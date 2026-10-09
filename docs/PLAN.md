@@ -174,10 +174,11 @@ Example of why this matters: in 2024 Stack Exchange moved its data dump behind p
 ```python
 class SourceAdapter(Protocol):
     id: str
-    def discover(self, ctx: Ctx) -> Iterable[ReleaseRef]: ...           # what upstream has now
+
+    def discover(self, ctx: Ctx) -> Iterable[ReleaseRef]: ...  # what upstream has now
     def plan(self, ctx: Ctx, have: Generation | None, want: ReleaseRef) -> FetchPlan: ...
-    def fetch(self, ctx: Ctx, plan: FetchPlan) -> Iterable[Artifact]:  ...  # resumable
-    def verify(self, ctx: Ctx, art: Artifact) -> Verdict: ...          # upstream checksums
+    def fetch(self, ctx: Ctx, plan: FetchPlan) -> Iterable[Artifact]: ...  # resumable
+    def verify(self, ctx: Ctx, art: Artifact) -> Verdict: ...  # upstream checksums
     def documents(self, ctx: Ctx, gen: Generation) -> Iterable[DocRecord]: ...  # for Refinery
 ```
 
