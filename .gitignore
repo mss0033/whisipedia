@@ -1,0 +1,36 @@
+# Local configuration and secrets
+config/local.toml
+.env
+.env.*
+*.key
+*.pem
+
+# Never commit corpus data
+*.zim
+*.pbf
+*.bz2
+*.7z
+*.zst
+*.parquet
+data/
+indexes/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+dist/
+build/
+*.egg-info/
+
+# Node
+node_modules/
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

@@ -1,0 +1,314 @@
+# Whisipedia source registry: the single source of truth for what the library holds.
+# Validated against registry/schema/source.schema.json. Narrative research: docs/research/SOURCES.md
+# size.measured = true means it was measured live on size.as_of; false means an estimate.
+schema_version: 1
+sources:
+  - id: wikipedia-top10
+    name: Wikipedia (top 10 languages by article count)
+    publisher: Wikimedia Foundation
+    domain: [encyclopedia]
+    tier: T1
+    status: candidate
+    license: CC-BY-SA-4.0
+    legal_basis: open-license
+    languages: [en, ceb, de, fr, sv, nl, es, ru, it, pl]
+    access:
+      adapter: wikimedia-dumps
+      endpoints: ["https://dumps.wikimedia.org/", "https://dumps.wikimedia.org/other/incr/"]
+      checksums: md5+sha1 (upstream)
+    update: {cadence: P1D, strategy: base-plus-incremental, settling_window: PT72H}
+    size: {current_bytes: 68.4e9, history_7z_bytes: 456.5e9, weekly_incr_bytes: 11.0e9, measured: true, as_of: 2026-10-09}
+    retention: {base: quarterly, segments: P2Y}
+    irreplaceable: false
+    scores: {authority: 4, density: 5, uniqueness: 5, license: 5, bulk: 5, health: 5, longevity: 4, cost: 4}
+
+  - id: wikipedia-en-zim
+    name: Wikipedia English (Kiwix ZIM, maxi)
+    publisher: Kiwix / Wikimedia
+    domain: [encyclopedia]
+    tier: T1
+    status: candidate
+    license: CC-BY-SA-4.0
+    legal_basis: open-license
+    access: {adapter: kiwix-opds, selector: {name: wikipedia_en_all, flavour: maxi}}
+    update: {cadence: P1M, strategy: snapshot-retention}
+    size: {bytes: 127.4e9, measured: true, as_of: 2026-10-09}
+    retention: {gfs: {last: 3, monthly: 12, yearly: forever}}
+
+  - id: wikidata
+    name: Wikidata
+    publisher: Wikimedia Foundation
+    domain: [knowledge-graph]
+    tier: T1
+    status: candidate
+    license: CC0-1.0
+    legal_basis: open-license
+    access: {adapter: wikimedia-dumps, endpoints: ["https://dumps.wikimedia.org/wikidatawiki/entities/"]}
+    update: {cadence: P1W, strategy: snapshot-retention}
+    size: {json_bz2_bytes: 103.3e9, truthy_nt_bz2_bytes: 43.5e9, measured: true, as_of: 2026-10-09}
+    retention: {gfs: {last: 2, monthly: 12, yearly: forever}}
+
+  - id: wiktionary-en
+    name: English Wiktionary
+    publisher: Wikimedia Foundation
+    domain: [dictionary]
+    tier: T1
+    status: candidate
+    license: CC-BY-SA-4.0
+    legal_basis: open-license
+    access: {adapter: wikimedia-dumps}
+    update: {cadence: P1M, strategy: snapshot-retention}
+    size: {bytes: 1.6e9, measured: true, as_of: 2026-10-09}
+
+  - id: wikisource-en
+    name: English Wikisource
+    publisher: Wikimedia Foundation
+    domain: [books, primary-sources]
+    tier: T1
+    status: candidate
+    license: CC-BY-SA-4.0
+    legal_basis: open-license
+    access: {adapter: wikimedia-dumps}
+    update: {cadence: P1M, strategy: snapshot-retention}
+    size: {bytes: 3.4e9, measured: true, as_of: 2026-10-09}
+
+  - id: gutenberg
+    name: Project Gutenberg
+    publisher: Project Gutenberg Literary Archive Foundation
+    domain: [books]
+    tier: T1
+    status: candidate
+    license: LicenseRef-PD-US+PG-terms
+    legal_basis: public-domain
+    access: {adapter: rsync-mirror, catalog: "https://www.gutenberg.org/cache/epub/feeds/"}
+    update: {cadence: P1D, strategy: mirror}
+    size: {txt_zip_bytes: 11e9, full_mirror_bytes: 1.0e12, measured: false, as_of: 2026-10-09}
+
+  - id: standard-ebooks
+    name: Standard Ebooks
+    publisher: Standard Ebooks
+    domain: [books]
+    tier: T1
+    status: candidate
+    license: CC0-1.0
+    legal_basis: public-domain
+    access: {adapter: git-mirror}
+    update: {cadence: P1W, strategy: mirror}
+    size: {bytes: 15e9, measured: false, as_of: 2026-10-09}
+
+  - id: open-library
+    name: Open Library dumps
+    publisher: Internet Archive
+    domain: [catalog]
+    tier: T1
+    status: candidate
+    license: CC0-1.0
+    legal_basis: open-license
+    access: {adapter: http-files, endpoints: ["https://openlibrary.org/data/"]}
+    update: {cadence: P1M, strategy: snapshot-retention}
+    size: {bytes: 16.7e9, measured: true, as_of: 2026-10-09}
+
+  - id: openstax
+    name: OpenStax textbooks
+    publisher: Rice University
+    domain: [textbooks]
+    tier: T1
+    status: candidate
+    license: CC-BY-4.0
+    legal_basis: open-license
+    access: {adapter: git-mirror}
+    update: {cadence: P1M, strategy: mirror}
+    size: {bytes: 8e9, measured: false, as_of: 2026-10-09}
+
+  - id: arxiv
+    name: arXiv
+    publisher: Cornell University
+    domain: [science]
+    tier: T1
+    status: candidate
+    license: LicenseRef-per-item
+    legal_basis: bulk-access-terms
+    access: {adapter: s3-bucket, requester_pays: true, metadata_adapter: oai-pmh}
+    update: {cadence: P1D, strategy: base-plus-incremental}
+    size: {bytes: 10e12, measured: false, as_of: 2026-10-09}
+    notes: Metadata first. PDFs pending owner decision D4 (egress cost).
+
+  - id: pubmed
+    name: PubMed baseline + updates
+    publisher: US National Library of Medicine
+    domain: [medicine, science]
+    tier: T1
+    status: candidate
+    license: LicenseRef-NLM-terms
+    legal_basis: bulk-access-terms
+    access: {adapter: http-files, endpoints: ["https://ftp.ncbi.nlm.nih.gov/pubmed/baseline/", "https://ftp.ncbi.nlm.nih.gov/pubmed/updatefiles/"]}
+    update: {cadence: P1D, strategy: base-plus-incremental}
+    size: {files: 1334, bytes: 50e9, measured: false, as_of: 2026-10-09}
+
+  - id: pmc-oa
+    name: PubMed Central Open Access subset
+    publisher: US National Library of Medicine
+    domain: [medicine, science]
+    tier: T1
+    status: candidate
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access: {adapter: s3-bucket}
+    update: {cadence: P1W, strategy: base-plus-incremental}
+    size: {bytes: 5e12, measured: false, as_of: 2026-10-09}
+
+  - id: openalex
+    name: OpenAlex snapshot
+    publisher: OurResearch
+    domain: [science, catalog]
+    tier: T1
+    status: candidate
+    license: CC0-1.0
+    legal_basis: open-license
+    access: {adapter: s3-bucket}
+    update: {cadence: P1M, strategy: snapshot-retention}
+    size: {bytes: 500e9, measured: false, as_of: 2026-10-09}
+    notes: Snapshot path on S3 changed; re-measure in Phase 1.
+
+  - id: stackexchange
+    name: Stack Exchange network
+    publisher: Stack Exchange Inc. (community content)
+    domain: [qa]
+    tier: T1
+    status: candidate
+    license: CC-BY-SA-4.0
+    legal_basis: open-license
+    access: {adapter: kiwix-opds, selector: {category: stack_exchange, lang: eng}}
+    update: {cadence: P3M, strategy: snapshot-retention}
+    size: {zim_bytes: 191.1e9, raw_2024_dump_bytes: 99.1e9, measured: true, as_of: 2026-10-09}
+    irreplaceable: true
+    notes: The last public raw dump on archive.org is 2024-04-07; later dumps are behind per-account terms. Preserve the 2024 dump with parity.
+
+  - id: mdwiki
+    name: MDWiki (WikiProjectMed)
+    publisher: WikiProjectMed Foundation
+    domain: [medicine]
+    tier: T1
+    status: candidate
+    license: CC-BY-SA-4.0
+    legal_basis: open-license
+    access: {adapter: kiwix-opds, selector: {name: mdwiki_en_all}}
+    update: {cadence: P3M, strategy: snapshot-retention}
+    size: {bytes: 10.8e9, measured: true, as_of: 2026-10-09}
+
+  - id: medlineplus
+    name: MedlinePlus health topics
+    publisher: US National Library of Medicine
+    domain: [medicine]
+    tier: T1
+    status: candidate
+    license: LicenseRef-US-Gov-PD
+    legal_basis: public-domain
+    access: {adapter: http-files}
+    update: {cadence: P1D, strategy: snapshot-retention}
+    size: {bytes: 0.5e9, measured: false, as_of: 2026-10-09}
+
+  - id: osm-planet
+    name: OpenStreetMap planet
+    publisher: OpenStreetMap Foundation
+    domain: [geography]
+    tier: T1
+    status: candidate
+    license: ODbL-1.0
+    legal_basis: open-license
+    access: {adapter: osm-replication, endpoints: ["https://planet.openstreetmap.org/"]}
+    update: {cadence: P1D, strategy: base-plus-incremental}
+    size: {planet_pbf_bytes: 95.2e9, measured: true, as_of: 2026-10-09}
+
+  - id: rfc
+    name: IETF RFCs
+    publisher: IETF
+    domain: [standards]
+    tier: T1
+    status: candidate
+    license: LicenseRef-IETF-Trust
+    legal_basis: bulk-access-terms
+    access: {adapter: rsync-mirror}
+    update: {cadence: P1D, strategy: mirror}
+    size: {bytes: 2e9, measured: false, as_of: 2026-10-09}
+
+  - id: us-code
+    name: United States Code (USLM XML)
+    publisher: Office of the Law Revision Counsel
+    domain: [law]
+    tier: T1
+    status: candidate
+    license: LicenseRef-US-Gov-PD
+    legal_basis: public-domain
+    access: {adapter: http-files}
+    update: {cadence: P1W, strategy: snapshot-retention}
+    size: {bytes: 1e9, measured: false, as_of: 2026-10-09}
+
+  - id: ecfr-federal-register
+    name: eCFR and Federal Register
+    publisher: US Government Publishing Office
+    domain: [law]
+    tier: T1
+    status: candidate
+    license: LicenseRef-US-Gov-PD
+    legal_basis: public-domain
+    access: {adapter: http-files}
+    update: {cadence: P1D, strategy: base-plus-incremental}
+    size: {bytes: 50e9, measured: false, as_of: 2026-10-09}
+
+  - id: courtlistener
+    name: CourtListener bulk data
+    publisher: Free Law Project
+    domain: [law]
+    tier: T1
+    status: candidate
+    license: LicenseRef-PD-court-opinions
+    legal_basis: public-domain
+    access: {adapter: http-files, endpoints: ["https://com-courtlistener-storage.s3-us-west-2.amazonaws.com/bulk-data/"]}
+    update: {cadence: P3M, strategy: snapshot-retention}
+    size: {opinions_bytes: 55.3e9, measured: true, as_of: 2026-10-09}
+
+  - id: kiwix-curated-t2
+    name: Kiwix curated T2 bundle
+    publisher: Kiwix (various upstreams)
+    domain: [education, howto, technology]
+    tier: T2
+    status: candidate
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {names: [khanacademy_en_all, ifixit_en_all, wikibooks_en_all, wikivoyage_en_all, wikiversity_en_all, wikiquote_en_all, phet_en_all, archlinux_en_all, apod.nasa.gov_en_all, survivorlibrary.com_en_all, crashcourse_en_all]}
+    update: {cadence: P1M, strategy: snapshot-retention}
+    size: {bytes: 470e9, measured: false, as_of: 2026-10-09}
+
+  - id: chronicling-america
+    name: Chronicling America OCR text
+    publisher: Library of Congress
+    domain: [news, history]
+    tier: T2
+    status: candidate
+    license: LicenseRef-PD
+    legal_basis: public-domain
+    access: {adapter: http-files}
+    update: {cadence: P1M, strategy: base-plus-incremental}
+    size: {bytes: 2e12, measured: false, as_of: 2026-10-09}
+
+  - id: stanford-encyclopedia-philosophy
+    name: Stanford Encyclopedia of Philosophy
+    publisher: Stanford University
+    domain: [philosophy]
+    tier: T3
+    status: candidate
+    license: LicenseRef-copyright
+    legal_basis: none
+    notes: Highest-quality reference in its field; requires written permission before any bulk copy.
+
+  - id: shadow-libraries
+    name: LibGen / Sci-Hub / Anna's Archive / Z-Library
+    domain: [books, science]
+    tier: X
+    status: excluded
+    license: LicenseRef-infringing
+    legal_basis: none
+    notes: Firm exclusion. Copyright infringement.

@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://whisipedia.invalid/schema/source.schema.json",
+  "title": "Whisipedia source registry",
+  "type": "object",
+  "required": ["schema_version", "sources"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "sources": {"type": "array", "items": {"$ref": "#/$defs/source"}}
+  },
+  "$defs": {
+    "source": {
+      "type": "object",
+      "required": ["id", "name", "domain", "tier", "status", "license", "legal_basis"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
+        "name": {"type": "string"},
+        "publisher": {"type": "string"},
+        "domain": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+        "tier": {"enum": ["T1", "T2", "T3", "X"]},
+        "status": {"enum": ["candidate", "active", "paused", "retired", "excluded"]},
+        "license": {"type": "string"},
+        "legal_basis": {"enum": ["public-domain", "open-license", "bulk-access-terms", "permission-granted", "none"]},
+        "languages": {"type": "array", "items": {"type": "string"}},
+        "access": {"type": "object", "properties": {"adapter": {"type": "string"}}},
+        "update": {
+          "type": "object",
+          "properties": {
+            "cadence": {"type": "string", "description": "ISO 8601 duration"},
+            "strategy": {"enum": ["snapshot-retention", "base-plus-incremental", "mirror"]},
+            "settling_window": {"type": "string"}
+          }
+        },
+        "size": {"type": "object", "properties": {"measured": {"type": "boolean"}, "as_of": {"type": "string", "format": "date"}}},
+        "retention": {"type": "object"},
+        "irreplaceable": {"type": "boolean"},
+        "scores": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0, "maximum": 5}},
+        "notes": {"type": "string"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"status": {"const": "active"}}},
+          "then": {"properties": {"legal_basis": {"not": {"const": "none"}}, "tier": {"not": {"const": "X"}}}}
+        }
+      ]
+    }
+  }
+}
