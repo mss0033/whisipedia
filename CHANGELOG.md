@@ -5,3 +5,5 @@ All notable changes are documented here. The format follows [Keep a Changelog](h
 ## [Unreleased]
 ### Added
 - Project plan, source research, source registry seed, initial ADRs, repository hygiene configuration.
+### Changed
+- Default update cycle is monthly instead of weekly, with quarterly as a single config option (PLAN §6.7).

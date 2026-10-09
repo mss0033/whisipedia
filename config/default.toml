@@ -7,6 +7,8 @@ parity_percent = 10
 [acquirer]
 user_agent = "Whisipedia/0.0 (personal offline archive)"
 max_connections_per_host = 2
+cycle = "monthly"               # "monthly" | "quarterly" (PLAN §6.7)
+health_probe_interval = "P1W"
 
 [index]
 root = "/path/to/local/index"    # local disk, never SMB (ADR-0002)

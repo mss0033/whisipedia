@@ -24,7 +24,7 @@
 | G1 | **Preserve.** Keep a known-good, verifiable copy of high-value knowledge sources. | Every stored byte is covered by a signed manifest. A full scrub passes every 30 days. |
 | G2 | **Stay current.** Find and apply upstream updates without manual work. | Each source's lag behind upstream stays within its SLO (see §6.6). |
 | G3 | **Survive damage.** Detect and repair corruption, failed downloads and bad upstream releases. | Corruption drills (§8.5) end in automatic repair or a clear alert. Silent loss never happens. |
-| G4 | **Improve the selection.** Find new sources and retire weak ones, within set policy. | Discovery files proposals every week. Promotions follow the rules in §5. |
+| G4 | **Improve the selection.** Find new sources and retire weak ones, within set policy. | Discovery files proposals every update cycle. Promotions follow the rules in §5. |
 | G5 | **Surf and search.** Browse an offline web in 90s style, with an offline natural-language search engine. | Search results p95 < 100 ms. Every page and link resolves locally. Zero network calls. |
 | G6 | **Work without our software.** A person can browse the raw data with ordinary tools. | Every directory has a README. Formats are open and documented (§7). |
 | G7 | **Be built well.** Clean public APIs and swappable parts, with repo hygiene fit for a public project. | Contract tests for each port. Versioned OpenAPI spec. CI gates (§12). |
@@ -114,7 +114,7 @@ The full research, scoring rubric and per-source notes are in [`research/SOURCES
 | Retained older generations (×≈1.5 on rolling sources) and par2 parity (10% of irreplaceable data) | ≈ 3–8 TB |
 | **Total, year one** | **≈ 20–35 TB of the 123 TB free** |
 
-**Steady-state growth: about 50–150 GB per week.** This counts net new data plus generation churn after retention has pruned old copies. The Wikimedia part, measured for the top 10 Wikipedias, is 11 GB per week of raw incrementals, or 0.3–0.6 GB per week as compressed diffs of article namespaces.
+**Steady-state growth (≈, at the default monthly cadence, §6.7): about 150–400 GB per month, or about 300–800 GB per quarter on the quarterly setting.** This counts net new data plus generation churn after retention has pruned old copies. The Wikimedia part for the top 10 Wikipedias is about 1–3 GB per cycle as compressed net diffs of article namespaces. For reference, keeping every individual edit would need weekly incrementals at 11 GB per week raw (✓) or 0.3–0.6 GB per week as diffs.
 
 ---
 
@@ -140,7 +140,7 @@ The full research, scoring rubric and per-source notes are in [`research/SOURCES
 
 `score = Σ weight × axis`. **License is a hard gate:** a score below 3 means the source cannot become `active`, whatever its total.
 
-### 5.3 Discovery bots (weekly, network-enabled)
+### 5.3 Discovery bots (once per update cycle, network-enabled)
 
 | Watcher | Finds |
 |---|---|
@@ -163,7 +163,7 @@ Example of why this matters: in 2024 Stack Exchange moved its data dump behind p
 ### 5.5 Health monitors
 
 - A daily lightweight probe per source: endpoint reachable, latest release, checksum file present.
-- Weekly **adapter contract tests** against live upstream, using a small sample, to catch format drift before a full fetch runs.
+- **Adapter contract tests** against live upstream, a week before each scheduled cycle,, using a small sample, to catch format drift before a full fetch runs.
 
 ---
 
@@ -188,7 +188,7 @@ Adapters are Python packages registered through entry points (`whisipedia.adapte
 | Adapter | Covers |
 |---|---|
 | `kiwix-opds` | Every ZIM in the Kiwix catalog, chosen by name, flavour and language filters |
-| `wikimedia-dumps` | `pages-articles-multistream`, `meta-history`, Wikidata entities, and `other/incr` daily incrementals |
+| `wikimedia-dumps` | `pages-articles-multistream`, `meta-history`, Wikidata entities. `other/incr` daily incrementals are used only if a source is set to a weekly cadence. |
 | `http-files` | Versioned file sets with checksum files (PubMed baseline and updates, CourtListener, Open Library, World Bank) |
 | `rsync-mirror` | Gutenberg, IETF RFCs |
 | `s3-bucket` | arXiv (requester pays), OpenAlex |
@@ -211,28 +211,47 @@ DISCOVERED → PLANNED → FETCHING → FETCHED → VERIFIED → SEALED → REFI
 | Strategy | Used for | What happens on change |
 |---|---|---|
 | **Snapshot + retention** | ZIMs, OSM monthly, CourtListener, Open Library | A new generation goes into a new directory. Document-level diff against the previous generation yields a change set (add, modify, delete, rename). Indexes are updated with upserts and tombstones, not rebuilt. Older generations are pruned by GFS retention: keep the last 3, then monthly for 12 months, then yearly forever. |
-| **Base + incremental stream** | Wikimedia, OSM diffs, PubMed update files, arXiv OAI | Weekly segment files are appended to the generation. Content can be reconstructed at any date as base + segments. A new base is taken quarterly, and segments older than the window are compacted into it. |
+| **Base + net diffs** | Wikimedia (snapshot-to-snapshot), OSM replication diffs, PubMed update files, arXiv OAI | One diff segment per cycle is appended to the generation. For Wikimedia it is the net change between consecutive full dumps; for the others, the upstream changes accumulated since the last cycle. Content can be reconstructed at any cycle boundary as base + segments. A new base is taken yearly, and segments older than the window are compacted into it. |
 | **Mirror (rsync/git)** | Gutenberg, RFCs, git sources | Mirror into a staging copy, compute the change set, then seal it as a new generation that records file-level deltas. Git sources keep their full history for free. |
 
 **Deletions upstream.** The library keeps the content. In the current view the document gets a `removed_upstream` tombstone, but its old text stays reachable through history. Retention policy is the only thing that ever deletes data, and it never deletes the last copy of anything that is gone from upstream.
 
-**Vandalism and bad edits ("known good").** For wiki-style incremental sources, a revision becomes *known good* only once it has survived a **settling window** (default 72 h) without being reverted. Reverted revisions are kept in history but never shown as current. Snapshot sources are checked for sanity before promotion: the article count must not drop by more than 2%, and size must stay within ±10% of the trend. Anything outside that is held for review.
+**Vandalism and bad edits ("known good").** With monthly or quarterly snapshots, most vandalism has already been reverted upstream before the dump is taken. If a source is switched to a weekly cadence with incrementals, a revision becomes *known good* only once it has survived a **settling window** (default 72 h) without being reverted. Reverted revisions are kept in history but never shown as current. Snapshot sources are checked for sanity before promotion: the article count must not drop by more than 2%, and size must stay within ±10% of the trend. Anything outside that is held for review.
 
 ### 6.5 Scheduling
 
 - A single orchestrator daemon. It runs as a systemd user service in WSL, or as Docker Compose, depending on D6. Jobs sit in a persistent queue in local SQLite.
-- **Catch-up semantics:** on startup it runs every job whose last success is older than its cadence. Daily incremental files are fetched within the server's retention window. Wikimedia keeps them for about two weeks, and a missed gap gets flagged before it expires.
+- **Catch-up semantics:** on startup it runs every job whose last success is older than its cadence. Upstream retention sets how long a cycle can slip: Wikimedia keeps only the last few full dump runs (≈ 2–3 months), OSM replication diffs are kept indefinitely, and PubMed update files stay until the next annual baseline. A cycle that has not run by halfway through its retention window raises an alert.
 - **Politeness:** a bandwidth cap per host, at most 2–3 connections per host, mirrors and torrents preferred (Kiwix publishes metalinks), resumable range requests, and a `User-Agent` that names the project. The UA carries a project contact address, not a personal email, unless the owner chooses otherwise.
 
 ### 6.6 Freshness SLOs (starting values)
 
 | Source class | Target lag |
 |---|---|
-| Wikimedia incrementals | ≤ 8 days |
+| Wikimedia | ≤ 1 cycle + 14 days (the dump run takes up to ~2 weeks to finish) |
 | ZIM catalog items | ≤ 45 days after publication |
-| Scholarly feeds (arXiv, PubMed) | ≤ 8 days |
-| Law and regulations | ≤ 8 days |
+| Scholarly feeds (arXiv, PubMed) | ≤ 1 cycle + 7 days |
+| Law and regulations | ≤ 1 cycle + 7 days |
 | Everything else | ≤ 1 cadence + 7 days |
+
+### 6.7 Update cadence (default: monthly; quarterly is one setting)
+
+One global setting, `acquirer.cycle = "monthly" | "quarterly"`, sets the library-wide rhythm. Individual sources can override it.
+
+| | Monthly (default) | Quarterly |
+|---|---|---|
+| When | Shortly after the 1st-of-month Wikimedia dumps finish (≈ mid-month) | Same, in Jan / Apr / Jul / Oct |
+| What gets captured | The net state of every document once a month. Edits made and changed again within the month are not kept individually. | The same, at 3-month resolution |
+| Wikimedia download per cycle (top 10) | ✓ 68 GB current dumps, then local diff against the previous snapshot | Same 68 GB |
+| Wikimedia stored per cycle | ≈ 1–3 GB net diffs | ≈ 2–5 GB net diffs |
+| Library-wide growth (≈) | 150–400 GB per month | 300–800 GB per quarter |
+| Margin for missed cycles | Wikimedia keeps ≈ 2–3 months of runs, so a skipped month can be recovered | Tight. The cycle must run within its window, or use a mirror with longer retention. |
+| Search index refresh | Monthly incremental upsert | Quarterly |
+
+**What isn't affected by the cycle:**
+- **Integrity scrubbing stays on its 30-day rotation.** It protects data already stored, not freshness.
+- **Lightweight health probes stay frequent (weekly).** They are a few HTTP requests, and they catch broken upstreams before a cycle depends on them.
+- **Full edit history** can still be refreshed separately: a yearly pull of the ✓ 457 GB `meta-history` dump (.7z) fills in every individual edit between snapshots, for anyone who wants it.
 
 ---
 
@@ -255,7 +274,7 @@ Everything sits under `/mnt/z/whisipedia/`. Directory names are readable and the
 │   │       │   ├── MANIFEST.json               ← every file: size, sha256, blake3, upstream hash
 │   │       │   ├── MANIFEST.json.sig           ← signature (SSH/minisign key)
 │   │       │   └── parity/                     ← par2 (if source is marked irreplaceable)
-│   │       └── increments/2026-W41.jsonl.zst   ← diff segments (stream sources)
+│   │       └── increments/2026-10.jsonl.zst     ← net diff segment per cycle
 │   ├── books/  gutenberg/  standard-ebooks/ …
 │   ├── science/  arxiv/  pubmed/  pmc-oa/  openalex/ …
 │   ├── maps/  osm-planet/ …
@@ -547,7 +566,7 @@ Estimates assume one developer with heavy agent assistance. Each phase ends with
 | Phase | Weeks | Deliverables | Exit criteria |
 |---|---|---|---|
 | **0 Foundations** | 1–2 | Repo, CI, pre-commit, ADRs 1–6, config system, `wsp-core` domain and ports, ledger, manifest and signing, NAS layout and README generator, tooling installed. Decisions D1–D8 made. | CI green. `wsp ledger verify` works. A `wsp vault init` dry run works on the NAS. |
-| **1 Vault MVP** | 3–6 | Adapters `kiwix-opds` and `wikimedia-dumps` (current + incr). Fetch, verify, seal, promote. Scrub, repair ladder, par2. CATALOG.html. First real data: Wikipedia en ZIM, top-10 current dumps, Wikidata. | One full corruption drill is repaired automatically. A weekly incremental cycle runs end to end on its own. |
+| **1 Vault MVP** | 3–6 | Adapters `kiwix-opds` and `wikimedia-dumps` (current + snapshot diffs). Fetch, verify, seal, promote. Scrub, repair ladder, par2. CATALOG.html. First real data: Wikipedia en ZIM, top-10 current dumps, Wikidata. | One full corruption drill is repaired automatically. A full monthly update cycle runs end to end on its own. |
 | **2 Search core** | 6–10 | Refinery to Parquet, Tantivy index, title FST, `/v1` read API and SDK, Navigator v0: browser chrome, start page, ZIM site reader, `wsp://search` with lexical results, cross-source link rewriting. Offline CI test. | The offline test passes. Results p95 < 100 ms on English Wikipedia. |
 | **3 Natural language** | 10–14 | Embedder and ANN, hybrid fusion, reranker, router, instant-answer boxes, optional cited summaries, directory, eval harness and gold set, all themes, TUI. | nDCG@10 target set and met. Faithfulness ≥ 0.95 on the gold set. Summary first token < 1 s. |
 | **4 Breadth** | 14–22 | Adapters for OSM (plus map reader), Gutenberg, Standard Ebooks, arXiv, PubMed/PMC, OpenAlex, Stack Exchange, OpenStax, RFCs, US law, CourtListener, Open Library, MDWiki/MedlinePlus. Entity linking across sources. | All T1 sources are active and within their freshness SLOs. |
@@ -565,7 +584,7 @@ Estimates assume one developer with heavy agent assistance. Each phase ends with
 | ISP data cap or bandwidth limit | M | M | Spread the initial load over time, prefer torrents and mirrors, use bandwidth windows |
 | Upstream changes license or access | M | M | Policy gate auto-pauses. Last good generation is kept. Human review. |
 | Index doesn't fit hot storage or RAM | H | M | Quantization, tiered dense index, dedicated NVMe (D5) |
-| WSL host offline → missed incrementals | M | M | Catch-up logic, gap alerts before upstream retention expires, run on the NAS (D6) |
+| WSL host offline → missed cycle | L | M | Catch-up logic, alerts at half the upstream retention window, run on the NAS (D6) |
 | Living models hallucinate or degrade content | H | M | Overlay-only design, eval gates, sampled review, one-command revert |
 | Scope creep (it's a library of everything) | H | M | Tier system, storage budgets per domain, phase exit criteria |
 | Requester-pays egress costs (arXiv) | M | L–M | Explicit budget approval (D4), metadata first, then PDFs |
@@ -585,3 +604,4 @@ Estimates assume one developer with heavy agent assistance. Each phase ends with
 | D7 | ISP data cap | Confirm before Phase 1 bulk pulls |
 | D8 | Commit identity and project license | GitHub `noreply` email. License: none / all rights reserved while private (decide before any publication). |
 | D9 | Include video (TED, Khan Academy, CrashCourse ≈ 0.3–1 TB)? | Yes for Khan Academy; TED as T3 |
+| D10 | Update cycle: monthly or quarterly (§6.7) | Monthly. It gives a margin to recover a missed cycle before upstream retention expires. Quarterly is a single config change. |
