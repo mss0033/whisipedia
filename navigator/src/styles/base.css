@@ -1,0 +1,629 @@
+/* Whisipedia Navigator — window chrome and layout.
+ * Colours and fonts come from theme tokens (themes.css). No external fonts:
+ * system font stacks that evoke each era. */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  font-size: calc(100% * var(--font-scale, 1));
+  background: var(--desktop-bg);
+  color: var(--chrome-fg);
+}
+
+body {
+  margin: 0;
+  font-family: var(--ui-font);
+  background: var(--desktop-bg);
+  color: var(--chrome-fg);
+}
+
+.app {
+  height: 100vh;
+}
+@supports (height: 100dvh) {
+  .app {
+    height: 100dvh;
+  }
+}
+
+[hidden] {
+  display: none !important;
+}
+
+.visually-hidden {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.skip-link {
+  position: absolute;
+  left: 8px;
+  top: -100px;
+  z-index: 100;
+  padding: 6px 10px;
+  background: var(--field-bg);
+  color: var(--link);
+  border: 2px solid var(--focus);
+}
+.skip-link:focus {
+  top: 8px;
+}
+
+:focus-visible {
+  outline: 2px dotted var(--focus);
+  outline-offset: 2px;
+}
+
+/* ------------------------------ window ------------------------------ */
+
+.window {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--chrome-bg);
+  border: var(--window-border);
+  box-shadow: var(--bevel-out);
+  padding: var(--window-pad);
+}
+
+.chrome-top {
+  flex: none;
+}
+
+.titlebar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 1.6rem;
+  padding: 2px 3px 2px 4px;
+  background: var(--title-bg);
+  color: var(--title-fg);
+  font-weight: bold;
+  font-size: 0.8125rem;
+  user-select: none;
+}
+.titlebar-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 1.1rem;
+  height: 1.1rem;
+  font-size: 0.7rem;
+  background: var(--accent);
+  color: var(--accent-fg);
+  border: 1px solid var(--title-fg);
+}
+.titlebar-text {
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  text-align: var(--title-align, left);
+}
+.titlebar-buttons {
+  display: flex;
+  gap: 2px;
+}
+.titlebar-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 1.1rem;
+  height: 1rem;
+  font: bold 0.7rem / 1 var(--ui-font);
+  background: var(--chrome-bg);
+  color: var(--chrome-fg);
+  box-shadow: var(--bevel-out);
+  border: 0;
+  padding: 0;
+}
+
+/* ------------------------------ menu bar ----------------------------- */
+
+.menubar-nav {
+  border-bottom: 1px solid var(--chrome-shadow);
+}
+.menubar {
+  display: flex;
+  flex-wrap: wrap;
+  margin: 0;
+  padding: 1px 2px;
+  list-style: none;
+}
+.menubar-li {
+  position: relative;
+}
+.menubar-item {
+  font: 0.8125rem var(--ui-font);
+  color: var(--chrome-fg);
+  background: transparent;
+  border: 1px solid transparent;
+  padding: 2px 8px;
+  cursor: default;
+}
+.menubar-item[aria-expanded="true"],
+.menubar-item:hover {
+  background: var(--menu-hi-bg);
+  color: var(--menu-hi-fg);
+}
+.mnemonic {
+  text-decoration: underline;
+}
+.menu {
+  position: absolute;
+  z-index: 50;
+  top: 100%;
+  left: 0;
+  min-width: 15rem;
+  margin: 0;
+  padding: 2px;
+  list-style: none;
+  background: var(--chrome-bg);
+  color: var(--chrome-fg);
+  box-shadow: var(--bevel-out), var(--menu-drop);
+  border: var(--menu-border);
+}
+.menu-item {
+  display: grid;
+  grid-template-columns: 1.2rem 1fr auto;
+  gap: 4px;
+  padding: 3px 10px 3px 2px;
+  font-size: 0.8125rem;
+  cursor: default;
+  white-space: nowrap;
+}
+.menu-item:focus,
+.menu-item:hover {
+  background: var(--menu-hi-bg);
+  color: var(--menu-hi-fg);
+  outline: none;
+}
+.menu-item:focus-visible {
+  outline: 1px dotted var(--menu-hi-fg);
+  outline-offset: -2px;
+}
+.menu-item.is-disabled {
+  color: var(--chrome-disabled);
+}
+.menu-item.is-disabled:hover {
+  background: transparent;
+  color: var(--chrome-disabled);
+}
+.menu-check {
+  text-align: center;
+}
+.menu-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 28rem;
+}
+.menu-shortcut {
+  padding-left: 1.5rem;
+}
+.menu-sep {
+  height: 0;
+  margin: 3px 2px;
+  border-top: 1px solid var(--chrome-shadow);
+  border-bottom: 1px solid var(--chrome-light);
+}
+.menu-header {
+  padding: 4px 8px 2px 1.6rem;
+  font-size: 0.75rem;
+  font-weight: bold;
+  color: var(--chrome-muted);
+}
+
+/* ------------------------------ toolbar ------------------------------ */
+
+.toolbar-row {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  padding: 3px 2px;
+  border-top: 1px solid var(--chrome-light);
+  border-bottom: 1px solid var(--chrome-shadow);
+}
+.toolbar {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+:root[data-toolbar="off"] .toolbar-row {
+  display: none;
+}
+.tool-btn {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 3.4rem;
+  padding: 2px 4px;
+  font: 0.75rem var(--ui-font);
+  color: var(--chrome-fg);
+  background: var(--chrome-bg);
+  border: 0;
+  box-shadow: var(--bevel-out);
+  cursor: pointer;
+}
+.tool-btn:active:not(:disabled) {
+  box-shadow: var(--bevel-in);
+}
+.tool-btn:disabled {
+  color: var(--chrome-disabled);
+  cursor: default;
+}
+.tool-btn .icon {
+  width: 1.5rem;
+  height: 1.5rem;
+  fill: var(--icon-fill);
+  stroke: var(--icon-stroke);
+  stroke-width: 1;
+}
+.tool-btn:disabled .icon {
+  fill: var(--chrome-disabled);
+  stroke: var(--chrome-light);
+}
+.tool-stop:not(:disabled) .icon {
+  fill: var(--stop-fill);
+}
+
+.throbber {
+  flex: none;
+  width: 3.2rem;
+  padding: 2px;
+  background: var(--chrome-bg);
+  border: 0;
+  box-shadow: var(--bevel-in);
+  cursor: pointer;
+}
+.throbber-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.throbber-sky {
+  fill: var(--throbber-sky);
+}
+.star {
+  fill: var(--throbber-star);
+}
+.throbber-letter {
+  fill: var(--throbber-letter);
+  font: bold 26px var(--display-font);
+}
+.comet {
+  opacity: 0;
+}
+.comet-tail {
+  stroke: var(--throbber-star);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+.comet-head {
+  fill: var(--throbber-comet);
+}
+
+@keyframes comet-fly {
+  0% {
+    transform: translate(0, 4px);
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    transform: translate(62px, 30px);
+    opacity: 0;
+  }
+}
+@keyframes twinkle {
+  50% {
+    opacity: 0.15;
+  }
+}
+.throbber.is-active .comet {
+  animation: comet-fly 0.9s linear infinite;
+}
+.throbber.is-active .star-1 {
+  animation: twinkle 0.6s steps(2) infinite;
+}
+.throbber.is-active .star-2 {
+  animation: twinkle 0.8s steps(2) infinite 0.3s;
+}
+
+/* ----------------------------- location ------------------------------ */
+
+.location-row {
+  padding: 3px 4px;
+  border-bottom: 1px solid var(--chrome-shadow);
+}
+.location {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.loc-label {
+  min-width: 4.5rem;
+  font-size: 0.8125rem;
+  font-weight: bold;
+  text-align: right;
+}
+.location .suggest-wrap {
+  flex: 1;
+}
+.loc-input,
+.search-input {
+  font: 0.875rem var(--field-font);
+  color: var(--field-fg);
+  background: var(--field-bg);
+  border: 0;
+  box-shadow: var(--bevel-in);
+  padding: 3px 5px;
+}
+.loc-input {
+  width: 100%;
+}
+
+.suggest-wrap {
+  position: relative;
+  display: inline-block;
+}
+.suggest-list {
+  position: absolute;
+  z-index: 40;
+  top: 100%;
+  left: 0;
+  right: 0;
+  min-width: 18rem;
+  margin: 1px 0 0;
+  padding: 0;
+  list-style: none;
+  background: var(--field-bg);
+  color: var(--field-fg);
+  border: 1px solid var(--chrome-dark);
+  box-shadow: var(--menu-drop);
+  text-align: left;
+}
+.suggest-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 3px 6px;
+  font: 0.875rem var(--field-font);
+  cursor: default;
+}
+.suggest-item[aria-selected="true"],
+.suggest-item:hover {
+  background: var(--menu-hi-bg);
+  color: var(--menu-hi-fg);
+}
+.suggest-kind {
+  font-size: 0.75rem;
+  opacity: 0.8;
+}
+
+/* -------------------------- directory buttons ------------------------ */
+
+.dirbuttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  padding: 3px 4px 4px;
+}
+:root[data-dirbuttons="off"] .dirbuttons {
+  display: none;
+}
+.dirbuttons a {
+  padding: 2px 10px;
+  font-size: 0.75rem;
+  color: var(--chrome-fg);
+  text-decoration: none;
+  background: var(--chrome-bg);
+  box-shadow: var(--bevel-out);
+}
+.dirbuttons a:active {
+  box-shadow: var(--bevel-in);
+}
+
+/* ------------------------------ viewport ----------------------------- */
+
+.viewport {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  margin: 0 2px;
+  background: var(--page-bg);
+  color: var(--page-fg);
+  box-shadow: var(--bevel-in);
+  font-family: var(--page-font);
+  font-size: 1rem;
+  line-height: 1.45;
+}
+.viewport:focus {
+  outline: none;
+}
+.viewport:focus-visible {
+  outline: 2px dotted var(--focus);
+  outline-offset: -3px;
+}
+
+/* ------------------------------ status bar --------------------------- */
+
+.statusbar {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  font-size: 0.75rem;
+}
+.status-cell {
+  padding: 1px 6px;
+  box-shadow: var(--bevel-in-thin);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.status-main {
+  flex: 1;
+}
+.status-progress-cell {
+  width: 9rem;
+  display: flex;
+  align-items: center;
+}
+.status-progress {
+  width: 100%;
+  height: 0.7rem;
+  accent-color: var(--accent);
+}
+.status-offline {
+  flex: none;
+}
+
+/* ------------------------------ controls ----------------------------- */
+
+.btn,
+.btn-like {
+  display: inline-block;
+  font: 0.8125rem var(--ui-font);
+  color: var(--chrome-fg);
+  background: var(--chrome-bg);
+  border: 0;
+  box-shadow: var(--bevel-out);
+  padding: 4px 12px;
+  cursor: pointer;
+  text-decoration: none;
+}
+.btn:active:not(:disabled) {
+  box-shadow: var(--bevel-in);
+}
+.btn:disabled {
+  color: var(--chrome-disabled);
+  cursor: default;
+}
+.btn-small {
+  padding: 1px 6px;
+  font-size: 0.75rem;
+}
+
+/* ------------------------------ dialogs ------------------------------ */
+
+.win-dialog {
+  padding: 3px;
+  max-width: min(46rem, 94vw);
+  max-height: 88vh;
+  background: var(--chrome-bg);
+  color: var(--chrome-fg);
+  border: var(--window-border);
+  box-shadow: var(--bevel-out), var(--menu-drop);
+  font-family: var(--ui-font);
+}
+.win-dialog::backdrop {
+  background: rgb(0 0 0 / 0.35);
+}
+.win-dialog .titlebar-btn {
+  cursor: pointer;
+}
+.win-dialog-body {
+  padding: 8px 10px;
+  overflow: auto;
+  max-height: 70vh;
+  font-size: 0.875rem;
+}
+.win-dialog-buttons {
+  display: flex;
+  justify-content: flex-end;
+  padding: 6px 10px;
+}
+.raw-json {
+  max-height: 16rem;
+  overflow: auto;
+  padding: 6px;
+  background: var(--field-bg);
+  color: var(--field-fg);
+  box-shadow: var(--bevel-in);
+  font: 0.75rem var(--mono-font);
+}
+code.wrap {
+  word-break: break-all;
+}
+
+/* -------------------------------- motion ----------------------------- */
+
+:root[data-motion="reduce"] *,
+:root[data-motion="reduce"] *::before,
+:root[data-motion="reduce"] *::after {
+  animation: none !important;
+  transition: none !important;
+  scroll-behavior: auto !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  :root[data-motion="system"] *,
+  :root[data-motion="system"] *::before,
+  :root[data-motion="system"] *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}
+/* Without motion the throbber still signals loading: it lights up. */
+.throbber.is-active .throbber-sky {
+  fill: var(--throbber-sky-active);
+}
+
+/* ------------------------------ responsive --------------------------- */
+
+@media (max-width: 640px) {
+  .tool-label {
+    display: none;
+  }
+  .tool-btn {
+    min-width: 2.4rem;
+  }
+  .titlebar-buttons,
+  .status-progress-cell {
+    display: none;
+  }
+  .loc-label {
+    min-width: 0;
+  }
+}
+
+/* -------------------------------- print ------------------------------ */
+
+@media print {
+  .chrome-top,
+  .statusbar,
+  .skip-link,
+  .doc-actions,
+  .time-machine,
+  .webring {
+    display: none !important;
+  }
+  .app,
+  .window {
+    height: auto;
+    border: 0;
+    box-shadow: none;
+    padding: 0;
+  }
+  .viewport {
+    overflow: visible;
+    box-shadow: none;
+    background: #fff;
+    color: #000;
+  }
+}

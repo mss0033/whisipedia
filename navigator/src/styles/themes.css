@@ -1,0 +1,484 @@
+/* Theme token sets, keyed by data-theme on <html>. Each theme only sets
+ * custom properties (plus a few structural touches at the bottom). */
+
+/* ---------------------- Navigator '96 (default) ---------------------- */
+:root,
+:root[data-theme="navigator96"] {
+  --ui-font:
+    Tahoma, "MS Sans Serif", "Microsoft Sans Serif", Geneva, Verdana, "DejaVu Sans", sans-serif;
+  --page-font: "Times New Roman", Times, "Liberation Serif", "Nimbus Roman", serif;
+  --display-font: "Arial Black", Arial, Helvetica, sans-serif;
+  --field-font: "Courier New", Courier, "Liberation Mono", monospace;
+  --mono-font: "Courier New", Courier, "Liberation Mono", monospace;
+
+  --desktop-bg: #008080;
+  --chrome-bg: #c0c0c0;
+  --chrome-fg: #000;
+  --chrome-muted: #404040;
+  --chrome-disabled: #6d6d6d;
+  --chrome-light: #fff;
+  --chrome-shadow: #808080;
+  --chrome-dark: #000;
+  --title-bg: #000080;
+  --title-fg: #fff;
+  --menu-hi-bg: #000080;
+  --menu-hi-fg: #fff;
+  --menu-border: 0;
+  --menu-drop: 2px 2px 0 rgb(0 0 0 / 0.35);
+  --window-border: 1px solid #dfdfdf;
+  --window-pad: 2px;
+  --bevel-out:
+    inset -1px -1px #000, inset 1px 1px #fff, inset -2px -2px #808080, inset 2px 2px #dfdfdf;
+  --bevel-in:
+    inset -1px -1px #fff, inset 1px 1px #808080, inset -2px -2px #dfdfdf, inset 2px 2px #000;
+  --bevel-in-thin: inset -1px -1px #fff, inset 1px 1px #808080;
+
+  --field-bg: #fff;
+  --field-fg: #000;
+  --page-bg: #fff;
+  --page-fg: #000;
+  --page-muted: #555;
+  --link: #0000ee;
+  --visited: #551a8b;
+  --active-link: #ff0000;
+  --broken: #a00000;
+  --focus: #000;
+  --accent: #000080;
+  --accent-fg: #fff;
+  --hl-fg: inherit;
+  --hl-bg: transparent;
+  --result-url: #008000;
+  --box-border: #808080;
+  --box-title-bg: #000080;
+  --box-title-fg: #fff;
+  --badge-bg: #ffffcc;
+  --badge-fg: #000;
+  --badge-border: #999;
+  --rule: #808080;
+  --notice-bg: #ffffe0;
+  --notice-warn-bg: #ffe4e1;
+  --new-bg: #ff0000;
+  --new-fg: #ffff00;
+  --icon-fill: #c0c0c0;
+  --icon-stroke: #000;
+  --stop-fill: #e00000;
+  --throbber-sky: #000040;
+  --throbber-sky-active: #0000a0;
+  --throbber-star: #fff;
+  --throbber-comet: #ffff80;
+  --throbber-letter: #c0c0ff;
+  --logo-0: #1a3ccf;
+  --logo-1: #d6201f;
+  --logo-2: #e8a800;
+  --logo-3: #1a3ccf;
+  --logo-4: #13a333;
+  --logo-5: #d6201f;
+  --ok: #008000;
+  --warn: #b36b00;
+  --bad: #c00000;
+  --ins-bg: #ddffdd;
+  --del-bg: #ffdddd;
+  color-scheme: light;
+}
+
+/* ------------------------------ Mosaic '93 ---------------------------- */
+:root[data-theme="mosaic93"] {
+  --ui-font: Helvetica, Arial, "Liberation Sans", sans-serif;
+  --page-font: "Times New Roman", Times, "Liberation Serif", serif;
+  --display-font: "Times New Roman", Times, serif;
+  --desktop-bg: #5f7f9f;
+  --chrome-bg: #b8b8b8;
+  --chrome-light: #e0e0e0;
+  --chrome-shadow: #707070;
+  --title-bg: #6f8faf;
+  --title-fg: #000;
+  --menu-hi-bg: #9090a0;
+  --menu-hi-fg: #000;
+  --bevel-out: inset -2px -2px #707070, inset 2px 2px #e0e0e0;
+  --bevel-in: inset 2px 2px #707070, inset -2px -2px #e0e0e0;
+  --bevel-in-thin: inset 1px 1px #707070, inset -1px -1px #e0e0e0;
+  --page-bg: #bfbfbf;
+  --page-fg: #000;
+  --page-muted: #333;
+  --link: #0000ee;
+  --visited: #551a8b;
+  --field-bg: #d8d8d8;
+  --box-title-bg: transparent;
+  --box-title-fg: #000;
+  --box-border: #707070;
+  --badge-bg: #d8d8d8;
+  --notice-bg: #d0d0d0;
+  --notice-warn-bg: #d8c0c0;
+  --throbber-sky: #102040;
+  --throbber-letter: #fff;
+  --logo-0: #000;
+  --logo-1: #000;
+  --logo-2: #000;
+  --logo-3: #000;
+  --logo-4: #000;
+  --logo-5: #000;
+  --title-align: center;
+}
+
+/* ------------------------------ Encarta '95 --------------------------- */
+:root[data-theme="encarta95"] {
+  --ui-font: "Arial", Helvetica, "Liberation Sans", sans-serif;
+  --page-font: Georgia, "Book Antiqua", Palatino, "Palatino Linotype", serif;
+  --display-font: "Book Antiqua", Palatino, Georgia, serif;
+  --desktop-bg: #10082a;
+  --chrome-bg: #2b2260;
+  --chrome-fg: #f3e9c6;
+  --chrome-muted: #c9bd94;
+  --chrome-disabled: #7d7598;
+  --chrome-light: #5a4fa0;
+  --chrome-shadow: #150f38;
+  --chrome-dark: #07041a;
+  --title-bg: linear-gradient(90deg, #4a1a6b, #1b3a7a);
+  --title-fg: #ffd970;
+  --menu-hi-bg: #c79a2e;
+  --menu-hi-fg: #10082a;
+  --window-border: 1px solid #c79a2e;
+  --bevel-out:
+    inset -1px -1px #07041a, inset 1px 1px #8a7fd0, inset -2px -2px #150f38, inset 2px 2px #5a4fa0;
+  --bevel-in: inset 1px 1px #07041a, inset -1px -1px #8a7fd0;
+  --bevel-in-thin: inset 1px 1px #07041a, inset -1px -1px #5a4fa0;
+  --field-bg: #fdf8e6;
+  --field-fg: #1a1030;
+  --page-bg: #1b1546;
+  --page-fg: #f3ecd2;
+  --page-muted: #c9bd94;
+  --link: #8fd3ff;
+  --visited: #d5a6ff;
+  --active-link: #ffd970;
+  --broken: #ff8f8f;
+  --focus: #ffd970;
+  --accent: #c79a2e;
+  --accent-fg: #10082a;
+  --result-url: #9be39b;
+  --box-border: #c79a2e;
+  --box-title-bg: linear-gradient(90deg, #7a2a8a, #2a4a9a);
+  --box-title-fg: #ffd970;
+  --badge-bg: #2b2260;
+  --badge-fg: #f3e9c6;
+  --badge-border: #c79a2e;
+  --rule: #c79a2e;
+  --notice-bg: #2b2260;
+  --notice-warn-bg: #4a1a3a;
+  --icon-fill: #ffd970;
+  --icon-stroke: #07041a;
+  --throbber-sky: #07041a;
+  --throbber-sky-active: #3a1a6b;
+  --throbber-letter: #ffd970;
+  --logo-0: #ffd970;
+  --logo-1: #8fd3ff;
+  --logo-2: #ff9fd0;
+  --logo-3: #9be39b;
+  --logo-4: #ffd970;
+  --logo-5: #d5a6ff;
+  --ok: #9be39b;
+  --warn: #ffd970;
+  --bad: #ff8f8f;
+  --ins-bg: #1f4a2a;
+  --del-bg: #5a1f2a;
+  color-scheme: dark;
+}
+
+/* ------------------------------- Phosphor ----------------------------- */
+:root[data-theme="phosphor-amber"],
+:root[data-theme="phosphor-green"] {
+  --ui-font: "IBM Plex Mono", "Lucida Console", "Courier New", "DejaVu Sans Mono", monospace;
+  --page-font: var(--ui-font);
+  --display-font: var(--ui-font);
+  --field-font: var(--ui-font);
+  --mono-font: var(--ui-font);
+  --desktop-bg: #000;
+  --chrome-bg: #000;
+  --chrome-disabled: var(--phos-dim);
+  --chrome-fg: var(--phos);
+  --chrome-muted: var(--phos-dim);
+  --chrome-light: var(--phos-dim);
+  --chrome-shadow: var(--phos-dim);
+  --chrome-dark: var(--phos-dim);
+  --title-bg: var(--phos);
+  --title-fg: #000;
+  --menu-hi-bg: var(--phos);
+  --menu-hi-fg: #000;
+  --menu-border: 1px solid var(--phos);
+  --menu-drop: 0 0 0 transparent;
+  --window-border: 1px solid var(--phos);
+  --bevel-out: inset 0 0 0 1px var(--phos-dim);
+  --bevel-in: inset 0 0 0 1px var(--phos-dim);
+  --bevel-in-thin: inset 0 0 0 1px var(--phos-dim);
+  --field-bg: #000;
+  --field-fg: var(--phos);
+  --page-bg: #050300;
+  --page-fg: var(--phos);
+  --page-muted: var(--phos-dim);
+  --link: var(--phos-bright);
+  --visited: var(--phos-dim);
+  --active-link: #fff;
+  --broken: var(--phos-dim);
+  --focus: var(--phos-bright);
+  --accent: var(--phos);
+  --accent-fg: #000;
+  --hl-fg: #000;
+  --hl-bg: var(--phos);
+  --result-url: var(--phos-dim);
+  --box-border: var(--phos-dim);
+  --box-title-bg: var(--phos);
+  --box-title-fg: #000;
+  --badge-bg: #000;
+  --badge-fg: var(--phos);
+  --badge-border: var(--phos-dim);
+  --rule: var(--phos-dim);
+  --notice-bg: #000;
+  --notice-warn-bg: #000;
+  --new-bg: var(--phos);
+  --new-fg: #000;
+  --icon-fill: var(--phos);
+  --icon-stroke: #000;
+  --stop-fill: var(--phos-bright);
+  --throbber-sky: #000;
+  --throbber-sky-active: #000;
+  --throbber-star: var(--phos);
+  --throbber-comet: var(--phos-bright);
+  --throbber-letter: var(--phos);
+  --logo-0: var(--phos);
+  --logo-1: var(--phos);
+  --logo-2: var(--phos);
+  --logo-3: var(--phos);
+  --logo-4: var(--phos);
+  --logo-5: var(--phos);
+  --ok: var(--phos);
+  --warn: var(--phos-bright);
+  --bad: #fff;
+  --ins-bg: #000;
+  --del-bg: #000;
+  color-scheme: dark;
+}
+:root[data-theme="phosphor-amber"] {
+  --phos: #ffb000;
+  --phos-bright: #ffd27a;
+  --phos-dim: #b07800;
+}
+:root[data-theme="phosphor-green"] {
+  --phos: #33ff66;
+  --phos-bright: #a8ffbf;
+  --phos-dim: #1fa640;
+}
+:root[data-theme^="phosphor"] .viewport,
+:root[data-theme^="phosphor"] .chrome-top {
+  text-shadow: 0 0 3px color-mix(in srgb, var(--phos) 55%, transparent);
+}
+:root[data-theme^="phosphor"][data-scanlines="on"] .window::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 90;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgb(0 0 0 / 0) 0,
+    rgb(0 0 0 / 0) 2px,
+    rgb(0 0 0 / 0.28) 3px
+  );
+}
+:root[data-theme^="phosphor"] .icon {
+  stroke-width: 0;
+}
+:root[data-theme^="phosphor"] a.visited {
+  text-decoration-style: dotted;
+}
+
+/* ------------------------------- System 7 ----------------------------- */
+:root[data-theme="system7"] {
+  --ui-font: Chicago, Charcoal, "ChicagoFLF", Geneva, "Helvetica Neue", Arial, sans-serif;
+  --page-font: Geneva, "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --display-font: Chicago, Charcoal, Geneva, Arial, sans-serif;
+  --field-font: Monaco, "Courier New", monospace;
+  --mono-font: Monaco, "Courier New", monospace;
+  --desktop-bg: #808080;
+  --chrome-bg: #fff;
+  --chrome-fg: #000;
+  --chrome-muted: #000;
+  --chrome-disabled: #808080;
+  --chrome-light: #fff;
+  --chrome-shadow: #000;
+  --chrome-dark: #000;
+  --title-bg: repeating-linear-gradient(to bottom, #fff 0, #fff 1px, #000 1px, #000 2px);
+  --title-fg: #000;
+  --menu-hi-bg: #000;
+  --menu-hi-fg: #fff;
+  --menu-border: 1px solid #000;
+  --menu-drop: 2px 2px 0 #000;
+  --window-border: 1px solid #000;
+  --window-pad: 1px;
+  --bevel-out: inset 0 0 0 1px #000;
+  --bevel-in: inset 0 0 0 1px #000, inset 2px 2px 0 #000;
+  --bevel-in-thin: inset 0 0 0 1px #000;
+  --field-bg: #fff;
+  --page-bg: #fff;
+  --page-fg: #000;
+  --page-muted: #000;
+  --link: #000;
+  --visited: #000;
+  --broken: #000;
+  --focus: #000;
+  --accent: #000;
+  --accent-fg: #fff;
+  --hl-fg: #fff;
+  --hl-bg: #000;
+  --result-url: #000;
+  --box-border: #000;
+  --box-title-bg: #fff;
+  --box-title-fg: #000;
+  --badge-bg: #fff;
+  --badge-fg: #000;
+  --badge-border: #000;
+  --rule: #000;
+  --notice-bg: #fff;
+  --notice-warn-bg: #fff;
+  --new-bg: #000;
+  --new-fg: #fff;
+  --icon-fill: #fff;
+  --icon-stroke: #000;
+  --stop-fill: #000;
+  --throbber-sky: #fff;
+  --throbber-sky-active: #ddd;
+  --throbber-star: #000;
+  --throbber-comet: #000;
+  --throbber-letter: #000;
+  --logo-0: #000;
+  --logo-1: #000;
+  --logo-2: #000;
+  --logo-3: #000;
+  --logo-4: #000;
+  --logo-5: #000;
+  --ok: #000;
+  --warn: #000;
+  --bad: #000;
+  --ins-bg: #fff;
+  --del-bg: #fff;
+  --title-align: center;
+}
+:root[data-theme="system7"] .titlebar-text {
+  flex: none;
+  margin: 0 auto;
+  padding: 0 8px;
+  background: #fff;
+}
+:root[data-theme="system7"] .titlebar-buttons,
+:root[data-theme="system7"] .titlebar-icon {
+  display: none;
+}
+:root[data-theme="system7"] .btn,
+:root[data-theme="system7"] .btn-like,
+:root[data-theme="system7"] .dirbuttons a {
+  border-radius: 6px;
+}
+:root[data-theme="system7"] a.visited {
+  text-decoration-style: dashed;
+}
+:root[data-theme="system7"] .window {
+  box-shadow: 2px 2px 0 #000;
+}
+
+/* ----------------------------- High contrast -------------------------- */
+:root[data-contrast="high"] {
+  --chrome-bg: #000;
+  --chrome-fg: #fff;
+  --chrome-muted: #fff;
+  --chrome-disabled: #9a9a9a;
+  --chrome-light: #fff;
+  --chrome-shadow: #fff;
+  --chrome-dark: #fff;
+  --title-bg: #000;
+  --title-fg: #ffff00;
+  --menu-hi-bg: #ffff00;
+  --menu-hi-fg: #000;
+  --menu-border: 2px solid #fff;
+  --window-border: 2px solid #fff;
+  --bevel-out: inset 0 0 0 2px #fff;
+  --bevel-in: inset 0 0 0 2px #fff;
+  --bevel-in-thin: inset 0 0 0 1px #fff;
+  --field-bg: #000;
+  --field-fg: #fff;
+  --page-bg: #000;
+  --page-fg: #fff;
+  --page-muted: #fff;
+  --link: #ffff00;
+  --visited: #00ffff;
+  --active-link: #fff;
+  --broken: #ff9e9e;
+  --focus: #00ffff;
+  --accent: #ffff00;
+  --accent-fg: #000;
+  --hl-fg: #000;
+  --hl-bg: #ffff00;
+  --result-url: #7dff7d;
+  --box-border: #fff;
+  --box-title-bg: #000;
+  --box-title-fg: #fff;
+  --badge-bg: #000;
+  --badge-fg: #fff;
+  --badge-border: #fff;
+  --rule: #fff;
+  --notice-bg: #000;
+  --notice-warn-bg: #000;
+  --new-bg: #ffff00;
+  --new-fg: #000;
+  --icon-fill: #fff;
+  --icon-stroke: #000;
+  --stop-fill: #ff9e9e;
+  --ok: #7dff7d;
+  --warn: #ffff00;
+  --bad: #ff9e9e;
+  --ins-bg: #003300;
+  --del-bg: #330000;
+  --logo-0: #ffff00;
+  --logo-1: #ffff00;
+  --logo-2: #ffff00;
+  --logo-3: #ffff00;
+  --logo-4: #ffff00;
+  --logo-5: #ffff00;
+  --phos: #fff;
+  --phos-dim: #fff;
+  --phos-bright: #ffff00;
+  color-scheme: dark;
+}
+:root[data-contrast="high"] :focus-visible {
+  outline-width: 3px;
+  outline-style: solid;
+}
+:root[data-contrast="high"] .viewport,
+:root[data-contrast="high"] .chrome-top {
+  text-shadow: none;
+}
+:root[data-contrast="high"] .window::after {
+  display: none;
+}
+
+@media (forced-colors: active) {
+  .tool-btn,
+  .btn,
+  .btn-like,
+  .throbber,
+  .loc-input,
+  .search-input {
+    border: 1px solid ButtonText;
+  }
+  .broken-link {
+    text-decoration-style: wavy;
+  }
+}
+
+/* Mosaic '93: minimal chrome, text-only buttons. */
+:root[data-theme="mosaic93"] .tool-btn .icon,
+:root[data-theme="mosaic93"] .titlebar-buttons,
+:root[data-theme="mosaic93"] .dirbuttons {
+  display: none;
+}
+:root[data-theme="mosaic93"] .tool-btn {
+  min-width: 0;
+  padding: 3px 8px;
+}
