@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, cast
 
 ENV_PREFIX = "WSP__"
+NO_LOCAL_ENV = "WSP_NO_LOCAL_CONFIG"  # set (to anything) to ignore local.toml, e.g. in test runs
 
 
 def _merge(base: dict[str, Any], override: Mapping[str, Any]) -> dict[str, Any]:
@@ -49,10 +50,16 @@ def _env_layer(environ: Mapping[str, str]) -> dict[str, Any]:
 
 
 def load_config(config_dir: Path, *, environ: Mapping[str, str] | None = None) -> dict[str, Any]:
-    """Load ``default.toml`` then ``local.toml`` (optional, gitignored) then environment overrides."""
+    """Load ``default.toml`` then ``local.toml`` (optional, gitignored) then environment overrides.
+
+    ``local.toml`` is skipped when ``WSP_NO_LOCAL_CONFIG`` is set, so test suites never reach a
+    machine's real vault or index.
+    """
+    env = os.environ if environ is None else environ
+    names = ("default.toml",) if env.get(NO_LOCAL_ENV) else ("default.toml", "local.toml")
     cfg: dict[str, Any] = {}
-    for name in ("default.toml", "local.toml"):
+    for name in names:
         path = config_dir / name
         if path.is_file():
             cfg = _merge(cfg, tomllib.loads(path.read_text(encoding="utf-8")))
-    return _merge(cfg, _env_layer(os.environ if environ is None else environ))
+    return _merge(cfg, _env_layer(env))

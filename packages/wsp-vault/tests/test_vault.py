@@ -6,8 +6,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
-from conftest import SealFn
-from vaultkit import FILES, GEN, SOURCE, corrupt
+from vaultkit import FILES, GEN, SOURCE, SealFn, corrupt
 
 from wsp_core.model import Checksum, GenerationStatus
 from wsp_core.ports import Vault

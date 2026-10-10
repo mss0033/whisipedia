@@ -4,8 +4,7 @@ import shutil
 from pathlib import Path
 
 import pytest
-from conftest import SealFn
-from vaultkit import FILES, GEN, SOURCE, FakeParity, corrupt
+from vaultkit import FILES, GEN, SOURCE, FakeParity, SealFn, corrupt
 
 from wsp_vault.ledger import JsonlLedger
 from wsp_vault.manifest import PARITY_DIR
