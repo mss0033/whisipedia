@@ -1,0 +1,528 @@
+/**
+ * wsp://search — the offline search engine, styled like a 1998–2000 search
+ * site: sparse home page, ten blue links, instant answers, paging, and an
+ * optional streamed "Summarize these results".
+ */
+import { ApiRequestError } from '../api/client.ts';
+import type { DocKind, InstantAnswer, MapAnswer, SearchHit, SearchResponse } from '../api/types.ts';
+import { attachSuggest } from '../chrome/suggest.ts';
+import { docIdToAddress, makeAddress, searchAddress } from '../core/address.ts';
+import { type Child, frag, h, s } from '../core/dom.ts';
+import { formatNumber } from '../core/format.ts';
+import { highlightSnippet } from '../core/highlight.ts';
+import type { Route } from '../core/router.ts';
+import {
+  asOf,
+  badge,
+  docLink,
+  ENGINE_NAME,
+  engineLogo,
+  KIND_LABELS,
+  KIND_ORDER,
+  licenseBadge,
+  searchForm,
+  wspLink,
+} from '../ui/components.ts';
+import type { AppServices, PageContext, PageResult } from './types.ts';
+
+type SearchRoute = Extract<Route, { page: 'search' }>;
+
+export const PAGE_SIZE = 10;
+
+function go(app: AppServices, q: string, lucky: boolean, kind?: DocKind, source?: string) {
+  app.navigate(searchAddress(q, { kind, source, lucky: lucky ? 1 : undefined }));
+}
+
+function makeForm(app: AppServices, route: SearchRoute, big: boolean) {
+  const { form, input } = searchForm({
+    query: route.query,
+    big,
+    lucky: true,
+    kind: route.kind,
+    source: route.source,
+    label: 'Search for:',
+    onSubmit: (q, lucky) => go(app, q, lucky, route.kind, route.source),
+  });
+  attachSuggest(input, app, {
+    onPick: (sug) => {
+      if (sug.doc_id) app.navigate(docIdToAddress(sug.doc_id));
+      else go(app, sug.text, false, route.kind, route.source);
+    },
+  });
+  return { form, input };
+}
+
+async function renderHome(ctx: PageContext, route: SearchRoute): Promise<PageResult> {
+  const { form, input } = makeForm(ctx.app, route, true);
+  const sources = await ctx.app.sources();
+  const docs = sources.reduce((n, s) => n + s.doc_count, 0);
+  const body = h(
+    'div',
+    { class: 'page page-search-home' },
+    h('h1', { class: 'visually-hidden', tabindex: '-1' }, `${ENGINE_NAME} offline search`),
+    h('div', { class: 'search-home-logo' }, engineLogo('big')),
+    h(
+      'p',
+      { class: 'search-home-tag' },
+      'Search the offline web. Type anything, in plain language.',
+    ),
+    form,
+    h(
+      'p',
+      { class: 'search-home-kinds' },
+      'Or browse: ',
+      wspLink(makeAddress('directory'), 'Directory'),
+      ' · ',
+      wspLink(makeAddress('whatsnew'), "What's New"),
+      ' · ',
+      wspLink(makeAddress('random'), 'Random page'),
+    ),
+    h(
+      'p',
+      { class: 'search-home-stats' },
+      docs > 0
+        ? `Searching ${formatNumber(docs)} documents in ${sources.length} sites. No modem required.`
+        : 'Searching the library. No modem required.',
+    ),
+    h(
+      'p',
+      { class: 'search-home-examples' },
+      'Try: ',
+      ...[
+        'how do vaccines train the immune system',
+        'rfc about http caching',
+        'map of Lisbon',
+        'books by Mary Shelley',
+        'define sesquipedalian',
+      ].flatMap((q, i) => [i ? ' · ' : '', wspLink(searchAddress(q), q)]),
+    ),
+    h(
+      'p',
+      { class: 'fineprint' },
+      `©1998–2026 ${ENGINE_NAME} · 0 bytes downloaded · `,
+      wspLink('wsp://help/search', 'Search tips'),
+    ),
+  );
+  return { title: `${ENGINE_NAME} Search`, body, focus: input };
+}
+
+export async function render(ctx: PageContext): Promise<PageResult> {
+  const route = ctx.route as SearchRoute;
+  if (!route.query) return renderHome(ctx, route);
+
+  if (route.lucky) {
+    const r = await ctx.app.api.search({ q: route.query, page_size: 1 }, ctx.signal);
+    const first = r.navigate_to ?? r.hits[0]?.doc_id;
+    if (first) return { redirect: docIdToAddress(first) };
+  }
+
+  const resp = await ctx.app.api.search(
+    {
+      q: route.query,
+      kind: route.kind,
+      source: route.source,
+      page: route.pageNo,
+      page_size: PAGE_SIZE,
+    },
+    ctx.signal,
+  );
+  if (ctx.opts.fromLocation && resp.navigate_to && route.pageNo === 1) {
+    return { redirect: docIdToAddress(resp.navigate_to) };
+  }
+
+  const sources = await ctx.app.sources();
+  const sourceName = route.source
+    ? (sources.find((x) => x.id === route.source)?.name ?? route.source)
+    : null;
+  const top = makeForm(ctx.app, route, false);
+  const bottom = makeForm(ctx.app, route, false);
+
+  const body = h(
+    'div',
+    { class: 'page page-search-results' },
+    h(
+      'div',
+      { class: 'results-header' },
+      wspLink(makeAddress('search'), engineLogo('small')),
+      top.form,
+    ),
+    h('h1', { class: 'visually-hidden', tabindex: '-1' }, `Search results for ${route.query}`),
+    renderResultsPage(resp, route, ctx, sourceName),
+    h('div', { class: 'results-footer' }, bottom.form),
+  );
+  return { title: `${ENGINE_NAME} Search: ${route.query}`, body };
+}
+
+/** Everything below the search box. Exported for tests (render budget). */
+export function renderResultsPage(
+  resp: SearchResponse,
+  route: SearchRoute,
+  ctx: PageContext | null,
+  sourceName: string | null,
+): DocumentFragment {
+  const first = (resp.page - 1) * resp.page_size + 1;
+  const last = first + resp.hits.length - 1;
+  const secs = (resp.took_ms / 1000).toFixed(2);
+
+  return frag(
+    h(
+      'div',
+      { class: 'results-bar', role: 'status' },
+      resp.hits.length
+        ? [
+            'Results ',
+            h('b', null, String(first)),
+            ' - ',
+            h('b', null, String(last)),
+            ' of about ',
+            h('b', null, formatNumber(resp.total)),
+            ' for ',
+            h('b', null, resp.query),
+            `. Search took ${secs} seconds.`,
+          ]
+        : ['No documents matched ', h('b', null, resp.query), '.'],
+    ),
+    kindFilters(resp, route),
+    sourceName
+      ? h(
+          'p',
+          { class: 'notice' },
+          'Showing results from ',
+          h('b', null, sourceName),
+          ' only. ',
+          wspLink(searchAddress(route.query, { kind: route.kind }), 'Search all sites'),
+        )
+      : null,
+    resp.did_you_mean
+      ? h(
+          'p',
+          { class: 'did-you-mean' },
+          'Did you mean: ',
+          wspLink(searchAddress(resp.did_you_mean), h('b', null, h('i', null, resp.did_you_mean))),
+          '?',
+        )
+      : null,
+    resp.low_confidence
+      ? h(
+          'p',
+          { class: 'notice notice-warn' },
+          'The library may not hold a good answer to this. Try fewer or different words, or browse the ',
+          wspLink(makeAddress('directory'), 'directory'),
+          '.',
+        )
+      : null,
+    resp.instant ? instantBox(resp.instant) : null,
+    ctx && resp.hits.length > 0 ? summarizePanel(ctx, resp) : null,
+    resultsList(resp),
+    pagination(resp, route),
+  );
+}
+
+function kindFilters(resp: SearchResponse, route: SearchRoute): HTMLElement | null {
+  if (resp.facets.length === 0 && !route.kind) return null;
+  const counts = new Map(resp.facets.map((f) => [f.kind, f.count]));
+  const kinds = KIND_ORDER.filter((k) => counts.has(k) || k === route.kind);
+  const item = (label: string, kind: DocKind | undefined, count?: number) => {
+    const text = count === undefined ? label : `${label} (${formatNumber(count)})`;
+    const current = route.kind === kind;
+    return h(
+      'li',
+      null,
+      current
+        ? h('b', { 'aria-current': 'page' }, text)
+        : wspLink(searchAddress(route.query, { kind, source: route.source }), text),
+    );
+  };
+  return h(
+    'nav',
+    { class: 'kind-filters', 'aria-label': 'Filter by kind' },
+    h(
+      'ul',
+      null,
+      item('All', undefined),
+      ...kinds.map((k) => item(KIND_LABELS[k], k, counts.get(k))),
+    ),
+  );
+}
+
+export function resultsList(resp: SearchResponse): HTMLOListElement {
+  const start = (resp.page - 1) * resp.page_size + 1;
+  const ol = h('ol', { class: 'results', start, 'aria-label': 'Search results' });
+  resp.hits.forEach((hit, i) => {
+    ol.appendChild(resultItem(hit, resp.query, start + i));
+  });
+  return ol;
+}
+
+export function resultItem(hit: SearchHit, query: string, n: number): HTMLLIElement {
+  const address = docIdToAddress(hit.doc_id);
+  const snippet = h('div', { class: 'result-snippet' });
+  snippet.appendChild(highlightSnippet(hit.snippet, query, hit.highlights));
+  return h(
+    'li',
+    { class: 'result', id: `result-${n}` },
+    h('div', { class: 'result-title' }, wspLink(address, hit.title)),
+    snippet,
+    h(
+      'div',
+      { class: 'result-meta' },
+      h('span', { class: 'result-address' }, address),
+      ' - ',
+      asOf(hit.as_of),
+      ' ',
+      badge(hit.source_name, 'badge-source'),
+      ' ',
+      licenseBadge(hit.license),
+      ' - ',
+      wspLink(searchAddress(query, { source: hit.source_id }), 'More from this site'),
+    ),
+  );
+}
+
+function pagination(resp: SearchResponse, route: SearchRoute): HTMLElement | null {
+  const pages = Math.min(10, Math.ceil(resp.total / resp.page_size));
+  if (pages <= 1) return null;
+  const cur = resp.page;
+  const link = (p: number, text: Child) =>
+    wspLink(
+      searchAddress(route.query, {
+        kind: route.kind,
+        source: route.source,
+        page: p > 1 ? p : undefined,
+      }),
+      text,
+    );
+
+  const cells: HTMLElement[] = [];
+  cells.push(
+    h(
+      'li',
+      { class: 'pg-cell pg-edge' },
+      h('span', { class: 'pg-letter', 'aria-hidden': 'true' }, 'Whi'),
+      cur > 1 ? link(cur - 1, 'Previous') : h('span', { class: 'pg-dim' }, ' '),
+    ),
+  );
+  for (let p = 1; p <= pages; p += 1) {
+    cells.push(
+      h(
+        'li',
+        { class: 'pg-cell' },
+        h(
+          'span',
+          { class: `pg-letter ${p === cur ? 'pg-current-letter' : ''}`, 'aria-hidden': 'true' },
+          'z',
+        ),
+        p === cur ? h('b', { 'aria-current': 'page' }, String(p)) : link(p, String(p)),
+      ),
+    );
+  }
+  cells.push(
+    h(
+      'li',
+      { class: 'pg-cell pg-edge' },
+      h('span', { class: 'pg-letter', 'aria-hidden': 'true' }, 'Bang!'),
+      cur < pages ? link(cur + 1, 'Next') : h('span', { class: 'pg-dim' }, ' '),
+    ),
+  );
+  return h(
+    'nav',
+    { class: 'pagination', 'aria-label': 'Result pages' },
+    h('span', { class: 'pg-label' }, 'Result Page:'),
+    h('ul', null, ...cells),
+  );
+}
+
+/* ----------------------------- instant answers ---------------------------- */
+
+export function instantBox(a: InstantAnswer): HTMLElement {
+  const more = (label: string) =>
+    h(
+      'p',
+      { class: 'instant-more' },
+      docLink(a.doc_id, `${label} »`),
+      ' ',
+      licenseBadge(a.license),
+    );
+  switch (a.type) {
+    case 'definition':
+      return h(
+        'aside',
+        { class: 'instant instant-definition', 'aria-label': 'Definition' },
+        h(
+          'p',
+          { class: 'instant-head' },
+          h('b', null, 'Definition: '),
+          h('dfn', null, a.term),
+          a.pronunciation ? h('span', { class: 'pron' }, ` ${a.pronunciation}`) : null,
+        ),
+        h(
+          'ol',
+          null,
+          ...a.senses.map((s) =>
+            h(
+              'li',
+              null,
+              h('i', null, `(${s.part_of_speech}) `),
+              s.definition,
+              s.example ? h('span', { class: 'example' }, ` “${s.example}”`) : null,
+            ),
+          ),
+        ),
+        more('Full entry in Wiktionary'),
+      );
+    case 'fact':
+      return h(
+        'aside',
+        { class: 'instant instant-fact', 'aria-label': `Facts about ${a.label}` },
+        h('p', { class: 'instant-head' }, h('b', null, a.label), ` — ${a.description}`),
+        h(
+          'table',
+          { class: 'facts' },
+          h(
+            'tbody',
+            null,
+            ...a.facts.map((f) =>
+              h(
+                'tr',
+                null,
+                h('th', { scope: 'row' }, f.label),
+                h('td', null, f.doc_id ? docLink(f.doc_id, f.value) : f.value),
+              ),
+            ),
+          ),
+        ),
+        more(`Wikidata ${a.qid}`),
+      );
+    case 'map':
+      return h(
+        'aside',
+        { class: 'instant instant-map', 'aria-label': `Map of ${a.place}` },
+        h('p', { class: 'instant-head' }, h('b', null, 'Map: '), a.place),
+        h(
+          'div',
+          { class: 'map-row' },
+          locator(a),
+          h('p', null, formatCoord(a), h('br'), a.description ?? ''),
+        ),
+        more('Open the map'),
+      );
+  }
+}
+
+function formatCoord(a: MapAnswer): string {
+  const lat = `${Math.abs(a.lat).toFixed(4)}° ${a.lat >= 0 ? 'N' : 'S'}`;
+  const lon = `${Math.abs(a.lon).toFixed(4)}° ${a.lon >= 0 ? 'E' : 'W'}`;
+  return `${lat}, ${lon}`;
+}
+
+/** Tiny equirectangular world locator: graticule plus a dot. No tiles. */
+function locator(a: MapAnswer): SVGElement {
+  const x = ((a.lon + 180) / 360) * 160;
+  const y = ((90 - a.lat) / 180) * 80;
+  const lines: SVGElement[] = [];
+  for (let i = 1; i < 8; i += 1)
+    lines.push(s('line', { x1: i * 20, y1: 0, x2: i * 20, y2: 80, class: 'grat' }));
+  for (let i = 1; i < 4; i += 1)
+    lines.push(s('line', { x1: 0, y1: i * 20, x2: 160, y2: i * 20, class: 'grat' }));
+  return s(
+    'svg',
+    {
+      viewBox: '0 0 160 80',
+      width: 160,
+      height: 80,
+      class: 'locator',
+      role: 'img',
+      'aria-label': `Location ${formatCoord(a)}`,
+    },
+    s('rect', { x: 0, y: 0, width: 160, height: 80, class: 'sea' }),
+    ...lines,
+    s('circle', { cx: x.toFixed(1), cy: y.toFixed(1), r: 6, class: 'ring' }),
+    s('circle', { cx: x.toFixed(1), cy: y.toFixed(1), r: 2.5, class: 'dot' }),
+  );
+}
+
+/* ------------------------------- summarize -------------------------------- */
+
+function summarizePanel(ctx: PageContext, resp: SearchResponse): HTMLElement {
+  const out = h('div', { class: 'summary-text', 'aria-live': 'polite' });
+  const btn = h('button', { type: 'button', class: 'btn' }, 'Summarize these results');
+  const stop = h('button', { type: 'button', class: 'btn', hidden: true }, 'Stop');
+  const note = h(
+    'p',
+    { class: 'fineprint' },
+    'Written by the local language model from the results below. Every sentence cites a result; the results remain the answer.',
+  );
+  const panel = h(
+    'section',
+    { class: 'summary-panel', 'aria-label': 'Summary of results' },
+    h('div', { class: 'summary-buttons' }, btn, ' ', stop),
+    out,
+  );
+  let controller: AbortController | null = null;
+  ctx.signal.addEventListener('abort', () => controller?.abort());
+
+  btn.addEventListener('click', () => {
+    controller?.abort();
+    const ac = new AbortController();
+    controller = ac;
+    out.replaceChildren(h('span', { class: 'blink-cursor' }, 'Thinking'));
+    panel.classList.add('is-open');
+    if (!panel.contains(note)) panel.appendChild(note);
+    btn.disabled = true;
+    stop.hidden = false;
+    void (async () => {
+      let started = false;
+      try {
+        const ids = resp.hits.slice(0, 5).map((x) => x.doc_id);
+        for await (const ev of ctx.app.api.summarize(
+          { query: resp.query, doc_ids: ids, max_sentences: 5 },
+          ac.signal,
+        )) {
+          if (!started) {
+            out.replaceChildren();
+            started = true;
+          }
+          if (ev.type === 'token') out.append(ev.text);
+          else if (ev.type === 'citation') {
+            const n = (resp.page - 1) * resp.page_size + ev.index;
+            out.append(
+              h(
+                'sup',
+                null,
+                h(
+                  'a',
+                  { href: `#result-${n}`, dataset: { anchor: `result-${n}` }, class: 'cite' },
+                  `[${n}]`,
+                ),
+              ),
+            );
+          } else if (ev.type === 'notice') out.append(h('em', { class: 'notice' }, ` ${ev.text} `));
+          else if (ev.type === 'error')
+            out.append(h('p', { class: 'notice notice-warn' }, ev.message));
+        }
+      } catch (err) {
+        if (ac.signal.aborted) {
+          out.append(h('em', null, ' [stopped]'));
+        } else if (err instanceof ApiRequestError && err.isUnavailable) {
+          out.replaceChildren(
+            h(
+              'p',
+              { class: 'notice' },
+              'The local summarizer is not installed or not running. The results below are the answer.',
+            ),
+          );
+        } else {
+          out.replaceChildren(
+            h('p', { class: 'notice notice-warn' }, `Summary failed: ${String(err)}`),
+          );
+        }
+      } finally {
+        btn.disabled = false;
+        stop.hidden = true;
+        if (controller === ac) controller = null;
+      }
+    })();
+  });
+  stop.addEventListener('click', () => controller?.abort());
+  return panel;
+}
