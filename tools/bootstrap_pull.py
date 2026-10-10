@@ -203,23 +203,31 @@ def wikimedia_targets(registry: dict[str, dict[str, Any]]) -> list[Target]:
 
 
 def wikidata_targets() -> list[Target]:
+    """Newest run of each entity dump. ``all.json`` and ``truthy`` are produced on different days."""
     base = f"{WM_PRIMARY}/wikidatawiki/entities"
+    mirror = "https://mirror.accum.se/mirror/wikimedia.org/other/wikibase/wikidatawiki"
     runs = sorted(set(re.findall(r'href="(\d{8})/', http_get(base + "/").decode())), reverse=True)
-    for run in runs:
-        sums = http_get(f"{base}/{run}/wikidata-{run}-sha1sums.txt").decode()
-        want = {f"wikidata-{run}-all.json.bz2", f"wikidata-{run}-truthy-BETA.nt.bz2"}
-        found = {n: h for h, n in (line.split() for line in sums.splitlines() if line.strip()) if n in want}
-        if found:
-            mirror = "https://mirror.accum.se/mirror/wikimedia.org/other/wikibase/wikidatawiki"
-            out: list[Target] = []
-            for n, h in found.items():
-                uris = [f"{base}/{run}/{n}"]
-                if http_ok(f"{mirror}/{run}/{n}"):
-                    uris = [f"{mirror}/{run}/{n}", *uris]
-                lane = "wm-mirrors" if len(uris) > 1 else "wm-primary"
-                out.append(Target("wikidata", run, n, uris, lane, ("sha-1", h)))
-            return out
-    return []
+    out: list[Target] = []
+    for kind in ("all.json.bz2", "truthy-BETA.nt.bz2"):
+        for run in runs:
+            try:
+                sums = http_get(f"{base}/{run}/wikidata-{run}-sha1sums.txt").decode()
+            except Exception as exc:
+                print(f"  ! wikidata {run}: {exc}", file=sys.stderr)
+                continue
+            name = f"wikidata-{run}-{kind}"
+            digest = next(
+                (h for h, n in (ln.split() for ln in sums.splitlines() if ln.strip()) if n == name), None
+            )
+            if digest is None:
+                continue
+            # Never mix the primary into a multi-connection lane: it allows 2 connections per IP.
+            on_mirror = http_ok(f"{mirror}/{run}/{name}")
+            uris = [f"{mirror}/{run}/{name}"] if on_mirror else [f"{base}/{run}/{name}"]
+            lane = "wm-mirrors" if on_mirror else "wm-primary"
+            out.append(Target("wikidata", run, name, uris, lane, ("sha-1", digest)))
+            break
+    return out
 
 
 # --- Other sources -------------------------------------------------------------------------------
@@ -334,7 +342,9 @@ def write_input(targets: list[Target], incoming: Path, path: Path) -> None:
         lines.append(f"  dir={incoming / t.source_id / t.version}")
         if t.meta.get("kind") not in ("metalink", "torrent"):
             lines.append(f"  out={t.name}")
-        if t.checksum:
+        # A torrent's own piece hashes verify its payload; the file checksum would wrongly apply to
+        # the .torrent metadata download, so it is checked after completion instead (see verify).
+        if t.checksum and t.meta.get("kind") != "torrent":
             lines.append(f"  checksum={t.checksum[0]}={t.checksum[1]}")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
