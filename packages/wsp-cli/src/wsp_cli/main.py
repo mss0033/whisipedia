@@ -4,6 +4,9 @@ Read commands (``search``, ``doc``, ``sources``, ``changes``) go through the pub
 ``--url`` (or ``WSP_API_URL``) they talk to a running server; otherwise they run the API in-process on
 the backends from :mod:`wsp_cli.bootstrap`, without opening a socket.
 
+Operator commands (``ingest``, ``index build``, ``scrub``, ``drill``, ``approve``/``reject``/``resume``,
+``status``) act on the real library configured in ``config/`` (see :mod:`wsp_cli.ops`).
+
 argparse rather than Typer/Click: the surface is small, it keeps the dependency tree (and the offline
 audit) minimal, and it type-checks cleanly under pyright strict.
 """
@@ -26,9 +29,10 @@ from pydantic import BaseModel
 from wsp_api import create_app
 from wsp_api.inprocess import InProcessTransport
 from wsp_api.services import DEFAULT_HOST, DEFAULT_PORT
-from wsp_cli import bootstrap
+from wsp_cli import bootstrap, ops
 from wsp_core.registry import RegistryError, load_registry
 from wsp_sdk import WspApiError, WspClient
+from wsp_vault.drill import DrillKind
 
 Handler = Callable[[argparse.Namespace, TextIO], int]
 
@@ -56,9 +60,15 @@ def _client(args: argparse.Namespace) -> WspClient:
         return WspClient(url)
     lay = bootstrap.layout(args.config_dir)
     cfg = bootstrap.load(lay)
-    print(f"note: {bootstrap.BACKEND_NOTE}", file=sys.stderr)
+    _note_backend(cfg)
     app = create_app(bootstrap.build_services(cfg, lay), bootstrap.api_settings(cfg, lay))
     return WspClient(http=httpx.Client(transport=InProcessTransport(app), base_url=f"http://{DEFAULT_HOST}"))
+
+
+def _note_backend(cfg: dict[str, object]) -> None:
+    note = bootstrap.backend_note(cfg)
+    if note:
+        print(f"note: {note}", file=sys.stderr)
 
 
 # --- commands -----------------------------------------------------------------------------------
@@ -76,7 +86,7 @@ def cmd_serve(args: argparse.Namespace, out: TextIO) -> int:
     settings = bootstrap.api_settings(cfg, lay, static_dir=args.static_dir)
     if not _is_loopback(host):
         settings = replace(settings, allowed_hosts=(*settings.allowed_hosts, host))
-    print(f"note: {bootstrap.BACKEND_NOTE}", file=sys.stderr)
+    _note_backend(cfg)
     app = create_app(bootstrap.build_services(cfg, lay), settings)
     out.write(f"Whisipedia API on http://{host}:{args.port}/ (static: {settings.static_dir})\n")
     uvicorn.run(app, host=host, port=args.port, server_header=False, proxy_headers=False, log_level="info")
@@ -216,6 +226,49 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--registry", type=Path, default=None)
     s.add_argument("--schema", type=Path, default=None)
 
+    s = add("ingest", ops.cmd_ingest, "Adopt completed bulk downloads from <vault>/_incoming into the vault.")
+    s.add_argument("--source", default=None, help="only this source id")
+    s.add_argument("--dry-run", action="store_true", help="report what would happen; change nothing")
+    s.add_argument("--offline", action="store_true", help="do not fetch Kiwix .sha256 files")
+    s.add_argument(
+        "--allow-mirror", action="store_true", help="with --source gutenberg: ingest the rsync tree"
+    )
+    s.add_argument("--settle-seconds", type=float, default=120.0, help="ignore files modified more recently")
+    s.add_argument("--json", action="store_true")
+
+    ix = add("index", _usage, "Search index tools.")
+    ix_sub = ix.add_subparsers(dest="index_command", required=True, metavar="COMMAND")
+    s = add(
+        "build",
+        ops.cmd_index_build,
+        "Refine sealed generations to Parquet and index them (local disk).",
+        ix_sub,
+    )
+    s.add_argument("--source", default=None, help="only this source id")
+
+    s = add(
+        "scrub", ops.cmd_scrub, "Re-hash sealed files that are due and run the repair ladder on findings."
+    )
+    s.add_argument("--budget-gb", type=float, default=None, help="stop after hashing this many GB")
+
+    s = add("drill", ops.cmd_drill, "Break a sandboxed copy of a sealed generation; expect detect + repair.")
+    s.add_argument("--kind", choices=[k.value for k in DrillKind], default=None)
+    s.add_argument("--source", default=None, help="drill this source (default: smallest generation)")
+
+    for name, help_ in (
+        ("approve", "Promote a release held by the sanity check."),
+        ("reject", "Reject a held release (it is quarantined)."),
+        ("resume", "Resume an auto-paused source."),
+    ):
+        s = add(name, ops.cmd_owner, help_)
+        s.set_defaults(owner_action=name)
+        s.add_argument("source")
+        if name != "resume":
+            s.add_argument("version", nargs="?", default=None, help="default: the release held for review")
+            s.add_argument("--note", default=None, help="reason recorded in the ledger")
+
+    add("status", ops.cmd_status, "Sources, generations, degraded data and the orchestrator queue.")
+
     cfg = add("config", _usage, "Configuration tools.")
     cfg_sub = cfg.add_subparsers(dest="config_command", required=True, metavar="COMMAND")
     add("show", cmd_config_show, "Print the merged configuration with secrets redacted.", cfg_sub)
@@ -237,6 +290,9 @@ def main(argv: Sequence[str] | None = None, *, out: TextIO | None = None) -> int
     except httpx.TransportError as exc:
         print(f"error: cannot reach the API ({type(exc).__name__}); is `wsp serve` running?", file=sys.stderr)
         return 1
+    except bootstrap.ConfigError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":
