@@ -1,0 +1,26 @@
+[project]
+name = "wsp-orchestrator"
+version = "0.1.0"
+description = "Whisipedia orchestrator: release pipeline, job queue, scheduler, policy and retention"
+requires-python = ">=3.12"
+dependencies = [
+  "wsp-core",
+]
+
+[project.scripts]
+wsp-orchestrator = "wsp_orchestrator.daemon:main"
+
+[dependency-groups]
+dev = [
+  "hypothesis>=6.100",
+]
+
+[tool.uv.sources]
+wsp-core = { workspace = true }
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/wsp_orchestrator"]
