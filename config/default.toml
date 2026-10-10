@@ -12,3 +12,18 @@ health_probe_interval = "P1W"
 
 [index]
 root = "/path/to/local/index"    # local disk, never SMB (ADR-0002)
+
+[orchestrator]
+# All orchestrator state is on LOCAL disk, never the NAS (ADR-0002). Override in local.toml.
+state_db = "/path/to/local/state/orchestrator.sqlite3"
+workdir = "/path/to/local/work"
+metrics_path = "/path/to/local/metrics/orchestrator.prom"
+wiring = ""                     # "package.module:factory" returning wsp_orchestrator.Wiring
+anchor_day = 15                 # calendar cycle runs on this day (after the 1st-of-month dumps)
+scrub_slices = 720              # slices per vault.scrub_cycle_days (hourly at 30 days)
+drill_interval = "P1M"
+max_workers = 4
+max_jobs_per_host = 1
+
+[orchestrator.retention_windows]  # upstream retention per adapter; alert at half (PLAN §6.5)
+wikimedia-dumps = "P60D"

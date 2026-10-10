@@ -1,0 +1,80 @@
+# Whisipedia container profile - SKETCH (PLAN §6.5, §10.5, decision D6).
+#
+# Offline guarantee: only the acquisition side (orchestrator: Curator + Acquirer) gets a network.
+# Everything that serves or reads the library runs with `network_mode: none`.
+#
+# Paths are placeholders; set them in a git-ignored `.env` next to this file:
+#   WSP_LIBRARY=/path/to/nas/library        # NAS mount (write-once vault)
+#   WSP_LOCAL=/path/to/local/disk/whisipedia  # local disk: state DB, workdir, indexes, metrics
+#
+# The orchestrator's SQLite state lives on ${WSP_LOCAL} (local disk), never on the NAS (ADR-0002).
+
+name: whisipedia
+
+x-common: &common
+  restart: unless-stopped
+  user: "${WSP_UID:-1000}:${WSP_GID:-1000}"
+  read_only: true
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: [ALL]
+  tmpfs: [/tmp]
+  environment:
+    PYTHONUNBUFFERED: "1"
+
+services:
+  orchestrator:
+    <<: *common
+    image: whisipedia/app:local
+    build: {context: .., dockerfile: deploy/Dockerfile}   # TODO(lead): add Dockerfile
+    command: ["wsp-orchestrator", "--config-dir", "/app/config"]
+    stop_signal: SIGTERM
+    stop_grace_period: 2m
+    # Network: needed for discovery, health probes and downloads only.
+    networks: [egress]
+    volumes:
+      - ../config:/app/config:ro
+      - ${WSP_LIBRARY:?set WSP_LIBRARY}:/library            # vault root (write-once)
+      - ${WSP_LOCAL:?set WSP_LOCAL}/state:/local/state      # orchestrator.sqlite3 (WAL)
+      - ${WSP_LOCAL}/work:/local/work                       # partial downloads
+      - ${WSP_LOCAL}/metrics:/local/metrics                 # Prometheus textfile output
+    environment:
+      PYTHONUNBUFFERED: "1"
+      WSP__VAULT__ROOT: /library
+      WSP__ORCHESTRATOR__STATE_DB: /local/state/orchestrator.sqlite3
+      WSP__ORCHESTRATOR__WORKDIR: /local/work
+      WSP__ORCHESTRATOR__METRICS_PATH: /local/metrics/orchestrator.prom
+
+  # Refinery/index builder: reads sealed generations, writes local indexes. No network.
+  # TODO(lead): today refine/index run in-process as orchestrator hooks; split them into this
+  # worker (fed by a local queue) so that no network-enabled process parses upstream content.
+  indexer:
+    <<: *common
+    image: whisipedia/app:local
+    command: ["wsp", "index", "worker"]
+    network_mode: none
+    volumes:
+      - ${WSP_LIBRARY}:/library:ro
+      - ${WSP_LOCAL}/indexes:/local/indexes
+
+  api:
+    <<: *common
+    image: whisipedia/app:local
+    command: ["wsp", "api", "serve", "--socket", "/run/wsp/api.sock"]
+    network_mode: none          # served over a unix socket shared with the navigator
+    volumes:
+      - ${WSP_LIBRARY}:/library:ro
+      - ${WSP_LOCAL}/indexes:/local/indexes:ro
+      - wsp-run:/run/wsp
+
+  navigator:
+    <<: *common
+    image: whisipedia/navigator:local
+    network_mode: none
+    volumes:
+      - wsp-run:/run/wsp
+
+networks:
+  egress: {}
+
+volumes:
+  wsp-run: {}
