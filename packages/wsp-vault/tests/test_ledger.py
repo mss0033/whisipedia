@@ -152,3 +152,16 @@ def test_non_json_data_is_rejected(tmp_path: Path) -> None:
     with pytest.raises(TypeError):
         ledger.append("a", "s", {"x": object()})
     assert list(ledger.events()) == []
+
+
+def test_fast_verify_checks_only_recent_days_from_a_signed_anchor(days: JsonlLedger, clock: Clock) -> None:
+    clock.advance(days=1)
+    days.append("a", "s", {"n": 4})
+    assert days.verify(recent_days=1)
+    first = days.day_files()[0][1]
+    first.write_text(first.read_text().replace('"n":1', '"n":7'))
+    assert not days.verify(), "the full replay still sees old damage"
+    assert days.verify(recent_days=1), "fast mode trusts the signed checkpoint before its window"
+    second = days.day_files()[1][1]
+    second.write_text("\n".join(_bad_sig(second.read_text().splitlines())) + "\n")
+    assert "checkpoint" in (JsonlLedger(days.directory, SIGNER).verify_detail(recent_days=1) or "")

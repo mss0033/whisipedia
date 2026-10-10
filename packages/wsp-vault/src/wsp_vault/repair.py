@@ -28,6 +28,7 @@ from wsp_core.ports import Ledger, ParityProvider
 from wsp_vault.atomic import IntegrityError, atomic_copy, fsync_dir, readback
 from wsp_vault.hashing import hash_file
 from wsp_vault.manifest import MANIFEST_NAME, PARITY_DIR, SIGNATURE_NAME, Manifest, ManifestEntry
+from wsp_vault.paritymeta import is_parity_path, read_sidecar, sidecar_paths
 from wsp_vault.scrub import ScrubFinding
 from wsp_vault.vault import FileVault, SignatureError, VaultError, make_read_only
 
@@ -117,7 +118,9 @@ class RepairLadder:
             relpaths = None
 
         lib = self._vault.library_path(source_id, generation_id)
-        unexpected = {p for p in relpaths or () if manifest.entry(p) is None}
+        derived = sidecar_paths(self._vault, source_id, generation_id)  # parity: rebuilt, not repaired
+        relpaths = None if relpaths is None else [p for p in relpaths if p not in derived]
+        unexpected = {p for p in relpaths or () if manifest.entry(p) is None and not is_parity_path(p)}
         for rel in sorted(unexpected):
             if (lib / rel).exists():
                 self._vault.quarantine(lib / rel)
@@ -156,11 +159,28 @@ class RepairLadder:
         self, source_id: str, generation_id: str, manifest: Manifest, bad: list[ManifestEntry]
     ) -> set[str] | None:
         lib = self._vault.library_path(source_id, generation_id)
-        if self._parity is None or not manifest.parity or not (lib / PARITY_DIR).is_dir():
+        if self._parity is None or not (lib / PARITY_DIR).is_dir():
+            return None
+        try:
+            sidecar = read_sidecar(self._vault, source_id, generation_id)
+        except SignatureError:
+            sidecar = None
+        runs: list[tuple[list[Path], Path]] = []
+        if manifest.parity:  # parity created while sealing, listed in the manifest itself
+            runs.append(([lib / e.path for e in manifest.data], lib / PARITY_DIR))
+        if sidecar is not None:  # parity added after sealing: one recovery set per group of files
+            wanted = {e.path for e in bad}
+            runs += [
+                ([lib / f for f in s.files], lib / PARITY_DIR / s.name)
+                for s in sidecar.sets
+                if wanted & set(s.files)
+            ]
+        if not runs:
             return None
         known = {lib / e.path for e in manifest.entries} | {lib / MANIFEST_NAME, lib / SIGNATURE_NAME}
         before = {p for p in lib.rglob("*") if p.is_file()}
-        self._parity.repair([lib / e.path for e in manifest.data], lib / PARITY_DIR)
+        for files, parity_dir in runs:
+            self._parity.repair(files, parity_dir)
         for leftover in sorted({p for p in lib.rglob("*") if p.is_file()} - before - known):
             self._vault.quarantine(leftover)
         fixed: set[str] = set()

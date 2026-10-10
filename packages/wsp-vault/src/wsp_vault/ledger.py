@@ -270,14 +270,25 @@ class JsonlLedger:
                 break
         return list(out)[-n:]
 
-    def verify(self) -> bool:
-        return self.verify_detail() is None
+    def verify(self, *, recent_days: int | None = None) -> bool:
+        return self.verify_detail(recent_days=recent_days) is None
 
-    def verify_detail(self) -> str | None:
-        """``None`` if the chain is intact, else a description of the first problem found."""
+    def verify_detail(self, *, recent_days: int | None = None) -> str | None:
+        """``None`` if the chain is intact, else a description of the first problem found.
+
+        ``recent_days`` (fast mode) checks only the newest day files, anchored on the signed
+        checkpoint that closes the day before them; the full replay remains the default.
+        """
         seq, prev = 0, GENESIS_HASH
         files = self.day_files()
-        for index, (day, path) in enumerate(files):
+        start = 0
+        if recent_days is not None and len(files) > recent_days:
+            start = len(files) - max(recent_days, 1)
+            anchor = self._anchor(files[start - 1])
+            if isinstance(anchor, str):
+                return anchor
+            seq, prev = anchor
+        for index, (day, path) in enumerate(files[start:], start=start):
             data = path.read_bytes()
             if not data.endswith(b"\n"):
                 return f"{path.name}: torn or empty file"
@@ -310,6 +321,20 @@ class JsonlLedger:
             if index < len(files) - 1 and not closed:
                 return f"{path.name}: missing checkpoint"
         return None
+
+    def _anchor(self, day_file: tuple[date, Path]) -> tuple[int, str] | str:
+        """``(last_seq, last_hash)`` from the signed checkpoint closing ``day_file``, or a problem."""
+        day, path = day_file
+        lines = path.read_bytes().rstrip(b"\n").split(b"\n")
+        try:
+            obj = cast(dict[str, Any], json.loads(lines[-1]))
+            cp = cast(dict[str, Any], obj["checkpoint"])
+            seq, last = int(cp["last_seq"]), str(cp["last_hash"])
+            count = int(cp["events"])
+        except (ValueError, KeyError, TypeError):
+            return f"{path.name}: missing checkpoint"
+        problem = self._check_checkpoint(obj, day, count, seq, last)
+        return f"{path.name}: {problem}" if problem else (seq, last)
 
     def _check_checkpoint(self, obj: Mapping[str, Any], day: date, count: int, seq: int, prev: str) -> str:
         expected = {"date": day.isoformat(), "events": count, "last_hash": prev, "last_seq": seq}
