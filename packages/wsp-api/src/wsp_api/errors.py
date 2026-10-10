@@ -12,6 +12,7 @@ from wsp_api.schemas import ErrorBody, ErrorResponse
 
 _STATUS_CODES = {
     400: "bad_request",
+    403: "forbidden",
     404: "not_found",
     405: "method_not_allowed",
     406: "not_acceptable",

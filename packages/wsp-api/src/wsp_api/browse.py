@@ -1,0 +1,241 @@
+"""Navigator resources: start page, directory, random page, document assets and gap reports (PLAN §10.2)."""
+
+from __future__ import annotations
+
+import ipaddress
+import random
+import secrets
+from typing import Annotated
+
+from fastapi import APIRouter, Query, Request, Response
+
+from wsp_api import sites
+from wsp_api.addresses import address_of
+from wsp_api.errors import ApiError, errors
+from wsp_api.schemas import (
+    DirectoryCategory,
+    DirectoryCrumb,
+    DirectoryEntry,
+    DirectoryPage,
+    DocKind,
+    DocRef,
+    FeaturedDoc,
+    GapReport,
+    Portal,
+)
+from wsp_api.seams import Gap
+from wsp_api.views import Library
+from wsp_core.ids import DocId
+from wsp_core.model import SourceSpec
+
+# Only images are served from containers: never HTML or scripts at our origin.
+SERVED_MIMETYPES = frozenset(
+    {
+        "image/png",
+        "image/jpeg",
+        "image/gif",
+        "image/webp",
+        "image/avif",
+        "image/bmp",
+        "image/svg+xml",
+        "image/x-icon",
+        "image/vnd.microsoft.icon",
+    }
+)
+_BLURB = 280
+
+
+def _blurb(text: str) -> str:
+    flat = " ".join(text.split())
+    if len(flat) <= _BLURB:
+        return flat
+    cut = flat[:_BLURB].rsplit(" ", 1)[0]
+    return cut + "…"
+
+
+def _is_loopback(request: Request) -> bool:
+    host = request.client.host if request.client else ""
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return host == "localhost"
+
+
+def browse_router(lib: Library) -> APIRouter:
+    r = APIRouter(prefix="/v1")
+    s = lib.s
+
+    def doc_ref(did: DocId | None) -> DocRef | None:
+        doc = None if did is None else s.documents.get(did)
+        if doc is None:
+            return None
+        return DocRef(
+            doc_id=doc.doc_id,
+            source_id=doc.source_id,
+            title=doc.title,
+            address=address_of(doc.source_id, doc.native_id),
+        )
+
+    # --- Portal ---------------------------------------------------------------------------------
+
+    @r.get("/portal", tags=["navigator"])
+    def portal() -> Portal:
+        today = s.clock().date()
+        encyclopedic = [x.id for x in s.sources if sites.kind_of(x) is DocKind.ENCYCLOPEDIA]
+        pick = lib.catalog.random_doc(
+            sources=encyclopedic or None,
+            rng=random.Random(today.toordinal()),  # noqa: S311 - not security
+        )
+        featured_doc = None if pick is None else s.documents.get(pick)
+        featured = (
+            None
+            if featured_doc is None
+            else FeaturedDoc(
+                doc_id=featured_doc.doc_id,
+                title=featured_doc.title,
+                address=address_of(featured_doc.source_id, featured_doc.native_id),
+                blurb=_blurb(featured_doc.text),
+            )
+        )
+        newest, _ = lib.catalog.recent(limit=8)
+        rng = random.Random(secrets.randbits(64))  # noqa: S311 - picking a page to read, not a secret
+        infos = lib.source_infos()
+        return Portal(
+            date=today,
+            featured=featured,
+            # TODO: "On this day" and "Did you know" from Wikipedia's selected anniversaries / DYK pages.
+            on_this_day=[],
+            did_you_know=[],
+            newest=[lib.change(c) for c in newest],
+            random=doc_ref(lib.catalog.random_doc(sources=None, rng=rng)),
+            random_sources=[i.id for i in infos if i.doc_count],
+            sites=infos,
+        )
+
+    # --- Directory ------------------------------------------------------------------------------
+
+    @r.get("/directory", tags=["navigator"], responses=errors(404))
+    def directory(
+        path: Annotated[
+            str, Query(max_length=500, description="`''` (Top), `<domain>`, `<domain>/<source>`, …")
+        ] = "",
+    ) -> DirectoryPage:
+        parts = [p for p in path.strip("/").split("/") if p]
+        specs = sorted(s.sources, key=lambda x: x.name.casefold())
+        domains = sorted({d for x in specs for d in x.domain})
+
+        def not_found() -> ApiError:
+            return ApiError(404, "category_not_found", f"no such category: {path}")
+
+        if not parts:
+            children = [
+                DirectoryCategory(path=d, name=sites.domain_name(d), count=sum(d in x.domain for x in specs))
+                for d in domains
+            ]
+            children.sort(key=lambda c: c.name)
+            return DirectoryPage(path="", name="Top", trail=[], children=children, entries=[])
+
+        domain = parts[0]
+        if domain not in domains:
+            raise not_found()
+        trail = [DirectoryCrumb(path=domain, name=sites.domain_name(domain))]
+        members = [x for x in specs if domain in x.domain]
+        if len(parts) == 1:
+            children = [
+                DirectoryCategory(
+                    path=f"{domain}/{x.id}",
+                    name=x.name,
+                    count=lib.catalog.doc_count(x.id) or 0,
+                    crosslink=x.domain[0] != domain,
+                )
+                for x in members
+            ]
+            return DirectoryPage(path=domain, name=trail[0].name, trail=trail, children=children, entries=[])
+
+        spec: SourceSpec | None = next((x for x in members if x.id == parts[1]), None)
+        if spec is None or len(parts) > 3:
+            raise not_found()
+        here = f"{domain}/{spec.id}"
+        trail.append(DirectoryCrumb(path=here, name=spec.name))
+        cats = lib.catalog.categories(spec.id)
+        if len(parts) == 2:
+            site = DirectoryEntry(
+                title=spec.name,
+                address=address_of(spec.id),
+                source_id=spec.id,
+                doc_id=sites.raw_str(spec, "home_doc_id"),
+                description=sites.raw_str(spec, "description"),
+            )
+            children = [DirectoryCategory(path=f"{here}/{c.slug}", name=c.name, count=c.count) for c in cats]
+            return DirectoryPage(path=here, name=spec.name, trail=trail, children=children, entries=[site])
+
+        cat = next((c for c in cats if c.slug == parts[2]), None)
+        if cat is None:
+            raise not_found()
+        trail.append(DirectoryCrumb(path=f"{here}/{cat.slug}", name=cat.name))
+        entries: list[DirectoryEntry] = []
+        for did in lib.catalog.category_docs(spec.id, cat.slug, limit=200):
+            ref = doc_ref(did)
+            if ref is not None:
+                entries.append(
+                    DirectoryEntry(
+                        title=ref.title, address=ref.address, source_id=ref.source_id, doc_id=ref.doc_id
+                    )
+                )
+        return DirectoryPage(
+            path=f"{here}/{cat.slug}", name=cat.name, trail=trail, children=[], entries=entries
+        )
+
+    # --- Random ---------------------------------------------------------------------------------
+
+    @r.get("/random", tags=["navigator"], responses=errors(404))
+    def random_page(
+        source: Annotated[str | None, Query(description="Pick from this source only.")] = None,
+        seed: Annotated[int | None, Query(description="Make the pick reproducible.")] = None,
+    ) -> DocRef:
+        if source is not None:
+            lib.source(source)
+        rng = random.Random(secrets.randbits(64) if seed is None else seed)  # noqa: S311 - not security
+        ref = doc_ref(lib.catalog.random_doc(sources=[source] if source else None, rng=rng))
+        if ref is None:
+            raise ApiError(404, "empty", "no pages to pick from")
+        return ref
+
+    # --- Assets ---------------------------------------------------------------------------------
+
+    @r.get(
+        "/assets/{source_id}/{generation_id}/{path:path}",
+        tags=["navigator"],
+        response_class=Response,
+        responses={
+            200: {
+                "description": "The image, with a long-lived cache header (generations are immutable).",
+                "content": {"image/*": {"schema": {"type": "string", "format": "binary"}}},
+            }
+        }
+        | errors(404),
+    )
+    def asset(source_id: str, generation_id: str, path: str) -> Response:
+        lib.source(source_id)
+        found = lib.assets.asset(source_id, generation_id, path)
+        if found is None or found.mimetype.split(";")[0].strip() not in SERVED_MIMETYPES:
+            raise ApiError(404, "asset_not_found", f"no image at {source_id}/{generation_id}/{path}")
+        return Response(
+            content=found.content,
+            media_type=found.mimetype,
+            headers={"Cache-Control": "public, max-age=31536000, immutable"},
+        )
+
+    # --- Gaps -----------------------------------------------------------------------------------
+
+    @r.post("/gaps", tags=["navigator"], status_code=204, responses=errors(403, 422, 501))
+    def report_gap(body: GapReport, request: Request) -> Response:
+        """Record a "not in library" link for the gap miner. Accepted from loopback clients only."""
+        if not _is_loopback(request):
+            raise ApiError(403, "local_only", "gap reports are accepted from this computer only")
+        if s.gaps is None:
+            raise ApiError(501, "not_configured", "no gap log is configured")
+        s.gaps.record(Gap(at=s.clock(), href=body.href, from_doc_id=body.from_doc_id))
+        return Response(status_code=204)
+
+    return r

@@ -25,6 +25,9 @@ from wsp_sdk.errors import raise_for_error
 from wsp_sdk.models import (
     Change,
     ChangePage,
+    DirectoryPage,
+    DocKind,
+    DocRef,
     Document,
     DocumentVersion,
     GenerationInfo,
@@ -32,13 +35,16 @@ from wsp_sdk.models import (
     Health,
     HistoryPage,
     Hit,
+    Portal,
+    RecentChanges,
     Resolution,
     SearchResults,
     SourceInfo,
     SourcePage,
     StreamedChange,
     Suggestions,
-    SummaryChunk,
+    SummaryEvent,
+    SummaryItem,
     SystemStatus,
 )
 
@@ -48,6 +54,10 @@ DEFAULT_BASE_URL = w.DEFAULT_BASE_URL
 def _parse[M: BaseModel](model: type[M], response: httpx.Response) -> M:
     raise_for_error(response)
     return model.model_validate_json(response.content)
+
+
+def _summary_from(ev: w.SSEEvent) -> SummaryItem:
+    return SummaryEvent.model_validate_json(ev.data).root
 
 
 def _change_from(ev: w.SSEEvent) -> StreamedChange | None:
@@ -129,9 +139,15 @@ class WspClient:
     # --- search ---
 
     def search(
-        self, q: str, *, sources: Sequence[str] | None = None, limit: int = 10, offset: int = 0
+        self,
+        q: str,
+        *,
+        sources: Sequence[str] | None = None,
+        kind: DocKind | None = None,
+        limit: int = 10,
+        offset: int = 0,
     ) -> SearchResults:
-        return _parse(SearchResults, self._send(w.search(q, sources, limit, offset)))
+        return _parse(SearchResults, self._send(w.search(q, sources, limit, offset, kind)))
 
     def iter_search(
         self, q: str, *, sources: Sequence[str] | None = None, page_size: int = 10, max_results: int = 100
@@ -183,15 +199,34 @@ class WspClient:
 
     def summarize(
         self, query: str, doc_ids: Sequence[str], *, max_tokens: int = 512
-    ) -> Iterator[SummaryChunk]:
-        """Stream a cited summary. Raises ``NotConfiguredError`` if the server has no local LLM."""
+    ) -> Iterator[SummaryItem]:
+        """Stream a cited summary (SSE). Raises ``NotConfiguredError`` if the server has no local LLM."""
         req = w.summarize(query, doc_ids, max_tokens)
         with self._http.stream(req.method, req.path, json=req.json) as r:
             if r.status_code >= 400:
                 raise_for_error(r, r.read())
+            parser = w.SSEParser()
             for line in r.iter_lines():
-                if line.strip():
-                    yield SummaryChunk.model_validate_json(line)
+                if (ev := parser.feed(line)) is not None:
+                    yield _summary_from(ev)
+
+    # --- Navigator resources ---
+
+    def recent_changes(self, *, limit: int = 50, source: str | None = None) -> RecentChanges:
+        return _parse(RecentChanges, self._send(w.recent_changes(limit, source)))
+
+    def portal(self) -> Portal:
+        return _parse(Portal, self._send(w.portal()))
+
+    def directory(self, path: str = "") -> DirectoryPage:
+        return _parse(DirectoryPage, self._send(w.directory(path)))
+
+    def random(self, *, source: str | None = None, seed: int | None = None) -> DocRef:
+        return _parse(DocRef, self._send(w.random(source, seed)))
+
+    def report_gap(self, href: str, *, from_doc_id: str | None = None) -> None:
+        """Tell the gap miner a link is not in the library (loopback clients only)."""
+        raise_for_error(self._send(w.report_gap(href, from_doc_id)))
 
     def resolve(self, address: str) -> Resolution:
         return _parse(Resolution, self._send(w.resolve(address)))
@@ -273,9 +308,15 @@ class AsyncWspClient:
                 return
 
     async def search(
-        self, q: str, *, sources: Sequence[str] | None = None, limit: int = 10, offset: int = 0
+        self,
+        q: str,
+        *,
+        sources: Sequence[str] | None = None,
+        kind: DocKind | None = None,
+        limit: int = 10,
+        offset: int = 0,
     ) -> SearchResults:
-        return _parse(SearchResults, await self._send(w.search(q, sources, limit, offset)))
+        return _parse(SearchResults, await self._send(w.search(q, sources, limit, offset, kind)))
 
     async def iter_search(
         self, q: str, *, sources: Sequence[str] | None = None, page_size: int = 10, max_results: int = 100
@@ -326,14 +367,30 @@ class AsyncWspClient:
 
     async def summarize(
         self, query: str, doc_ids: Sequence[str], *, max_tokens: int = 512
-    ) -> AsyncIterator[SummaryChunk]:
+    ) -> AsyncIterator[SummaryItem]:
         req = w.summarize(query, doc_ids, max_tokens)
         async with self._http.stream(req.method, req.path, json=req.json) as r:
             if r.status_code >= 400:
                 raise_for_error(r, await r.aread())
+            parser = w.SSEParser()
             async for line in r.aiter_lines():
-                if line.strip():
-                    yield SummaryChunk.model_validate_json(line)
+                if (ev := parser.feed(line)) is not None:
+                    yield _summary_from(ev)
+
+    async def recent_changes(self, *, limit: int = 50, source: str | None = None) -> RecentChanges:
+        return _parse(RecentChanges, await self._send(w.recent_changes(limit, source)))
+
+    async def portal(self) -> Portal:
+        return _parse(Portal, await self._send(w.portal()))
+
+    async def directory(self, path: str = "") -> DirectoryPage:
+        return _parse(DirectoryPage, await self._send(w.directory(path)))
+
+    async def random(self, *, source: str | None = None, seed: int | None = None) -> DocRef:
+        return _parse(DocRef, await self._send(w.random(source, seed)))
+
+    async def report_gap(self, href: str, *, from_doc_id: str | None = None) -> None:
+        raise_for_error(await self._send(w.report_gap(href, from_doc_id)))
 
     async def resolve(self, address: str) -> Resolution:
         return _parse(Resolution, await self._send(w.resolve(address)))

@@ -16,8 +16,9 @@ CSP = "default-src 'self'"
     [
         ("/v1/sources/nope", 404, "source_not_found"),
         ("/v1/sources/nope/generations", 404, "source_not_found"),
-        ("/v1/documents/wsp:rfc/0", 404, "document_not_found"),
-        ("/v1/documents/wsp:rfc/0/history", 404, "document_not_found"),
+        ("/v1/documents/wsp%3Arfc%2F0", 404, "document_not_found"),
+        ("/v1/documents/wsp%3Arfc%2F0/history", 404, "document_not_found"),
+        ("/v1/documents/wsp:rfc/9110", 404, "doc_id_not_encoded"),
         ("/v1/documents/rfc-9110", 400, "invalid_doc_id"),
         ("/v1/sources?cursor=garbage", 400, "invalid_cursor"),
         ("/v1/sources?cursor=eyJvIjogLTF9", 400, "invalid_cursor"),

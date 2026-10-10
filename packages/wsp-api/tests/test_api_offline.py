@@ -11,8 +11,9 @@ from typing import Any
 import pytest
 
 from wsp_api import create_app
+from wsp_api.addresses import document_href
 from wsp_api.testing import local_client
-from wsp_api.testing.fakes import sample_services
+from wsp_api.testing.browse import browse_services
 
 
 def _is_loopback(address: object) -> bool:
@@ -71,7 +72,7 @@ def test_guard_catches_outbound(outbound: list[object]) -> None:
 
 
 def test_full_api_surface_makes_no_outbound_connections(outbound: list[object]) -> None:
-    app = create_app(sample_services())
+    app = create_app(browse_services())
     turing = "wsp:wikipedia-en-zim/A/Alan_Turing"
     with local_client(app) as c:
         for path in [
@@ -81,8 +82,14 @@ def test_full_api_surface_makes_no_outbound_connections(outbound: list[object]) 
             "/v1/sources",
             "/v1/sources/rfc",
             "/v1/sources/rfc/generations",
-            f"/v1/documents/{turing}",
-            f"/v1/documents/{turing}/history",
+            document_href(turing),
+            document_href(turing) + "/history",
+            document_href("wsp:wikipedia-en-zim/A/Enigma_machine"),
+            "/v1/assets/wikipedia-en-zim/2026-10-01/I/enigma.png",
+            "/v1/portal",
+            "/v1/directory",
+            "/v1/random",
+            "/v1/changes/recent",
             "/v1/search?q=computer",
             "/v1/suggest?q=al",
             "/v1/changes",
@@ -94,4 +101,5 @@ def test_full_api_surface_makes_no_outbound_connections(outbound: list[object]) 
         ]:
             assert c.get(path).status_code < 500, path
         assert c.post("/v1/summarize", json={"query": "q", "doc_ids": [turing]}).status_code == 200
+        assert c.post("/v1/gaps", json={"href": "https://example.org/"}).status_code == 204
     assert outbound == []

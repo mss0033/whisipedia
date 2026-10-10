@@ -14,22 +14,33 @@ from wsp_core.ids import DocId, InvalidDocIdError, make_doc_id
 SCHEME = "wsp://"
 
 # Pages that are not sources. Source ids must not use these names.
-_PageKind = Literal["home", "directory", "system", "whatsnew"]
+_PageKind = Literal["home", "directory", "system", "whatsnew", "random", "client"]
 _PAGES: dict[str, tuple[_PageKind, str | None]] = {
-    "home": ("home", "/v1/sources"),
-    "directory": ("directory", None),
+    "home": ("home", "/v1/portal"),
+    "directory": ("directory", "/v1/directory"),
     "system": ("system", "/v1/system"),
-    "whatsnew": ("whatsnew", "/v1/changes"),
+    "whatsnew": ("whatsnew", "/v1/changes/recent"),
+    "random": ("random", "/v1/random"),
+    # Drawn entirely by the Navigator; reserved so no source can take the name.
+    **{name: ("client", None) for name in ("history", "hotlist", "about", "help", "offline")},
 }
 RESERVED = frozenset({*_PAGES, "search"})
+
+# encodeURIComponent's unreserved set, so Python and the Navigator build identical URLs.
+_SEGMENT_SAFE = "!'()*"
 
 
 def address_of(source_id: str, native_id: str | None = None) -> str:
     return f"{SCHEME}{source_id}" if native_id is None else f"{SCHEME}{source_id}/{native_id}"
 
 
+def encode_segment(value: str) -> str:
+    """Percent-encode as one path segment (``/`` → ``%2F``), like JavaScript's ``encodeURIComponent``."""
+    return quote(value, safe=_SEGMENT_SAFE)
+
+
 def document_href(doc_id: str) -> str:
-    return "/v1/documents/" + quote(doc_id, safe="/:")
+    return "/v1/documents/" + encode_segment(doc_id)
 
 
 def _strip(address: str) -> str:
@@ -52,8 +63,17 @@ def resolve(services: Services, address: str, query: Mapping[str, str]) -> Resol
         href = "/v1/search?" + urlencode({"q": q}) if q else None
         canonical = f"{SCHEME}search" + (f"?{urlencode({'q': q})}" if q else "")
         return Resolution(address=canonical, kind="search", href=href)
-    if head in _PAGES and not rest:
+    if head in _PAGES:
         kind, href = _PAGES[head]
+        if head == "directory" and rest:
+            return Resolution(
+                address=f"{SCHEME}directory/{rest}",
+                kind=kind,
+                href="/v1/directory?" + urlencode({"path": rest}),
+            )
+        if head == "random" and query.get("source"):
+            params = urlencode({"source": query["source"]})
+            return Resolution(address=f"{SCHEME}random?{params}", kind=kind, href=f"/v1/random?{params}")
         return Resolution(address=f"{SCHEME}{head}", kind=kind, href=href)
     if services.source(head) is None:
         raise ApiError(404, "address_not_found", f"no site at {SCHEME}{path}")
