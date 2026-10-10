@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from wsp_api.seams import AssetStore, Catalog, GapLog
 from wsp_core.model import SourceSpec
 from wsp_core.ports import ChangeFeed, DocumentStore, Generator, Ledger, LexicalIndex, Vault
 
@@ -27,6 +28,10 @@ class Services:
     sources: Sequence[SourceSpec]
     generator: Generator | None = None  # None: /v1/summarize answers 501
     clock: Callable[[], datetime] = _utcnow
+    # Seams not yet in wsp_core.ports (see wsp_api.seams). None picks the default noted on each.
+    catalog: Catalog | None = None  # None: wsp_api.catalog.FeedCatalog over the change feed
+    assets: AssetStore | None = None  # None: wsp_api.zim.ZimAssetStore over the vault
+    gaps: GapLog | None = None  # None: POST /v1/gaps answers 501
 
     def source(self, source_id: str) -> SourceSpec | None:
         return next((s for s in self.sources if s.id == source_id), None)

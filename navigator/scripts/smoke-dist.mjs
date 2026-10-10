@@ -91,9 +91,13 @@ try {
     '/v1/search?q=vaccines',
     '/v1/suggest?q=tur',
     `/v1/documents/${encodeURIComponent('wsp:rfc/9110')}`,
-    `/v1/documents/${encodeURIComponent('wsp:wikipedia-en/Alan_Turing')}/history`,
+    `/v1/documents/${encodeURIComponent('wsp:wikipedia-en-zim/Alan_Turing')}/history`,
     '/v1/changes',
+    '/v1/changes/recent',
     '/v1/system',
+    '/v1/portal',
+    '/v1/directory',
+    '/v1/random',
   ];
   for (const p of api) {
     const r = await fetch(base + p);

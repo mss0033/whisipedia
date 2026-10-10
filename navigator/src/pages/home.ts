@@ -3,7 +3,7 @@
  * day, What's New, random-page buttons and a link to every site.
  */
 import { ApiRequestError } from '../api/client.ts';
-import type { ChangeEntry, PortalResponse, SourceInfo } from '../api/types.ts';
+import type { Change, Portal, SourceInfo } from '../api/types.ts';
 import { attachSuggest } from '../chrome/suggest.ts';
 import { docIdToAddress, makeAddress, searchAddress } from '../core/address.ts';
 import { h } from '../core/dom.ts';
@@ -51,8 +51,8 @@ function sitesList(sources: SourceInfo[]): HTMLElement {
               'li',
               null,
               wspLink(makeAddress(s.id), s.name),
-              s.status !== 'ok'
-                ? h('span', { class: `lamp-inline lamp-${s.status}` }, ` (${s.status})`)
+              s.health !== 'ok'
+                ? h('span', { class: `lamp-inline lamp-${s.health}` }, ` (${s.health})`)
                 : null,
             ),
           ),
@@ -62,7 +62,7 @@ function sitesList(sources: SourceInfo[]): HTMLElement {
   );
 }
 
-function whatsNewList(changes: ChangeEntry[]): HTMLElement {
+function whatsNewList(changes: Change[]): HTMLElement {
   return h(
     'ul',
     { class: 'whatsnew-mini' },
@@ -72,11 +72,13 @@ function whatsNewList(changes: ChangeEntry[]): HTMLElement {
         h(
           'li',
           null,
-          c.op === 'tombstone' ? h('s', null, c.title) : docLink(c.doc_id, c.title),
+          c.kind === 'removed'
+            ? h('s', null, c.title ?? c.doc_id)
+            : docLink(c.doc_id, c.title ?? c.doc_id),
           ' ',
-          c.op === 'add'
+          c.kind === 'added'
             ? newBadge()
-            : h('span', { class: 'updated' }, c.op === 'modify' ? 'updated' : 'removed'),
+            : h('span', { class: 'updated' }, c.kind === 'removed' ? 'removed' : 'updated'),
         ),
       ),
   );
@@ -84,11 +86,13 @@ function whatsNewList(changes: ChangeEntry[]): HTMLElement {
 
 export async function render(ctx: PageContext): Promise<PageResult> {
   const { app } = ctx;
-  const [sources, portal, changes] = await Promise.all([
-    app.sources(),
-    optional<PortalResponse>(app.api.portal(ctx.signal)),
-    optional(app.api.changes(undefined, 8, ctx.signal)),
-  ]);
+  const portal = await optional<Portal>(app.api.portal(ctx.signal));
+  // Older daemons have no /v1/portal: build the page from the sources and the change feed.
+  const sources = portal?.sites ?? (await app.sources());
+  const newest =
+    portal?.newest ??
+    (await optional(app.api.recentChanges(8, undefined, ctx.signal)))?.items ??
+    [];
 
   const { form, input } = searchForm({
     big: false,
@@ -100,7 +104,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
     onPick: (s) => app.navigate(s.doc_id ? docIdToAddress(s.doc_id) : searchAddress(s.text)),
   });
 
-  const totalDocs = sources.reduce((n, s) => n + s.doc_count, 0);
+  const totalDocs = sources.reduce((n, s) => n + (s.doc_count ?? 0), 0);
   const visits = app.history.list().find((e) => e.address === 'wsp://home')?.visits ?? 0;
 
   const randomButtons = h(
@@ -109,7 +113,8 @@ export async function render(ctx: PageContext): Promise<PageResult> {
     wspLink(makeAddress('random'), h('span', { class: 'btn-like' }, 'Random page!')),
     ' ',
     ...sources
-      .filter((s) => ['wikipedia-en', 'gutenberg', 'rfc', 'stackexchange'].includes(s.id))
+      .filter((s) => (portal ? portal.random_sources.includes(s.id) : (s.doc_count ?? 0) > 0))
+      .slice(0, 4)
       .flatMap((s) => [
         wspLink(
           makeAddress('random', '', { source: s.id }),
@@ -218,9 +223,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
         { class: 'portal-right', 'aria-label': "What's New" },
         sectionBox(
           "What's New!",
-          changes?.changes.length
-            ? whatsNewList(changes.changes)
-            : h('p', null, 'No recent changes.'),
+          newest.length ? whatsNewList(newest) : h('p', null, 'No recent changes.'),
           h('p', { class: 'more' }, wspLink(makeAddress('whatsnew'), 'More new stuff…')),
         ),
         sectionBox(
@@ -233,7 +236,9 @@ export async function render(ctx: PageContext): Promise<PageResult> {
             h('b', null, String(sources.length)),
             ' sites.',
           ),
-          portal ? h('p', { class: 'fineprint' }, `Generation ${portal.generation_id}`) : null,
+          portal?.random
+            ? h('p', null, 'Try: ', docLink(portal.random.doc_id, portal.random.title))
+            : null,
         ),
       ),
     ),

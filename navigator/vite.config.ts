@@ -31,7 +31,7 @@ function cspMeta(): Plugin {
 }
 
 const useMock = process.env.WSP_MOCK !== '0';
-const apiTarget = process.env.WSP_API ?? 'http://127.0.0.1:8740';
+const apiTarget = process.env.WSP_API ?? 'http://127.0.0.1:8737'; // `wsp serve` default
 
 export default defineConfig({
   base: '/',

@@ -8,7 +8,7 @@ import type { DocumentResponse, SourceInfo } from '../api/types.ts';
 import { makeAddress, searchAddress } from '../core/address.ts';
 import { diffLines, diffStats } from '../core/diff.ts';
 import { h } from '../core/dom.ts';
-import { formatDate, isoDay } from '../core/format.ts';
+import { formatDate } from '../core/format.ts';
 import { sanitizeDocumentHtml } from '../core/links.ts';
 import type { Route } from '../core/router.ts';
 import { renderPlainText } from '../core/text.ts';
@@ -57,22 +57,27 @@ async function loadDoc(ctx: PageContext, id: string, at?: string): Promise<Docum
   return doc;
 }
 
+function asOfText(doc: DocumentResponse): string {
+  return doc.timestamp ? formatDate(doc.timestamp) : (doc.generation_id ?? 'an unknown date');
+}
+
 export function isPreformatted(doc: Pick<DocumentResponse, 'source_id' | 'kind'>): boolean {
   return doc.source_id === 'rfc' || doc.kind === 'data' || doc.kind === 'law';
 }
 
 export function renderBody(doc: DocumentResponse): { node: HTMLElement; broken: number } {
   const wrap = h('div', { class: 'doc-body', lang: doc.lang });
-  if (doc.format === 'html' && doc.html !== undefined) {
+  if (doc.format === 'html' && doc.html) {
     const { fragment, stats } = sanitizeDocumentHtml(doc.html, {
       sourceId: doc.source_id,
       nativeId: doc.native_id,
+      docId: doc.doc_id,
       links: doc.links,
     });
     wrap.appendChild(fragment);
     return { node: wrap, broken: stats.broken };
   }
-  wrap.appendChild(renderPlainText(doc.text ?? '', isPreformatted(doc)));
+  wrap.appendChild(renderPlainText(doc.text, isPreformatted(doc)));
   return { node: wrap, broken: wrap.querySelectorAll('.broken-link').length };
 }
 
@@ -160,30 +165,28 @@ function timeMachine(ctx: PageContext, doc: DocumentResponse, route: DocRoute): 
             h(
               'tbody',
               null,
-              ...hist.versions.map((v, i) => {
-                const day = isoDay(v.timestamp);
+              ...[...hist.items].reverse().map((v, i) => {
+                const at = v.generation_id;
+                const label = v.timestamp ? formatDate(v.timestamp) : at;
                 return h(
                   'tr',
-                  { class: v.revision === doc.revision ? 'tm-current' : '' },
+                  { class: v.content_hash === doc.content_hash ? 'tm-current' : '' },
                   h(
                     'td',
                     null,
                     i === 0
-                      ? wspLink(here, formatDate(v.timestamp))
-                      : wspLink(
-                          makeAddress(doc.source_id, doc.native_id, { at: day }),
-                          formatDate(v.timestamp),
-                        ),
+                      ? wspLink(here, label)
+                      : wspLink(makeAddress(doc.source_id, doc.native_id, { at }), label),
                   ),
-                  h('td', null, h('code', null, v.revision)),
-                  h('td', null, v.op),
+                  h('td', null, h('code', null, v.revision ?? at)),
+                  h('td', null, v.kind === 'added' ? 'added' : 'modified'),
                   h(
                     'td',
                     null,
                     i === 0
                       ? '(current)'
                       : wspLink(
-                          makeAddress(doc.source_id, doc.native_id, { at: day, diff: 1 }),
+                          makeAddress(doc.source_id, doc.native_id, { at, diff: 1 }),
                           'diff vs current',
                         ),
                   ),
@@ -213,7 +216,7 @@ function timeMachine(ctx: PageContext, doc: DocumentResponse, route: DocRoute): 
 }
 
 function renderDiff(oldDoc: DocumentResponse, cur: DocumentResponse): HTMLElement {
-  const ops = diffLines(oldDoc.text ?? '', cur.text ?? '');
+  const ops = diffLines(oldDoc.text, cur.text);
   if (!ops) return h('p', { class: 'notice' }, 'This page is too large to compare in the browser.');
   const st = diffStats(ops);
   return h(
@@ -222,7 +225,7 @@ function renderDiff(oldDoc: DocumentResponse, cur: DocumentResponse): HTMLElemen
     h(
       'p',
       { class: 'diff-stats' },
-      `${st.added} line(s) added, ${st.removed} line(s) removed between ${formatDate(oldDoc.timestamp)} and ${formatDate(cur.timestamp)}.`,
+      `${st.added} line(s) added, ${st.removed} line(s) removed between ${asOfText(oldDoc)} and ${asOfText(cur)}.`,
     ),
     h(
       'pre',
@@ -264,17 +267,19 @@ function footer(app: AppServices, doc: DocumentResponse, address: string): HTMLE
       null,
       'From ',
       wspLink(makeAddress(doc.source_id), doc.source_name),
-      ` · revision ${doc.revision} · `,
+      ` · revision ${doc.revision ?? doc.generation_id ?? 'unknown'} · `,
       asOf(doc.timestamp),
       ' · license ',
       licenseBadge(doc.license),
     ),
-    h(
-      'p',
-      { class: 'fineprint' },
-      'Original address (not fetched, offline): ',
-      h('code', null, doc.url_native),
-    ),
+    doc.url_native
+      ? h(
+          'p',
+          { class: 'fineprint' },
+          'Original address (not fetched, offline): ',
+          h('code', null, doc.url_native),
+        )
+      : null,
     h('p', { class: 'doc-actions' }, vsd, ' ', bookmark),
   );
 }
@@ -287,6 +292,8 @@ export async function render(ctx: PageContext): Promise<PageResult> {
   } catch (err) {
     if (err instanceof ApiRequestError && err.status === 404) {
       const words = route.nativeId.replace(/[_/]+/g, ' ');
+      // A link led here but the library lacks the page: tell the gap miner (PLAN §5.3).
+      void ctx.app.api.reportGap({ href: ctx.address, from_doc_id: ctx.app.lastDocId() });
       return {
         title: '404 Not Found',
         body: errorPage({
@@ -317,7 +324,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
       'p',
       { class: 'notice notice-tm', role: 'note' },
       h('b', null, 'Time Machine: '),
-      `you are viewing this page as of ${formatDate(doc.timestamp)} (revision ${doc.revision}). `,
+      `you are viewing this page as of ${asOfText(doc)} (generation ${doc.generation_id ?? route.at}). `,
       wspLink(here, 'View the current page'),
       route.diff
         ? null
@@ -359,7 +366,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
   );
   body.querySelector('h1')?.setAttribute('id', 'doc-title');
   return {
-    title: route.at ? `${doc.title} (as of ${formatDate(doc.timestamp)})` : doc.title,
+    title: route.at ? `${doc.title} (as of ${asOfText(doc)})` : doc.title,
     body,
     scrollTo: route.fragment ? `doc-${route.fragment}` : undefined,
   };

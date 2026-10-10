@@ -28,11 +28,11 @@ describe('resolveRoute', () => {
 
   it('routes source sites and documents', () => {
     expect(resolveRoute('wsp://rfc')).toEqual({ page: 'site', source: 'rfc' });
-    expect(resolveRoute('wsp://wikipedia-en/Alan_Turing?at=2026-01-01#Legacy')).toEqual({
+    expect(resolveRoute('wsp://wikipedia-en-zim/Alan_Turing?at=2026-01-01#Legacy')).toEqual({
       page: 'document',
-      source: 'wikipedia-en',
+      source: 'wikipedia-en-zim',
       nativeId: 'Alan_Turing',
-      docId: 'wsp:wikipedia-en/Alan_Turing',
+      docId: 'wsp:wikipedia-en-zim/Alan_Turing',
       at: '2026-01-01',
       diff: false,
       fragment: 'Legacy',

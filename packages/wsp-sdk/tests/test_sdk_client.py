@@ -7,8 +7,10 @@ import pytest
 
 from wsp_api import create_app
 from wsp_api.testing import local_async_client, local_client
+from wsp_api.testing.browse import InMemoryGapLog, browse_services
 from wsp_api.testing.fakes import SAMPLE_GEN_1, SAMPLE_GEN_2, sample_services
 from wsp_sdk import AsyncWspClient, NotConfiguredError, NotFoundError, WspApiError, WspClient
+from wsp_sdk.models import DocKind
 
 TURING = "wsp:wikipedia-en-zim/A/Alan_Turing"
 
@@ -70,12 +72,26 @@ def test_system_summarize_resolve(wsp: WspClient) -> None:
     status = wsp.system(ledger_tail=1)
     assert len(status.ledger_tail) == 1
     assert status.ledger_ok
-    chunks = list(wsp.summarize("who", [TURING]))
-    assert chunks[0].citations is not None
-    assert chunks[0].citations[0].doc_id == TURING
-    assert chunks[-1].type == "done"
-    assert wsp.resolve("wsp://rfc/9110").href == "/v1/documents/wsp:rfc/9110"
+    events = list(wsp.summarize("who", [TURING]))
+    cites = [e for e in events if e.type == "citation"]
+    assert [c.doc_id for c in cites] == [TURING]  # type: ignore[union-attr]
+    assert events[0].type == "token"
+    assert events[-1].type == "done"
+    assert wsp.resolve("wsp://rfc/9110").href == "/v1/documents/wsp%3Arfc%2F9110"
     assert wsp.resolve("wsp://search?q=turing").href == "/v1/search?q=turing"
+
+
+def test_navigator_resources() -> None:
+    services = browse_services()
+    with local_client(create_app(services)) as http, WspClient(http=http) as wsp:
+        assert wsp.portal().sites
+        assert wsp.directory("encyclopedia").children[0].path == "encyclopedia/wikipedia-en-zim"
+        assert wsp.random(source="rfc").doc_id == "wsp:rfc/9110"
+        assert wsp.recent_changes(limit=1).items[0].title == "Enigma machine"
+        assert {h.source_id for h in wsp.search("the", kind=DocKind.PAPERS).hits} == {"rfc"}
+        wsp.report_gap("https://example.org/", from_doc_id=TURING)
+    assert isinstance(services.gaps, InMemoryGapLog)
+    assert services.gaps.gaps[0].href == "https://example.org/"
 
 
 def test_doc_ids_with_reserved_characters_are_escaped(wsp: WspClient) -> None:
@@ -115,6 +131,10 @@ def test_async_client_mirrors_sync() -> None:
             assert (await wsp.system()).ledger_ok
             assert [c.type async for c in wsp.summarize("q", [TURING])][-1] == "done"
             assert (await wsp.resolve("home")).kind == "home"
+            assert (await wsp.portal()).featured is not None
+            assert (await wsp.directory()).name == "Top"
+            assert (await wsp.random(seed=1)).doc_id
+            assert (await wsp.recent_changes(limit=1)).cursor == "5"
             with pytest.raises(NotFoundError):
                 await wsp.source("nope")
 

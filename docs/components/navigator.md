@@ -17,7 +17,7 @@ inside that web. Code lives in [`navigator/`](../../navigator/).
   `home`, `directory`, `search`, `whatsnew`, `system`, `history`, `hotlist`,
   `about`, `help`, `random` and `offline`. Any other host is a source id, and
   `wsp://rfc/9110` maps 1:1 to `doc_id` `wsp:rfc/9110` (PLAN §9.2). Aliases such
-  as `wikipedia.en` → `wikipedia-en` and `maps` → `osm-planet` are accepted.
+  as `wikipedia.en` → `wikipedia-en-zim` and `maps` → `osm-planet` are accepted.
 - **Location bar.** Accepts addresses, client-side shortcuts (`rfc 9110`,
   `gutenberg 84`, `Q42`, `arxiv:…`, `pmid:…`) and plain text. Plain text runs a
   search. If the search response has `navigate_to`, the Navigator jumps
@@ -67,27 +67,31 @@ inside that web. Code lives in [`navigator/`](../../navigator/).
 | `wsp://history`, `wsp://hotlist` | Local history (filter, remove, clear) and bookmarks (reorder, delete) |
 | `wsp://about`, `wsp://help` | About and the handbook, including keyboard shortcuts |
 
-## API contract (backend must match)
+## API contract
 
-All types are in [`navigator/src/api/types.ts`](../../navigator/src/api/types.ts).
-Align them with the OpenAPI spec there when it lands. Summary:
+The contract is [`docs/api/openapi.json`](../api/openapi.json) (ADR-0005). The
+Navigator's wire types are generated from it into
+[`navigator/src/api/generated.ts`](../../navigator/src/api/generated.ts) by
+`npm run gen:api` (`scripts/gen-api.mjs`, no dependencies); `npm run check`
+fails while that file is stale. The client and the mock API are typed by the
+generated `Routes` table, so neither can drift from the spec. Summary:
 
 | Endpoint | Notes |
 |---|---|
-| `GET /v1/search?q&kind&source&page&page_size&lang` | `SearchResponse`: `hits[]` (`doc_id, source_id, source_name, kind, title, snippet` plain text, optional `highlights` as code-point ranges, `license, as_of, lang, score`), `facets[]`, `total, page, page_size, took_ms, intent, generation_id`, optional `instant`, `navigate_to`, `did_you_mean`, `low_confidence` |
-| `GET /v1/suggest?q&limit` | `{query, suggestions: [{text, doc_id?, kind?}]}` |
-| `GET /v1/documents/{doc_id}?at=YYYY-MM-DD\|version=` | `doc_id` is percent-encoded as one path segment. Returns `DocumentResponse` with `format: html\|text`, `html`/`text`, `links[{href,target}]`, `vault{path,manifest,sha256,offset?,length?}`, `has_history`, provenance fields |
-| `GET /v1/documents/{doc_id}/history` | `{doc_id, versions[{content_hash, revision, timestamp, generation_id, op}]}`, newest first |
-| `GET /v1/sources` | `{generation_id, sources[SourceInfo]}`, including `kind`, `description`, `doc_count`, `bytes`, `as_of`, `status`, `home_doc_id?`, `related[]` |
-| `GET /v1/changes?since&limit` | `{cursor, next_cursor, changes[{seq, doc_id, source_id, title, op, content_hash, timestamp, generation_id}]}` |
-| `GET /v1/system` | `SystemResponse`: freshness, scrub, degraded, disk, ledger_tail, latency |
-| `POST /v1/summarize` | Body `{query, doc_ids, max_sentences?}`. Responds with `text/event-stream`, one JSON event per `data:` line (`token`, `citation`, `notice`, `done`, `error`). A 404, 501 or 503 means "no local LLM" |
+| `GET /v1/search?q&sources&kind&limit&offset` | `SearchResults`: `hits[]` with source name, kind, license, `as_of`, plain-text snippet and code-point `highlights`; `facets`, `total`, `took_ms`, `intent`, `navigate_to` (location-bar jumps), `instant`, `did_you_mean`, `low_confidence`. The UI maps its 1-based pages to `offset` |
+| `GET /v1/suggest?q&limit` | `{query, suggestions: string[]}` (titles) |
+| `GET /v1/documents/{doc_id}?at=<generation>` | `doc_id` is ONE percent-encoded segment. `format: html\|text`, `html` (rewritten original), `text`, `links[{href,target}]`, `vault{generation_id,path,manifest,entry,size,sha256,blake3}` or null, `has_history` |
+| `GET /v1/documents/{doc_id}/history` | `items[{generation_id, content_hash, revision, timestamp, kind}]`, oldest first. The time machine uses generation ids for `?at=` |
+| `GET /v1/sources` | `SourcePage` (`items`, `next_cursor`); `health` drives the status lamp (`status` is the registry lifecycle) |
+| `GET /v1/changes/recent`, `/v1/changes/stream`, `/v1/changes?since` | What's New: newest first, then live over SSE (EventSource), polling `/v1/changes` as the fallback |
+| `GET /v1/system` | Freshness and health per site, degraded generations, ledger tail and `ledger_ok`, uptime |
+| `POST /v1/summarize` | SSE events `token`, `citation`, `notice`, `done`, `error`. 404/501/503 mean "no local LLM", except `404 document_not_found` |
+| `GET /v1/portal`, `/v1/directory?path=`, `/v1/random?source=` | Start page, directory and random page. The UI falls back to `/v1/sources` and the change feed on 404/501 (older daemons) |
+| `POST /v1/gaps` | "Not in library" links and missing pages, reported once per session |
 | Errors | Any non-2xx returns `{error:{code,message}}` |
-| *Proposed* `GET /v1/portal`, `/v1/directory?path=`, `/v1/random?source=` | Start-page content, directory tree and random page. The UI falls back to `/v1/sources` and `/v1/changes` when these return 404 or 501 |
 
-Document images load only from same-origin `/v1/...` paths, so the backend
-should rewrite ZIM image references to an asset route (for example
-`/v1/documents/{id}/assets/{path}`).
+Document images load only from same-origin `/v1/assets/...` paths: the API
+rewrites ZIM image references there, and the sanitizer drops anything else.
 
 ## Performance
 
@@ -102,8 +106,8 @@ should rewrite ZIM image references to an asset route (for example
   If fonts are added, they must be open-licensed and ship with their license files.
 - Maps show only a coordinate locator box. The MapLibre viewer with local tiles
   is still to come, as are the PDF and EPUB readers.
-- Missing links are not yet reported to the gap miner (PLAN §5.3); this needs a
-  backend endpoint.
-- The change feed is polled; SSE is not used yet.
+- The directory comes from registry domains and per-source categories; the
+  Wikidata / Library of Congress / LCC trees are still to come. "On this day" and
+  "Did you know" stay empty until a source for them is indexed.
 - There is no Playwright suite. App flows are covered by jsdom tests, and real
   Chrome was checked by hand under the CSP.

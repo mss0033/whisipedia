@@ -13,13 +13,15 @@ no external requests and runs under `Content-Security-Policy: default-src 'self'
 cd navigator
 npm ci
 npm run dev        # http://127.0.0.1:5173 with the built-in mock API (no backend needed)
-npm run check      # typecheck + lint + tests + build + bundle budget + smoke test
+npm run check      # API types fresh + typecheck + lint + tests + build + budget + smoke
 ```
 
 | Script | What it does |
 |---|---|
 | `npm run dev` | Vite dev server with the mock API under `/v1` |
-| `WSP_MOCK=0 WSP_API=http://127.0.0.1:8740 npm run dev` | Dev server proxying `/v1` to a real daemon |
+| `WSP_MOCK=0 npm run dev` | Dev server proxying `/v1` to a real daemon (`WSP_API`, default `http://127.0.0.1:8737`) |
+| `npm run gen:api` | Regenerate `src/api/generated.ts` from `docs/api/openapi.json` |
+| `npm run check:api` | Fail if `src/api/generated.ts` is stale |
 | `npm run build` | Production bundle in `dist/` (CSP meta tag injected) |
 | `npm run preview` | Serve `dist/` with the CSP header and the mock API |
 | `npm run typecheck` | `tsc --noEmit`, strict settings |
@@ -27,6 +29,16 @@ npm run check      # typecheck + lint + tests + build + bundle budget + smoke te
 | `npm test` | Vitest (jsdom) |
 | `npm run budget` | Gzip budget (JS < 150 KB, CSS < 40 KB) and offline/CSP checks on `dist/` |
 | `npm run smoke` | Serves `dist/` + mock API on an ephemeral port and fetches every asset |
+
+## The API contract
+
+`docs/api/openapi.json` (exported from the FastAPI app) is the single source of
+truth. `npm run gen:api` turns it into `src/api/generated.ts` with a small
+dependency-free generator (`scripts/gen-api.mjs`; `openapi-typescript` needs the
+TypeScript 5 compiler API, this project uses TypeScript 7). The mock API is
+typed by the same file, so neither the client nor the mock can drift from the
+spec without failing `npm run typecheck`, and `npm run check` fails while the
+generated file is stale.
 
 ## Serving from the daemon
 
@@ -44,15 +56,17 @@ only needs to serve `index.html` at `/`; no SPA fallback rules are required.
 
 ```
 src/
-  api/types.ts      every API type the UI uses (align with OpenAPI here)
-  api/client.ts     typed fetch client, SSE parser for /v1/summarize
+  api/generated.ts  wire types GENERATED from docs/api/openapi.json (do not edit)
+  api/types.ts      UI names for the generated types, plus UI-only types
+  api/client.ts     fetch client typed by the generated Routes table; SSE summaries
+  api/changes.ts    live change feed: EventSource, polling fallback
   core/             address parsing, router, history/hotlist, themes,
                     link rewriting + HTML sanitizer, highlighting, diff
   chrome/           menu bar, suggestions combobox, dialogs, icons/throbber
   pages/            one module per wsp:// site
   styles/           base chrome, theme token sets, page styles
 mock/               mock API (handler + fixtures + Vite plugin)
-scripts/            bundle budget and smoke checks
+scripts/            API type generator, bundle budget and smoke checks
 tests/              Vitest unit + jsdom app tests
 ```
 

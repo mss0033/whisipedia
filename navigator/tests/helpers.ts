@@ -9,9 +9,18 @@ export function mockFetch(log: string[] = []): FetchLike {
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
     const r = handle(init?.method ?? 'GET', url.pathname, url.searchParams, body);
     if ('stream' in r) {
-      const text = r.stream.map((e) => `data: ${JSON.stringify(e.event)}\n\n`).join('');
+      const text = r.stream
+        .map((e) => `event: ${e.event.type}\ndata: ${JSON.stringify(e.event)}\n\n`)
+        .join('');
       return new Response(text, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
     }
+    if ('hold' in r) {
+      return new Response(`retry: ${r.retryMs}\n\n`, {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      });
+    }
+    if (!('json' in r)) return new Response(null, { status: r.status });
     return new Response(JSON.stringify(r.json), {
       status: r.status,
       headers: { 'Content-Type': 'application/json' },

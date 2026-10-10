@@ -3,7 +3,7 @@ import { resolveHref, sanitizeDocumentHtml } from '../src/core/links.ts';
 import { linkify, renderPlainText } from '../src/core/text.ts';
 
 const ctx = {
-  sourceId: 'wikipedia-en',
+  sourceId: 'wikipedia-en-zim',
   nativeId: 'Alan_Turing',
   links: [
     { href: 'https://www.rfc-editor.org/rfc/rfc9110', target: 'wsp:rfc/9110' },
@@ -27,11 +27,11 @@ describe('resolveHref', () => {
     });
     expect(resolveHref('./Turing_machine', ctx)).toEqual({
       kind: 'local',
-      address: 'wsp://wikipedia-en/Turing_machine',
+      address: 'wsp://wikipedia-en-zim/Turing_machine',
     });
     expect(resolveHref('Enigma_machine#Design', ctx)).toEqual({
       kind: 'local',
-      address: 'wsp://wikipedia-en/Enigma_machine#Design',
+      address: 'wsp://wikipedia-en-zim/Enigma_machine#Design',
     });
     expect(resolveHref('#Legacy', ctx)).toEqual({ kind: 'anchor', id: 'Legacy' });
   });
@@ -79,9 +79,9 @@ describe('sanitizeDocumentHtml', () => {
 
   it('rewrites links into the offline web', () => {
     const local = div.querySelector<HTMLAnchorElement>(
-      'a[data-wsp="wsp://wikipedia-en/Turing_machine"]',
+      'a[data-wsp="wsp://wikipedia-en-zim/Turing_machine"]',
     );
-    expect(local?.getAttribute('href')).toBe('#wsp://wikipedia-en/Turing_machine');
+    expect(local?.getAttribute('href')).toBe('#wsp://wikipedia-en-zim/Turing_machine');
     const broken = div.querySelector<HTMLAnchorElement>('a.broken-link');
     expect(broken?.dataset.missing).toBe('https://evil.example/');
     const anchor = div.querySelector<HTMLAnchorElement>('a[data-anchor]');

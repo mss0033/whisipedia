@@ -29,7 +29,8 @@ def test_crlf_lines() -> None:
 
 
 def test_paths_and_params() -> None:
-    assert doc_path("wsp:rfc/a b?c#d%") == "/v1/documents/wsp:rfc/a%20b%3Fc%23d%25"
+    assert doc_path("wsp:rfc/a b?c#d%") == "/v1/documents/wsp%3Arfc%2Fa%20b%3Fc%23d%25"
+    assert doc_path("wsp:x/(it's)!*~") == "/v1/documents/wsp%3Ax%2F(it's)!*~"  # = encodeURIComponent
     assert search("q", ["a", "b"], 5, 0).params == (
         ("q", "q"),
         ("sources", "a"),

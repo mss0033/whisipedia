@@ -26,6 +26,14 @@ SECURITY_HEADERS: tuple[tuple[bytes, bytes], ...] = (
     (b"cross-origin-resource-policy", b"same-origin"),
 )
 
+# Asset bytes come from upstream containers. A second, stricter policy (browsers enforce both) keeps
+# an SVG opened directly from running anything at our origin.
+ASSET_CSP: tuple[bytes, bytes] = (
+    b"content-security-policy",
+    b"default-src 'none'; style-src 'unsafe-inline'; sandbox",
+)
+ASSET_PREFIX = "/v1/assets/"
+
 
 def _host_of(scope: Scope) -> str:
     for name, value in scope.get("headers", []):
@@ -47,11 +55,13 @@ class SecurityMiddleware:
             await self.app(scope, receive, send)
             return
 
+        extra = (ASSET_CSP,) if str(scope.get("path", "")).startswith(ASSET_PREFIX) else ()
+
         async def send_with_headers(message: Message) -> None:
             if message["type"] == "http.response.start":
                 drop = {k for k, _ in SECURITY_HEADERS}
                 headers = [(k, v) for k, v in message.get("headers", []) if k.lower() not in drop]
-                message["headers"] = [*headers, *SECURITY_HEADERS]
+                message["headers"] = [*headers, *SECURITY_HEADERS, *extra]
             await send(message)
 
         if _host_of(scope) not in self.settings.allowed_hosts:

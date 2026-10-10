@@ -6,17 +6,38 @@ import base64
 import binascii
 import json
 from collections.abc import Mapping, Sequence
+from datetime import datetime
 from typing import cast
 
 from pydantic import JsonValue
 
+from wsp_api import sites
 from wsp_api.addresses import address_of
 from wsp_api.errors import ApiError
-from wsp_api.schemas import Change, Document, GenerationInfo, Hit, LedgerEntry, SourceInfo
+from wsp_api.schemas import (
+    Change,
+    DocKind,
+    Document,
+    DocumentLink,
+    GenerationInfo,
+    Hit,
+    LedgerEntry,
+    SourceHealth,
+    SourceInfo,
+    VaultLocation,
+)
 from wsp_core.model import ChangeRecord, DocRecord, Generation, LedgerEvent, SearchHit, SourceSpec
 
 
-def source_info(spec: SourceSpec, current: Generation | None) -> SourceInfo:
+def source_info(
+    spec: SourceSpec,
+    current: Generation | None,
+    *,
+    specs: Sequence[SourceSpec] = (),
+    now: datetime | None = None,
+    doc_count: int | None = None,
+) -> SourceInfo:
+    fresh = None if now is None else sites.freshness(spec, current, now)
     return SourceInfo(
         id=spec.id,
         name=spec.name,
@@ -31,6 +52,15 @@ def source_info(spec: SourceSpec, current: Generation | None) -> SourceInfo:
         irreplaceable=spec.irreplaceable,
         address=address_of(spec.id),
         current_generation=None if current is None else current.generation_id,
+        publisher=sites.raw_str(spec, "publisher"),
+        description=sites.raw_str(spec, "description"),
+        kind=sites.kind_of(spec),
+        health=SourceHealth.OFFLINE if fresh is None else fresh.health,
+        doc_count=doc_count,
+        bytes=None if current is None else sum(a.size for a in current.artifacts),
+        as_of=None if current is None else current.sealed_at,
+        home_doc_id=sites.raw_str(spec, "home_doc_id"),
+        related=sites.related(spec, specs),
     )
 
 
@@ -46,7 +76,16 @@ def generation_info(gen: Generation, *, current: bool) -> GenerationInfo:
     )
 
 
-def document(doc: DocRecord) -> Document:
+def document(
+    doc: DocRecord,
+    *,
+    spec: SourceSpec | None,
+    links: Sequence[DocumentLink] = (),
+    generation_id: str | None = None,
+    html: str | None = None,
+    vault: VaultLocation | None = None,
+    has_history: bool = False,
+) -> Document:
     return Document(
         doc_id=doc.doc_id,
         source_id=doc.source_id,
@@ -61,12 +100,25 @@ def document(doc: DocRecord) -> Document:
         url_native=doc.url_native,
         html_ref=doc.html_ref,
         entities=list(doc.entities),
-        links=list(doc.links),
+        links=list(links),
         address=address_of(doc.source_id, doc.native_id),
+        source_name=doc.source_id if spec is None else spec.name,
+        kind=DocKind.OTHER if spec is None else sites.kind_of(spec),
+        generation_id=generation_id,
+        format="text" if html is None else "html",
+        html=html,
+        vault=vault,
+        has_history=has_history,
     )
 
 
-def hit(h: SearchHit) -> Hit:
+def hit(
+    h: SearchHit,
+    *,
+    spec: SourceSpec | None = None,
+    doc: DocRecord | None = None,
+    highlights: Sequence[tuple[int, int]] = (),
+) -> Hit:
     source_id, _, native_id = h.doc_id.removeprefix("wsp:").partition("/")
     return Hit(
         doc_id=h.doc_id,
@@ -75,10 +127,18 @@ def hit(h: SearchHit) -> Hit:
         snippet=h.snippet,
         source_id=h.source_id or source_id,
         address=address_of(source_id, native_id),
+        source_name=(h.source_id or source_id) if spec is None else spec.name,
+        kind=DocKind.OTHER if spec is None else sites.kind_of(spec),
+        license=None if doc is None else doc.license,
+        as_of=None if doc is None else doc.timestamp,
+        lang=None if doc is None else doc.lang,
+        url_native=None if doc is None else doc.url_native,
+        highlights=list(highlights),
     )
 
 
-def change(c: ChangeRecord) -> Change:
+def change(c: ChangeRecord, *, title: str | None = None) -> Change:
+    source_id, _, native_id = c.doc_id.removeprefix("wsp:").partition("/")
     return Change(
         doc_id=c.doc_id,
         kind=c.kind.value,
@@ -86,6 +146,9 @@ def change(c: ChangeRecord) -> Change:
         old_hash=c.old_hash,
         new_hash=c.new_hash,
         renamed_from=c.renamed_from,
+        source_id=source_id,
+        title=title,
+        address=address_of(source_id, native_id),
     )
 
 

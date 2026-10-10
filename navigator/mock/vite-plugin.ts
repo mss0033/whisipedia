@@ -31,6 +31,19 @@ export function mockMiddleware(latencyMs = 25): Connect.NextHandleFunction {
       const body = req.method === 'POST' ? await readBody(req) : undefined;
       const result = handle(req.method ?? 'GET', url.pathname, url.searchParams, body);
       await sleep(latencyMs);
+      if ('hold' in result) {
+        // The change feed: nothing new happens in the mock, so keep the stream open quietly.
+        res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store' });
+        res.write(`retry: ${result.retryMs}\n\n`);
+        const beat = setInterval(() => res.write(': keepalive\n\n'), 15_000);
+        req.on('close', () => clearInterval(beat));
+        return;
+      }
+      if (!('json' in result) && !('stream' in result)) {
+        res.writeHead(result.status, { 'Cache-Control': 'no-store' });
+        res.end();
+        return;
+      }
       if ('stream' in result) {
         res.writeHead(200, {
           'Content-Type': 'text/event-stream',
@@ -44,7 +57,7 @@ export function mockMiddleware(latencyMs = 25): Connect.NextHandleFunction {
         for (const { delayMs, event } of result.stream) {
           if (closed) return;
           await sleep(delayMs);
-          res.write(`data: ${JSON.stringify(event)}\n\n`);
+          res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
         }
         res.end();
         return;
