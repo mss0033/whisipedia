@@ -65,12 +65,12 @@ describe('Navigator app', () => {
 
   it('renders sanitized documents with broken links and the time machine', async () => {
     const { app, settled, main } = boot();
-    app.navigate('wsp://wikipedia-en/Alan_Turing');
+    app.navigate('wsp://wikipedia-en-zim/Alan_Turing');
     await settled(() => !!main().querySelector('.page-document'));
     expect(main().querySelector('script')).toBeNull();
     expect(main().querySelectorAll('a.broken-link').length).toBeGreaterThanOrEqual(2);
     expect(main().querySelector('.webring')).not.toBeNull();
-    app.navigate('wsp://wikipedia-en/Alan_Turing?at=2026-01-01&diff=1');
+    app.navigate('wsp://wikipedia-en-zim/Alan_Turing?at=2026-01-01&diff=1');
     await settled(() => !!main().querySelector('.diff'));
     expect(main().querySelectorAll('ins.diff-add').length).toBeGreaterThan(0);
   });

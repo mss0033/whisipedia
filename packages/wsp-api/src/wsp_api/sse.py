@@ -15,9 +15,11 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 
 from wsp_api.convert import change
+from wsp_api.schemas import Change
+from wsp_core.model import ChangeRecord
 from wsp_core.ports import ChangeFeed
 
 RETRY_MS = 3000
@@ -42,16 +44,16 @@ async def change_events(
     max_seconds: float | None,
     is_disconnected: Callable[[], Awaitable[bool]],
     batch: int = 500,
+    describe: Callable[[ChangeRecord], Change] = change,
 ) -> AsyncIterator[str]:
     yield f"retry: {RETRY_MS}\n\n"
     started = last_sent = time.monotonic()
     while True:
         records, new_cursor = await asyncio.to_thread(feed.since, cursor, limit=batch)
-        for i, rec in enumerate(records):
-            last = i == len(records) - 1
-            yield format_event(
-                change(rec).model_dump_json(), event="change", event_id=new_cursor if last else None
-            )
+        described = await asyncio.to_thread(_describe_all, describe, records)
+        for i, item in enumerate(described):
+            last = i == len(described) - 1
+            yield format_event(item.model_dump_json(), event="change", event_id=new_cursor if last else None)
         if records:
             cursor, last_sent = new_cursor, time.monotonic()
             continue  # drain backlog before sleeping
@@ -64,3 +66,9 @@ async def change_events(
         if await is_disconnected():
             return
         await asyncio.sleep(poll_seconds)
+
+
+def _describe_all(
+    describe: Callable[[ChangeRecord], Change], records: Sequence[ChangeRecord]
+) -> list[Change]:
+    return [describe(r) for r in records]

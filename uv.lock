@@ -1524,6 +1524,7 @@ source = { editable = "packages/wsp-api" }
 dependencies = [
     { name = "fastapi" },
     { name = "httpx" },
+    { name = "libzim" },
     { name = "pydantic" },
     { name = "wsp-core" },
 ]
@@ -1537,6 +1538,7 @@ dev = [
 requires-dist = [
     { name = "fastapi", specifier = ">=0.143" },
     { name = "httpx", specifier = ">=0.27" },
+    { name = "libzim", specifier = ">=3.6" },
     { name = "pydantic", specifier = ">=2.9" },
     { name = "wsp-core", editable = "packages/wsp-core" },
 ]

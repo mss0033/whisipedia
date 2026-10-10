@@ -1,24 +1,29 @@
 /**
  * Typed client for the Whisipedia HTTP API v1. Same-origin only: the daemon
  * serves both the API and this bundle from 127.0.0.1, and the CSP forbids
- * anything else.
+ * anything else. Every call names an operation of the generated `Routes`
+ * table, so an endpoint or parameter that leaves the spec stops compiling.
  */
 import type {
-  ApiError,
-  ChangesResponse,
-  DirectoryResponse,
+  ChangePage,
+  DirectoryPage,
   DocId,
+  DocRef,
   DocumentResponse,
-  HistoryResponse,
-  PortalResponse,
-  RandomResponse,
+  ErrorResponse,
+  GapReport,
+  HistoryPage,
+  Portal,
+  RecentChanges,
+  Routes,
   SearchParams,
-  SearchResponse,
-  SourcesResponse,
-  SuggestResponse,
-  SummarizeEvent,
+  SearchResults,
+  SourceInfo,
+  SourcePage,
+  Suggestions,
   SummarizeRequest,
-  SystemResponse,
+  SummaryEvent,
+  SystemStatus,
 } from './types.ts';
 
 export class ApiRequestError extends Error {
@@ -30,7 +35,7 @@ export class ApiRequestError extends Error {
     this.status = status;
     this.code = code;
   }
-  /** Endpoint not implemented by this daemon (used for PROPOSED endpoints). */
+  /** The daemon lacks this feature (older daemon, or component not configured). */
   get isUnavailable(): boolean {
     return this.status === 404 || this.status === 501 || this.status === 503;
   }
@@ -43,23 +48,33 @@ export interface ClientOptions {
   fetch?: FetchLike;
 }
 
-type Query = Record<string, string | number | undefined>;
+type QueryValue = string | number | boolean | null | undefined | ReadonlyArray<string>;
 
-export function buildQuery(params: Query): string {
+export function buildQuery(params: Readonly<Record<string, QueryValue>>): string {
   const qs = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {
-    if (v === undefined || v === '') continue;
-    qs.set(k, String(v));
+    if (v === undefined || v === null || v === '') continue;
+    if (Array.isArray(v)) for (const item of v) qs.append(k, item);
+    else qs.set(k, String(v));
   }
   const s = qs.toString();
   return s ? `?${s}` : '';
 }
 
+/** `/v1/documents/<doc_id as ONE percent-encoded segment>` (docs/api/addresses.md). */
 export function docPath(id: DocId): string {
   return `/v1/documents/${encodeURIComponent(id)}`;
 }
 
-/** Incremental parser for `text/event-stream` bodies. */
+/** Fill `{name}` placeholders of a spec path; each value is one encoded segment. */
+export function routePath<K extends keyof Routes>(route: K, path: Routes[K]['path']): string {
+  const values = path as Readonly<Record<string, string>>;
+  return route
+    .slice(route.indexOf(' ') + 1)
+    .replace(/\{(\w+)\}/g, (_, name: string) => encodeURIComponent(values[name] ?? ''));
+}
+
+/** Incremental parser for `text/event-stream` bodies; yields each event's data. */
 export class SseParser {
   private buf = '';
   push(chunk: string): string[] {
@@ -81,29 +96,42 @@ export class SseParser {
   }
 }
 
+const NO_PATH = {} as Record<string, never>;
+
 export class WspClient {
   private readonly base: string;
   private readonly fetchImpl: FetchLike;
+  private readonly reportedGaps = new Set<string>();
 
   constructor(opts: ClientOptions = {}) {
     this.base = opts.base ?? '';
     this.fetchImpl = opts.fetch ?? ((input, init) => fetch(input, init));
   }
 
-  private async get<T>(path: string, signal?: AbortSignal): Promise<T> {
-    const res = await this.fetchImpl(this.base + path, {
-      headers: { Accept: 'application/json' },
-      ...(signal ? { signal } : {}),
-    });
-    return this.parse<T>(res);
+  /** Base URL, for EventSource (which cannot use the injected fetch). */
+  url(path: string): string {
+    return this.base + path;
   }
 
-  private async parse<T>(res: Response): Promise<T> {
+  private async get<K extends keyof Routes>(
+    route: K,
+    path: Routes[K]['path'],
+    query: Routes[K]['query'],
+    signal?: AbortSignal,
+  ): Promise<Routes[K]['response']> {
+    const res = await this.fetchImpl(
+      this.base + routePath(route, path) + buildQuery(query as Record<string, QueryValue>),
+      { headers: { Accept: 'application/json' }, ...(signal ? { signal } : {}) },
+    );
+    return (await this.parse(res)) as Routes[K]['response'];
+  }
+
+  private async parse(res: Response): Promise<unknown> {
     if (!res.ok) {
       let code = `http_${res.status}`;
       let message = res.statusText || `HTTP ${res.status}`;
       try {
-        const body = (await res.json()) as Partial<ApiError>;
+        const body = (await res.json()) as Partial<ErrorResponse>;
         if (body.error) {
           code = body.error.code;
           message = body.error.message;
@@ -113,76 +141,117 @@ export class WspClient {
       }
       throw new ApiRequestError(res.status, code, message);
     }
-    return (await res.json()) as T;
+    if (res.status === 204) return null;
+    return res.json();
   }
 
-  search(params: SearchParams, signal?: AbortSignal): Promise<SearchResponse> {
+  search(params: SearchParams, signal?: AbortSignal): Promise<SearchResults> {
+    const size = params.page_size ?? 10;
     return this.get(
-      `/v1/search${buildQuery({
+      'GET /v1/search',
+      NO_PATH,
+      {
         q: params.q,
         kind: params.kind,
-        source: params.source,
-        page: params.page,
-        page_size: params.page_size,
-        lang: params.lang,
-      })}`,
+        sources: params.source ? [params.source] : undefined,
+        limit: size,
+        offset: ((params.page ?? 1) - 1) * size,
+      },
       signal,
     );
   }
 
-  suggest(q: string, limit = 8, signal?: AbortSignal): Promise<SuggestResponse> {
-    return this.get(`/v1/suggest${buildQuery({ q, limit })}`, signal);
+  suggest(q: string, limit = 8, signal?: AbortSignal): Promise<Suggestions> {
+    return this.get('GET /v1/suggest', NO_PATH, { q, limit }, signal);
   }
 
+  /** `at` is a generation id (time machine). */
   document(
     id: DocId,
-    opts: { at?: string | undefined; version?: string | undefined } = {},
+    opts: { at?: string | undefined } = {},
     signal?: AbortSignal,
   ): Promise<DocumentResponse> {
-    return this.get(`${docPath(id)}${buildQuery({ at: opts.at, version: opts.version })}`, signal);
+    return this.get('GET /v1/documents/{doc_id}', { doc_id: id }, { at: opts.at }, signal);
   }
 
-  history(id: DocId, signal?: AbortSignal): Promise<HistoryResponse> {
-    return this.get(`${docPath(id)}/history`, signal);
+  history(id: DocId, signal?: AbortSignal): Promise<HistoryPage> {
+    return this.get('GET /v1/documents/{doc_id}/history', { doc_id: id }, { limit: 200 }, signal);
   }
 
-  sources(signal?: AbortSignal): Promise<SourcesResponse> {
-    return this.get('/v1/sources', signal);
+  /** Every source (follows `next_cursor`). */
+  async sources(signal?: AbortSignal): Promise<SourceInfo[]> {
+    const out: SourceInfo[] = [];
+    let cursor: string | null = null;
+    do {
+      const page: SourcePage = await this.get(
+        'GET /v1/sources',
+        NO_PATH,
+        { cursor, limit: 200 },
+        signal,
+      );
+      out.push(...page.items);
+      cursor = page.next_cursor;
+    } while (cursor);
+    return out;
   }
 
-  changes(since?: string, limit = 50, signal?: AbortSignal): Promise<ChangesResponse> {
-    return this.get(`/v1/changes${buildQuery({ since, limit })}`, signal);
+  /** Change feed, oldest first, from a cursor. */
+  changes(since?: string | null, limit = 50, signal?: AbortSignal): Promise<ChangePage> {
+    return this.get('GET /v1/changes', NO_PATH, { since, limit }, signal);
   }
 
-  system(signal?: AbortSignal): Promise<SystemResponse> {
-    return this.get('/v1/system', signal);
+  /** Newest changes first, plus the cursor to follow live updates from. */
+  recentChanges(limit = 50, source?: string, signal?: AbortSignal): Promise<RecentChanges> {
+    return this.get('GET /v1/changes/recent', NO_PATH, { limit, source }, signal);
   }
 
-  /** PROPOSED endpoint. */
-  portal(signal?: AbortSignal): Promise<PortalResponse> {
-    return this.get('/v1/portal', signal);
+  system(signal?: AbortSignal): Promise<SystemStatus> {
+    return this.get('GET /v1/system', NO_PATH, {}, signal);
   }
 
-  /** PROPOSED endpoint. */
-  directory(path: string, signal?: AbortSignal): Promise<DirectoryResponse> {
-    return this.get(`/v1/directory${buildQuery({ path })}`, signal);
+  portal(signal?: AbortSignal): Promise<Portal> {
+    return this.get('GET /v1/portal', NO_PATH, {}, signal);
   }
 
-  /** PROPOSED endpoint. */
-  random(source?: string, signal?: AbortSignal): Promise<RandomResponse> {
-    return this.get(`/v1/random${buildQuery({ source })}`, signal);
+  directory(path: string, signal?: AbortSignal): Promise<DirectoryPage> {
+    return this.get('GET /v1/directory', NO_PATH, { path }, signal);
   }
 
-  /** Streams summary events. Throws ApiRequestError when unavailable. */
-  async *summarize(req: SummarizeRequest, signal?: AbortSignal): AsyncGenerator<SummarizeEvent> {
-    const res = await this.fetchImpl(`${this.base}/v1/summarize`, {
+  random(source?: string, signal?: AbortSignal): Promise<DocRef> {
+    return this.get('GET /v1/random', NO_PATH, { source }, signal);
+  }
+
+  /**
+   * Tell the gap miner about a "not in library" link (PLAN §5.3). Best effort:
+   * never throws, and each link is reported once per session.
+   */
+  async reportGap(report: GapReport): Promise<void> {
+    const key = `${report.href}\n${report.from_doc_id ?? ''}`;
+    if (this.reportedGaps.has(key)) return;
+    this.reportedGaps.add(key);
+    const body: Routes['POST /v1/gaps']['body'] = report;
+    try {
+      await this.fetchImpl(this.base + routePath('POST /v1/gaps', NO_PATH), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    } catch {
+      /* reporting must never disturb browsing */
+    }
+  }
+
+  /** Streams summary events (SSE). Throws ApiRequestError when unavailable. */
+  async *summarize(req: SummarizeRequest, signal?: AbortSignal): AsyncGenerator<SummaryEvent> {
+    const body: Routes['POST /v1/summarize']['body'] = req;
+    const res = await this.fetchImpl(this.base + routePath('POST /v1/summarize', NO_PATH), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
-      body: JSON.stringify(req),
+      body: JSON.stringify(body),
       ...(signal ? { signal } : {}),
     });
     if (!res.ok || !res.body) {
-      await this.parse<never>(res.ok ? new Response(null, { status: 501 }) : res);
+      await this.parse(res.ok ? new Response(null, { status: 501 }) : res);
       return;
     }
     const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
@@ -191,9 +260,9 @@ export class WspClient {
       const { value, done } = await reader.read();
       if (done) break;
       for (const data of parser.push(value)) {
-        let ev: SummarizeEvent;
+        let ev: SummaryEvent;
         try {
-          ev = JSON.parse(data) as SummarizeEvent;
+          ev = JSON.parse(data) as SummaryEvent;
         } catch {
           continue;
         }

@@ -24,7 +24,7 @@ export type Route =
   | { page: 'about'; topic: string }
   | { page: 'help'; topic: string }
   | { page: 'random'; source: string | undefined }
-  | { page: 'offline'; url: string }
+  | { page: 'offline'; url: string; from: string | undefined }
   | { page: 'site'; source: string }
   | {
       page: 'document';
@@ -75,7 +75,7 @@ export function resolveRoute(address: string): Route {
     case 'random':
       return { page: 'random', source: p.source || a.path || undefined };
     case 'offline':
-      return { page: 'offline', url: p.url ?? p.doc ?? '' };
+      return { page: 'offline', url: p.url ?? p.doc ?? '', from: p.from };
     default: {
       const docId = addressToDocId(a);
       if (!docId) return { page: 'site', source: a.host };

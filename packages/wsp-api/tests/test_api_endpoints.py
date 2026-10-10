@@ -17,7 +17,7 @@ from wsp_api.schemas import (
     SourceInfo,
     SourcePage,
     Suggestions,
-    SummaryChunk,
+    SummaryEvent,
     SystemStatus,
 )
 from wsp_api.testing import local_client
@@ -59,8 +59,8 @@ def test_generations_newest_first_and_current_flag(client: httpx.Client) -> None
 
 
 def test_document_current_and_at_generation(client: httpx.Client) -> None:
-    now = Document.model_validate(client.get(f"/v1/documents/{TURING}").json())
-    old = Document.model_validate(client.get(f"/v1/documents/{TURING}", params={"at": SAMPLE_GEN_1}).json())
+    now = Document.model_validate(client.get(document_href(TURING)).json())
+    old = Document.model_validate(client.get(document_href(TURING), params={"at": SAMPLE_GEN_1}).json())
     assert now.native_id == "A/Alan_Turing"
     assert now.address == "wsp://wikipedia-en-zim/A/Alan_Turing"
     assert "father of theoretical computer science" in now.text
@@ -69,13 +69,13 @@ def test_document_current_and_at_generation(client: httpx.Client) -> None:
 
 
 def test_document_before_first_generation_is_404(client: httpx.Client) -> None:
-    r = client.get(f"/v1/documents/{TURING}", params={"at": "2000-01-01"})
+    r = client.get(document_href(TURING), params={"at": "2000-01-01"})
     assert r.status_code == 404
     assert r.json()["error"]["code"] == "document_not_found"
 
 
 def test_document_history_oldest_first(client: httpx.Client) -> None:
-    hist = HistoryPage.model_validate(client.get(f"/v1/documents/{TURING}/history").json())
+    hist = HistoryPage.model_validate(client.get(document_href(TURING) + "/history").json())
     assert [v.generation_id for v in hist.items] == [SAMPLE_GEN_1, SAMPLE_GEN_2]
     assert hist.doc_id == TURING
 
@@ -161,22 +161,29 @@ def test_system_flags_broken_ledger() -> None:
         assert c.get("/v1/system").json()["ledger_ok"] is False
 
 
-def _ndjson(r: httpx.Response) -> list[SummaryChunk]:
-    return [SummaryChunk.model_validate(json.loads(line)) for line in r.text.splitlines() if line]
+def _sse(r: httpx.Response) -> list[tuple[str, SummaryEvent]]:
+    out: list[tuple[str, SummaryEvent]] = []
+    for block in r.text.split("\n\n"):
+        lines = dict(line.split(": ", 1) for line in block.splitlines() if ": " in line)
+        if "data" in lines:
+            out.append((lines["event"], SummaryEvent.model_validate(json.loads(lines["data"]))))
+    return out
 
 
-def test_summarize_streams_cited_chunks(services: Services) -> None:
+def test_summarize_streams_sse_with_citation_events(services: Services) -> None:
     with local_client(create_app(services)) as c:
         r = c.post("/v1/summarize", json={"query": "who was turing", "doc_ids": [TURING, "wsp:rfc/9110"]})
     assert r.status_code == 200
-    assert r.headers["content-type"].startswith("application/x-ndjson")
-    chunks = _ndjson(r)
-    assert chunks[0].type == "citations"
-    assert [c.n for c in chunks[0].citations or []] == [1, 2]
-    text = "".join(c.text or "" for c in chunks if c.type == "text")
-    assert "[1]" in text
-    assert "[2]" in text
-    assert chunks[-1].type == "done"
+    assert r.headers["content-type"].startswith("text/event-stream")
+    events = _sse(r)
+    assert all(name == ev.root.type for name, ev in events)
+    kinds = [ev.root.type for _, ev in events]
+    assert kinds[-1] == "done"
+    cites = [ev.root for _, ev in events if ev.root.type == "citation"]
+    assert [(c.index, c.doc_id) for c in cites] == [(1, TURING), (2, "wsp:rfc/9110")]  # type: ignore[union-attr]
+    text = "".join(ev.root.text for _, ev in events if ev.root.type == "token")  # type: ignore[union-attr]
+    assert "[1]" not in text  # markers became citation events
+    assert text.startswith("Summary of 2 results")
     gen = services.generator
     assert isinstance(gen, EchoGenerator)
     assert "Question: who was turing" in gen.prompts[0]

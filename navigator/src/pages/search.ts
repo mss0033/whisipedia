@@ -4,7 +4,7 @@
  * optional streamed "Summarize these results".
  */
 import { ApiRequestError } from '../api/client.ts';
-import type { DocKind, InstantAnswer, MapAnswer, SearchHit, SearchResponse } from '../api/types.ts';
+import type { DocKind, Hit, InstantAnswer, MapAnswer, SearchResults } from '../api/types.ts';
 import { attachSuggest } from '../chrome/suggest.ts';
 import { docIdToAddress, makeAddress, searchAddress } from '../core/address.ts';
 import { type Child, frag, h, s } from '../core/dom.ts';
@@ -20,6 +20,7 @@ import {
   KIND_LABELS,
   KIND_ORDER,
   licenseBadge,
+  maybeLicenseBadge,
   searchForm,
   wspLink,
 } from '../ui/components.ts';
@@ -55,7 +56,7 @@ function makeForm(app: AppServices, route: SearchRoute, big: boolean) {
 async function renderHome(ctx: PageContext, route: SearchRoute): Promise<PageResult> {
   const { form, input } = makeForm(ctx.app, route, true);
   const sources = await ctx.app.sources();
-  const docs = sources.reduce((n, s) => n + s.doc_count, 0);
+  const docs = sources.reduce((n, s) => n + (s.doc_count ?? 0), 0);
   const body = h(
     'div',
     { class: 'page page-search-home' },
@@ -112,6 +113,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
 
   if (route.lucky) {
     const r = await ctx.app.api.search({ q: route.query, page_size: 1 }, ctx.signal);
+    // navigate_to names the page; otherwise the top hit, like "I'm Feeling Lucky".
     const first = r.navigate_to ?? r.hits[0]?.doc_id;
     if (first) return { redirect: docIdToAddress(first) };
   }
@@ -153,14 +155,19 @@ export async function render(ctx: PageContext): Promise<PageResult> {
   return { title: `${ENGINE_NAME} Search: ${route.query}`, body };
 }
 
+/** 1-based number of the current results page. */
+function pageOf(resp: SearchResults): number {
+  return Math.floor(resp.offset / resp.limit) + 1;
+}
+
 /** Everything below the search box. Exported for tests (render budget). */
 export function renderResultsPage(
-  resp: SearchResponse,
+  resp: SearchResults,
   route: SearchRoute,
   ctx: PageContext | null,
   sourceName: string | null,
 ): DocumentFragment {
-  const first = (resp.page - 1) * resp.page_size + 1;
+  const first = resp.offset + 1;
   const last = first + resp.hits.length - 1;
   const secs = (resp.took_ms / 1000).toFixed(2);
 
@@ -174,7 +181,7 @@ export function renderResultsPage(
             h('b', null, String(first)),
             ' - ',
             h('b', null, String(last)),
-            ' of about ',
+            resp.total_is_estimate ? ' of more than ' : ' of about ',
             h('b', null, formatNumber(resp.total)),
             ' for ',
             h('b', null, resp.query),
@@ -218,7 +225,7 @@ export function renderResultsPage(
   );
 }
 
-function kindFilters(resp: SearchResponse, route: SearchRoute): HTMLElement | null {
+function kindFilters(resp: SearchResults, route: SearchRoute): HTMLElement | null {
   if (resp.facets.length === 0 && !route.kind) return null;
   const counts = new Map(resp.facets.map((f) => [f.kind, f.count]));
   const kinds = KIND_ORDER.filter((k) => counts.has(k) || k === route.kind);
@@ -245,8 +252,8 @@ function kindFilters(resp: SearchResponse, route: SearchRoute): HTMLElement | nu
   );
 }
 
-export function resultsList(resp: SearchResponse): HTMLOListElement {
-  const start = (resp.page - 1) * resp.page_size + 1;
+export function resultsList(resp: SearchResults): HTMLOListElement {
+  const start = resp.offset + 1;
   const ol = h('ol', { class: 'results', start, 'aria-label': 'Search results' });
   resp.hits.forEach((hit, i) => {
     ol.appendChild(resultItem(hit, resp.query, start + i));
@@ -254,7 +261,7 @@ export function resultsList(resp: SearchResponse): HTMLOListElement {
   return ol;
 }
 
-export function resultItem(hit: SearchHit, query: string, n: number): HTMLLIElement {
+export function resultItem(hit: Hit, query: string, n: number): HTMLLIElement {
   const address = docIdToAddress(hit.doc_id);
   const snippet = h('div', { class: 'result-snippet' });
   snippet.appendChild(highlightSnippet(hit.snippet, query, hit.highlights));
@@ -272,17 +279,18 @@ export function resultItem(hit: SearchHit, query: string, n: number): HTMLLIElem
       ' ',
       badge(hit.source_name, 'badge-source'),
       ' ',
-      licenseBadge(hit.license),
+      maybeLicenseBadge(hit.license),
       ' - ',
       wspLink(searchAddress(query, { source: hit.source_id }), 'More from this site'),
     ),
   );
 }
 
-function pagination(resp: SearchResponse, route: SearchRoute): HTMLElement | null {
-  const pages = Math.min(10, Math.ceil(resp.total / resp.page_size));
+function pagination(resp: SearchResults, route: SearchRoute): HTMLElement | null {
+  const cur = pageOf(resp);
+  const known = Math.ceil(resp.total / resp.limit);
+  const pages = Math.min(10, Math.max(known, resp.next_offset !== null ? cur + 1 : cur));
   if (pages <= 1) return null;
-  const cur = resp.page;
   const link = (p: number, text: Child) =>
     wspLink(
       searchAddress(route.query, {
@@ -443,7 +451,7 @@ function locator(a: MapAnswer): SVGElement {
 
 /* ------------------------------- summarize -------------------------------- */
 
-function summarizePanel(ctx: PageContext, resp: SearchResponse): HTMLElement {
+function summarizePanel(ctx: PageContext, resp: SearchResults): HTMLElement {
   const out = h('div', { class: 'summary-text', 'aria-live': 'polite' });
   const btn = h('button', { type: 'button', class: 'btn' }, 'Summarize these results');
   const stop = h('button', { type: 'button', class: 'btn', hidden: true }, 'Stop');
@@ -475,7 +483,7 @@ function summarizePanel(ctx: PageContext, resp: SearchResponse): HTMLElement {
       try {
         const ids = resp.hits.slice(0, 5).map((x) => x.doc_id);
         for await (const ev of ctx.app.api.summarize(
-          { query: resp.query, doc_ids: ids, max_sentences: 5 },
+          { query: resp.query, doc_ids: ids, max_tokens: 400 },
           ac.signal,
         )) {
           if (!started) {
@@ -484,7 +492,7 @@ function summarizePanel(ctx: PageContext, resp: SearchResponse): HTMLElement {
           }
           if (ev.type === 'token') out.append(ev.text);
           else if (ev.type === 'citation') {
-            const n = (resp.page - 1) * resp.page_size + ev.index;
+            const n = resp.offset + ev.index;
             out.append(
               h(
                 'sup',
@@ -503,7 +511,11 @@ function summarizePanel(ctx: PageContext, resp: SearchResponse): HTMLElement {
       } catch (err) {
         if (ac.signal.aborted) {
           out.append(h('em', null, ' [stopped]'));
-        } else if (err instanceof ApiRequestError && err.isUnavailable) {
+        } else if (
+          err instanceof ApiRequestError &&
+          err.isUnavailable &&
+          err.code !== 'document_not_found'
+        ) {
           out.replaceChildren(
             h(
               'p',

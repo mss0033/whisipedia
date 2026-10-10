@@ -7,22 +7,25 @@ from wsp_api.schemas import Resolution
 @pytest.mark.parametrize(
     ("address", "kind", "canonical", "href"),
     [
-        ("wsp://home", "home", "wsp://home", "/v1/sources"),
-        ("home", "home", "wsp://home", "/v1/sources"),
+        ("wsp://home", "home", "wsp://home", "/v1/portal"),
+        ("home", "home", "wsp://home", "/v1/portal"),
         ("wsp://system", "system", "wsp://system", "/v1/system"),
-        ("wsp://whatsnew", "whatsnew", "wsp://whatsnew", "/v1/changes"),
-        ("wsp://directory", "directory", "wsp://directory", None),
+        ("wsp://whatsnew", "whatsnew", "wsp://whatsnew", "/v1/changes/recent"),
+        ("wsp://directory", "directory", "wsp://directory", "/v1/directory"),
+        ("wsp://directory/books", "directory", "wsp://directory/books", "/v1/directory?path=books"),
+        ("wsp://random", "random", "wsp://random", "/v1/random"),
+        ("wsp://hotlist", "client", "wsp://hotlist", None),
         ("wsp://search", "search", "wsp://search", None),
         ("wsp://rfc", "source", "wsp://rfc", "/v1/sources/rfc"),
         ("wsp://rfc/", "source", "wsp://rfc", "/v1/sources/rfc"),
-        ("wsp://rfc/9110", "document", "wsp://rfc/9110", "/v1/documents/wsp:rfc/9110"),
+        ("wsp://rfc/9110", "document", "wsp://rfc/9110", "/v1/documents/wsp%3Arfc%2F9110"),
         (
             "wsp://wikipedia-en-zim/A/Alan_Turing",
             "document",
             "wsp://wikipedia-en-zim/A/Alan_Turing",
-            "/v1/documents/wsp:wikipedia-en-zim/A/Alan_Turing",
+            "/v1/documents/wsp%3Awikipedia-en-zim%2FA%2FAlan_Turing",
         ),
-        ("wsp:rfc/9110", "document", "wsp://rfc/9110", "/v1/documents/wsp:rfc/9110"),
+        ("wsp:rfc/9110", "document", "wsp://rfc/9110", "/v1/documents/wsp%3Arfc%2F9110"),
     ],
 )
 def test_resolve(client: httpx.Client, address: str, kind: str, canonical: str, href: str | None) -> None:
@@ -34,7 +37,7 @@ def test_resolve(client: httpx.Client, address: str, kind: str, canonical: str, 
 
 def test_resolve_percent_encoded_address(client: httpx.Client) -> None:
     res = Resolution.model_validate(client.get("/go/wsp%3A%2F%2Frfc%2F9110").json())
-    assert res.href == "/v1/documents/wsp:rfc/9110"
+    assert res.href == "/v1/documents/wsp%3Arfc%2F9110"
 
 
 def test_search_address_carries_query(client: httpx.Client) -> None:
@@ -46,13 +49,13 @@ def test_search_address_carries_query(client: httpx.Client) -> None:
 def test_redirect_mode(client: httpx.Client) -> None:
     r = client.get("/go/wsp://rfc/9110", params={"redirect": "true"}, follow_redirects=False)
     assert r.status_code == 307
-    assert r.headers["location"] == "/v1/documents/wsp:rfc/9110"
+    assert r.headers["location"] == "/v1/documents/wsp%3Arfc%2F9110"
     followed = client.get("/go/wsp://rfc/9110", params={"redirect": "true"}, follow_redirects=True)
     assert followed.json()["title"] == "RFC 9110: HTTP Semantics"
 
 
 def test_redirect_mode_for_client_side_page_returns_json(client: httpx.Client) -> None:
-    r = client.get("/go/wsp://directory", params={"redirect": "true"}, follow_redirects=False)
+    r = client.get("/go/wsp://hotlist", params={"redirect": "true"}, follow_redirects=False)
     assert r.status_code == 200
     assert r.json()["href"] is None
 

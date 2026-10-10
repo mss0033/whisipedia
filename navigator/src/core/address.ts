@@ -41,9 +41,10 @@ export function isBuiltinHost(host: string): host is BuiltinHost {
 
 /** Friendly host names accepted in the location bar. */
 export const HOST_ALIASES: Readonly<Record<string, string>> = {
-  'wikipedia.en': 'wikipedia-en',
-  wikipedia: 'wikipedia-en',
-  wiki: 'wikipedia-en',
+  'wikipedia.en': 'wikipedia-en-zim',
+  'wikipedia-en': 'wikipedia-en-zim',
+  wikipedia: 'wikipedia-en-zim',
+  wiki: 'wikipedia-en-zim',
   'wiktionary.en': 'wiktionary-en',
   wiktionary: 'wiktionary-en',
   maps: 'osm-planet',

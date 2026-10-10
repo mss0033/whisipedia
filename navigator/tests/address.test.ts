@@ -24,15 +24,15 @@ describe('parseAddress / formatAddress', () => {
   it('accepts doc_id form, aliases, case and trailing slashes', () => {
     expect(normalizeAddress('wsp:rfc/9110')).toBe('wsp://rfc/9110');
     expect(normalizeAddress('WSP://Wikipedia.en/Alan_Turing/')).toBe(
-      'wsp://wikipedia-en/Alan_Turing',
+      'wsp://wikipedia-en-zim/Alan_Turing',
     );
     expect(normalizeAddress('wsp://')).toBe('wsp://home');
     expect(normalizeAddress('wsp://maps/relation/1')).toBe('wsp://osm-planet/relation/1');
   });
 
   it('keeps native ids with slashes and encodes only what breaks parsing', () => {
-    const a = makeAddress('wikipedia-en', 'AC/DC? 100%');
-    expect(a).toBe('wsp://wikipedia-en/AC/DC%3F%20100%25');
+    const a = makeAddress('wikipedia-en-zim', 'AC/DC? 100%');
+    expect(a).toBe('wsp://wikipedia-en-zim/AC/DC%3F%20100%25');
     expect(parseAddress(a)?.path).toBe('AC/DC? 100%');
   });
 

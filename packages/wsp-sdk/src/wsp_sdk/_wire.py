@@ -35,8 +35,8 @@ def _p(**kwargs: object) -> Params:
 
 
 def doc_path(doc_id: str) -> str:
-    # Keep ':' and '/' (native ids contain slashes); escape '?', '#', '%', spaces and the rest.
-    return "/v1/documents/" + quote(doc_id, safe="/:")
+    # The doc id is ONE path segment: '/' becomes %2F (same bytes as JavaScript's encodeURIComponent).
+    return "/v1/documents/" + quote(doc_id, safe="!'()*")
 
 
 def health() -> Req:
@@ -63,9 +63,11 @@ def history(doc_id: str, cursor: str | None, limit: int) -> Req:
     return Req("GET", doc_path(doc_id) + "/history", _p(cursor=cursor, limit=limit))
 
 
-def search(q: str, sources: Sequence[str] | None, limit: int, offset: int) -> Req:
+def search(q: str, sources: Sequence[str] | None, limit: int, offset: int, kind: str | None = None) -> Req:
     return Req(
-        "GET", "/v1/search", _p(q=q, sources=list(sources) if sources else None, limit=limit, offset=offset)
+        "GET",
+        "/v1/search",
+        _p(q=q, sources=list(sources) if sources else None, kind=kind, limit=limit, offset=offset),
     )
 
 
@@ -75,6 +77,26 @@ def suggest(q: str, limit: int) -> Req:
 
 def changes(since: str | None, limit: int) -> Req:
     return Req("GET", "/v1/changes", _p(since=since, limit=limit))
+
+
+def recent_changes(limit: int, source: str | None) -> Req:
+    return Req("GET", "/v1/changes/recent", _p(limit=limit, source=source))
+
+
+def portal() -> Req:
+    return Req("GET", "/v1/portal")
+
+
+def directory(path: str) -> Req:
+    return Req("GET", "/v1/directory", _p(path=path))
+
+
+def random(source: str | None, seed: int | None) -> Req:
+    return Req("GET", "/v1/random", _p(source=source, seed=seed))
+
+
+def report_gap(href: str, from_doc_id: str | None) -> Req:
+    return Req("POST", "/v1/gaps", json={"href": href, "from_doc_id": from_doc_id})
 
 
 def changes_stream(since: str | None, max_seconds: float | None) -> Req:
