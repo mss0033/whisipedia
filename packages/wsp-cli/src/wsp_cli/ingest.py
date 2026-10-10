@@ -21,6 +21,24 @@ ever deleted; files that fail verification stay where they are. Kiwix multi-book
 selector) are one generation across all their version folders, named after the newest version.
 ``_incoming/gutenberg/mirror/`` (an rsync tree) is only ingested with ``--source gutenberg
 --allow-mirror`` while no rsync process runs, by copy so the mirror stays usable for the next rsync.
+
+**arXiv PDF mirror** (``_incoming/arxiv/<snapshot>/{pdf/<archive>/<yymm>/*.pdf,manifests/<chunk>.jsonl}``,
+written by ``tools/arxiv_pull.py``; millions of files, still growing while the pull runs). It is not
+in ``targets.json``; :func:`plan_arxiv` reads it directly. The incremental model:
+
+* the unit is a **chunk** (one archive-month, ``acc-phys-9411`` or ``arxiv-2301``) and each chunk
+  becomes its own sealed **part generation** ``<snapshot>.pdf.<chunk>``; the snapshot's content is
+  the union of its parts, exactly as its manifest is the union of the chunk manifests;
+* a chunk is ready only when the pull recorded it as finished in ``done-<snapshot>.txt`` in its
+  local state directory (``$WSP_ARXIV_STATE_DIR``, else ``$XDG_STATE_HOME/whisipedia/arxiv``, else
+  ``~/.local/state/whisipedia/arxiv``). Chunks still downloading are never touched, so ingest can
+  run while the pull continues; without a done file, a chunk is ready when every manifest entry
+  exists with its size and no ``.aria2`` control file;
+* each file is adopted by **rename** after checking the manifest's MD5 and computing our
+  SHA-256/BLAKE3 (``FileVault.adopt_many``: hashing on threads, batched staging record); the chunk
+  manifest is kept as ``upstream/manifests/<chunk>.jsonl``; then the part is sealed. Parts are never
+  promoted (``CURRENT.txt`` names the metadata generation that the indexer reads);
+* resumable at any point: sealed parts are skipped, staged files are re-hashed and recorded.
 """
 
 from __future__ import annotations
@@ -44,6 +62,7 @@ from wsp_vault.atomic import IntegrityError
 from wsp_vault.docs import write_library_docs
 from wsp_vault.vault import FileVault, VaultError
 
+ARXIV_SOURCE = "arxiv"
 PLANS_DIR = "_plans"
 TARGETS_FILE = "targets.json"
 CONTROL_SUFFIX = ".aria2"
@@ -229,6 +248,8 @@ class Ingestor:
         now: Callable[[], float] = time.time,
         rsync_check: Callable[[], bool] = rsync_running,
         user_agent: str = "Whisipedia ingest",
+        arxiv_state_dir: Path | None = None,
+        hash_workers: int = 4,
     ) -> None:
         self.vault = vault
         self.specs = {s.id: s for s in specs}
@@ -239,6 +260,8 @@ class Ingestor:
         self.rsync_check = rsync_check
         self.user_agent = user_agent
         self.incoming = vault.root / "_incoming"
+        self.arxiv_state_dir = arxiv_state_dir if arxiv_state_dir is not None else default_arxiv_state_dir()
+        self.hash_workers = hash_workers
 
     def _say(self, text: str) -> None:
         if self.out is not None:
@@ -250,10 +273,11 @@ class Ingestor:
     def plan(self, source_id: str | None = None) -> IngestReport:
         report = IngestReport(dry_run=True)
         targets_path = self.incoming / PLANS_DIR / TARGETS_FILE
-        if not targets_path.is_file():
+        targets: list[Target] = []
+        if targets_path.is_file():
+            targets = [t for t in load_targets(targets_path) if source_id in (None, t.source_id)]
+        else:
             report.notes.append(f"no download plan at {targets_path}")
-            return report
-        targets = [t for t in load_targets(targets_path) if source_id in (None, t.source_id)]
         groups: dict[tuple[str, str], list[Target]] = {}
         for t in targets:
             spec = self.specs.get(t.source_id)
@@ -267,10 +291,15 @@ class Ingestor:
                 if source_id not in (None, src.name):
                     continue
                 for ver in sorted(p for p in src.iterdir() if p.is_dir()):
-                    if (src.name, ver.name) not in planned_dirs and not (
-                        src.name == MIRROR_SOURCE and ver.name == MIRROR_DIR
+                    if (
+                        (src.name, ver.name) not in planned_dirs
+                        and not (src.name == MIRROR_SOURCE and ver.name == MIRROR_DIR)
+                        and src.name != ARXIV_SOURCE
                     ):
                         report.notes.append(f"{src.name}/{ver.name}: folder has no entries in targets.json")
+        if source_id in (None, ARXIV_SOURCE) and ARXIV_SOURCE in self.specs:
+            arxiv_root = self.incoming / ARXIV_SOURCE
+            report.versions.extend(plan_arxiv(self.vault, arxiv_root, self.arxiv_state_dir))
         return report
 
     def _plan_group(self, sid: str, version: str, group: list[Target]) -> VersionPlan:
@@ -386,6 +415,10 @@ class Ingestor:
         changed = False
         for vp in report.versions:
             if vp.status is VersionStatus.READY:
+                if isinstance(vp, ArxivSnapshotPlan):
+                    if not dry_run:
+                        changed |= self._ingest_arxiv(vp)
+                    continue
                 self.resolve_checksums(vp)
                 if not dry_run:
                     changed |= self._ingest(vp)
@@ -425,6 +458,42 @@ class Ingestor:
                 },
             )
         return True
+
+    def _ingest_arxiv(self, vp: ArxivSnapshotPlan) -> bool:
+        """Seal every ready chunk of an arXiv snapshot as its own part generation."""
+        sid = vp.source_id
+        sealed = 0
+        for chunk in vp.chunks:
+            if chunk.state is not ChunkState.READY:
+                continue
+            gid = chunk.generation_id
+            started = time.monotonic()
+            manifest = vp.snapshot_dir / "manifests" / f"{chunk.name}.jsonl"
+            try:
+                items = list(chunk.items(vp.snapshot_dir))
+                self.vault.stage(sid, gid)
+                n = self.vault.adopt_many(sid, gid, items, workers=self.hash_workers)
+                self.vault.adopt(sid, gid, manifest, f"upstream/manifests/{manifest.name}")
+                self.vault.seal(sid, gid)
+            except (IntegrityError, VaultError, OSError, ValueError) as exc:
+                chunk.state = ChunkState.FAILED
+                vp.status, vp.reason = VersionStatus.FAILED, f"{chunk.name}: {type(exc).__name__}: {exc}"
+                self._say(f"  {sid}/{gid}: FAILED {vp.reason} (files left in place)")
+                break
+            chunk.state = ChunkState.SEALED
+            sealed += 1
+            self._say(f"  {sid}/{gid}: {n} files verified and sealed ({time.monotonic() - started:.1f}s)")
+            if self.vault.ledger is not None:
+                self.vault.ledger.append(
+                    "ingest.adopted",
+                    f"{sid}/{gid}",
+                    {"incoming_versions": [vp.snapshot], "chunk": chunk.name, "files": n, "promoted": False},
+                )
+        failed = vp.status is VersionStatus.FAILED
+        vp.refresh()
+        if not failed:
+            vp.status = VersionStatus.INGESTED
+        return sealed > 0
 
     def _maybe_promote(self, gen: Generation) -> bool:
         current = self.vault.current(gen.source_id)
@@ -476,6 +545,149 @@ class Ingestor:
         vp.promoted = self._maybe_promote(gen)
         write_library_docs(self.vault, list(self.specs.values()))
         return vp
+
+
+# --- arXiv PDF mirror ------------------------------------------------------------------------------
+
+
+def default_arxiv_state_dir() -> Path:
+    """Where ``tools/arxiv_pull.py`` records finished chunks (local disk, never the NAS)."""
+    if env := os.environ.get("WSP_ARXIV_STATE_DIR"):
+        return Path(env)
+    base = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local" / "state")
+    return base / "whisipedia" / "arxiv"
+
+
+class ChunkState(StrEnum):
+    READY = "ready"
+    SEALED = "sealed"
+    IN_PROGRESS = "in-progress"
+    FAILED = "failed"
+
+
+@dataclass
+class ArxivChunk:
+    name: str  # <archive>-<yymm>
+    generation_id: str
+    state: ChunkState
+    files: int = 0
+    bytes: int = 0
+    manifest: Path | None = None  # in _incoming, or already staged after an interrupted run
+
+    def items(self, snapshot_dir: Path) -> Iterator[tuple[Path, str, Sequence[Checksum]]]:
+        """``(incoming path, relpath, [md5])`` for every manifest entry."""
+        if self.manifest is None:
+            return
+        for path, _size, md5 in read_chunk_manifest(self.manifest):
+            yield snapshot_dir / path, f"upstream/{path}", (Checksum("md5", md5),)
+
+
+def read_chunk_manifest(path: Path) -> list[tuple[str, int, str]]:
+    """``(path, size, md5)`` of a chunk manifest; paths must stay under ``pdf/``."""
+    out: list[tuple[str, int, str]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        item = cast(Mapping[str, Any], json.loads(line))
+        rel = str(item["path"])
+        if not rel.startswith("pdf/") or ".." in rel.split("/"):
+            raise ValueError(f"{path.name}: unsafe path {rel!r}")
+        out.append((rel, int(item["size"]), str(item["md5"]).lower()))
+    return out
+
+
+_CHUNK_FILE_STATE = {
+    ChunkState.SEALED: FileState.STAGED,
+    ChunkState.READY: FileState.COMPLETE,
+    ChunkState.IN_PROGRESS: FileState.DOWNLOADING,
+    ChunkState.FAILED: FileState.COMPLETE,
+}
+
+
+@dataclass
+class ArxivSnapshotPlan(VersionPlan):
+    """One arXiv snapshot folder. Its rows ("files") are chunks; each becomes a part generation."""
+
+    snapshot_dir: Path = field(default_factory=Path)
+    snapshot: str = ""
+    chunks: list[ArxivChunk] = field(default_factory=list[ArxivChunk])
+
+    def refresh(self) -> None:
+        self.files = [
+            FilePlan(
+                Target(self.source_id, self.snapshot, c.name, (), "arxiv-pull", None, c.bytes or None, {}),
+                self.snapshot_dir / "manifests" / f"{c.name}.jsonl",
+                _CHUNK_FILE_STATE[c.state],
+                (Checksum("md5", "per-file"),),  # every PDF is checked against the manifest's MD5
+            )
+            for c in self.chunks
+        ]
+        count = {s: sum(c.state is s for c in self.chunks) for s in ChunkState}
+        ready = [c for c in self.chunks if c.state is ChunkState.READY]
+        self.reason = (
+            f"chunks: {count[ChunkState.SEALED]} sealed, {len(ready)} ready "
+            f"({sum(c.files for c in ready):,} PDFs, {sum(c.bytes for c in ready) / 1e9:.1f} GB), "
+            f"{count[ChunkState.IN_PROGRESS]} in progress, {count[ChunkState.FAILED]} failed"
+        )
+        if ready:
+            self.status = VersionStatus.READY
+        elif count[ChunkState.FAILED]:
+            self.status = VersionStatus.FAILED
+        elif self.chunks and not count[ChunkState.IN_PROGRESS]:
+            self.status = VersionStatus.SEALED
+        else:
+            self.status = VersionStatus.INCOMPLETE
+
+
+def _chunk_complete_on_disk(snapshot_dir: Path, manifest: Path) -> bool:
+    """Readiness without pull state: every entry present with its size, no aria2 control file."""
+    for rel, size, _md5 in read_chunk_manifest(manifest):
+        path = snapshot_dir / rel
+        try:
+            if path.stat().st_size != size or path.with_name(path.name + CONTROL_SUFFIX).exists():
+                return False
+        except FileNotFoundError:
+            return False
+    return True
+
+
+def plan_arxiv(vault: FileVault, root: Path, state_dir: Path) -> list[ArxivSnapshotPlan]:
+    """Read-only plan of every arXiv snapshot under ``_incoming/arxiv`` (see the module docstring)."""
+    plans: list[ArxivSnapshotPlan] = []
+    if not root.is_dir():
+        return plans
+    parts = [g.generation_id for g in vault.generations(ARXIV_SOURCE)]
+    for snap in sorted(p for p in root.iterdir() if p.is_dir()):
+        manifests = snap / "manifests"
+        done_file = state_dir / f"done-{snap.name}.txt"
+        done = set(done_file.read_text(encoding="utf-8").split()) if done_file.is_file() else None
+        prefix = f"{snap.name}.pdf."
+        names = {p.stem for p in manifests.glob("*.jsonl")} if manifests.is_dir() else set[str]()
+        names |= {g.removeprefix(prefix) for g in parts if g.startswith(prefix)}
+        vp = ArxivSnapshotPlan(ARXIV_SOURCE, snap.name, (snap.name,), snapshot_dir=snap, snapshot=snap.name)
+        for name in sorted(names):
+            gid = prefix + name
+            manifest = manifests / f"{name}.jsonl"
+            staged = vault.staging_path(ARXIV_SOURCE, gid) / "upstream" / "manifests" / f"{name}.jsonl"
+            if (vault.library_path(ARXIV_SOURCE, gid) / "MANIFEST.json").is_file():
+                vp.chunks.append(ArxivChunk(name, gid, ChunkState.SEALED))
+            elif staged.is_file():  # interrupted after the manifest was adopted: finish it
+                entries = read_chunk_manifest(staged)
+                size = sum(e[1] for e in entries)
+                vp.chunks.append(ArxivChunk(name, gid, ChunkState.READY, len(entries), size, staged))
+            elif not manifest.is_file():
+                vp.chunks.append(ArxivChunk(name, gid, ChunkState.IN_PROGRESS))
+            elif (name in done) if done is not None else _chunk_complete_on_disk(snap, manifest):
+                entries = read_chunk_manifest(manifest)
+                size = sum(e[1] for e in entries)
+                vp.chunks.append(ArxivChunk(name, gid, ChunkState.READY, len(entries), size, manifest))
+            else:
+                vp.chunks.append(ArxivChunk(name, gid, ChunkState.IN_PROGRESS))
+        vp.refresh()
+        if done is None:
+            vp.reason += "; no pull state file, files checked on disk"
+        plans.append(vp)
+    return plans
 
 
 def _walk_files(root: Path) -> Iterator[Path]:
