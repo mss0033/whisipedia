@@ -98,6 +98,31 @@ class SqliteChangeFeed:
             row = self._db.execute("SELECT COALESCE(MAX(seq), 0) FROM changes").fetchone()
         return self._cursor(int(row[0]))
 
+    def tail(
+        self, limit: int, *, sources: Sequence[str] | None = None, max_scan: int = 200_000
+    ) -> tuple[Sequence[ChangeRecord], str]:
+        """The newest ``limit`` changes, newest first, plus the head cursor (no full replay).
+
+        With ``sources`` only changes of those sources are returned; at most ``max_scan`` rows are
+        examined so a rare source cannot turn this into a full scan.
+        """
+        prefixes = tuple(f"wsp:{s}/" for s in sources) if sources else None
+        out: list[ChangeRecord] = []
+        with self._lock:
+            top = int(self._db.execute("SELECT COALESCE(MAX(seq), 0) FROM changes").fetchone()[0])
+            rows = self._db.execute(
+                "SELECT seq, doc_id, kind, generation_id, old_hash, new_hash, renamed_from "
+                "FROM changes ORDER BY seq DESC LIMIT ?",
+                (max_scan if prefixes else limit,),
+            )
+            for r in rows:
+                if prefixes is not None and not str(r[1]).startswith(prefixes):
+                    continue
+                out.append(_record(r))
+                if len(out) >= limit:
+                    break
+        return out, self._cursor(top)
+
     def since(self, cursor: str | None, *, limit: int = 1000) -> tuple[Sequence[ChangeRecord], str]:
         if limit < 1:
             raise ValueError("limit must be positive")
@@ -112,16 +137,17 @@ class SqliteChangeFeed:
                 "FROM changes WHERE seq > ? ORDER BY seq LIMIT ?",
                 (after, limit),
             ).fetchall()
-        out = [
-            ChangeRecord(
-                doc_id=DocId(r[1]),
-                kind=ChangeKind(r[2]),
-                generation_id=r[3],
-                old_hash=r[4],
-                new_hash=r[5],
-                renamed_from=None if r[6] is None else DocId(r[6]),
-            )
-            for r in rows
-        ]
+        out = [_record(r) for r in rows]
         last = int(rows[-1][0]) if rows else after
         return out, self._cursor(last)
+
+
+def _record(r: Sequence[object]) -> ChangeRecord:
+    return ChangeRecord(
+        doc_id=DocId(str(r[1])),
+        kind=ChangeKind(str(r[2])),
+        generation_id=str(r[3]),
+        old_hash=None if r[4] is None else str(r[4]),
+        new_hash=None if r[5] is None else str(r[5]),
+        renamed_from=None if r[6] is None else DocId(str(r[6])),
+    )

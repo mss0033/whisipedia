@@ -332,3 +332,12 @@ class Gap:
     at: datetime
     href: str  # the link as it appeared, or a wsp:// address that did not resolve
     from_doc_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class DayEvent:
+    """An "On this day" entry for the start page (PLAN §10.2), e.g. from a Wikipedia date page."""
+
+    year: int  # negative for BC
+    text: str
+    doc_id: DocId | None = None  # page the entry comes from (or is about)

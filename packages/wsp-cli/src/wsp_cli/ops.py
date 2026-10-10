@@ -120,6 +120,24 @@ def cmd_index_build(args: argparse.Namespace, out: TextIO) -> int:
     return 0
 
 
+def cmd_index_catalog(args: argparse.Namespace, out: TextIO) -> int:
+    """Rebuild only the portal/directory/random catalog of already indexed sources."""
+    from wsp_index.refinery import current_generation
+
+    lay, cfg, specs = _context(args)
+    built = 0
+    with open_indexer(cfg, lay, specs, out) as ix:
+        for spec in specs:
+            if args.source and spec.id != args.source:
+                continue
+            gen = current_generation(ix.refinery, spec.id)
+            if gen is None:
+                continue
+            built += ix.build_catalog(spec, gen) is not None
+    out.write(f"catalog: {built} source(s) rebuilt\n")
+    return 0
+
+
 # --- warden ----------------------------------------------------------------------------------------------
 
 

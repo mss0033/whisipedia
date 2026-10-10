@@ -41,7 +41,7 @@ from wsp_api.testing.fakes import (
 )
 from wsp_core.config import load_config
 from wsp_core.model import SourceSpec, SourceStatus
-from wsp_core.ports import Fetcher, Signer, SourceAdapter
+from wsp_core.ports import Catalog, ChangeFeed, Fetcher, Signer, SourceAdapter
 from wsp_core.registry import load_registry
 
 if TYPE_CHECKING:  # heavy imports stay lazy so `wsp search --url ...` starts fast
@@ -348,7 +348,6 @@ def build_services(cfg: Mapping[str, Any], lay: Layout) -> Services:
     """Build the API's ports from config. Nothing here may open a network connection (PLAN §10.5)."""
     specs = tuple(load_sources(cfg, lay))
     if real_backends_available(cfg):
-        from wsp_api.catalog import FeedCatalog
         from wsp_api.gaps import JsonlGapLog
         from wsp_api.zim import ZimAssetStore
 
@@ -363,7 +362,7 @@ def build_services(cfg: Mapping[str, Any], lay: Layout) -> Services:
             ledger=build_ledger(cfg, signer),
             sources=effective_sources([s for s in specs if s.status is not SourceStatus.EXCLUDED], cfg),
             generator=None,  # TODO(integration): wsp_oracle.LocalGenerator (loopback only) when configured
-            catalog=FeedCatalog(changes),  # TODO(integration): a Refinery-backed catalog with categories
+            catalog=build_catalog(cfg, specs, changes),
             assets=ZimAssetStore(vault),  # original HTML and images from sealed ZIMs (read-only)
             gaps=JsonlGapLog(paths(cfg).gaps_log),  # local disk next to the index, never the vault
         )
@@ -380,6 +379,20 @@ def build_services(cfg: Mapping[str, Any], lay: Layout) -> Services:
         ledger=ledger,
         sources=effective_sources(specs, cfg) or SAMPLE_SOURCES,  # sample specs outside a checkout
         generator=generator,
+    )
+
+
+def build_catalog(cfg: Mapping[str, Any], specs: Sequence[SourceSpec], changes: ChangeFeed) -> Catalog:
+    """The Refinery-backed catalog: data precomputed by ``wsp index build`` under ``<index>/catalog``."""
+    from wsp_index.catalog import CATALOG_DIR, RefineryCatalog, is_featured_source
+
+    p = paths(cfg)
+    return RefineryCatalog(
+        p.refinery,
+        p.require_index() / CATALOG_DIR,
+        changes,
+        sources=[s.id for s in specs],
+        featured_sources=[s.id for s in specs if is_featured_source(s)],
     )
 
 

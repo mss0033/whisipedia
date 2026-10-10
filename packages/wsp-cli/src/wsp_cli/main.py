@@ -245,6 +245,13 @@ def build_parser() -> argparse.ArgumentParser:
         ix_sub,
     )
     s.add_argument("--source", default=None, help="only this source id")
+    s = add(
+        "catalog",
+        ops.cmd_index_catalog,
+        "Rebuild the portal/directory/random catalog from the Refinery (local disk).",
+        ix_sub,
+    )
+    s.add_argument("--source", default=None, help="only this source id")
 
     s = add(
         "scrub", ops.cmd_scrub, "Re-hash sealed files that are due and run the repair ladder on findings."
