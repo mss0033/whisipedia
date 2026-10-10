@@ -1,0 +1,248 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom"
+      xmlns:dc="http://purl.org/dc/terms/"
+      xmlns:opds="https://specs.opds.io/opds-1.2"
+      xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/">
+  <id>9ddaa7d8-e8ca-1a9b-a015-2a488745f04e</id>
+
+  <link rel="self"
+        href="/catalog/v2/entries?name=wikipedia_en_all&amp;count=50"
+        type="application/atom+xml;profile=opds-catalog;kind=acquisition"/>
+  <link rel="start"
+        href="/catalog/v2/root.xml"
+        type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
+  <link rel="up"
+        href="/catalog/v2/root.xml"
+        type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
+
+  <title>Filtered Entries (name=wikipedia_en_all&amp;count=50)</title>
+  <updated>2026-10-09T20:22:44Z</updated>
+  <totalResults>9</totalResults>
+  <startIndex>0</startIndex>
+  <itemsPerPage>9</itemsPerPage>
+  <entry>
+    <id>urn:uuid:c22094d0-6ad1-6360-36b7-dab953595143</id>
+    <title>Wikipedia</title>
+    <updated>2026-06-17T00:00:00Z</updated>
+    <summary>The free encyclopedia</summary>
+    <language>eng</language>
+    <name>wikipedia_en_all</name>
+    <flavour>nopic</flavour>
+    <category>wikipedia</category>
+    <tags>wikipedia;_category:wikipedia;_pictures:no;_videos:no;_details:yes;_ftindex:yes</tags>
+    <articleCount>19191219</articleCount>
+    <mediaCount>515775</mediaCount>
+    <link rel="http://opds-spec.org/image/thumbnail"
+          href="/catalog/v2/illustration/c22094d0-6ad1-6360-36b7-dab953595143/?size=48"
+          type="image/png;width=48;height=48;scale=1"/>
+    <link type="text/html" href="https://browse.library.kiwix.org/content/wikipedia_en_all_nopic_2026-06" />
+    <author>
+      <name>Wikipedia</name>
+    </author>
+    <publisher>
+      <name>openZIM</name>
+    </publisher>
+    <dc:issued>2026-06-17T00:00:00Z</dc:issued>
+    <link rel="http://opds-spec.org/acquisition/open-access" type="application/x-zim" href="https://lb.download.kiwix.org/zim/wikipedia/wikipedia_en_all_nopic_2026-06.zim.meta4" length="52690707456" />
+  </entry>
+  <entry>
+    <id>urn:uuid:50e94998-c1ec-b5e7-ec34-499f1d907c30</id>
+    <title>Wikipedia</title>
+    <updated>2026-08-25T00:00:00Z</updated>
+    <summary>The free encyclopedia</summary>
+    <language>eng</language>
+    <name>wikipedia_en_all</name>
+    <flavour>maxi</flavour>
+    <category>wikipedia</category>
+    <tags>wikipedia;_category:wikipedia;_pictures:yes;_videos:no;_details:yes;_ftindex:yes</tags>
+    <articleCount>21673012</articleCount>
+    <mediaCount>8469385</mediaCount>
+    <link rel="http://opds-spec.org/image/thumbnail"
+          href="/catalog/v2/illustration/50e94998-c1ec-b5e7-ec34-499f1d907c30/?size=48"
+          type="image/png;width=48;height=48;scale=1"/>
+    <link type="text/html" href="https://browse.library.kiwix.org/content/wikipedia_en_all_maxi_2026-08" />
+    <author>
+      <name>Wikipedia</name>
+    </author>
+    <publisher>
+      <name>openZIM</name>
+    </publisher>
+    <dc:issued>2026-08-25T00:00:00Z</dc:issued>
+    <link rel="http://opds-spec.org/acquisition/open-access" type="application/x-zim" href="https://lb.download.kiwix.org/zim/wikipedia/wikipedia_en_all_maxi_2026-08.zim.meta4" length="127418088448" />
+  </entry>
+  <entry>
+    <id>urn:uuid:299eb9dc-88e5-6494-1a4b-132d4e897f3d</id>
+    <title>Wikipedia</title>
+    <updated>2026-09-09T00:00:00Z</updated>
+    <summary>The free encyclopedia</summary>
+    <language>eng</language>
+    <name>wikipedia_en_all</name>
+    <flavour>mini</flavour>
+    <category>wikipedia</category>
+    <tags>wikipedia;_category:wikipedia;_pictures:no;_videos:no;_details:no;_ftindex:yes</tags>
+    <articleCount>18095848</articleCount>
+    <mediaCount>33992</mediaCount>
+    <link rel="http://opds-spec.org/image/thumbnail"
+          href="/catalog/v2/illustration/299eb9dc-88e5-6494-1a4b-132d4e897f3d/?size=48"
+          type="image/png;width=48;height=48;scale=1"/>
+    <link type="text/html" href="https://browse.library.kiwix.org/content/wikipedia_en_all_mini_2026-09" />
+    <author>
+      <name>Wikipedia</name>
+    </author>
+    <publisher>
+      <name>openZIM</name>
+    </publisher>
+    <dc:issued>2026-09-09T00:00:00Z</dc:issued>
+    <link rel="http://opds-spec.org/acquisition/open-access" type="application/x-zim" href="https://lb.download.kiwix.org/zim/wikipedia/wikipedia_en_all_mini_2026-09.zim.meta4" length="14386799616" />
+  </entry>
+  <entry>
+    <id>urn:uuid:5911a18d-2a57-329f-8bf8-435e7ed0cc08</id>
+    <title>MDWiki Medical Encyclopedia</title>
+    <updated>2025-11-14T00:00:00Z</updated>
+    <summary>Healthcare articles curated by WikiProjectMed</summary>
+    <language>eng</language>
+    <name>mdwiki_en_all</name>
+    <flavour></flavour>
+    <category></category>
+    <tags>medical;mdwiki;_details:yes;_ftindex:yes;_pictures:yes;_videos:yes</tags>
+    <articleCount>363797</articleCount>
+    <mediaCount>112412</mediaCount>
+    <link rel="http://opds-spec.org/image/thumbnail"
+          href="/catalog/v2/illustration/5911a18d-2a57-329f-8bf8-435e7ed0cc08/?size=48"
+          type="image/png;width=48;height=48;scale=1"/>
+    <link type="text/html" href="https://browse.library.kiwix.org/content/mdwiki_en_all_2025-11" />
+    <author>
+      <name>Mdwiki</name>
+    </author>
+    <publisher>
+      <name>WikiProjectMed</name>
+    </publisher>
+    <dc:issued>2025-11-14T00:00:00Z</dc:issued>
+    <link rel="http://opds-spec.org/acquisition/open-access" type="application/x-zim" href="https://lb.download.kiwix.org/zim/other/mdwiki_en_all_2025-11.zim.meta4" length="10752257024" />
+  </entry>
+  <entry>
+    <id>urn:uuid:00be15d4-7231-6bf3-d02e-968b100d2cca</id>
+    <title>MDWiki Medical Encyclopedia</title>
+    <updated>2025-11-12T00:00:00Z</updated>
+    <summary>Healthcare articles curated by WikiProjectMed</summary>
+    <language>eng</language>
+    <name>mdwiki_en_all</name>
+    <flavour>maxi</flavour>
+    <category></category>
+    <tags>medical;mdwiki;_pictures:yes;_videos:no;_details:yes;_ftindex:yes</tags>
+    <articleCount>363797</articleCount>
+    <mediaCount>109499</mediaCount>
+    <link rel="http://opds-spec.org/image/thumbnail"
+          href="/catalog/v2/illustration/00be15d4-7231-6bf3-d02e-968b100d2cca/?size=48"
+          type="image/png;width=48;height=48;scale=1"/>
+    <link type="text/html" href="https://browse.library.kiwix.org/content/mdwiki_en_all_maxi_2025-11" />
+    <author>
+      <name>Mdwiki</name>
+    </author>
+    <publisher>
+      <name>WikiProjectMed</name>
+    </publisher>
+    <dc:issued>2025-11-12T00:00:00Z</dc:issued>
+    <link rel="http://opds-spec.org/acquisition/open-access" type="application/x-zim" href="https://lb.download.kiwix.org/zim/other/mdwiki_en_all_maxi_2025-11.zim.meta4" length="2302838784" />
+  </entry>
+  <entry>
+    <id>urn:uuid:bff12bdb-1fac-6ab0-ed6c-9f5f030722b3</id>
+    <title>iFixit in English</title>
+    <updated>2025-12-21T00:00:00Z</updated>
+    <summary>iFixit is a global community of people helping each other repair things. Let&apos;s …</summary>
+    <language>eng</language>
+    <name>ifixit_en_all</name>
+    <flavour></flavour>
+    <category>iFixit</category>
+    <tags>_category:iFixit;iFixit;_pictures:yes;_videos:yes;_ftindex:no;_details:yes</tags>
+    <articleCount>103480</articleCount>
+    <mediaCount>575002</mediaCount>
+    <link rel="http://opds-spec.org/image/thumbnail"
+          href="/catalog/v2/illustration/bff12bdb-1fac-6ab0-ed6c-9f5f030722b3/?size=48"
+          type="image/png;width=48;height=48;scale=1"/>
+    <link type="text/html" href="https://browse.library.kiwix.org/content/ifixit_en_all_2025-12" />
+    <author>
+      <name>iFixit</name>
+    </author>
+    <publisher>
+      <name>openZIM</name>
+    </publisher>
+    <dc:issued>2025-12-21T00:00:00Z</dc:issued>
+    <link rel="http://opds-spec.org/acquisition/open-access" type="application/x-zim" href="https://lb.download.kiwix.org/zim/ifixit/ifixit_en_all_2025-12.zim.meta4" length="3570696192" />
+  </entry>
+  <entry>
+    <id>urn:uuid:9528fea1-132e-9621-e133-e8a6c200e8c7</id>
+    <title>スタック・オーバーフロー</title>
+    <updated>2026-02-04T00:00:00Z</updated>
+    <summary>熱狂的でプロフェッショナルなプログラマーのためのQ&amp;A</summary>
+    <language>eng,jpn</language>
+    <name>ja.stackoverflow.com_mul_all</name>
+    <flavour></flavour>
+    <category>stack_exchange</category>
+    <tags>stack_exchange;_category:stack_exchange;_details:no;_videos:no;_ftindex:no;_pictures:yes</tags>
+    <articleCount>46764</articleCount>
+    <mediaCount>266</mediaCount>
+    <link rel="http://opds-spec.org/image/thumbnail"
+          href="/catalog/v2/illustration/9528fea1-132e-9621-e133-e8a6c200e8c7/?size=48"
+          type="image/png;width=48;height=48;scale=1"/>
+    <link type="text/html" href="https://browse.library.kiwix.org/content/ja.stackoverflow.com_mul_all_2026-02" />
+    <author>
+      <name>Stack Exchange</name>
+    </author>
+    <publisher>
+      <name>openZIM</name>
+    </publisher>
+    <dc:issued>2026-02-04T00:00:00Z</dc:issued>
+    <link rel="http://opds-spec.org/acquisition/open-access" type="application/x-zim" href="https://lb.download.kiwix.org/zim/stack_exchange/ja.stackoverflow.com_mul_all_2026-02.zim.meta4" length="236789760" />
+  </entry>
+  <entry>
+    <id>urn:uuid:a9a8ce72-5bba-fa35-c450-31657b51b1f7</id>
+    <title>Stack Overflow на русском</title>
+    <updated>2026-08-06T00:00:00Z</updated>
+    <summary>Вопросы и ответы для программистов</summary>
+    <language>eng,rus</language>
+    <name>ru.stackoverflow.com_mul_all</name>
+    <flavour></flavour>
+    <category>stack_exchange</category>
+    <tags>stack_exchange;_details:no;_category:stack_exchange;_videos:no;_ftindex:yes;_pictures:yes</tags>
+    <articleCount>626075</articleCount>
+    <mediaCount>117547</mediaCount>
+    <link rel="http://opds-spec.org/image/thumbnail"
+          href="/catalog/v2/illustration/a9a8ce72-5bba-fa35-c450-31657b51b1f7/?size=48"
+          type="image/png;width=48;height=48;scale=1"/>
+    <link type="text/html" href="https://browse.library.kiwix.org/content/ru.stackoverflow.com_mul_all_2026-08" />
+    <author>
+      <name>Stack Exchange</name>
+    </author>
+    <publisher>
+      <name>openZIM</name>
+    </publisher>
+    <dc:issued>2026-08-06T00:00:00Z</dc:issued>
+    <link rel="http://opds-spec.org/acquisition/open-access" type="application/x-zim" href="https://lb.download.kiwix.org/zim/stack_exchange/ru.stackoverflow.com_mul_all_2026-08.zim.meta4" length="2694561792" />
+  </entry>
+  <entry>
+    <id>urn:uuid:6f86eb2f-b7d0-e2f2-5d68-3a801069b463</id>
+    <title>Русский язык</title>
+    <updated>2026-08-04T00:00:00Z</updated>
+    <summary>Cайт вопросов и ответов для лингвистов и энтузиастов русского языка</summary>
+    <language>eng,rus</language>
+    <name>rus.stackexchange.com_mul_all</name>
+    <flavour></flavour>
+    <category>stack_exchange</category>
+    <tags>_details:no;_category:stack_exchange;stack_exchange;_videos:no;_ftindex:yes;_pictures:yes</tags>
+    <articleCount>33883</articleCount>
+    <mediaCount>1615</mediaCount>
+    <link rel="http://opds-spec.org/image/thumbnail"
+          href="/catalog/v2/illustration/6f86eb2f-b7d0-e2f2-5d68-3a801069b463/?size=48"
+          type="image/png;width=48;height=48;scale=1"/>
+    <link type="text/html" href="https://browse.library.kiwix.org/content/rus.stackexchange.com_mul_all_2026-08" />
+    <author>
+      <name>Stack Exchange</name>
+    </author>
+    <publisher>
+      <name>openZIM</name>
+    </publisher>
+    <dc:issued>2026-08-04T00:00:00Z</dc:issued>
+    <link rel="http://opds-spec.org/acquisition/open-access" type="application/x-zim" href="https://lb.download.kiwix.org/zim/stack_exchange/rus.stackexchange.com_mul_all_2026-08.zim.meta4" length="127559680" />
+  </entry>
+</feed>
