@@ -1,0 +1,77 @@
+{
+ "jobs": {
+  "articlesmultistreamdump": {
+   "status": "done",
+   "updated": "2026-10-08 06:27:51",
+   "files": {
+    "enwiki-20261001-pages-articles-multistream1.xml-p1p41242.bz2": {
+     "size": 300361909,
+     "url": "/enwiki/20261001/enwiki-20261001-pages-articles-multistream1.xml-p1p41242.bz2",
+     "md5": "e6d315fb17b765eebac2e0db357e80f1",
+     "sha1": "353bf6ce69fb0ba5e47a5cc13464523e95edb9f7"
+    },
+    "enwiki-20261001-pages-articles-multistream-index1.txt-p1p41242.bz2": {
+     "size": 226427,
+     "url": "/enwiki/20261001/enwiki-20261001-pages-articles-multistream-index1.txt-p1p41242.bz2",
+     "md5": "00155cb6acf3189b1481a8fca056af26",
+     "sha1": "94bcea6e42467c3eae8ea42a9ad90a4f75b668fc"
+    },
+    "enwiki-20261001-pages-articles-multistream2.xml-p41243p151573.bz2": {
+     "size": 407421247,
+     "url": "/enwiki/20261001/enwiki-20261001-pages-articles-multistream2.xml-p41243p151573.bz2",
+     "md5": "5a7fc5263f9e30cc5a79f68870305ca5",
+     "sha1": "6b2a38013f200d7679ac5de6993c0457a2881016"
+    },
+    "enwiki-20261001-pages-articles-multistream-index2.txt-p41243p151573.bz2": {
+     "size": 652912,
+     "url": "/enwiki/20261001/enwiki-20261001-pages-articles-multistream-index2.txt-p41243p151573.bz2",
+     "md5": "49d37d71d0cfc5e8c395f857b7ea5353",
+     "sha1": "254dfa18fe8dd9fd346df683c6b9e67b534e4d23"
+    }
+   }
+  },
+  "articlesmultistreamdumprecombine": {
+   "status": "done",
+   "updated": "2026-10-08 06:34:45",
+   "files": {
+    "enwiki-20261001-pages-articles-multistream.xml.bz2": {
+     "size": 26917225724,
+     "url": "/enwiki/20261001/enwiki-20261001-pages-articles-multistream.xml.bz2",
+     "md5": "85ebcbc1f7a8b2503138c93b627150d5",
+     "sha1": "992b5ca87b3404894f013e59a43efbb8b1bc012b"
+    },
+    "enwiki-20261001-pages-articles-multistream-index.txt.bz2": {
+     "size": 285227194,
+     "url": "/enwiki/20261001/enwiki-20261001-pages-articles-multistream-index.txt.bz2",
+     "md5": "aed928790aa878d863154529640e4fe7",
+     "sha1": "c4c99005dabde563d018dc778dbd0a0ea60272be"
+    }
+   }
+  },
+  "metacurrentdump": {
+   "status": "done",
+   "updated": "2026-10-08 07:37:04",
+   "files": {
+    "enwiki-20261001-pages-meta-current1.xml-p1p41242.bz2": {
+     "size": 320223569,
+     "url": "/enwiki/20261001/enwiki-20261001-pages-meta-current1.xml-p1p41242.bz2",
+     "md5": "078c4ceaa47c63c691be913bead18b27",
+     "sha1": "01d2af2588f87f1783180b87302fef238327f004"
+    }
+   }
+  },
+  "xmlstubsdump": {
+   "status": "done",
+   "updated": "2026-10-08 01:27:49",
+   "files": {
+    "enwiki-20261001-stub-meta-history1.xml.gz": {
+     "size": 3839795924,
+     "url": "/enwiki/20261001/enwiki-20261001-stub-meta-history1.xml.gz",
+     "md5": "795669ab3429e3268c30cd9b3beee679",
+     "sha1": "12be55b2f8fa5e9ed5143285625ed284404614ca"
+    }
+   }
+  }
+ },
+ "version": "0.8"
+}

@@ -1,0 +1,25 @@
+[project]
+name = "wsp-adapters"
+version = "0.1.0"
+description = "Whisipedia source adapters (Kiwix OPDS, Wikimedia dumps) and snapshot diffing"
+requires-python = ">=3.12"
+dependencies = [
+  "wsp-core",
+  "libzim>=3.6",
+  "selectolax>=0.3.27",
+  "zstandard>=0.23",
+]
+
+[project.entry-points."whisipedia.adapters"]
+kiwix-opds = "wsp_adapters.kiwix:KiwixOpdsAdapter"
+wikimedia-dumps = "wsp_adapters.wikimedia:WikimediaDumpsAdapter"
+
+[tool.uv.sources]
+wsp-core = { workspace = true }
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/wsp_adapters"]
