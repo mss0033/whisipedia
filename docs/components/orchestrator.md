@@ -11,7 +11,7 @@ adapters, refinery and index plug in without changes here.
 |---|---|
 | `pipeline.py` | `ReleasePipeline`: DISCOVERED → … → PROMOTED, retries, quarantine, review holds |
 | `store.py` | SQLite (WAL) state on local disk: releases, schedule marks, alerts, source health, ledger outbox |
-| `jobs.py` | Persistent job queue: `discover`, `fetch_release`, `scrub_slice`, `drill`, `health_probe`, `prune`, `discovery_bots` |
+| `jobs.py` | Persistent job queue: `discover`, `fetch_release`, `scrub_slice`, `drill`, `health_probe`, `prune`, `discovery_bots`, `parity` |
 | `scheduler.py` | Cadences → jobs, catch-up, rolling scrub, retention-window alerts |
 | `durations.py` | ISO 8601 durations; calendar-anchored and interval cadences |
 | `policy.py` | Promotion sanity checks, auto-pause rules, candidate policy gate → `Proposal` |
@@ -19,6 +19,8 @@ adapters, refinery and index plug in without changes here.
 | `orchestrator.py` | `Wiring` (composition root input), `Orchestrator` (handlers, dispatch, limits, metrics) |
 | `daemon.py` | `run(config)` main loop, signals, `wsp-orchestrator` CLI |
 | `metrics.py`, `jsonlog.py` | Prometheus text file, JSON log lines |
+| `bots.py` | `Bot` protocol, `BotContext`, `BotResult` |
+| `curator/` | Bots (`KiwixWatcher`, `WikimediaRankingBot`, `RegistryHealthBot`, `AdapterSmokeBot`, `GapMiner`), `ProposalFiles`, `registry_edit` (overlay, registry text edits) |
 | `testing.py` | In-memory fakes of the ports, crash injector, harnesses, `demo_wiring` |
 
 ## Release pipeline
@@ -59,7 +61,8 @@ DISCOVERED → PLANNED → FETCHING → FETCHED → VERIFIED → SEALED → REFI
 |---|---|
 | `discover`, `prune` (per active source) | source cadence |
 | `health_probe` (per active source, also while paused) | `acquirer.health_probe_interval` (P1W) |
-| `discovery_bots` | global cycle |
+| `discovery_bots` (key = bot name) | the bot's `cadence` (`registry-health`, `adapter-contract`: P1W; the rest: global cycle) |
+| `parity` (`backfill`) | `orchestrator.parity_interval` (PT6H), and after every promotion; continues every `parity_continue` while work remains |
 | `drill` | `orchestrator.drill_interval` (P1M) |
 | `scrub_slice` | continuous: slice *i*/*n* due at `cycle_start + i·(scrub_cycle_days/n)` |
 
@@ -92,31 +95,69 @@ DISCOVERED → PLANNED → FETCHING → FETCHED → VERIFIED → SEALED → REFI
   `reject`. Proposals are stored (`proposals` table), logged as `policy.decision` ledger events and
   handed to `Wiring.proposal_sink`.
 
+## Curator automation (PLAN §5.3-5.5)
+
+| Bot | Network | Produces |
+|---|---|---|
+| `kiwix-opds` | yes | a `kiwix-title` candidate for every catalog title in `curator.kiwix_categories` that no registry selector covers (topic subsets of a held project are skipped) |
+| `wikimedia-ranking` | yes | a `new-variant` of `wikipedia-top10` when the top 10 Wikipedias by article count change (always reviewed: size unknown) |
+| `registry-health` | yes | after two failed weekly probes of every `access.endpoints` URL: an alert and a `registry-fix` proposal |
+| `adapter-contract` | yes | weekly live smoke per adapter in use (`discover` offers a sane release, `plan` accepts it): alerts only |
+| `gap-miner` | no | "seek a source for X" from `gaps.jsonl` (broken links by site/domain) and `queries.jsonl` (searches with no results, by query and word) |
+
+Every candidate goes through `Orchestrator.handle_candidates`: the policy gate decides, a candidate
+key is proposed **once** (whatever the owner decides later), `policy.decision` is logged, and
+`Wiring.proposal_recorder` writes one YAML file per proposal (`ProposalFiles`, default
+`<index.root>/../proposals/`). `AUTO_PROMOTE` is applied by `Wiring.promoter` to the git-ignored
+overlay `config/registry.local.yaml` (merged by `load_registry`, effective on the next daemon start);
+the committed registry changes only through `wsp proposals accept`, which edits
+`registry/sources.yaml` in the working tree for the owner to commit. `REJECT` is final.
+`/v1/proposals` and the `ops.proposals` block of `/v1/system` show them; the last summary of each bot
+is in the state DB (`meta bot:<name>`), its notes are handed to its next run (`BotContext.previous`).
+
+## Parity (PLAN §8.1)
+
+`Wiring.parity` runs one bounded slice of `wsp_vault.paritykeeper.ParityKeeper` over the sealed
+generations in scope (`vault.parity_scope = "all"` by default, or `"irreplaceable"`: flagged sources
+plus generations holding a last copy), oldest first, at most `vault.parity_bytes_per_run` per job and
+`vault.parity_bytes_per_sec`. Data is verified before it is encoded; damaged parity found by the
+scrub is quarantined and created again. A summary is stored as `meta parity:last` and logged as
+`parity.run`; generations that cannot get parity raise the `parity-skipped` alert.
+
 ## Retention (`retention.plan_retention`)
 
 GFS per source from registry `retention.gfs` (default last 3, monthly 12, yearly forever): keep the
 last N, the newest generation of each of the M most recent months *that have generations*, and the
 newest of each year. Never pruned: the newest sealed generation, the current generation, anything
 whose `holds_last_copy` is true, and anything not `SEALED`. Non-GFS policies (base + segments) are
-not pruned. Without a `Wiring.last_copy` oracle **and** a `Wiring.pruner`, the prune job only records
-a dry-run `retention.plan` ledger event. Property tests (hypothesis) check the invariants and
-idempotence.
+not pruned. Property tests (hypothesis) check the invariants and idempotence.
+
+**Last copy.** `discover` and `health_probe` store what upstream currently serves (state schema v3,
+`upstream_offers`). `Orchestrator.holds_last_copy` says a generation is the last copy unless upstream
+was seen serving its version within `orchestrator.offer_max_age` (P14D); with no observation it is
+kept. `Wiring.last_copy` overrides this. With a `Wiring.pruner`, planned generations are retired
+(`FileVault.prune` moves them to `pruned/`, never deletes; one `retention.pruned` event each);
+`orchestrator.prune_dry_run = true` (or no pruner) only records the `retention.plan` event, which
+lists the last copies it protected.
 
 ## Plugging in real components
 
 `config/default.toml` points `orchestrator.wiring` at `wsp_cli.wiring:build_wiring`, which builds the
 real components from config: registry sources, entry-point adapters, `HttpFetcher`/`Aria2Fetcher`,
 `FileVault` + `JsonlLedger`, the Refinery/Tantivy indexer hooks (`wsp_cli.indexer`), rolling scrub
-with the repair ladder, drills on the smallest sealed generation and `FileVault.prune`. Retention
-stays a dry run until a `last_copy` oracle is wired. Discovery bots and the proposal sink are not
-wired yet.
+with the repair ladder (parity findings are routed to the parity keeper), drills on the smallest
+sealed generation, `FileVault.prune`, the bots from `curator.bots`, proposal files, the overlay
+promoter, live gate budgets (`curator.domain_budget_tb` against sealed bytes per domain) and the
+parity backfill.
 
 `wsp_orchestrator.testing:demo_wiring` is a self-contained fake world for smoke tests.
 
 ## Operations
 
-* `wsp-orchestrator --config-dir config` (systemd user unit: `deploy/systemd/whisipedia-orchestrator.service`;
-  container sketch: `deploy/compose.yaml`, where only the orchestrator has a network).
+* `wsp-orchestrator --config-dir config`, installed as a systemd user unit by `wsp service install`
+  (`deploy/systemd/`, see [the runbook](../runbooks/install-services.md)); container sketch:
+  `deploy/compose.yaml`, where only the orchestrator has a network.
+* `wsp doctor` checks readiness; `wsp status`, `wsp parity status` and `/v1/system` show state.
 * SIGTERM/SIGINT: stop claiming, pipelines stop between steps, wait `shutdown_grace_seconds`;
   unfinished jobs return to the queue on next start.
 * Logs: JSON lines on stderr (`ts, level, logger, msg` + structured fields).

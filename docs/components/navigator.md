@@ -106,8 +106,10 @@ rewrites ZIM image references there, and the sanitizer drops anything else.
   If fonts are added, they must be open-licensed and ship with their license files.
 - Maps show only a coordinate locator box. The MapLibre viewer with local tiles
   is still to come, as are the PDF and EPUB readers.
-- The directory comes from registry domains and per-source categories; the
-  Wikidata / Library of Congress / LCC trees are still to come. "On this day" and
-  "Did you know" stay empty until a source for them is indexed.
+- The directory comes from registry domains and per-source categories (ZIM book or
+  language, else A-Z; `wsp_index.catalog.CategoryProvider`); the Wikidata / Library of
+  Congress / LCC trees are still to come. "On this day" comes from indexed Wikipedia
+  date pages; "Did you know" stays empty (not in the dumps or ZIMs). The System Monitor
+  page does not render the new `ops` block of `/v1/system` yet.
 - There is no Playwright suite. App flows are covered by jsdom tests, and real
   Chrome was checked by hand under the CSP.
