@@ -596,13 +596,13 @@ Estimates assume one developer with heavy agent assistance. Each phase ends with
 
 | ID | Decision | Recommendation |
 |---|---|---|
-| D1 | NAS OS and filesystem: ZFS, Btrfs, ext4? Does it support snapshots? | Turn on snapshots and monthly scrubs if available |
-| D2 | Second-copy location for T1 originals (≈ 10–20 TB) | Rotated external drives offsite, or a second NAS |
+| D1 | NAS OS and filesystem: ZFS, Btrfs, ext4? Does it support snapshots? | **Decided 2026-10-10: no snapshots for now.** Integrity relies on the application layer only: signed manifests, scrub, par2, write-once generations. |
+| D2 | Second-copy location for T1 originals (≈ 10–20 TB) | **Deferred 2026-10-10 (no resources yet). Known open risk:** losing the NAS loses the library. Revisit when budget allows; `vault.mirror_root` is ready to use. |
 | D3 | Languages beyond English | Top-10 Wikipedias (already planned); English for everything else at first |
-| D4 | arXiv PDFs via requester-pays S3 (egress about $0.09/GB, so roughly hundreds of USD for a full pull) | Approve metadata and abstracts now, decide on PDFs in Phase 4 |
-| D5 | Dedicated NVMe for hot indexes | 2–4 TB NVMe before Phase 3 |
+| D4 | arXiv PDFs | **Resolved 2026-10-10 at no cost:** pulled from the public `arxiv-dataset` GCS bucket (not requester-pays, MD5 per file, current through 2026-09) with `tools/arxiv_pull.py`. The S3 route would have cost ≈ $800 one-time plus ≈ $13/month. |
+| D5 | Dedicated NVMe for hot indexes | **Deferred 2026-10-10 (cost).** Indexes use the workstation disk (≈ 600 GB free); dense vectors only for priority corpora (§9.4). |
 | D6 | Where the daemons run: WSL workstation or NAS (Docker) | Acquirer and Warden on the NAS if it can run containers; Oracle and Navigator on the workstation (GPU) |
-| D7 | ISP data cap | Confirm before Phase 1 bulk pulls |
-| D8 | Commit identity and project license | GitHub `noreply` email. License: none / all rights reserved while private (decide before any publication). |
+| D7 | ISP data cap | **Decided 2026-10-09: no cap.** |
+| D8 | Commit identity and project license | **Decided 2026-10-10:** keep the existing commit identity (private, single-user repo). License: none / all rights reserved while private. |
 | D9 | Include video (TED, Khan Academy, CrashCourse ≈ 0.3–1 TB)? | Yes for Khan Academy; TED as T3 |
 | D10 | Update cycle: monthly or quarterly (§6.7) | Monthly. It gives a margin to recover a missed cycle before upstream retention expires. Quarterly is a single config change. |
