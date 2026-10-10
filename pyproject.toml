@@ -49,4 +49,5 @@ addopts = "-q --strict-markers"
 markers = [
   "network: test touches the network (excluded from offline CI)",
   "slow: long-running test",
+  "gpu: needs a CUDA GPU and local model weights (wsp-oracle[gpu]); skipped when unavailable",
 ]
