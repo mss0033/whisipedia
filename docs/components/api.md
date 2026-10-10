@@ -22,17 +22,34 @@ library. Each `TODO(integration)` comment in that function marks where a real co
 The fakes are meant to be reused by other packages' tests. `sample_services()` returns a fully wired
 `Services`.
 
+Three more read seams live in `wsp_api.seams` until they move to `wsp_core.ports` (TODO(port)). Each
+has a default, so `Services` works without wiring them:
+
+| Seam | Purpose | Default when `None` |
+|---|---|---|
+| `Catalog` | random pages, doc counts, newest changes, per-source categories | `wsp_api.catalog.FeedCatalog` (replays the change feed) |
+| `AssetStore` | original HTML and images inside sealed containers | `wsp_api.zim.ZimAssetStore` (libzim, over the vault) |
+| `GapLog` | "not in library" reports for the gap miner | none: `POST /v1/gaps` answers 501; `wsp_api.gaps.JsonlGapLog(<index root>/gaps.jsonl)` is the reference |
+
+In-memory versions are in `wsp_api.testing.browse`; `browse_services()` adds them, an HTML document with
+an image and a few categories to the sample library.
+
 ## HTTP endpoints (v1)
 
 | Method and path | Purpose |
 |---|---|
 | `GET /v1/health` | Liveness check, API version, source count |
 | `GET /v1/sources`, `/v1/sources/{id}`, `/v1/sources/{id}/generations` | Registry plus the vault's generations (snapshot handles) |
-| `GET /v1/documents/{doc_id}` (`?at=<generation>`), `/v1/documents/{doc_id}/history` | Documents and their version hashes |
-| `GET /v1/search?q=&sources=&limit=&offset=`, `GET /v1/suggest?q=` | Search and title autocomplete |
-| `GET /v1/changes?since=`, `GET /v1/changes/stream` (SSE) | Change feed |
-| `GET /v1/system` | System Monitor data: freshness, degraded generations, ledger tail and its integrity |
-| `POST /v1/summarize` | Cited summary as an NDJSON stream of `SummaryChunk`. Returns `501 not_configured` if no `Generator` is set |
+| `GET /v1/documents/{doc_id}` (`?at=<generation>`), `/v1/documents/{doc_id}/history` | Documents (text, original HTML when available, link table, vault location) and their versions |
+| `GET /v1/search?q=&sources=&kind=&limit=&offset=`, `GET /v1/suggest?q=` | Search (facets, code-point highlights, `navigate_to` for navigational queries) and title autocomplete |
+| `GET /v1/changes?since=`, `GET /v1/changes/stream` (SSE), `GET /v1/changes/recent` | Change feed; `recent` is newest first with the cursor to follow live |
+| `GET /v1/system` | System Monitor data: freshness and health, degraded generations, ledger tail and its integrity |
+| `POST /v1/summarize` | Cited summary as server-sent events (`token`, `citation`, `notice`, `done`, `error`). Returns `501 not_configured` if no `Generator` is set |
+| `GET /v1/portal` | Start page: featured page of the day, newest changes, a random page, every site |
+| `GET /v1/directory?path=` | Directory: Top › registry domain › site › category |
+| `GET /v1/random?source=&seed=` | A random page |
+| `GET /v1/assets/{source}/{generation}/{path}` | An image inside a sealed ZIM. Images only, immutable cache, sandboxed CSP |
+| `POST /v1/gaps` | Record a "not in library" link (loopback clients only, `204`) |
 | `GET /go/{address}` | Resolves a `wsp://` address (see [addresses](../api/addresses.md)) |
 | `GET /v1/openapi.json` | The live spec |
 | `/` | The Navigator bundle (`navigator/dist`, configurable), or a placeholder page if it is not built |
@@ -52,8 +69,15 @@ and needs an ADR.
 - **Change feed.** `since` is the feed's own opaque cursor. On the SSE stream, the last event of each
   batch carries `id: <cursor>`, so `Last-Event-ID` resumes the stream. Delivery is at-least-once.
   `?max_seconds=` closes the stream after that many seconds, for proxies and tests.
-- **Document ids** contain `/` (`wsp:wikipedia-en-zim/A/Alan_Turing`). Percent-encode `?`, `#` and `%`
-  in them. One known ambiguity: a native id that ends in `/history` collides with the history route.
+- **Document ids** contain `/` (`wsp:wikipedia-en-zim/A/Alan_Turing`). In a URL path a doc id is ONE
+  percent-encoded segment (`encodeURIComponent`: `/v1/documents/wsp%3Arfc%2F9110`). The server routes
+  on the raw path, so native ids ending in `/history` do not collide (ADR-0005,
+  [addresses](../api/addresses.md)).
+- **Search** is navigational when the query names one page (`rfc 9110`, `wikipedia Alan Turing`,
+  `wsp://rfc/9110`): exact native id or exact title within a named site, no fuzzy matching
+  (`wsp_api.search`). `highlights` are `[start, end)` code-point ranges into `snippet`.
+- **Document HTML** is the original (ZIM) HTML with relative images rewritten to `/v1/assets/…` and
+  relative links to `wsp://` addresses. It is untrusted: clients sanitize it.
 
 ## Security and offline guarantees
 
@@ -86,10 +110,11 @@ with WspClient() as wsp:  # http://127.0.0.1:8737
 ```
 
 The SDK mirrors every endpoint, with iterators for paginated results, change-feed draining, SSE
-following (`stream_changes`) and summary streaming. Errors are typed: `WspApiError`, `NotFoundError`
+following (`stream_changes`), summary streaming (SSE events) and the Navigator resources (`portal`,
+`directory`, `random`, `recent_changes`, `report_gap`). Errors are typed: `WspApiError`, `NotFoundError`
 and `NotConfiguredError`.
 
-The models in `wsp_sdk.models` are a hand-written mirror of `wsp_api.schemas`. Installing the SDK
+The models in `wsp_sdk.models` are a mirror of `wsp_api.schemas`. Installing the SDK
 (for example in Living) therefore does not pull in FastAPI, Starlette or wsp-core.
 `test_sdk_models.py` compares the JSON schemas of the two sets, so drift fails CI. The SDK ignores
 unknown fields, so a newer server never breaks an older client.
