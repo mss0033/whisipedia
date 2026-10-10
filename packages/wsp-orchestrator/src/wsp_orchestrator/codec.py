@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import datetime
+from pathlib import Path
 from typing import Any, cast
 
-from wsp_core.model import Checksum, FetchPlan, ReleaseRef, RemoteFile
+from wsp_core.model import Checksum, FetchPlan, FetchResult, ReleaseRef, RemoteFile
 
 JsonObj = dict[str, Any]
 
@@ -26,6 +27,7 @@ def remote_to_json(r: RemoteFile) -> JsonObj:
         "size": r.size,
         "checksums": [checksum_to_json(c) for c in r.checksums],
         "mirrors": list(r.mirrors),
+        "metalink": r.metalink,
     }
 
 
@@ -37,6 +39,7 @@ def remote_from_json(d: Mapping[str, Any]) -> RemoteFile:
         size=int(size) if size is not None else None,
         checksums=tuple(checksum_from_json(c) for c in cast(list[Mapping[str, Any]], d.get("checksums", []))),
         mirrors=tuple(str(m) for m in cast(list[str], d.get("mirrors", []))),
+        metalink=str(d["metalink"]) if d.get("metalink") else None,
     )
 
 
@@ -47,6 +50,8 @@ def release_to_json(r: ReleaseRef) -> JsonObj:
         "published": r.published.isoformat() if r.published else None,
         "files": [remote_to_json(f) for f in r.files],
         "meta": dict(r.meta),
+        "license": r.license,
+        "format": r.format,
     }
 
 
@@ -58,6 +63,8 @@ def release_from_json(d: Mapping[str, Any]) -> ReleaseRef:
         published=datetime.fromisoformat(published) if published else None,
         files=tuple(remote_from_json(f) for f in cast(list[Mapping[str, Any]], d["files"])),
         meta={str(k): str(v) for k, v in cast(Mapping[str, Any], d.get("meta", {})).items()},
+        license=str(d["license"]) if d.get("license") else None,
+        format=str(d["format"]) if d.get("format") else None,
     )
 
 
@@ -75,4 +82,24 @@ def plan_from_json(d: Mapping[str, Any]) -> FetchPlan:
         release=release_from_json(cast(Mapping[str, Any], d["release"])),
         files=tuple(remote_from_json(f) for f in cast(list[Mapping[str, Any]], d["files"])),
         previous_generation=str(prev) if prev is not None else None,
+    )
+
+
+def fetch_result_to_json(r: FetchResult) -> JsonObj:
+    return {
+        "path": str(r.path),
+        "size": r.size,
+        "sha256": r.sha256,
+        "blake3": r.blake3,
+        "verified": [checksum_to_json(c) for c in r.verified],
+    }
+
+
+def fetch_result_from_json(d: Mapping[str, Any]) -> FetchResult:
+    return FetchResult(
+        path=Path(str(d["path"])),
+        size=int(d["size"]),
+        sha256=str(d["sha256"]),
+        blake3=str(d["blake3"]),
+        verified=tuple(checksum_from_json(c) for c in cast(list[Mapping[str, Any]], d.get("verified", []))),
     )

@@ -3,7 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from wsp_core.model import ReleaseState, allowed_transitions
+from wsp_core.model import FetchPlan, FetchResult, ReleaseState, allowed_transitions
+from wsp_core.ports import Ctx
 from wsp_orchestrator.pipeline import (
     IllegalTransitionError,
     Outcome,
@@ -12,7 +13,7 @@ from wsp_orchestrator.pipeline import (
     UnknownReleaseError,
     resume_source,
 )
-from wsp_orchestrator.testing import PipelineHarness, SimulatedCrash
+from wsp_orchestrator.testing import PipelineHarness, SimulatedCrash, fetch_result
 
 S = ReleaseState
 HAPPY = [
@@ -285,3 +286,45 @@ def test_crash_at_every_checkpoint_resumes_exactly_once(tmp_path: Path, fail_fet
         assert h.vault.calls["seal"] == 1, f"crash at {k} ({crashed_at}) resealed"
         assert h.store.outbox() == []
         h.store.close()
+
+
+def test_fetch_digests_are_persisted_and_forwarded_to_the_vault(tmp_path: Path) -> None:
+    h = PipelineHarness(tmp_path)
+    ref = h.adapter.add_release("2026-10-01", FILES)
+    h.pipeline.register(ref)
+    result = h.pipeline.run("src", "2026-10-01")
+    assert result.outcome is Outcome.PROMOTED
+    assert set(result.record.fetched) == set(FILES)
+    assert result.record.fetched["b.txt"]["size"] == len(FILES["b.txt"])
+    current = h.vault.current("src")
+    assert current is not None
+    for art in current.artifacts:
+        assert art.upstream == next(f.checksums for f in ref.files if f.name == art.relpath.name)
+
+
+def test_verified_fetch_skips_the_adapter_rehash(tmp_path: Path) -> None:
+    h = PipelineHarness(tmp_path)
+    ref = h.adapter.add_release("2026-10-01", FILES)
+    original = h.adapter.fetch
+
+    def verified_fetch(ctx: Ctx, plan: FetchPlan) -> list[FetchResult]:
+        out = list(original(ctx, plan))
+        sums = {f.name: f.checksums for f in plan.files}
+        return [fetch_result(r.path, sums[r.path.name]) for r in out]
+
+    h.adapter.fetch = verified_fetch  # type: ignore[method-assign]
+    h.pipeline.register(ref)
+    assert h.pipeline.run("src", "2026-10-01").outcome is Outcome.PROMOTED
+    assert h.adapter.calls["verify"] == 0
+
+
+def test_ledger_flush_is_idempotent_by_event_id(tmp_path: Path) -> None:
+    h = PipelineHarness(tmp_path)
+    ref = h.adapter.add_release("2026-10-01", FILES)
+    h.pipeline.register(ref)
+    first = h.ledger.of_kind("release.state")[0]
+    assert first.data["idempotency_key"] == first.data["event_id"]
+    again = h.ledger.append(
+        first.kind, first.subject, first.data, idempotency_key=str(first.data["event_id"])
+    )
+    assert again == first

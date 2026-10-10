@@ -20,12 +20,12 @@ with HttpFetcher(cfg) as fetcher:
     result.sha256, result.blake3, result.verdict  # digests for the manifest
 ```
 
-`download()` (the port method) returns only the path. `fetch()` also returns a `FetchResult` with every digest it computed and per-mirror byte counts.
+`download()` (the port method) returns a `wsp_core.model.FetchResult` (path, size, SHA-256, BLAKE3, verified upstream digests). `fetch()` returns the same object as a `FetchReport` that also carries every digest it computed and per-mirror byte counts. A 404/410 raises `wsp_core.errors.NotFoundError`; `HttpFetcher.head()` implements the optional `SupportsHead` capability. `RemoteFile.metalink` names a Metalink explicitly (ADR-0005).
 
 ## Speed techniques
 
 1. **Segmented, multi-mirror transfer.** The file is cut into pieces: 64 KiB-aligned, 1–8 MiB, or the Metalink piece length when one is published. Every usable mirror gets as many worker threads as its host's connection cap. Workers pull the lowest-numbered outstanding piece from a shared queue (work stealing), so fast mirrors naturally take more pieces.
-2. **Mirror discovery.** Mirrors come from three places: `RemoteFile.mirrors`, the packaged Wikimedia catalog (`data/wikimedia_mirrors.toml`, which needs periodic refresh and warns once its `refresh_by` date has passed), and the Kiwix Metalink. For hosts listed in `metalink_hosts`, the fetcher automatically reads `<url>.meta4`, or reads the URL itself if it points at a `.meta4`.
+2. **Mirror discovery.** Mirrors come from four places: `RemoteFile.mirrors` (full URLs of byte copies), `RemoteFile.metalink`, the packaged Wikimedia catalog (`data/wikimedia_mirrors.toml`, which needs periodic refresh and warns once its `refresh_by` date has passed), and the Kiwix Metalink. For hosts listed in `metalink_hosts`, the fetcher automatically reads `<url>.meta4`, or reads the URL itself if it points at a `.meta4`.
 3. **Probing.** Every candidate gets one `Range: bytes=0-0` request in parallel. The probe learns the size, whether Range is supported, the final URL after redirects, and the ETag. A mirror is dropped before any data moves if it 404s or advertises a different size.
 4. **Adaptive mirrors.** A mirror that fails repeatedly is dropped. A mirror with a fatal error (404, ignored Range, wrong `Content-Range`) is dropped immediately. A mirror whose per-connection throughput is below best ÷ `slow_mirror_factor` is cut to one connection.
 5. **Endgame.** Once the queue is empty, idle connections duplicate any straggling piece that has been in flight on another mirror for more than 0.5 s. The first copy to verify wins and the other is cancelled mid-stream. One slow mirror can therefore never hold up the tail of the download.

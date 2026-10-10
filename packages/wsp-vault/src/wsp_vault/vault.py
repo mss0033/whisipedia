@@ -7,6 +7,7 @@ Layout under ``root``::
         upstream/...  MANIFEST.json  MANIFEST.json.sig  parity/  [DEGRADED.txt]
     staging/<domain>/<source_id>/<generation_id>/     generation being assembled
     quarantine/...                                    damaged files moved aside, never deleted
+    pruned/<domain>/<source_id>/<generation_id>.<ts>/ generations retired by retention (owner empties)
     keys/<key_id>-<fingerprint>.pub                   public verification keys only
 
 **Why a separate ``staging/`` tree rather than a ``.staging`` suffix:** everything under
@@ -15,11 +16,13 @@ staging is on the same filesystem, so sealing is one directory ``rename`` that p
 generation at once; and abandoned staging can be inspected or cleaned without touching the library.
 
 ``<domain>`` is not part of the port. It is resolved from an existing directory first (so data is
-never split if the registry changes), then the injected ``domains`` mapping, then ``default_domain``.
+never split if the registry changes), then the injected ``domains`` mapping (built from the registry
+with :func:`domains_from_specs`, i.e. :attr:`SourceSpec.vault_domain`), then ``default_domain``.
 
 Rules: all writes go through :mod:`wsp_vault.atomic`; nothing is ever deleted except our own
 ``*.partial`` temporaries and the staging record; sealed files are chmod read-only (a no-op on SMB
-shares that ignore modes, which is tolerated).
+shares that ignore modes, which is tolerated). ``prune`` (retention) moves a generation under
+``pruned/``; emptying that folder is a deliberate owner action, never automatic.
 """
 
 from __future__ import annotations
@@ -39,6 +42,7 @@ import blake3
 from wsp_core.model import (
     Artifact,
     Checksum,
+    FetchResult,
     Generation,
     GenerationStatus,
     SourceSpec,
@@ -74,6 +78,7 @@ from wsp_vault.signing import PublishableSigner
 LIBRARY_DIR = "library"
 STAGING_DIR = "staging"
 QUARANTINE_DIR = "quarantine"
+PRUNED_DIR = "pruned"
 KEYS_DIR = "keys"
 CURRENT_NAME = "CURRENT.txt"
 READ_ONLY = stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH
@@ -95,8 +100,19 @@ def utcnow() -> datetime:
 
 
 def domains_from_specs(specs: Iterable[SourceSpec]) -> dict[str, str]:
-    """``source_id -> domain`` using each spec's first domain."""
-    return {s.id: s.domain[0] for s in specs if s.domain}
+    """``source_id -> domain`` from the registry (:attr:`SourceSpec.vault_domain`, ADR-0005)."""
+    return {s.id: s.vault_domain for s in specs}
+
+
+def check_expected(digests: Digests, expected: FetchResult | None) -> None:
+    """Raise :class:`IntegrityError` if a read-back disagrees with what the fetcher computed."""
+    if expected is None:
+        return
+    if (digests.size, digests.sha256, digests.blake3) != (expected.size, expected.sha256, expected.blake3):
+        raise IntegrityError(
+            f"read-back {digests.size} bytes sha256 {digests.sha256} != fetched {expected.size} bytes "
+            f"sha256 {expected.sha256}"
+        )
 
 
 def check_upstream(digests: Digests, upstream: Sequence[Checksum]) -> None:
@@ -209,10 +225,13 @@ class FileVault:
         relpath: str,
         *,
         upstream: Sequence[Checksum] = (),
+        expected: FetchResult | None = None,
     ) -> Artifact:
         """Copy ``local`` into staging (hash, fsync, read back, rename). Idempotent for identical bytes.
 
         ``upstream`` checksums are verified when hashlib can compute them and recorded either way.
+        ``expected`` (the fetcher's digests) must match the read-back; it also spares re-hashing
+        ``local`` when the file turns out to be staged already.
         """
         rel = check_relpath(relpath)
         staging = self.stage(source_id, generation_id)
@@ -220,17 +239,26 @@ class FileVault:
         dest = staging / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
         extra = supported_extra(c.algorithm for c in upstream)
+
+        def validate(d: Digests) -> None:
+            check_expected(d, expected)
+            check_upstream(d, upstream)
+
         if dest.exists():
             have = self._retry.run(lambda: readback(dest, extra=extra))
-            new = self._retry.run(lambda: hash_file(local, extra=extra))
-            if have != new:
-                raise VaultError(f"{relpath} is already staged with different content")
+            if expected is None:
+                new = self._retry.run(lambda: hash_file(local, extra=extra))
+                if have != new:
+                    raise VaultError(f"{relpath} is already staged with different content")
+            else:
+                try:
+                    check_expected(have, expected)
+                except IntegrityError as exc:
+                    raise VaultError(f"{relpath} is already staged with different content") from exc
             check_upstream(have, upstream)
             digests = have
         else:
-            digests = atomic_copy(
-                local, dest, extra=extra, validate=lambda d: check_upstream(d, upstream), retry=self._retry
-            )
+            digests = atomic_copy(local, dest, extra=extra, validate=validate, retry=self._retry)
         return self._record(source_id, generation_id, staging, rel.as_posix(), digests, upstream, "ingest")
 
     def adopt(
@@ -511,6 +539,31 @@ class FileVault:
             "vault.degraded", f"{source_id}/{generation_id}", {"reason": reason, "files": sorted(files)}
         )
         return path
+
+    def prune(self, source_id: str, generation_id: str) -> Path:
+        """Retire a sealed generation (retention, PLAN §6.4): move it under ``pruned/``. Never deletes.
+
+        Refuses the current generation and the newest sealed one, so a source always keeps data.
+        """
+        subject = f"{source_id}/{generation_id}"
+        lib = self.library_path(source_id, generation_id)
+        if not (lib / MANIFEST_NAME).exists():
+            raise VaultError(f"{subject} is not a sealed generation")
+        if self._read_current(source_id) == generation_id:
+            raise VaultError(f"refusing to prune the current generation {subject}")
+        sealed = [
+            g.generation_id for g in self.generations(source_id) if g.status is not GenerationStatus.STAGING
+        ]
+        if sealed and sealed[-1] == generation_id:
+            raise VaultError(f"refusing to prune the newest sealed generation {subject}")
+        stamp = self._clock().astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
+        dest = self._root / PRUNED_DIR / self.domain_of(source_id) / source_id / f"{generation_id}.{stamp}"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        os.rename(lib, dest)
+        fsync_dir(lib.parent)
+        fsync_dir(dest.parent)
+        self._log("vault.prune", subject, {"moved_to": dest.relative_to(self._root).as_posix()})
+        return dest
 
     def quarantine(self, path: Path) -> Path:
         """Move a damaged file under ``quarantine/`` (same filesystem rename; never deletes)."""

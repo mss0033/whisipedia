@@ -26,7 +26,8 @@ def test_kiwix_catalog_live(tmp_path: Path) -> None:
     print(f"\nkiwix {release.version} {remote.name} checksums={remote.checksums} mirrors={remote.mirrors}")
     assert remote.checksums
     assert remote.checksums[0].algorithm == "sha256"
-    assert remote.mirrors[-1].endswith(".meta4")
+    assert remote.metalink is not None
+    assert remote.metalink.endswith(".meta4")
 
 
 def test_wikimedia_enwiki_live(tmp_path: Path) -> None:

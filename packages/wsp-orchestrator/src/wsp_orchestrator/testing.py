@@ -23,6 +23,7 @@ from wsp_core.model import (
     Checksum,
     DocRecord,
     FetchPlan,
+    FetchResult,
     Generation,
     GenerationStatus,
     LedgerEvent,
@@ -65,7 +66,21 @@ def sha256_hex(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def make_release(source_id: str, version: str, files: Mapping[str, bytes], **meta: str) -> ReleaseRef:
+def fetch_result(path: Path, verified: Sequence[Checksum] = ()) -> FetchResult:
+    """A FetchResult for a file on disk (sha256 + a stand-in for blake3, like the fake vault)."""
+    data = path.read_bytes()
+    return FetchResult(path, len(data), sha256_hex(data), hashlib.blake2b(data).hexdigest(), tuple(verified))
+
+
+def make_release(
+    source_id: str,
+    version: str,
+    files: Mapping[str, bytes],
+    *,
+    license: str | None = None,
+    format: str | None = None,
+    **meta: str,
+) -> ReleaseRef:
     """A ReleaseRef whose files carry sha256 checksums of ``files`` contents."""
     published = None
     with contextlib.suppress(ValueError):
@@ -84,6 +99,8 @@ def make_release(source_id: str, version: str, files: Mapping[str, bytes], **met
             for name, data in files.items()
         ),
         meta=dict(meta),
+        license=license,
+        format=format,
     )
 
 
@@ -99,8 +116,16 @@ class FakeAdapter:
     failures: dict[str, list[BaseException]] = field(default_factory=dict[str, list[BaseException]])
     calls: Counter[str] = field(default_factory=Counter[str])
 
-    def add_release(self, version: str, files: Mapping[str, bytes], **meta: str) -> ReleaseRef:
-        ref = make_release(self.source_id or self.id, version, files, **meta)
+    def add_release(
+        self,
+        version: str,
+        files: Mapping[str, bytes],
+        *,
+        license: str | None = None,
+        format: str | None = None,
+        **meta: str,
+    ) -> ReleaseRef:
+        ref = make_release(self.source_id or self.id, version, files, license=license, format=format, **meta)
         self.releases.append(ref)
         for name, data in files.items():
             self.contents[(version, name)] = data
@@ -122,16 +147,17 @@ class FakeAdapter:
             release=want, files=want.files, previous_generation=have.generation_id if have else None
         )
 
-    def fetch(self, ctx: Ctx, plan: FetchPlan) -> Iterable[Path]:
+    def fetch(self, ctx: Ctx, plan: FetchPlan) -> Iterable[FetchResult]:
+        """Unverified results (like a fetcher without upstream digests), so ``verify`` still runs."""
         self._maybe_fail("fetch")
-        out: list[Path] = []
+        out: list[FetchResult] = []
         for remote in plan.files:
             dest = ctx.workdir / remote.name
             data = self.contents[(plan.release.version, remote.name)]
             if (plan.release.version, remote.name) in self.corrupt:
                 data = b"corrupted:" + data
             dest.write_bytes(data)
-            out.append(dest)
+            out.append(fetch_result(dest))
         return out
 
     def verify(self, ctx: Ctx, remote: RemoteFile, local: Path) -> Verdict:
@@ -165,9 +191,9 @@ class FakeFetcher:
     def get_bytes(self, url: str, *, max_bytes: int = 64 * 1024 * 1024) -> bytes:
         return self.documents[url][:max_bytes]
 
-    def download(self, remote: RemoteFile, dest: Path) -> Path:
+    def download(self, remote: RemoteFile, dest: Path) -> FetchResult:
         dest.write_bytes(self.documents[remote.url])
-        return dest
+        return fetch_result(dest)
 
 
 class VaultError(RuntimeError):
@@ -198,7 +224,16 @@ class FakeVault:
             )
         return path
 
-    def ingest(self, source_id: str, generation_id: str, local: Path, relpath: str) -> Artifact:
+    def ingest(
+        self,
+        source_id: str,
+        generation_id: str,
+        local: Path,
+        relpath: str,
+        *,
+        upstream: Sequence[Checksum] = (),
+        expected: FetchResult | None = None,
+    ) -> Artifact:
         self.calls["ingest"] += 1
         gen = self._gens.get((source_id, generation_id))
         if gen is None or gen.status is not GenerationStatus.STAGING:
@@ -214,9 +249,26 @@ class FakeVault:
             size=len(data),
             sha256=sha256_hex(data),
             blake3=hashlib.blake2b(data).hexdigest(),
+            upstream=tuple(upstream),
         )
+        if expected is not None and (expected.size, expected.sha256) != (art.size, art.sha256):
+            raise VaultError(f"{relpath}: stored bytes differ from the fetch result")
         others = tuple(a for a in gen.artifacts if a.relpath != art.relpath)
         self._gens[(source_id, generation_id)] = replace(gen, artifacts=(*others, art))
+        return art
+
+    def adopt(
+        self,
+        source_id: str,
+        generation_id: str,
+        path: Path,
+        relpath: str,
+        *,
+        upstream: Sequence[Checksum] = (),
+    ) -> Artifact:
+        self.calls["adopt"] += 1
+        art = self.ingest(source_id, generation_id, path, relpath, upstream=upstream)
+        path.unlink()
         return art
 
     def seal(self, source_id: str, generation_id: str) -> Generation:
@@ -249,13 +301,14 @@ class FakeVault:
     def generation_path(self, source_id: str, generation_id: str) -> Path:
         return self.root / source_id / generation_id
 
-    def prune(self, source_id: str, generation_id: str) -> None:
+    def prune(self, source_id: str, generation_id: str) -> Path:
         if self._current.get(source_id) == generation_id:
             raise VaultError("refusing to prune the current generation")
         gen = self._gens[(source_id, generation_id)]
         shutil.rmtree(self.generation_path(source_id, generation_id), ignore_errors=True)
         self._gens[(source_id, generation_id)] = replace(gen, status=GenerationStatus.PRUNED, artifacts=())
         self.pruned.append((source_id, generation_id))
+        return self.generation_path(source_id, generation_id)
 
     def add_sealed(self, source_id: str, generation_id: str, *, current: bool = False) -> Generation:
         """Test helper: inject an already sealed generation."""
@@ -273,7 +326,14 @@ class FakeLedger:
         self.clock = clock or SystemClock()
         self._events: list[LedgerEvent] = []
 
-    def append(self, kind: str, subject: str, data: Mapping[str, object]) -> LedgerEvent:
+    def append(
+        self, kind: str, subject: str, data: Mapping[str, object], *, idempotency_key: str | None = None
+    ) -> LedgerEvent:
+        if idempotency_key is not None:
+            for e in self._events:
+                if e.data.get("idempotency_key") == idempotency_key:
+                    return e
+            data = {**data, "idempotency_key": idempotency_key}
         prev = self._events[-1].hash if self._events else "0" * 64
         seq = len(self._events) + 1
         at = self.clock.now()
@@ -295,6 +355,9 @@ class FakeLedger:
 
     def events(self, since_seq: int = 0) -> Iterator[LedgerEvent]:
         return iter([e for e in self._events if e.seq > since_seq])
+
+    def tail(self, n: int) -> Sequence[LedgerEvent]:
+        return list(self._events[-n:]) if n > 0 else []
 
     def verify(self) -> bool:
         prev = "0" * 64

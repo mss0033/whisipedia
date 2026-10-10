@@ -7,7 +7,7 @@ them. Generation ids sort chronologically.
 Semantics pinned here:
 
 * ``get(id)`` reads the newest generation; a document missing there (tombstoned) returns ``None``.
-* ``get(id, at_generation=g)`` reads generation ``g``.
+* ``get(id, at_generation=g)`` reads the newest generation at or before ``g`` (``g`` need not exist).
 * ``history(id)`` is ``(generation_id, content_hash)`` oldest first, one entry per content change
   (generations where the content did not change are not repeated; re-appearing after a removal is a
   new entry).
@@ -54,6 +54,7 @@ A1 = make_doc(
     html_ref="zim:A/Alpha",
     entities=("Q1",),
     links=("wsp:contract-src/Beta",),
+    aliases=("First letter",),
 )
 A2 = make_doc("Alpha", "alpha two")
 B1 = make_doc("Beta", "beta one")
@@ -93,6 +94,13 @@ class DocumentStoreContract:
         assert store.get(_id("Alpha"), at_generation="2026-01-01") == A1
         assert store.get(_id("Gamma"), at_generation="2026-02-01") is None
         assert store.get(_id("Alpha"), at_generation="1999-01-01") is None
+
+    def test_get_at_generation_between_generations(self, store: DocumentStore) -> None:
+        assert store.get(_id("Alpha"), at_generation="2026-02-15") == A1
+        assert store.get(_id("Gamma"), at_generation="2026-02-15") is None  # tombstoned then
+        alpha = store.get(_id("Alpha"), at_generation="2099-12-31")
+        assert alpha is not None
+        assert alpha.text == "alpha two"
 
     def test_round_trips_every_field(self, store: DocumentStore) -> None:
         doc = store.get(_id("Alpha"), at_generation="2026-02-01")

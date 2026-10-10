@@ -62,6 +62,7 @@ from wsp_core.model import (
     Checksum,
     DocRecord,
     FetchPlan,
+    FetchResult,
     Generation,
     ReleaseRef,
     RemoteFile,
@@ -284,6 +285,7 @@ class WikimediaDumpsAdapter:
             published=max(updated) if updated else None,
             files=tuple(f for r in runs for f in r.files),
             meta={"run": date, "wikis": ",".join(r.wiki for r in runs)},
+            format="mediawiki-xml-multistream",
         )
 
     def _discover_entities(self, ctx: Ctx) -> list[ReleaseRef]:
@@ -346,12 +348,13 @@ class WikimediaDumpsAdapter:
             published=None,
             files=tuple(files),
             meta={"run": date, "wikis": "wikidatawiki"},
+            format="wikidata-json",
         )
 
     def plan(self, ctx: Ctx, have: Generation | None, want: ReleaseRef) -> FetchPlan:
         return plan_missing(have, want)
 
-    def fetch(self, ctx: Ctx, plan: FetchPlan) -> Iterable[Path]:
+    def fetch(self, ctx: Ctx, plan: FetchPlan) -> Iterable[FetchResult]:
         return fetch_all(ctx, plan)
 
     def verify(self, ctx: Ctx, remote: RemoteFile, local: Path) -> Verdict:
@@ -631,4 +634,5 @@ def entity_record(entity: Mapping[str, Any], source_id: str, license_: str, lang
         url_native=f"https://www.wikidata.org/wiki/{page}{eid}",
         entities=(eid,) if eid.startswith("Q") else (),
         content_hash=content_hash(text),
+        aliases=tuple(dict.fromkeys(a for a in aliases if a and a != label)),
     )

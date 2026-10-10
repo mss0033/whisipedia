@@ -1,7 +1,8 @@
 """Resolve a ``RemoteFile`` into a download target: mirror URLs, size, digests and piece hashes.
 
 Sources are merged: the ``RemoteFile`` itself, its ``mirrors`` and, when available, a Metalink
-(``<url>.meta4`` on hosts listed in ``FetchConfig.metalink_hosts``, or a URL that *is* a Metalink).
+(``RemoteFile.metalink``, else ``<url>.meta4`` on hosts listed in ``FetchConfig.metalink_hosts``, or a
+URL that *is* a Metalink).
 Disagreeing digests or sizes are an error, never a silent pick.
 """
 
@@ -51,6 +52,11 @@ def resolve_target(remote: RemoteFile, get_bytes: Callable[[str, int], bytes], c
     ml: MetalinkFile | None = None
     if is_metalink_url(remote.url):
         ml = _pick_file(parse_metalink(get_bytes(remote.url, METALINK_MAX_BYTES)), remote.name)
+    elif remote.metalink:
+        try:
+            ml = _pick_file(parse_metalink(get_bytes(remote.metalink, METALINK_MAX_BYTES)), remote.name)
+        except FetchError as exc:  # optional: fall back to plain HTTP + mirrors
+            log.info("no usable metalink at %s: %s", remote.metalink, exc)
     elif host_key(remote.url) in config.metalink_hosts:
         try:
             ml = _pick_file(parse_metalink(get_bytes(remote.url + ".meta4", METALINK_MAX_BYTES)), remote.name)
@@ -58,7 +64,7 @@ def resolve_target(remote: RemoteFile, get_bytes: Callable[[str, int], bytes], c
             log.info("no usable metalink for %s: %s", remote.url, exc)
 
     urls: list[str] = [] if is_metalink_url(remote.url) else [remote.url]
-    urls += remote.mirrors
+    urls += (m for m in remote.mirrors if not is_metalink_url(m))  # RemoteFile.mirrors are byte copies
     if ml is not None:
         urls += ml.mirror_urls()
     urls = list(dict.fromkeys(u for u in urls if u))

@@ -23,8 +23,11 @@ from wsp_core.model import DocRecord, SearchHit
 from wsp_core.ports import LexicalIndex
 
 
-def make_doc(source_id: str, native_id: str, title: str, text: str, *, lang: str = "en") -> DocRecord:
+def make_doc(
+    source_id: str, native_id: str, title: str, text: str, *, lang: str = "en", aliases: tuple[str, ...] = ()
+) -> DocRecord:
     return DocRecord(
+        aliases=aliases,
         doc_id=make_doc_id(source_id, native_id),
         source_id=source_id,
         native_id=native_id,
@@ -173,3 +176,11 @@ class LexicalIndexContract:
         loaded.commit()
         assert "Lisbon" not in loaded.suggest("li")
         assert "Lima" in loaded.suggest("li")
+
+    def test_suggest_includes_record_aliases(self, index: LexicalIndex) -> None:
+        index.upsert([make_doc("encyclo", "uk", "United Kingdom", "A country.", aliases=("Britain",))])
+        index.commit()
+        assert "Britain" in index.suggest("brit") or "United Kingdom" in index.suggest("brit")
+
+    def test_close_is_safe(self, loaded: LexicalIndex) -> None:
+        loaded.close()

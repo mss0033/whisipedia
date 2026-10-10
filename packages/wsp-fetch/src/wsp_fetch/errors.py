@@ -1,21 +1,24 @@
-"""Typed fetch errors. Every failure that leaves no verified file raises a ``FetchError`` subclass."""
+"""Typed fetch errors. Every failure that leaves no verified file raises a ``FetchError`` subclass.
+
+``FetchError``, ``ChecksumMismatchError`` and ``NotFoundError`` are the port-level types from
+:mod:`wsp_core.errors` (ADR-0005); the rest refine ``FetchError`` for this implementation.
+"""
 
 from __future__ import annotations
 
+from wsp_core.errors import ChecksumMismatchError, FetchError, NotFoundError
 
-class FetchError(Exception):
-    """Base class for all download failures."""
-
-
-class ChecksumMismatchError(FetchError):
-    """The assembled file does not match an upstream digest (PLAN §8.1). Nothing is renamed into place."""
-
-    def __init__(self, url: str, algorithm: str, expected: str, actual: str) -> None:
-        super().__init__(f"{algorithm} mismatch for {url}: expected {expected}, got {actual}")
-        self.url = url
-        self.algorithm = algorithm
-        self.expected = expected
-        self.actual = actual
+__all__ = [
+    "Aria2Error",
+    "ChecksumMismatchError",
+    "ConflictingChecksumsError",
+    "FetchError",
+    "MirrorsExhaustedError",
+    "NotFoundError",
+    "ResponseTooLargeError",
+    "SizeMismatchError",
+    "UnsupportedChecksumError",
+]
 
 
 class SizeMismatchError(FetchError):

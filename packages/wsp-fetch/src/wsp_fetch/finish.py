@@ -11,37 +11,45 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from wsp_core.model import Checksum, Verdict, VerdictStatus
+from wsp_core.model import Checksum, FetchResult
 from wsp_fetch.errors import ChecksumMismatchError, SizeMismatchError
 from wsp_fetch.hashing import check_digests, hash_file
 
 
 @dataclass(frozen=True, slots=True)
-class FetchResult:
-    """What a download produced. ``digests`` always holds ``sha256`` and ``blake3``."""
+class FetchReport(FetchResult):
+    """The port's :class:`~wsp_core.model.FetchResult` plus every digest and transfer statistics."""
 
-    path: Path
-    size: int
-    digests: Mapping[str, str]
-    verified: tuple[Checksum, ...]  # upstream digests that matched
+    digests: Mapping[str, str] = field(default_factory=dict[str, str])
     bytes_downloaded: int = 0
     bytes_resumed: int = 0
     seconds: float = 0.0
     per_mirror_bytes: Mapping[str, int] = field(default_factory=dict[str, int])
 
-    @property
-    def sha256(self) -> str:
-        return self.digests["sha256"]
 
-    @property
-    def blake3(self) -> str:
-        return self.digests["blake3"]
-
-    @property
-    def verdict(self) -> Verdict:
-        if not self.verified:
-            return Verdict(VerdictStatus.UNVERIFIABLE, "upstream publishes no checksum")
-        return Verdict(VerdictStatus.OK, ", ".join(c.algorithm for c in self.verified))
+def make_report(
+    path: Path,
+    size: int,
+    digests: Mapping[str, str],
+    verified: Sequence[Checksum],
+    bytes_downloaded: int = 0,
+    bytes_resumed: int = 0,
+    seconds: float = 0.0,
+    per_mirror_bytes: Mapping[str, int] | None = None,
+) -> FetchReport:
+    """``digests`` must hold ``sha256`` and ``blake3`` (always computed, PLAN §8.1)."""
+    return FetchReport(
+        path=path,
+        size=size,
+        sha256=digests["sha256"],
+        blake3=digests["blake3"],
+        verified=tuple(verified),
+        digests=dict(digests),
+        bytes_downloaded=bytes_downloaded,
+        bytes_resumed=bytes_resumed,
+        seconds=seconds,
+        per_mirror_bytes=dict(per_mirror_bytes or {}),
+    )
 
 
 def fsync_dir(path: Path) -> None:

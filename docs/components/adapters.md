@@ -30,9 +30,9 @@ redirects to detect page moves.
 - **Plan**: skips files the previous generation already holds byte-identically (unchanged books in a
   bundle), then reads the `.meta4` metalink of each remaining file for the exact size, MD5/SHA-1 and the
   mirror list. A metalink hash that disagrees with `.sha256` aborts the plan.
-- **Mirrors**: `RemoteFile.mirrors` lists byte-identical mirrors and, **as the last entry, the `.meta4`
-  URL**. A fetcher should treat a mirror ending in `.meta4` as a metalink (per-piece SHA-1 for multi-mirror
-  piece verification), not as a copy of the file. It is also in `ReleaseRef.meta["meta4:<file>"]`.
+- **Mirrors**: `RemoteFile.mirrors` lists byte-identical mirrors only; the `.meta4` URL is
+  `RemoteFile.metalink` (per-piece SHA-1 for multi-mirror piece verification). `ReleaseRef.format` is `zim`.
+  `KiwixOpdsAdapter.upstream_checksums(ctx, file_url)` reads the published `<file>.sha256` (used by `wsp ingest`).
 - **Documents**: read with `libzim`. Every user entry with an HTML mimetype becomes a `DocRecord`;
   redirects become `Redirect`s; assets are skipped. `native_id` is the ZIM path; sources that select more
   than one book prefix it with the book name (`ifixit_en_all/<path>`). `html_ref = "zim:" + native_id`.

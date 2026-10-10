@@ -14,6 +14,7 @@ from typing import cast
 from wsp_core.model import (
     Checksum,
     FetchPlan,
+    FetchResult,
     Generation,
     ReleaseRef,
     RemoteFile,
@@ -132,7 +133,7 @@ def plan_missing(have: Generation | None, want: ReleaseRef) -> FetchPlan:
     )
 
 
-def fetch_all(ctx: Ctx, plan: FetchPlan) -> Iterator[Path]:
+def fetch_all(ctx: Ctx, plan: FetchPlan) -> Iterator[FetchResult]:
     """Download every planned file into ``ctx.workdir`` through the injected fetcher."""
     ctx.workdir.mkdir(parents=True, exist_ok=True)
     for remote in plan.files:

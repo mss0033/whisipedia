@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import bisect
 import threading
 from collections import OrderedDict
 from collections.abc import Sequence
@@ -24,7 +25,7 @@ class ParquetDocumentStore:
 
     * ``get(doc_id)`` reads the source's current generation (``CURRENT.txt`` or the newest sealed
       one). A document tombstoned upstream is absent there and returns ``None``; its content stays
-      reachable with ``at_generation``.
+      reachable with ``at_generation``, which selects the newest generation at or before it.
     * ``history(doc_id)`` lists content versions oldest first: one entry per generation in which the
       content hash differs from the previous generation (a re-appearance after removal counts).
 
@@ -62,7 +63,12 @@ class ParquetDocumentStore:
             source_id, _ = parse_doc_id(doc_id)
         except InvalidDocIdError:
             return None
-        gen = at_generation if at_generation is not None else current_generation(self.root, source_id)
+        if at_generation is None:
+            gen = current_generation(self.root, source_id)
+        else:
+            gens = self.generations(source_id)
+            i = bisect.bisect_right(gens, at_generation)
+            gen = gens[i - 1] if i else None
         if gen is None:
             return None
         reader = self.reader(source_id, gen)

@@ -4,7 +4,7 @@ Subclass and provide a ``feed`` fixture returning an empty feed.
 
 Semantics pinned here: cursors are opaque; ``since(None)`` starts at the beginning; following the
 returned cursor never repeats or skips a change; ``publish`` returns a cursor after its own
-changes; a cursor the feed did not issue raises ``ValueError``.
+changes; a cursor the feed did not issue raises :class:`wsp_core.errors.InvalidCursorError`.
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from wsp_core.errors import InvalidCursorError
 from wsp_core.ids import make_doc_id
 from wsp_core.model import ChangeKind, ChangeRecord
 from wsp_core.ports import ChangeFeed
@@ -98,5 +99,5 @@ class ChangeFeedContract:
     @pytest.mark.parametrize("bad", ["garbage", "0", "x.y.z", "-1"])
     def test_foreign_cursor_rejected(self, feed: ChangeFeed, bad: str) -> None:
         feed.publish([change(1)])
-        with pytest.raises(ValueError, match=r"."):
+        with pytest.raises(InvalidCursorError, match=r"."):
             feed.since(bad)

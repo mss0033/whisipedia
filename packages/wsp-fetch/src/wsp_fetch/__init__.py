@@ -4,6 +4,7 @@
 contract. See ``docs/components/fetch.md``.
 """
 
+from wsp_core.model import FetchResult
 from wsp_fetch.aria2 import Aria2Fetcher, find_aria2c
 from wsp_fetch.config import FetchConfig
 from wsp_fetch.errors import (
@@ -12,11 +13,12 @@ from wsp_fetch.errors import (
     ConflictingChecksumsError,
     FetchError,
     MirrorsExhaustedError,
+    NotFoundError,
     ResponseTooLargeError,
     SizeMismatchError,
     UnsupportedChecksumError,
 )
-from wsp_fetch.finish import FetchResult
+from wsp_fetch.finish import FetchReport
 from wsp_fetch.http import HttpFetcher
 from wsp_fetch.metalink import MetalinkFile, MetalinkUrl, Pieces, build_metalink, parse_metalink
 from wsp_fetch.mirrors import (
@@ -37,12 +39,14 @@ __all__ = [
     "ConflictingChecksumsError",
     "FetchConfig",
     "FetchError",
+    "FetchReport",
     "FetchResult",
     "HttpFetcher",
     "MetalinkFile",
     "MetalinkUrl",
     "MirrorCatalog",
     "MirrorsExhaustedError",
+    "NotFoundError",
     "Pieces",
     "ResponseTooLargeError",
     "SizeMismatchError",

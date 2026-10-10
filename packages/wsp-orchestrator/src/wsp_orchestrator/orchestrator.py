@@ -352,8 +352,8 @@ class Orchestrator:
         now = self.clock.now()
         health = self.store.source_health(spec.id)
         obs = Observation(
-            license=newest.meta.get("license"),
-            format=newest.meta.get("format"),
+            license=newest.license,
+            format=newest.format,
             newest_published=newest.published,
         )
         findings = auto_pause_findings(

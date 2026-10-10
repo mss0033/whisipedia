@@ -19,12 +19,12 @@ from pathlib import Path
 from wsp_core.model import RemoteFile
 from wsp_fetch import Aria2Fetcher, FetchConfig, HttpFetcher, find_aria2c, load_wikimedia_catalog
 from wsp_fetch.config import host_key
-from wsp_fetch.finish import FetchResult
+from wsp_fetch.finish import FetchReport
 
 DEFAULT_URL = "https://download.kiwix.org/zim/wikipedia/wikipedia_ar_history_nopic_2026-04.zim"
 
 
-def run(name: str, fetcher: HttpFetcher | Aria2Fetcher, remote: RemoteFile, dest: Path) -> FetchResult:
+def run(name: str, fetcher: HttpFetcher | Aria2Fetcher, remote: RemoteFile, dest: Path) -> FetchReport:
     t0 = time.monotonic()
     result = fetcher.fetch(remote, dest)
     secs = time.monotonic() - t0

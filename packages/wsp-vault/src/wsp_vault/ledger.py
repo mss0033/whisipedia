@@ -19,6 +19,10 @@ process may append. Appends are not rename-atomic, since rewriting a day file pe
 quadratic. Instead each append is written with ``O_APPEND``, fsynced, read back and compared; a
 failed append is truncated back to the previous length and retried. A torn last line left by a
 crash is moved aside to ``<file>.torn`` (never deleted) the next time the ledger is opened.
+
+**Idempotent appends.** ``append(..., idempotency_key=k)`` stores ``k`` as ``data["idempotency_key"]``
+and returns the existing event if one with that key was already written. The key index is built
+by one scan of the ledger on first use and kept in memory (single writer).
 """
 
 from __future__ import annotations
@@ -27,7 +31,8 @@ import base64
 import json
 import os
 import re
-from collections.abc import Callable, Iterator, Mapping
+from collections import deque
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import suppress
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -40,6 +45,7 @@ from wsp_core.ports import Signer
 from wsp_vault.atomic import DEFAULT_RETRY, ReadbackError, RetryPolicy, fsync_dir
 
 GENESIS_HASH = "0" * 64
+IDEMPOTENCY_FIELD = "idempotency_key"
 _DAY_FILE = re.compile(r"^(\d{4}-\d{2}-\d{2})\.jsonl$")
 _EVENT_KEYS = frozenset({"seq", "at", "kind", "subject", "data", "prev_hash", "hash"})
 
@@ -61,6 +67,17 @@ def canonical_json(obj: object) -> bytes:
 def event_hash(fields: Mapping[str, object]) -> str:
     body = {k: v for k, v in fields.items() if k != "hash"}
     return blake3.blake3(canonical_json(body)).hexdigest()
+
+
+def _day_events(path: Path) -> list[LedgerEvent]:
+    out: list[LedgerEvent] = []
+    for raw in path.read_bytes().splitlines():
+        if not raw.strip():
+            continue
+        obj = cast(dict[str, Any], json.loads(raw))
+        if "checkpoint" not in obj:
+            out.append(_to_event(obj))
+    return out
 
 
 def _to_event(obj: Mapping[str, Any]) -> LedgerEvent:
@@ -91,6 +108,7 @@ class JsonlLedger:
         self._clock = clock
         self._retry = retry
         self._tail: tuple[int, str, date | None, bool] | None = None
+        self._keys: dict[str, LedgerEvent] | None = None
 
     @property
     def directory(self) -> Path:
@@ -108,7 +126,30 @@ class JsonlLedger:
 
     # --- writing ---------------------------------------------------------------------------------
 
-    def append(self, kind: str, subject: str, data: Mapping[str, object]) -> LedgerEvent:
+    def append(
+        self, kind: str, subject: str, data: Mapping[str, object], *, idempotency_key: str | None = None
+    ) -> LedgerEvent:
+        if idempotency_key is not None:
+            keys = self._key_index()
+            existing = keys.get(idempotency_key)
+            if existing is not None:
+                return existing
+            data = {**data, IDEMPOTENCY_FIELD: idempotency_key}
+        event = self._append(kind, subject, data)
+        if idempotency_key is not None and self._keys is not None:
+            self._keys[idempotency_key] = event
+        return event
+
+    def _key_index(self) -> dict[str, LedgerEvent]:
+        if self._keys is None:
+            self._keys = {}
+            for ev in self.events():
+                key = ev.data.get(IDEMPOTENCY_FIELD)
+                if isinstance(key, str):
+                    self._keys[key] = ev
+        return self._keys
+
+    def _append(self, kind: str, subject: str, data: Mapping[str, object]) -> LedgerEvent:
         seq, prev, last_day, closed = self._load_tail()
         now = self._clock().astimezone(UTC)
         day = now.date() if last_day is None else max(now.date(), last_day)
@@ -214,12 +255,20 @@ class JsonlLedger:
 
     def events(self, since_seq: int = 0) -> Iterator[LedgerEvent]:
         for _, path in self.day_files():
-            for raw in path.read_bytes().splitlines():
-                if not raw.strip():
-                    continue
-                obj = cast(dict[str, Any], json.loads(raw))
-                if "checkpoint" not in obj and int(obj["seq"]) > since_seq:
-                    yield _to_event(obj)
+            for ev in _day_events(path):
+                if ev.seq > since_seq:
+                    yield ev
+
+    def tail(self, n: int) -> Sequence[LedgerEvent]:
+        """The newest ``n`` events, oldest first; reads day files newest first and stops early."""
+        if n <= 0:
+            return []
+        out: deque[LedgerEvent] = deque()
+        for _, path in reversed(self.day_files()):
+            out.extendleft(reversed(_day_events(path)))
+            if len(out) >= n:
+                break
+        return list(out)[-n:]
 
     def verify(self) -> bool:
         return self.verify_detail() is None

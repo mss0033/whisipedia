@@ -19,12 +19,15 @@ from pathlib import Path, PurePosixPath
 import blake3
 
 from wsp_api.services import Services
+from wsp_core.errors import InvalidCursorError
 from wsp_core.ids import DocId, content_hash, make_doc_id
 from wsp_core.model import (
     Artifact,
     ChangeKind,
     ChangeRecord,
+    Checksum,
     DocRecord,
+    FetchResult,
     Generation,
     GenerationStatus,
     LedgerEvent,
@@ -43,8 +46,17 @@ def _tokens(text: str) -> list[str]:
     return [t.casefold() for t in _WORD.findall(text)]
 
 
-class InvalidCursorError(ValueError):
-    """Raised for a change-feed cursor this feed did not issue (see report: proposed for wsp_core)."""
+__all__ = [
+    "EchoGenerator",
+    "InMemoryChangeFeed",
+    "InMemoryDocumentStore",
+    "InMemoryLedger",
+    "InMemoryLexicalIndex",
+    "InMemoryVault",
+    "InvalidCursorError",
+    "sample_services",
+    "seed_sample_library",
+]
 
 
 # --- LexicalIndex --------------------------------------------------------------------------------
@@ -85,7 +97,9 @@ class InMemoryLexicalIndex:
         terms = set(_tokens(query))
         if not terms:
             return ()
-        wanted = set(sources) if sources else None
+        if limit <= 0:
+            return ()
+        wanted = None if sources is None else set(sources)
         scored: list[SearchHit] = []
         for doc in self._docs.values():
             if wanted is not None and doc.source_id not in wanted:
@@ -109,9 +123,11 @@ class InMemoryLexicalIndex:
         p = prefix.casefold().strip()
         if not p:
             return ()
-        return tuple(
-            sorted({d.title for d in self._docs.values() if d.title.casefold().startswith(p)})[:limit]
-        )
+        names = {n for d in self._docs.values() for n in (d.title, *d.aliases) if n.casefold().startswith(p)}
+        return tuple(sorted(names)[:limit])
+
+    def close(self) -> None:
+        self._pending.clear()
 
 
 def _snippet(text: str, terms: set[str], width: int = 160) -> str:
@@ -126,18 +142,29 @@ def _snippet(text: str, terms: set[str], width: int = 160) -> str:
 
 
 class InMemoryDocumentStore:
-    """Versions per document, keyed by generation id (which sorts chronologically)."""
+    """Versions per document, keyed by generation id (which sorts chronologically).
+
+    ``put`` records content as of a generation; ``remove`` records a tombstone. A generation that is
+    not mentioned for a document inherits its previous state (diff semantics).
+    """
 
     def __init__(self) -> None:
-        self._versions: dict[DocId, list[tuple[str, DocRecord]]] = {}
+        self._versions: dict[DocId, list[tuple[str, DocRecord | None]]] = {}
+
+    def _set(self, generation_id: str, doc_id: DocId, doc: DocRecord | None) -> None:
+        versions = self._versions.setdefault(doc_id, [])
+        versions[:] = [v for v in versions if v[0] != generation_id]
+        versions.append((generation_id, doc))
+        versions.sort(key=lambda v: v[0])
 
     def put(self, generation_id: str, doc: DocRecord) -> None:
         if not doc.content_hash:
             doc = replace(doc, content_hash=content_hash(doc.text))
-        versions = self._versions.setdefault(doc.doc_id, [])
-        versions[:] = [v for v in versions if v[0] != generation_id]
-        versions.append((generation_id, doc))
-        versions.sort(key=lambda v: v[0])
+        self._set(generation_id, doc.doc_id, doc)
+
+    def remove(self, generation_id: str, doc_id: DocId) -> None:
+        """Tombstone ``doc_id`` as of ``generation_id`` (removed upstream; history is kept)."""
+        self._set(generation_id, doc_id, None)
 
     def get(self, doc_id: DocId, *, at_generation: str | None = None) -> DocRecord | None:
         versions = self._versions.get(doc_id, [])
@@ -146,11 +173,20 @@ class InMemoryDocumentStore:
         return versions[-1][1] if versions else None
 
     def history(self, doc_id: DocId) -> Sequence[tuple[str, str]]:
-        return tuple((g, d.content_hash) for g, d in self._versions.get(doc_id, []))
+        out: list[tuple[str, str]] = []
+        previous: str | None = None
+        for gen, doc in self._versions.get(doc_id, []):
+            current = None if doc is None else doc.content_hash
+            if current is not None and current != previous:
+                out.append((gen, current))
+            previous = current
+        return tuple(out)
 
     def all_current(self) -> Iterator[DocRecord]:
         for versions in self._versions.values():
-            yield versions[-1][1]
+            doc = versions[-1][1]
+            if doc is not None:
+                yield doc
 
 
 # --- ChangeFeed ----------------------------------------------------------------------------------
@@ -171,9 +207,12 @@ class InMemoryChangeFeed:
         batch = tuple(self._log[start : start + limit])
         return batch, str(start + len(batch))
 
+    def close(self) -> None:
+        return None
+
 
 def _parse_cursor(cursor: str, size: int) -> int:
-    if not cursor.isdigit() or int(cursor) > size:
+    if not cursor.isdigit() or int(cursor) > size or (cursor != "0" and cursor.startswith("0")):
         raise InvalidCursorError(f"unknown cursor: {cursor!r}")
     return int(cursor)
 
@@ -199,7 +238,16 @@ class InMemoryVault:
         gens.setdefault(generation_id, Generation(source_id, generation_id, GenerationStatus.STAGING))
         return self.generation_path(source_id, generation_id)
 
-    def ingest(self, source_id: str, generation_id: str, local: Path, relpath: str) -> Artifact:
+    def ingest(
+        self,
+        source_id: str,
+        generation_id: str,
+        local: Path,
+        relpath: str,
+        *,
+        upstream: Sequence[Checksum] = (),
+        expected: FetchResult | None = None,
+    ) -> Artifact:
         gen = self._gens[source_id][generation_id]
         if gen.status is not GenerationStatus.STAGING:
             raise PermissionError(f"{source_id}/{generation_id} is {gen.status}, not staging")
@@ -211,9 +259,29 @@ class InMemoryVault:
             size=len(data),
             sha256=hashlib.sha256(data).hexdigest(),
             blake3=blake3.blake3(data).hexdigest(),
+            upstream=tuple(upstream),
         )
-        self._gens[source_id][generation_id] = replace(gen, artifacts=(*gen.artifacts, art))
+        if expected is not None and (expected.size, expected.sha256) != (art.size, art.sha256):
+            raise ValueError(f"{relpath}: bytes differ from the fetch result")
+        for c in upstream:
+            known = c.algorithm in hashlib.algorithms_available
+            if known and hashlib.new(c.algorithm, data).hexdigest() != c.hexdigest.lower():
+                raise ValueError(f"{relpath}: upstream {c.algorithm} mismatch")
+        others = tuple(a for a in gen.artifacts if a.relpath != art.relpath)
+        self._gens[source_id][generation_id] = replace(gen, artifacts=(*others, art))
         return art
+
+    def adopt(
+        self,
+        source_id: str,
+        generation_id: str,
+        path: Path,
+        relpath: str,
+        *,
+        upstream: Sequence[Checksum] = (),
+    ) -> Artifact:
+        """Like ``ingest`` (nothing is stored on disk, so the file is left where it is)."""
+        return self.ingest(source_id, generation_id, path, relpath, upstream=upstream)
 
     def seal(self, source_id: str, generation_id: str) -> Generation:
         gen = replace(
@@ -249,7 +317,14 @@ class InMemoryLedger:
         self._events: list[LedgerEvent] = []
         self._clock = clock
 
-    def append(self, kind: str, subject: str, data: Mapping[str, object]) -> LedgerEvent:
+    def append(
+        self, kind: str, subject: str, data: Mapping[str, object], *, idempotency_key: str | None = None
+    ) -> LedgerEvent:
+        if idempotency_key is not None:
+            for e in self._events:
+                if e.data.get("idempotency_key") == idempotency_key:
+                    return e
+            data = {**data, "idempotency_key": idempotency_key}
         prev = self._events[-1].hash if self._events else _GENESIS
         seq = len(self._events) + 1
         at = self._clock()
@@ -261,6 +336,9 @@ class InMemoryLedger:
 
     def events(self, since_seq: int = 0) -> Iterator[LedgerEvent]:
         return iter([e for e in self._events if e.seq > since_seq])
+
+    def tail(self, n: int) -> Sequence[LedgerEvent]:
+        return list(self._events[-n:]) if n > 0 else []
 
     def verify(self) -> bool:
         prev = _GENESIS

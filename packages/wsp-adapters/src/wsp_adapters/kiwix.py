@@ -13,10 +13,9 @@ selection (``YYYY-MM``).
 
 Checksums come from the ``<file>.sha256`` published next to each ZIM. ``plan`` additionally
 resolves the ``.meta4`` metalink of every file that will actually be downloaded: it gives the
-exact size (the catalog rounds up to KiB), MD5/SHA-1, and the mirror list. The metalink URL itself
-is appended as the last entry of ``RemoteFile.mirrors`` (and stored in ``ReleaseRef.meta`` as
-``meta4:<file>``) so a fetcher can use its per-piece SHA-1 hashes; a mirror entry ending in
-``.meta4`` is a metalink, not a byte copy.
+exact size (the catalog rounds up to KiB), MD5/SHA-1, and the mirror list. The metalink URL is
+``RemoteFile.metalink`` so a fetcher can use its per-piece SHA-1 hashes; ``RemoteFile.mirrors`` holds
+only full URLs of byte-identical copies.
 """
 
 from __future__ import annotations
@@ -47,11 +46,13 @@ from wsp_adapters._common import (
 )
 from wsp_adapters.entries import Entry, Redirect
 from wsp_adapters.html_text import html_to_text
+from wsp_core.errors import FetchError
 from wsp_core.ids import content_hash, make_doc_id
 from wsp_core.model import (
     Checksum,
     DocRecord,
     FetchPlan,
+    FetchResult,
     Generation,
     ReleaseRef,
     RemoteFile,
@@ -61,6 +62,7 @@ from wsp_core.model import (
 from wsp_core.ports import Ctx
 
 CATALOG_URL = "https://library.kiwix.org/catalog/v2/entries"
+ZIM_FORMAT = "zim"
 DEFAULT_MIRRORS = ("https://mirror.download.kiwix.org/",)
 FLAVOUR_PREFERENCE = ("maxi", "", "nopic", "mini", "nodet")
 _PAGE_SIZE = 500
@@ -317,10 +319,10 @@ class KiwixOpdsAdapter:
                     name=entry.file_name,
                     size=None,  # the catalog length is rounded up to KiB; plan() fills the exact size
                     checksums=(Checksum("sha256", digest),) if digest else (),
-                    mirrors=(*_mirror_urls(entry.file_url, mirrors), entry.meta4_url),
+                    mirrors=_mirror_urls(entry.file_url, mirrors),
+                    metalink=entry.meta4_url,
                 )
             )
-            meta[f"meta4:{entry.file_name}"] = entry.meta4_url
             if entry.length is not None:
                 meta[f"approx_size:{entry.file_name}"] = str(entry.length)
         issued = [e.issued for e in chosen if e.issued is not None]
@@ -330,8 +332,19 @@ class KiwixOpdsAdapter:
             published=max(issued) if issued else None,
             files=tuple(files),
             meta=meta,
+            format=ZIM_FORMAT,
         )
         return [release]
+
+    def upstream_checksums(self, ctx: Ctx, file_url: str) -> tuple[Checksum, ...]:
+        """The SHA-256 Kiwix publishes next to a ZIM (``<file>.sha256``); empty if there is none."""
+        name = file_url.rsplit("/", 1)[-1]
+        try:
+            data = ctx.fetcher.get_bytes(file_url + ".sha256", max_bytes=64 * 1024)
+        except FetchError:
+            return ()
+        digest = parse_checksum_file(data.decode("utf-8", "replace")).get(name)
+        return (Checksum("sha256", digest),) if digest else ()
 
     def plan(self, ctx: Ctx, have: Generation | None, want: ReleaseRef) -> FetchPlan:
         """Plan missing files and enrich each with its metalink (exact size, more hashes, mirrors)."""
@@ -343,7 +356,7 @@ class KiwixOpdsAdapter:
         )
 
     def _resolve(self, ctx: Ctx, remote: RemoteFile, release: ReleaseRef) -> RemoteFile:
-        meta4_url = release.meta.get(f"meta4:{remote.name}")
+        meta4_url = remote.metalink
         if meta4_url is None:
             return remote
         link = parse_metalink(ctx.fetcher.get_bytes(meta4_url))
@@ -353,16 +366,17 @@ class KiwixOpdsAdapter:
             for mine in remote.checksums:
                 if c.algorithm == mine.algorithm and c.hexdigest != mine.hexdigest.lower():
                     raise ValueError(f"{remote.name}: metalink {c.algorithm} disagrees with .sha256")
-        mirrors = tuple(dict.fromkeys((*link.urls, *remote.mirrors[:-1], meta4_url)))
+        mirrors = tuple(dict.fromkeys((*link.urls, *remote.mirrors)))
         return RemoteFile(
             url=remote.url,
             name=remote.name,
             size=link.size,
             checksums=remote.checksums + extra,
             mirrors=tuple(m for m in mirrors if m != remote.url),
+            metalink=meta4_url,
         )
 
-    def fetch(self, ctx: Ctx, plan: FetchPlan) -> Iterable[Path]:
+    def fetch(self, ctx: Ctx, plan: FetchPlan) -> Iterable[FetchResult]:
         return fetch_all(ctx, plan)
 
     def verify(self, ctx: Ctx, remote: RemoteFile, local: Path) -> Verdict:
