@@ -7,8 +7,13 @@ signing_key = ""                 # "" = ~/.config/whisipedia/vault-signing-ed255
 mirror_root = ""                 # second copy with the same layout (repair ladder rung 2); "" = none
 scrub_cycle_days = 30
 scrub_bytes_per_sec = 200000000  # rolling scrub rate limit (PLAN §8.2)
-parity = true                    # par2 for irreplaceable sources when par2 is installed
+parity = true                    # par2 recovery data (needs par2 on PATH); the main bit-rot defence
+parity_scope = "all"             # "all" sealed generations | "irreplaceable" (flagged sources + last copies)
 parity_percent = 10
+parity_bytes_per_sec = 150000000 # parity work (verify + par2 input) rate limit
+parity_bytes_per_run = 200000000000  # one bounded parity job; the backfill continues in later runs
+parity_max_set_gb = 64           # data per par2 recovery set (a bigger file is a set of its own)
+parity_threads = 4               # par2 -t (leave CPU for the browser and the indexer)
 
 [acquirer]
 user_agent = "Whisipedia/0.0 (personal offline archive)"
@@ -22,6 +27,7 @@ root = "/path/to/local/index"    # local disk, never SMB (ADR-0002): refinery/, 
 languages = ["en"]               # Tantivy analyzers; other languages use the unstemmed fallback
 
 [api]
+query_log = true                 # local-only search log (query + result count) for the gap miner; rotated
 backend = "auto"                 # "auto" (real if vault.root exists) | "real" | "sample"
 static_dir = ""                  # "" = <repo>/navigator/dist
 allowed_hosts = []               # extra Host-header names (only with `wsp serve --allow-remote`)
@@ -38,6 +44,38 @@ scrub_slices = 720              # slices per vault.scrub_cycle_days (hourly at 3
 drill_interval = "P1M"
 max_workers = 4
 max_jobs_per_host = 1
+prune_dry_run = false           # true: retention records its plan but moves nothing to pruned/
+offer_max_age = "P14D"          # upstream observations older than this prove nothing (last-copy oracle)
+parity_interval = "PT6H"        # parity backfill wake-up; it continues every few minutes while work remains
 
 [orchestrator.retention_windows]  # upstream retention per adapter; alert at half (PLAN §6.5)
 wikimedia-dumps = "P60D"
+
+[curator]
+# Discovery bots (PLAN §5.3, §5.5). Network bots run in the orchestrator (the only networked service).
+bots = ["kiwix-opds", "wikimedia-ranking", "registry-health", "adapter-contract", "gap-miner"]
+proposals_dir = ""              # "" = <index.root>/../proposals (local disk; one YAML file per proposal)
+overlay = ""                    # "" = config/registry.local.yaml (git-ignored auto-promotions)
+license_allowlist = ["CC0-1.0", "CC-BY-4.0", "CC-BY-SA-3.0", "CC-BY-SA-4.0", "ODbL-1.0", "LicenseRef-PD", "LicenseRef-US-Gov-PD"]
+kiwix_categories = ["wikipedia", "wiktionary", "wikibooks", "wikivoyage", "wikiquote", "wikiversity", "wikisource", "stack_exchange", "other"]
+kiwix_languages = ["eng"]
+kiwix_auto_categories = ["wikibooks", "wikivoyage", "wikiquote", "wikiversity", "wikisource"]
+min_score = 3.5
+gap_min_count = 5
+gap_window_days = 90
+
+[curator.domain_budget_tb]      # storage budget per registry domain (policy gate)
+encyclopedia = 3
+knowledge-graph = 1
+dictionary = 0.2
+books = 2
+textbooks = 0.5
+education = 1.5
+geography = 1
+qa = 0.5
+medicine = 0.2
+science = 16
+law = 1
+catalog = 0.2
+primary-sources = 0.5
+news = 2

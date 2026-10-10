@@ -54,6 +54,10 @@ class CategorizedCatalog(FeedCatalog):
         super().__init__(feed)
         self._cats = categories
 
+    @property
+    def category_map(self) -> Mapping[str, Mapping[str, tuple[str, Sequence[DocId]]]]:
+        return self._cats
+
     def categories(self, source_id: str) -> Sequence[Category]:
         return [
             Category(slug=slug, name=name, count=len(ids))

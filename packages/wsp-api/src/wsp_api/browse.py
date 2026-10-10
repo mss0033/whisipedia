@@ -21,11 +21,13 @@ from wsp_api.schemas import (
     DocRef,
     FeaturedDoc,
     GapReport,
+    OnThisDay,
     Portal,
 )
 from wsp_api.views import Library
 from wsp_core.ids import DocId
 from wsp_core.model import Gap, SourceSpec
+from wsp_core.ports import PortalSource
 
 # Only images are served from containers: never HTML or scripts at our origin.
 SERVED_MIMETYPES = frozenset(
@@ -80,11 +82,14 @@ def browse_router(lib: Library) -> APIRouter:
     @r.get("/portal", tags=["navigator"])
     def portal() -> Portal:
         today = s.clock().date()
-        encyclopedic = [x.id for x in s.sources if sites.kind_of(x) is DocKind.ENCYCLOPEDIA]
-        pick = lib.catalog.random_doc(
-            sources=encyclopedic or None,
-            rng=random.Random(today.toordinal()),  # noqa: S311 - not security
-        )
+        portal_source = lib.catalog if isinstance(lib.catalog, PortalSource) else None
+        pick = portal_source.featured(today) if portal_source is not None else None
+        if pick is None:  # no precomputed picks: a random encyclopedia page, fixed for the day
+            encyclopedic = [x.id for x in s.sources if sites.kind_of(x) is DocKind.ENCYCLOPEDIA]
+            pick = lib.catalog.random_doc(
+                sources=encyclopedic or None,
+                rng=random.Random(today.toordinal()),  # noqa: S311 - not security
+            )
         featured_doc = None if pick is None else s.documents.get(pick)
         featured = (
             None
@@ -102,9 +107,11 @@ def browse_router(lib: Library) -> APIRouter:
         return Portal(
             date=today,
             featured=featured,
-            # TODO: "On this day" and "Did you know" from Wikipedia's selected anniversaries / DYK pages.
-            on_this_day=[],
-            did_you_know=[],
+            on_this_day=[
+                OnThisDay(year=e.year, text=e.text, doc_id=e.doc_id)
+                for e in (portal_source.on_this_day(today) if portal_source is not None else ())
+            ],
+            did_you_know=[],  # TODO: Wikipedia "Did you know" pages are not in the dumps or ZIMs
             newest=[lib.change(c) for c in newest],
             random=doc_ref(lib.catalog.random_doc(sources=None, rng=rng)),
             random_sources=[i.id for i in infos if i.doc_count],

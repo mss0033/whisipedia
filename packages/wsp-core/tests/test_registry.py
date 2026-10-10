@@ -24,3 +24,18 @@ def test_active_source_without_legal_basis_is_rejected(tmp_path: Path) -> None:
     )
     with pytest.raises(RegistryError):
         load_registry(reg, SCHEMA)
+
+
+def test_overlay_replaces_and_adds_entries(tmp_path: Path) -> None:
+    overlay = tmp_path / "registry.local.yaml"
+    overlay.write_text(
+        "schema_version: 1\nsources:\n"
+        "  - {id: wikidata, name: Wikidata (local), domain: [knowledge-graph], tier: T1,"
+        " status: paused, license: CC0-1.0, legal_basis: open-license}\n"
+        "  - {id: kiwix-x, name: X, domain: [education], tier: T2,"
+        " status: active, license: CC-BY-SA-4.0, legal_basis: open-license}\n"
+    )
+    specs = {s.id: s for s in load_registry(ROOT / "registry/sources.yaml", SCHEMA, overlay=overlay)}
+    assert specs["wikidata"].name == "Wikidata (local)"
+    assert "kiwix-x" in specs
+    assert load_registry(ROOT / "registry/sources.yaml", SCHEMA, overlay=tmp_path / "missing.yaml")

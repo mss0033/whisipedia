@@ -1,5 +1,6 @@
 # Local configuration and secrets
 config/local.toml
+config/registry.local.yaml
 .env
 .env.*
 *.key

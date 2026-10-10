@@ -1,0 +1,32 @@
+# Whisipedia API + Navigator (`wsp serve`) as a systemd USER service, on loopback only.
+#
+# Template: `wsp service install` renders @REPO@ and @CONFIG_DIR@ (docs/runbooks/install-services.md).
+# Serves navigator/dist (build it with `cd navigator && npm run build`) at http://127.0.0.1:8737/.
+# Offline guarantee (PLAN §10.5): the API makes no outbound connections; systemd additionally
+# restricts it to loopback where the user manager supports IP filtering.
+
+[Unit]
+Description=Whisipedia API and Navigator (loopback, offline)
+Documentation=file://@REPO@/docs/components/api.md
+
+[Service]
+Type=simple
+WorkingDirectory=@REPO@
+EnvironmentFile=-%h/.config/whisipedia/whisipedia.env
+Environment=PYTHONUNBUFFERED=1
+Environment=WSP_CONFIG_DIR=@CONFIG_DIR@
+ExecStart=@REPO@/.venv/bin/wsp --config-dir @CONFIG_DIR@ serve --host 127.0.0.1 --port 8737
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+# Loopback only: ignored with a warning where the user manager cannot do BPF IP filtering.
+IPAddressDeny=any
+IPAddressAllow=localhost
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+NoNewPrivileges=yes
+PrivateTmp=yes
+UMask=0027
+
+[Install]
+WantedBy=default.target

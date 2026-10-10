@@ -18,7 +18,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, RootModel
 
-API_VERSION = "1.1.0"
+API_VERSION = "1.2.0"
 
 
 class _Wire(BaseModel):
@@ -430,6 +430,129 @@ class LedgerEntry(_Wire):
     hash: str
 
 
+class SourceSlo(_Wire):
+    """Freshness against the source's SLO (PLAN §6.6)."""
+
+    source_id: str
+    slo_class: Literal["wikimedia", "zim", "scholarly", "law", "default"]
+    target_days: float = Field(description="Allowed lag behind upstream.")
+    lag_days: float | None = Field(
+        default=None, description="How long upstream has had a newer release than ours; 0 if current."
+    )
+    within_slo: bool | None = Field(default=None, description="Null when upstream was never observed.")
+    upstream_newest: str | None = Field(default=None, description="Newest version upstream offered.")
+    paused: bool = False
+    pause_reasons: list[str] = Field(default_factory=list[str])
+
+
+class ScrubStatus(_Wire):
+    files_known: int
+    verified_in_cycle: int
+    failing: int
+    fraction: float = Field(description="Share of known files verified within the scrub cycle.")
+    cycle_days: int
+    oldest_check: datetime | None = None
+
+
+class ParityStatus(_Wire):
+    scope: str = Field(description="`all` or `irreplaceable` (vault.parity_scope).")
+    available: bool = Field(description="False when par2 is not installed or parity is off.")
+    generations: int
+    covered: int
+    bytes_total: int
+    bytes_covered: int
+    fraction: float
+    states: dict[str, int] = Field(description="Generations per parity state (none, partial, sidecar, ...).")
+    last_run: dict[str, JsonValue] | None = None
+
+
+class DiskUsage(_Wire):
+    name: Literal["vault", "index", "state"]
+    total_bytes: int
+    free_bytes: int
+    used_bytes: int
+
+
+class DomainBudget(_Wire):
+    domain: str
+    used_bytes: int
+    budget_bytes: int | None = None
+
+
+class DownloadLane(_Wire):
+    """A bulk download lane (aria2 session) from the bootstrap downloads."""
+
+    name: str
+    state: Literal["active", "idle", "finished", "unknown"]
+    last_activity: datetime | None = None
+    completed: int = Field(default=0, description="Files reported complete in the lane's log.")
+    last_completed: str | None = Field(default=None, description="File name of the newest completion.")
+    progress: str | None = Field(default=None, description="Latest progress line, if the lane is running.")
+
+
+class QueueDepth(_Wire):
+    kind: str
+    status: Literal["pending", "running"]
+    count: int
+
+
+class AlertInfo(_Wire):
+    key: str
+    severity: str
+    message: str
+    raised_at: datetime
+
+
+class BotRun(_Wire):
+    name: str
+    at: datetime | None = None
+    ok: bool | None = None
+    candidates: int = 0
+    error: str | None = None
+
+
+class ProposalInfo(_Wire):
+    id: int
+    key: str
+    title: str
+    status: Literal["open", "applied", "accepted", "rejected"]
+    decision: Literal["auto-promote", "review", "reject"]
+    score: float | None = None
+    kind: str
+    found_by: str
+    created_at: datetime | None = None
+    decided_at: datetime | None = None
+    body: str = Field(default="", description="Markdown: score breakdown and checks.")
+
+
+class ProposalPage(_Wire):
+    items: list[ProposalInfo] = Field(description="Newest first.")
+
+
+class ProposalSummary(_Wire):
+    open: int = 0
+    applied: int = 0
+    accepted: int = 0
+    rejected: int = 0
+    latest: list[ProposalInfo] = Field(default_factory=list[ProposalInfo], description="Newest open ones.")
+
+
+class OpsStatus(_Wire):
+    """Operations data for the System Monitor (PLAN §12.6); every part tolerates missing state."""
+
+    slo: list[SourceSlo]
+    scrub: ScrubStatus | None = None
+    parity: ParityStatus | None = None
+    disk: list[DiskUsage]
+    budgets: list[DomainBudget]
+    lanes: list[DownloadLane]
+    queue: list[QueueDepth]
+    alerts: list[AlertInfo]
+    bots: list[BotRun]
+    proposals: ProposalSummary
+    orchestrator_state: bool = Field(description="False until the orchestrator has created its state DB.")
+
+
 class SystemStatus(_Wire):
     generated_at: datetime
     freshness: list[SourceFreshness]
@@ -438,6 +561,7 @@ class SystemStatus(_Wire):
     ledger_ok: bool = Field(description="Result of replaying the ledger hash chain.")
     api_version: str = API_VERSION
     uptime_seconds: float = 0.0
+    ops: OpsStatus | None = Field(default=None, description="Null without orchestrator data.")
 
 
 # --- Summaries ---------------------------------------------------------------------------------

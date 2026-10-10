@@ -1,12 +1,27 @@
 /**
- * Whisipedia API v1.1.0: types generated from docs/api/openapi.json
+ * Whisipedia API v1.2.0: types generated from docs/api/openapi.json
  * by scripts/gen-api.mjs. Do not edit; run `npm run gen:api`.
  */
 
-export const API_VERSION = '1.1.0';
+export const API_VERSION = '1.2.0';
 
 /** Marks a `text/event-stream` response; `T` is the JSON in each `data:` line. */
 export type EventStream<T> = { readonly __events: T };
+
+export interface AlertInfo {
+  key: string;
+  severity: string;
+  message: string;
+  raised_at: string;
+}
+
+export interface BotRun {
+  name: string;
+  at: string | null;
+  ok: boolean | null;
+  candidates: number;
+  error: string | null;
+}
 
 export interface Change {
   doc_id: string;
@@ -80,6 +95,13 @@ export interface DirectoryPage {
   entries: Array<DirectoryEntry>;
 }
 
+export interface DiskUsage {
+  name: 'vault' | 'index' | 'state';
+  total_bytes: number;
+  free_bytes: number;
+  used_bytes: number;
+}
+
 /** What kind of site a source is: drives result filters, badges and the start page (PLAN §10.3). */
 export type DocKind = 'encyclopedia' | 'books' | 'papers' | 'law' | 'maps' | 'qa' | 'dictionary' | 'data' | 'medicine' | 'news' | 'other';
 
@@ -139,6 +161,25 @@ export interface DocumentVersion {
   revision: string | null;
   timestamp: string | null;
   kind: 'added' | 'modified';
+}
+
+export interface DomainBudget {
+  domain: string;
+  used_bytes: number;
+  budget_bytes: number | null;
+}
+
+/** A bulk download lane (aria2 session) from the bootstrap downloads. */
+export interface DownloadLane {
+  name: string;
+  state: 'active' | 'idle' | 'finished' | 'unknown';
+  last_activity: string | null;
+  /** Files reported complete in the lane's log. */
+  completed: number;
+  /** File name of the newest completion. */
+  last_completed: string | null;
+  /** Latest progress line, if the lane is running. */
+  progress: string | null;
 }
 
 export interface ErrorBody {
@@ -265,6 +306,37 @@ export interface OnThisDay {
   doc_id: string | null;
 }
 
+/** Operations data for the System Monitor (PLAN §12.6); every part tolerates missing state. */
+export interface OpsStatus {
+  slo: Array<SourceSlo>;
+  scrub: ScrubStatus | null;
+  parity: ParityStatus | null;
+  disk: Array<DiskUsage>;
+  budgets: Array<DomainBudget>;
+  lanes: Array<DownloadLane>;
+  queue: Array<QueueDepth>;
+  alerts: Array<AlertInfo>;
+  bots: Array<BotRun>;
+  proposals: ProposalSummary;
+  /** False until the orchestrator has created its state DB. */
+  orchestrator_state: boolean;
+}
+
+export interface ParityStatus {
+  /** `all` or `irreplaceable` (vault.parity_scope). */
+  scope: string;
+  /** False when par2 is not installed or parity is off. */
+  available: boolean;
+  generations: number;
+  covered: number;
+  bytes_total: number;
+  bytes_covered: number;
+  fraction: number;
+  /** Generations per parity state (none, partial, sidecar, ...). */
+  states: Record<string, number>;
+  last_run: Record<string, JsonValue> | null;
+}
+
 /** Start page content (`wsp://home`, PLAN §10.2). */
 export interface Portal {
   date: string;
@@ -281,8 +353,43 @@ export interface Portal {
   sites: Array<SourceInfo>;
 }
 
+export interface ProposalInfo {
+  id: number;
+  key: string;
+  title: string;
+  status: 'open' | 'applied' | 'accepted' | 'rejected';
+  decision: 'auto-promote' | 'review' | 'reject';
+  score: number | null;
+  kind: string;
+  found_by: string;
+  created_at: string | null;
+  decided_at: string | null;
+  /** Markdown: score breakdown and checks. */
+  body: string;
+}
+
+export interface ProposalPage {
+  /** Newest first. */
+  items: Array<ProposalInfo>;
+}
+
+export interface ProposalSummary {
+  open: number;
+  applied: number;
+  accepted: number;
+  rejected: number;
+  /** Newest open ones. */
+  latest: Array<ProposalInfo>;
+}
+
 /** Router intents (PLAN §9.3). */
 export type QueryIntent = 'lookup' | 'define' | 'how-to' | 'navigate' | 'locate' | 'compare' | 'ask';
+
+export interface QueueDepth {
+  kind: string;
+  status: 'pending' | 'running';
+  count: number;
+}
 
 export interface RecentChanges {
   /** Newest first. */
@@ -298,6 +405,16 @@ export interface Resolution {
   kind: 'home' | 'search' | 'directory' | 'system' | 'whatsnew' | 'random' | 'client' | 'source' | 'document';
   /** API resource to fetch; null for pages rendered client-side. */
   href: string | null;
+}
+
+export interface ScrubStatus {
+  files_known: number;
+  verified_in_cycle: number;
+  failing: number;
+  /** Share of known files verified within the scrub cycle. */
+  fraction: number;
+  cycle_days: number;
+  oldest_check: string | null;
 }
 
 export interface SearchResults {
@@ -381,6 +498,22 @@ export interface SourcePage {
   next_cursor: string | null;
 }
 
+/** Freshness against the source's SLO (PLAN §6.6). */
+export interface SourceSlo {
+  source_id: string;
+  slo_class: 'wikimedia' | 'zim' | 'scholarly' | 'law' | 'default';
+  /** Allowed lag behind upstream. */
+  target_days: number;
+  /** How long upstream has had a newer release than ours; 0 if current. */
+  lag_days: number | null;
+  /** Null when upstream was never observed. */
+  within_slo: boolean | null;
+  /** Newest version upstream offered. */
+  upstream_newest: string | null;
+  paused: boolean;
+  pause_reasons: Array<string>;
+}
+
 export interface Suggestions {
   query: string;
   suggestions: Array<string>;
@@ -438,6 +571,8 @@ export interface SystemStatus {
   ledger_ok: boolean;
   api_version: string;
   uptime_seconds: number;
+  /** Null without orchestrator data. */
+  ops: OpsStatus | null;
 }
 
 /** Where the bytes live, for "View Source Data" and the direct route (PLAN §7, §10.2). */
@@ -588,6 +723,16 @@ export interface Routes {
     };
     body: null;
     response: EventStream<Change>;
+  };
+  /** Proposals */
+  'GET /v1/proposals': {
+    path: Record<string, never>;
+    query: {
+      /** Filter by status. */
+      status?: 'open' | 'applied' | 'accepted' | 'rejected' | null | undefined;
+    };
+    body: null;
+    response: ProposalPage;
   };
   /** System */
   'GET /v1/system': {

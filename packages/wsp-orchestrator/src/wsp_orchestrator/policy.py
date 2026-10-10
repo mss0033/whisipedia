@@ -182,6 +182,7 @@ class CandidateKind(StrEnum):
     NEW_VARIANT = "new-variant"  # e.g. another flavour or language of an existing active source
     KIWIX_TITLE = "kiwix-title"  # a Kiwix catalog title
     NEW_SOURCE = "new-source"  # anything else
+    REGISTRY_FIX = "registry-fix"  # a change to an existing entry (dead endpoint, ...): always reviewed
 
 
 class Decision(StrEnum):
@@ -304,6 +305,8 @@ def evaluate_candidate(candidate: Candidate, cfg: GateConfig, sources: Sequence[
     elif candidate.kind is CandidateKind.KIWIX_TITLE:
         related = candidate.category is not None and candidate.category in cfg.kiwix_categories
         detail = f"Kiwix category {candidate.category!r} {'allowed' if related else 'not allowed'}"
+    elif candidate.kind is CandidateKind.REGISTRY_FIX:
+        related, detail = False, "registry fix: needs owner review"
     else:
         related, detail = False, "new source: needs owner review"
     checks.append(CheckResult("relation", related, detail))
