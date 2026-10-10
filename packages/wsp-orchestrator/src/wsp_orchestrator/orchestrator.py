@@ -88,7 +88,7 @@ class Wiring:
     bots: Sequence[Bot] = ()  # Curator bots, scheduled per bot (PLAN §5.3, §5.5)
     gate_provider: Callable[[], GateConfig] | None = None  # live budgets; falls back to ``gate``
     promoter: Callable[[Proposal], None] | None = None  # applies AUTO_PROMOTE (registry overlay)
-    proposal_recorder: Callable[[ProposalRecord], None] | None = None  # proposal files
+    proposal_recorder: Callable[[ProposalRecord], object] | None = None  # proposal files
     parity: ParityHook | None = None
 
 

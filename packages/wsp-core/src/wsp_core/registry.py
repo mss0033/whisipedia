@@ -22,8 +22,30 @@ def _jsonable(value: object) -> object:
     return json.loads(json.dumps(value, default=str))
 
 
-def load_registry(registry_path: Path, schema_path: Path) -> Sequence[SourceSpec]:
+def merge_overlay(data: object, overlay: object) -> object:
+    """Entries of ``overlay["sources"]`` replace same-id entries of ``data`` or are appended."""
+    original: object = data
+    if not isinstance(data, dict) or not isinstance(overlay, dict):
+        return original
+    base = cast(dict[str, Any], data)
+    extra: object = cast(dict[str, Any], overlay).get("sources")
+    if not isinstance(extra, list) or not extra:
+        return original
+    entries = [cast(dict[str, Any], e) for e in cast(list[object], extra) if isinstance(e, dict)]
+    by_id = {str(e.get("id")): e for e in entries}
+    merged = [by_id.pop(str(e.get("id")), e) for e in cast(list[dict[str, Any]], base.get("sources", []))]
+    out: dict[str, Any] = {**base, "sources": [*merged, *by_id.values()]}
+    return out
+
+
+def load_registry(
+    registry_path: Path, schema_path: Path, *, overlay: Path | None = None
+) -> Sequence[SourceSpec]:
+    """Load and validate the registry; ``overlay`` (``config/registry.local.yaml``, if it exists) is
+    merged first, so the result is validated as a whole (PLAN §5.4 auto-promotions)."""
     data = _jsonable(yaml.safe_load(registry_path.read_text(encoding="utf-8")))
+    if overlay is not None and overlay.is_file():
+        data = merge_overlay(data, _jsonable(yaml.safe_load(overlay.read_text(encoding="utf-8"))))
     schema = json.loads(schema_path.read_text(encoding="utf-8"))
     try:
         jsonschema.validate(data, schema)

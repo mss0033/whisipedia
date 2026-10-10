@@ -280,6 +280,7 @@ def test_adapter_smoke_reports_contract_problems(tmp_path: Path) -> None:
     world = FakeWorld.build(tmp_path, ManualClock(T0), [make_spec("src")])
     adapter = world.adapters["src"]
     smoke = AdapterSmokeBot()
+
     def adapter_for(spec: SourceSpec) -> Any:
         return adapter
 

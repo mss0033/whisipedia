@@ -104,7 +104,7 @@ class ParityKeeper:
     def __init__(
         self,
         vault: FileVault,
-        parity: ParityProvider,
+        parity: ParityProvider | None,  # None: status and coverage only
         *,
         state_dir: Path,
         scratch: Path,
@@ -280,6 +280,8 @@ class ParityKeeper:
         shutil.rmtree(tmp, ignore_errors=True)  # our own local scratch
         tmp.mkdir(parents=True)
         try:
+            if self.parity is None:
+                raise VaultError("no parity provider (par2) configured")
             created = self.parity.create(files, tmp, self.percent)
             out: list[ManifestEntry] = []
             for path in created:

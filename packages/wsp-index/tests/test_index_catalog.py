@@ -36,7 +36,17 @@ def _wiki(root: Path) -> None:
         for i in range(60):
             links = tuple(f"wsp:wikipedia-en-zim/Topic_{j}" for j in range(i % 5))
             w.write([doc("wikipedia-en-zim", f"Topic_{i}", f"Topic {i}", long, links=links)])
-        w.write([doc("wikipedia-en-zim", "List_of_topics", "List of topics", long, links=links)])
+        w.write(
+            [
+                doc(
+                    "wikipedia-en-zim",
+                    "List_of_topics",
+                    "List of topics",
+                    long,
+                    links=("wsp:wikipedia-en-zim/Topic_1",),
+                )
+            ]
+        )
         w.write([doc("wikipedia-en-zim", "October_10", "October 10", DATE_PAGE)])
 
 

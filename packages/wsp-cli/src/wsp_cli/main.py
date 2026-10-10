@@ -276,6 +276,45 @@ def build_parser() -> argparse.ArgumentParser:
 
     add("status", ops.cmd_status, "Sources, generations, degraded data and the orchestrator queue.")
 
+    pr = add("proposals", _usage, "Curator proposals: list, show, accept or reject.")
+    pr_sub = pr.add_subparsers(dest="proposals_command", required=True, metavar="COMMAND")
+    s = add("list", ops.cmd_proposals_list, "List proposals, newest first.", pr_sub)
+    s.add_argument("--status", choices=["open", "applied", "accepted", "rejected"], default=None)
+    s.add_argument("--json", action="store_true")
+    s = add("show", ops.cmd_proposals_show, "Print one proposal file.", pr_sub)
+    s.add_argument("id", type=int)
+    for name, help_ in (
+        ("accept", "Write the drafted entry into registry/sources.yaml (working tree) for you to commit."),
+        ("reject", "Reject a proposal; the candidate is never proposed again."),
+    ):
+        s = add(name, ops.cmd_proposals_decide, help_, pr_sub)
+        s.set_defaults(decision=name)
+        s.add_argument("id", type=int)
+        s.add_argument("--note", default=None)
+
+    pa = add("parity", _usage, "par2 parity (Warden).")
+    pa_sub = pa.add_subparsers(dest="parity_command", required=True, metavar="COMMAND")
+    add("status", ops.cmd_parity_status, "Parity coverage of sealed generations.", pa_sub)
+
+    sv = add("service", _usage, "systemd user units: install, status, uninstall.")
+    sv_sub = sv.add_subparsers(dest="service_command", required=True, metavar="COMMAND")
+    for name, help_ in (
+        ("install", "Render deploy/systemd units into ~/.config/systemd/user and enable them."),
+        ("status", "Show whether the units are installed, enabled and active."),
+        ("uninstall", "Disable and remove the units this command installed."),
+    ):
+        s = add(name, ops.cmd_service, help_, sv_sub)
+        s.add_argument("--unit-dir", default=None, help="default: $XDG_CONFIG_HOME/systemd/user")
+        if name != "status":
+            s.add_argument("--dry-run", action="store_true")
+        if name == "install":
+            s.add_argument("--now", action="store_true", help="also start the services")
+            s.add_argument("--no-enable", action="store_true", help="only write the unit files")
+
+    s = add("doctor", ops.cmd_doctor, "Check config, vault, index, disk, tools, services, key and ledger.")
+    s.add_argument("--quiet", action="store_true", help="print only problems (to stderr)")
+    s.add_argument("--require", action="append", default=None, help="only these checks decide the exit code")
+
     cfg = add("config", _usage, "Configuration tools.")
     cfg_sub = cfg.add_subparsers(dest="config_command", required=True, metavar="COMMAND")
     add("show", cmd_config_show, "Print the merged configuration with secrets redacted.", cfg_sub)

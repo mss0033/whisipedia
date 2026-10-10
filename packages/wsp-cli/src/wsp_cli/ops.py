@@ -9,15 +9,23 @@ import json
 import sys
 from collections import Counter
 from collections.abc import Generator, Mapping, Sequence
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, TextIO
+from typing import Any, TextIO, cast
 
 from wsp_cli import bootstrap
+from wsp_cli.doctor import Doctor, Level
+from wsp_cli.doctor import exit_code as doctor_exit
+from wsp_cli.doctor import render as render_doctor
 from wsp_cli.indexer import Indexer
 from wsp_cli.ingest import Ingestor, VersionStatus, render
-from wsp_cli.wiring import drill_once, repair_ladder, scrubber
+from wsp_cli.service import ServiceManager, unit_dir
+from wsp_cli.wiring import drill_once, parity_targets, repair_ladder, scrubber
 from wsp_core.model import GenerationStatus, SourceSpec
 from wsp_core.ports import Fetcher
+from wsp_core.registry import RegistryError, load_registry
+from wsp_orchestrator.curator import ProposalFiles
+from wsp_orchestrator.curator.registry_edit import apply_to_registry_text, remove_from_overlay
 from wsp_orchestrator.orchestrator import Orchestrator
 from wsp_orchestrator.settings import OrchestratorSettings
 from wsp_orchestrator.store import StateStore
@@ -271,3 +279,152 @@ def _queue_depth(store: StateStore) -> dict[tuple[str, str], int]:
         " WHERE status IN ('pending', 'running') GROUP BY kind, status"
     )
     return {(str(r["kind"]), str(r["status"])): int(r["n"]) for r in rows}
+
+
+# --- curator proposals -------------------------------------------------------------------------------
+
+
+def _proposal_files(cfg: Mapping[str, Any]) -> ProposalFiles:
+    return ProposalFiles(bootstrap.paths(cfg).proposals)
+
+
+def _mark_state(cfg: Mapping[str, Any], proposal_id: int, status: str) -> None:
+    raw = str(bootstrap.section(cfg, "orchestrator").get("state_db") or "")
+    state_db = Path(raw).expanduser() if raw else None
+    if state_db is not None and state_db.is_file():
+        store = StateStore(state_db, check_local=False)
+        try:
+            store.set_proposal_status(proposal_id, status)
+        finally:
+            store.close()
+
+
+def cmd_proposals_list(args: argparse.Namespace, out: TextIO) -> int:
+    _, cfg, _ = _context(args)
+    docs = _proposal_files(cfg).list(status=args.status)
+    if args.json:
+        out.write(json.dumps(docs, indent=2, default=str) + "\n")
+        return 0
+    if not docs:
+        out.write("no proposals\n")
+    for d in sorted(docs, key=lambda d: int(d.get("id", 0)), reverse=True):
+        score = d.get("score")
+        out.write(
+            f"{int(d.get('id', 0)):>5}  {d.get('status')!s:<9} {d.get('decision')!s:<13}"
+            f" {'-' if score is None else f'{float(score):.2f}':>5}  {d.get('title')}\n"
+        )
+    return 0
+
+
+def cmd_proposals_show(args: argparse.Namespace, out: TextIO) -> int:
+    _, cfg, _ = _context(args)
+    files = _proposal_files(cfg)
+    path = files.find(args.id)
+    if path is None:
+        print(f"error: no proposal {args.id}", file=sys.stderr)
+        return 2
+    out.write(path.read_text(encoding="utf-8"))
+    return 0
+
+
+def cmd_proposals_decide(args: argparse.Namespace, out: TextIO) -> int:
+    """Accept (write the drafted entry into registry/sources.yaml) or reject a proposal."""
+    lay, cfg, _ = _context(args)
+    files = _proposal_files(cfg)
+    path = files.find(args.id)
+    if path is None:
+        print(f"error: no proposal {args.id}", file=sys.stderr)
+        return 2
+    doc = files.load(path)
+    if doc.get("status") in ("accepted", "rejected"):
+        print(f"error: proposal {args.id} is already {doc.get('status')}", file=sys.stderr)
+        return 2
+    now = datetime.now(UTC)
+    if args.decision == "reject":
+        files.decide(args.id, "rejected", at=now, note=args.note)
+        _mark_state(cfg, args.id, "rejected")
+        out.write(f"proposal {args.id}: rejected\n")
+        return 0
+    candidate = cast(dict[str, Any], doc.get("candidate") or {})
+    entry = cast(dict[str, Any], candidate.get("registry_entry") or {})
+    if entry.get("id"):
+        registry = Path(str(bootstrap.section(cfg, "registry").get("path", lay.registry)))
+        text = registry.read_text(encoding="utf-8")
+        updated = apply_to_registry_text(text, entry)
+        tmp = registry.with_name(registry.name + ".partial")
+        tmp.write_text(updated, encoding="utf-8")
+        try:
+            load_registry(tmp, lay.schema)
+        except RegistryError as exc:
+            tmp.unlink()
+            print(f"error: the drafted entry does not validate: {exc}", file=sys.stderr)
+            return 1
+        tmp.replace(registry)
+        removed = remove_from_overlay(bootstrap.overlay_path(cfg, lay), str(entry["id"]))
+        moved = " (moved from the overlay)" if removed else ""
+        out.write(f"registry/sources.yaml: wrote entry {entry['id']!r}{moved}\n")
+        out.write("review and commit:  git diff registry/sources.yaml\n")
+    else:
+        out.write("nothing to write to the registry (a task for the owner); marked accepted\n")
+    files.decide(args.id, "accepted", at=now, note=args.note)
+    _mark_state(cfg, args.id, "accepted")
+    out.write(f"proposal {args.id}: accepted\n")
+    return 0
+
+
+# --- services and doctor ----------------------------------------------------------------------------
+
+
+def _services(args: argparse.Namespace) -> ServiceManager:
+    lay = bootstrap.layout(args.config_dir)
+    if lay.root is None:
+        raise bootstrap.ConfigError("run `wsp service` from inside the Whisipedia checkout")
+    target = Path(args.unit_dir) if args.unit_dir else unit_dir()
+    return ServiceManager(repo=lay.root, config_dir=lay.config_dir.resolve(), target=target)
+
+
+def cmd_service(args: argparse.Namespace, out: TextIO) -> int:
+    mgr = _services(args)
+    match args.service_command:
+        case "install":
+            return mgr.install(out, enable=not args.no_enable, now=args.now, dry_run=args.dry_run)
+        case "uninstall":
+            return mgr.uninstall(out, dry_run=args.dry_run)
+        case _:
+            return mgr.status(out)
+
+
+def cmd_doctor(args: argparse.Namespace, out: TextIO) -> int:
+    lay = bootstrap.layout(args.config_dir)
+    cfg = bootstrap.load(lay)
+    require = list(args.require or [])
+    checks = Doctor(cfg, lay).checks(require or None)
+    if not args.quiet:
+        render_doctor(checks, out)
+    else:
+        for c in checks:
+            if c.level is not Level.OK:
+                print(f"{c.level.value}: {c.title}: {c.detail}", file=sys.stderr)
+    return doctor_exit(checks, require)
+
+
+def cmd_parity_status(args: argparse.Namespace, out: TextIO) -> int:
+    """Parity coverage of sealed generations (reads manifests; never writes)."""
+    from wsp_vault.paritykeeper import ParityKeeper
+
+    lay, cfg, specs = _context(args)
+    vault = _vault(cfg, lay, specs, writable=False)
+    p = bootstrap.paths(cfg)
+    local = p.state_dir or p.require_index()
+    keeper = ParityKeeper(vault, None, state_dir=local, scratch=p.workdir or local)
+    scope = str(bootstrap.section(cfg, "vault").get("parity_scope", "all"))
+    targets = parity_targets(vault, specs, scope, None)
+    cov = keeper.coverage(targets)
+    out.write(
+        f"parity ({scope}): {cov.covered}/{cov.generations} generations, "
+        f"{cov.bytes_covered / 1e12:.2f}/{cov.bytes_total / 1e12:.2f} TB ({cov.fraction:.1%}); "
+        f"states {cov.states}\n"
+    )
+    for subject in cov.uncovered[:50]:
+        out.write(f"  missing: {subject}\n")
+    return 0

@@ -45,6 +45,7 @@ from wsp_core.ports import Catalog, ChangeFeed, Fetcher, Signer, SourceAdapter
 from wsp_core.registry import load_registry
 
 if TYPE_CHECKING:  # heavy imports stay lazy so `wsp search --url ...` starts fast
+    from wsp_cli.monitor import LibraryMonitor
     from wsp_index import ParquetDocumentStore, SqliteChangeFeed, TantivyIndex
     from wsp_vault.ledger import JsonlLedger
     from wsp_vault.vault import FileVault
@@ -110,7 +111,13 @@ def load_sources(cfg: Mapping[str, Any], lay: Layout) -> Sequence[SourceSpec]:
     schema = Path(reg.get("schema", lay.schema))
     if not registry.is_file():
         return ()
-    return load_registry(registry, schema)
+    return load_registry(registry, schema, overlay=overlay_path(cfg, lay))
+
+
+def overlay_path(cfg: Mapping[str, Any], lay: Layout) -> Path:
+    """The local registry overlay written by auto-promotions (git-ignored, PLAN §5.4)."""
+    configured = _opt_path(section(cfg, "curator").get("overlay"))
+    return configured or lay.config_dir / "registry.local.yaml"
 
 
 def effective_sources(specs: Sequence[SourceSpec], cfg: Mapping[str, Any]) -> tuple[SourceSpec, ...]:
@@ -138,6 +145,7 @@ class Paths:
     index_root: Path | None
     state_dir: Path | None  # local orchestrator/warden state (directory of orchestrator.state_db)
     workdir: Path | None
+    proposals_dir: Path | None = None
 
     @property
     def incoming(self) -> Path:
@@ -162,6 +170,15 @@ class Paths:
     @property
     def gaps_log(self) -> Path:
         return self.require_index() / "gaps.jsonl"
+
+    @property
+    def queries_log(self) -> Path:
+        return self.require_index() / "queries.jsonl"
+
+    @property
+    def proposals(self) -> Path:
+        """Proposal files (local disk, next to the index root unless ``curator.proposals_dir``)."""
+        return self.proposals_dir or self.require_index().parent / "proposals"
 
     @property
     def index_work(self) -> Path:
@@ -191,6 +208,7 @@ def paths(cfg: Mapping[str, Any]) -> Paths:
         index_root=_opt_path(section(cfg, "index").get("root")),
         state_dir=state_db.parent if state_db else None,
         workdir=_opt_path(orch.get("workdir")),
+        proposals_dir=_opt_path(section(cfg, "curator").get("proposals_dir")),
     )
 
 
@@ -348,7 +366,7 @@ def build_services(cfg: Mapping[str, Any], lay: Layout) -> Services:
     """Build the API's ports from config. Nothing here may open a network connection (PLAN §10.5)."""
     specs = tuple(load_sources(cfg, lay))
     if real_backends_available(cfg):
-        from wsp_api.gaps import JsonlGapLog
+        from wsp_api.gaps import JsonlGapLog, JsonlQueryLog
         from wsp_api.zim import ZimAssetStore
 
         signer = load_signer(cfg, lay)
@@ -365,6 +383,10 @@ def build_services(cfg: Mapping[str, Any], lay: Layout) -> Services:
             catalog=build_catalog(cfg, specs, changes),
             assets=ZimAssetStore(vault),  # original HTML and images from sealed ZIMs (read-only)
             gaps=JsonlGapLog(paths(cfg).gaps_log),  # local disk next to the index, never the vault
+            ops=build_monitor(cfg, specs, vault),
+            queries=JsonlQueryLog(paths(cfg).queries_log)
+            if section(cfg, "api").get("query_log", True)
+            else None,
         )
 
     index, documents, changes = InMemoryLexicalIndex(), InMemoryDocumentStore(), InMemoryChangeFeed()
@@ -393,6 +415,41 @@ def build_catalog(cfg: Mapping[str, Any], specs: Sequence[SourceSpec], changes: 
         changes,
         sources=[s.id for s in specs],
         featured_sources=[s.id for s in specs if is_featured_source(s)],
+    )
+
+
+def build_monitor(cfg: Mapping[str, Any], specs: Sequence[SourceSpec], vault: FileVault) -> LibraryMonitor:
+    """System Monitor data for ``/v1/system`` (read-only views of local state and the vault)."""
+    from wsp_cli.monitor import LibraryMonitor, default_downloads_dir
+    from wsp_cli.wiring import TB, domain_usage
+    from wsp_orchestrator.curator import ProposalFiles
+    from wsp_vault.paritykeeper import ParityCoverage, ParityKeeper
+
+    p = paths(cfg)
+    orch, v, ops = section(cfg, "orchestrator"), section(cfg, "vault"), section(cfg, "ops")
+    local = p.state_dir or p.require_index()
+    keeper = ParityKeeper(vault, None, state_dir=local, scratch=p.workdir or local)
+    files = ProposalFiles(p.proposals)
+
+    def coverage(targets: Sequence[tuple[str, str]]) -> ParityCoverage:
+        return keeper.coverage(targets)
+
+    budgets = cast(Mapping[str, object], section(cfg, "curator").get("domain_budget_tb", {}))
+    cycle = str(section(cfg, "acquirer").get("cycle", "monthly"))
+    return LibraryMonitor(
+        sources=specs,
+        vault=vault,
+        state_db=_opt_path(orch.get("state_db")),
+        scrub_db=p.state_dir / "scrub.sqlite" if p.state_dir else None,
+        proposals=lambda: files.list(),
+        downloads_dir=_opt_path(ops.get("downloads_dir")) or default_downloads_dir(),
+        disks={"vault": p.vault_root, "index": p.index_root, "state": p.state_dir},
+        cycle_days=91.0 if cycle == "quarterly" else 30.5,
+        scrub_cycle_days=int(v.get("scrub_cycle_days", 30)),
+        parity_scope=str(v.get("parity_scope", "all")),
+        coverage=coverage,
+        domain_usage=lambda: domain_usage(vault),
+        budgets={str(k): int(float(str(x)) * TB) for k, x in budgets.items()},
     )
 
 
