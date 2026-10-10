@@ -9,7 +9,7 @@ sources:
     publisher: Wikimedia Foundation
     domain: [encyclopedia]
     tier: T1
-    status: candidate
+    status: active
     license: CC-BY-SA-4.0
     legal_basis: open-license
     languages: [en, ceb, de, fr, sv, nl, es, ru, it, pl]
@@ -23,12 +23,27 @@ sources:
     irreplaceable: false
     scores: {authority: 4, density: 5, uniqueness: 5, license: 5, bulk: 5, health: 5, longevity: 4, cost: 4}
 
+  - id: wikipedia-top10-history
+    name: Wikipedia full edit history (top 10 languages)
+    publisher: Wikimedia Foundation
+    domain: [encyclopedia]
+    tier: T1
+    status: active
+    license: CC-BY-SA-4.0
+    legal_basis: open-license
+    languages: [en, ceb, de, fr, sv, nl, es, ru, it, pl]
+    access: {adapter: wikimedia-dumps, job: metahistory7zdump}
+    update: {cadence: P1Y, strategy: snapshot-retention}
+    size: {bytes: 456.5e9, measured: true, as_of: 2026-10-09}
+    retention: {gfs: {last: 2, yearly: forever}}
+    notes: Every revision of every page. Refreshed yearly to fill in edits between monthly snapshots (PLAN §6.7).
+
   - id: wikipedia-en-zim
     name: Wikipedia English (Kiwix ZIM, maxi)
     publisher: Kiwix / Wikimedia
     domain: [encyclopedia]
     tier: T1
-    status: candidate
+    status: active
     license: CC-BY-SA-4.0
     legal_basis: open-license
     access: {adapter: kiwix-opds, selector: {name: wikipedia_en_all, flavour: maxi}}
@@ -41,7 +56,7 @@ sources:
     publisher: Wikimedia Foundation
     domain: [knowledge-graph]
     tier: T1
-    status: candidate
+    status: active
     license: CC0-1.0
     legal_basis: open-license
     access: {adapter: wikimedia-dumps, endpoints: ["https://dumps.wikimedia.org/wikidatawiki/entities/"]}
@@ -54,7 +69,7 @@ sources:
     publisher: Wikimedia Foundation
     domain: [dictionary]
     tier: T1
-    status: candidate
+    status: active
     license: CC-BY-SA-4.0
     legal_basis: open-license
     access: {adapter: wikimedia-dumps}
@@ -66,7 +81,7 @@ sources:
     publisher: Wikimedia Foundation
     domain: [books, primary-sources]
     tier: T1
-    status: candidate
+    status: active
     license: CC-BY-SA-4.0
     legal_basis: open-license
     access: {adapter: wikimedia-dumps}
@@ -78,12 +93,25 @@ sources:
     publisher: Project Gutenberg Literary Archive Foundation
     domain: [books]
     tier: T1
-    status: candidate
+    status: active
     license: LicenseRef-PD-US+PG-terms
     legal_basis: public-domain
     access: {adapter: rsync-mirror, catalog: "https://www.gutenberg.org/cache/epub/feeds/"}
     update: {strategy: mirror}
     size: {txt_zip_bytes: 11e9, full_mirror_bytes: 1.0e12, measured: false, as_of: 2026-10-09}
+
+  - id: gutenberg-zim
+    name: Project Gutenberg (Kiwix ZIM, all languages)
+    publisher: Kiwix / Project Gutenberg
+    domain: [books]
+    tier: T1
+    status: active
+    license: LicenseRef-PD-US+PG-terms
+    legal_basis: public-domain
+    access: {adapter: kiwix-opds, selector: {name: gutenberg_mul_all}}
+    update: {cadence: P6M, strategy: snapshot-retention}
+    size: {bytes: 253.1e9, measured: true, as_of: 2026-10-10}
+    notes: Browsable EPUB/HTML for every book. The raw rsync mirror was too slow (about 150 KB/s); plain text and catalogs come from the gutenberg source's bulk feeds.
 
   - id: standard-ebooks
     name: Standard Ebooks
@@ -102,7 +130,7 @@ sources:
     publisher: Internet Archive
     domain: [catalog]
     tier: T1
-    status: candidate
+    status: active
     license: CC0-1.0
     legal_basis: open-license
     access: {adapter: http-files, endpoints: ["https://openlibrary.org/data/"]}
@@ -139,7 +167,7 @@ sources:
     publisher: US National Library of Medicine
     domain: [medicine, science]
     tier: T1
-    status: candidate
+    status: active
     license: LicenseRef-NLM-terms
     legal_basis: bulk-access-terms
     access: {adapter: http-files, endpoints: ["https://ftp.ncbi.nlm.nih.gov/pubmed/baseline/", "https://ftp.ncbi.nlm.nih.gov/pubmed/updatefiles/"]}
@@ -176,7 +204,7 @@ sources:
     publisher: Stack Exchange Inc. (community content)
     domain: [qa]
     tier: T1
-    status: candidate
+    status: active
     license: CC-BY-SA-4.0
     legal_basis: open-license
     access: {adapter: kiwix-opds, selector: {category: stack_exchange, lang: eng}}
@@ -190,7 +218,7 @@ sources:
     publisher: WikiProjectMed Foundation
     domain: [medicine]
     tier: T1
-    status: candidate
+    status: active
     license: CC-BY-SA-4.0
     legal_basis: open-license
     access: {adapter: kiwix-opds, selector: {name: mdwiki_en_all}}
@@ -214,7 +242,7 @@ sources:
     publisher: OpenStreetMap Foundation
     domain: [geography]
     tier: T1
-    status: candidate
+    status: active
     license: ODbL-1.0
     legal_basis: open-license
     access: {adapter: osm-replication, endpoints: ["https://planet.openstreetmap.org/"]}
@@ -262,7 +290,7 @@ sources:
     publisher: Free Law Project
     domain: [law]
     tier: T1
-    status: candidate
+    status: active
     license: LicenseRef-PD-court-opinions
     legal_basis: public-domain
     access: {adapter: http-files, endpoints: ["https://com-courtlistener-storage.s3-us-west-2.amazonaws.com/bulk-data/"]}
@@ -274,7 +302,7 @@ sources:
     publisher: Kiwix (various upstreams)
     domain: [education, howto, technology]
     tier: T2
-    status: candidate
+    status: active
     license: LicenseRef-per-item
     legal_basis: open-license
     access:

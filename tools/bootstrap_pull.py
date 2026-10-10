@@ -344,9 +344,33 @@ def write_input(targets: list[Target], incoming: Path, path: Path) -> None:
             lines.append(f"  out={t.name}")
         # A torrent's own piece hashes verify its payload; the file checksum would wrongly apply to
         # the .torrent metadata download, so it is checked after completion instead (see verify).
-        if t.checksum and t.meta.get("kind") != "torrent":
+        if t.checksum and t.meta.get("kind") not in ("torrent", "metalink"):
             lines.append(f"  checksum={t.checksum[0]}={t.checksum[1]}")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def enrich_metalinks(targets: list[Target]) -> None:
+    """Use the exact size and SHA-256 from each .meta4; Kiwix catalog sizes are rounded."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    ns = "{urn:ietf:params:xml:ns:metalink}"
+
+    def fetch(t: Target) -> None:
+        try:
+            root = ET.fromstring(http_get(t.uris[0]))  # noqa: S314 (trusted upstream metalink)
+            f = root.find(ns + "file")
+            if f is None:
+                return
+            t.name = f.get("name") or t.name
+            t.size = int(f.findtext(ns + "size") or 0) or t.size
+            sha = next((h.text for h in f.findall(ns + "hash") if h.get("type") == "sha-256"), None)
+            if sha:
+                t.checksum = ("sha-256", sha.strip())
+        except Exception as exc:
+            print(f"  ! metalink {t.name}: {exc}", file=sys.stderr)
+
+    with ThreadPoolExecutor(8) as pool:
+        list(pool.map(fetch, [t for t in targets if t.meta.get("kind") == "metalink"]))
 
 
 def fill_pubmed_md5(targets: list[Target]) -> None:
@@ -383,6 +407,7 @@ def plan(root: Path) -> Path:
         except Exception as exc:  # one failing upstream must not block the others
             print(f"  ! {label} failed: {exc}", file=sys.stderr)
     fill_pubmed_md5(targets)
+    enrich_metalinks(targets)
 
     plans = root / "_incoming/_plans"
     plans.mkdir(parents=True, exist_ok=True)
