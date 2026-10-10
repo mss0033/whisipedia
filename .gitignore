@@ -12,8 +12,8 @@ config/local.toml
 *.7z
 *.zst
 *.parquet
-data/
-indexes/
+/data/
+/indexes/
 
 # Python
 __pycache__/
@@ -37,3 +37,4 @@ Thumbs.db
 
 # Agent worktrees
 .claude/
+.hypothesis/

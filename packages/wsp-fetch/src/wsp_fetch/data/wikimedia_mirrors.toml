@@ -1,0 +1,59 @@
+# Wikimedia XML dump mirrors (PLAN §6.5: prefer mirrors, spare the origin).
+#
+# NEEDS PERIODIC REFRESH: mirrors come and go and their retention differs. Re-check every update
+# cycle against https://meta.wikimedia.org/wiki/Mirroring_Wikimedia_project_XML_dumps and bump
+# `reviewed`. `wsp_fetch.mirrors.load_wikimedia_catalog()` warns once `refresh_by` has passed.
+#
+# Each mirror's `base` replaces the origin prefix: a file at <origin>enwiki/20261001/x.bz2 is
+# expected at <base>enwiki/20261001/x.bz2. Mirrors that lag or lack a file are dropped at probe
+# time (404 or size mismatch), so listing a mirror is never a correctness risk, only a probe.
+# `connections` is our per-host politeness cap for that host. `wikis` (optional) limits a mirror to
+# the listed wiki directories.
+
+reviewed = 2026-10-09
+refresh_by = 2027-01-09
+origin = "https://dumps.wikimedia.org/"
+
+[[mirror]]
+name = "Wikimedia Foundation (origin)"
+base = "https://dumps.wikimedia.org/"
+connections = 2   # hard limit: 2 concurrent connections per client IP
+retention = "last ~5 runs"
+
+[[mirror]]
+name = "Academic Computer Club, Umeå University (SE)"
+base = "https://ftp.acc.umu.se/mirror/wikimedia.org/dumps/"
+connections = 4
+retention = "last 2 runs"
+
+[[mirror]]
+name = "Your.org (US)"
+base = "https://dumps.wikimedia.your.org/"
+connections = 4
+retention = "all XML dumps"
+
+[[mirror]]
+name = "C3SL, Universidade Federal do Paraná (BR)"
+base = "http://wikipedia.c3sl.ufpr.br/"   # HTTP only; integrity comes from upstream checksums
+connections = 3
+retention = "last 5 runs"
+
+[[mirror]]
+name = "Scatter (US)"
+base = "https://files.scatter.red/wikimedia/"
+connections = 3
+retention = "last 2 runs"
+wikis = ["enwiki", "wikidatawiki", "commonswiki"]
+
+[[mirror]]
+name = "PDApps (RU)"
+base = "https://wikipedia.mirror.pdapps.org/"
+connections = 3
+retention = "last 2 runs"
+
+[[mirror]]
+name = "Clarkson University (US)"
+base = "https://wikimedia.mirror.clarkson.edu/"
+connections = 3
+retention = "last 2 runs"
+enabled = false   # reported stale (2026-03); returned 403 at review time

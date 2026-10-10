@@ -18,7 +18,10 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run pyright
       - name: Tests (network disabled, PLAN §12.4)
-        run: sudo unshare -n -- sudo -u "$USER" env "PATH=$PATH" uv run --offline pytest -m "not network"
+        # Loopback stays available for in-process test servers; everything else is unreachable.
+        run: >-
+          sudo unshare -n -- sh -c 'ip link set lo up &&
+          sudo -u "$0" env "PATH=$1" uv run --offline pytest -m "not network"' "$USER" "$PATH"
   secrets:
     runs-on: ubuntu-latest
     steps:
