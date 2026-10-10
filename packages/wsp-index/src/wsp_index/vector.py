@@ -70,7 +70,7 @@ class NumpyVectorIndex:
                 if row is not None:
                     self._mat[row] = mat[i]
                 else:
-                    self._row[doc_id] = len(self._ids) + len(new_rows)
+                    self._row[doc_id] = len(self._ids)
                     self._ids.append(doc_id)
                     new_rows.append(mat[i])
             if new_rows:
