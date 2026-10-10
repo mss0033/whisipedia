@@ -160,6 +160,10 @@ class Paths:
         return self.require_index() / "changes.sqlite"
 
     @property
+    def gaps_log(self) -> Path:
+        return self.require_index() / "gaps.jsonl"
+
+    @property
     def index_work(self) -> Path:
         return self.require_index() / "work"
 
@@ -344,16 +348,24 @@ def build_services(cfg: Mapping[str, Any], lay: Layout) -> Services:
     """Build the API's ports from config. Nothing here may open a network connection (PLAN §10.5)."""
     specs = tuple(load_sources(cfg, lay))
     if real_backends_available(cfg):
+        from wsp_api.catalog import FeedCatalog
+        from wsp_api.gaps import JsonlGapLog
+        from wsp_api.zim import ZimAssetStore
+
         signer = load_signer(cfg, lay)
         vault = build_vault(cfg, specs, signer, ledger=False)
+        changes = open_changes(cfg)
         return Services(
             index=open_index(cfg),
             documents=open_documents(cfg),
-            changes=open_changes(cfg),
+            changes=changes,
             vault=vault,
             ledger=build_ledger(cfg, signer),
             sources=effective_sources([s for s in specs if s.status is not SourceStatus.EXCLUDED], cfg),
             generator=None,  # TODO(integration): wsp_oracle.LocalGenerator (loopback only) when configured
+            catalog=FeedCatalog(changes),  # TODO(integration): a Refinery-backed catalog with categories
+            assets=ZimAssetStore(vault),  # original HTML and images from sealed ZIMs (read-only)
+            gaps=JsonlGapLog(paths(cfg).gaps_log),  # local disk next to the index, never the vault
         )
 
     index, documents, changes = InMemoryLexicalIndex(), InMemoryDocumentStore(), InMemoryChangeFeed()

@@ -9,11 +9,11 @@ from wsp_api import convert
 from wsp_api.catalog import FeedCatalog
 from wsp_api.errors import ApiError
 from wsp_api.schemas import Change, DocumentLink, SourceInfo, VaultLocation
-from wsp_api.seams import AssetStore, Catalog
 from wsp_api.services import Services
 from wsp_api.zim import ZimAssetStore
 from wsp_core.ids import DocId, InvalidDocIdError, make_doc_id, parse_doc_id
 from wsp_core.model import ChangeRecord, DocRecord, Generation, GenerationStatus, SourceSpec
+from wsp_core.ports import AssetStore, Catalog
 
 MANIFEST_NAME = "MANIFEST.json"  # same name as wsp_vault.manifest.MANIFEST_NAME
 _MAX_LINK_LOOKUPS = 1000

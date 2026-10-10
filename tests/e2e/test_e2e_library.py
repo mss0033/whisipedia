@@ -267,6 +267,13 @@ def test_ingest_index_and_serve(library: dict[str, Any]) -> None:
         # Redirects become aliases: the prefix matches the alias, the suggestion is the article title.
         assert "Alan Turing" in wsp.suggest("tur").suggestions  # ZIM redirect "Turing"
         assert "Ada Lovelace" in wsp.suggest("love").suggestions  # dump redirect "Lovelace"
+        turing = wsp.document("wsp:wikipedia-en-zim/A/Alan_Turing")
+        assert turing.format == "html"  # original HTML straight from the sealed ZIM (ZimAssetStore)
+        assert turing.html is not None
+        assert "codebreaker" in turing.html
+        wsp.report_gap("https://en.wikipedia.org/wiki/Colossus", from_doc_id=turing.doc_id)
+        gaps = (library["tmp"] / "index" / "gaps.jsonl").read_text().splitlines()
+        assert [json.loads(g)["href"] for g in gaps] == ["https://en.wikipedia.org/wiki/Colossus"]
         with pytest.raises(NotFoundError):
             wsp.document("wsp:wikipedia-en/Nope")
         assert {c.doc_id for c in wsp.changes().items} >= {"wsp:wikipedia-en/Ada_Lovelace"}

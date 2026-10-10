@@ -303,3 +303,32 @@ class LedgerEvent:
     data: Mapping[str, object]
     prev_hash: str
     hash: str
+
+
+# --- Read-side browsing (Navigator portal, directory, assets, gaps; moved from wsp_api.seams in v0.2) ----
+
+
+@dataclass(frozen=True, slots=True)
+class Category:
+    """A top-level category of one source (e.g. a Gutenberg LCC class or a Wikidata class)."""
+
+    slug: str  # path segment, [a-z0-9-]+
+    name: str
+    count: int
+
+
+@dataclass(frozen=True, slots=True)
+class Asset:
+    """A file inside a sealed container (ZIM image, stylesheet, ...)."""
+
+    content: bytes
+    mimetype: str
+
+
+@dataclass(frozen=True, slots=True)
+class Gap:
+    """A "not in library" report for the gap miner (PLAN §5.3, §10.2)."""
+
+    at: datetime
+    href: str  # the link as it appeared, or a wsp:// address that did not resolve
+    from_doc_id: str | None = None

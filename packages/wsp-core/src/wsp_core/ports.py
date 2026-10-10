@@ -6,11 +6,13 @@ Each port has a reference implementation in its package and a contract test suit
 Port revision v0.2 (ADR-0005): ``Fetcher.download`` returns a :class:`~wsp_core.model.FetchResult`;
 ``Vault`` gains ``adopt`` and upstream checksums on ``ingest``; integrity operations live on the
 separate :class:`Warden` port; ``Ledger`` gains ``tail`` and idempotent appends; ``LexicalIndex`` and
-``ChangeFeed`` gain ``close``; typed errors live in :mod:`wsp_core.errors`.
+``ChangeFeed`` gain ``close``; typed errors live in :mod:`wsp_core.errors`; the API's read-side seams
+(``Catalog``, ``AssetStore``, ``GapLog``) moved here from ``wsp_api.seams``.
 """
 
 from __future__ import annotations
 
+import random
 from collections.abc import AsyncIterator, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -20,11 +22,14 @@ from typing import Protocol, runtime_checkable
 from wsp_core.ids import DocId
 from wsp_core.model import (
     Artifact,
+    Asset,
+    Category,
     ChangeRecord,
     Checksum,
     DocRecord,
     FetchPlan,
     FetchResult,
+    Gap,
     Generation,
     LedgerEvent,
     ReleaseRef,
@@ -335,3 +340,49 @@ class ChangeFeed(Protocol):
         ...
 
     def close(self) -> None: ...
+
+
+# --- Browsing (Navigator portal, directory, original HTML, gaps) ----------------------------------------
+
+
+@runtime_checkable
+class Catalog(Protocol):
+    """Browse the library: random pages, counts, newest changes, per-source categories."""
+
+    def doc_count(self, source_id: str) -> int | None:
+        """Live documents of a source, or None if unknown."""
+        ...
+
+    def random_doc(self, *, sources: Sequence[str] | None, rng: random.Random) -> DocId | None:
+        """A uniformly random live document (restricted to ``sources`` if given)."""
+        ...
+
+    def recent(
+        self, *, limit: int, sources: Sequence[str] | None = None
+    ) -> tuple[Sequence[ChangeRecord], str | None]:
+        """Newest changes first, plus the change-feed cursor they are current to (None: empty feed)."""
+        ...
+
+    def categories(self, source_id: str) -> Sequence[Category]: ...
+
+    def category_docs(self, source_id: str, slug: str, *, limit: int) -> Sequence[DocId]: ...
+
+
+@runtime_checkable
+class AssetStore(Protocol):
+    """Original HTML and embedded files inside sealed containers (ZIM)."""
+
+    def html(self, source_id: str, generation_id: str, html_ref: str) -> str | None:
+        """Original HTML for ``DocRecord.html_ref`` (e.g. ``zim:A/Alan_Turing``), or None."""
+        ...
+
+    def asset(self, source_id: str, generation_id: str, path: str) -> Asset | None:
+        """A file inside the generation's containers, addressed like a native id (e.g. ``I/logo.png``)."""
+        ...
+
+
+@runtime_checkable
+class GapLog(Protocol):
+    """Append-only "not in library" reports (local disk, never the vault)."""
+
+    def record(self, gap: Gap) -> None: ...

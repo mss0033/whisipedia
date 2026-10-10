@@ -13,9 +13,8 @@ import threading
 from collections import deque
 from collections.abc import Sequence
 
-from wsp_api.seams import Category
 from wsp_core.ids import DocId
-from wsp_core.model import ChangeKind, ChangeRecord
+from wsp_core.model import Category, ChangeKind, ChangeRecord
 from wsp_core.ports import ChangeFeed
 
 _BATCH = 5000

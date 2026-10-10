@@ -27,6 +27,7 @@ Adopted:
 | `DocumentStore.get(at_generation=g)` = newest generation at or before `g`; missing there = tombstoned (`None`); `history()` lists content changes only | Pinned in the contract suite and implemented by the Parquet store and the API fake. |
 | `DocRecord.aliases` | Wikidata labels feed suggest and search directly; the Tantivy index adds them to `set_aliases`. Refinery Parquet format bumps to 2 (rebuildable derived data). |
 | Optional `SupportsHead` capability (`head(url) -> RemoteHead`) | A separate runtime-checkable protocol rather than an optional method, so pyright strict keeps working and callers test with `isinstance`. |
+| `Catalog`, `AssetStore`, `GapLog` ports (value types `Category`, `Asset`, `Gap` in `wsp_core.model`) | Moved from `wsp_api.seams` (ADR-0006), which now re-exports them. The composition root wires `FeedCatalog`, the ZIM-backed `ZimAssetStore` and `JsonlGapLog(<index.root>/gaps.jsonl)`; `GapLogContract` pins the log semantics. |
 | `wsp-core[testing]` extra | `wsp_core.testing` imports pytest; runtime installs of wsp-core no longer need it. Package dev groups depend on the extra. |
 
 **Warden is a separate port.** `manifest`, `mark_degraded` and `prune` live on `Warden`, not

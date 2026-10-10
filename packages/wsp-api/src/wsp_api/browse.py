@@ -23,10 +23,9 @@ from wsp_api.schemas import (
     GapReport,
     Portal,
 )
-from wsp_api.seams import Gap
 from wsp_api.views import Library
 from wsp_core.ids import DocId
-from wsp_core.model import SourceSpec
+from wsp_core.model import Gap, SourceSpec
 
 # Only images are served from containers: never HTML or scripts at our origin.
 SERVED_MIMETYPES = frozenset(
