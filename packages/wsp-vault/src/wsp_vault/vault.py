@@ -435,7 +435,7 @@ class FileVault:
             lib.parent.mkdir(parents=True, exist_ok=True)
             if lib.exists():
                 raise VaultError(f"{lib} exists without a manifest; inspect it by hand")
-            os.rename(stg, lib)
+            _rename_with_retry(stg, lib)
             fsync_dir(lib.parent)
             for parent in (stg.parent, stg.parent.parent):
                 with suppress(OSError):
@@ -717,3 +717,25 @@ def _read_staging(staging: Path) -> dict[str, ManifestEntry]:
         return {}
     raw = cast(dict[str, Any], json.loads(path.read_bytes()))
     return {rel: ManifestEntry.from_json(cast(dict[str, Any], obj)) for rel, obj in raw.items()}
+
+
+def _rename_with_retry(src: Path, dst: Path, *, attempts: int = 6, first_delay: float = 2.0) -> None:
+    """``os.rename`` that waits out transient sharing locks.
+
+    On SMB a directory cannot be renamed while any client holds a file inside it open (another
+    reader, an indexer or virus scanner on the NAS). Such locks are usually short, so retry with
+    exponential backoff (about two minutes in total) before giving up; the seal is idempotent and
+    the next run retries anyway.
+    """
+    import time
+
+    delay = first_delay
+    for attempt in range(attempts):
+        try:
+            os.rename(src, dst)
+            return
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(delay)
+            delay *= 2
