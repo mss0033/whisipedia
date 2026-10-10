@@ -9,15 +9,15 @@ from wsp_orchestrator.store import StateStore, UnsafeStoragePathError, assert_lo
 T0 = datetime(2026, 10, 15, tzinfo=UTC)
 MOUNTS = """\
 /dev/sdc / ext4 rw,relatime 0 0
-//nas/share /mnt/z cifs rw,soft 0 0
+//nas/share /mnt/nas cifs rw,soft 0 0
 C:\\134 /mnt/c 9p rw 0 0
 """
 
 
 def test_local_path_guard_refuses_network_and_vault(tmp_path: Path) -> None:
-    assert_local_path(Path("/home/user/state/db.sqlite3"), mounts_text=MOUNTS)
+    assert_local_path(Path("/srv/wsp/state/db.sqlite3"), mounts_text=MOUNTS)
     with pytest.raises(UnsafeStoragePathError, match="cifs"):
-        assert_local_path(Path("/mnt/z/whisipedia/state.sqlite3"), mounts_text=MOUNTS)
+        assert_local_path(Path("/mnt/nas/whisipedia/state.sqlite3"), mounts_text=MOUNTS)
     with pytest.raises(UnsafeStoragePathError, match="9p"):
         assert_local_path(Path("/mnt/c/state.sqlite3"), mounts_text=MOUNTS)
     with pytest.raises(UnsafeStoragePathError, match="local disk"):
