@@ -1,0 +1,44 @@
+# Whisipedia orchestrator (Curator + Acquirer + Warden scheduling) as a systemd USER service.
+#
+# Install:
+#   mkdir -p ~/.config/systemd/user
+#   cp deploy/systemd/whisipedia-orchestrator.service ~/.config/systemd/user/
+#   # edit WorkingDirectory below to point at your checkout, then:
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now whisipedia-orchestrator
+#   loginctl enable-linger "$USER"   # keep running without an open session (WSL: see PLAN §2)
+#
+# Machine-specific values (vault root on the NAS, LOCAL state_db/workdir/metrics paths, wiring)
+# belong in config/local.toml, never in this file (PLAN §12.2). The state DB must be on local disk
+# (ADR-0002); the daemon refuses to start if it is on cifs/nfs/9p or under vault.root.
+
+[Unit]
+Description=Whisipedia orchestrator
+Documentation=file://%h/whisipedia/docs/components/orchestrator.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/whisipedia
+ExecStart=/usr/bin/env uv run --frozen wsp-orchestrator --config-dir config
+# SIGTERM -> graceful shutdown: stop claiming jobs, pipelines stop between steps, unfinished work
+# resumes on the next start. Allow long enough for the in-flight step to finish.
+KillSignal=SIGTERM
+TimeoutStopSec=120
+Restart=on-failure
+RestartSec=30
+# Logs are JSON lines on stderr -> journald (`journalctl --user -u whisipedia-orchestrator -o cat`).
+StandardOutput=journal
+StandardError=journal
+Environment=PYTHONUNBUFFERED=1
+# Be a good neighbour to the browser and the NAS (scrub is IO-heavy).
+Nice=10
+IOSchedulingClass=idle
+# Hardening that works in user units.
+NoNewPrivileges=yes
+PrivateTmp=yes
+UMask=0027
+
+[Install]
+WantedBy=default.target
