@@ -32,7 +32,7 @@ In an API path a doc id is **one percent-encoded segment**, exactly as JavaScrip
 The server routes these paths on the raw, undecoded path, so a native id that ends in `/history` can
 never be mistaken for the history route. A doc id with literal slashes (`/v1/documents/wsp:rfc/9110`)
 answers `404 doc_id_not_encoded`. Python: `wsp_api.addresses.document_href` and the SDK use the same
-encoding. See ADR-0005.
+encoding. See ADR-0006.
 
 ## Mapping
 

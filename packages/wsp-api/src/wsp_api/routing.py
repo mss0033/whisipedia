@@ -3,7 +3,7 @@
 ASGI servers decode the path before routing, so ``%2F`` would become ``/`` and a native id ending in
 ``/history`` (Wiktionary's entry "history") would collide with the history route. This middleware
 routes ``/v1/documents/…`` on the *raw* path instead, so ``%2F`` stays inside its segment; the routes
-unquote the segment. See docs/api/addresses.md and ADR-0005.
+unquote the segment. See docs/api/addresses.md and ADR-0006.
 """
 
 from __future__ import annotations

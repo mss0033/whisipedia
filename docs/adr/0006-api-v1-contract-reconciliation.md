@@ -1,4 +1,4 @@
-# ADR-0005: One API contract for the Navigator and the API, generated from OpenAPI
+# ADR-0006: One API contract for the Navigator and the API, generated from OpenAPI
 
 - Status: Proposed
 - Date: 2026-10-10

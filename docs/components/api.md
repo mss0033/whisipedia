@@ -71,7 +71,7 @@ and needs an ADR.
   `?max_seconds=` closes the stream after that many seconds, for proxies and tests.
 - **Document ids** contain `/` (`wsp:wikipedia-en-zim/A/Alan_Turing`). In a URL path a doc id is ONE
   percent-encoded segment (`encodeURIComponent`: `/v1/documents/wsp%3Arfc%2F9110`). The server routes
-  on the raw path, so native ids ending in `/history` do not collide (ADR-0005,
+  on the raw path, so native ids ending in `/history` do not collide (ADR-0006,
   [addresses](../api/addresses.md)).
 - **Search** is navigational when the query names one page (`rfc 9110`, `wikipedia Alan Turing`,
   `wsp://rfc/9110`): exact native id or exact title within a named site, no fuzzy matching

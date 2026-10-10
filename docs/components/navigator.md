@@ -69,7 +69,7 @@ inside that web. Code lives in [`navigator/`](../../navigator/).
 
 ## API contract
 
-The contract is [`docs/api/openapi.json`](../api/openapi.json) (ADR-0005). The
+The contract is [`docs/api/openapi.json`](../api/openapi.json) (ADR-0006). The
 Navigator's wire types are generated from it into
 [`navigator/src/api/generated.ts`](../../navigator/src/api/generated.ts) by
 `npm run gen:api` (`scripts/gen-api.mjs`, no dependencies); `npm run check`
