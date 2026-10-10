@@ -75,7 +75,7 @@ export async function renderHelp(ctx: PageContext): Promise<PageResult> {
       ' address, like ',
       wspLink('wsp://rfc/9110'),
       ' or ',
-      wspLink('wsp://wikipedia-en/Alan_Turing'),
+      wspLink('wsp://wikipedia-en-zim/Alan_Turing'),
       '. Type an address into the Location bar, or type anything else to search. Shortcuts such as ',
       h('kbd', null, 'rfc 9110'),
       ', ',
@@ -146,6 +146,9 @@ export async function renderHelp(ctx: PageContext): Promise<PageResult> {
 
 export async function renderOffline(ctx: PageContext): Promise<PageResult> {
   const url = (ctx.route as { url: string }).url;
+  const from = (ctx.route as { from: string | undefined }).from;
+  // "The missing link has been noted": report it to the gap miner (PLAN §5.3).
+  if (url) void ctx.app.api.reportGap({ href: url, from_doc_id: from ?? ctx.app.lastDocId() });
   let words = '';
   try {
     const u = new URL(/^[a-z]+:/i.test(url) ? url : `http://${url}`);
@@ -177,11 +180,11 @@ export async function renderRandom(ctx: PageContext): Promise<PageResult> {
     return { redirect: docIdToAddress(r.doc_id) };
   } catch (err) {
     if (!(err instanceof ApiRequestError)) throw err;
-    // Fallback: a random recent change.
-    const ch = await ctx.app.api.changes(undefined, 50, ctx.signal);
-    const pool = ch.changes.filter(
-      (c) => c.op !== 'tombstone' && (!source || c.source_id === source),
-    );
+    // Older daemon without /v1/random: a random recent change.
+    const ch = await ctx.app.api
+      .recentChanges(50, source, ctx.signal)
+      .catch(() => ({ items: [], cursor: null }));
+    const pool = ch.items.filter((c) => c.kind !== 'removed');
     const pick = pool[Math.floor(Math.random() * pool.length)];
     if (pick) return { redirect: docIdToAddress(pick.doc_id) };
     return {

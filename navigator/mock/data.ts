@@ -1,11 +1,30 @@
 /**
  * Fixture library for the mock API. All prose is written for this project
- * (or is public-domain text) so the fixtures are license-clean. Values are
- * shaped exactly like src/api/types.ts.
+ * (or is public-domain text) so the fixtures are license-clean. The handler
+ * (mock/handler.ts) turns these into responses typed by the generated spec.
  */
-import type { DocKind, DocumentLink, SourceInfo } from '../src/api/types.ts';
+import type { DocKind, DocumentLink, SourceHealth } from '../src/api/types.ts';
 
-export const GENERATION = 'gen-2026-10-01-a1';
+/** Generation ids are the sealing date (PLAN §7). */
+export const GENERATION = '2026-10-01';
+
+/** Registry facts plus what the vault and catalog would report. */
+export interface FixtureSource {
+  id: string;
+  name: string;
+  publisher: string;
+  kind: DocKind;
+  domain: string[];
+  license: string;
+  tier: 'T1' | 'T2' | 'T3';
+  description: string;
+  doc_count: number;
+  bytes: number;
+  as_of: string;
+  health: SourceHealth;
+  home_doc_id?: string;
+  related: string[];
+}
 
 export interface FixtureVersion {
   revision: string;
@@ -33,9 +52,9 @@ export interface FixtureDoc {
 
 const T = (d: string) => `${d}T00:00:00Z`;
 
-export const SOURCES: SourceInfo[] = [
+export const SOURCES: FixtureSource[] = [
   {
-    id: 'wikipedia-en',
+    id: 'wikipedia-en-zim',
     name: 'Wikipedia (English)',
     publisher: 'Wikimedia Foundation',
     kind: 'encyclopedia',
@@ -46,8 +65,8 @@ export const SOURCES: SourceInfo[] = [
     doc_count: 6_912_404,
     bytes: 127.4e9,
     as_of: T('2026-10-01'),
-    status: 'ok',
-    home_doc_id: 'wsp:wikipedia-en/Main_Page',
+    health: 'ok',
+    home_doc_id: 'wsp:wikipedia-en-zim/Main_Page',
     related: ['wiktionary-en', 'wikidata', 'wikisource-en'],
   },
   {
@@ -62,8 +81,8 @@ export const SOURCES: SourceInfo[] = [
     doc_count: 8_421_337,
     bytes: 1.6e9,
     as_of: T('2026-10-01'),
-    status: 'ok',
-    related: ['wikipedia-en', 'wikidata'],
+    health: 'ok',
+    related: ['wikipedia-en-zim', 'wikidata'],
   },
   {
     id: 'wikidata',
@@ -77,8 +96,8 @@ export const SOURCES: SourceInfo[] = [
     doc_count: 112_004_561,
     bytes: 103.3e9,
     as_of: T('2026-09-28'),
-    status: 'ok',
-    related: ['wikipedia-en', 'osm-planet'],
+    health: 'ok',
+    related: ['wikipedia-en-zim', 'osm-planet'],
   },
   {
     id: 'wikisource-en',
@@ -92,8 +111,8 @@ export const SOURCES: SourceInfo[] = [
     doc_count: 1_003_225,
     bytes: 3.4e9,
     as_of: T('2026-10-01'),
-    status: 'ok',
-    related: ['gutenberg', 'wikipedia-en'],
+    health: 'ok',
+    related: ['gutenberg', 'wikipedia-en-zim'],
   },
   {
     id: 'gutenberg',
@@ -107,7 +126,7 @@ export const SOURCES: SourceInfo[] = [
     doc_count: 76_102,
     bytes: 71.9e9,
     as_of: T('2026-09-30'),
-    status: 'ok',
+    health: 'ok',
     related: ['wikisource-en', 'standard-ebooks'],
   },
   {
@@ -122,7 +141,7 @@ export const SOURCES: SourceInfo[] = [
     doc_count: 1_204,
     bytes: 2.1e9,
     as_of: T('2026-09-15'),
-    status: 'stale',
+    health: 'stale',
     related: ['gutenberg'],
   },
   {
@@ -137,8 +156,8 @@ export const SOURCES: SourceInfo[] = [
     doc_count: 9_812,
     bytes: 0.6e9,
     as_of: T('2026-10-07'),
-    status: 'ok',
-    related: ['stackexchange', 'wikipedia-en'],
+    health: 'ok',
+    related: ['stackexchange', 'wikipedia-en-zim'],
   },
   {
     id: 'arxiv',
@@ -152,7 +171,7 @@ export const SOURCES: SourceInfo[] = [
     doc_count: 2_590_118,
     bytes: 1.9e12,
     as_of: T('2026-10-01'),
-    status: 'ok',
+    health: 'ok',
     related: ['rfc', 'openstax'],
   },
   {
@@ -167,8 +186,8 @@ export const SOURCES: SourceInfo[] = [
     doc_count: 61_337_902,
     bytes: 98.2e9,
     as_of: T('2026-09-30'),
-    status: 'ok',
-    related: ['rfc', 'wikipedia-en'],
+    health: 'ok',
+    related: ['rfc', 'wikipedia-en-zim'],
   },
   {
     id: 'openstax',
@@ -182,7 +201,7 @@ export const SOURCES: SourceInfo[] = [
     doc_count: 72,
     bytes: 4.2e9,
     as_of: T('2026-09-01'),
-    status: 'ok',
+    health: 'ok',
     related: ['medlineplus', 'arxiv'],
   },
   {
@@ -197,8 +216,8 @@ export const SOURCES: SourceInfo[] = [
     doc_count: 4_310,
     bytes: 0.4e9,
     as_of: T('2026-10-02'),
-    status: 'ok',
-    related: ['openstax', 'wikipedia-en'],
+    health: 'ok',
+    related: ['openstax', 'wikipedia-en-zim'],
   },
   {
     id: 'osm-planet',
@@ -212,8 +231,8 @@ export const SOURCES: SourceInfo[] = [
     doc_count: 10_204_118_330,
     bytes: 86.2e9,
     as_of: T('2026-10-06'),
-    status: 'ok',
-    related: ['wikidata', 'wikipedia-en'],
+    health: 'ok',
+    related: ['wikidata', 'wikipedia-en-zim'],
   },
   {
     id: 'us-code',
@@ -227,7 +246,7 @@ export const SOURCES: SourceInfo[] = [
     doc_count: 54,
     bytes: 0.9e9,
     as_of: T('2026-08-20'),
-    status: 'degraded',
+    health: 'degraded',
     related: ['wikisource-en'],
   },
 ];
@@ -257,7 +276,7 @@ const turingV1 = `
 
 export const DOCS: FixtureDoc[] = [
   {
-    source_id: 'wikipedia-en',
+    source_id: 'wikipedia-en-zim',
     native_id: 'Main_Page',
     title: 'Wikipedia, the free encyclopedia',
     kind: 'encyclopedia',
@@ -278,7 +297,7 @@ export const DOCS: FixtureDoc[] = [
     entities: [],
   },
   {
-    source_id: 'wikipedia-en',
+    source_id: 'wikipedia-en-zim',
     native_id: 'Alan_Turing',
     title: 'Alan Turing',
     kind: 'encyclopedia',
@@ -299,7 +318,7 @@ export const DOCS: FixtureDoc[] = [
     aliases: ['turing', 'father of computer science', 'enigma codebreaker'],
   },
   {
-    source_id: 'wikipedia-en',
+    source_id: 'wikipedia-en-zim',
     native_id: 'Turing_machine',
     title: 'Turing machine',
     kind: 'encyclopedia',
@@ -319,7 +338,7 @@ export const DOCS: FixtureDoc[] = [
     entities: ['Q163310', 'Q7251'],
   },
   {
-    source_id: 'wikipedia-en',
+    source_id: 'wikipedia-en-zim',
     native_id: 'Enigma_machine',
     title: 'Enigma machine',
     kind: 'encyclopedia',
@@ -339,7 +358,7 @@ export const DOCS: FixtureDoc[] = [
     entities: ['Q48244'],
   },
   {
-    source_id: 'wikipedia-en',
+    source_id: 'wikipedia-en-zim',
     native_id: 'Vaccine',
     title: 'Vaccine',
     kind: 'encyclopedia',
@@ -362,7 +381,7 @@ export const DOCS: FixtureDoc[] = [
     aliases: ['vaccines', 'vaccination', 'immunization'],
   },
   {
-    source_id: 'wikipedia-en',
+    source_id: 'wikipedia-en-zim',
     native_id: 'Immune_system',
     title: 'Immune system',
     kind: 'encyclopedia',
@@ -382,7 +401,7 @@ export const DOCS: FixtureDoc[] = [
     entities: ['Q1059'],
   },
   {
-    source_id: 'wikipedia-en',
+    source_id: 'wikipedia-en-zim',
     native_id: 'Lisbon',
     title: 'Lisbon',
     kind: 'encyclopedia',
@@ -403,7 +422,7 @@ export const DOCS: FixtureDoc[] = [
     aliases: ['lisboa', 'capital of portugal'],
   },
   {
-    source_id: 'wikipedia-en',
+    source_id: 'wikipedia-en-zim',
     native_id: 'Hypertext_Transfer_Protocol',
     title: 'Hypertext Transfer Protocol',
     kind: 'encyclopedia',
@@ -428,7 +447,7 @@ export const DOCS: FixtureDoc[] = [
     aliases: ['http'],
   },
   {
-    source_id: 'wikipedia-en',
+    source_id: 'wikipedia-en-zim',
     native_id: 'World_Wide_Web',
     title: 'World Wide Web',
     kind: 'encyclopedia',
@@ -449,7 +468,7 @@ export const DOCS: FixtureDoc[] = [
     aliases: ['www', 'the web'],
   },
   {
-    source_id: 'wikipedia-en',
+    source_id: 'wikipedia-en-zim',
     native_id: 'Mary_Shelley',
     title: 'Mary Shelley',
     kind: 'encyclopedia',
@@ -510,7 +529,7 @@ export const DOCS: FixtureDoc[] = [
 <tr><td>place of birth</td><td>Maida Vale, London</td></tr>
 <tr><td>date of death</td><td>7 June 1954</td></tr>
 <tr><td>field of work</td><td>mathematics, cryptanalysis, computer science</td></tr>
-<tr><td>Wikipedia article</td><td><a href="wsp:wikipedia-en/Alan_Turing">Alan Turing</a></td></tr>
+<tr><td>Wikipedia article</td><td><a href="wsp:wikipedia-en-zim/Alan_Turing">Alan Turing</a></td></tr>
 </tbody></table>`,
       },
     ],
@@ -820,7 +839,7 @@ export const DIRECTORY: Record<
   'Arts/Literature': {
     name: 'Literature',
     children: ['Arts/Literature/Novels', 'Arts/Literature/Poetry'],
-    entries: ['wsp:wikipedia-en/Mary_Shelley'],
+    entries: ['wsp:wikipedia-en-zim/Mary_Shelley'],
   },
   'Arts/Literature/Novels': {
     name: 'Novels',
@@ -843,8 +862,8 @@ export const DIRECTORY: Record<
     name: 'Immunology',
     children: [],
     entries: [
-      'wsp:wikipedia-en/Immune_system',
-      'wsp:wikipedia-en/Vaccine',
+      'wsp:wikipedia-en-zim/Immune_system',
+      'wsp:wikipedia-en-zim/Vaccine',
       'wsp:openstax/microbiology-18-1',
     ],
     crosslinks: ['Health'],
@@ -852,7 +871,7 @@ export const DIRECTORY: Record<
   'Science/Mathematics': {
     name: 'Mathematics',
     children: [],
-    entries: ['wsp:wikipedia-en/Turing_machine'],
+    entries: ['wsp:wikipedia-en-zim/Turing_machine'],
   },
   Computers_and_Internet: {
     name: 'Computers and Internet',
@@ -863,8 +882,8 @@ export const DIRECTORY: Record<
     name: 'Internet',
     children: [],
     entries: [
-      'wsp:wikipedia-en/World_Wide_Web',
-      'wsp:wikipedia-en/Hypertext_Transfer_Protocol',
+      'wsp:wikipedia-en-zim/World_Wide_Web',
+      'wsp:wikipedia-en-zim/Hypertext_Transfer_Protocol',
       'wsp:rfc/9110',
       'wsp:rfc/9111',
       'wsp:rfc/1149',
@@ -874,19 +893,19 @@ export const DIRECTORY: Record<
   'Computers_and_Internet/History': {
     name: 'History',
     children: [],
-    entries: ['wsp:wikipedia-en/Alan_Turing', 'wsp:wikipedia-en/Enigma_machine'],
+    entries: ['wsp:wikipedia-en-zim/Alan_Turing', 'wsp:wikipedia-en-zim/Enigma_machine'],
   },
   Health: {
     name: 'Health',
     children: [],
-    entries: ['wsp:medlineplus/vaccines', 'wsp:wikipedia-en/Vaccine'],
+    entries: ['wsp:medlineplus/vaccines', 'wsp:wikipedia-en-zim/Vaccine'],
   },
   Regional: { name: 'Regional', children: ['Regional/Europe'], entries: [] },
   'Regional/Europe': { name: 'Europe', children: ['Regional/Europe/Portugal'], entries: [] },
   'Regional/Europe/Portugal': {
     name: 'Portugal',
     children: [],
-    entries: ['wsp:wikipedia-en/Lisbon', 'wsp:osm-planet/relation/5400890'],
+    entries: ['wsp:wikipedia-en-zim/Lisbon', 'wsp:osm-planet/relation/5400890'],
   },
   Reference: {
     name: 'Reference',
@@ -897,23 +916,23 @@ export const DIRECTORY: Record<
 };
 
 export const DESCRIPTIONS: Record<string, string> = {
-  'wsp:wikipedia-en/Mary_Shelley': 'English novelist, author of Frankenstein.',
+  'wsp:wikipedia-en-zim/Mary_Shelley': 'English novelist, author of Frankenstein.',
   'wsp:gutenberg/84': 'The 1818 Gothic novel, full text.',
   'wsp:gutenberg/1342': "Jane Austen's 1813 novel of manners, full text.",
-  'wsp:wikipedia-en/Immune_system': 'How the body defends itself.',
-  'wsp:wikipedia-en/Vaccine': 'Preparations that train the immune system.',
+  'wsp:wikipedia-en-zim/Immune_system': 'How the body defends itself.',
+  'wsp:wikipedia-en-zim/Vaccine': 'Preparations that train the immune system.',
   'wsp:openstax/microbiology-18-1': 'Textbook chapter on adaptive immunity.',
-  'wsp:wikipedia-en/Turing_machine': 'The abstract model of computation.',
-  'wsp:wikipedia-en/World_Wide_Web': 'The hypertext system you are imitating right now.',
-  'wsp:wikipedia-en/Hypertext_Transfer_Protocol': 'The protocol of the web.',
+  'wsp:wikipedia-en-zim/Turing_machine': 'The abstract model of computation.',
+  'wsp:wikipedia-en-zim/World_Wide_Web': 'The hypertext system you are imitating right now.',
+  'wsp:wikipedia-en-zim/Hypertext_Transfer_Protocol': 'The protocol of the web.',
   'wsp:rfc/9110': 'HTTP Semantics, the core spec.',
   'wsp:rfc/9111': 'HTTP Caching.',
   'wsp:rfc/1149': 'IP over Avian Carriers. Cool site!',
   'wsp:stackexchange/webmasters/1007': 'ETag vs Last-Modified, answered.',
-  'wsp:wikipedia-en/Alan_Turing': 'Mathematician, codebreaker, computing pioneer.',
-  'wsp:wikipedia-en/Enigma_machine': 'The WWII cipher machine.',
+  'wsp:wikipedia-en-zim/Alan_Turing': 'Mathematician, codebreaker, computing pioneer.',
+  'wsp:wikipedia-en-zim/Enigma_machine': 'The WWII cipher machine.',
   'wsp:medlineplus/vaccines': 'Plain-language guide to immunizations.',
-  'wsp:wikipedia-en/Lisbon': 'Capital of Portugal.',
+  'wsp:wikipedia-en-zim/Lisbon': 'Capital of Portugal.',
   'wsp:osm-planet/relation/5400890': 'Map boundary of Lisbon.',
   'wsp:wiktionary-en/sesquipedalian': 'A word about long words.',
   'wsp:wikidata/Q7251': 'Structured facts about Alan Turing.',

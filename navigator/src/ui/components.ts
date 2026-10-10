@@ -54,8 +54,14 @@ export function licenseBadge(license: string): HTMLElement {
   return h('span', { class: 'badge badge-license', title: `License: ${license}` }, license);
 }
 
-export function asOf(ts: string): HTMLElement {
+export function asOf(ts: string | null): HTMLElement {
+  if (!ts) return h('span', { class: 'as-of' }, 'date unknown');
   return h('span', { class: 'as-of' }, 'as of ', h('time', { datetime: ts }, formatDate(ts)));
+}
+
+/** License badge, or nothing when the license is unknown. */
+export function maybeLicenseBadge(license: string | null): HTMLElement | null {
+  return license ? licenseBadge(license) : null;
 }
 
 export function newBadge(): HTMLElement {

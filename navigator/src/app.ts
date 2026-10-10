@@ -118,13 +118,10 @@ export class App implements AppServices {
 
   sources(): Promise<SourceInfo[]> {
     if (!this.sourcesPromise) {
-      this.sourcesPromise = this.api
-        .sources()
-        .then((r) => r.sources)
-        .catch(() => {
-          this.sourcesPromise = null;
-          return [];
-        });
+      this.sourcesPromise = this.api.sources().catch(() => {
+        this.sourcesPromise = null;
+        return [];
+      });
     }
     return this.sourcesPromise;
   }
@@ -144,6 +141,10 @@ export class App implements AppServices {
 
   setCurrentDocument(doc: DocumentResponse | null): void {
     this.pendingDoc = doc;
+  }
+
+  lastDocId(): string | null {
+    return this.currentDoc?.doc_id ?? null;
   }
 
   navigate(address: string, opts: NavOptions = {}): void {

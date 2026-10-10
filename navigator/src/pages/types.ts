@@ -25,6 +25,8 @@ export interface AppServices {
   openSourceData(doc: DocumentResponse): void;
   /** Set the document shown by View Source Data (null on other pages). */
   setCurrentDocument(doc: DocumentResponse | null): void;
+  /** Document shown before the page being loaded (the page a link was followed from). */
+  lastDocId(): string | null;
 }
 
 export interface PageContext {

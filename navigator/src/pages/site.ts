@@ -60,7 +60,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
       ),
     ),
     pageHeading(`Welcome to ${src.name}`),
-    h('p', { class: 'site-desc' }, src.description),
+    src.description ? h('p', { class: 'site-desc' }, src.description) : null,
     form,
     h(
       'table',
@@ -68,22 +68,27 @@ export async function render(ctx: PageContext): Promise<PageResult> {
       h(
         'tbody',
         null,
-        h('tr', null, h('th', { scope: 'row' }, 'Publisher'), h('td', null, src.publisher)),
+        h(
+          'tr',
+          null,
+          h('th', { scope: 'row' }, 'Publisher'),
+          h('td', null, src.publisher ?? 'unknown'),
+        ),
         h(
           'tr',
           null,
           h('th', { scope: 'row' }, 'Documents'),
-          h('td', null, formatNumber(src.doc_count)),
+          h('td', null, src.doc_count === null ? 'unknown' : formatNumber(src.doc_count)),
         ),
         h(
           'tr',
           null,
           h('th', { scope: 'row' }, 'Size on disk'),
-          h('td', null, formatBytes(src.bytes)),
+          h('td', null, src.bytes === null ? 'unknown' : formatBytes(src.bytes)),
         ),
         h('tr', null, h('th', { scope: 'row' }, 'Snapshot'), h('td', null, asOf(src.as_of))),
         h('tr', null, h('th', { scope: 'row' }, 'Tier'), h('td', null, src.tier)),
-        h('tr', null, h('th', { scope: 'row' }, 'Health'), h('td', null, statusLamp(src.status))),
+        h('tr', null, h('th', { scope: 'row' }, 'Health'), h('td', null, statusLamp(src.health))),
       ),
     ),
     h(

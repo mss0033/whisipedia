@@ -123,7 +123,9 @@ export function attachSuggest(
       .then((r) => {
         if (ac.signal.aborted || input.value.trim() !== q) return;
         const seen = new Set(local.map((l) => l.text.toLowerCase()));
-        const remote = r.suggestions.filter((s) => !seen.has(s.text.toLowerCase()));
+        const remote: PickedSuggestion[] = r.suggestions
+          .filter((text) => !seen.has(text.toLowerCase()))
+          .map((text) => ({ text }));
         show(q, [...local, ...remote].slice(0, limit));
       })
       .catch(() => {

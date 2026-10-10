@@ -37,27 +37,41 @@ export function showDialog(dlg: HTMLDialogElement): void {
 
 /** "View Source Data": where the bytes live in the vault, plus the raw record. */
 export function sourceDataDialog(doc: DocumentResponse): HTMLDialogElement {
+  const vault = doc.vault;
+  const code = (v: string | null | undefined, cls = 'wrap') =>
+    v ? h('code', { class: cls }, v) : h('i', null, 'unknown');
   const rows: Array<[string, Child]> = [
     ['Document id', h('code', null, doc.doc_id)],
     ['Address', h('code', null, docIdToAddress(doc.doc_id))],
     ['Source', `${doc.source_name} (${doc.source_id})`],
     ['Native id', h('code', null, doc.native_id)],
-    ['Revision', h('code', null, doc.revision)],
-    ['As of', formatDateTime(doc.timestamp)],
+    ['Revision', code(doc.revision, '')],
+    ['As of', doc.timestamp ? formatDateTime(doc.timestamp) : 'unknown'],
     ['License', doc.license],
-    ['Content hash', h('code', { class: 'wrap' }, doc.content_hash)],
-    ['Generation', h('code', null, doc.generation_id)],
-    ['Vault file', h('code', { class: 'wrap' }, doc.vault.path)],
-    ['Manifest', h('code', { class: 'wrap' }, doc.vault.manifest)],
-    ['SHA-256 (manifest)', h('code', { class: 'wrap' }, doc.vault.sha256)],
+    ['Content hash', code(doc.content_hash)],
+    ['Generation', code(doc.generation_id, '')],
   ];
-  if (doc.vault.offset !== undefined)
-    rows.push(['Offset / length', `${doc.vault.offset} / ${doc.vault.length ?? '?'} bytes`]);
-  rows.push(['Upstream (not fetched)', h('code', { class: 'wrap' }, doc.url_native)]);
+  if (vault) {
+    rows.push(
+      ['Vault file', code(vault.path)],
+      ['Manifest', code(vault.manifest)],
+      ['SHA-256 (manifest)', code(vault.sha256)],
+      ['BLAKE3 (manifest)', code(vault.blake3)],
+    );
+    if (vault.entry) rows.push(['Entry in file', code(vault.entry)]);
+  } else {
+    rows.push(['Vault file', h('i', null, 'not located in the vault')]);
+  }
+  rows.push(['Upstream (not fetched)', code(doc.url_native)]);
 
-  const copy = h('button', { type: 'button', class: 'btn btn-small' }, 'Copy vault path');
+  const copy = h(
+    'button',
+    { type: 'button', class: 'btn btn-small', hidden: !vault },
+    'Copy vault path',
+  );
   copy.addEventListener('click', () => {
-    navigator.clipboard?.writeText(doc.vault.path).then(
+    if (!vault) return;
+    navigator.clipboard?.writeText(vault.path).then(
       () => {
         copy.textContent = 'Copied!';
       },

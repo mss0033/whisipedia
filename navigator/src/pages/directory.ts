@@ -1,10 +1,10 @@
 /**
- * wsp://directory/<path> — Yahoo!-'97-style hand-curated directory. Uses the
- * (proposed) /v1/directory endpoint; falls back to a tree built from
- * /v1/sources so the page always works.
+ * wsp://directory/<path> — Yahoo!-'97-style directory from /v1/directory
+ * (Top › domain › site › category). Falls back to a tree built from
+ * /v1/sources when talking to an older daemon without that endpoint.
  */
 import { ApiRequestError } from '../api/client.ts';
-import type { DirectoryResponse, SourceInfo } from '../api/types.ts';
+import type { DirectoryPage, SourceInfo } from '../api/types.ts';
 import { makeAddress, searchAddress } from '../core/address.ts';
 import { h } from '../core/dom.ts';
 import { formatNumber } from '../core/format.ts';
@@ -12,10 +12,7 @@ import { badge, docLink, errorPage, KIND_LABELS, searchForm, wspLink } from '../
 import type { PageContext, PageResult } from './types.ts';
 
 /** Fallback directory: Top › <kind> › sources. */
-export function directoryFromSources(
-  path: string,
-  sources: SourceInfo[],
-): DirectoryResponse | null {
+export function directoryFromSources(path: string, sources: SourceInfo[]): DirectoryPage | null {
   const kinds = [...new Set(sources.map((s) => s.kind))];
   if (!path) {
     return {
@@ -27,6 +24,7 @@ export function directoryFromSources(
           path: k,
           name: KIND_LABELS[k],
           count: sources.filter((s) => s.kind === k).length,
+          crosslink: false,
         }))
         .sort((a, b) => a.name.localeCompare(b.name)),
       entries: [],
@@ -42,8 +40,9 @@ export function directoryFromSources(
     entries: sources
       .filter((s) => s.kind === kind)
       .map((s) => ({
-        doc_id: s.home_doc_id ?? `wsp:${s.id}/`,
+        doc_id: s.home_doc_id,
         title: s.name,
+        address: s.address,
         description: s.description,
         source_id: s.id,
       })),
@@ -53,14 +52,13 @@ export function directoryFromSources(
 export async function render(ctx: PageContext): Promise<PageResult> {
   const path = (ctx.route as { path: string }).path.replace(/^\/+|\/+$/g, '');
   const sources = await ctx.app.sources();
-  let dir: DirectoryResponse | null;
+  let dir: DirectoryPage | null;
   try {
     dir = await ctx.app.api.directory(path, ctx.signal);
   } catch (err) {
-    // 404 is either "no such category" or "endpoint not implemented"; the
-    // fallback tree answers both (unknown paths resolve to null).
     if (!(err instanceof ApiRequestError) || !err.isUnavailable) throw err;
-    dir = directoryFromSources(path, sources);
+    // "No such category" is an answer; anything else means an older daemon.
+    dir = err.code === 'category_not_found' ? null : directoryFromSources(path, sources);
   }
   if (!dir) {
     return {
@@ -81,7 +79,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
   });
 
   const half = Math.ceil(dir.children.length / 2);
-  const col = (items: DirectoryResponse['children']) =>
+  const col = (items: DirectoryPage['children']) =>
     h(
       'ul',
       { class: 'dir-col' },
@@ -144,9 +142,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
               h(
                 'li',
                 null,
-                e.doc_id.endsWith('/')
-                  ? wspLink(makeAddress(e.source_id), e.title)
-                  : docLink(e.doc_id, e.title),
+                e.doc_id ? docLink(e.doc_id, e.title) : wspLink(e.address, e.title),
                 e.description ? ` - ${e.description}` : '',
                 ' ',
                 badge(sourceName(e.source_id), 'badge-source'),

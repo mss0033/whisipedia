@@ -18,6 +18,8 @@ export type LinkTarget =
 export interface LinkContext {
   sourceId: string;
   nativeId: string;
+  /** The document's id, carried into "not in library" addresses for the gap report. */
+  docId?: string | undefined;
   /** Resolution table from the API (`DocumentResponse.links`). */
   links?: readonly DocumentLink[] | undefined;
 }
@@ -25,8 +27,9 @@ export interface LinkContext {
 const SCHEME_RE = /^([a-z][a-z0-9+.-]*):/i;
 const ANCHOR_PREFIX = 'doc-';
 
-function missing(original: string): LinkTarget {
-  return { kind: 'missing', original, address: makeAddress('offline', '', { url: original }) };
+function missing(original: string, ctx?: LinkContext): LinkTarget {
+  const address = makeAddress('offline', '', { url: original, from: ctx?.docId });
+  return { kind: 'missing', original, address };
 }
 
 export function anchorId(id: string): string {
@@ -36,24 +39,26 @@ export function anchorId(id: string): string {
 /** Resolve one href from a document into the offline web. */
 export function resolveHref(rawHref: string, ctx: LinkContext): LinkTarget {
   const href = rawHref.trim();
-  if (!href) return missing(rawHref);
+  if (!href) return missing(rawHref, ctx);
 
   const known = ctx.links?.find((l) => l.href === href);
   if (known)
-    return known.target ? { kind: 'local', address: docIdToAddress(known.target) } : missing(href);
+    return known.target
+      ? { kind: 'local', address: docIdToAddress(known.target) }
+      : missing(href, ctx);
 
   if (href.startsWith('#')) {
     const id = href.slice(1);
-    return id ? { kind: 'anchor', id } : missing(href);
+    return id ? { kind: 'anchor', id } : missing(href, ctx);
   }
 
   const scheme = SCHEME_RE.exec(href)?.[1]?.toLowerCase();
   if (scheme === 'wsp') {
     const n = normalizeAddress(href);
-    return n ? { kind: 'local', address: n } : missing(href);
+    return n ? { kind: 'local', address: n } : missing(href, ctx);
   }
-  if (scheme) return missing(href); // http, mailto, javascript, data, ...
-  if (href.startsWith('//')) return missing(href); // protocol-relative = remote
+  if (scheme) return missing(href, ctx); // http, mailto, javascript, data, ...
+  if (href.startsWith('//')) return missing(href, ctx); // protocol-relative = remote
 
   // Relative link inside the same source "site" (ZIM-style ./Article).
   const base = new URL(`wsp-rel://site/${encodePath(ctx.nativeId)}`);
@@ -61,7 +66,7 @@ export function resolveHref(rawHref: string, ctx: LinkContext): LinkTarget {
   try {
     resolved = new URL(href, base);
   } catch {
-    return missing(href);
+    return missing(href, ctx);
   }
   let path: string;
   try {
@@ -69,7 +74,7 @@ export function resolveHref(rawHref: string, ctx: LinkContext): LinkTarget {
   } catch {
     path = resolved.pathname.replace(/^\/+/, '');
   }
-  if (!path) return missing(href);
+  if (!path) return missing(href, ctx);
   const fragment = resolved.hash.replace(/^#/, '');
   const addr = makeAddress(ctx.sourceId, path);
   return { kind: 'local', address: fragment ? `${addr}#${fragment}` : addr };
