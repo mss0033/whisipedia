@@ -10,12 +10,13 @@ Write-once golden storage and its Warden: PLAN §7 (layout), §8 (integrity, scr
 ├── library/<domain>/<source_id>/
 │   ├── README.txt  CURRENT.txt                 CURRENT.txt = generation id + LF
 │   └── <generation_id>/                        sealed, files chmod 0444
-│       ├── upstream/…  parity/…
+│       ├── upstream/…  parity/  (PARITY.json + .sig, set-00001/…)
 │       ├── MANIFEST.json  MANIFEST.json.sig
 │       └── DEGRADED.txt                        only if repair failed
 ├── staging/<domain>/<source_id>/<generation_id>/   being assembled; sealing = one dir rename
 ├── quarantine/…                                damaged files moved aside, never deleted
 ├── pruned/<domain>/<source_id>/<gen>.<ts>/     retired by retention (Warden.prune); owner empties it
+├── parity-staging/<domain>/<source_id>/<gen>/  parity sets being created (renamed into the generation)
 ├── ledger/YYYY-MM-DD.jsonl                     hash-chained events, signed daily checkpoint
 └── keys/<key_id>-<fingerprint>.pub             public keys only
 ```
@@ -32,6 +33,24 @@ Write-once golden storage and its Warden: PLAN §7 (layout), §8 (integrity, scr
 - **Ledger.** Supports a single writer only, with no locking. Appends are fsynced and read back. `verify()` replays the whole chain and checks every checkpoint signature.
 - **Ports.** `FileVault` implements `Vault` (stage, ingest with `upstream`/`expected`, adopt, seal, promote) and the separate `Warden` port (`manifest`, `mark_degraded`, `prune`), ADR-0005. `<domain>` is `SourceSpec.vault_domain`.
 - **Nothing is deleted.** The only exceptions are our own temporaries and the staging record.
+
+## Parity after sealing (`ParityKeeper`, `paritymeta`)
+
+The data manifest is never rewritten, so parity created after sealing (new generations and the
+backfill of old ones) has its own signed sidecar `parity/PARITY.json` (+ `.sig`, same signer), bound
+to the manifest by its BLAKE3. Data files are grouped into par2 recovery sets (`set-00001/…`, at most
+`max_set_files` files or `max_set_bytes`; a bigger file is a set alone), each created with
+`par2 create` at low priority (`nice`/`ionice`) into local scratch, then copied with verified atomic
+writes into `parity-staging/`; progress is kept on local disk, so a crash loses one set. When all
+sets exist, the sidecar is written and the directory is renamed into the generation in one step.
+Data is verified against the manifest before encoding (skipped for files the scrub verified within
+its cycle). The scrubber verifies every listed parity file and the sidecar signature; the repair
+ladder's first rung repairs from the sets that hold a damaged file; damaged parity is never
+"repaired" but quarantined (`ParityKeeper.invalidate`) and created again. Parity listed in
+`MANIFEST.json` (made while sealing) keeps working as before.
+
+`JsonlLedger.verify(recent_days=N)` checks only the newest day files, anchored on the signed
+checkpoint before them (used by `wsp doctor`); the default is the full replay.
 
 ## Scrub, repair, drill
 

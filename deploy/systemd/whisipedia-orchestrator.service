@@ -1,41 +1,38 @@
 # Whisipedia orchestrator (Curator + Acquirer + Warden scheduling) as a systemd USER service.
+# The only Whisipedia process with network access (PLAN §3, §10.5).
 #
-# Install:
-#   mkdir -p ~/.config/systemd/user
-#   cp deploy/systemd/whisipedia-orchestrator.service ~/.config/systemd/user/
-#   # edit WorkingDirectory below to point at your checkout, then:
-#   systemctl --user daemon-reload
-#   systemctl --user enable --now whisipedia-orchestrator
-#   loginctl enable-linger "$USER"   # keep running without an open session (WSL: see PLAN §2)
-#
-# Machine-specific values (vault root on the NAS, LOCAL state_db/workdir/metrics paths, wiring)
-# belong in config/local.toml, never in this file (PLAN §12.2). The state DB must be on local disk
-# (ADR-0002); the daemon refuses to start if it is on cifs/nfs/9p or under vault.root.
+# Template: `wsp service install` renders @REPO@ and @CONFIG_DIR@ from your checkout into
+# ~/.config/systemd/user/ and enables it (see docs/runbooks/install-services.md). Machine-specific
+# values (vault root on the NAS, LOCAL state paths) belong in config/local.toml, never here. Optional
+# environment overrides (WSP__SECTION__KEY=value) go in ~/.config/whisipedia/whisipedia.env.
 
 [Unit]
-Description=Whisipedia orchestrator
-Documentation=file://%h/whisipedia/docs/components/orchestrator.md
+Description=Whisipedia orchestrator (discovery, downloads, scrub, parity, curator bots)
+Documentation=file://@REPO@/docs/components/orchestrator.md
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=%h/whisipedia
-ExecStart=/usr/bin/env uv run --frozen wsp-orchestrator --config-dir config
+WorkingDirectory=@REPO@
+EnvironmentFile=-%h/.config/whisipedia/whisipedia.env
+Environment=PYTHONUNBUFFERED=1
+Environment=WSP_CONFIG_DIR=@CONFIG_DIR@
+# The NAS may not be mounted yet after a Windows/WSL start: fail fast and retry.
+ExecStartPre=@REPO@/.venv/bin/wsp --config-dir @CONFIG_DIR@ doctor --quiet --require vault
+ExecStart=@REPO@/.venv/bin/wsp-orchestrator --config-dir @CONFIG_DIR@
 # SIGTERM -> graceful shutdown: stop claiming jobs, pipelines stop between steps, unfinished work
 # resumes on the next start. Allow long enough for the in-flight step to finish.
 KillSignal=SIGTERM
 TimeoutStopSec=120
 Restart=on-failure
-RestartSec=30
+RestartSec=60
 # Logs are JSON lines on stderr -> journald (`journalctl --user -u whisipedia-orchestrator -o cat`).
 StandardOutput=journal
 StandardError=journal
-Environment=PYTHONUNBUFFERED=1
-# Be a good neighbour to the browser and the NAS (scrub is IO-heavy).
+# Be a good neighbour to the browser and the NAS (scrub and parity are IO-heavy).
 Nice=10
 IOSchedulingClass=idle
-# Hardening that works in user units.
 NoNewPrivileges=yes
 PrivateTmp=yes
 UMask=0027

@@ -107,6 +107,10 @@ def system(ledger_tail: int | None) -> Req:
     return Req("GET", "/v1/system", _p(ledger_tail=ledger_tail))
 
 
+def proposals(status: str | None) -> Req:
+    return Req("GET", "/v1/proposals", _p(status=status))
+
+
 def summarize(query: str, doc_ids: Sequence[str], max_tokens: int) -> Req:
     return Req(
         "POST", "/v1/summarize", json={"query": query, "doc_ids": list(doc_ids), "max_tokens": max_tokens}

@@ -15,7 +15,7 @@ from __future__ import annotations
 import random
 from collections.abc import AsyncIterator, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
@@ -26,6 +26,7 @@ from wsp_core.model import (
     Category,
     ChangeRecord,
     Checksum,
+    DayEvent,
     DocRecord,
     FetchPlan,
     FetchResult,
@@ -386,3 +387,20 @@ class GapLog(Protocol):
     """Append-only "not in library" reports (local disk, never the vault)."""
 
     def record(self, gap: Gap) -> None: ...
+
+
+@runtime_checkable
+class PortalSource(Protocol):
+    """Optional :class:`Catalog` capability: start-page picks precomputed at index-build time.
+
+    Checked with ``isinstance``; a catalog without it gets a random featured page and no
+    "On this day" (PLAN §10.2).
+    """
+
+    def featured(self, day: date) -> DocId | None:
+        """A well-linked encyclopedia article, the same for the whole ``day``."""
+        ...
+
+    def on_this_day(self, day: date, *, limit: int = 5) -> Sequence[DayEvent]:
+        """Anniversaries for ``day``'s month and day (empty if no date pages are indexed)."""
+        ...

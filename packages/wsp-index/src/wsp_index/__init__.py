@@ -1,5 +1,6 @@
 """Whisipedia index: Refinery storage, lexical index, suggest, document store, change feed, hybrid search."""
 
+from wsp_index.catalog import CatalogConfig, RefineryCatalog, build_source_catalog
 from wsp_index.changefeed import InvalidCursorError, SqliteChangeFeed
 from wsp_index.docstore import ParquetDocumentStore
 from wsp_index.hybrid import FusionConfig, HybridSearcher, embed_documents
@@ -13,6 +14,7 @@ from wsp_index.vector import HashingEmbedder, NullVectorIndex, NumpyVectorIndex
 __version__ = "0.1.0"
 
 __all__ = [
+    "CatalogConfig",
     "FusionConfig",
     "HashingEmbedder",
     "HybridSearcher",
@@ -20,6 +22,7 @@ __all__ = [
     "NullVectorIndex",
     "NumpyVectorIndex",
     "ParquetDocumentStore",
+    "RefineryCatalog",
     "RefineryReader",
     "RefineryWriter",
     "RemoteFilesystemError",
@@ -30,6 +33,7 @@ __all__ = [
     "TantivyIndex",
     "TitleTrie",
     "apply_changes",
+    "build_source_catalog",
     "diff_generations",
     "embed_documents",
     "ensure_local",

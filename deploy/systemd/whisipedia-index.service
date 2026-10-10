@@ -1,0 +1,27 @@
+# Whisipedia index refresh (`wsp index build`): refines and indexes sealed generations that arrived
+# outside the orchestrator (bulk `wsp ingest`), and rebuilds the portal/directory catalog. Idempotent:
+# already refined generations are skipped. Started by whisipedia-index.timer; no network needed.
+#
+# Template: `wsp service install` renders @REPO@ and @CONFIG_DIR@ (docs/runbooks/install-services.md).
+
+[Unit]
+Description=Whisipedia index refresh (Refinery, Tantivy, catalog)
+Documentation=file://@REPO@/docs/components/index.md
+
+[Service]
+Type=oneshot
+WorkingDirectory=@REPO@
+EnvironmentFile=-%h/.config/whisipedia/whisipedia.env
+Environment=PYTHONUNBUFFERED=1
+Environment=WSP_CONFIG_DIR=@CONFIG_DIR@
+ExecStartPre=@REPO@/.venv/bin/wsp --config-dir @CONFIG_DIR@ doctor --quiet --require vault
+ExecStart=@REPO@/.venv/bin/wsp --config-dir @CONFIG_DIR@ index build
+Nice=15
+IOSchedulingClass=idle
+StandardOutput=journal
+StandardError=journal
+IPAddressDeny=any
+IPAddressAllow=localhost
+NoNewPrivileges=yes
+PrivateTmp=yes
+UMask=0027

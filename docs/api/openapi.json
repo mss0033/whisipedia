@@ -3,7 +3,7 @@
   "info": {
     "title": "Whisipedia API",
     "description": "Read API of a private offline library. Everything is served from local storage; the server makes no\noutbound connections. Errors always use the envelope `{\"error\": {\"code\", \"message\"}}`.\n\nList endpoints use opaque cursors: pass `next_cursor` back as `cursor`. The change feed uses its own\ncursor (`since`). Document ids are `wsp:<source_id>/<native_id>`; in URL paths a doc id is ONE\npercent-encoded segment (`/v1/documents/wsp%3Arfc%2F9110`), as produced by `encodeURIComponent`.\n",
-    "version": "1.1.0"
+    "version": "1.2.0"
   },
   "paths": {
     "/v1/health": {
@@ -947,6 +947,74 @@
         }
       }
     },
+    "/v1/proposals": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Proposals",
+        "description": "Curator proposals (newest first). Deciding them is an owner action: `wsp proposals`.",
+        "operationId": "proposals_v1_proposals_get",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "open",
+                    "applied",
+                    "accepted",
+                    "rejected"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by status.",
+              "title": "Status"
+            },
+            "description": "Filter by status."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProposalPage"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid_request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/system": {
       "get": {
         "tags": [
@@ -1507,6 +1575,91 @@
   },
   "components": {
     "schemas": {
+      "AlertInfo": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "severity": {
+            "type": "string",
+            "title": "Severity"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "raised_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Raised At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "severity",
+          "message",
+          "raised_at"
+        ],
+        "title": "AlertInfo"
+      },
+      "BotRun": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "At"
+          },
+          "ok": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ok"
+          },
+          "candidates": {
+            "type": "integer",
+            "title": "Candidates",
+            "default": 0
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "at",
+          "ok",
+          "candidates",
+          "error"
+        ],
+        "title": "BotRun"
+      },
       "Change": {
         "properties": {
           "doc_id": {
@@ -1865,6 +2018,39 @@
         ],
         "title": "DirectoryPage"
       },
+      "DiskUsage": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "enum": [
+              "vault",
+              "index",
+              "state"
+            ],
+            "title": "Name"
+          },
+          "total_bytes": {
+            "type": "integer",
+            "title": "Total Bytes"
+          },
+          "free_bytes": {
+            "type": "integer",
+            "title": "Free Bytes"
+          },
+          "used_bytes": {
+            "type": "integer",
+            "title": "Used Bytes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "total_bytes",
+          "free_bytes",
+          "used_bytes"
+        ],
+        "title": "DiskUsage"
+      },
       "DocKind": {
         "type": "string",
         "enum": [
@@ -2180,6 +2366,107 @@
         ],
         "title": "DocumentVersion"
       },
+      "DomainBudget": {
+        "properties": {
+          "domain": {
+            "type": "string",
+            "title": "Domain"
+          },
+          "used_bytes": {
+            "type": "integer",
+            "title": "Used Bytes"
+          },
+          "budget_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget Bytes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "domain",
+          "used_bytes",
+          "budget_bytes"
+        ],
+        "title": "DomainBudget"
+      },
+      "DownloadLane": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "active",
+              "idle",
+              "finished",
+              "unknown"
+            ],
+            "title": "State"
+          },
+          "last_activity": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Activity"
+          },
+          "completed": {
+            "type": "integer",
+            "title": "Completed",
+            "description": "Files reported complete in the lane's log.",
+            "default": 0
+          },
+          "last_completed": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Completed",
+            "description": "File name of the newest completion."
+          },
+          "progress": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Progress",
+            "description": "Latest progress line, if the lane is running."
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "state",
+          "last_activity",
+          "completed",
+          "last_completed",
+          "progress"
+        ],
+        "title": "DownloadLane",
+        "description": "A bulk download lane (aria2 session) from the bootstrap downloads."
+      },
       "ErrorBody": {
         "properties": {
           "code": {
@@ -2449,7 +2736,7 @@
           "api_version": {
             "type": "string",
             "title": "Api Version",
-            "default": "1.1.0"
+            "default": "1.2.0"
           },
           "sources": {
             "type": "integer",
@@ -2766,6 +3053,172 @@
         ],
         "title": "OnThisDay"
       },
+      "OpsStatus": {
+        "properties": {
+          "slo": {
+            "items": {
+              "$ref": "#/components/schemas/SourceSlo"
+            },
+            "type": "array",
+            "title": "Slo"
+          },
+          "scrub": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ScrubStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "parity": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ParityStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "disk": {
+            "items": {
+              "$ref": "#/components/schemas/DiskUsage"
+            },
+            "type": "array",
+            "title": "Disk"
+          },
+          "budgets": {
+            "items": {
+              "$ref": "#/components/schemas/DomainBudget"
+            },
+            "type": "array",
+            "title": "Budgets"
+          },
+          "lanes": {
+            "items": {
+              "$ref": "#/components/schemas/DownloadLane"
+            },
+            "type": "array",
+            "title": "Lanes"
+          },
+          "queue": {
+            "items": {
+              "$ref": "#/components/schemas/QueueDepth"
+            },
+            "type": "array",
+            "title": "Queue"
+          },
+          "alerts": {
+            "items": {
+              "$ref": "#/components/schemas/AlertInfo"
+            },
+            "type": "array",
+            "title": "Alerts"
+          },
+          "bots": {
+            "items": {
+              "$ref": "#/components/schemas/BotRun"
+            },
+            "type": "array",
+            "title": "Bots"
+          },
+          "proposals": {
+            "$ref": "#/components/schemas/ProposalSummary"
+          },
+          "orchestrator_state": {
+            "type": "boolean",
+            "title": "Orchestrator State",
+            "description": "False until the orchestrator has created its state DB."
+          }
+        },
+        "type": "object",
+        "required": [
+          "slo",
+          "scrub",
+          "parity",
+          "disk",
+          "budgets",
+          "lanes",
+          "queue",
+          "alerts",
+          "bots",
+          "proposals",
+          "orchestrator_state"
+        ],
+        "title": "OpsStatus",
+        "description": "Operations data for the System Monitor (PLAN §12.6); every part tolerates missing state."
+      },
+      "ParityStatus": {
+        "properties": {
+          "scope": {
+            "type": "string",
+            "title": "Scope",
+            "description": "`all` or `irreplaceable` (vault.parity_scope)."
+          },
+          "available": {
+            "type": "boolean",
+            "title": "Available",
+            "description": "False when par2 is not installed or parity is off."
+          },
+          "generations": {
+            "type": "integer",
+            "title": "Generations"
+          },
+          "covered": {
+            "type": "integer",
+            "title": "Covered"
+          },
+          "bytes_total": {
+            "type": "integer",
+            "title": "Bytes Total"
+          },
+          "bytes_covered": {
+            "type": "integer",
+            "title": "Bytes Covered"
+          },
+          "fraction": {
+            "type": "number",
+            "title": "Fraction"
+          },
+          "states": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "States",
+            "description": "Generations per parity state (none, partial, sidecar, ...)."
+          },
+          "last_run": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/JsonValue"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Run"
+          }
+        },
+        "type": "object",
+        "required": [
+          "scope",
+          "available",
+          "generations",
+          "covered",
+          "bytes_total",
+          "bytes_covered",
+          "fraction",
+          "states",
+          "last_run"
+        ],
+        "title": "ParityStatus"
+      },
       "Portal": {
         "properties": {
           "date": {
@@ -2847,6 +3300,163 @@
         "title": "Portal",
         "description": "Start page content (`wsp://home`, PLAN §10.2)."
       },
+      "ProposalInfo": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "applied",
+              "accepted",
+              "rejected"
+            ],
+            "title": "Status"
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "auto-promote",
+              "review",
+              "reject"
+            ],
+            "title": "Decision"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "found_by": {
+            "type": "string",
+            "title": "Found By"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "decided_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided At"
+          },
+          "body": {
+            "type": "string",
+            "title": "Body",
+            "description": "Markdown: score breakdown and checks.",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "key",
+          "title",
+          "status",
+          "decision",
+          "score",
+          "kind",
+          "found_by",
+          "created_at",
+          "decided_at",
+          "body"
+        ],
+        "title": "ProposalInfo"
+      },
+      "ProposalPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProposalInfo"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "Newest first."
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "ProposalPage"
+      },
+      "ProposalSummary": {
+        "properties": {
+          "open": {
+            "type": "integer",
+            "title": "Open",
+            "default": 0
+          },
+          "applied": {
+            "type": "integer",
+            "title": "Applied",
+            "default": 0
+          },
+          "accepted": {
+            "type": "integer",
+            "title": "Accepted",
+            "default": 0
+          },
+          "rejected": {
+            "type": "integer",
+            "title": "Rejected",
+            "default": 0
+          },
+          "latest": {
+            "items": {
+              "$ref": "#/components/schemas/ProposalInfo"
+            },
+            "type": "array",
+            "title": "Latest",
+            "description": "Newest open ones."
+          }
+        },
+        "type": "object",
+        "required": [
+          "open",
+          "applied",
+          "accepted",
+          "rejected",
+          "latest"
+        ],
+        "title": "ProposalSummary"
+      },
       "QueryIntent": {
         "type": "string",
         "enum": [
@@ -2860,6 +3470,33 @@
         ],
         "title": "QueryIntent",
         "description": "Router intents (PLAN §9.3)."
+      },
+      "QueueDepth": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "running"
+            ],
+            "title": "Status"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "status",
+          "count"
+        ],
+        "title": "QueueDepth"
       },
       "RecentChanges": {
         "properties": {
@@ -2934,6 +3571,53 @@
           "href"
         ],
         "title": "Resolution"
+      },
+      "ScrubStatus": {
+        "properties": {
+          "files_known": {
+            "type": "integer",
+            "title": "Files Known"
+          },
+          "verified_in_cycle": {
+            "type": "integer",
+            "title": "Verified In Cycle"
+          },
+          "failing": {
+            "type": "integer",
+            "title": "Failing"
+          },
+          "fraction": {
+            "type": "number",
+            "title": "Fraction",
+            "description": "Share of known files verified within the scrub cycle."
+          },
+          "cycle_days": {
+            "type": "integer",
+            "title": "Cycle Days"
+          },
+          "oldest_check": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Oldest Check"
+          }
+        },
+        "type": "object",
+        "required": [
+          "files_known",
+          "verified_in_cycle",
+          "failing",
+          "fraction",
+          "cycle_days",
+          "oldest_check"
+        ],
+        "title": "ScrubStatus"
       },
       "SearchResults": {
         "properties": {
@@ -3428,6 +4112,91 @@
         ],
         "title": "SourcePage"
       },
+      "SourceSlo": {
+        "properties": {
+          "source_id": {
+            "type": "string",
+            "title": "Source Id"
+          },
+          "slo_class": {
+            "type": "string",
+            "enum": [
+              "wikimedia",
+              "zim",
+              "scholarly",
+              "law",
+              "default"
+            ],
+            "title": "Slo Class"
+          },
+          "target_days": {
+            "type": "number",
+            "title": "Target Days",
+            "description": "Allowed lag behind upstream."
+          },
+          "lag_days": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lag Days",
+            "description": "How long upstream has had a newer release than ours; 0 if current."
+          },
+          "within_slo": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Within Slo",
+            "description": "Null when upstream was never observed."
+          },
+          "upstream_newest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Upstream Newest",
+            "description": "Newest version upstream offered."
+          },
+          "paused": {
+            "type": "boolean",
+            "title": "Paused",
+            "default": false
+          },
+          "pause_reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Pause Reasons"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_id",
+          "slo_class",
+          "target_days",
+          "lag_days",
+          "within_slo",
+          "upstream_newest",
+          "paused",
+          "pause_reasons"
+        ],
+        "title": "SourceSlo",
+        "description": "Freshness against the source's SLO (PLAN §6.6)."
+      },
       "Suggestions": {
         "properties": {
           "query": {
@@ -3661,12 +4430,23 @@
           "api_version": {
             "type": "string",
             "title": "Api Version",
-            "default": "1.1.0"
+            "default": "1.2.0"
           },
           "uptime_seconds": {
             "type": "number",
             "title": "Uptime Seconds",
             "default": 0.0
+          },
+          "ops": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OpsStatus"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null without orchestrator data."
           }
         },
         "type": "object",
@@ -3677,7 +4457,8 @@
           "ledger_tail",
           "ledger_ok",
           "api_version",
-          "uptime_seconds"
+          "uptime_seconds",
+          "ops"
         ],
         "title": "SystemStatus"
       },

@@ -1,0 +1,620 @@
+"""Refinery-backed :class:`~wsp_core.ports.Catalog` for the Navigator's portal, directory and random pages.
+
+Everything slow is precomputed when a generation is indexed (:func:`build_source_catalog`), into one
+small JSON file per source on local disk::
+
+    <index root>/catalog/<source_id>.json
+        {"format": 1, "source_id", "generation_id", "doc_count",
+         "scheme": "prefix" | "initial" | <provider name>,
+         "categories": [{"slug", "name", "count", "docs": [doc ids, alphabetical by title]}],
+         "featured":   [doc ids of well-linked (or, without link data, long) articles],
+         "on_this_day": {"MM-DD": [{"year", "text", "doc_id"}]}}
+
+Serving (:class:`RefineryCatalog`) only reads those files (reloaded when they change), the Refinery's
+Parquet footers (for uniform random pages) and the change-feed tail, so every call stays well under
+the 50 ms budget even for multi-million-document sources.
+
+Directory categories come from a :class:`CategoryProvider`. The defaults split a source by its native
+id prefix (ZIM book, Wikipedia language) when it has one, else A-Z by title. Wikidata classes and
+Library of Congress / LCC trees plug in as further providers (TODO: Phase 5+, they need entity data).
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import random
+import re
+import threading
+import time
+from bisect import bisect_right
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass, field
+from datetime import date
+from pathlib import Path
+from typing import Any, Protocol, cast, runtime_checkable
+
+import numpy as np
+import numpy.typing as npt
+import pyarrow as pa
+import pyarrow.compute as _pc
+import pyarrow.parquet as pq
+
+from wsp_core.ids import DocId
+from wsp_core.model import Category, ChangeRecord, DayEvent, SourceSpec
+from wsp_core.ports import ChangeFeed
+from wsp_index.refinery import RefineryReader, current_generation, generation_dir, is_sealed
+
+pc = cast(Any, _pc)  # pyarrow-stubs type compute kernels too narrowly for column arrays
+
+CATALOG_FORMAT = 1
+CATALOG_DIR = "catalog"
+
+_MONTHS = (
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+)
+_DATE_PAGE = re.compile(r"^(" + "|".join(_MONTHS) + r")[_ ](\d{1,2})$")
+_EVENT_LINE = re.compile(r"^[*\u2022\-\s]*(\d{1,4})(\s*BC)?\s*[\u2013\u2014-]\s+(.{8,})$")
+_SECTION_END = frozenset({"Births", "Deaths", "Holidays and observances", "References", "External links"})
+_NOT_FEATURED = re.compile(r"(^List_of|^Lists_of|\(disambiguation\)|^Index_of|^Outline_of|^\d+$|^\d+s$)")
+_SLUG_BAD = re.compile(r"[^a-z0-9]+")
+_LANG_NAMES = {
+    "en": "English",
+    "de": "German",
+    "fr": "French",
+    "es": "Spanish",
+    "it": "Italian",
+    "nl": "Dutch",
+    "pl": "Polish",
+    "ru": "Russian",
+    "sv": "Swedish",
+    "ceb": "Cebuano",
+    "ja": "Japanese",
+    "zh": "Chinese",
+    "pt": "Portuguese",
+    "uk": "Ukrainian",
+    "ar": "Arabic",
+}
+
+
+def slugify(text: str) -> str:
+    return _SLUG_BAD.sub("-", text.casefold()).strip("-") or "other"
+
+
+def is_featured_source(spec: SourceSpec) -> bool:
+    """Sources whose articles may be "featured" on the start page: Wikipedia snapshots."""
+    return spec.id.startswith("wikipedia") and "history" not in spec.id and "encyclopedia" in spec.domain
+
+
+# --- category providers (the directory seam) ---------------------------------------------------------
+
+
+@runtime_checkable
+class CategoryProvider(Protocol):
+    """Assigns a document to one top-level directory category of its source.
+
+    Returns ``(slug, display name)`` or ``None`` (not listed). A Wikidata-class or LCC provider
+    implements the same method from entity data.
+    """
+
+    name: str
+
+    def key(self, doc_id: str, native_id: str, title: str) -> tuple[str, str] | None: ...
+
+
+def _prefix_name(prefix: str) -> str:
+    if prefix in _LANG_NAMES:
+        return _LANG_NAMES[prefix]
+    core = re.sub(r"_(?:[a-z]{2,3}|mul)_all$", "", prefix)
+    return core.replace("_", " ").replace(".", " ").strip().title() or prefix
+
+
+class PrefixCategories:
+    """First native-id segment: the ZIM book of a bundle, the language of a multi-wiki source."""
+
+    name = "prefix"
+
+    def key(self, doc_id: str, native_id: str, title: str) -> tuple[str, str] | None:
+        head, sep, _ = native_id.partition("/")
+        if not sep or not head:
+            return None
+        return slugify(head), _prefix_name(head)
+
+
+class InitialCategories:
+    """A-Z by title (Yahoo-style index), digits under ``0-9``, everything else under ``Other``."""
+
+    name = "initial"
+
+    def key(self, doc_id: str, native_id: str, title: str) -> tuple[str, str] | None:
+        first = title.strip()[:1].upper()
+        if "A" <= first <= "Z":
+            return first.lower(), first
+        if first.isdigit():
+            return "0-9", "0-9"
+        return "other", "Other"
+
+
+# --- build ------------------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class CatalogConfig:
+    featured: bool = False  # compute start-page candidates (encyclopedias)
+    featured_candidates: int = 730  # two years of distinct daily picks
+    min_featured_chars: int = 2_000
+    max_link_docs: int = 1_000_000  # inbound links are counted over at most this many documents
+    per_category: int = 200  # documents listed per category page
+    providers: Sequence[CategoryProvider] | None = None  # None: prefix if the source has one, else A-Z
+    max_prefixes: int = 200
+
+
+@dataclass
+class _Bucket:
+    name: str
+    count: int = 0
+    docs: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])  # (title key, doc id)
+
+    def add(self, title: str, doc_id: str, limit: int) -> None:
+        self.count += 1
+        self.docs.append((title.casefold(), doc_id))
+        if len(self.docs) > 2 * limit:
+            self.docs.sort()
+            del self.docs[limit:]
+
+    def top(self, limit: int) -> list[str]:
+        self.docs.sort()
+        return [d for _, d in self.docs[:limit]]
+
+
+class _Grouping:
+    def __init__(self, provider: CategoryProvider, limit: int, max_keys: int | None) -> None:
+        self.provider = provider
+        self.limit = limit
+        self.max_keys = max_keys
+        self.buckets: dict[str, _Bucket] = {}
+        self.unkeyed = 0
+        self.overflow = False
+
+    def add(self, doc_id: str, native_id: str, title: str) -> None:
+        if self.overflow:
+            return
+        found = self.provider.key(doc_id, native_id, title)
+        if found is None:
+            self.unkeyed += 1
+            return
+        slug, name = found
+        bucket = self.buckets.get(slug)
+        if bucket is None:
+            if self.max_keys is not None and len(self.buckets) >= self.max_keys:
+                self.overflow = True
+                return
+            bucket = self.buckets[slug] = _Bucket(name)
+        bucket.add(title, doc_id, self.limit)
+
+    def usable(self, total: int) -> bool:
+        if self.overflow or not self.buckets or total == 0:
+            return False
+        if self.max_keys is None:  # explicit providers are always used
+            return True
+        biggest = max(b.count for b in self.buckets.values())
+        return len(self.buckets) >= 2 and biggest <= 0.95 * total and self.unkeyed <= 0.05 * total
+
+    def to_json(self) -> list[dict[str, object]]:
+        out: list[dict[str, object]] = [
+            {"slug": slug, "name": b.name, "count": b.count, "docs": b.top(self.limit)}
+            for slug, b in self.buckets.items()
+        ]
+        return sorted(out, key=lambda c: str(c["name"]).casefold())
+
+
+def parse_date_page(text: str) -> list[tuple[int, str]]:
+    """``(year, text)`` events from a Wikipedia date page's "Events" section (plain text)."""
+    lines = [ln.strip() for ln in text.splitlines()]
+    try:
+        start = lines.index("Events") + 1
+    except ValueError:
+        start = 0
+    out: list[tuple[int, str]] = []
+    for line in lines[start:]:
+        if line in _SECTION_END:
+            break
+        m = _EVENT_LINE.match(line)
+        if m:
+            year = int(m[1]) * (-1 if m[2] else 1)
+            out.append((year, m[3].strip()))
+    return out
+
+
+def _top_k(values: npt.NDArray[np.int64], k: int) -> npt.NDArray[np.intp]:
+    if len(values) <= k:
+        return np.argsort(-values, kind="stable")
+    idx = np.argpartition(-values, k)[:k]
+    return idx[np.argsort(-values[idx], kind="stable")]
+
+
+def _inlink_ranking(reader: RefineryReader, source_id: str, max_docs: int) -> list[tuple[str, int]]:
+    """Inbound links per document of this source (counted over at most ``max_docs`` documents)."""
+    prefix = f"wsp:{source_id}/"
+    pending: list[pa.Table] = []
+    pending_rows = 0
+    acc: pa.Table | None = None
+    seen = 0
+
+    def compact() -> None:
+        nonlocal acc, pending, pending_rows
+        parts = [*([acc] if acc is not None else []), *pending]
+        if parts:
+            merged = pa.concat_tables(parts)
+            agg = merged.group_by("v").aggregate([("c", "sum")])  # pyright: ignore[reportUnknownMemberType]
+            acc = agg.rename_columns(["v", "c"])
+        pending, pending_rows = [], 0
+
+    for batch in reader.scan(["links"], batch_size=8192):
+        seen += batch.num_rows
+        flat = pc.list_flatten(batch.column(0))
+        flat = flat.filter(pc.starts_with(flat, prefix))
+        if len(flat):
+            vc = pc.value_counts(flat)
+            vals: pa.Array[Any] = vc.field("values")
+            counts: pa.Array[Any] = pc.cast(vc.field("counts"), pa.int64())
+            pending.append(pa.Table.from_arrays([vals, counts], names=["v", "c"]))
+            pending_rows += len(vc)
+            if pending_rows > 4_000_000:
+                compact()
+        if seen >= max_docs:
+            break
+    compact()
+    if acc is None or acc.num_rows == 0:
+        return []
+    counts_np = cast(npt.NDArray[np.int64], acc.column("c").to_numpy())
+    order = _top_k(counts_np, 20_000)
+    values = acc.column("v")
+    return [(cast(str, values[int(i)].as_py()), int(counts_np[int(i)])) for i in order]
+
+
+def _length_ranking(reader: RefineryReader, k: int) -> list[tuple[str, int]]:
+    """Fallback without link data: the longest articles (a rough proxy for well-developed ones)."""
+    best_ids: list[str] = []
+    best_len: npt.NDArray[np.int64] = np.zeros(0, dtype=np.int64)
+    for batch in reader.scan(["doc_id", "text"], batch_size=4096):
+        lens = cast(npt.NDArray[np.int64], pc.utf8_length(batch.column(1)).to_numpy().astype(np.int64))
+        ids = cast(list[str], batch.column(0).to_pylist())
+        all_len = np.concatenate([best_len, lens])
+        keep = _top_k(all_len, k)
+        pool = [*best_ids, *ids]
+        best_ids = [pool[int(i)] for i in keep]
+        best_len = all_len[keep]
+    return list(zip(best_ids, (int(x) for x in best_len), strict=True))
+
+
+def _featured(reader: RefineryReader, source_id: str, cfg: CatalogConfig) -> list[str]:
+    ranking = _inlink_ranking(reader, source_id, cfg.max_link_docs)
+    if not ranking:
+        ranking = _length_ranking(reader, cfg.featured_candidates * 4)
+    out: list[str] = []
+    for doc_id, _ in ranking:
+        native = doc_id.split("/", 1)[1] if "/" in doc_id else doc_id
+        leaf = native.rsplit("/", 1)[-1]
+        if _NOT_FEATURED.search(leaf) or _DATE_PAGE.match(leaf):
+            continue
+        row = reader.lookup(doc_id, ("text",))
+        if row is None or len(cast(str, row["text"])) < cfg.min_featured_chars:
+            continue
+        out.append(doc_id)
+        if len(out) >= cfg.featured_candidates:
+            break
+    return out
+
+
+def _date_key(native_id: str) -> str | None:
+    head, _, leaf = native_id.rpartition("/")
+    if head not in ("", "A", "en"):
+        return None
+    m = _DATE_PAGE.match(leaf)
+    if not m:
+        return None
+    month, day = _MONTHS.index(m[1]) + 1, int(m[2])
+    if not 1 <= day <= 31:
+        return None
+    return f"{month:02d}-{day:02d}"
+
+
+def build_source_catalog(
+    refinery_root: Path,
+    source_id: str,
+    generation_id: str,
+    out_root: Path,
+    cfg: CatalogConfig = CatalogConfig(),  # noqa: B008 - immutable
+) -> Path:
+    """Scan one Refinery generation and write ``<out_root>/<source_id>.json`` atomically."""
+    reader = RefineryReader(generation_dir(refinery_root, source_id, generation_id))
+    groupings = (
+        [_Grouping(p, cfg.per_category, None) for p in cfg.providers]
+        if cfg.providers
+        else [
+            _Grouping(PrefixCategories(), cfg.per_category, cfg.max_prefixes),
+            _Grouping(InitialCategories(), cfg.per_category, None),
+        ]
+    )
+    date_pages: dict[str, str] = {}
+    total = 0
+    for batch in reader.scan(["doc_id", "native_id", "title"], batch_size=8192):
+        ids = cast(list[str], batch.column(0).to_pylist())
+        natives = cast(list[str], batch.column(1).to_pylist())
+        titles = cast(list[str], batch.column(2).to_pylist())
+        for doc_id, native, title in zip(ids, natives, titles, strict=True):
+            total += 1
+            for g in groupings:
+                g.add(doc_id, native, title)
+            if cfg.featured:
+                key = _date_key(native)
+                if key is not None:
+                    date_pages.setdefault(key, doc_id)
+    chosen = next((g for g in groupings if g.usable(total)), None)
+    on_this_day: dict[str, list[dict[str, object]]] = {}
+    for key, doc_id in sorted(date_pages.items()):
+        row = reader.lookup(doc_id, ("text",))
+        events = parse_date_page(cast(str, row["text"])) if row else []
+        if events:
+            on_this_day[key] = [{"year": y, "text": t, "doc_id": doc_id} for y, t in events]
+    payload: dict[str, object] = {
+        "format": CATALOG_FORMAT,
+        "source_id": source_id,
+        "generation_id": generation_id,
+        "doc_count": total,
+        "scheme": chosen.provider.name if chosen else None,
+        "categories": chosen.to_json() if chosen else [],
+        "featured": _featured(reader, source_id, cfg) if cfg.featured else [],
+        "on_this_day": on_this_day,
+    }
+    out_root.mkdir(parents=True, exist_ok=True)
+    path = out_root / f"{source_id}.json"
+    tmp = path.with_name(path.name + ".partial")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
+    return path
+
+
+# --- serve -----------------------------------------------------------------------------------------
+
+
+class _Tailable(Protocol):
+    def tail(
+        self, limit: int, *, sources: Sequence[str] | None = None, max_scan: int = 200_000
+    ) -> tuple[Sequence[ChangeRecord], str]: ...
+
+
+@dataclass(frozen=True, slots=True)
+class _Entry:
+    mtime_ns: int
+    data: Mapping[str, Any]
+    categories: tuple[Category, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _RowIndex:
+    """Cumulative row counts of every row group of a Refinery generation (from Parquet footers)."""
+
+    parts: tuple[Path, ...]
+    starts: tuple[int, ...]  # global first row of each (part, row group)
+    groups: tuple[tuple[int, int], ...]  # (part index, row group index)
+    total: int
+
+    @classmethod
+    def load(cls, reader: RefineryReader) -> _RowIndex:
+        starts: list[int] = []
+        groups: list[tuple[int, int]] = []
+        n = 0
+        parts = tuple(reader.parts)
+        for i, path in enumerate(parts):
+            meta = pq.ParquetFile(path).metadata
+            for rg in range(meta.num_row_groups):
+                starts.append(n)
+                groups.append((i, rg))
+                n += meta.row_group(rg).num_rows
+        return cls(parts, tuple(starts), tuple(groups), n)
+
+    def doc_id(self, row: int) -> DocId:
+        g = bisect_right(self.starts, row) - 1
+        part, rg = self.groups[g]
+        table = pq.ParquetFile(self.parts[part]).read_row_group(rg, columns=["doc_id"])  # pyright: ignore[reportUnknownMemberType]
+        return DocId(cast(str, table.column(0)[row - self.starts[g]].as_py()))
+
+
+def _stable_index(day: date, n: int, salt: str = "") -> int:
+    digest = hashlib.blake2b(f"{salt}{day.isoformat()}".encode(), digest_size=8).digest()
+    return int.from_bytes(digest, "little") % n
+
+
+class RefineryCatalog:
+    """Implements :class:`wsp_core.ports.Catalog` and :class:`wsp_core.ports.PortalSource`."""
+
+    def __init__(
+        self,
+        refinery_root: Path,
+        catalog_root: Path,
+        feed: ChangeFeed,
+        *,
+        sources: Iterable[str] = (),
+        featured_sources: Sequence[str] = (),
+        reload_seconds: float = 5.0,
+        monotonic: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self.refinery_root = refinery_root
+        self.catalog_root = catalog_root
+        self.feed = feed
+        self.sources = tuple(sources)
+        self.featured_sources = tuple(featured_sources)
+        self.reload_seconds = reload_seconds
+        self._monotonic = monotonic
+        self._lock = threading.Lock()
+        self._entries: dict[str, tuple[float, _Entry | None]] = {}
+        self._rows: dict[tuple[str, str], _RowIndex] = {}
+
+    # --- precomputed data ---
+
+    def _entry(self, source_id: str) -> _Entry | None:
+        now = self._monotonic()
+        with self._lock:
+            cached = self._entries.get(source_id)
+        if cached is not None and now - cached[0] < self.reload_seconds:
+            return cached[1]
+        path = self.catalog_root / f"{source_id}.json"
+        try:
+            mtime = path.stat().st_mtime_ns
+        except OSError:
+            entry = None
+        else:
+            if cached is not None and cached[1] is not None and cached[1].mtime_ns == mtime:
+                entry = cached[1]
+            else:
+                entry = self._load(path, mtime)
+        with self._lock:
+            self._entries[source_id] = (now, entry)
+        return entry
+
+    @staticmethod
+    def _load(path: Path, mtime: int) -> _Entry | None:
+        try:
+            data = cast(dict[str, Any], json.loads(path.read_text(encoding="utf-8")))
+        except (OSError, ValueError):
+            return None
+        if data.get("format") != CATALOG_FORMAT:
+            return None
+        cats = tuple(
+            Category(slug=str(c["slug"]), name=str(c["name"]), count=int(c["count"]))
+            for c in cast(list[dict[str, Any]], data.get("categories", []))
+        )
+        return _Entry(mtime, data, cats)
+
+    def _known_sources(self) -> list[str]:
+        found = set(self.sources)
+        if self.refinery_root.is_dir():
+            found.update(p.name for p in self.refinery_root.iterdir() if p.is_dir())
+        return sorted(found)
+
+    def _row_index(self, source_id: str) -> _RowIndex | None:
+        gen = current_generation(self.refinery_root, source_id)
+        if gen is None:
+            return None
+        key = (source_id, gen)
+        with self._lock:
+            cached = self._rows.get(key)
+        if cached is not None:
+            return cached
+        gen_dir = generation_dir(self.refinery_root, source_id, gen)
+        if not is_sealed(gen_dir):
+            return None
+        idx = _RowIndex.load(RefineryReader(gen_dir))
+        with self._lock:
+            for old in [k for k in self._rows if k[0] == source_id]:
+                del self._rows[old]
+            self._rows[key] = idx
+        return idx
+
+    # --- Catalog ---
+
+    def doc_count(self, source_id: str) -> int | None:
+        idx = self._row_index(source_id)
+        if idx is not None:
+            return idx.total
+        entry = self._entry(source_id)
+        return None if entry is None else int(entry.data.get("doc_count", 0))
+
+    def random_doc(self, *, sources: Sequence[str] | None, rng: random.Random) -> DocId | None:
+        pools = [(s, self._row_index(s)) for s in (sorted(sources) if sources else self._known_sources())]
+        sized = [(s, idx) for s, idx in pools if idx is not None and idx.total > 0]
+        total = sum(idx.total for _, idx in sized)
+        if total == 0:
+            return None
+        n = rng.randrange(total)
+        for _, idx in sized:
+            if n < idx.total:
+                return idx.doc_id(n)
+            n -= idx.total
+        return None  # pragma: no cover - unreachable
+
+    def recent(
+        self, *, limit: int, sources: Sequence[str] | None = None
+    ) -> tuple[Sequence[ChangeRecord], str | None]:
+        tail = getattr(self.feed, "tail", None)
+        if callable(tail):
+            records, cursor = cast(_Tailable, self.feed).tail(limit, sources=sources)
+            return records, cursor if records or cursor else None
+        # Generic feed: replay (fine for small feeds and tests).
+        out: list[ChangeRecord] = []
+        cursor: str | None = None
+        wanted = set(sources) if sources else None
+        while True:
+            batch, cursor = self.feed.since(cursor, limit=5000)
+            out.extend(r for r in batch if wanted is None or r.doc_id[4:].partition("/")[0] in wanted)
+            if len(batch) < 5000:
+                break
+        return out[::-1][:limit], cursor
+
+    def categories(self, source_id: str) -> Sequence[Category]:
+        entry = self._entry(source_id)
+        return () if entry is None else entry.categories
+
+    def category_docs(self, source_id: str, slug: str, *, limit: int) -> Sequence[DocId]:
+        entry = self._entry(source_id)
+        if entry is None:
+            return ()
+        for c in cast(list[dict[str, Any]], entry.data.get("categories", [])):
+            if c.get("slug") == slug:
+                return [DocId(str(d)) for d in cast(list[str], c.get("docs", []))[:limit]]
+        return ()
+
+    # --- PortalSource ---
+
+    def featured(self, day: date) -> DocId | None:
+        pool: list[str] = []
+        for sid in self.featured_sources or self._known_sources():
+            entry = self._entry(sid)
+            if entry is not None:
+                pool.extend(cast(list[str], entry.data.get("featured", [])))
+        if not pool:
+            return None
+        return DocId(pool[_stable_index(day, len(pool))])
+
+    def on_this_day(self, day: date, *, limit: int = 5) -> Sequence[DayEvent]:
+        key = f"{day.month:02d}-{day.day:02d}"
+        for sid in self.featured_sources or self._known_sources():
+            entry = self._entry(sid)
+            if entry is None:
+                continue
+            events = cast(dict[str, list[dict[str, Any]]], entry.data.get("on_this_day", {})).get(key)
+            if not events:
+                continue
+            chosen = _spread(events, limit, day)
+            return [
+                DayEvent(
+                    year=int(e["year"]),
+                    text=str(e["text"]),
+                    doc_id=DocId(str(e["doc_id"])) if e.get("doc_id") else None,
+                )
+                for e in sorted(chosen, key=lambda e: int(e["year"]))
+            ]
+        return ()
+
+
+def _spread(events: list[dict[str, Any]], limit: int, day: date) -> list[dict[str, Any]]:
+    """``limit`` events spread across the list (it is in year order), rotating with the year."""
+    if len(events) <= limit:
+        return list(events)
+    step = len(events) / limit
+    offset = _stable_index(day, max(1, int(step)), salt="otd")
+    return [events[min(len(events) - 1, int(i * step) + offset)] for i in range(limit)]

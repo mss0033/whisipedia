@@ -6,6 +6,7 @@ Layout under ``index.root`` (local disk only, ADR-0002)::
     lexical/                                Tantivy + suggest tries (TantivyIndex)
     changes.sqlite                          change feed (SqliteChangeFeed)
     index-state.json                        {source_id: generation indexed last}
+    catalog/<source_id>.json                portal/directory/random data (wsp_index.catalog)
     work/<source_id>/<generation_id>/       redirects.sqlite (aliases), adapter scratch
 
 Every step is resumable: a refined generation is sealed by ``_SUCCESS.json`` and skipped next time
@@ -32,6 +33,7 @@ from wsp_core.ids import InvalidDocIdError, make_doc_id
 from wsp_core.model import DocRecord, FetchResult, Generation, GenerationStatus, RemoteFile, SourceSpec
 from wsp_core.ports import ChangeFeed, Ctx, SourceAdapter, Vault
 from wsp_index import RefineryReader, RefineryWriter, TantivyIndex, ensure_local, refresh
+from wsp_index.catalog import CATALOG_DIR, CatalogConfig, build_source_catalog, is_featured_source
 from wsp_index.refinery import CURRENT_FILE, generation_dir, is_sealed
 from wsp_orchestrator.pipeline import RefineResult
 
@@ -174,6 +176,8 @@ class Indexer:
         previous = state.get(spec.id)
         new_dir = generation_dir(self.refinery, spec.id, generation_id)
         if previous == generation_id:
+            if not (self.root / CATALOG_DIR / f"{spec.id}.json").is_file():
+                self.build_catalog(spec, generation_id)
             return SourceReport(spec.id, indexed=generation_id)
         new = RefineryReader(new_dir)
         old_dir = generation_dir(self.refinery, spec.id, previous) if previous else None
@@ -187,10 +191,23 @@ class Indexer:
         os.replace(tmp, pointer)
         state[spec.id] = generation_id
         self._save_state(state)
+        self.build_catalog(spec, generation_id)
         self._say(
             f"  indexed {spec.id}/{generation_id}: +{stats.upserted:,} upserted, -{stats.deleted:,} removed"
         )
         return SourceReport(spec.id, indexed=generation_id, upserted=stats.upserted, deleted=stats.deleted)
+
+    def build_catalog(self, spec: SourceSpec, generation_id: str) -> Path | None:
+        """Precompute the portal/directory/random data of one indexed generation (derived, local)."""
+        started = self.clock()
+        cfg = CatalogConfig(featured=is_featured_source(spec))
+        try:
+            path = build_source_catalog(self.refinery, spec.id, generation_id, self.root / CATALOG_DIR, cfg)
+        except Exception as exc:  # derived data: never fail an index build over it
+            self._say(f"  catalog {spec.id}/{generation_id}: FAILED ({type(exc).__name__}: {exc})")
+            return None
+        self._say(f"  catalog {spec.id}/{generation_id}: built in {self.clock() - started:.1f}s")
+        return path
 
     def _apply_redirect_aliases(self, spec: SourceSpec, generation_id: str) -> None:
         path = self.work / spec.id / generation_id / "redirects.sqlite"

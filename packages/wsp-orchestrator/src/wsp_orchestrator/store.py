@@ -20,7 +20,7 @@ from typing import Any, cast
 from wsp_core.model import ReleaseState
 from wsp_orchestrator.clock import ensure_utc
 
-SCHEMA_VERSION = 2  # 2: releases.fetched_json (fetch digests, port revision v0.2)
+SCHEMA_VERSION = 3  # 2: releases.fetched_json (port revision v0.2); 3: upstream_offers, proposal ids
 
 # Filesystems on which SQLite WAL locking/shared memory is unsafe or unsupported.
 UNSAFE_FS_TYPES = frozenset(
@@ -172,6 +172,8 @@ CREATE TABLE IF NOT EXISTS gen_stats (
 CREATE TABLE IF NOT EXISTS outbox (
   id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL UNIQUE, kind TEXT NOT NULL,
   subject TEXT NOT NULL, data_json TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS upstream_offers (
+  source_id TEXT PRIMARY KEY, offers_json TEXT NOT NULL, observed_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS proposals (
   id INTEGER PRIMARY KEY AUTOINCREMENT, candidate_key TEXT NOT NULL, decision TEXT NOT NULL,
   proposal_json TEXT NOT NULL, created_at TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'open');
@@ -214,11 +216,14 @@ class StateStore:
             row = c.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
             if row is None:
                 c.execute("INSERT INTO meta(key, value) VALUES ('schema_version', ?)", (str(SCHEMA_VERSION),))
-            elif int(row["value"]) == 1:  # v1 -> v2: add the fetch digests column
-                c.execute("ALTER TABLE releases ADD COLUMN fetched_json TEXT NOT NULL DEFAULT '{}'")
+            else:
+                version = int(row["value"])
+                if version > SCHEMA_VERSION or version < 1:
+                    raise StoreError(f"state store schema {version} != supported {SCHEMA_VERSION}")
+                if version == 1:  # v1 -> v2: add the fetch digests column
+                    c.execute("ALTER TABLE releases ADD COLUMN fetched_json TEXT NOT NULL DEFAULT '{}'")
+                # v2 -> v3: new tables only (created above)
                 c.execute("UPDATE meta SET value=? WHERE key='schema_version'", (str(SCHEMA_VERSION),))
-            elif int(row["value"]) != SCHEMA_VERSION:
-                raise StoreError(f"state store schema {row['value']} != supported {SCHEMA_VERSION}")
 
     def close(self) -> None:
         with self._lock:
@@ -500,5 +505,40 @@ class StateStore:
             )
             return int(cast(int, cur.lastrowid))
 
-    def proposals(self, *, status: str = "open") -> list[sqlite3.Row]:
+    def proposals(self, *, status: str | None = "open") -> list[sqlite3.Row]:
+        if status is None:
+            return self.query("SELECT * FROM proposals ORDER BY id")
         return self.query("SELECT * FROM proposals WHERE status=? ORDER BY id", (status,))
+
+    def proposal(self, proposal_id: int) -> sqlite3.Row | None:
+        rows = self.query("SELECT * FROM proposals WHERE id=?", (proposal_id,))
+        return rows[0] if rows else None
+
+    def proposal_keys(self) -> set[str]:
+        """Candidate keys ever proposed, whatever their status: a decided candidate is not re-raised."""
+        return {str(r["candidate_key"]) for r in self.query("SELECT candidate_key FROM proposals")}
+
+    def set_proposal_status(self, proposal_id: int, status: str) -> bool:
+        with self.tx() as c:
+            cur = c.execute("UPDATE proposals SET status=? WHERE id=?", (status, proposal_id))
+            return cur.rowcount == 1
+
+    # --- upstream offers (last-copy oracle, freshness) ----------------------------------------
+
+    def put_offers(self, source_id: str, offers: Sequence[Mapping[str, object]], now: datetime) -> None:
+        """What upstream served at ``now``: ``[{generation_id, version, published}]``."""
+        with self.tx() as c:
+            c.execute(
+                "INSERT INTO upstream_offers(source_id, offers_json, observed_at) VALUES (?, ?, ?)"
+                " ON CONFLICT(source_id) DO UPDATE SET offers_json=excluded.offers_json,"
+                " observed_at=excluded.observed_at",
+                (source_id, _dumps(list(offers)), ts(now)),
+            )
+
+    def offers(self, source_id: str) -> tuple[list[dict[str, Any]], datetime] | None:
+        rows = self.query("SELECT * FROM upstream_offers WHERE source_id=?", (source_id,))
+        if not rows:
+            return None
+        observed = parse_ts(rows[0]["observed_at"])
+        assert observed is not None
+        return cast(list[dict[str, Any]], json.loads(rows[0]["offers_json"])), observed

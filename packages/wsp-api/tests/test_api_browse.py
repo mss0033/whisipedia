@@ -1,9 +1,9 @@
 """Navigator-facing resources: portal, directory, random, recent changes, assets, gaps, rich documents."""
 
 import json
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import httpx
@@ -26,10 +26,10 @@ from wsp_api.schemas import (
 )
 from wsp_api.summaries import CitationSplitter
 from wsp_api.testing import local_client
-from wsp_api.testing.browse import ENIGMA, PIXEL_PNG, InMemoryGapLog, browse_services
+from wsp_api.testing.browse import ENIGMA, PIXEL_PNG, CategorizedCatalog, InMemoryGapLog, browse_services
 from wsp_api.testing.fakes import SAMPLE_GEN_2, sample_services
-from wsp_core.ids import make_doc_id
-from wsp_core.model import Gap
+from wsp_core.ids import DocId, make_doc_id
+from wsp_core.model import DayEvent, Gap
 
 TURING = "wsp:wikipedia-en-zim/A/Alan_Turing"
 
@@ -191,6 +191,27 @@ def test_portal(browse: httpx.Client) -> None:
     assert set(portal.random_sources) == {"gutenberg", "rfc", "wikipedia-en-zim"}
     again = Portal.model_validate(browse.get("/v1/portal").json())
     assert again.featured == portal.featured  # deterministic for the day
+
+
+class _PortalCatalog(CategorizedCatalog):
+    """A catalog with precomputed start-page picks (``wsp_core.ports.PortalSource``)."""
+
+    def featured(self, day: date) -> DocId | None:
+        return DocId(ENIGMA)
+
+    def on_this_day(self, day: date, *, limit: int = 5) -> Sequence[DayEvent]:
+        return [DayEvent(1912, "Turing is born (not really today).", DocId(TURING))][:limit]
+
+
+def test_portal_uses_precomputed_picks() -> None:
+    base = browse_services()
+    assert isinstance(base.catalog, CategorizedCatalog)
+    services = replace(base, catalog=_PortalCatalog(base.changes, base.catalog.category_map))
+    with local_client(create_app(services)) as c:
+        portal = Portal.model_validate(c.get("/v1/portal").json())
+    assert portal.featured is not None
+    assert portal.featured.doc_id == ENIGMA
+    assert [(e.year, e.doc_id) for e in portal.on_this_day] == [(1912, TURING)]
 
 
 def test_directory_tree(browse: httpx.Client) -> None:

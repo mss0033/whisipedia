@@ -17,8 +17,9 @@ implementation.
 
 `wsp_cli.bootstrap.build_services(cfg, layout)` is the single place where implementations are
 chosen. With `[api] backend = "real"` (or `"auto"` and an existing `vault.root`) it builds `FileVault`,
-`JsonlLedger`, `TantivyIndex`, `ParquetDocumentStore`, `SqliteChangeFeed`, `FeedCatalog`,
-`ZimAssetStore` and `JsonlGapLog(<index.root>/gaps.jsonl)`; otherwise the in-memory fakes from
+`JsonlLedger`, `TantivyIndex`, `ParquetDocumentStore`, `SqliteChangeFeed`, `RefineryCatalog`,
+`ZimAssetStore`, `JsonlGapLog(<index.root>/gaps.jsonl)`, `JsonlQueryLog(<index.root>/queries.jsonl)`
+and the System Monitor provider `wsp_cli.monitor.LibraryMonitor`; otherwise the in-memory fakes from
 `wsp_api.testing.fakes`, seeded with a small sample library. The browsing ports (`Catalog`,
 `AssetStore`, `GapLog`) live in `wsp_core.ports` since port revision v0.2 (ADR-0005).
 
@@ -30,7 +31,9 @@ has a default, so `Services` works without wiring them:
 
 | Seam | Purpose | Default when `None` |
 |---|---|---|
-| `Catalog` | random pages, doc counts, newest changes, per-source categories | `wsp_api.catalog.FeedCatalog` (replays the change feed) |
+| `Catalog` | random pages, doc counts, newest changes, per-source categories | `wsp_api.catalog.FeedCatalog` (replays the change feed); the real backend uses `wsp_index.catalog.RefineryCatalog` (precomputed at index time, also `PortalSource`: featured article and On this day) |
+| `OpsProvider` | `/v1/system` `ops` block and `/v1/proposals` | none: `ops` is null, proposals empty |
+| `QueryLog` | local search log for the gap miner | none: searches are not logged |
 | `AssetStore` | original HTML and images inside sealed containers | `wsp_api.zim.ZimAssetStore` (libzim, over the vault) |
 | `GapLog` | "not in library" reports for the gap miner | none: `POST /v1/gaps` answers 501; `wsp_api.gaps.JsonlGapLog(<index root>/gaps.jsonl)` is the reference |
 
@@ -46,7 +49,8 @@ an image and a few categories to the sample library.
 | `GET /v1/documents/{doc_id}` (`?at=<generation>`), `/v1/documents/{doc_id}/history` | Documents (text, original HTML when available, link table, vault location) and their versions |
 | `GET /v1/search?q=&sources=&kind=&limit=&offset=`, `GET /v1/suggest?q=` | Search (facets, code-point highlights, `navigate_to` for navigational queries) and title autocomplete |
 | `GET /v1/changes?since=`, `GET /v1/changes/stream` (SSE), `GET /v1/changes/recent` | Change feed; `recent` is newest first with the cursor to follow live |
-| `GET /v1/system` | System Monitor data: freshness and health, degraded generations, ledger tail and its integrity |
+| `GET /v1/system` | System Monitor data: freshness and health, degraded generations, ledger tail and its integrity; `ops`: SLO lag, scrub progress, parity coverage, disks and domain budgets, download lanes, queue, alerts, bot runs, proposals |
+| `GET /v1/proposals?status=` | Curator proposals, newest first (deciding them is `wsp proposals accept/reject`) |
 | `POST /v1/summarize` | Cited summary as server-sent events (`token`, `citation`, `notice`, `done`, `error`). Returns `501 not_configured` if no `Generator` is set |
 | `GET /v1/portal` | Start page: featured page of the day, newest changes, a random page, every site |
 | `GET /v1/directory?path=` | Directory: Top › registry domain › site › category |
@@ -141,6 +145,11 @@ wsp drill [--kind KIND] [--source ID] # chaos drill on a sandboxed copy
 wsp approve|reject <source> [<version>] [--note TEXT]
 wsp resume <source>
 wsp status                            # sources, generations, degraded, orchestrator queue
+wsp index catalog [--source ID]       # rebuild the portal/directory/random catalog only
+wsp parity status                     # parity coverage of sealed generations
+wsp proposals list|show|accept|reject # Curator proposals; accept edits registry/sources.yaml
+wsp service install|status|uninstall  # systemd user units from deploy/systemd
+wsp doctor [--quiet] [--require NAME] # readiness report (config, vault, index, disk, tools, key, ledger)
 ```
 
 `wsp ingest` adopts complete bulk downloads from `<vault.root>/_incoming/<source>/<version>/` using

@@ -24,6 +24,10 @@ Keys (all optional except the paths in production)::
     shutdown_grace_seconds = 60
     job_retry_gap = "PT1H"
     log_level = "INFO"
+    prune_dry_run = false              # true: retention records its plan but moves nothing
+    offer_max_age = "P14D"             # upstream observations older than this cannot prove redundancy
+    parity_interval = "PT6H"           # how often the parity backfill wakes up
+    parity_continue = "PT2M"           # pause between bounded parity runs while work remains
     wiring = "package.module:factory"  # builds the Wiring (adapters, vault, ledger...)
     [orchestrator.job_limits]          # per job type concurrency
     fetch_release = 2
@@ -55,6 +59,7 @@ DEFAULT_JOB_LIMITS: Mapping[JobKind, int] = {
     JobKind.HEALTH_PROBE: 4,
     JobKind.PRUNE: 1,
     JobKind.DISCOVERY_BOTS: 1,
+    JobKind.PARITY: 1,
 }
 DEFAULT_RETENTION_WINDOWS: Mapping[str, str] = {"wikimedia-dumps": "P60D"}
 DEFAULT_USER_AGENT = "Whisipedia/0.0 (personal offline archive)"
@@ -101,6 +106,10 @@ class OrchestratorSettings:
     )
     log_level: str = "INFO"
     wiring: str | None = None
+    prune_dry_run: bool = False  # True: retention only records its plan (never moves anything)
+    offer_max_age: timedelta = timedelta(days=14)  # older upstream observations prove nothing
+    parity_interval: IsoDuration = field(default_factory=lambda: IsoDuration.parse("PT6H"))
+    parity_continue: timedelta = timedelta(minutes=2)  # pause between bounded parity runs
 
     def __post_init__(self) -> None:
         cadence_for_cycle(self.cycle, anchor_day=self.anchor_day)  # validates both
@@ -158,4 +167,8 @@ class OrchestratorSettings:
             retention_windows={k: IsoDuration.parse(v) for k, v in windows.items()},
             log_level=str(orch.get("log_level", "INFO")),
             wiring=str(orch["wiring"]) if orch.get("wiring") else None,
+            prune_dry_run=bool(orch.get("prune_dry_run", False)),
+            offer_max_age=IsoDuration.parse(str(orch.get("offer_max_age", "P14D"))).approx(),
+            parity_interval=IsoDuration.parse(str(orch.get("parity_interval", "PT6H"))),
+            parity_continue=IsoDuration.parse(str(orch.get("parity_continue", "PT2M"))).approx(),
         )

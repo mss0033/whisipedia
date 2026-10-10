@@ -17,6 +17,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath
 from typing import Any, cast
 
+from wsp_core.errors import NotFoundError
 from wsp_core.ids import make_doc_id
 from wsp_core.model import (
     Artifact,
@@ -189,6 +190,8 @@ class FakeFetcher:
     documents: dict[str, bytes] = field(default_factory=dict[str, bytes])
 
     def get_bytes(self, url: str, *, max_bytes: int = 64 * 1024 * 1024) -> bytes:
+        if url not in self.documents:
+            raise NotFoundError(url, "HTTP 404")
         return self.documents[url][:max_bytes]
 
     def download(self, remote: RemoteFile, dest: Path) -> FetchResult:

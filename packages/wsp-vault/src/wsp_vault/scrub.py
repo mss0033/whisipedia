@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import sqlite3
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import closing
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -21,6 +21,7 @@ from wsp_core.model import GenerationStatus, VerdictStatus
 from wsp_core.ports import Ledger
 from wsp_vault.atomic import DEFAULT_RETRY, RetryPolicy, readback
 from wsp_vault.manifest import DEGRADED_NAME, MANIFEST_NAME, SIGNATURE_NAME, ManifestEntry
+from wsp_vault.paritymeta import SIDECAR_PATH, is_parity_path, read_sidecar
 from wsp_vault.vault import FileVault, SignatureError
 
 DEFAULT_CYCLE = timedelta(days=30)
@@ -128,6 +129,24 @@ class Scrubber:
         db.execute(_SCHEMA)
         return db
 
+    def verified_ok(self, keys: Sequence[str], *, now: datetime | None = None) -> set[str]:
+        """Keys (``<source>/<generation>/<path>``) that passed a check within the current cycle."""
+        if not self._state_path.exists():
+            return set()
+        now = now or self._clock()
+        ok: set[str] = set()
+        with closing(self._connect()) as db:
+            for i in range(0, len(keys), 500):
+                chunk = list(keys[i : i + 500])
+                marks = ",".join("?" * len(chunk))
+                for key, at, good in db.execute(
+                    f"SELECT key, verified_at, ok FROM files WHERE key IN ({marks})",  # noqa: S608 - placeholders
+                    chunk,
+                ):
+                    if good and now - datetime.fromisoformat(at) < self._cycle:
+                        ok.add(str(key))
+        return ok
+
     def run(self, *, max_bytes: int | None = None, max_files: int | None = None) -> ScrubReport:
         now = self._clock()
         findings: list[ScrubFinding] = []
@@ -184,12 +203,26 @@ class Scrubber:
         except SignatureError as exc:
             return [ScrubFinding(source_id, generation_id, None, VerdictStatus.MISMATCH, str(exc))]
         known = {e.path for e in manifest.entries} | {MANIFEST_NAME, SIGNATURE_NAME, DEGRADED_NAME}
-        findings = [
+        findings: list[ScrubFinding] = []
+        entries = list(manifest.entries)
+        on_disk = sorted(_walk(lib))
+        try:
+            sidecar = read_sidecar(self._vault, source_id, generation_id)
+        except SignatureError as exc:  # parity is derived: report once, do not list each file
+            findings.append(
+                ScrubFinding(source_id, generation_id, SIDECAR_PATH, VerdictStatus.MISMATCH, str(exc))
+            )
+            known |= {rel for rel in on_disk if is_parity_path(rel)}
+        else:
+            if sidecar is not None:
+                known |= sidecar.paths
+                entries += sidecar.entries
+        findings += [
             ScrubFinding(source_id, generation_id, rel, VerdictStatus.MISMATCH, "unexpected file")
-            for rel in sorted(_walk(lib))
+            for rel in on_disk
             if rel not in known
         ]
-        for e in manifest.entries:
+        for e in entries:
             key = f"{source_id}/{generation_id}/{e.path}"
             items.append(_Item(key, source_id, generation_id, lib / e.path, e))
         return findings
@@ -251,3 +284,36 @@ def _walk(root: Path) -> Iterator[str]:
     for path in root.rglob("*"):
         if path.is_file() or path.is_symlink():
             yield path.relative_to(root).as_posix()
+
+
+@dataclass(frozen=True, slots=True)
+class ScrubProgress:
+    """Where the rolling scrub stands, from its local state file (no vault access)."""
+
+    files_known: int  # files seen by the last run
+    verified_in_cycle: int  # passed a check within the cycle
+    failing: int  # failed their last check
+    oldest_check: datetime | None
+
+    @property
+    def fraction(self) -> float:
+        return self.verified_in_cycle / self.files_known if self.files_known else 0.0
+
+
+def scrub_progress(
+    state_path: Path, *, now: datetime, cycle: timedelta = DEFAULT_CYCLE
+) -> ScrubProgress | None:
+    """Read-only summary of ``scrub.sqlite``; ``None`` if the scrubber never ran."""
+    if not state_path.is_file():
+        return None
+    db = sqlite3.connect(f"file:{state_path}?mode=ro", uri=True)
+    try:
+        rows = db.execute("SELECT verified_at, ok FROM files").fetchall()
+    except sqlite3.Error:
+        return None
+    finally:
+        db.close()
+    stamps = [datetime.fromisoformat(str(at)) for at, _ in rows]
+    fresh = sum(1 for (_, ok), at in zip(rows, stamps, strict=True) if ok and now - at < cycle)
+    failing = sum(1 for _, ok in rows if not ok)
+    return ScrubProgress(len(rows), fresh, failing, min(stamps, default=None))

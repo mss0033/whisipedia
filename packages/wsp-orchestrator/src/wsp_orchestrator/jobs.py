@@ -24,7 +24,8 @@ class JobKind(StrEnum):
     DRILL = "drill"
     HEALTH_PROBE = "health_probe"
     PRUNE = "prune"
-    DISCOVERY_BOTS = "discovery_bots"
+    DISCOVERY_BOTS = "discovery_bots"  # key: bot name ("global" = the legacy single hook)
+    PARITY = "parity"  # par2 creation and backfill (Warden, PLAN §8.1)
 
 
 class JobStatus(StrEnum):
