@@ -104,29 +104,12 @@ idempotence.
 
 ## Plugging in real components
 
-Write a composition-root factory and point `orchestrator.wiring` at it:
-
-```python
-# e.g. packages/wsp-cli/src/wsp_cli/wiring.py
-def build(config) -> Wiring:
-    sources = load_registry(Path("registry/sources.yaml"), Path("registry/schema/source.schema.json"))
-    return Wiring(
-        sources=sources,
-        adapters=load_adapter_entry_points(),  # {"kiwix-opds": KiwixAdapter(), ...}
-        fetcher=HttpFetcher(config),
-        vault=NasVault(config),
-        ledger=JsonlLedger(config),
-        refine=refinery.refine_generation,
-        index=indexer.upsert_generation,
-        scrub=warden.scrub_slice,
-        drill=warden.monthly_drill,
-        discovery_bots=curator.run_bots,
-        gate=GateConfig(...),
-        proposal_sink=curator.open_pr,
-        pruner=vault.prune,
-        last_copy=history.holds_last_copy,
-    )
-```
+`config/default.toml` points `orchestrator.wiring` at `wsp_cli.wiring:build_wiring`, which builds the
+real components from config: registry sources, entry-point adapters, `HttpFetcher`/`Aria2Fetcher`,
+`FileVault` + `JsonlLedger`, the Refinery/Tantivy indexer hooks (`wsp_cli.indexer`), rolling scrub
+with the repair ladder, drills on the smallest sealed generation and `FileVault.prune`. Retention
+stays a dry run until a `last_copy` oracle is wired. Discovery bots and the proposal sink are not
+wired yet.
 
 `wsp_orchestrator.testing:demo_wiring` is a self-contained fake world for smoke tests.
 

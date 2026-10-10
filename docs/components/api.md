@@ -16,8 +16,11 @@ Whisipedia has three public surfaces (PLAN §12.2). All three depend only on the
 implementation.
 
 `wsp_cli.bootstrap.build_services(cfg, layout)` is the single place where implementations are
-chosen. Today it uses the in-memory fakes from `wsp_api.testing.fakes`, seeded with a small sample
-library. Each `TODO(integration)` comment in that function marks where a real component goes.
+chosen. With `[api] backend = "real"` (or `"auto"` and an existing `vault.root`) it builds `FileVault`,
+`JsonlLedger`, `TantivyIndex`, `ParquetDocumentStore`, `SqliteChangeFeed`, `FeedCatalog`,
+`ZimAssetStore` and `JsonlGapLog(<index.root>/gaps.jsonl)`; otherwise the in-memory fakes from
+`wsp_api.testing.fakes`, seeded with a small sample library. The browsing ports (`Catalog`,
+`AssetStore`, `GapLog`) live in `wsp_core.ports` since port revision v0.2 (ADR-0005).
 
 The fakes are meant to be reused by other packages' tests. `sample_services()` returns a fully wired
 `Services`.
@@ -129,7 +132,23 @@ wsp sources [--json]
 wsp changes [--since CURSOR] [--limit N] [--follow --max-seconds S] [--json]
 wsp registry validate [--registry PATH] [--schema PATH]
 wsp config show                       # merged config with secret-looking keys shown as ***
+
+# operator commands (real library from config/; see wsp_cli.ops)
+wsp ingest [--source ID] [--dry-run] [--offline] [--allow-mirror] [--json]
+wsp index build [--source ID]         # refine sealed generations -> Parquet -> Tantivy + suggest (local disk)
+wsp scrub [--budget-gb N]             # re-hash due files, repair ladder on findings
+wsp drill [--kind KIND] [--source ID] # chaos drill on a sandboxed copy
+wsp approve|reject <source> [<version>] [--note TEXT]
+wsp resume <source>
+wsp status                            # sources, generations, degraded, orchestrator queue
 ```
+
+`wsp ingest` adopts complete bulk downloads from `<vault.root>/_incoming/<source>/<version>/` using
+`_incoming/_plans/targets.json`: a file is complete when no `<name>.aria2` control file exists, its
+size matches and it has settled; expected checksums come from the plan (or the Kiwix `.zim.sha256`
+via the adapter). Complete versions are adopted by rename, sealed, signed, logged and promoted (never
+over a newer generation), then README/CATALOG are regenerated. It is idempotent, resumable and never
+deletes. `--dry-run` only reads.
 
 Read commands go through the SDK. They use `--url` or `$WSP_API_URL` when set. Otherwise they run
 the API in-process, without opening a socket.
