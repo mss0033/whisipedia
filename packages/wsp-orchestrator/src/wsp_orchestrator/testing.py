@@ -13,8 +13,9 @@ import shutil
 from collections import Counter
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath
+from typing import Any, cast
 
 from wsp_core.ids import make_doc_id
 from wsp_core.model import (
@@ -37,7 +38,9 @@ from wsp_core.model import (
 from wsp_core.ports import Ctx
 from wsp_orchestrator.alerts import Alert, Alerter
 from wsp_orchestrator.clock import Clock, ManualClock, SystemClock
+from wsp_orchestrator.orchestrator import Wiring
 from wsp_orchestrator.pipeline import RefineResult, ReleasePipeline, RetryPolicy, adapter_resolver
+from wsp_orchestrator.settings import OrchestratorSettings
 from wsp_orchestrator.store import StateStore
 
 
@@ -89,6 +92,7 @@ class FakeAdapter:
     """Serves configured releases. ``contents[(version, name)]`` is what fetch() writes."""
 
     id: str
+    source_id: str = ""  # source the releases belong to; defaults to the adapter id
     releases: list[ReleaseRef] = field(default_factory=list[ReleaseRef])
     contents: dict[tuple[str, str], bytes] = field(default_factory=dict[tuple[str, str], bytes])
     corrupt: set[tuple[str, str]] = field(default_factory=set[tuple[str, str]])
@@ -96,7 +100,7 @@ class FakeAdapter:
     calls: Counter[str] = field(default_factory=Counter[str])
 
     def add_release(self, version: str, files: Mapping[str, bytes], **meta: str) -> ReleaseRef:
-        ref = make_release(self.id, version, files, **meta)
+        ref = make_release(self.source_id or self.id, version, files, **meta)
         self.releases.append(ref)
         for name, data in files.items():
             self.contents[(version, name)] = data
@@ -381,7 +385,7 @@ class PipelineHarness:
         self.root = root
         self.clock = clock or ManualClock(datetime(2026, 10, 15, tzinfo=UTC))
         self.sources = list(sources) or [make_spec("src")]
-        self.adapters = {s.adapter or s.id: FakeAdapter(s.adapter or s.id) for s in self.sources}
+        self.adapters = {s.adapter or s.id: FakeAdapter(s.adapter or s.id, s.id) for s in self.sources}
         self.vault = FakeVault(root / "vault", self.clock)
         self.ledger = FakeLedger(self.clock)
         self.refinery = FakeRefinery()
@@ -425,3 +429,72 @@ class PipelineHarness:
         self.store.close()
         self.injector = CrashInjector(crash_at)
         self._open()
+
+
+def make_settings(root: Path, **overrides: Any) -> OrchestratorSettings:
+    """Settings rooted in a temporary directory (state, work and metrics under ``root``)."""
+    base: dict[str, Any] = {
+        "state_db": root / "state" / "orchestrator.sqlite3",
+        "workdir": root / "work",
+        "metrics_path": root / "metrics" / "orchestrator.prom",
+        "vault_root": root / "vault",
+        "retry": RetryPolicy(max_attempts=3, base_delay=timedelta(minutes=10)),
+        "poll_interval_seconds": 0.05,
+        "shutdown_grace_seconds": 5.0,
+    }
+    base.update(overrides)
+    return OrchestratorSettings(**base)
+
+
+@dataclass
+class FakeWorld:
+    """Fakes behind a :class:`Wiring`; survives orchestrator restarts like real external systems."""
+
+    sources: list[SourceSpec]
+    adapters: dict[str, FakeAdapter]
+    vault: FakeVault
+    ledger: FakeLedger
+    refinery: FakeRefinery
+    sink: RecordingSink
+    scrubbed: list[tuple[int, int]] = field(default_factory=list[tuple[int, int]])
+
+    @classmethod
+    def build(cls, root: Path, clock: Clock, sources: Sequence[SourceSpec]) -> FakeWorld:
+        return cls(
+            sources=list(sources),
+            adapters={s.adapter or s.id: FakeAdapter(s.adapter or s.id, s.id) for s in sources},
+            vault=FakeVault(root / "vault", clock),
+            ledger=FakeLedger(clock),
+            refinery=FakeRefinery(),
+            sink=RecordingSink(),
+        )
+
+    def scrub(self, index: int, count: int) -> None:
+        self.scrubbed.append((index, count))
+
+    def wiring(self, **extra: Any) -> Wiring:
+        return Wiring(
+            sources=self.sources,
+            adapters=dict(self.adapters),
+            fetcher=FakeFetcher(),
+            vault=self.vault,
+            ledger=self.ledger,
+            refine=self.refinery.refine,
+            index=self.refinery.index,
+            alert_sinks=[self.sink],
+            scrub=self.scrub,
+            **extra,
+        )
+
+
+def demo_wiring(config: Mapping[str, Any]) -> Wiring:
+    """``orchestrator.wiring = "wsp_orchestrator.testing:demo_wiring"``: a self-contained fake world.
+
+    One active source with one release; the fake vault lives next to ``orchestrator.workdir``.
+    Useful for smoke-testing the daemon and deployment without network or NAS.
+    """
+    orch = cast(Mapping[str, Any], config.get("orchestrator", {}))
+    root = Path(str(orch["workdir"])).parent
+    world = FakeWorld.build(root, SystemClock(), [make_spec("demo")])
+    world.adapters["demo"].add_release("2026-10-01", {"demo.txt": b"hello offline world\n"})
+    return world.wiring()
