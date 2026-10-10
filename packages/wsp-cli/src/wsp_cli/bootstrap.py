@@ -1,18 +1,31 @@
 """Composition root: the one place that turns configuration into concrete port implementations.
 
-Everything else (API, CLI commands) receives a :class:`wsp_api.Services` and never imports an
-implementation. Today every backend is an in-memory fake seeded with a small sample library; each
-``TODO(integration)`` marks where the lead wires the real component, selected by config (PLAN §12.2).
+Everything else (API, CLI commands, the orchestrator via :mod:`wsp_cli.wiring`) receives ports and
+never chooses an implementation. Configuration is layered (PLAN §12.2): ``config/default.toml`` <
+``config/local.toml`` (gitignored) < ``WSP__SECTION__KEY`` environment variables.
+
+Real backends (selected when ``[api] backend = "real"``, or ``"auto"`` and ``vault.root`` exists):
+
+* ``FileVault(vault.root)`` with domains from the registry, ``JsonlLedger(<vault.root>/ledger)``;
+* ``TantivyIndex``, ``ParquetDocumentStore`` and ``SqliteChangeFeed`` under ``index.root``, which must
+  be local disk (``ensure_local``, ADR-0002);
+* ``HttpFetcher`` (or ``Aria2Fetcher`` with ``acquirer.fetcher = "aria2"``) and the adapters registered
+  under the ``whisipedia.adapters`` entry points;
+* the manifest/ledger signer from ``vault.signing_key``. Without one, an Ed25519 key is generated on
+  first use under ``$XDG_CONFIG_HOME/whisipedia/`` (``~/.config/whisipedia/``), never inside the repo.
+
+Otherwise the in-memory sample library from :mod:`wsp_api.testing.fakes` backs the API.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from wsp_api import ApiSettings, Services
 from wsp_api.services import LOOPBACK_HOSTS
@@ -27,10 +40,22 @@ from wsp_api.testing.fakes import (
     seed_sample_library,
 )
 from wsp_core.config import load_config
-from wsp_core.model import SourceSpec
+from wsp_core.model import SourceSpec, SourceStatus
+from wsp_core.ports import Fetcher, Signer, SourceAdapter
 from wsp_core.registry import load_registry
 
-BACKEND_NOTE = "using in-memory sample backends (real vault/index not wired yet)"
+if TYPE_CHECKING:  # heavy imports stay lazy so `wsp search --url ...` starts fast
+    from wsp_index import ParquetDocumentStore, SqliteChangeFeed, TantivyIndex
+    from wsp_vault.ledger import JsonlLedger
+    from wsp_vault.vault import FileVault
+
+BACKEND_NOTE = "using in-memory sample backends (set vault.root / index.root for the real library)"
+CYCLE_DURATIONS = {"monthly": "P1M", "quarterly": "P3M"}
+SIGNING_KEY_NAME = "vault-signing-ed25519.pem"
+
+
+class ConfigError(ValueError):
+    """The configuration cannot build the requested component."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,13 +95,17 @@ def load(lay: Layout, *, environ: Mapping[str, str] | None = None) -> dict[str, 
     return load_config(lay.config_dir, environ=environ)
 
 
-def _section(cfg: Mapping[str, Any], name: str) -> Mapping[str, Any]:
+def section(cfg: Mapping[str, Any], name: str) -> Mapping[str, Any]:
     value = cfg.get(name, {})
     return cast(Mapping[str, Any], value) if isinstance(value, Mapping) else {}
 
 
+def _opt_path(value: object) -> Path | None:
+    return Path(str(value)).expanduser() if value not in (None, "") else None
+
+
 def load_sources(cfg: Mapping[str, Any], lay: Layout) -> Sequence[SourceSpec]:
-    reg = _section(cfg, "registry")
+    reg = section(cfg, "registry")
     registry = Path(reg.get("path", lay.registry))
     schema = Path(reg.get("schema", lay.schema))
     if not registry.is_file():
@@ -84,29 +113,252 @@ def load_sources(cfg: Mapping[str, Any], lay: Layout) -> Sequence[SourceSpec]:
     return load_registry(registry, schema)
 
 
+def effective_sources(specs: Sequence[SourceSpec], cfg: Mapping[str, Any]) -> tuple[SourceSpec, ...]:
+    """Specs with the global cycle filled in where the registry has no override (for display/freshness)."""
+    cycle = str(section(cfg, "acquirer").get("cycle", "monthly"))
+    default = CYCLE_DURATIONS.get(cycle, "P1M")
+    return tuple(s if s.cadence else dataclasses.replace(s, cadence=default) for s in specs)
+
+
 def api_settings(cfg: Mapping[str, Any], lay: Layout, *, static_dir: Path | None = None) -> ApiSettings:
-    api = _section(cfg, "api")
-    static = static_dir or (Path(api["static_dir"]) if "static_dir" in api else lay.navigator_dist)
+    api = section(cfg, "api")
+    static = static_dir or (Path(api["static_dir"]) if api.get("static_dir") else lay.navigator_dist)
     extra = tuple(str(h) for h in api.get("allowed_hosts", ()))
     return ApiSettings(static_dir=static, allowed_hosts=(*LOOPBACK_HOSTS, *extra))
 
 
-def build_services(cfg: Mapping[str, Any], lay: Layout) -> Services:
-    """Build the ports from config. Nothing here may open a network connection (PLAN §10.5)."""
-    # TODO(integration): vault = wsp_vault.FileVault(Path(cfg["vault"]["root"]))  (read-only mount)
-    vault = InMemoryVault()
-    # TODO(integration): ledger = wsp_vault.FileLedger(<vault root>/ledger)
-    ledger = InMemoryLedger()
-    # TODO(integration): index = wsp_index.TantivyLexicalIndex(Path(cfg["index"]["root"]), read_only=True)
-    index = InMemoryLexicalIndex()
-    # TODO(integration): documents = wsp_index.ParquetDocumentStore(<index root>, vault)
-    documents = InMemoryDocumentStore()
-    # TODO(integration): changes = wsp_index.SqliteChangeFeed(<index root>/changes.db)
-    changes = InMemoryChangeFeed()
-    # TODO(integration): generator = wsp_oracle.LocalGenerator(cfg["oracle"]) when configured; must be a
-    # loopback llama.cpp/vLLM endpoint or in-process model. None makes /v1/summarize answer 501.
-    generator = EchoGenerator() if _section(cfg, "api").get("demo_generator", True) else None
+# --- paths ------------------------------------------------------------------------------------------
 
+
+@dataclass(frozen=True, slots=True)
+class Paths:
+    """Every location the real backends use, resolved from config."""
+
+    vault_root: Path | None
+    index_root: Path | None
+    state_dir: Path | None  # local orchestrator/warden state (directory of orchestrator.state_db)
+    workdir: Path | None
+
+    @property
+    def incoming(self) -> Path:
+        return self.require_vault() / "_incoming"
+
+    @property
+    def ledger_dir(self) -> Path:
+        return self.require_vault() / "ledger"
+
+    @property
+    def refinery(self) -> Path:
+        return self.require_index() / "refinery"
+
+    @property
+    def lexical(self) -> Path:
+        return self.require_index() / "lexical"
+
+    @property
+    def changes_db(self) -> Path:
+        return self.require_index() / "changes.sqlite"
+
+    @property
+    def index_work(self) -> Path:
+        return self.require_index() / "work"
+
+    def require_vault(self) -> Path:
+        if self.vault_root is None:
+            raise ConfigError("vault.root is not set (config/local.toml or WSP__VAULT__ROOT)")
+        return self.vault_root
+
+    def require_index(self) -> Path:
+        if self.index_root is None:
+            raise ConfigError("index.root is not set (config/local.toml or WSP__INDEX__ROOT)")
+        return self.index_root
+
+    def require_state(self) -> Path:
+        if self.state_dir is None:
+            raise ConfigError("orchestrator.state_db is not set (local disk)")
+        return self.state_dir
+
+
+def paths(cfg: Mapping[str, Any]) -> Paths:
+    orch = section(cfg, "orchestrator")
+    state_db = _opt_path(orch.get("state_db"))
+    return Paths(
+        vault_root=_opt_path(section(cfg, "vault").get("root")),
+        index_root=_opt_path(section(cfg, "index").get("root")),
+        state_dir=state_db.parent if state_db else None,
+        workdir=_opt_path(orch.get("workdir")),
+    )
+
+
+def real_backends_available(cfg: Mapping[str, Any]) -> bool:
+    backend = str(section(cfg, "api").get("backend", "auto"))
+    if backend == "real":
+        return True
+    if backend == "sample":
+        return False
+    root = paths(cfg).vault_root
+    return root is not None and root.is_dir()
+
+
+# --- signer ---------------------------------------------------------------------------------------
+
+
+def config_home(environ: Mapping[str, str] | None = None) -> Path:
+    env = os.environ if environ is None else environ
+    base = env.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    return Path(base).expanduser() / "whisipedia"
+
+
+def load_signer(
+    cfg: Mapping[str, Any],
+    lay: Layout | None = None,
+    *,
+    create: bool = True,
+    environ: Mapping[str, str] | None = None,
+) -> Signer:
+    """The vault's manifest/ledger signer (``[vault] signer`` = ``ed25519`` | ``ssh``).
+
+    ``ed25519`` reads a PKCS#8 PEM from ``vault.signing_key`` (default
+    ``<config home>/vault-signing-ed25519.pem``) and generates it on first use when ``create`` is set.
+    With ``create=False`` and no key, an ephemeral in-memory key is used (dry runs only: it can sign
+    nothing that is kept). Keys inside the repository checkout are refused.
+    """
+    from wsp_vault.signing import Ed25519Signer, SshSigner
+
+    vault = section(cfg, "vault")
+    kind = str(vault.get("signer", "ed25519"))
+    key = _opt_path(vault.get("signing_key")) or config_home(environ) / SIGNING_KEY_NAME
+    key = key.resolve()
+    if lay is not None and lay.root is not None and key.is_relative_to(lay.root.resolve()):
+        raise ConfigError(f"refusing a signing key inside the repository: {key}")
+    if kind == "ssh":
+        return SshSigner(key)
+    if kind != "ed25519":
+        raise ConfigError(f"unknown vault.signer {kind!r} (ed25519 | ssh)")
+    if key.is_file():
+        return Ed25519Signer.from_private_pem(key.read_bytes())
+    if not create:
+        return Ed25519Signer.generate()
+    signer = Ed25519Signer.generate()
+    key.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    fd = os.open(key, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "wb") as fh:
+        fh.write(signer.private_pem())
+    return signer
+
+
+# --- components -----------------------------------------------------------------------------------
+
+
+def user_agent(cfg: Mapping[str, Any]) -> str:
+    return str(section(cfg, "acquirer").get("user_agent", "Whisipedia/0.0 (personal offline archive)"))
+
+
+def build_vault(
+    cfg: Mapping[str, Any], specs: Sequence[SourceSpec], signer: Signer, *, ledger: bool = True
+) -> FileVault:
+    """``FileVault`` at ``vault.root`` with registry domains and (optionally) the ledger attached."""
+    from wsp_vault.parity import Par2Parity
+    from wsp_vault.vault import FileVault, domains_from_specs
+
+    p = paths(cfg)
+    root = p.require_vault()
+    parity = Par2Parity() if section(cfg, "vault").get("parity", True) and _has_par2() else None
+    return FileVault(
+        root,
+        signer,
+        domains=domains_from_specs(specs),
+        ledger=build_ledger(cfg, signer) if ledger else None,
+        parity=parity,
+    )
+
+
+def _has_par2() -> bool:
+    import shutil
+
+    return shutil.which("par2") is not None
+
+
+def build_ledger(cfg: Mapping[str, Any], signer: Signer) -> JsonlLedger:
+    from wsp_vault.ledger import JsonlLedger
+
+    return JsonlLedger(paths(cfg).ledger_dir, signer)
+
+
+def build_fetcher(cfg: Mapping[str, Any]) -> Fetcher:
+    """``HttpFetcher`` (default) or ``Aria2Fetcher`` (``acquirer.fetcher = "aria2"``) from ``[acquirer]``."""
+    from wsp_fetch import Aria2Fetcher, FetchConfig, HttpFetcher, find_aria2c, load_wikimedia_catalog
+
+    acq = section(cfg, "acquirer")
+    fc = FetchConfig.from_mapping(acq)
+    catalog = load_wikimedia_catalog()
+    fc = dataclasses.replace(fc, host_connections={**catalog.host_connections(), **fc.host_connections})
+    if str(acq.get("fetcher", "http")) == "aria2":
+        if find_aria2c() is None:
+            raise ConfigError("acquirer.fetcher = 'aria2' but aria2c is not on PATH")
+        return Aria2Fetcher(fc)
+    return HttpFetcher(fc)
+
+
+def load_adapters() -> dict[str, SourceAdapter]:
+    """Every adapter registered under the ``whisipedia.adapters`` entry points, by registry name."""
+    from wsp_adapters import available_adapters, load_adapter
+
+    return {name: load_adapter(name) for name in available_adapters()}
+
+
+def index_languages(cfg: Mapping[str, Any]) -> tuple[str, ...]:
+    langs = section(cfg, "index").get("languages", ["en"])
+    return tuple(str(x) for x in cast(Sequence[object], langs))
+
+
+def open_index(cfg: Mapping[str, Any]) -> TantivyIndex:
+    from wsp_index import TantivyConfig, TantivyIndex, ensure_local
+
+    p = paths(cfg)
+    ensure_local(p.require_index())
+    return TantivyIndex(p.lexical, TantivyConfig(languages=index_languages(cfg)))
+
+
+def open_documents(cfg: Mapping[str, Any]) -> ParquetDocumentStore:
+    from wsp_index import ParquetDocumentStore, ensure_local
+
+    p = paths(cfg)
+    ensure_local(p.require_index())
+    p.refinery.mkdir(parents=True, exist_ok=True)
+    return ParquetDocumentStore(p.refinery)
+
+
+def open_changes(cfg: Mapping[str, Any]) -> SqliteChangeFeed:
+    from wsp_index import SqliteChangeFeed, ensure_local
+
+    p = paths(cfg)
+    ensure_local(p.require_index())
+    return SqliteChangeFeed(p.changes_db)
+
+
+# --- API services -----------------------------------------------------------------------------------
+
+
+def build_services(cfg: Mapping[str, Any], lay: Layout) -> Services:
+    """Build the API's ports from config. Nothing here may open a network connection (PLAN §10.5)."""
+    specs = tuple(load_sources(cfg, lay))
+    if real_backends_available(cfg):
+        signer = load_signer(cfg, lay)
+        vault = build_vault(cfg, specs, signer, ledger=False)
+        return Services(
+            index=open_index(cfg),
+            documents=open_documents(cfg),
+            changes=open_changes(cfg),
+            vault=vault,
+            ledger=build_ledger(cfg, signer),
+            sources=effective_sources([s for s in specs if s.status is not SourceStatus.EXCLUDED], cfg),
+            generator=None,  # TODO(integration): wsp_oracle.LocalGenerator (loopback only) when configured
+        )
+
+    index, documents, changes = InMemoryLexicalIndex(), InMemoryDocumentStore(), InMemoryChangeFeed()
+    vault, ledger = InMemoryVault(), InMemoryLedger()
+    generator = EchoGenerator() if section(cfg, "api").get("demo_generator", True) else None
     seed_sample_library(index=index, documents=documents, changes=changes, vault=vault, ledger=ledger)
     return Services(
         index=index,
@@ -114,9 +366,13 @@ def build_services(cfg: Mapping[str, Any], lay: Layout) -> Services:
         changes=changes,
         vault=vault,
         ledger=ledger,
-        sources=load_sources(cfg, lay) or SAMPLE_SOURCES,  # sample specs outside a checkout
+        sources=effective_sources(specs, cfg) or SAMPLE_SOURCES,  # sample specs outside a checkout
         generator=generator,
     )
+
+
+def backend_note(cfg: Mapping[str, Any]) -> str | None:
+    return None if real_backends_available(cfg) else BACKEND_NOTE
 
 
 # --- Secret redaction for `wsp config show` -----------------------------------------------------

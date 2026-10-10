@@ -1550,9 +1550,14 @@ version = "0.1.0"
 source = { editable = "packages/wsp-cli" }
 dependencies = [
     { name = "uvicorn" },
+    { name = "wsp-adapters" },
     { name = "wsp-api" },
     { name = "wsp-core" },
+    { name = "wsp-fetch" },
+    { name = "wsp-index" },
+    { name = "wsp-orchestrator" },
     { name = "wsp-sdk" },
+    { name = "wsp-vault" },
 ]
 
 [package.dev-dependencies]
@@ -1563,9 +1568,14 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "uvicorn", specifier = ">=0.30" },
+    { name = "wsp-adapters", editable = "packages/wsp-adapters" },
     { name = "wsp-api", editable = "packages/wsp-api" },
     { name = "wsp-core", editable = "packages/wsp-core" },
+    { name = "wsp-fetch", editable = "packages/wsp-fetch" },
+    { name = "wsp-index", editable = "packages/wsp-index" },
+    { name = "wsp-orchestrator", editable = "packages/wsp-orchestrator" },
     { name = "wsp-sdk", editable = "packages/wsp-sdk" },
+    { name = "wsp-vault", editable = "packages/wsp-vault" },
 ]
 
 [package.metadata.requires-dev]

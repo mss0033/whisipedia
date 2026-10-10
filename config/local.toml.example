@@ -1,0 +1,25 @@
+# Copy to config/local.toml (gitignored) and adjust. Only keys that differ from default.toml are needed.
+# Placeholders only: never commit real host names, IPs, user names or credentials.
+
+[vault]
+# The NAS share as mounted on this machine (an SMB mount is fine: only sealed files go there).
+root = "/mnt/<nas-share>/whisipedia"
+# Optional: sign with an existing OpenSSH ed25519 key instead of the generated one.
+# signer = "ssh"
+# signing_key = "~/.ssh/<whisipedia-signing-key>"
+# Optional second copy with the same layout (external drive or second NAS), repair ladder rung 2.
+# mirror_root = "/mnt/<backup-drive>/whisipedia"
+
+[acquirer]
+user_agent = "Whisipedia/0.1 (personal offline archive; contact: <project-contact-address>)"
+# fetcher = "aria2"
+
+[index]
+# Local NVMe (PLAN §9.4); the indexer refuses network filesystems.
+root = "/home/<user>/whisipedia/index"
+languages = ["en", "de", "fr", "es", "it", "nl", "pl", "ru", "sv"]
+
+[orchestrator]
+state_db = "/home/<user>/whisipedia/state/orchestrator.sqlite3"
+workdir = "/home/<user>/whisipedia/work"
+metrics_path = "/home/<user>/whisipedia/metrics/orchestrator.prom"

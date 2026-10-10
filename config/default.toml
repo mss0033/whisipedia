@@ -1,24 +1,38 @@
-# Defaults. Machine-specific values (NAS path, hosts, keys) go in config/local.toml (gitignored).
+# Defaults. Machine-specific values (NAS path, hosts, keys) go in config/local.toml (gitignored);
+# see config/local.toml.example. Environment overrides: WSP__<SECTION>__<KEY>=value.
 [vault]
-root = "/path/to/library"        # override in local.toml
+root = "/path/to/library"        # the NAS library root; override in local.toml
+signer = "ed25519"               # "ed25519" (pure Python) | "ssh" (ssh-keygen -Y with signing_key)
+signing_key = ""                 # "" = ~/.config/whisipedia/vault-signing-ed25519.pem, generated on first use
+mirror_root = ""                 # second copy with the same layout (repair ladder rung 2); "" = none
 scrub_cycle_days = 30
+scrub_bytes_per_sec = 200000000  # rolling scrub rate limit (PLAN §8.2)
+parity = true                    # par2 for irreplaceable sources when par2 is installed
 parity_percent = 10
 
 [acquirer]
 user_agent = "Whisipedia/0.0 (personal offline archive)"
+fetcher = "http"                 # "http" (HttpFetcher) | "aria2" (Aria2Fetcher, needs aria2c)
 max_connections_per_host = 2
 cycle = "monthly"               # "monthly" | "quarterly" (PLAN §6.7)
 health_probe_interval = "P1W"
 
 [index]
-root = "/path/to/local/index"    # local disk, never SMB (ADR-0002)
+root = "/path/to/local/index"    # local disk, never SMB (ADR-0002): refinery/, lexical/, changes.sqlite
+languages = ["en"]               # Tantivy analyzers; other languages use the unstemmed fallback
+
+[api]
+backend = "auto"                 # "auto" (real if vault.root exists) | "real" | "sample"
+static_dir = ""                  # "" = <repo>/navigator/dist
+allowed_hosts = []               # extra Host-header names (only with `wsp serve --allow-remote`)
+demo_generator = true            # sample backend only: echo summaries; the real backend has none yet
 
 [orchestrator]
 # All orchestrator state is on LOCAL disk, never the NAS (ADR-0002). Override in local.toml.
 state_db = "/path/to/local/state/orchestrator.sqlite3"
 workdir = "/path/to/local/work"
 metrics_path = "/path/to/local/metrics/orchestrator.prom"
-wiring = ""                     # "package.module:factory" returning wsp_orchestrator.Wiring
+wiring = "wsp_cli.wiring:build_wiring"  # composition root returning wsp_orchestrator.Wiring
 anchor_day = 15                 # calendar cycle runs on this day (after the 1st-of-month dumps)
 scrub_slices = 720              # slices per vault.scrub_cycle_days (hourly at 30 days)
 drill_interval = "P1M"
