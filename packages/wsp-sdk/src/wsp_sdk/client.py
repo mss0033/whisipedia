@@ -36,6 +36,7 @@ from wsp_sdk.models import (
     HistoryPage,
     Hit,
     Portal,
+    ProposalPage,
     RecentChanges,
     Resolution,
     SearchResults,
@@ -196,6 +197,9 @@ class WspClient:
 
     def system(self, *, ledger_tail: int | None = None) -> SystemStatus:
         return _parse(SystemStatus, self._send(w.system(ledger_tail)))
+
+    def proposals(self, *, status: str | None = None) -> ProposalPage:
+        return _parse(ProposalPage, self._send(w.proposals(status)))
 
     def summarize(
         self, query: str, doc_ids: Sequence[str], *, max_tokens: int = 512
@@ -364,6 +368,9 @@ class AsyncWspClient:
 
     async def system(self, *, ledger_tail: int | None = None) -> SystemStatus:
         return _parse(SystemStatus, await self._send(w.system(ledger_tail)))
+
+    async def proposals(self, *, status: str | None = None) -> ProposalPage:
+        return _parse(ProposalPage, await self._send(w.proposals(status)))
 
     async def summarize(
         self, query: str, doc_ids: Sequence[str], *, max_tokens: int = 512

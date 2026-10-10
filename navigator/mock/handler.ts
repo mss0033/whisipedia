@@ -485,6 +485,7 @@ export function system(): Response<'GET /v1/system'> {
     ledger_ok: true,
     api_version: `${API_VERSION}-mock`,
     uptime_seconds: Math.floor((Date.now() - started) / 1000),
+    ops: null,
   };
 }
 
@@ -693,6 +694,8 @@ export function handle(
       return { status: 200, hold: true, retryMs: 60_000 };
     case '/v1/system':
       return ok(system());
+    case '/v1/proposals':
+      return ok({ items: [] });
     case '/v1/portal':
       return ok(portal());
     case '/v1/directory': {

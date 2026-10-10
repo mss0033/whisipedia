@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections import Counter, deque
+from collections import Counter
 from collections.abc import AsyncIterator
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from urllib.parse import unquote
 
 from fastapi import APIRouter, FastAPI, Header, Path, Query, Request
@@ -39,6 +39,7 @@ from wsp_api.schemas import (
     Health,
     HistoryPage,
     KindFacet,
+    ProposalPage,
     RecentChanges,
     Resolution,
     SearchResults,
@@ -292,6 +293,8 @@ def _v1(lib: Library, settings: ApiSettings) -> APIRouter:
             for h in page
         ]
         nav = search.navigate_to(s, q) if offset == 0 else None
+        if s.queries is not None and offset == 0:
+            s.queries.record(s.clock(), q, total, not window)
         return SearchResults(
             query=q,
             offset=offset,
@@ -380,6 +383,24 @@ def _v1(lib: Library, settings: ApiSettings) -> APIRouter:
 
     # --- System Monitor -------------------------------------------------------------------------
 
+    verified: list[tuple[float, bool]] = []  # (monotonic time, result) of the last chain replay
+
+    def ledger_ok() -> bool:
+        now = time.monotonic()
+        if not verified or now - verified[0][0] > settings.ledger_verify_seconds:
+            verified[:] = [(now, s.ledger.verify())]
+        return verified[0][1]
+
+    @r.get("/proposals", tags=["system"])
+    def proposals(
+        status: Annotated[
+            Literal["open", "applied", "accepted", "rejected"] | None, Query(description="Filter by status.")
+        ] = None,
+    ) -> ProposalPage:
+        """Curator proposals (newest first). Deciding them is an owner action: `wsp proposals`."""
+        items = [] if s.ops is None else list(s.ops.proposals(status))
+        return ProposalPage(items=sorted(items, key=lambda p: p.id, reverse=True))
+
     @r.get("/system", tags=["system"])
     def system(ledger_tail: Annotated[int, Query(ge=0, le=500)] = settings.ledger_tail) -> SystemStatus:
         now = s.clock()
@@ -406,15 +427,15 @@ def _v1(lib: Library, settings: ApiSettings) -> APIRouter:
                 for g in s.vault.generations(spec.id)
                 if g.status is GenerationStatus.DEGRADED
             ]
-        # TODO(port): Ledger.tail(n) would avoid replaying the whole log here.
-        tail = list(deque(s.ledger.events(), maxlen=ledger_tail)) if ledger_tail else []
+        tail = list(s.ledger.tail(ledger_tail)) if ledger_tail else []
         return SystemStatus(
             generated_at=now,
             freshness=fresh,
             degraded=degraded,
             ledger_tail=[convert.ledger_entry(e) for e in tail],
-            ledger_ok=s.ledger.verify(),
+            ledger_ok=ledger_ok(),
             uptime_seconds=round(time.monotonic() - started, 3),
+            ops=None if s.ops is None else s.ops.status(now),
         )
 
     # --- Summaries ------------------------------------------------------------------------------
