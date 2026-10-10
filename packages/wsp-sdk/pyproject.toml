@@ -1,0 +1,24 @@
+[project]
+name = "wsp-sdk"
+version = "0.1.0"
+description = "Typed sync and async Python client for the Whisipedia /v1 API"
+requires-python = ">=3.12"
+# Deliberately light: no server stack, no wsp-core. Living and other consumers install only this.
+dependencies = [
+  "httpx>=0.27",
+  "pydantic>=2.9",
+]
+
+[dependency-groups]
+# The tests run the SDK against the real app (in-process) and check model parity with wsp_api.schemas.
+dev = ["wsp-api"]
+
+[tool.uv.sources]
+wsp-api = { workspace = true }
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/wsp_sdk"]
