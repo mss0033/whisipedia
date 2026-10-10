@@ -71,7 +71,7 @@ class TantivyConfig:
     snippet_chars: int = 200
     store_text: bool = True
     """Store body text in Tantivy (needed for highlighted snippets; costs roughly 40% of text size)."""
-    suggest_rebuild_threshold: int = 10_000
+    suggest_rebuild_threshold: int = 2_000
     """Rebuild the suggest trie at commit when more than this many titles changed since the last build."""
     suggest_heavy_threshold: int = DEFAULT_HEAVY_THRESHOLD
     suggest_top_k: int = DEFAULT_TOP_K
