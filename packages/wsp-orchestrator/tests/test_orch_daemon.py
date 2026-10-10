@@ -58,7 +58,7 @@ def test_settings_from_config(tmp_path: Path) -> None:
     assert s.job_limits[JobKind.SCRUB_SLICE] == 1
     assert s.retry.max_attempts == 7
     assert s.retry.max_delay.total_seconds() == 3600
-    assert set(s.retention_windows) == {"wikimedia-dumps", "osm-replication"}
+    assert set(s.retention_windows) == {"wikimedia-dumps", "wikidata", "osm-replication"}
     assert s.vault_root == tmp_path / "vault"
     with pytest.raises(SettingsError, match="state_db"):
         OrchestratorSettings.from_config({"orchestrator": {}})

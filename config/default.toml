@@ -50,6 +50,7 @@ parity_interval = "PT6H"        # parity backfill wake-up; it continues every fe
 
 [orchestrator.retention_windows]  # upstream retention per adapter; alert at half (PLAN §6.5)
 wikimedia-dumps = "P60D"
+wikidata = "P60D"
 
 [curator]
 # Discovery bots (PLAN §5.3, §5.5). Network bots run in the orchestrator (the only networked service).
