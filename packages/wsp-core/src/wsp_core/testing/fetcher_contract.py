@@ -3,8 +3,6 @@
 Usage::
 
     class TestMyFetcher(FetcherContract):
-        mismatch_error = MyChecksumError
-
         @pytest.fixture
         def fetcher(self) -> Iterator[Fetcher]:
             yield MyFetcher()
@@ -28,9 +26,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import ClassVar
 
+import blake3
 import pytest
 
-from wsp_core.model import Checksum, RemoteFile
+from wsp_core.errors import ChecksumMismatchError, NotFoundError
+from wsp_core.model import Checksum, RemoteFile, VerdictStatus
 from wsp_core.ports import Fetcher
 
 _RANGE = re.compile(r"bytes=(\d*)-(\d*)$")
@@ -230,7 +230,7 @@ def sha256_checksum(data: bytes) -> Checksum:
 class FetcherContract:
     """Behaviour every ``Fetcher`` must show (PLAN §6.5, §8.1)."""
 
-    mismatch_error: ClassVar[type[Exception]] = Exception
+    mismatch_error: ClassVar[type[Exception]] = ChecksumMismatchError
 
     @pytest.fixture
     def fetcher(self) -> Iterator[Fetcher]:
@@ -256,7 +256,12 @@ class FetcherContract:
         url = server.add("a/file.bin", data)
         dest = tmp_path / "out" / "file.bin"
         remote = RemoteFile(url, "file.bin", len(data), (sha256_checksum(data),))
-        assert fetcher.download(remote, dest) == dest
+        result = fetcher.download(remote, dest)
+        assert result.path == dest
+        assert result.size == len(data)
+        assert result.sha256 == hashlib.sha256(data).hexdigest()
+        assert result.blake3 == blake3.blake3(data).hexdigest()
+        assert result.verdict.status is VerdictStatus.OK
         assert dest.read_bytes() == data
         assert sorted(p.name for p in dest.parent.iterdir()) == ["file.bin"]
 
@@ -296,8 +301,14 @@ class FetcherContract:
     ) -> None:
         data = payload(10_000, seed=5)
         url = server.add("e.bin", data)
-        fetcher.download(RemoteFile(url, "e.bin"), tmp_path / "e.bin")
+        result = fetcher.download(RemoteFile(url, "e.bin"), tmp_path / "e.bin")
         assert (tmp_path / "e.bin").read_bytes() == data
+        assert result.verdict.status is VerdictStatus.UNVERIFIABLE
+        assert result.sha256 == hashlib.sha256(data).hexdigest()
+
+    def test_missing_resource_raises_not_found(self, fetcher: Fetcher, server: RangeServer) -> None:
+        with pytest.raises(NotFoundError):
+            fetcher.get_bytes(server.url("nope.json"))
 
     def test_get_bytes_and_cap(self, fetcher: Fetcher, server: RangeServer) -> None:
         url = server.add("meta.json", b'{"ok": true}')

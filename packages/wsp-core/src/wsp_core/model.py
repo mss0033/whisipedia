@@ -10,7 +10,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 
 from wsp_core.ids import DocId
 
@@ -48,10 +48,18 @@ class SourceSpec:
     legal_basis: str
     domain: tuple[str, ...]
     adapter: str | None = None
-    cadence: str | None = None  # ISO 8601 duration, e.g. "P1M"
+    cadence: str | None = None  # ISO 8601 override, e.g. "P3M"; None follows ``acquirer.cycle``
     strategy: UpdateStrategy | None = None
     irreplaceable: bool = False
     raw: Mapping[str, object] = field(default_factory=dict[str, object])  # full registry entry
+
+    @property
+    def vault_domain(self) -> str:
+        """The shelf this source lives on in the vault (``library/<domain>/<id>/``): its first domain.
+
+        Resolved from the registry everywhere (ADR-0005); a source that already has a directory keeps it.
+        """
+        return self.domain[0] if self.domain else "misc"
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,24 +72,38 @@ class Checksum:
 
 @dataclass(frozen=True, slots=True)
 class RemoteFile:
-    """A single upstream file that a release consists of."""
+    """A single upstream file that a release consists of.
+
+    ``mirrors`` are full URLs of byte-identical copies (never metalinks or directory bases).
+    ``metalink`` is the URL of a Metalink 4 document for this file, if upstream publishes one; a
+    fetcher may use it for more mirrors, the exact size and per-piece hashes.
+    """
 
     url: str
     name: str  # file name to store under ``upstream/``
     size: int | None = None
     checksums: tuple[Checksum, ...] = ()
     mirrors: tuple[str, ...] = ()
+    metalink: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class ReleaseRef:
-    """An upstream release as discovered by an adapter (not yet fetched)."""
+    """An upstream release as discovered by an adapter (not yet fetched).
+
+    ``license`` and ``format`` are what upstream *reports* for this release (SPDX id, format label
+    such as ``zim/6`` or ``mediawiki-xml/0.11``); ``None`` when upstream does not say. The policy
+    gate compares them with the registry and the previous release (PLAN §5.4). ``meta`` holds
+    adapter-private strings only.
+    """
 
     source_id: str
     version: str  # upstream version label, sortable (e.g. "2026-10-01")
     published: datetime | None
     files: tuple[RemoteFile, ...]
     meta: Mapping[str, str] = field(default_factory=dict[str, str])
+    license: str | None = None
+    format: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,6 +143,47 @@ class Verdict:
     @property
     def ok(self) -> bool:
         return self.status in (VerdictStatus.OK, VerdictStatus.UNVERIFIABLE)
+
+
+@dataclass(frozen=True, slots=True)
+class FetchResult:
+    """What ``Fetcher.download`` produced: the file and the digests computed while downloading.
+
+    ``sha256`` and ``blake3`` are always our own digests; ``verified`` lists the upstream digests
+    that matched (empty when upstream publishes none). Downstream steps use these instead of
+    re-hashing the local file; the vault still reads its own copy back (PLAN §8.1).
+    """
+
+    path: Path
+    size: int
+    sha256: str
+    blake3: str
+    verified: tuple[Checksum, ...] = ()
+
+    @property
+    def verdict(self) -> Verdict:
+        if not self.verified:
+            return Verdict(VerdictStatus.UNVERIFIABLE, "upstream publishes no checksum")
+        return Verdict(VerdictStatus.OK, ", ".join(c.algorithm for c in self.verified))
+
+    @property
+    def checksums(self) -> tuple[Checksum, ...]:
+        """Our digests plus the verified upstream ones (deduplicated by algorithm)."""
+        out = {"sha256": Checksum("sha256", self.sha256), "blake3": Checksum("blake3", self.blake3)}
+        for c in self.verified:
+            out.setdefault(c.algorithm.lower(), c)
+        return tuple(out.values())
+
+
+@dataclass(frozen=True, slots=True)
+class RemoteHead:
+    """Metadata of a remote resource without its body (optional ``Fetcher.head``)."""
+
+    url: str  # final URL after redirects
+    size: int | None = None
+    etag: str | None = None
+    last_modified: datetime | None = None
+    accepts_ranges: bool = False
 
 
 class ReleaseState(StrEnum):
@@ -198,6 +261,7 @@ class DocRecord:
     entities: tuple[str, ...] = ()  # Wikidata QIDs
     links: tuple[str, ...] = ()  # outbound doc ids or native urls
     content_hash: str = ""  # blake3 of normalized text; see wsp_core.ids.content_hash
+    aliases: tuple[str, ...] = ()  # alternative titles (redirects, labels); feed suggest and search
 
 
 class ChangeKind(StrEnum):
@@ -239,3 +303,32 @@ class LedgerEvent:
     data: Mapping[str, object]
     prev_hash: str
     hash: str
+
+
+# --- Read-side browsing (Navigator portal, directory, assets, gaps; moved from wsp_api.seams in v0.2) ----
+
+
+@dataclass(frozen=True, slots=True)
+class Category:
+    """A top-level category of one source (e.g. a Gutenberg LCC class or a Wikidata class)."""
+
+    slug: str  # path segment, [a-z0-9-]+
+    name: str
+    count: int
+
+
+@dataclass(frozen=True, slots=True)
+class Asset:
+    """A file inside a sealed container (ZIM image, stylesheet, ...)."""
+
+    content: bytes
+    mimetype: str
+
+
+@dataclass(frozen=True, slots=True)
+class Gap:
+    """A "not in library" report for the gap miner (PLAN §5.3, §10.2)."""
+
+    at: datetime
+    href: str  # the link as it appeared, or a wsp:// address that did not resolve
+    from_doc_id: str | None = None

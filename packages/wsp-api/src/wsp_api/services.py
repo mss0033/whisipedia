@@ -7,9 +7,18 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from wsp_api.seams import AssetStore, Catalog, GapLog
 from wsp_core.model import SourceSpec
-from wsp_core.ports import ChangeFeed, DocumentStore, Generator, Ledger, LexicalIndex, Vault
+from wsp_core.ports import (
+    AssetStore,
+    Catalog,
+    ChangeFeed,
+    DocumentStore,
+    GapLog,
+    Generator,
+    Ledger,
+    LexicalIndex,
+    Vault,
+)
 
 
 def _utcnow() -> datetime:
@@ -28,7 +37,7 @@ class Services:
     sources: Sequence[SourceSpec]
     generator: Generator | None = None  # None: /v1/summarize answers 501
     clock: Callable[[], datetime] = _utcnow
-    # Seams not yet in wsp_core.ports (see wsp_api.seams). None picks the default noted on each.
+    # Browsing ports (wsp_core.ports, v0.2). None picks the default noted on each.
     catalog: Catalog | None = None  # None: wsp_api.catalog.FeedCatalog over the change feed
     assets: AssetStore | None = None  # None: wsp_api.zim.ZimAssetStore over the vault
     gaps: GapLog | None = None  # None: POST /v1/gaps answers 501

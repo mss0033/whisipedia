@@ -39,7 +39,7 @@ import pyarrow.parquet as pq
 from wsp_core.ids import DocId, content_hash
 from wsp_core.model import ChangeKind, ChangeRecord, DocRecord
 
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2  # 2: ``aliases`` column (port revision v0.2); older generations are rebuilt
 SUCCESS_FILE = "_SUCCESS.json"
 IDS_FILE = "_ids.parquet"
 CURRENT_FILE = "CURRENT.txt"
@@ -64,6 +64,7 @@ SCHEMA = pa.schema(
         pa.field("entities", pa.list_(pa.string()), nullable=False),
         pa.field("links", pa.list_(pa.string()), nullable=False),
         pa.field("content_hash", pa.string(), nullable=False),
+        pa.field("aliases", pa.list_(pa.string()), nullable=False),
     ]
 )
 COLUMNS: tuple[str, ...] = tuple(SCHEMA.names)
@@ -138,6 +139,7 @@ def _to_row(rec: DocRecord) -> dict[str, object]:
         "entities": list(rec.entities),
         "links": list(rec.links),
         "content_hash": rec.content_hash,
+        "aliases": list(rec.aliases),
     }
 
 
@@ -158,6 +160,7 @@ def record_from_row(row: Mapping[str, Any]) -> DocRecord:
         entities=tuple(row["entities"] or ()),
         links=tuple(row["links"] or ()),
         content_hash=row["content_hash"],
+        aliases=tuple(row.get("aliases") or ()),
     )
 
 

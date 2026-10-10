@@ -34,7 +34,7 @@ DISCOVERED → PLANNED → FETCHING → FETCHED → VERIFIED → SEALED → REFI
 | PLANNED → FETCHING | `vault.stage()` (reopens) |
 | FETCHING → FETCHED | `adapter.fetch()` (resumes partial files); skipped if the generation is already sealed |
 | FETCHED → VERIFIED | `adapter.verify()` per planned file; a mismatch counts toward auto-pause |
-| VERIFIED → SEALED | `vault.ingest()` each file as `upstream/<name>`, `vault.seal()`; reuses an already sealed generation |
+| VERIFIED → SEALED | `vault.ingest(upstream=..., expected=<FetchResult>)` each file as `upstream/<name>`, `vault.seal()`; reuses an already sealed generation |
 | SEALED → REFINED | `refine(spec, generation, path)` hook → document count |
 | REFINED → INDEXED | `index(spec, generation)` hook |
 | INDEXED → PROMOTED | sanity checks, then `vault.promote()`; workdir cleaned |
@@ -42,8 +42,9 @@ DISCOVERED → PLANNED → FETCHING → FETCHED → VERIFIED → SEALED → REFI
 * Transitions are checked against `wsp_core.model.allowed_transitions`.
 * **Exactly one ledger event per transition** (`kind="release.state"`, `data={from,to,attempt,event_id,…}`).
   The state change and an outbox row commit in one SQLite transaction; the outbox is then appended to
-  the ledger. After a crash, outbox rows are matched against the ledger by `event_id` before
-  re-appending. Tests crash at every checkpoint (with and without a mid-run failure) and assert the
+  the ledger with `idempotency_key=event_id`, so re-flushing after a crash returns the existing event.
+  Fetch digests are persisted with the release (`fetched_json`); FETCHED → VERIFIED skips the
+  adapter's re-hash when the fetcher verified every upstream digest. Tests crash at every checkpoint (with and without a mid-run failure) and assert the
   exact event sequence, one seal, and a verified hash chain.
 * Failures go to FAILED with exponential backoff (`orchestrator.retry`); after `max_attempts` the
   release is QUARANTINED and a critical alert is raised.
@@ -64,9 +65,8 @@ DISCOVERED → PLANNED → FETCHING → FETCHED → VERIFIED → SEALED → REFI
 
 * **Global cycle**: `acquirer.cycle = "monthly"` runs on `anchor_day` (15th) every month; `"quarterly"`
   on the 15th of Jan/Apr/Jul/Oct.
-* **Per-source override**: registry `update.cadence`. Values listed in
-  `acquirer.follow_cycle_cadences` (default `["P1M"]`, the registry's documented "follows the cycle"
-  value) follow the global cycle; anything else overrides it. Whole-month durations that divide a
+* **Per-source override**: registry `update.cadence`. A source without one follows the global cycle;
+  any value present is a deliberate override (even `P1M`). Whole-month durations that divide a
   year (`P3M`, `P6M`, `P1Y`) are calendar-anchored; others (`P1W`, `P10D`) are intervals from the
   last success.
 * **Catch-up**: due = `cadence.next_due(last_success)`; never-run jobs are due immediately. After
@@ -83,7 +83,7 @@ DISCOVERED → PLANNED → FETCHING → FETCHED → VERIFIED → SEALED → REFI
   `Orchestrator.resume_source()`:
   license reported upstream differs from the registry; two consecutive checksum mismatches; newest
   upstream release older than 3× the cadence; format changed.
-  Adapters report license and format via `ReleaseRef.meta["license"]` and `meta["format"]`.
+  Adapters report license and format via the typed `ReleaseRef.license` and `ReleaseRef.format`.
 * **Policy gate** (PLAN §5.2–5.4): `evaluate_candidate(candidate, GateConfig, sources)` returns a
   `Proposal` (decision `auto-promote | review | reject`, weighted score and breakdown, per-check
   results, a PR title and Markdown body, and the drafted registry entry). Auto-promote needs all of:
@@ -104,29 +104,12 @@ idempotence.
 
 ## Plugging in real components
 
-Write a composition-root factory and point `orchestrator.wiring` at it:
-
-```python
-# e.g. packages/wsp-cli/src/wsp_cli/wiring.py
-def build(config) -> Wiring:
-    sources = load_registry(Path("registry/sources.yaml"), Path("registry/schema/source.schema.json"))
-    return Wiring(
-        sources=sources,
-        adapters=load_adapter_entry_points(),  # {"kiwix-opds": KiwixAdapter(), ...}
-        fetcher=HttpFetcher(config),
-        vault=NasVault(config),
-        ledger=JsonlLedger(config),
-        refine=refinery.refine_generation,
-        index=indexer.upsert_generation,
-        scrub=warden.scrub_slice,
-        drill=warden.monthly_drill,
-        discovery_bots=curator.run_bots,
-        gate=GateConfig(...),
-        proposal_sink=curator.open_pr,
-        pruner=vault.prune,
-        last_copy=history.holds_last_copy,
-    )
-```
+`config/default.toml` points `orchestrator.wiring` at `wsp_cli.wiring:build_wiring`, which builds the
+real components from config: registry sources, entry-point adapters, `HttpFetcher`/`Aria2Fetcher`,
+`FileVault` + `JsonlLedger`, the Refinery/Tantivy indexer hooks (`wsp_cli.indexer`), rolling scrub
+with the repair ladder, drills on the smallest sealed generation and `FileVault.prune`. Retention
+stays a dry run until a `last_copy` oracle is wired. Discovery bots and the proposal sink are not
+wired yet.
 
 `wsp_orchestrator.testing:demo_wiring` is a self-contained fake world for smoke tests.
 

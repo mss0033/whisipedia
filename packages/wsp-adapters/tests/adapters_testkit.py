@@ -14,7 +14,7 @@ from xml.sax.saxutils import escape, quoteattr
 
 from libzim.writer import Creator, Hint, Item, StringProvider
 
-from wsp_core.model import RemoteFile, SourceSpec, SourceStatus, Tier
+from wsp_core.model import FetchResult, RemoteFile, SourceSpec, SourceStatus, Tier
 from wsp_core.ports import Ctx, Fetcher
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -195,5 +195,5 @@ class UrllibFetcher:
             raise ValueError(f"{url} exceeds {max_bytes} bytes")
         return data
 
-    def download(self, remote: RemoteFile, dest: Path) -> Path:
+    def download(self, remote: RemoteFile, dest: Path) -> FetchResult:
         raise NotImplementedError("live smoke tests never download corpus files")

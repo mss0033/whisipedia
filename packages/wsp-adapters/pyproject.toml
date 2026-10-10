@@ -14,6 +14,9 @@ dependencies = [
 kiwix-opds = "wsp_adapters.kiwix:KiwixOpdsAdapter"
 wikimedia-dumps = "wsp_adapters.wikimedia:WikimediaDumpsAdapter"
 
+[dependency-groups]
+dev = ["wsp-core[testing]"]
+
 [tool.uv.sources]
 wsp-core = { workspace = true }
 

@@ -37,15 +37,16 @@ from pathlib import Path
 
 import httpx
 
-from wsp_core.model import RemoteFile
+from wsp_core.model import RemoteFile, RemoteHead
 from wsp_fetch.config import FetchConfig, host_key
 from wsp_fetch.errors import (
     FetchError,
     MirrorsExhaustedError,
+    NotFoundError,
     ResponseTooLargeError,
     SizeMismatchError,
 )
-from wsp_fetch.finish import FetchResult, finalize, fsync_dir
+from wsp_fetch.finish import FetchReport, finalize, fsync_dir, make_report
 from wsp_fetch.hashing import InOrderHasher, MultiHasher, hash_file, new_hasher
 from wsp_fetch.ratelimit import TokenBucket
 from wsp_fetch.state import PartialState, load_state, partial_path, save_state, state_path
@@ -56,6 +57,7 @@ log = logging.getLogger(__name__)
 _CONTENT_RANGE = re.compile(r"bytes\s+(\d+)-(\d+)/(\d+|\*)")
 _CONTENT_RANGE_EMPTY = re.compile(r"bytes\s+\*/(\d+)")
 _RETRY_STATUSES = {408, 425, 429, 500, 502, 503, 504}
+_NOT_FOUND = {404, 410}
 
 
 # --- helpers ------------------------------------------------------------------------------------
@@ -91,10 +93,18 @@ def choose_piece_size(size: int, config: FetchConfig) -> int:
 
 
 class _RetryableError(FetchError):
-    def __init__(self, msg: str, retry_after: float | None = None, *, fatal_for_mirror: bool = False) -> None:
+    def __init__(
+        self,
+        msg: str,
+        retry_after: float | None = None,
+        *,
+        fatal_for_mirror: bool = False,
+        status: int | None = None,
+    ) -> None:
         super().__init__(msg)
         self.retry_after = retry_after
         self.fatal_for_mirror = fatal_for_mirror
+        self.status = status
 
 
 class _CancelledError(Exception):
@@ -211,6 +221,8 @@ class HttpFetcher:
             try:
                 return fn()
             except _RetryableError as exc:
+                if exc.status in _NOT_FOUND:
+                    raise NotFoundError(label.split(" ", 1)[-1], f"HTTP {exc.status}") from exc
                 if attempt >= attempts or exc.fatal_for_mirror:
                     raise FetchError(f"{label} failed after {attempt} attempt(s): {exc}") from exc
                 delay = backoff_delay(attempt, self.config.backoff_base, self.config.backoff_max)
@@ -239,12 +251,40 @@ class HttpFetcher:
             except httpx.TransportError as exc:
                 raise _RetryableError(f"{type(exc).__name__}: {exc}") from exc
 
+    def head(self, url: str) -> RemoteHead:
+        """``HEAD`` with redirects followed (optional ``SupportsHead`` capability of the port)."""
+
+        def once() -> RemoteHead:
+            with self.host_slot(url):
+                try:
+                    r = self._client.head(url)
+                except httpx.TransportError as exc:
+                    raise _RetryableError(f"{type(exc).__name__}: {exc}") from exc
+            _raise_for_status(r)
+            cl = r.headers.get("Content-Length")
+            modified = r.headers.get("Last-Modified")
+            when = None
+            if modified:
+                try:
+                    when = email.utils.parsedate_to_datetime(modified)
+                except (TypeError, ValueError):
+                    when = None
+            return RemoteHead(
+                url=str(r.url),
+                size=int(cl) if cl and cl.isdigit() else None,
+                etag=r.headers.get("ETag"),
+                last_modified=when,
+                accepts_ranges=r.headers.get("Accept-Ranges", "").lower() == "bytes",
+            )
+
+        return self._retrying(f"HEAD {url}", once, self.config.max_attempts)
+
     # --- files -------------------------------------------------------------------------------
 
-    def download(self, remote: RemoteFile, dest: Path) -> Path:
-        return self.fetch(remote, dest).path
+    def download(self, remote: RemoteFile, dest: Path) -> FetchReport:
+        return self.fetch(remote, dest)
 
-    def fetch(self, remote: RemoteFile, dest: Path) -> FetchResult:
+    def fetch(self, remote: RemoteFile, dest: Path) -> FetchReport:
         """Download and verify ``remote`` into ``dest``; returns digests and transfer statistics."""
         t0 = time.monotonic()
         target = resolve_target(remote, lambda u, n: self.get_bytes(u, max_bytes=n), self.config)
@@ -337,7 +377,7 @@ class HttpFetcher:
         except httpx.TransportError as exc:
             raise _RetryableError(f"{type(exc).__name__}: {exc}") from exc
 
-    def _single_stream(self, target: Target, probes: list[_Probe], dest: Path, t0: float) -> FetchResult:
+    def _single_stream(self, target: Target, probes: list[_Probe], dest: Path, t0: float) -> FetchReport:
         """Fallback when no source supports Range: sequential download with inline hashing."""
         partial = partial_path(dest)
         errors: list[str] = []
@@ -373,18 +413,18 @@ class HttpFetcher:
                 readback=self.config.verify_readback,
             )
             state_path(dest).unlink(missing_ok=True)
-            return FetchResult(
+            return make_report(
                 dest, got, digests, target.checksums, got, 0, time.monotonic() - t0, {p.url: got}
             )
         raise MirrorsExhaustedError(f"all sources failed for {target.url}: {'; '.join(errors)}")
 
 
-def _already_complete(dest: Path, target: Target) -> FetchResult | None:
+def _already_complete(dest: Path, target: Target) -> FetchReport | None:
     if target.size is not None and dest.stat().st_size != target.size:
         return None
     digests = hash_file(dest, [c.algorithm for c in target.checksums])
     if all(digests.get(c.algorithm) == c.hexdigest for c in target.checksums):
-        return FetchResult(dest, dest.stat().st_size, digests, target.checksums)
+        return make_report(dest, dest.stat().st_size, digests, target.checksums)
     return None
 
 
@@ -394,7 +434,7 @@ def _raise_for_status(r: httpx.Response) -> None:
     retry_after = parse_retry_after(r.headers.get("Retry-After"))
     if r.status_code in _RETRY_STATUSES:
         raise _RetryableError(f"HTTP {r.status_code}", retry_after)
-    raise _RetryableError(f"HTTP {r.status_code}", retry_after, fatal_for_mirror=True)
+    raise _RetryableError(f"HTTP {r.status_code}", retry_after, fatal_for_mirror=True, status=r.status_code)
 
 
 # --- segmented engine ---------------------------------------------------------------------------
@@ -449,7 +489,7 @@ class _SegmentedDownload:
         return pieces is None or pieces.hashes[i] == digest
 
     # lifecycle
-    def run(self) -> FetchResult:
+    def run(self) -> FetchReport:
         resumed = self._open_partial()
         hasher = MultiHasher(c.algorithm for c in self.plan.target.checksums)
         self.inorder = InOrderHasher(
@@ -524,7 +564,7 @@ class _SegmentedDownload:
         finally:
             if not self.partial.exists():
                 self.state_file.unlink(missing_ok=True)
-        return FetchResult(
+        return make_report(
             self.plan.dest,
             self.size,
             digests,

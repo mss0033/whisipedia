@@ -6,7 +6,6 @@ Keys (all optional except the paths in production)::
     cycle = "monthly"                  # or "quarterly" (PLAN §6.7)
     user_agent = "..."
     health_probe_interval = "P1W"
-    follow_cycle_cadences = ["P1M"]    # registry cadences that mean "follow acquirer.cycle"
 
     [vault]
     root = "..."                       # the state DB is refused if it lives under here
@@ -84,7 +83,6 @@ class OrchestratorSettings:
     vault_root: Path | None = None
     cycle: str = "monthly"
     anchor_day: int = 15
-    follow_cycle_cadences: frozenset[str] = frozenset({"P1M"})
     user_agent: str = DEFAULT_USER_AGENT
     health_probe_interval: IsoDuration = field(default_factory=lambda: IsoDuration.parse("P1W"))
     scrub_cycle_days: int = 30
@@ -138,7 +136,6 @@ class OrchestratorSettings:
         )
         windows = dict(DEFAULT_RETENTION_WINDOWS)
         windows.update({str(k): str(v) for k, v in _section(orch, "retention_windows").items()})
-        follow = acq.get("follow_cycle_cadences", ["P1M"])
         return cls(
             state_db=state_db,
             workdir=workdir,
@@ -146,7 +143,6 @@ class OrchestratorSettings:
             vault_root=_path(vault.get("root")),
             cycle=str(acq.get("cycle", "monthly")),
             anchor_day=int(orch.get("anchor_day", 15)),
-            follow_cycle_cadences=frozenset(str(c) for c in cast(list[object], follow)),
             user_agent=str(acq.get("user_agent", DEFAULT_USER_AGENT)),
             health_probe_interval=IsoDuration.parse(str(acq.get("health_probe_interval", "P1W"))),
             scrub_cycle_days=int(vault.get("scrub_cycle_days", 30)),

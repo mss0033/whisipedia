@@ -4,9 +4,11 @@ Guarantees:
 
 * Only transitions allowed by :func:`wsp_core.model.allowed_transitions` are taken.
 * Each transition is committed to the local state store together with an *outbox* row in one SQLite
-  transaction, then appended to the ledger. A crash between the two is repaired on the next run by
-  looking the event up in the ledger by its ``event_id`` - so every transition produces exactly one
-  ledger event.
+  transaction, then appended to the ledger with ``idempotency_key=event_id``. A crash between the
+  two is repaired on the next run by appending again: the ledger hands back the event it already
+  holds - so every transition produces exactly one ledger event.
+* Fetch digests (``FetchResult``) are stored with the release: verification trusts a download whose
+  upstream digests all matched (no local re-hash), and the vault's read-back must equal them.
 * Each step is idempotent, so a crash anywhere just repeats the interrupted step: adapters resume
   partial downloads, ``Vault.stage`` reopens, a generation that is already sealed is reused, and
   ``Vault.promote`` re-points ``CURRENT`` at the same generation.
@@ -30,6 +32,7 @@ from typing import Any, Protocol
 
 from wsp_core.model import (
     FetchPlan,
+    FetchResult,
     Generation,
     GenerationStatus,
     ReleaseRef,
@@ -41,7 +44,14 @@ from wsp_core.model import (
 from wsp_core.ports import Ctx, Fetcher, Ledger, SourceAdapter, Vault
 from wsp_orchestrator.alerts import Alert, Alerter, Severity
 from wsp_orchestrator.clock import Clock
-from wsp_orchestrator.codec import plan_from_json, plan_to_json, release_from_json, release_to_json
+from wsp_orchestrator.codec import (
+    fetch_result_from_json,
+    fetch_result_to_json,
+    plan_from_json,
+    plan_to_json,
+    release_from_json,
+    release_to_json,
+)
 from wsp_orchestrator.policy import SanityThresholds, check_promotion
 from wsp_orchestrator.store import GenerationStats, ReleaseRecord, SourceHealth, StateStore
 
@@ -176,7 +186,6 @@ class ReleasePipeline:
         self.sanity = sanity
         self.checksum_failures_to_pause = checksum_failures_to_pause
         self.checkpoint = checkpoint  # test hook: called at every crash-relevant point
-        self._ledger_dedupe = True  # first flush after start checks the ledger for already-written events
 
     # --- public API ---------------------------------------------------------------------------
 
@@ -269,30 +278,15 @@ class ReleasePipeline:
         return rec
 
     def flush_ledger(self) -> int:
-        """Append pending outbox events to the ledger exactly once. Returns how many were appended."""
-        pending = self.store.outbox()
-        if not pending:
-            self._ledger_dedupe = False
-            return 0
-        already: dict[str, int] = {}
-        if self._ledger_dedupe:
-            wanted = {e.event_id for e in pending}
-            watermark = int(self.store.get_meta("ledger_watermark") or 0)
-            for ev in self.ledger.events(since_seq=watermark):
-                eid = ev.data.get("event_id")
-                if isinstance(eid, str) and eid in wanted:
-                    already[eid] = ev.seq
-        appended = 0
-        for e in pending:
-            if e.event_id in already:
-                self.store.remove_outbox(e.event_id, already[e.event_id])
-                continue
-            ev = self.ledger.append(e.kind, e.subject, e.data)
+        """Deliver pending outbox events to the ledger exactly once (idempotent appends keyed by
+        ``event_id``). Returns how many outbox rows were flushed."""
+        flushed = 0
+        for e in self.store.outbox():
+            ev = self.ledger.append(e.kind, e.subject, e.data, idempotency_key=e.event_id)
             self.checkpoint(f"ledger:{e.data.get('to') or e.data.get('action')}:appended")
             self.store.remove_outbox(e.event_id, ev.seq)
-            appended += 1
-        self._ledger_dedupe = False
-        return appended
+            flushed += 1
+        return flushed
 
     # --- state machine ------------------------------------------------------------------------
 
@@ -328,7 +322,13 @@ class ReleasePipeline:
                     self.checkpoint("vault:staged")
                 return self._transition(rec, ReleaseState.FETCHING, plan=plan)
             case ReleaseState.FETCHING:
-                return self._transition(rec, ReleaseState.FETCHED, local_files=self._fetch(spec, rec))
+                results = self._fetch(spec, rec)
+                return self._transition(
+                    rec,
+                    ReleaseState.FETCHED,
+                    local_files=tuple(str(r.path) for r in results),
+                    fetched={r.path.name: fetch_result_to_json(r) for r in results},
+                )
             case ReleaseState.FETCHED:
                 self._verify(spec, rec)
                 return self._transition(rec, ReleaseState.VERIFIED, health=self._reset_checksum_failures(rec))
@@ -367,12 +367,16 @@ class ReleasePipeline:
             raise StepError(f"{rec.subject}: no fetch plan recorded")
         return plan_from_json(rec.plan)
 
-    def _fetch(self, spec: SourceSpec, rec: ReleaseRecord) -> tuple[str, ...]:
+    def _fetch(self, spec: SourceSpec, rec: ReleaseRecord) -> tuple[FetchResult, ...]:
         if self._sealed_generation(rec) is not None:
-            return rec.local_files  # retry after sealing: nothing to download again
-        paths = tuple(str(p) for p in self.resolve_adapter(spec).fetch(self.ctx(spec), self._plan(rec)))
+            return tuple(self._fetched(rec).values())  # retry after sealing: nothing to download again
+        results = tuple(self.resolve_adapter(spec).fetch(self.ctx(spec), self._plan(rec)))
         self.checkpoint("adapter:fetched")
-        return paths
+        return results
+
+    @staticmethod
+    def _fetched(rec: ReleaseRecord) -> dict[str, FetchResult]:
+        return {name: fetch_result_from_json(d) for name, d in rec.fetched.items()}
 
     def _local_for(self, rec: ReleaseRecord, name: str) -> Path:
         for p in rec.local_files:
@@ -384,6 +388,7 @@ class ReleasePipeline:
         if self._sealed_generation(rec) is not None:
             return  # verified and read back by the vault when it was sealed
         adapter, ctx = self.resolve_adapter(spec), self.ctx(spec)
+        fetched = self._fetched(rec)
         problems: list[str] = []
         mismatch = False
         for remote in self._plan(rec).files:
@@ -391,6 +396,13 @@ class ReleasePipeline:
             if not local.is_file():
                 problems.append(f"{remote.name}: missing locally")
                 continue
+            result = fetched.get(remote.name)
+            if (
+                result is not None
+                and result.verdict.status is VerdictStatus.OK
+                and local.stat().st_size == result.size
+            ):
+                continue  # the fetcher matched every upstream digest while downloading: no re-hash
             verdict = adapter.verify(ctx, remote, local)
             if not verdict.ok:
                 mismatch = mismatch or verdict.status is VerdictStatus.MISMATCH
@@ -417,9 +429,17 @@ class ReleasePipeline:
         if existing is not None:
             return existing
         self.vault.stage(rec.source_id, rec.generation_id)
+        fetched = self._fetched(rec)
         for remote in self._plan(rec).files:
             local = self._local_for(rec, remote.name)
-            self.vault.ingest(rec.source_id, rec.generation_id, local, f"upstream/{remote.name}")
+            self.vault.ingest(
+                rec.source_id,
+                rec.generation_id,
+                local,
+                f"upstream/{remote.name}",
+                upstream=remote.checksums,
+                expected=fetched.get(remote.name),
+            )
             self.checkpoint("vault:ingested")
         gen = self.vault.seal(rec.source_id, rec.generation_id)
         self.checkpoint("vault:sealed")

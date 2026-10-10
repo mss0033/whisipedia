@@ -207,7 +207,7 @@ def render_source_readme(row: CatalogRow, generated: datetime) -> str:
             f"Legal basis: {s.legal_basis}",
             f"Tier:        {s.tier}",
             f"Subjects:    {', '.join(s.domain)}",
-            f"Update:      {s.cadence or 'n/a'} ({s.strategy or 'n/a'})",
+            f"Update:      {s.cadence or 'library cycle'} ({s.strategy or 'n/a'})",
             "",
         ]
     lines += [f"Current generation: {row.current.generation_id if row.current else 'none'} ({row.state})", ""]

@@ -115,7 +115,7 @@ list length, so check the result again on the real English Wikipedia index (35×
 
 ## Known gaps
 
-- `DocRecord` has no aliases field, so aliases come in through `TantivyIndex.set_aliases`.
+- `DocRecord.aliases` (Refinery format 2) are added to the suggest aliases on upsert; redirects still come in through `TantivyIndex.set_aliases` (`wsp index build` does this).
 - Suggest matches title prefixes only. It does not complete words in the middle of a title.
 - Dense retrieval is a seam only (`NumpyVectorIndex` is exact and O(n)). ANN and a real embedder
   are Phase 3.

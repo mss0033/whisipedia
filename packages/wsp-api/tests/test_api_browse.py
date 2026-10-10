@@ -24,12 +24,12 @@ from wsp_api.schemas import (
     SummaryCitation,
     SummaryToken,
 )
-from wsp_api.seams import Gap
 from wsp_api.summaries import CitationSplitter
 from wsp_api.testing import local_client
 from wsp_api.testing.browse import ENIGMA, PIXEL_PNG, InMemoryGapLog, browse_services
 from wsp_api.testing.fakes import SAMPLE_GEN_2, sample_services
 from wsp_core.ids import make_doc_id
+from wsp_core.model import Gap
 
 TURING = "wsp:wikipedia-en-zim/A/Alan_Turing"
 

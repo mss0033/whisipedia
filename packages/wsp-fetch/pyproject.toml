@@ -9,6 +9,9 @@ dependencies = [
   "httpx>=0.28",
 ]
 
+[dependency-groups]
+dev = ["wsp-core[testing]"]
+
 [tool.uv.sources]
 wsp-core = { workspace = true }
 

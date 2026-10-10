@@ -10,11 +10,10 @@ from collections.abc import Mapping, Sequence
 from dataclasses import replace
 
 from wsp_api.catalog import FeedCatalog
-from wsp_api.seams import Asset, Category, Gap
 from wsp_api.services import Services
 from wsp_api.testing.fakes import SAMPLE_GEN_2, InMemoryDocumentStore, InMemoryLexicalIndex, sample_services
 from wsp_core.ids import DocId, content_hash, make_doc_id
-from wsp_core.model import ChangeKind, ChangeRecord, DocRecord
+from wsp_core.model import Asset, Category, ChangeKind, ChangeRecord, DocRecord, Gap
 from wsp_core.ports import ChangeFeed
 
 # 1x1 transparent PNG.

@@ -68,3 +68,26 @@ class LedgerContract:
         assert ledger.verify()
         self.tamper(ledger_dir)
         assert not self.reopen(ledger_dir).verify()
+
+    def test_tail_returns_newest_in_order(self, ledger: Ledger) -> None:
+        assert list(ledger.tail(5)) == []
+        for i in range(6):
+            ledger.append("test.event", "s", {"n": i})
+        assert [e.data["n"] for e in ledger.tail(3)] == [3, 4, 5]
+        assert [e.seq for e in ledger.tail(100)] == [1, 2, 3, 4, 5, 6]
+        assert list(ledger.tail(0)) == []
+
+    def test_idempotency_key_appends_once(self, ledger: Ledger) -> None:
+        first = ledger.append("test.event", "s", {"n": 1}, idempotency_key="k1")
+        again = ledger.append("test.event", "s", {"n": 1}, idempotency_key="k1")
+        other = ledger.append("test.event", "s", {"n": 2}, idempotency_key="k2")
+        assert again == first
+        assert first.data["idempotency_key"] == "k1"
+        assert [e.seq for e in ledger.events()] == [first.seq, other.seq]
+        assert ledger.verify()
+
+    def test_idempotency_survives_reopen(self, ledger: Ledger, ledger_dir: Path) -> None:
+        first = ledger.append("test.event", "s", {"n": 1}, idempotency_key="k1")
+        again = self.reopen(ledger_dir)
+        assert again.append("test.event", "s", {"n": 1}, idempotency_key="k1").seq == first.seq
+        assert len(list(again.events())) == 1

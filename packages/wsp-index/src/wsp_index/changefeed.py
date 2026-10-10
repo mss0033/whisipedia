@@ -13,6 +13,7 @@ import threading
 from collections.abc import Iterable, Sequence
 from pathlib import Path
 
+from wsp_core.errors import InvalidCursorError
 from wsp_core.ids import DocId
 from wsp_core.model import ChangeKind, ChangeRecord
 from wsp_index.localfs import ensure_local
@@ -31,8 +32,7 @@ CREATE TABLE IF NOT EXISTS changes (
 """
 
 
-class InvalidCursorError(ValueError):
-    pass
+__all__ = ["InvalidCursorError", "SqliteChangeFeed"]
 
 
 class SqliteChangeFeed:
@@ -55,6 +55,7 @@ class SqliteChangeFeed:
         self._epoch = epoch
 
     def close(self) -> None:
+        """Idempotent."""
         with self._lock:
             self._db.close()
 

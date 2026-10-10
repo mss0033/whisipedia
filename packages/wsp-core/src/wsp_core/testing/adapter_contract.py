@@ -9,11 +9,15 @@ An adapter's test module subclasses :class:`SourceAdapterContract` and provides 
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Mapping
 from pathlib import Path
 
+import blake3
+
+from wsp_core.errors import NotFoundError
 from wsp_core.ids import content_hash, make_doc_id
-from wsp_core.model import RemoteFile, VerdictStatus
+from wsp_core.model import FetchResult, RemoteFile, VerdictStatus
 from wsp_core.ports import Ctx, SourceAdapter
 
 
@@ -31,7 +35,7 @@ class FakeFetcher:
         base = url.split("?", 1)[0]
         if base in self.routes:
             return self.routes[base]
-        raise FileNotFoundError(url)
+        raise NotFoundError(url)
 
     def get_bytes(self, url: str, *, max_bytes: int = 64 * 1024 * 1024) -> bytes:
         data = self._lookup(url)
@@ -39,16 +43,19 @@ class FakeFetcher:
             raise ValueError(f"{url}: {len(data)} bytes exceeds max_bytes={max_bytes}")
         return data
 
-    def download(self, remote: RemoteFile, dest: Path) -> Path:
+    def download(self, remote: RemoteFile, dest: Path) -> FetchResult:
+        """Writes the first URL that resolves. Does not check checksums (adapters verify)."""
         for url in (remote.url, *remote.mirrors):
             try:
                 data = self._lookup(url)
-            except FileNotFoundError:
+            except NotFoundError:
                 continue
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(data)
-            return dest
-        raise FileNotFoundError(remote.url)
+            return FetchResult(
+                dest, len(data), hashlib.sha256(data).hexdigest(), blake3.blake3(data).hexdigest()
+            )
+        raise NotFoundError(remote.url)
 
 
 class SourceAdapterContract:
@@ -74,16 +81,18 @@ class SourceAdapterContract:
         release = next(iter(adapter.discover(ctx)))
         plan = adapter.plan(ctx, None, release)
         assert {f.name for f in plan.files} == {f.name for f in release.files}
-        paths = list(adapter.fetch(ctx, plan))
-        assert len(paths) == len(plan.files)
-        for remote, path in zip(plan.files, paths, strict=True):
-            assert adapter.verify(ctx, remote, path).ok
+        results = list(adapter.fetch(ctx, plan))
+        assert len(results) == len(plan.files)
+        for remote, result in zip(plan.files, results, strict=True):
+            assert result.path.name == remote.name
+            assert result.size == result.path.stat().st_size
+            assert adapter.verify(ctx, remote, result.path).ok
 
     def test_verify_detects_corruption(self, adapter: SourceAdapter, ctx: Ctx) -> None:
         release = next(iter(adapter.discover(ctx)))
         plan = adapter.plan(ctx, None, release)
         remote = next(f for f in plan.files if f.checksums)
-        path = next(iter(adapter.fetch(ctx, plan)))
+        path = next(iter(adapter.fetch(ctx, plan))).path
         data = bytearray(path.read_bytes())
         data[len(data) // 2] ^= 0xFF
         path.write_bytes(bytes(data))

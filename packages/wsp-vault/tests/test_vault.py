@@ -240,3 +240,23 @@ def test_manifest_parse_errors() -> None:
         Manifest.from_bytes(b"{}")
     with pytest.raises(ManifestError):
         Manifest.from_bytes(b'{"format": "other"}')
+
+
+def test_prune_moves_aside_and_guards_current(vault: FileVault, seal: SealFn, ledger: JsonlLedger) -> None:
+    from wsp_core.ports import Warden
+
+    assert isinstance(vault, Warden)
+    seal("2026-08-01", promote=False)
+    seal("2026-09-01")
+    seal("2026-10-01", promote=False)
+    with pytest.raises(VaultError, match="current"):
+        vault.prune(SOURCE, "2026-09-01")
+    with pytest.raises(VaultError, match="newest"):
+        vault.prune(SOURCE, "2026-10-01")
+    dest = vault.prune(SOURCE, "2026-08-01")
+    assert dest.is_relative_to(vault.root / "pruned")
+    assert (dest / "MANIFEST.json").is_file()
+    assert [g.generation_id for g in vault.generations(SOURCE)] == ["2026-09-01", "2026-10-01"]
+    assert ledger.tail(1)[0].kind == "vault.prune"
+    with pytest.raises(VaultError, match="not a sealed"):
+        vault.prune(SOURCE, "2026-08-01")

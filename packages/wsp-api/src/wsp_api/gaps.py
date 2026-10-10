@@ -10,7 +10,7 @@ import json
 import threading
 from pathlib import Path
 
-from wsp_api.seams import Gap
+from wsp_core.model import Gap
 
 
 class JsonlGapLog:

@@ -99,8 +99,8 @@ class PauseThresholds:
 class Observation:
     """What a probe or discovery saw upstream.
 
-    ``license`` and ``format`` come from ``ReleaseRef.meta["license"]`` / ``meta["format"]`` by convention
-    (see docs/components/orchestrator.md); ``None`` means "not reported" and never triggers a pause.
+    ``license`` and ``format`` come from the typed ``ReleaseRef.license`` / ``ReleaseRef.format``
+    fields (port revision v0.2); ``None`` means "not reported" and never triggers a pause.
     """
 
     license: str | None = None

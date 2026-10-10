@@ -14,7 +14,7 @@ from pathlib import Path
 
 from libzim.reader import Archive, Entry
 
-from wsp_api.seams import Asset
+from wsp_core.model import Asset
 from wsp_core.ports import Vault
 
 _ZIM_DATE_RE = re.compile(r"_(\d{4}-\d{2})\.zim$")

@@ -7,16 +7,29 @@ dependencies = [
   "wsp-core",
   "wsp-api",
   "wsp-sdk",
+  "wsp-vault",
+  "wsp-fetch",
+  "wsp-adapters",
+  "wsp-index",
+  "wsp-orchestrator",
   "uvicorn>=0.30",
 ]
 
 [project.scripts]
 wsp = "wsp_cli.main:main"
 
+[dependency-groups]
+dev = ["wsp-core[testing]"]
+
 [tool.uv.sources]
 wsp-core = { workspace = true }
 wsp-api = { workspace = true }
 wsp-sdk = { workspace = true }
+wsp-vault = { workspace = true }
+wsp-fetch = { workspace = true }
+wsp-adapters = { workspace = true }
+wsp-index = { workspace = true }
+wsp-orchestrator = { workspace = true }
 
 [build-system]
 requires = ["hatchling>=1.25"]

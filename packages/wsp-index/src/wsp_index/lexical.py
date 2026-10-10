@@ -111,6 +111,7 @@ class TantivyIndex:
         self._schema = self._index.schema
         self._writer: tantivy.IndexWriter | None = None
         self._buffered = 0
+        self._closed = False
 
         self._suggest_dir = self.path / "suggest"
         self._suggester = Suggester()
@@ -168,6 +169,7 @@ class TantivyIndex:
         with self._lock:
             writer = self._get_writer()
             rows: list[tuple[str, str, str, str]] = []
+            aliases: list[tuple[str, str]] = []
             for doc in docs:
                 route = self.route(doc.lang)
                 tdoc = tantivy.Document()
@@ -179,6 +181,7 @@ class TantivyIndex:
                 writer.delete_documents_by_term("doc_id", doc.doc_id)
                 writer.add_document(tdoc)
                 rows.append((doc.doc_id, doc.source_id, doc.title, doc.lang))
+                aliases.extend((doc.doc_id, a) for a in doc.aliases if a.strip())
                 n += 1
             self._db.executemany(
                 "INSERT INTO titles(doc_id, source_id, title, lang) VALUES (?, ?, ?, ?) "
@@ -186,6 +189,8 @@ class TantivyIndex:
                 "lang=excluded.lang",
                 rows,
             )
+            # DocRecord.aliases add to (never replace) aliases set with set_aliases().
+            self._db.executemany("INSERT OR IGNORE INTO aliases(doc_id, alias) VALUES (?, ?)", aliases)
             self._stage_suggest([r[0] for r in rows])
             self._after_write(n)
         return n
@@ -280,8 +285,13 @@ class TantivyIndex:
                 self._rebuild_suggest()
 
     def close(self) -> None:
-        """Release the writer lock and persist the suggest trie. Uncommitted writes are discarded."""
+        """Release the writer lock and persist the suggest trie. Uncommitted writes are discarded.
+
+        Idempotent: closing twice is a no-op."""
         with self._lock:
+            if self._closed:
+                return
+            self._closed = True
             if self._writer is not None:
                 self._writer.rollback()
                 self._writer.wait_merging_threads()

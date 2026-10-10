@@ -20,7 +20,7 @@ from pathlib import Path
 from wsp_core.model import RemoteFile
 from wsp_fetch.config import FetchConfig, host_key
 from wsp_fetch.errors import Aria2Error, ChecksumMismatchError, FetchError
-from wsp_fetch.finish import FetchResult, finalize
+from wsp_fetch.finish import FetchReport, finalize, make_report
 from wsp_fetch.hashing import hash_file
 from wsp_fetch.http import HttpFetcher
 from wsp_fetch.metalink import MetalinkFile, MetalinkUrl, build_metalink
@@ -110,10 +110,10 @@ class Aria2Fetcher:
     def get_bytes(self, url: str, *, max_bytes: int = 64 * 1024 * 1024) -> bytes:
         return self._http.get_bytes(url, max_bytes=max_bytes)
 
-    def download(self, remote: RemoteFile, dest: Path) -> Path:
-        return self.fetch(remote, dest).path
+    def download(self, remote: RemoteFile, dest: Path) -> FetchReport:
+        return self.fetch(remote, dest)
 
-    def fetch(self, remote: RemoteFile, dest: Path) -> FetchResult:
+    def fetch(self, remote: RemoteFile, dest: Path) -> FetchReport:
         t0 = time.monotonic()
         target = resolve_target(remote, lambda u, n: self._http.get_bytes(u, max_bytes=n), self.config)
         stage = staging_dir(dest)
@@ -150,4 +150,4 @@ class Aria2Fetcher:
         )
         shutil.rmtree(stage, ignore_errors=True)
         size = dest.stat().st_size
-        return FetchResult(dest, size, digests, target.checksums, size, 0, time.monotonic() - t0)
+        return make_report(dest, size, digests, target.checksums, size, 0, time.monotonic() - t0)

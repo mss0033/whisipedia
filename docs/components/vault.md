@@ -15,6 +15,7 @@ Write-once golden storage and its Warden: PLAN §7 (layout), §8 (integrity, scr
 │       └── DEGRADED.txt                        only if repair failed
 ├── staging/<domain>/<source_id>/<generation_id>/   being assembled; sealing = one dir rename
 ├── quarantine/…                                damaged files moved aside, never deleted
+├── pruned/<domain>/<source_id>/<gen>.<ts>/     retired by retention (Warden.prune); owner empties it
 ├── ledger/YYYY-MM-DD.jsonl                     hash-chained events, signed daily checkpoint
 └── keys/<key_id>-<fingerprint>.pub             public keys only
 ```
@@ -29,6 +30,7 @@ Write-once golden storage and its Warden: PLAN §7 (layout), §8 (integrity, scr
 - **Deterministic, signed manifests.** Every file has its path, size, sha256, blake3, role and upstream checksums. Signed with `SshSigner` (`ssh-keygen -Y`, namespace `whisipedia-manifest`) or `Ed25519Signer`.
 - **Promotion** requires a valid signature and no `DEGRADED.txt`.
 - **Ledger.** Supports a single writer only, with no locking. Appends are fsynced and read back. `verify()` replays the whole chain and checks every checkpoint signature.
+- **Ports.** `FileVault` implements `Vault` (stage, ingest with `upstream`/`expected`, adopt, seal, promote) and the separate `Warden` port (`manifest`, `mark_degraded`, `prune`), ADR-0005. `<domain>` is `SourceSpec.vault_domain`.
 - **Nothing is deleted.** The only exceptions are our own temporaries and the staging record.
 
 ## Scrub, repair, drill

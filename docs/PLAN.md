@@ -237,7 +237,7 @@ DISCOVERED → PLANNED → FETCHING → FETCHED → VERIFIED → SEALED → REFI
 
 ### 6.7 Update cadence (default: monthly; quarterly is one setting)
 
-One global setting, `acquirer.cycle = "monthly" | "quarterly"`, sets the library-wide rhythm. Individual sources can override it.
+One global setting, `acquirer.cycle = "monthly" | "quarterly"`, sets the library-wide rhythm. Individual sources can override it with `update.cadence` in the registry; a source without one follows the cycle.
 
 | | Monthly (default) | Quarterly |
 |---|---|---|

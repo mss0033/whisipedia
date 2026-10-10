@@ -43,6 +43,9 @@ class FakeLexical:
     def commit(self) -> None:
         return None
 
+    def close(self) -> None:
+        return None
+
 
 class FakeVector:
     def __init__(self, results: list[tuple[str, float]]) -> None:

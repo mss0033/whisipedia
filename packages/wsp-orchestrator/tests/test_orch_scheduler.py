@@ -61,7 +61,7 @@ def test_monthly_cycle(tmp_path: Path) -> None:
 def test_quarterly_cycle_and_overrides(tmp_path: Path) -> None:
     clock = ManualClock(T0)
     sources = [
-        make_spec("follows", cadence="P1M"),  # P1M = "follow acquirer.cycle"
+        make_spec("follows"),  # no update.cadence = follow acquirer.cycle
         make_spec("weekly", cadence="P1W"),
         make_spec("absent"),
         make_spec("candidate", status=SourceStatus.CANDIDATE),
@@ -73,6 +73,8 @@ def test_quarterly_cycle_and_overrides(tmp_path: Path) -> None:
     assert sched.source_cadence(sources[0]) == CalendarCadence(3, 15)
     assert sched.source_cadence(sources[1]) == IntervalCadence(IsoDuration.parse("P1W"))
     assert sched.source_cadence(sources[2]) == CalendarCadence(3, 15)
+    # An explicit cadence is always a deliberate override, even one that equals the default cycle.
+    assert sched.source_cadence(make_spec("monthly", cadence="P1M")) == CalendarCadence(1, 15)
     assert ("discover", "candidate") not in {(e.kind.value, e.key) for e in sched.entries()}
 
     orch.start()

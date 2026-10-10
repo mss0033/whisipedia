@@ -181,7 +181,8 @@ def test_discover_against_recorded_catalog(tmp_path: Path) -> None:
         remote.mirrors[0]
         == "https://mirror.download.kiwix.org/zim/wikipedia/wikipedia_en_all_maxi_2026-08.zim"
     )
-    assert remote.mirrors[-1] == file_url + ".meta4"
+    assert remote.metalink == file_url + ".meta4"
+    assert not any(m.endswith(".meta4") for m in remote.mirrors)
     assert release.meta["approx_size:" + remote.name] == "127418088448"
     assert any("name=wikipedia_en_all" in r for r in fetcher.requests)
 
@@ -195,7 +196,7 @@ def test_plan_resolves_metalink(fetcher: FakeFetcher, zim_file: Path, tmp_path: 
     assert remote.size == zim_file.stat().st_size
     assert {c.algorithm for c in remote.checksums} == {"sha256", "md5", "sha1"}
     assert remote.mirrors[0].startswith("https://mirror.example.org/")
-    assert remote.mirrors[-1] == ZIM_URL + ".meta4"
+    assert remote.metalink == ZIM_URL + ".meta4"
 
 
 def test_plan_rejects_conflicting_metalink(fetcher: FakeFetcher, tmp_path: Path) -> None:

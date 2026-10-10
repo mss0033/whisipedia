@@ -20,7 +20,7 @@ from typing import Any, cast
 from wsp_core.model import ReleaseState
 from wsp_orchestrator.clock import ensure_utc
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2  # 2: releases.fetched_json (fetch digests, port revision v0.2)
 
 # Filesystems on which SQLite WAL locking/shared memory is unsafe or unsupported.
 UNSAFE_FS_TYPES = frozenset(
@@ -96,6 +96,7 @@ class ReleaseRecord:
     generation_id: str
     plan: Mapping[str, Any] | None = None
     local_files: tuple[str, ...] = ()
+    fetched: Mapping[str, Any] = field(default_factory=dict[str, Any])  # file name -> FetchResult JSON
     doc_count: int | None = None
     size_bytes: int | None = None
     hold_reason: str | None = None
@@ -145,7 +146,7 @@ CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS releases (
   source_id TEXT NOT NULL, version TEXT NOT NULL, state TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
   generation_id TEXT NOT NULL, ref_json TEXT NOT NULL, plan_json TEXT,
-  local_files_json TEXT NOT NULL DEFAULT '[]',
+  local_files_json TEXT NOT NULL DEFAULT '[]', fetched_json TEXT NOT NULL DEFAULT '{}',
   doc_count INTEGER, size_bytes INTEGER, hold_reason TEXT, approved INTEGER NOT NULL DEFAULT 0,
   last_error TEXT, next_attempt_at TEXT,
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY (source_id, version));
@@ -213,6 +214,9 @@ class StateStore:
             row = c.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
             if row is None:
                 c.execute("INSERT INTO meta(key, value) VALUES ('schema_version', ?)", (str(SCHEMA_VERSION),))
+            elif int(row["value"]) == 1:  # v1 -> v2: add the fetch digests column
+                c.execute("ALTER TABLE releases ADD COLUMN fetched_json TEXT NOT NULL DEFAULT '{}'")
+                c.execute("UPDATE meta SET value=? WHERE key='schema_version'", (str(SCHEMA_VERSION),))
             elif int(row["value"]) != SCHEMA_VERSION:
                 raise StoreError(f"state store schema {row['value']} != supported {SCHEMA_VERSION}")
 
@@ -263,6 +267,7 @@ class StateStore:
             generation_id=r["generation_id"],
             plan=_loads_obj(r["plan_json"]),
             local_files=tuple(cast(list[str], json.loads(r["local_files_json"]))),
+            fetched=cast(dict[str, Any], json.loads(r["fetched_json"])),
             doc_count=r["doc_count"],
             size_bytes=r["size_bytes"],
             hold_reason=r["hold_reason"],
@@ -310,7 +315,8 @@ class StateStore:
 
     def update_release(self, rec: ReleaseRecord, now: datetime, conn: sqlite3.Connection) -> None:
         conn.execute(
-            "UPDATE releases SET state=?, attempts=?, plan_json=?, local_files_json=?, doc_count=?,"
+            "UPDATE releases SET state=?, attempts=?, plan_json=?, local_files_json=?, fetched_json=?,"
+            " doc_count=?,"
             " size_bytes=?, hold_reason=?, approved=?, last_error=?, next_attempt_at=?, updated_at=?"
             " WHERE source_id=? AND version=?",
             (
@@ -318,6 +324,7 @@ class StateStore:
                 rec.attempts,
                 _dumps(rec.plan) if rec.plan is not None else None,
                 _dumps(list(rec.local_files)),
+                _dumps(dict(rec.fetched)),
                 rec.doc_count,
                 rec.size_bytes,
                 rec.hold_reason,
