@@ -1,0 +1,27 @@
+[project]
+name = "wsp-index"
+version = "0.1.0"
+description = "Whisipedia Refinery (Parquet), lexical index (Tantivy), suggest, document store, change feed and hybrid search"
+requires-python = ">=3.12"
+dependencies = [
+  "wsp-core",
+  "pyarrow>=17",
+  "tantivy>=0.22",
+  "marisa-trie>=1.2",
+  "numpy>=2.0",
+]
+
+[tool.uv.sources]
+wsp-core = { workspace = true }
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "pyarrow-stubs>=20.0.0.20260819",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/wsp_index"]
