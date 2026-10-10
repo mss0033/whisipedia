@@ -9,6 +9,7 @@ members = [
     "wsp-api",
     "wsp-cli",
     "wsp-core",
+    "wsp-fetch",
     "wsp-sdk",
     "wsp-vault",
 ]
@@ -1263,6 +1264,23 @@ requires-dist = [
     { name = "blake3", specifier = ">=1.0" },
     { name = "jsonschema", specifier = ">=4.23" },
     { name = "pyyaml", specifier = ">=6.0" },
+]
+
+[[package]]
+name = "wsp-fetch"
+version = "0.1.0"
+source = { editable = "packages/wsp-fetch" }
+dependencies = [
+    { name = "blake3" },
+    { name = "httpx" },
+    { name = "wsp-core" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "blake3", specifier = ">=1.0" },
+    { name = "httpx", specifier = ">=0.28" },
+    { name = "wsp-core", editable = "packages/wsp-core" },
 ]
 
 [[package]]
