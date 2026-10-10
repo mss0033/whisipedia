@@ -86,8 +86,9 @@ class Scheduler:
     # --- cadences ------------------------------------------------------------------------------
 
     def source_cadence(self, spec: SourceSpec) -> Cadence:
-        """Registry ``update.cadence`` overrides the global cycle, except values that mean "follow it"."""
-        if spec.cadence is None or spec.cadence in self.settings.follow_cycle_cadences:
+        """A registry ``update.cadence`` is a deliberate override; without one the source follows the
+        global ``acquirer.cycle`` (PLAN §6.7)."""
+        if spec.cadence is None:
             return self.cycle
         return cadence_from_duration(spec.cadence, anchor_day=self.settings.anchor_day)
 
