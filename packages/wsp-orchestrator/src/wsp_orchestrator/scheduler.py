@@ -44,6 +44,7 @@ from wsp_orchestrator.store import StateStore, parse_ts, ts
 log = logging.getLogger("wsp.orchestrator.scheduler")
 
 GLOBAL_KEY = "global"
+PARITY_KEY = "backfill"
 SCRUB_KEY = "rolling"
 _SCRUB_START = "scrub_cycle_start"
 _SCRUB_CURSOR = "scrub_next_slice"
@@ -74,7 +75,11 @@ class Scheduler:
         settings: OrchestratorSettings,
         sources: Sequence[SourceSpec],
         alerter: Alerter | None = None,
+        bots: Mapping[str, str | None] | None = None,
+        parity: bool = False,
     ) -> None:
+        self.bots = dict(bots or {})  # bot name -> ISO cadence (None: the global cycle)
+        self.parity = parity
         self.store = store
         self.queue = queue
         self.clock = clock
@@ -105,6 +110,14 @@ class Scheduler:
             out.append(ScheduleEntry(JobKind.HEALTH_PROBE, spec.id, probe, payload, spec.id))
             out.append(ScheduleEntry(JobKind.PRUNE, spec.id, cadence, payload, spec.id))
         out.append(ScheduleEntry(JobKind.DISCOVERY_BOTS, GLOBAL_KEY, self.cycle))
+        for name, iso in sorted(self.bots.items()):
+            bot_cadence = (
+                self.cycle if iso is None else cadence_from_duration(iso, anchor_day=self.settings.anchor_day)
+            )
+            out.append(ScheduleEntry(JobKind.DISCOVERY_BOTS, name, bot_cadence, {"bot": name}))
+        if self.parity:
+            parity = IntervalCadence(self.settings.parity_interval)
+            out.append(ScheduleEntry(JobKind.PARITY, PARITY_KEY, parity, {"backfill": True}))
         out.append(ScheduleEntry(JobKind.DRILL, GLOBAL_KEY, IntervalCadence(self.settings.drill_interval)))
         return out
 

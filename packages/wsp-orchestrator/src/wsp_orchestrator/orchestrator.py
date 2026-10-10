@@ -7,6 +7,7 @@ swapped independently (PLAN §12.2).
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
 import time
@@ -16,13 +17,16 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from enum import StrEnum
+from typing import cast
 from urllib.parse import urlparse
 
 from wsp_core.model import Generation, ReleaseRef, ReleaseState, SourceSpec
 from wsp_core.ports import Fetcher, Ledger, SourceAdapter, Vault
 from wsp_orchestrator.alerts import Alert, Alerter, AlertSink, Severity
-from wsp_orchestrator.clock import Clock, SystemClock
+from wsp_orchestrator.bots import Bot, BotContext, BotResult
+from wsp_orchestrator.clock import Clock, SystemClock, ensure_utc
 from wsp_orchestrator.codec import release_from_json
+from wsp_orchestrator.curator.proposals import ProposalRecord
 from wsp_orchestrator.jobs import Job, JobKind, JobQueue
 from wsp_orchestrator.metrics import Metrics
 from wsp_orchestrator.pipeline import (
@@ -38,6 +42,7 @@ from wsp_orchestrator.pipeline import (
 )
 from wsp_orchestrator.policy import (
     Candidate,
+    Decision,
     GateConfig,
     Observation,
     Proposal,
@@ -45,7 +50,7 @@ from wsp_orchestrator.policy import (
     evaluate_candidate,
 )
 from wsp_orchestrator.retention import GenerationInfo, GfsPolicy, plan_retention
-from wsp_orchestrator.scheduler import Scheduler
+from wsp_orchestrator.scheduler import GLOBAL_KEY, PARITY_KEY, Scheduler
 from wsp_orchestrator.settings import OrchestratorSettings
 from wsp_orchestrator.store import StateStore
 
@@ -54,8 +59,11 @@ log = logging.getLogger("wsp.orchestrator")
 ScrubHook = Callable[[int, int], None]  # (slice_index, slice_count) - Warden rolling scrub (PLAN §8.2)
 DrillHook = Callable[[], Mapping[str, object]]  # monthly chaos drill; must return {"ok": bool, ...}
 DiscoveryHook = Callable[[], Iterable[Candidate]]  # Curator discovery bots (PLAN §5.3)
-PrunerHook = Callable[[str, str], None]  # delete one generation (source_id, generation_id)
+PrunerHook = Callable[[str, str], None]  # retire one generation (source_id, generation_id): moved aside
 LastCopyHook = Callable[[str, Generation], bool]  # True if the generation holds the last copy of something
+# One bounded slice of parity work (create/backfill). Gets the last-copy oracle for scope decisions;
+# returns a JSON-safe summary with at least {"pending": int}.
+ParityHook = Callable[[LastCopyHook], Mapping[str, object]]
 
 
 @dataclass
@@ -76,7 +84,12 @@ class Wiring:
     gate: GateConfig = field(default_factory=GateConfig)
     proposal_sink: Callable[[Proposal], None] | None = None
     pruner: PrunerHook | None = None
-    last_copy: LastCopyHook | None = None
+    last_copy: LastCopyHook | None = None  # override; default: what upstream served lately (store)
+    bots: Sequence[Bot] = ()  # Curator bots, scheduled per bot (PLAN §5.3, §5.5)
+    gate_provider: Callable[[], GateConfig] | None = None  # live budgets; falls back to ``gate``
+    promoter: Callable[[Proposal], None] | None = None  # applies AUTO_PROMOTE (registry overlay)
+    proposal_recorder: Callable[[ProposalRecord], None] | None = None  # proposal files
+    parity: ParityHook | None = None
 
 
 class Handled(StrEnum):
@@ -147,7 +160,10 @@ class Orchestrator:
             settings=settings,
             sources=wiring.sources,
             alerter=self.alerter,
+            bots={b.name: b.cadence for b in wiring.bots},
+            parity=wiring.parity is not None,
         )
+        self.bots = {b.name: b for b in wiring.bots}
         self.handlers: dict[JobKind, Callable[[Job], JobResult]] = {
             JobKind.DISCOVER: self._discover,
             JobKind.FETCH_RELEASE: self._fetch_release,
@@ -156,6 +172,7 @@ class Orchestrator:
             JobKind.SCRUB_SLICE: self._scrub_slice,
             JobKind.DRILL: self._drill,
             JobKind.DISCOVERY_BOTS: self._discovery_bots,
+            JobKind.PARITY: self._parity,
         }
         self.stopping = threading.Event()
         self._lock = threading.Lock()
@@ -345,7 +362,32 @@ class Orchestrator:
         refs = list(adapter.discover(self.pipeline.ctx(spec)))
         if not refs:
             raise StepError(f"{spec.id}: upstream offers no releases")
+        offers: list[Mapping[str, object]] = []
+        for r in refs:
+            try:
+                gid = generation_id_for(r)
+            except StepError:
+                continue
+            published = r.published.isoformat() if r.published else None
+            offers.append({"generation_id": gid, "version": r.version, "published": published})
+        self.store.put_offers(spec.id, offers, self.clock.now())
         return refs
+
+    def holds_last_copy(self, source_id: str, generation: Generation) -> bool:
+        """True unless upstream was recently seen serving this generation's version (PLAN §6.4).
+
+        A generation upstream no longer serves is the last copy of that version and is never
+        pruned; without a recent observation nothing can be proven redundant, so it is kept too.
+        """
+        if self.wiring.last_copy is not None:
+            return self.wiring.last_copy(source_id, generation)
+        seen = self.store.offers(source_id)
+        if seen is None:
+            return True
+        offers, observed = seen
+        if self.clock.now() - ensure_utc(observed) > self.settings.offer_max_age:
+            return True
+        return generation.generation_id not in {str(o.get("generation_id")) for o in offers}
 
     def _observe(self, spec: SourceSpec, newest: ReleaseRef) -> bool:
         """Apply the auto-pause rules to what upstream shows. Returns True if the source is now paused."""
@@ -421,6 +463,8 @@ class Orchestrator:
             case Outcome.PROMOTED:
                 self._mark_cycle_ok(source_id)
                 self.queue.enqueue(JobKind.PRUNE, source_id, now=now, payload={"source_id": source_id})
+                if self.wiring.parity is not None:  # protect the new generation soon (PLAN §8.1)
+                    self.queue.enqueue(JobKind.PARITY, PARITY_KEY, now=now, payload={"backfill": True})
                 return JobResult()
             case Outcome.BACKOFF:
                 return JobResult(Handled.DEFER, run_after=result.record.next_attempt_at, note="backoff")
@@ -459,29 +503,39 @@ class Orchestrator:
         policy = GfsPolicy.from_registry(retention if isinstance(retention, Mapping) else None)  # pyright: ignore[reportUnknownArgumentType]
         if policy is None:
             return JobResult(note="non-GFS retention: nothing to prune")
-        vault, last_copy = self.wiring.vault, self.wiring.last_copy
+        vault = self.wiring.vault
         current = vault.current(spec.id)
-        # Without a last-copy oracle we cannot prove a generation is redundant: keep everything.
         infos = [
-            GenerationInfo.from_generation(
-                g, holds_last_copy=True if last_copy is None else last_copy(spec.id, g)
-            )
+            GenerationInfo.from_generation(g, holds_last_copy=self.holds_last_copy(spec.id, g))
             for g in vault.generations(spec.id)
         ]
         plan = plan_retention(infos, policy, current=current.generation_id if current else None)
-        dry_run = self.wiring.pruner is None or last_copy is None
+        dry_run = self.wiring.pruner is None or self.settings.prune_dry_run
+        last_copies = [i.generation_id for i in infos if i.holds_last_copy]
         self.pipeline.ledger_outbox_writer(
             "retention.plan",
             spec.id,
-            {"keep": list(plan.keep), "prune": list(plan.prune), "dry_run": dry_run},
+            {
+                "keep": list(plan.keep),
+                "prune": list(plan.prune),
+                "dry_run": dry_run,
+                "last_copy": last_copies,
+            },
         )
+        failed: list[str] = []
         if not dry_run and self.wiring.pruner is not None:
             for gid in plan.prune:
-                self.wiring.pruner(spec.id, gid)
+                try:
+                    self.wiring.pruner(spec.id, gid)  # moves aside under pruned/; never deletes
+                except Exception as exc:  # e.g. the vault refuses: keep going, report it
+                    failed.append(f"{gid}: {exc}")
+                    continue
                 self.pipeline.ledger_outbox_writer(
                     "retention.pruned", f"{spec.id}/{gid}", {"generation_id": gid}
                 )
         self.pipeline.flush_ledger()
+        if failed:
+            raise StepError(f"{spec.id}: could not prune {'; '.join(failed)}")
         return JobResult()
 
     def _scrub_slice(self, job: Job) -> JobResult:
@@ -506,24 +560,144 @@ class Orchestrator:
         return JobResult()
 
     def _discovery_bots(self, job: Job) -> JobResult:
-        if self.wiring.discovery_bots is None:
-            return JobResult(note="no discovery hook wired")
-        open_keys = {str(r["candidate_key"]) for r in self.store.proposals()}
-        now = self.clock.now()
-        for candidate in self.wiring.discovery_bots():
-            if candidate.key in open_keys:
+        if job.key == GLOBAL_KEY:
+            if self.wiring.discovery_bots is None:
+                return JobResult(note="no discovery hook wired")
+            self.handle_candidates(list(self.wiring.discovery_bots()))
+            return JobResult()
+        bot = self.bots.get(str(job.payload.get("bot", job.key)))
+        if bot is None:
+            return JobResult(Handled.CANCEL, note="unknown bot")
+        meta_key = f"bot:{bot.name}"
+        previous: object = json.loads(self.store.get_meta(meta_key) or "{}")
+        workdir = self.settings.workdir / "bots" / bot.name
+        workdir.mkdir(parents=True, exist_ok=True)
+        ctx = BotContext(
+            fetcher=self.wiring.fetcher,
+            sources=self.wiring.sources,
+            now=self.clock.now(),
+            user_agent=self.settings.user_agent,
+            workdir=workdir,
+            gate=self._gate(),
+            adapter_for=self.pipeline.resolve_adapter,
+            ctx_for=self.pipeline.ctx,
+            previous=_notes(previous),
+        )
+        try:
+            result = bot.run(ctx)
+        except Exception as exc:
+            error = f"{type(exc).__name__}: {exc}"
+            self._record_bot(meta_key, {"at": ctx.now.isoformat(), "ok": False, "error": error})
+            raise
+        self._apply_bot_result(bot, result, meta_key)
+        return JobResult()
+
+    def _apply_bot_result(self, bot: Bot, result: BotResult, meta_key: str) -> None:
+        for alert in result.alerts:
+            self.alerter.raise_(alert)
+        raised = {a.key for a in result.alerts}
+        for key in result.resolved:
+            if key not in raised:
+                self.alerter.resolve(key)
+        decided = self.handle_candidates(list(result.candidates))
+        summary: dict[str, object] = {
+            "at": self.clock.now().isoformat(),
+            "ok": True,
+            "candidates": len(result.candidates),
+            "proposals": decided,
+            "alerts": sorted(raised),
+            "notes": dict(result.notes),
+        }
+        self._record_bot(meta_key, summary)
+        self.pipeline.ledger_outbox_writer(
+            "curator.bot",
+            bot.name,
+            {"candidates": len(result.candidates), "proposals": decided, "alerts": sorted(raised)},
+        )
+        self.pipeline.flush_ledger()
+
+    def _record_bot(self, meta_key: str, summary: Mapping[str, object]) -> None:
+        self.store.set_meta(meta_key, json.dumps(summary, sort_keys=True, default=str))
+
+    def bot_runs(self) -> dict[str, dict[str, object]]:
+        """Last summary of every bot (System Monitor)."""
+        out: dict[str, dict[str, object]] = {}
+        for name in sorted(self.bots):
+            raw = self.store.get_meta(f"bot:{name}")
+            out[name] = json.loads(raw) if raw else {}
+        return out
+
+    def _gate(self) -> GateConfig:
+        return self.wiring.gate_provider() if self.wiring.gate_provider is not None else self.wiring.gate
+
+    def handle_candidates(self, candidates: Sequence[Candidate]) -> list[int]:
+        """Run candidates through the policy gate (PLAN §5.4). Returns the new proposal ids.
+
+        A candidate key is proposed once, whatever the owner decides later. AUTO_PROMOTE is applied
+        through ``Wiring.promoter`` (the local registry overlay) when one is wired; REJECT is final.
+        """
+        known = self.store.proposal_keys()
+        gate = self._gate()
+        ids: list[int] = []
+        for candidate in candidates:
+            if candidate.key in known:
                 continue
-            proposal = evaluate_candidate(candidate, self.wiring.gate, self.wiring.sources)
-            self.store.add_proposal(candidate.key, proposal.decision.value, proposal.to_json(), now)
+            known.add(candidate.key)
+            now = self.clock.now()
+            proposal = evaluate_candidate(candidate, gate, self.wiring.sources)
+            status = "open"
+            if proposal.decision is Decision.REJECT:
+                status = "rejected"
+            elif proposal.decision is Decision.AUTO_PROMOTE and self.wiring.promoter is not None:
+                self.wiring.promoter(proposal)
+                status = "applied"
+            pid = self.store.add_proposal(candidate.key, proposal.decision.value, proposal.to_json(), now)
+            if status != "open":
+                self.store.set_proposal_status(pid, status)
             self.pipeline.ledger_outbox_writer(
                 "policy.decision",
                 candidate.key,
-                {"decision": proposal.decision.value, "score": proposal.score, "title": proposal.title},
+                {
+                    "decision": proposal.decision.value,
+                    "score": proposal.score,
+                    "title": proposal.title,
+                    "proposal_id": pid,
+                    "status": status,
+                },
             )
+            if self.wiring.proposal_recorder is not None:
+                self.wiring.proposal_recorder(ProposalRecord(pid, status, now, proposal))
             if self.wiring.proposal_sink is not None:
                 self.wiring.proposal_sink(proposal)
-            open_keys.add(candidate.key)
+            ids.append(pid)
         self.pipeline.flush_ledger()
+        return ids
+
+    def _parity(self, job: Job) -> JobResult:
+        if self.wiring.parity is None:
+            return JobResult(note="no parity hook wired")
+        summary = dict(self.wiring.parity(self.holds_last_copy))
+        now = self.clock.now()
+        self.store.set_meta("parity:last", json.dumps({"at": now.isoformat(), **summary}, default=str))
+        if summary.get("created") or summary.get("skipped") or summary.get("sets_done"):
+            self.pipeline.ledger_outbox_writer("parity.run", "warden", summary)
+            self.pipeline.flush_ledger()
+        skipped = summary.get("skipped")
+        if isinstance(skipped, list) and skipped:
+            self.alerter.raise_(
+                Alert(
+                    "parity-skipped",
+                    Severity.WARNING,
+                    "parity could not be created for some generations; see the parity.run ledger event",
+                    {"skipped": cast(list[object], skipped)},
+                )
+            )
+        else:
+            self.alerter.resolve("parity-skipped")
+        pending = summary.get("pending")
+        if isinstance(pending, int) and pending > 0 and summary.get("in_progress"):
+            # Budget reached with work left: continue soon (the hook paces itself).
+            return JobResult(Handled.DEFER, run_after=now + self.settings.parity_continue, note="more to do")
         return JobResult()
 
     # --- metrics -------------------------------------------------------------------------------
@@ -553,3 +727,11 @@ class Orchestrator:
             if when is not None:
                 candidates.append((when - now).total_seconds())
         return max(0.05, min(candidates))
+
+
+def _notes(summary: object) -> Mapping[str, object]:
+    """The ``notes`` of a stored bot summary (handed to the bot's next run as ``previous``)."""
+    if not isinstance(summary, dict):
+        return {}
+    notes = cast(dict[str, object], summary).get("notes")
+    return cast(dict[str, object], notes) if isinstance(notes, dict) else {}

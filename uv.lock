@@ -1670,6 +1670,7 @@ name = "wsp-orchestrator"
 version = "0.1.0"
 source = { editable = "packages/wsp-orchestrator" }
 dependencies = [
+    { name = "pyyaml" },
     { name = "wsp-core" },
 ]
 
@@ -1680,7 +1681,10 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "wsp-core", editable = "packages/wsp-core" }]
+requires-dist = [
+    { name = "pyyaml", specifier = ">=6.0" },
+    { name = "wsp-core", editable = "packages/wsp-core" },
+]
 
 [package.metadata.requires-dev]
 dev = [

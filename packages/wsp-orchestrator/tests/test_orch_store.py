@@ -8,7 +8,7 @@ from wsp_orchestrator.store import StateStore
 TS = "2026-10-01T00:00:00.000000Z"
 
 
-def test_schema_v1_is_migrated_to_v2(tmp_path: Path) -> None:
+def test_schema_v1_is_migrated_to_current(tmp_path: Path) -> None:
     path = tmp_path / "state.sqlite3"
     db = sqlite3.connect(path)
     db.executescript(
@@ -28,5 +28,24 @@ def test_schema_v1_is_migrated_to_v2(tmp_path: Path) -> None:
     rec = store.get_release("s", "v")
     assert rec is not None
     assert rec.fetched == {}
-    assert store.get_meta("schema_version") == "2"
+    assert store.get_meta("schema_version") == "3"
+    assert store.offers("s") is None
+    store.close()
+
+
+def test_offers_and_proposal_status(tmp_path: Path) -> None:
+    from datetime import UTC, datetime
+
+    store = StateStore(tmp_path / "state.sqlite3", check_local=False)
+    now = datetime(2026, 10, 1, tzinfo=UTC)
+    store.put_offers("s", [{"generation_id": "2026-09", "version": "2026-09", "published": None}], now)
+    offers = store.offers("s")
+    assert offers is not None
+    assert offers[0][0]["generation_id"] == "2026-09"
+    assert offers[1] == now
+    pid = store.add_proposal("k", "review", {"title": "t"}, now)
+    assert store.proposal_keys() == {"k"}
+    assert store.set_proposal_status(pid, "rejected")
+    assert store.proposals() == []
+    assert len(store.proposals(status=None)) == 1
     store.close()
