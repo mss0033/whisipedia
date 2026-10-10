@@ -13,6 +13,9 @@ dependencies = [
 [project.scripts]
 wsp = "wsp_cli.main:main"
 
+[dependency-groups]
+dev = ["wsp-core[testing]"]
+
 [tool.uv.sources]
 wsp-core = { workspace = true }
 wsp-api = { workspace = true }

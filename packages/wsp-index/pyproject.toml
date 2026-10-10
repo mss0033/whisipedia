@@ -20,7 +20,8 @@ build-backend = "hatchling.build"
 
 [dependency-groups]
 dev = [
-    "pyarrow-stubs>=20.0.0.20260819",
+  "wsp-core[testing]",
+  "pyarrow-stubs>=20.0.0.20260819",
 ]
 
 [tool.hatch.build.targets.wheel]

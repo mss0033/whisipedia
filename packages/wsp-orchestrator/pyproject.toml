@@ -12,6 +12,7 @@ wsp-orchestrator = "wsp_orchestrator.daemon:main"
 
 [dependency-groups]
 dev = [
+  "wsp-core[testing]",
   "hypothesis>=6.100",
 ]
 

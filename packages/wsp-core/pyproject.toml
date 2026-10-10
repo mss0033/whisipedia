@@ -9,6 +9,12 @@ dependencies = [
   "pyyaml>=6.0",
 ]
 
+[project.optional-dependencies]
+# wsp_core.testing (port contract suites) imports pytest; implementations' dev groups depend on this.
+testing = [
+  "pytest>=8",
+]
+
 [build-system]
 requires = ["hatchling>=1.25"]
 build-backend = "hatchling.build"

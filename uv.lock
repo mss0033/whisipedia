@@ -1501,6 +1501,11 @@ dependencies = [
     { name = "zstandard" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "wsp-core", extra = ["testing"] },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "libzim", specifier = ">=3.6" },
@@ -1508,6 +1513,9 @@ requires-dist = [
     { name = "wsp-core", editable = "packages/wsp-core" },
     { name = "zstandard", specifier = ">=0.23" },
 ]
+
+[package.metadata.requires-dev]
+dev = [{ name = "wsp-core", extras = ["testing"], editable = "packages/wsp-core" }]
 
 [[package]]
 name = "wsp-api"
@@ -1520,6 +1528,11 @@ dependencies = [
     { name = "wsp-core" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "wsp-core", extra = ["testing"] },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "fastapi", specifier = ">=0.143" },
@@ -1527,6 +1540,9 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.9" },
     { name = "wsp-core", editable = "packages/wsp-core" },
 ]
+
+[package.metadata.requires-dev]
+dev = [{ name = "wsp-core", extras = ["testing"], editable = "packages/wsp-core" }]
 
 [[package]]
 name = "wsp-cli"
@@ -1539,6 +1555,11 @@ dependencies = [
     { name = "wsp-sdk" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "wsp-core", extra = ["testing"] },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "uvicorn", specifier = ">=0.30" },
@@ -1546,6 +1567,9 @@ requires-dist = [
     { name = "wsp-core", editable = "packages/wsp-core" },
     { name = "wsp-sdk", editable = "packages/wsp-sdk" },
 ]
+
+[package.metadata.requires-dev]
+dev = [{ name = "wsp-core", extras = ["testing"], editable = "packages/wsp-core" }]
 
 [[package]]
 name = "wsp-core"
@@ -1557,12 +1581,19 @@ dependencies = [
     { name = "pyyaml" },
 ]
 
+[package.optional-dependencies]
+testing = [
+    { name = "pytest" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "blake3", specifier = ">=1.0" },
     { name = "jsonschema", specifier = ">=4.23" },
+    { name = "pytest", marker = "extra == 'testing'", specifier = ">=8" },
     { name = "pyyaml", specifier = ">=6.0" },
 ]
+provides-extras = ["testing"]
 
 [[package]]
 name = "wsp-fetch"
@@ -1574,12 +1605,20 @@ dependencies = [
     { name = "wsp-core" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "wsp-core", extra = ["testing"] },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "blake3", specifier = ">=1.0" },
     { name = "httpx", specifier = ">=0.28" },
     { name = "wsp-core", editable = "packages/wsp-core" },
 ]
+
+[package.metadata.requires-dev]
+dev = [{ name = "wsp-core", extras = ["testing"], editable = "packages/wsp-core" }]
 
 [[package]]
 name = "wsp-index"
@@ -1596,6 +1635,7 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "pyarrow-stubs" },
+    { name = "wsp-core", extra = ["testing"] },
 ]
 
 [package.metadata]
@@ -1608,7 +1648,10 @@ requires-dist = [
 ]
 
 [package.metadata.requires-dev]
-dev = [{ name = "pyarrow-stubs", specifier = ">=20.0.0.20260819" }]
+dev = [
+    { name = "pyarrow-stubs", specifier = ">=20.0.0.20260819" },
+    { name = "wsp-core", extras = ["testing"], editable = "packages/wsp-core" },
+]
 
 [[package]]
 name = "wsp-orchestrator"
@@ -1621,13 +1664,17 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "hypothesis" },
+    { name = "wsp-core", extra = ["testing"] },
 ]
 
 [package.metadata]
 requires-dist = [{ name = "wsp-core", editable = "packages/wsp-core" }]
 
 [package.metadata.requires-dev]
-dev = [{ name = "hypothesis", specifier = ">=6.100" }]
+dev = [
+    { name = "hypothesis", specifier = ">=6.100" },
+    { name = "wsp-core", extras = ["testing"], editable = "packages/wsp-core" },
+]
 
 [[package]]
 name = "wsp-sdk"
@@ -1662,12 +1709,20 @@ dependencies = [
     { name = "wsp-core" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "wsp-core", extra = ["testing"] },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "blake3", specifier = ">=1.0" },
     { name = "cryptography", specifier = ">=43" },
     { name = "wsp-core", editable = "packages/wsp-core" },
 ]
+
+[package.metadata.requires-dev]
+dev = [{ name = "wsp-core", extras = ["testing"], editable = "packages/wsp-core" }]
 
 [[package]]
 name = "zstandard"
