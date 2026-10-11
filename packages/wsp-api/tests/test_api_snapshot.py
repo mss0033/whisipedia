@@ -152,6 +152,17 @@ def test_shed_and_timed_out_requests_carry_retry_after() -> None:
         assert r.headers["retry-after"] == "5"
 
 
+def test_executor_threads_never_hold_up_process_exit() -> None:
+    """A read stuck on a dead SMB mount must not keep the API (or a test run) from exiting."""
+    before = {t.ident for t in threading.enumerate()}
+    with local_client(create_app(sample_services())) as c:
+        assert c.get("/v1/documents/wsp%3Arfc%2F9110").status_code == 200
+        assert c.get("/v1/search", params={"q": "turing"}).status_code == 200
+    new = [t for t in threading.enumerate() if t.ident not in before and t.is_alive()]
+    assert new
+    assert all(t.daemon for t in new)
+
+
 def test_warming_up_is_a_503_not_a_hang() -> None:
     services = sample_services()
     lib = Library(services, ApiSettings(background=True))
