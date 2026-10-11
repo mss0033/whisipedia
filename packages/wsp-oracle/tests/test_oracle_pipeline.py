@@ -1,0 +1,245 @@
+"""The pipeline end to end on the fixture corpus (CPU, fake models), embed builds and the eval harness."""
+
+from __future__ import annotations
+
+from collections.abc import Iterator
+from pathlib import Path
+
+import pytest
+from oracle_helpers import CORPUS, FIXTURE_GOLD, OverlapReranker, ScriptedLLM, doc
+
+from wsp_core.model import DocRecord
+from wsp_index import HashingEmbedder, RefineryReader, RefineryWriter, TantivyConfig, TantivyIndex
+from wsp_index.refinery import generation_dir
+from wsp_oracle.config import OracleConfig, OracleConfigError
+from wsp_oracle.embedbuild import EmbedStats, embed_generation
+from wsp_oracle.evaluation import (
+    evaluate,
+    evaluate_summaries,
+    faithfulness,
+    lexical_judge,
+    load_gold,
+    ndcg_at,
+    percentile,
+    recall_at,
+    replace_searcher,
+)
+from wsp_oracle.generator import Passage, Summarizer
+from wsp_oracle.pipeline import OracleIndex, OracleSearcher
+from wsp_oracle.router import Intent, Router
+from wsp_oracle.services import build_oracle
+from wsp_oracle.vectors import ChunkVectorStore, DocVectorIndex
+
+SMALL = TantivyConfig(writer_heap_bytes=20_000_000, writer_threads=1)
+DIMS = 256
+
+
+@pytest.fixture
+def lexical(tmp_path: Path) -> Iterator[TantivyIndex]:
+    idx = TantivyIndex(tmp_path / "lexical", SMALL)
+    idx.upsert(CORPUS)
+    idx.commit()
+    yield idx
+    idx.close()
+
+
+def write_generation(root: Path, gen: str, docs: tuple[DocRecord, ...]) -> RefineryReader:
+    by_source: dict[str, list[DocRecord]] = {}
+    for d in docs:
+        by_source.setdefault(d.source_id, []).append(d)
+    for source, recs in by_source.items():
+        with RefineryWriter(root, source, gen) as w:
+            w.write(recs)
+    return RefineryReader(generation_dir(root, "encyclo", gen))
+
+
+@pytest.fixture
+def store(tmp_path: Path) -> Iterator[ChunkVectorStore]:
+    s = ChunkVectorStore(tmp_path / "vectors", DIMS)
+    root = tmp_path / "refinery"
+    write_generation(root, "g1", CORPUS)
+    emb = HashingEmbedder(DIMS)
+    for source in ("encyclo", "dictionary", "rfc"):
+        reader = RefineryReader(generation_dir(root, source, "g1"))
+        embed_generation(reader, s, emb, source_id=source, generation_id="g1", chunk_words=50)
+    yield s
+    s.close()
+
+
+def make_searcher(lexical: TantivyIndex, store: ChunkVectorStore, *, rerank: bool = True) -> OracleSearcher:
+    return OracleSearcher(
+        lexical,
+        router=Router.from_sources(["encyclo", "dictionary", "rfc"]),
+        embedder=HashingEmbedder(DIMS),
+        vectors=DocVectorIndex(store),
+        reranker=OverlapReranker() if rerank else None,
+        resolve=lexical.lookup,
+        passage_text=store.texts,
+    )
+
+
+def test_embed_generation_is_resumable_and_incremental(tmp_path: Path) -> None:
+    root = tmp_path / "refinery"
+    reader = write_generation(root, "g1", CORPUS)
+    s = ChunkVectorStore(tmp_path / "v", DIMS)
+    emb = HashingEmbedder(DIMS)
+    seen: list[EmbedStats] = []
+    first = embed_generation(reader, s, emb, source_id="encyclo", generation_id="g1", progress=seen.append)
+    assert first.docs_embedded == 8
+    assert seen
+    assert "encyclo" in seen[-1].line()
+    again = embed_generation(reader, s, emb, source_id="encyclo", generation_id="g1")
+    assert (again.docs_embedded, again.docs_unchanged) == (0, 8)
+
+    changed = tuple(d for d in CORPUS if d.source_id == "encyclo" and d.native_id != "Lisbon")
+    changed = (
+        *[d for d in changed if d.native_id != "Alligator"],
+        doc(
+            "encyclo", "Alligator", "Alligator", "Alligators live in freshwater swamps of the American south."
+        ),
+    )
+    r2 = write_generation(root, "g2", changed)
+    upd = embed_generation(r2, s, emb, source_id="encyclo", generation_id="g2", workers=0)
+    assert (upd.docs_embedded, upd.docs_unchanged, upd.docs_removed) == (1, 6, 1)
+    assert s.doc_count("encyclo") == 7
+    assert s.texts(["wsp:encyclo/Lisbon#0"]) == {}
+    limited = embed_generation(r2, s, emb, source_id="encyclo", generation_id="g3", limit=2)
+    assert limited.docs_seen == 2
+    assert limited.docs_removed == 0
+    s.close()
+
+
+def test_pipeline_end_to_end(lexical: TantivyIndex, store: ChunkVectorStore) -> None:
+    searcher = make_searcher(lexical, store)
+    res = searcher.run("how do vaccines train the immune system")
+    assert res.route.intent is Intent.HOW_TO
+    assert "wsp:encyclo/Vaccine" in {h.doc_id for h in res.hits[:2]}
+    assert "immune" in res.passages["wsp:encyclo/Vaccine"].casefold()
+    assert res.confidence is not None
+    assert res.confidence > 0.3
+    assert not res.low_confidence
+    assert {"route", "dense", "lexical+fusion", "rerank", "total"} <= set(res.timings_ms)
+    # snippets shown to the user are the lexical ones, not the reranked passages
+    assert all("#" not in h.doc_id for h in res.hits)
+
+
+def test_pins_exact_titles_and_comparisons(lexical: TantivyIndex, store: ChunkVectorStore) -> None:
+    searcher = make_searcher(lexical, store, rerank=False)
+    assert searcher.run("Alan Turing").hits[0].doc_id == "wsp:encyclo/Alan_Turing"
+    assert searcher.run("map of Lisbon").hits[0].doc_id == "wsp:encyclo/Lisbon"
+    top2 = {h.doc_id for h in searcher.run("alligator vs crocodile").hits[:2]}
+    assert top2 == {"wsp:encyclo/Alligator", "wsp:encyclo/Crocodile"}
+    nav = searcher.run("rfc http caching")
+    assert {h.source_id for h in nav.hits} == {"rfc"}
+
+
+def test_oracle_index_port_and_cache(lexical: TantivyIndex, store: ChunkVectorStore) -> None:
+    rr = OverlapReranker()
+    searcher = make_searcher(lexical, store)
+    searcher.reranker = rr
+    index = OracleIndex(searcher, cache_size=2)
+    page1 = index.search("immune system", limit=2)
+    page2 = index.search("immune system", limit=2, offset=2)
+    assert rr.calls == 1
+    assert not {h.doc_id for h in page1} & {h.doc_id for h in page2}
+    assert index.search("immune system", sources=[]) == []
+    assert index.search("   ") == []
+    assert index.suggest("Ali") == lexical.suggest("Ali")
+    index.upsert([doc("encyclo", "New", "Newt", "A newt is an amphibian.")])
+    index.commit()
+    assert index.search("newt amphibian")[0].doc_id == "wsp:encyclo/New"
+
+
+def test_low_confidence_when_nothing_matches(lexical: TantivyIndex, store: ChunkVectorStore) -> None:
+    res = make_searcher(lexical, store).run("zzzz qqqq")
+    assert res.low_confidence
+
+
+def test_eval_harness_on_fixtures(lexical: TantivyIndex, store: ChunkVectorStore) -> None:
+    gold = load_gold(FIXTURE_GOLD)
+    full = make_searcher(lexical, store)
+    lex = replace_searcher(full, dense=False, rerank=False)
+    reports = [
+        evaluate(name, lambda q, s=s: [h.doc_id for h in s.run(q).hits], gold)
+        for name, s in (("lexical", lex), ("full", full))
+    ]
+    for rep in reports:
+        assert rep.queries == 8
+        assert rep.ndcg10 >= 0.8, rep.summary()
+        assert rep.recall50 >= 0.9
+        assert rep.p95_ms < 1000
+        assert set(rep.by_domain) >= {"medicine", "geography"}
+
+
+def test_metrics() -> None:
+    rel = {"a": 2, "b": 1}
+    assert ndcg_at(["a", "b"], rel) == pytest.approx(1.0)
+    assert ndcg_at(["x", "a"], rel) < ndcg_at(["a", "x"], rel)
+    assert ndcg_at([], {}) == 0.0
+    assert recall_at(["b", "z"], rel) == 0.5
+    assert percentile([1.0, 2.0, 3.0, 4.0], 50) == 2.0
+    assert percentile([], 95) == 0.0
+
+
+def test_faithfulness_scoring() -> None:
+    passages = {1: "Lisbon is the capital of Portugal.", 2: "Memory cells persist after infection."}
+    f = faithfulness(
+        "Lisbon is the capital of Portugal [1]. Memory cells persist [2]. Paris is in Spain [1]. Uncited.",
+        passages,
+        lexical_judge(),
+    )
+    assert (f.sentences, f.cited, f.supported) == (4, 3, 2)
+    assert f.score == 0.5
+
+
+def test_summary_evaluation_with_scripted_model() -> None:
+    llm = ScriptedLLM(["Lisbon is the capital of Portugal [1]."])
+    items = [("capital of Portugal", [Passage(1, "Lisbon", "Lisbon is the capital of Portugal.")])]
+    se = evaluate_summaries(Summarizer(llm), items, lexical_judge())
+    assert se.faithfulness == 1.0
+    assert se.refused == 0
+
+
+def test_build_oracle_lexical_only(tmp_path: Path, lexical: TantivyIndex) -> None:
+    cfg = {"index": {"root": str(tmp_path)}, "oracle": {"reranker": {"enabled": False}}}
+    oracle = build_oracle(cfg, lexical=lexical, sources=["encyclo"])
+    assert oracle.vectors is None
+    assert oracle.generator is None
+    assert oracle.index.search("Lisbon")[0].doc_id == "wsp:encyclo/Lisbon"
+
+    cfg_gen = {
+        "index": {"root": str(tmp_path)},
+        "oracle": {"reranker": {"enabled": False}, "generator": {"enabled": True}},
+    }
+    with_gen = build_oracle(cfg_gen, lexical=lexical)
+    assert with_gen.generator is not None
+    assert with_gen.summarizer is not None
+
+
+def test_config_parsing() -> None:
+    cfg = OracleConfig.from_mapping(
+        {
+            "dense_sources": ["wikipedia-en-zim"],
+            "source_priors": {"wikipedia-en-zim": 1.2},
+            "embedder": {"device": "cpu", "batch_size": 64},
+            "vectors": {"path": "/tmp/v", "mode": "view"},
+        }
+    )
+    assert cfg.dense_sources == ("wikipedia-en-zim",)
+    assert cfg.embedder.batch_size == 64
+    assert cfg.vector_path(None) == Path("/tmp/v")
+    assert cfg.model_path("/abs/model") == Path("/abs/model")
+    assert cfg.model_path("rel").name == "rel"
+    for bad in (
+        {"nope": 1},
+        {"embedder": {"device": "tpu"}},
+        {"vectors": {"mode": "mmap"}},
+        {"depth": 0},
+        {"dense_sources": "x"},
+        {"embedder": "x"},
+        {"depth": "many"},
+    ):
+        with pytest.raises(OracleConfigError):
+            OracleConfig.from_mapping(bad)
+    with pytest.raises(OracleConfigError, match=r"index\.root"):
+        OracleConfig().vector_path(None)

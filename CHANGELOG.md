@@ -4,6 +4,12 @@ All notable changes are documented here. The format follows [Keep a Changelog](h
 
 ## [Unreleased]
 ### Added
+- `wsp-oracle` (Phase 3, ADR-0007): section-aware passages, a multilingual embedder on the GPU,
+  a binary-HNSW + int8 vector store, a deterministic query router, hybrid retrieval with
+  cross-encoder reranking, cited summaries over a loopback llama.cpp server with sentence-level
+  citation checks and a low-confidence refusal, a resumable embedding job
+  (`scripts/embed_sources.py`), an evaluation harness with a 125-query gold set, `build_oracle()`
+  for the composition root, and `VectorIndex`/`Embedder` contract suites.
 - The remaining T1 source adapters (`docs/components/adapters.md`):
   - `arxiv`: OAI-PMH metadata from `oaipmh.arxiv.org` (≤ 1 request / 3 s, resumption tokens,
     incremental `from=`) plus the newest PDF months from the public GCS mirror; `html_ref` points at the

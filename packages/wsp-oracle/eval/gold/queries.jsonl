@@ -1,0 +1,125 @@
+{"id": "q001", "query": "how do vaccines train the immune system", "lang": "en", "domain": "science", "relevant": {"wsp:wikipedia-en-zim/Vaccine": 2, "wsp:wikipedia-en-zim/Adaptive_immune_system": 1, "wsp:wikipedia-en-zim/Immune_system": 1, "wsp:wikipedia-en-zim/Vaccination": 1}}
+{"id": "q002", "query": "why is the sky blue", "lang": "en", "domain": "science", "relevant": {"wsp:wikipedia-en-zim/Rayleigh_scattering": 2, "wsp:wikipedia-en-zim/Diffuse_sky_radiation": 1}}
+{"id": "q003", "query": "what causes the seasons on earth", "lang": "en", "domain": "science", "relevant": {"wsp:wikipedia-en-zim/Season": 2, "wsp:wikipedia-en-zim/Axial_tilt": 1}}
+{"id": "q004", "query": "how does photosynthesis work", "lang": "en", "domain": "science", "relevant": {"wsp:wikipedia-en-zim/Photosynthesis": 2, "wsp:wikipedia-en-zim/Chlorophyll": 1, "wsp:wikipedia-en-zim/Calvin_cycle": 1}}
+{"id": "q005", "query": "what is dark matter", "lang": "en", "domain": "science", "relevant": {"wsp:wikipedia-en-zim/Dark_matter": 2, "wsp:wikipedia-en-zim/Dark_energy": 1}}
+{"id": "q006", "query": "speed of light in vacuum", "lang": "en", "domain": "science", "relevant": {"wsp:wikipedia-en-zim/Speed_of_light": 2}}
+{"id": "q007", "query": "how do black holes form", "lang": "en", "domain": "science", "relevant": {"wsp:wikipedia-en-zim/Black_hole": 2, "wsp:wikipedia-en-zim/Stellar_black_hole": 1}}
+{"id": "q008", "query": "theory explaining the origin of species by natural selection", "lang": "en", "domain": "science", "relevant": {"wsp:wikipedia-en-zim/Natural_selection": 2, "wsp:wikipedia-en-zim/On_the_Origin_of_Species": 1, "wsp:wikipedia-en-zim/Evolution": 1}}
+{"id": "q009", "query": "what is quantum entanglement", "lang": "en", "domain": "science", "relevant": {"wsp:wikipedia-en-zim/Quantum_entanglement": 2}}
+{"id": "q010", "query": "how does a nuclear reactor generate electricity", "lang": "en", "domain": "science", "relevant": {"wsp:wikipedia-en-zim/Nuclear_reactor": 2, "wsp:wikipedia-en-zim/Nuclear_power": 1}}
+{"id": "q011", "query": "half-life of carbon-14 dating", "lang": "en", "domain": "science", "relevant": {"wsp:wikipedia-en-zim/Radiocarbon_dating": 2, "wsp:wikipedia-en-zim/Carbon-14": 1}}
+{"id": "q012", "query": "structure of the DNA double helix", "lang": "en", "domain": "science", "relevant": {"wsp:wikipedia-en-zim/Nucleic_acid_double_helix": 2, "wsp:wikipedia-en-zim/DNA": 1}}
+{"id": "q013", "query": "plate tectonics and earthquakes", "lang": "en", "domain": "science", "relevant": {"wsp:wikipedia-en-zim/Plate_tectonics": 2, "wsp:wikipedia-en-zim/Earthquake": 1}}
+{"id": "q014", "query": "what is entropy in thermodynamics", "lang": "en", "domain": "science", "relevant": {"wsp:wikipedia-en-zim/Entropy": 2, "wsp:wikipedia-en-zim/Second_law_of_thermodynamics": 1}}
+{"id": "q015", "query": "why do we have tides", "lang": "en", "domain": "science", "relevant": {"wsp:wikipedia-en-zim/Tide": 2}}
+{"id": "q016", "query": "symptoms of type 2 diabetes", "lang": "en", "domain": "medicine", "relevant": {"wsp:wikipedia-en-zim/Type_2_diabetes": 2, "wsp:wikipedia-en-zim/Diabetes": 1}}
+{"id": "q017", "query": "how does penicillin kill bacteria", "lang": "en", "domain": "medicine", "relevant": {"wsp:wikipedia-en-zim/Penicillin": 2, "wsp:wikipedia-en-zim/Β-Lactam_antibiotic": 1}}
+{"id": "q018", "query": "what is a stroke and its warning signs", "lang": "en", "domain": "medicine", "relevant": {"wsp:wikipedia-en-zim/Stroke": 2}}
+{"id": "q019", "query": "treatment for high blood pressure", "lang": "en", "domain": "medicine", "relevant": {"wsp:wikipedia-en-zim/Hypertension": 2, "wsp:wikipedia-en-zim/Antihypertensive": 1}}
+{"id": "q020", "query": "how is malaria transmitted", "lang": "en", "domain": "medicine", "relevant": {"wsp:wikipedia-en-zim/Malaria": 2, "wsp:wikipedia-en-zim/Anopheles": 1}}
+{"id": "q021", "query": "what does the pancreas do", "lang": "en", "domain": "medicine", "relevant": {"wsp:wikipedia-en-zim/Pancreas": 2, "wsp:wikipedia-en-zim/Insulin": 1}}
+{"id": "q022", "query": "difference between a virus and a bacterium", "lang": "en", "domain": "medicine", "relevant": {"wsp:wikipedia-en-zim/Virus": 2, "wsp:wikipedia-en-zim/Bacteria": 2}}
+{"id": "q023", "query": "what causes migraine headaches", "lang": "en", "domain": "medicine", "relevant": {"wsp:wikipedia-en-zim/Migraine": 2}}
+{"id": "q024", "query": "first aid for a heart attack", "lang": "en", "domain": "medicine", "relevant": {"wsp:wikipedia-en-zim/Myocardial_infarction": 2, "wsp:wikipedia-en-zim/Cardiopulmonary_resuscitation": 1}}
+{"id": "q025", "query": "how does general anesthesia work", "lang": "en", "domain": "medicine", "relevant": {"wsp:wikipedia-en-zim/General_anaesthesia": 2}}
+{"id": "q026", "query": "causes of the first world war", "lang": "en", "domain": "history", "relevant": {"wsp:wikipedia-en-zim/Causes_of_World_War_I": 2, "wsp:wikipedia-en-zim/World_War_I": 1}}
+{"id": "q027", "query": "fall of the western roman empire", "lang": "en", "domain": "history", "relevant": {"wsp:wikipedia-en-zim/Fall_of_the_Western_Roman_Empire": 2, "wsp:wikipedia-en-zim/Western_Roman_Empire": 1}}
+{"id": "q028", "query": "who built the great pyramid of giza", "lang": "en", "domain": "history", "relevant": {"wsp:wikipedia-en-zim/Great_Pyramid_of_Giza": 2, "wsp:wikipedia-en-zim/Khufu": 1}}
+{"id": "q029", "query": "what was the cold war", "lang": "en", "domain": "history", "relevant": {"wsp:wikipedia-en-zim/Cold_War": 2}}
+{"id": "q030", "query": "french revolution storming of the bastille", "lang": "en", "domain": "history", "relevant": {"wsp:wikipedia-en-zim/Storming_of_the_Bastille": 2, "wsp:wikipedia-en-zim/French_Revolution": 1}}
+{"id": "q031", "query": "when did the berlin wall fall", "lang": "en", "domain": "history", "relevant": {"wsp:wikipedia-en-zim/Fall_of_the_Berlin_Wall": 2, "wsp:wikipedia-en-zim/Berlin_Wall": 1}}
+{"id": "q032", "query": "the black death plague in medieval europe", "lang": "en", "domain": "history", "relevant": {"wsp:wikipedia-en-zim/Black_Death": 2}}
+{"id": "q033", "query": "apollo 11 moon landing", "lang": "en", "domain": "history", "relevant": {"wsp:wikipedia-en-zim/Apollo_11": 2, "wsp:wikipedia-en-zim/Moon_landing": 1}}
+{"id": "q034", "query": "what was the magna carta", "lang": "en", "domain": "history", "relevant": {"wsp:wikipedia-en-zim/Magna_Carta": 2}}
+{"id": "q035", "query": "industrial revolution in britain", "lang": "en", "domain": "history", "relevant": {"wsp:wikipedia-en-zim/Industrial_Revolution": 2}}
+{"id": "q036", "query": "who was genghis khan", "lang": "en", "domain": "history", "relevant": {"wsp:wikipedia-en-zim/Genghis_Khan": 2, "wsp:wikipedia-en-zim/Mongol_Empire": 1}}
+{"id": "q037", "query": "the printing press of gutenberg", "lang": "en", "domain": "history", "relevant": {"wsp:wikipedia-en-zim/Printing_press": 2, "wsp:wikipedia-en-zim/Johannes_Gutenberg": 1}}
+{"id": "q038", "query": "end of apartheid in south africa", "lang": "en", "domain": "history", "relevant": {"wsp:wikipedia-en-zim/Apartheid": 2, "wsp:wikipedia-en-zim/Nelson_Mandela": 1}}
+{"id": "q039", "query": "map of Lisbon", "lang": "en", "domain": "geography", "relevant": {"wsp:wikipedia-en-zim/Lisbon": 2}}
+{"id": "q040", "query": "where is mount kilimanjaro", "lang": "en", "domain": "geography", "relevant": {"wsp:wikipedia-en-zim/Mount_Kilimanjaro": 2}}
+{"id": "q041", "query": "longest river in the world", "lang": "en", "domain": "geography", "relevant": {"wsp:wikipedia-en-zim/Nile": 2, "wsp:wikipedia-en-zim/Amazon_River": 1, "wsp:wikipedia-en-zim/List_of_river_systems_by_length": 1}}
+{"id": "q042", "query": "capital of australia", "lang": "en", "domain": "geography", "relevant": {"wsp:wikipedia-en-zim/Canberra": 2, "wsp:wikipedia-en-zim/Australia": 1}}
+{"id": "q043", "query": "where is the great barrier reef", "lang": "en", "domain": "geography", "relevant": {"wsp:wikipedia-en-zim/Great_Barrier_Reef": 2}}
+{"id": "q044", "query": "the sahara desert climate", "lang": "en", "domain": "geography", "relevant": {"wsp:wikipedia-en-zim/Sahara": 2}}
+{"id": "q045", "query": "deepest point in the ocean", "lang": "en", "domain": "geography", "relevant": {"wsp:wikipedia-en-zim/Challenger_Deep": 2, "wsp:wikipedia-en-zim/Mariana_Trench": 1}}
+{"id": "q046", "query": "largest lake in africa", "lang": "en", "domain": "geography", "relevant": {"wsp:wikipedia-en-zim/Lake_Victoria": 2}}
+{"id": "q047", "query": "where do the andes mountains run", "lang": "en", "domain": "geography", "relevant": {"wsp:wikipedia-en-zim/Andes": 2}}
+{"id": "q048", "query": "volcano that destroyed pompeii", "lang": "en", "domain": "geography", "relevant": {"wsp:wikipedia-en-zim/Mount_Vesuvius": 2, "wsp:wikipedia-en-zim/Eruption_of_Mount_Vesuvius_in_79_AD": 1, "wsp:wikipedia-en-zim/Pompeii": 1}}
+{"id": "q049", "query": "rfc about http caching", "lang": "en", "domain": "computing", "relevant": {"wsp:wikipedia-en-zim/Web_cache": 2, "wsp:wikipedia-en-zim/HTTP": 1}}
+{"id": "q050", "query": "how does public key cryptography work", "lang": "en", "domain": "computing", "relevant": {"wsp:wikipedia-en-zim/Public-key_cryptography": 2, "wsp:wikipedia-en-zim/RSA_cryptosystem": 1}}
+{"id": "q051", "query": "what is a turing machine", "lang": "en", "domain": "computing", "relevant": {"wsp:wikipedia-en-zim/Turing_machine": 2}}
+{"id": "q052", "query": "how does the domain name system resolve names", "lang": "en", "domain": "computing", "relevant": {"wsp:wikipedia-en-zim/Domain_Name_System": 2}}
+{"id": "q053", "query": "difference between tcp and udp", "lang": "en", "domain": "computing", "relevant": {"wsp:wikipedia-en-zim/Transmission_Control_Protocol": 2, "wsp:wikipedia-en-zim/User_Datagram_Protocol": 2}}
+{"id": "q054", "query": "who invented the world wide web", "lang": "en", "domain": "computing", "relevant": {"wsp:wikipedia-en-zim/World_Wide_Web": 2, "wsp:wikipedia-en-zim/Tim_Berners-Lee": 1}}
+{"id": "q055", "query": "how does a hash table work", "lang": "en", "domain": "computing", "relevant": {"wsp:wikipedia-en-zim/Hash_table": 2}}
+{"id": "q056", "query": "what is machine learning", "lang": "en", "domain": "computing", "relevant": {"wsp:wikipedia-en-zim/Machine_learning": 2}}
+{"id": "q057", "query": "linux kernel creator", "lang": "en", "domain": "computing", "relevant": {"wsp:wikipedia-en-zim/Linux_kernel": 2, "wsp:wikipedia-en-zim/Linus_Torvalds": 1, "wsp:wikipedia-en-zim/Linux": 1}}
+{"id": "q058", "query": "quicksort algorithm complexity", "lang": "en", "domain": "computing", "relevant": {"wsp:wikipedia-en-zim/Quicksort": 2}}
+{"id": "q059", "query": "what is the transformer neural network architecture", "lang": "en", "domain": "computing", "relevant": {"wsp:wikipedia-en-zim/Transformer_(deep_learning)": 2, "wsp:wikipedia-en-zim/Attention_(machine_learning)": 1}}
+{"id": "q060", "query": "how does wifi work", "lang": "en", "domain": "computing", "relevant": {"wsp:wikipedia-en-zim/Wi-Fi": 2, "wsp:wikipedia-en-zim/IEEE_802.11": 1}}
+{"id": "q061", "query": "the enigma machine codebreaking at bletchley park", "lang": "en", "domain": "computing", "relevant": {"wsp:wikipedia-en-zim/Enigma_machine": 2, "wsp:wikipedia-en-zim/Bletchley_Park": 1, "wsp:wikipedia-en-zim/Cryptanalysis_of_the_Enigma": 1}}
+{"id": "q062", "query": "Alan Turing", "lang": "en", "domain": "people", "relevant": {"wsp:wikipedia-en-zim/Alan_Turing": 2}}
+{"id": "q063", "query": "who was ada lovelace", "lang": "en", "domain": "people", "relevant": {"wsp:wikipedia-en-zim/Ada_Lovelace": 2, "wsp:wikipedia-en-zim/Analytical_engine": 1}}
+{"id": "q064", "query": "marie curie discoveries", "lang": "en", "domain": "people", "relevant": {"wsp:wikipedia-en-zim/Marie_Curie": 2, "wsp:wikipedia-en-zim/Polonium": 1, "wsp:wikipedia-en-zim/Radium": 1}}
+{"id": "q065", "query": "what did isaac newton discover", "lang": "en", "domain": "people", "relevant": {"wsp:wikipedia-en-zim/Isaac_Newton": 2, "wsp:wikipedia-en-zim/Newton's_laws_of_motion": 1}}
+{"id": "q066", "query": "leonardo da vinci paintings", "lang": "en", "domain": "people", "relevant": {"wsp:wikipedia-en-zim/Leonardo_da_Vinci": 2, "wsp:wikipedia-en-zim/Mona_Lisa": 1}}
+{"id": "q067", "query": "albert einstein theory of relativity", "lang": "en", "domain": "people", "relevant": {"wsp:wikipedia-en-zim/Theory_of_relativity": 2, "wsp:wikipedia-en-zim/Albert_Einstein": 1}}
+{"id": "q068", "query": "who was cleopatra", "lang": "en", "domain": "people", "relevant": {"wsp:wikipedia-en-zim/Cleopatra": 2}}
+{"id": "q069", "query": "mahatma gandhi nonviolent resistance", "lang": "en", "domain": "people", "relevant": {"wsp:wikipedia-en-zim/Mahatma_Gandhi": 2, "wsp:wikipedia-en-zim/Satyagraha": 1}}
+{"id": "q070", "query": "charles darwin voyage of the beagle", "lang": "en", "domain": "people", "relevant": {"wsp:wikipedia-en-zim/Charles_Darwin": 2, "wsp:wikipedia-en-zim/Second_voyage_of_HMS_Beagle": 1}}
+{"id": "q071", "query": "books by mary shelley", "lang": "en", "domain": "literature", "relevant": {"wsp:wikipedia-en-zim/Mary_Shelley": 2, "wsp:wikipedia-en-zim/Frankenstein": 1}}
+{"id": "q072", "query": "who wrote pride and prejudice", "lang": "en", "domain": "literature", "relevant": {"wsp:wikipedia-en-zim/Pride_and_Prejudice": 2, "wsp:wikipedia-en-zim/Jane_Austen": 1}}
+{"id": "q073", "query": "plot of moby dick", "lang": "en", "domain": "literature", "relevant": {"wsp:wikipedia-en-zim/Moby-Dick": 2, "wsp:wikipedia-en-zim/Herman_Melville": 1}}
+{"id": "q074", "query": "shakespeare tragedy about a danish prince", "lang": "en", "domain": "literature", "relevant": {"wsp:wikipedia-en-zim/Hamlet": 2, "wsp:wikipedia-en-zim/William_Shakespeare": 1}}
+{"id": "q075", "query": "author of one hundred years of solitude", "lang": "en", "domain": "literature", "relevant": {"wsp:wikipedia-en-zim/One_Hundred_Years_of_Solitude": 2, "wsp:wikipedia-en-zim/Gabriel_García_Márquez": 1}}
+{"id": "q076", "query": "the odyssey homer summary", "lang": "en", "domain": "literature", "relevant": {"wsp:wikipedia-en-zim/Odyssey": 2, "wsp:wikipedia-en-zim/Homer": 1}}
+{"id": "q077", "query": "dystopian novel about big brother", "lang": "en", "domain": "literature", "relevant": {"wsp:wikipedia-en-zim/Nineteen_Eighty-Four": 2, "wsp:wikipedia-en-zim/George_Orwell": 1}}
+{"id": "q078", "query": "who painted the starry night", "lang": "en", "domain": "arts", "relevant": {"wsp:wikipedia-en-zim/The_Starry_Night": 2, "wsp:wikipedia-en-zim/Vincent_van_Gogh": 1}}
+{"id": "q079", "query": "beethoven ninth symphony", "lang": "en", "domain": "arts", "relevant": {"wsp:wikipedia-en-zim/Symphony_No._9_(Beethoven)": 2, "wsp:wikipedia-en-zim/Ludwig_van_Beethoven": 1}}
+{"id": "q080", "query": "what is impressionism in painting", "lang": "en", "domain": "arts", "relevant": {"wsp:wikipedia-en-zim/Impressionism": 2}}
+{"id": "q081", "query": "baroque music composers", "lang": "en", "domain": "arts", "relevant": {"wsp:wikipedia-en-zim/Baroque_music": 2, "wsp:wikipedia-en-zim/Johann_Sebastian_Bach": 1}}
+{"id": "q082", "query": "pythagorean theorem proof", "lang": "en", "domain": "math", "relevant": {"wsp:wikipedia-en-zim/Pythagorean_theorem": 2}}
+{"id": "q083", "query": "what is a prime number", "lang": "en", "domain": "math", "relevant": {"wsp:wikipedia-en-zim/Prime_number": 2}}
+{"id": "q084", "query": "fermat's last theorem proof by wiles", "lang": "en", "domain": "math", "relevant": {"wsp:wikipedia-en-zim/Fermat's_Last_Theorem": 2, "wsp:wikipedia-en-zim/Andrew_Wiles": 1}}
+{"id": "q085", "query": "what is calculus used for", "lang": "en", "domain": "math", "relevant": {"wsp:wikipedia-en-zim/Calculus": 2}}
+{"id": "q086", "query": "euler's identity", "lang": "en", "domain": "math", "relevant": {"wsp:wikipedia-en-zim/Euler's_identity": 2}}
+{"id": "q087", "query": "the golden ratio", "lang": "en", "domain": "math", "relevant": {"wsp:wikipedia-en-zim/Golden_ratio": 2}}
+{"id": "q088", "query": "how does the electoral college work", "lang": "en", "domain": "society", "relevant": {"wsp:wikipedia-en-zim/United_States_Electoral_College": 2}}
+{"id": "q089", "query": "what is inflation in economics", "lang": "en", "domain": "society", "relevant": {"wsp:wikipedia-en-zim/Inflation": 2}}
+{"id": "q090", "query": "universal declaration of human rights", "lang": "en", "domain": "society", "relevant": {"wsp:wikipedia-en-zim/Universal_Declaration_of_Human_Rights": 2}}
+{"id": "q091", "query": "how does the european union parliament work", "lang": "en", "domain": "society", "relevant": {"wsp:wikipedia-en-zim/European_Parliament": 2, "wsp:wikipedia-en-zim/European_Union": 1}}
+{"id": "q092", "query": "supply and demand", "lang": "en", "domain": "society", "relevant": {"wsp:wikipedia-en-zim/Supply_and_demand": 2}}
+{"id": "q093", "query": "how to make bread rise yeast", "lang": "en", "domain": "everyday", "relevant": {"wsp:wikipedia-en-zim/Bread": 2, "wsp:wikipedia-en-zim/Baker's_yeast": 1, "wsp:wikipedia-en-zim/Leavening_agent": 1}}
+{"id": "q094", "query": "how to tie a bowline knot", "lang": "en", "domain": "everyday", "relevant": {"wsp:wikipedia-en-zim/Bowline": 2}}
+{"id": "q095", "query": "how does a refrigerator keep food cold", "lang": "en", "domain": "everyday", "relevant": {"wsp:wikipedia-en-zim/Refrigerator": 2, "wsp:wikipedia-en-zim/Vapor-compression_refrigeration": 1}}
+{"id": "q096", "query": "how to brew coffee espresso", "lang": "en", "domain": "everyday", "relevant": {"wsp:wikipedia-en-zim/Espresso": 2, "wsp:wikipedia-en-zim/Coffee": 1}}
+{"id": "q097", "query": "how do solar panels produce electricity", "lang": "en", "domain": "everyday", "relevant": {"wsp:wikipedia-en-zim/Solar_panel": 2, "wsp:wikipedia-en-zim/Photovoltaic_effect": 1, "wsp:wikipedia-en-zim/Solar_cell": 1}}
+{"id": "q098", "query": "define sesquipedalian", "lang": "en", "domain": "define", "relevant": {"wsp:wikipedia-en-zim/Verbosity": 2, "wsp:wikipedia-en-zim/Longest_words": 1}}
+{"id": "q099", "query": "define photosynthesis", "lang": "en", "domain": "define", "relevant": {"wsp:wikipedia-en-zim/Photosynthesis": 2}}
+{"id": "q100", "query": "meaning of serendipity", "lang": "en", "domain": "define", "relevant": {"wsp:wikipedia-en-zim/Serendipity": 2}}
+{"id": "q101", "query": "definition of democracy", "lang": "en", "domain": "define", "relevant": {"wsp:wikipedia-en-zim/Democracy": 2}}
+{"id": "q102", "query": "alligator vs crocodile", "lang": "en", "domain": "compare", "relevant": {"wsp:wikipedia-en-zim/Alligator": 2, "wsp:wikipedia-en-zim/Crocodile": 2, "wsp:wikipedia-en-zim/Crocodylia": 1}}
+{"id": "q103", "query": "compare mitosis and meiosis", "lang": "en", "domain": "compare", "relevant": {"wsp:wikipedia-en-zim/Mitosis": 2, "wsp:wikipedia-en-zim/Meiosis": 2}}
+{"id": "q104", "query": "python vs java programming language", "lang": "en", "domain": "compare", "relevant": {"wsp:wikipedia-en-zim/Python_(programming_language)": 2, "wsp:wikipedia-en-zim/Java_(programming_language)": 2}}
+{"id": "q105", "query": "weather versus climate", "lang": "en", "domain": "compare", "relevant": {"wsp:wikipedia-en-zim/Climate": 2, "wsp:wikipedia-en-zim/Weather": 2}}
+{"id": "q106", "query": "wikipedia Alan Turing", "lang": "en", "domain": "navigate", "relevant": {"wsp:wikipedia-en-zim/Alan_Turing": 2}}
+{"id": "q107", "query": "Photosynthesis", "lang": "en", "domain": "navigate", "relevant": {"wsp:wikipedia-en-zim/Photosynthesis": 2}}
+{"id": "q108", "query": "Mount Everest", "lang": "en", "domain": "navigate", "relevant": {"wsp:wikipedia-en-zim/Mount_Everest": 2}}
+{"id": "q109", "query": "Eiffel Tower", "lang": "en", "domain": "navigate", "relevant": {"wsp:wikipedia-en-zim/Eiffel_Tower": 2}}
+{"id": "q110", "query": "how do bees make honey", "lang": "en", "domain": "nature", "relevant": {"wsp:wikipedia-en-zim/Honey": 2, "wsp:wikipedia-en-zim/Honey_bee": 1}}
+{"id": "q111", "query": "largest animal that ever lived", "lang": "en", "domain": "nature", "relevant": {"wsp:wikipedia-en-zim/Blue_whale": 2}}
+{"id": "q112", "query": "why do leaves change color in autumn", "lang": "en", "domain": "nature", "relevant": {"wsp:wikipedia-en-zim/Autumn_leaf_color": 2}}
+{"id": "q113", "query": "how do birds migrate", "lang": "en", "domain": "nature", "relevant": {"wsp:wikipedia-en-zim/Bird_migration": 2}}
+{"id": "q114", "query": "what do pandas eat", "lang": "en", "domain": "nature", "relevant": {"wsp:wikipedia-en-zim/Giant_panda": 2, "wsp:wikipedia-en-zim/Bamboo": 1}}
+{"id": "q115", "query": "wie funktioniert die Photosynthese", "lang": "de", "domain": "multilingual", "relevant": {"wsp:wikipedia-en-zim/Photosynthesis": 2}}
+{"id": "q116", "query": "Ursachen des Ersten Weltkriegs", "lang": "de", "domain": "multilingual", "relevant": {"wsp:wikipedia-en-zim/Causes_of_World_War_I": 2, "wsp:wikipedia-en-zim/World_War_I": 1}}
+{"id": "q117", "query": "qui a peint la Joconde", "lang": "fr", "domain": "multilingual", "relevant": {"wsp:wikipedia-en-zim/Mona_Lisa": 2, "wsp:wikipedia-en-zim/Leonardo_da_Vinci": 1}}
+{"id": "q118", "query": "comment fonctionne un vaccin", "lang": "fr", "domain": "multilingual", "relevant": {"wsp:wikipedia-en-zim/Vaccine": 2, "wsp:wikipedia-en-zim/Vaccination": 1}}
+{"id": "q119", "query": "cuál es el río más largo del mundo", "lang": "es", "domain": "multilingual", "relevant": {"wsp:wikipedia-en-zim/Nile": 2, "wsp:wikipedia-en-zim/Amazon_River": 1, "wsp:wikipedia-en-zim/List_of_river_systems_by_length": 1}}
+{"id": "q120", "query": "quién escribió Don Quijote", "lang": "es", "domain": "multilingual", "relevant": {"wsp:wikipedia-en-zim/Don_Quixote": 2, "wsp:wikipedia-en-zim/Miguel_de_Cervantes": 1}}
+{"id": "q121", "query": "chi ha scoperto la penicillina", "lang": "it", "domain": "multilingual", "relevant": {"wsp:wikipedia-en-zim/Alexander_Fleming": 2, "wsp:wikipedia-en-zim/Penicillin": 1, "wsp:wikipedia-en-zim/History_of_penicillin": 1}}
+{"id": "q122", "query": "hoe werkt een kerncentrale", "lang": "nl", "domain": "multilingual", "relevant": {"wsp:wikipedia-en-zim/Nuclear_power_plant": 2, "wsp:wikipedia-en-zim/Nuclear_reactor": 1, "wsp:wikipedia-en-zim/Nuclear_power": 1}}
+{"id": "q123", "query": "kim była Maria Skłodowska-Curie", "lang": "pl", "domain": "multilingual", "relevant": {"wsp:wikipedia-en-zim/Marie_Curie": 2}}
+{"id": "q124", "query": "теория относительности Эйнштейна", "lang": "ru", "domain": "multilingual", "relevant": {"wsp:wikipedia-en-zim/Theory_of_relativity": 2, "wsp:wikipedia-en-zim/Albert_Einstein": 1}}
+{"id": "q125", "query": "varför är himlen blå", "lang": "sv", "domain": "multilingual", "relevant": {"wsp:wikipedia-en-zim/Rayleigh_scattering": 2, "wsp:wikipedia-en-zim/Diffuse_sky_radiation": 1}}

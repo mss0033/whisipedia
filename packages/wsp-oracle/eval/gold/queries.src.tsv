@@ -1,0 +1,129 @@
+# Gold query source: one query per line, TAB-separated.
+# columns: id  domain  lang  query  primary titles (| separated, grade 2)  related titles (| separated, grade 1)
+# Titles are resolved to canonical doc ids against a Wikipedia ZIM by eval/resolve_titles.py, which
+# writes queries.jsonl. Add lines here and re-run it; the set is meant to grow toward PLAN §9.5's 500.
+q001	science	en	how do vaccines train the immune system	Vaccine	Adaptive immune system|Immune system|Vaccination
+q002	science	en	why is the sky blue	Rayleigh scattering	Diffuse sky radiation
+q003	science	en	what causes the seasons on earth	Season	Axial tilt
+q004	science	en	how does photosynthesis work	Photosynthesis	Chlorophyll|Calvin cycle
+q005	science	en	what is dark matter	Dark matter	Dark energy
+q006	science	en	speed of light in vacuum	Speed of light
+q007	science	en	how do black holes form	Black hole	Stellar black hole
+q008	science	en	theory explaining the origin of species by natural selection	Natural selection	On the Origin of Species|Evolution
+q009	science	en	what is quantum entanglement	Quantum entanglement
+q010	science	en	how does a nuclear reactor generate electricity	Nuclear reactor	Nuclear power
+q011	science	en	half-life of carbon-14 dating	Radiocarbon dating	Carbon-14
+q012	science	en	structure of the DNA double helix	Nucleic acid double helix	DNA
+q013	science	en	plate tectonics and earthquakes	Plate tectonics	Earthquake
+q014	science	en	what is entropy in thermodynamics	Entropy	Second law of thermodynamics
+q015	science	en	why do we have tides	Tide
+q016	medicine	en	symptoms of type 2 diabetes	Type 2 diabetes	Diabetes
+q017	medicine	en	how does penicillin kill bacteria	Penicillin	Beta-lactam antibiotic
+q018	medicine	en	what is a stroke and its warning signs	Stroke
+q019	medicine	en	treatment for high blood pressure	Hypertension	Antihypertensive drug
+q020	medicine	en	how is malaria transmitted	Malaria	Anopheles
+q021	medicine	en	what does the pancreas do	Pancreas	Insulin
+q022	medicine	en	difference between a virus and a bacterium	Virus|Bacteria
+q023	medicine	en	what causes migraine headaches	Migraine
+q024	medicine	en	first aid for a heart attack	Myocardial infarction	Cardiopulmonary resuscitation
+q025	medicine	en	how does general anesthesia work	General anaesthesia
+q026	history	en	causes of the first world war	Causes of World War I	World War I
+q027	history	en	fall of the western roman empire	Fall of the Western Roman Empire	Western Roman Empire
+q028	history	en	who built the great pyramid of giza	Great Pyramid of Giza	Khufu
+q029	history	en	what was the cold war	Cold War
+q030	history	en	french revolution storming of the bastille	Storming of the Bastille	French Revolution
+q031	history	en	when did the berlin wall fall	Fall of the Berlin Wall	Berlin Wall
+q032	history	en	the black death plague in medieval europe	Black Death
+q033	history	en	apollo 11 moon landing	Apollo 11	Moon landing
+q034	history	en	what was the magna carta	Magna Carta
+q035	history	en	industrial revolution in britain	Industrial Revolution
+q036	history	en	who was genghis khan	Genghis Khan	Mongol Empire
+q037	history	en	the printing press of gutenberg	Printing press	Johannes Gutenberg
+q038	history	en	end of apartheid in south africa	Apartheid	Nelson Mandela
+q039	geography	en	map of Lisbon	Lisbon
+q040	geography	en	where is mount kilimanjaro	Mount Kilimanjaro
+q041	geography	en	longest river in the world	Nile	Amazon River|List of river systems by length
+q042	geography	en	capital of australia	Canberra	Australia
+q043	geography	en	where is the great barrier reef	Great Barrier Reef
+q044	geography	en	the sahara desert climate	Sahara
+q045	geography	en	deepest point in the ocean	Challenger Deep	Mariana Trench
+q046	geography	en	largest lake in africa	Lake Victoria
+q047	geography	en	where do the andes mountains run	Andes
+q048	geography	en	volcano that destroyed pompeii	Mount Vesuvius	Eruption of Mount Vesuvius in 79 AD|Pompeii
+q049	computing	en	rfc about http caching	HTTP caching	Hypertext Transfer Protocol
+q050	computing	en	how does public key cryptography work	Public-key cryptography	RSA cryptosystem
+q051	computing	en	what is a turing machine	Turing machine
+q052	computing	en	how does the domain name system resolve names	Domain Name System
+q053	computing	en	difference between tcp and udp	Transmission Control Protocol|User Datagram Protocol
+q054	computing	en	who invented the world wide web	World Wide Web	Tim Berners-Lee
+q055	computing	en	how does a hash table work	Hash table
+q056	computing	en	what is machine learning	Machine learning
+q057	computing	en	linux kernel creator	Linux kernel	Linus Torvalds|Linux
+q058	computing	en	quicksort algorithm complexity	Quicksort
+q059	computing	en	what is the transformer neural network architecture	Transformer (deep learning architecture)	Attention (machine learning)
+q060	computing	en	how does wifi work	Wi-Fi	IEEE 802.11
+q061	computing	en	the enigma machine codebreaking at bletchley park	Enigma machine	Bletchley Park|Cryptanalysis of the Enigma
+q062	people	en	Alan Turing	Alan Turing
+q063	people	en	who was ada lovelace	Ada Lovelace	Analytical engine
+q064	people	en	marie curie discoveries	Marie Curie	Polonium|Radium
+q065	people	en	what did isaac newton discover	Isaac Newton	Newton's laws of motion
+q066	people	en	leonardo da vinci paintings	Leonardo da Vinci	Mona Lisa
+q067	people	en	albert einstein theory of relativity	Theory of relativity	Albert Einstein
+q068	people	en	who was cleopatra	Cleopatra
+q069	people	en	mahatma gandhi nonviolent resistance	Mahatma Gandhi	Satyagraha
+q070	people	en	charles darwin voyage of the beagle	Charles Darwin	Second voyage of HMS Beagle
+q071	literature	en	books by mary shelley	Mary Shelley	Frankenstein
+q072	literature	en	who wrote pride and prejudice	Pride and Prejudice	Jane Austen
+q073	literature	en	plot of moby dick	Moby-Dick	Herman Melville
+q074	literature	en	shakespeare tragedy about a danish prince	Hamlet	William Shakespeare
+q075	literature	en	author of one hundred years of solitude	One Hundred Years of Solitude	Gabriel García Márquez
+q076	literature	en	the odyssey homer summary	Odyssey	Homer
+q077	literature	en	dystopian novel about big brother	Nineteen Eighty-Four	George Orwell
+q078	arts	en	who painted the starry night	The Starry Night	Vincent van Gogh
+q079	arts	en	beethoven ninth symphony	Symphony No. 9 (Beethoven)	Ludwig van Beethoven
+q080	arts	en	what is impressionism in painting	Impressionism
+q081	arts	en	baroque music composers	Baroque music	Johann Sebastian Bach
+q082	math	en	pythagorean theorem proof	Pythagorean theorem
+q083	math	en	what is a prime number	Prime number
+q084	math	en	fermat's last theorem proof by wiles	Fermat's Last Theorem	Andrew Wiles
+q085	math	en	what is calculus used for	Calculus
+q086	math	en	euler's identity	Euler's identity
+q087	math	en	the golden ratio	Golden ratio
+q088	society	en	how does the electoral college work	United States Electoral College
+q089	society	en	what is inflation in economics	Inflation
+q090	society	en	universal declaration of human rights	Universal Declaration of Human Rights
+q091	society	en	how does the european union parliament work	European Parliament	European Union
+q092	society	en	supply and demand	Supply and demand
+q093	everyday	en	how to make bread rise yeast	Bread	Baker's yeast|Leavening agent
+q094	everyday	en	how to tie a bowline knot	Bowline
+q095	everyday	en	how does a refrigerator keep food cold	Refrigerator	Vapor-compression refrigeration
+q096	everyday	en	how to brew coffee espresso	Espresso	Coffee
+q097	everyday	en	how do solar panels produce electricity	Solar panel	Photovoltaic effect|Solar cell
+q098	define	en	define sesquipedalian	Sesquipedalianism	Long words
+q099	define	en	define photosynthesis	Photosynthesis
+q100	define	en	meaning of serendipity	Serendipity
+q101	define	en	definition of democracy	Democracy
+q102	compare	en	alligator vs crocodile	Alligator|Crocodile	Crocodilia
+q103	compare	en	compare mitosis and meiosis	Mitosis|Meiosis
+q104	compare	en	python vs java programming language	Python (programming language)|Java (programming language)
+q105	compare	en	weather versus climate	Climate|Weather
+q106	navigate	en	wikipedia Alan Turing	Alan Turing
+q107	navigate	en	Photosynthesis	Photosynthesis
+q108	navigate	en	Mount Everest	Mount Everest
+q109	navigate	en	Eiffel Tower	Eiffel Tower
+q110	nature	en	how do bees make honey	Honey	Honey bee
+q111	nature	en	largest animal that ever lived	Blue whale
+q112	nature	en	why do leaves change color in autumn	Autumn leaf color
+q113	nature	en	how do birds migrate	Bird migration
+q114	nature	en	what do pandas eat	Giant panda	Bamboo
+q115	multilingual	de	wie funktioniert die Photosynthese	Photosynthesis
+q116	multilingual	de	Ursachen des Ersten Weltkriegs	Causes of World War I	World War I
+q117	multilingual	fr	qui a peint la Joconde	Mona Lisa	Leonardo da Vinci
+q118	multilingual	fr	comment fonctionne un vaccin	Vaccine	Vaccination
+q119	multilingual	es	cuál es el río más largo del mundo	Nile	Amazon River|List of river systems by length
+q120	multilingual	es	quién escribió Don Quijote	Don Quixote	Miguel de Cervantes
+q121	multilingual	it	chi ha scoperto la penicillina	Alexander Fleming	Penicillin|History of penicillin
+q122	multilingual	nl	hoe werkt een kerncentrale	Nuclear power plant	Nuclear reactor|Nuclear power
+q123	multilingual	pl	kim była Maria Skłodowska-Curie	Marie Curie
+q124	multilingual	ru	теория относительности Эйнштейна	Theory of relativity	Albert Einstein
+q125	multilingual	sv	varför är himlen blå	Rayleigh scattering	Diffuse sky radiation

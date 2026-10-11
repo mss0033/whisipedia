@@ -1,0 +1,8 @@
+{"id": "f01", "query": "how do vaccines train the immune system", "lang": "en", "domain": "medicine", "relevant": {"wsp:encyclo/Vaccine": 2, "wsp:encyclo/Immune_system": 1}}
+{"id": "f02", "query": "why is the sky blue", "lang": "en", "domain": "science", "relevant": {"wsp:encyclo/Rayleigh_scattering": 2}}
+{"id": "f03", "query": "map of Lisbon", "lang": "en", "domain": "geography", "relevant": {"wsp:encyclo/Lisbon": 2}}
+{"id": "f04", "query": "alligator vs crocodile", "lang": "en", "domain": "compare", "relevant": {"wsp:encyclo/Alligator": 2, "wsp:encyclo/Crocodile": 2}}
+{"id": "f05", "query": "Alan Turing", "lang": "en", "domain": "people", "relevant": {"wsp:encyclo/Alan_Turing": 2, "wsp:encyclo/Turing_machine": 1}}
+{"id": "f06", "query": "define serendipity", "lang": "en", "domain": "define", "relevant": {"wsp:dictionary/serendipity": 2}}
+{"id": "f07", "query": "rfc about http caching", "lang": "en", "domain": "computing", "relevant": {"wsp:rfc/9111": 2}}
+{"id": "f08", "query": "capital of Portugal", "lang": "en", "domain": "geography", "relevant": {"wsp:encyclo/Lisbon": 2}}
