@@ -159,10 +159,12 @@ class Indexer:
 
     def close(self) -> None:
         """Close whatever was opened (idempotent)."""
-        if self._index is not None:
-            self._index.close()
-        if self._feed is not None:
-            self._feed.close()
+        try:
+            if self._index is not None:
+                self._index.close()
+        finally:
+            if self._feed is not None:
+                self._feed.close()
 
     def finish(self) -> None:
         """After a run that changed the index: rebuild the suggest trie once (bulk commits defer it)."""
