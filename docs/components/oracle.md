@@ -36,7 +36,13 @@ query ─► Router ─┬─► lexical rewrite ─► TantivyIndex (BM25, top 
   and section head every passage, and reference sections are skipped. Ids are `<doc_id>#<n>`
   and depend only on the text. `DocVectorIndex` keeps each document's best passage, so fusion stays
   at document level and the reranker sees the passage that matched.
-* **Fusion** is `wsp_index.HybridSearcher` unchanged. Dense-only hits get titles from
+* **Site scope.** A site named in the query restricts the search to its sources only when that
+  site has a match; otherwise the whole library is searched with the full query text and
+  `OracleResult.scope.fallback` is set. `OracleIndex.search_hits` (the API's window for totals and
+  facets) is routed the same way, so totals, facets and results always describe one scope
+  (`rfc 9110` used to show 0 hits next to 28 in the facets).
+* **Fusion** is `wsp_index.HybridSearcher`, with the PageRank static rank as a multiplicative
+  boost (`static_rank_weight`; see `docs/components/index.md`). Dense-only hits get titles from
   `TantivyIndex.lookup`.
 * **Reranking** runs only with a GPU (or `reranker.cpu_fallback = true`). The best reranker
   probability is the retrieval confidence; below 0.05 the result is flagged `low_confidence`.
@@ -109,6 +115,8 @@ Every key is optional; unknown keys are rejected.
 | `rrf_k`, `lexical_weight`, `dense_weight` | `60`, `1.0`, `2.0` | fusion (dense counts double: measured, ADR-0007) |
 | `depth` | `50` | candidates per retriever |
 | `source_priors` | `{}` | multiplicative prior per source id |
+| `static_rank_weight` | `0.1` | fusion boost `1 + w * feature` from PageRank (0 = off) |
+| `spelling` | `true` | "did you mean" from `lexical/spelling.bin` |
 | `chunk_words`, `max_chunks_per_doc` | `200`, `256` | chunker |
 | `cache_size` | `256` | result lists kept for paging and facets |
 | `budget_ms` | `100` | logged when a query exceeds it |
@@ -143,7 +151,8 @@ which is what the API serves today.
 ## Evaluation (PLAN §9.5)
 
 ```
-uv run --extra gpu wsp-oracle-eval --modes lexical,hybrid,full [--index-root DIR] --out report.json
+uv run wsp-oracle-eval --modes lexical,hybrid,full [--index-root DIR] \
+    [--rank-weights 0/0,1/0,0/0.1,1/0.1] [--typos] --out report.json
 ```
 
 The gold set `eval/gold/queries.jsonl` (125 hand-written queries across 14 domains, 10 of them
@@ -152,6 +161,29 @@ non-English, graded `relevant` doc ids) is generated from `eval/gold/queries.src
 ids. Add lines to the TSV and re-run; the set is meant to grow toward 500. Metrics: nDCG@10 (gains
 `2^g - 1`), Recall@50, MRR, latency p50/p95/p99, per-domain nDCG. `tests/test_oracle_pipeline.py` runs the
 same harness on `eval/gold/fixture.jsonl` in CI with deterministic fakes.
+
+Ablations (learning-to-rank ready: each feature is measured on the gold set before its default moves):
+
+* `--rank-weights lw/fw,...` reruns the first mode with the PageRank weight in the lexical index (`lw`)
+  and in fusion (`fw`); `0/0` is "no PageRank".
+* `--typos` makes one deterministic one-edit typo in the longest word of every gold query (first
+  letter kept) and reports nDCG@10 for the clean queries, the typo'd ones, and the typo'd ones after
+  the "did you mean" correction (unknown words corrected, as the search page does).
+
+Results on the 20,000-document English Wikipedia sample (lexical mode, `bench/wiki20k` copied to a
+scratch directory; 2026-10-10):
+
+| run | nDCG@10 | R@50 | MRR |
+|---|---|---|---|
+| lexical, no PageRank | 0.787 | 0.897 | 0.854 |
+| lexical, PageRank 0.5…4 / fusion 0.05…0.2 (10 settings) | 0.787 | 0.897 | 0.854 |
+| one-typo queries (121 of 125 changed) | 0.570 | | |
+| one-typo queries after "did you mean" (104 restored exactly) | **0.780** | | |
+
+The sample is drawn from the Kiwix ZIM, whose documents carry no links, so its static rank is flat
+and PageRank cannot change the order there; the PageRank effect has to be measured on an index
+that holds the `wikipedia-en` dump (which has links). Spelling recovers 0.21 of the 0.22 nDCG lost
+to typos.
 
 Benchmarks: `scripts/sample_zim.py` writes a sample Refinery generation from a ZIM (the gold
 documents, their linked articles as distractors, and random article runs);

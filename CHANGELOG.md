@@ -4,6 +4,14 @@ All notable changes are documented here. The format follows [Keep a Changelog](h
 
 ## [Unreleased]
 ### Added
+- Link-analysis static rank: per-source and cross-source PageRank over `DocRecord.links`, computed
+  offline in bounded memory (`wsp index rank`, also the last step of `wsp index build`), blended into
+  BM25 and fusion, and used for suggest priors and the portal's featured article.
+- "Did you mean": noisy-channel spelling correction over the index's own vocabulary (symmetric-delete
+  candidates), offered only for sparse or low-score results (`wsp index spell`).
+- `SearchResults.scope` (API 1.3.0): a query naming a site reports where it was searched; the
+  Navigator says quietly when it fell back to the whole library.
+- Eval harness: `--rank-weights` and `--typos` ablations.
 - `wsp-oracle` (Phase 3, ADR-0007): section-aware passages, a multilingual embedder on the GPU,
   a binary-HNSW + int8 vector store, a deterministic query router, hybrid retrieval with
   cross-encoder reranking, a resumable embedding job
@@ -43,6 +51,8 @@ All notable changes are documented here. The format follows [Keep a Changelog](h
   `[oracle.generator]`, `[api] demo_generator` and the summary-faithfulness evaluation. The results
   page is fully extractive; dense retrieval and reranking stay.
 ### Changed
+- Search totals and facets now count the same routed scope as the results (`rfc 9110` showed 0 hits
+  with 28 in the facets).
 - A registry source without `update.cadence` follows `acquirer.cycle`; explicit cadences are always
   overrides (`acquirer.follow_cycle_cadences` removed). `pytest` is now the optional `wsp-core[testing]` extra.
 - Default update cycle is monthly instead of weekly, with quarterly as a single config option (PLAN §6.7).

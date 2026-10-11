@@ -71,7 +71,7 @@ compression measured. Groups larger than 1,024 rows push lookups past the API bu
 
 Every title and alias becomes one key, `normalized\x1fTitle\x1fdoc_id`, stored in a MARISA trie
 (`marisa-trie`, mmapped) with a float32 score. The score is `prior + 1/(1+len(title))`, where
-`prior = log1p(inbound links)` is set with `set_priors`. Very short prefixes match too many keys to
+`prior` is the static-rank feature (PageRank, below) set with `set_priors` by `wsp index rank`. Very short prefixes match too many keys to
 rank on every keystroke, so at build time each prefix with more than 512 completions stores its
 top 32 keys in a second trie. Every other prefix ranks at most 512 candidates. Between rebuilds,
 incremental changes go to an in-memory overlay. The overlay is folded into the trie on commit once
@@ -90,6 +90,63 @@ Python object, though: several GB of heap for the ~20M titles and aliases of the
 full rebuild on every start. The MARISA tries are mmapped, so they open instantly and are shared by
 worker processes. They are 2.3 times smaller and stay about 70 times inside the budget at p99. The heavy-prefix
 table is what keeps p99 flat for one- and two-letter prefixes.
+
+## Static rank: PageRank over the link graph
+
+`wsp_index.linkrank` computes a link-analysis prior offline. `wsp index rank` runs it alone; `wsp index
+build` runs it last whenever something changed (`--no-rank` skips it).
+
+* **Graph.** Nodes are the documents of every source's current Refinery generation; edges are
+  `DocRecord.links` that start with `wsp:`. Targets resolve with `pyarrow.compute.index_in` (C++): the
+  exact doc id first, then a loose key (lower case, `_` as space, no `#fragment`) that also covers
+  redirects and aliases from `meta.sqlite`. Self-links and duplicate links are dropped. Edges go to an
+  on-disk list under `work/_rank/`, split into links inside one source and links across sources.
+* **Ranks.** One streamed power iteration (damping 0.85, L1 tolerance 1e-6, at most 50 rounds) yields
+  two PageRanks: **per source** (only links inside the source; teleport and dangling mass stay in the
+  source) and **global** (the whole cross-source graph). With one source they are the same and only
+  one is computed.
+* **Feature.** `(1 - mix) * log1p(pr_source * N_source) + mix * log1p(pr_global * N)` with `mix = 0.5`
+  (`--mix`): ≈ 0.14 for a page nobody links to, 0.69 for an average page, 8-10 for the hubs.
+* **Sidecar.** `lexical/static_rank.bin`: sorted blake2b-64 doc-id hashes plus float32 feature and both
+  PageRanks, memory-mapped, replaced atomically; `static_rank.json` holds the build statistics. Readers
+  re-check the file every 5 s, so a rebuild needs no restart.
+* **Use.** `TantivyIndex` re-sorts its top `rank_depth` (100) BM25 hits by `bm25 + rank_weight *
+  feature` (`rank_weight` 1.0; deeper hits keep BM25 order, so paging stays stable). Oracle fusion
+  multiplies the RRF score by `1 + static_rank_weight * feature` (`[oracle] static_rank_weight`, 0.1).
+  Suggest priors are the feature (replacing raw inbound-link counts), and the portal's featured
+  article is chosen from the best-ranked long articles of each encyclopedia.
+
+Scale, measured with `scripts/bench_rank.py` under `nice -n 19 ionice -c 3`, 4 threads, on a shared
+workstation with ~2 GB of free RAM:
+
+| benchmark | result |
+|---|---|
+| graph from Parquet, 300k docs × 20 links (`graph`) | 6.0M edges resolved in 4.1 s (1.5M links/s), 12 iterations in 1.8 s, peak RSS 0.5 GB |
+| power iteration, 7M nodes / 150M edges (`iterate`, English Wikipedia scale) | 7.0 s per iteration, peak RSS 1.7 GB; ≤ 50 iterations ≈ 6 min |
+
+Link resolution at 1.5M links/s puts English Wikipedia (~150M links) at under 2 minutes. Node ids are
+held as one Arrow string array (~35 bytes per node, ~250 MB at 7M), never as Python strings.
+
+## "Did you mean" (spelling)
+
+`wsp_index.spelling` is a classic noisy-channel corrector. `wsp index spell` builds the vocabulary;
+`wsp index build` rebuilds it when something changed.
+
+* **Language model:** word counts from the indexed text (first 3,000 characters per document, at most
+  2M documents per source, titles counted ×5), tokenized in Arrow. Words of 3-24 letters; from 100k
+  documents on, words seen fewer than 3 times are dropped (the corpus's own typos); at most 500k words.
+* **Error model:** each edit (insertion, deletion, substitution, adjacent transposition) costs
+  ε = 0.01, plus one more when the first letter changes (people rarely mistype it). A word becomes
+  `argmax count(c) · ε^cost`, the word itself included, so a known word is only replaced by a much
+  more frequent neighbour.
+* **Candidates:** a symmetric-delete index (SymSpell): each word stores hashes of its variants with up
+  to two deletions in its first 7 letters; the query word's variants are binary-searched and the
+  candidates verified with the optimal-string-alignment distance. Words of 3-4 letters get one edit.
+* **File:** `lexical/spelling.bin` (hashes, counts, a UTF-8 blob, the delete index), memory-mapped and
+  replaced atomically; the API's `ReloadingSpeller` picks up a rebuild within 5 s.
+
+On the 20k-document Wikipedia sample: 228,691 words and 5.3M delete keys (built in 10 s, 70 MB); a
+correction takes 1-4 ms per query.
 
 ## Benchmarks
 
@@ -114,6 +171,10 @@ Search stays well inside the 30 ms lexical budget at this size. Latency grows ro
 list length, so check the result again on the real English Wikipedia index (35× larger).
 
 ## Known gaps
+
+- Documents from Kiwix ZIMs carry no `links` (the ZIM adapter does not extract them), so
+  `wikipedia-en-zim` gets a flat static rank; the link graph comes from the dump source
+  (`wikipedia-en`) and the other adapters that emit `wsp:` links.
 
 - `DocRecord.aliases` (Refinery format 2) are added to the suggest aliases on upsert; redirects still come in through `TantivyIndex.set_aliases` (`wsp index build` does this).
 - Suggest matches title prefixes only. It does not complete words in the middle of a title.
