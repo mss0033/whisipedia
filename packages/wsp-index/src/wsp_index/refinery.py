@@ -42,6 +42,7 @@ from wsp_core.model import ChangeKind, ChangeRecord, DocRecord
 FORMAT_VERSION = 2  # 2: ``aliases`` column (port revision v0.2); older generations are rebuilt
 SUCCESS_FILE = "_SUCCESS.json"
 IDS_FILE = "_ids.parquet"
+SHADOW_FILE = "_shadowed.parquet"  # rows superseded by a later row with the same doc_id
 CURRENT_FILE = "CURRENT.txt"
 
 DEFAULT_ROW_GROUP_ROWS = 256
@@ -214,6 +215,7 @@ class RefineryWriter:
         self._parts = 0
         self._bytes = 0
         self._docs = 0
+        self._dropped = 0  # duplicate ids dropped within one part file
         self._idx_h: list[npt.NDArray[np.uint64]] = []
         self._idx_loc: list[npt.NDArray[np.uint32]] = []
         self._closed = False
@@ -243,10 +245,14 @@ class RefineryWriter:
     def _flush(self) -> None:
         if not self._buf:
             return
-        self._buf.sort(key=lambda r: r.doc_id)
-        for a, b in zip(self._buf, self._buf[1:], strict=False):
-            if a.doc_id == b.doc_id:
-                raise DuplicateDocIdError(a.doc_id)
+        self._buf.sort(key=lambda r: r.doc_id)  # stable: equal ids stay in arrival order
+        deduped = [
+            r
+            for r, nxt in zip(self._buf, [*self._buf[1:], None], strict=True)
+            if nxt is None or nxt.doc_id != r.doc_id
+        ]
+        self._dropped += len(self._buf) - len(deduped)  # an id repeated within the file: last arrival wins
+        self._buf = deduped
         table = pa.Table.from_pylist([_to_row(r) for r in self._buf], schema=SCHEMA)
         name = f"part-{self._parts:05d}.parquet"
         final = self.dir / name
@@ -289,7 +295,9 @@ class RefineryWriter:
         loc = np.concatenate(self._idx_loc) if self._idx_loc else np.empty((0, 3), np.uint32)
         order = np.argsort(h, kind="stable")
         h, loc = h[order], loc[order]
-        self._check_cross_file_duplicates(h, loc)
+        keep = self._shadow_duplicates(h, loc)
+        shadowed = int(len(h) - int(keep.sum()))
+        h, loc = h[keep], loc[keep]
         ids = pa.Table.from_arrays(
             [pa.array(h), pa.array(loc[:, 0]), pa.array(loc[:, 1]), pa.array(loc[:, 2])],
             schema=_IDS_SCHEMA,
@@ -297,19 +305,31 @@ class RefineryWriter:
         partial = self.dir / (IDS_FILE + ".partial")
         pq.write_table(ids, partial, compression="zstd", row_group_size=1 << 20)  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
         _atomic_replace(partial, self.dir / IDS_FILE)
-        success = {"format": FORMAT_VERSION, "docs": self._docs, "parts": self._parts}
+        success = {
+            "format": FORMAT_VERSION,
+            "docs": self._docs - shadowed,
+            "parts": self._parts,
+            "shadowed": shadowed + self._dropped,
+        }
         partial = self.dir / (SUCCESS_FILE + ".partial")
         partial.write_text(json.dumps(success, sort_keys=True) + "\n", encoding="utf-8")
         _atomic_replace(partial, self.dir / SUCCESS_FILE)
         self._closed = True
         return WriteStats(self._docs, self._parts, self._bytes)
 
-    def _check_cross_file_duplicates(self, h: npt.NDArray[np.uint64], loc: npt.NDArray[np.uint32]) -> None:
+    def _shadow_duplicates(
+        self, h: npt.NDArray[np.uint64], loc: npt.NDArray[np.uint32]
+    ) -> npt.NDArray[np.bool_]:
+        """Mask of index rows to keep. A doc_id written more than once keeps its LAST row in stream order
+        (dumps can list a page twice when it is moved mid-dump; the later entry is the newer page); the
+        earlier rows are recorded in ``_shadowed.parquet`` so scans skip them. Hash collisions between
+        different ids are kept."""
+        keep = np.ones(len(h), dtype=np.bool_)
         if len(h) < 2:
-            return
+            return keep
         dup = np.nonzero(h[1:] == h[:-1])[0]
         if len(dup) == 0:
-            return
+            return keep
         files: dict[int, pq.ParquetFile] = {}
 
         def doc_id_at(i: int) -> str:
@@ -318,10 +338,31 @@ class RefineryWriter:
             table = pf.read_row_group(rg, columns=["doc_id"])  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
             return cast(str, table.column(0)[row].as_py())
 
-        for i in dup.tolist():
-            a, b = doc_id_at(i), doc_id_at(i + 1)
-            if a == b:
-                raise DuplicateDocIdError(a)
+        # Runs of equal hashes; within a run, rows with the same id: keep the max (part, rg, row).
+        for i in sorted(set(dup.tolist())):
+            if i > 0 and h[i - 1] == h[i]:
+                continue  # not the start of a run
+            j = i + 1
+            while j < len(h) and h[j] == h[i]:
+                j += 1
+            groups: dict[str, list[int]] = {}
+            for k in range(i, j):
+                groups.setdefault(doc_id_at(k), []).append(k)
+            for rows in groups.values():
+                if len(rows) > 1:
+                    latest = max(rows, key=lambda k: tuple(int(x) for x in loc[k]))
+                    for k in rows:
+                        if k != latest:
+                            keep[k] = False
+        shadow = loc[~keep]
+        table = pa.Table.from_arrays(
+            [pa.array(shadow[:, 0]), pa.array(shadow[:, 1]), pa.array(shadow[:, 2])],
+            names=["part", "rg", "row"],
+        )
+        partial = self.dir / (SHADOW_FILE + ".partial")
+        pq.write_table(table, partial)  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
+        _atomic_replace(partial, self.dir / SHADOW_FILE)
+        return keep
 
 
 # --- reader ------------------------------------------------------------------------------------
@@ -345,6 +386,14 @@ class RefineryReader:
         self._part: npt.NDArray[np.uint32] = ids.column("part").to_numpy()
         self._rg: npt.NDArray[np.uint32] = ids.column("rg").to_numpy()
         self._row: npt.NDArray[np.uint32] = ids.column("row").to_numpy()
+        self._shadow: dict[int, set[tuple[int, int]]] = {}
+        if (gen_dir / SHADOW_FILE).is_file():
+            sh = pq.read_table(gen_dir / SHADOW_FILE)  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
+            parts = cast(list[int], sh.column("part").to_pylist())
+            rgs = cast(list[int], sh.column("rg").to_pylist())
+            rows = cast(list[int], sh.column("row").to_pylist())
+            for part, rg, row in zip(parts, rgs, rows, strict=True):
+                self._shadow.setdefault(part, set()).add((rg, row))
         self._files: dict[int, pq.ParquetFile] = {}
         self._cache: OrderedDict[tuple[int, int, tuple[str, ...]], pa.Table] = OrderedDict()
         self._cache_size = cache_row_groups
@@ -405,9 +454,17 @@ class RefineryReader:
         return isinstance(doc_id, str) and self.lookup(doc_id, ()) is not None
 
     def scan(self, columns: Sequence[str] = COLUMNS, *, batch_size: int = 4096) -> Iterator[pa.RecordBatch]:
-        for path in self.parts:
+        """All live rows (shadowed duplicates skipped)."""
+        for part, path in enumerate(self.parts):
             pf = pq.ParquetFile(path)
-            yield from pf.iter_batches(batch_size=batch_size, columns=list(columns))  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
+            shadowed = self._shadow.get(part)
+            if not shadowed:
+                yield from pf.iter_batches(batch_size=batch_size, columns=list(columns))  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
+                continue
+            for rg in range(pf.num_row_groups):
+                table = pf.read_row_group(rg, columns=list(columns))  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
+                mask = pa.array([(rg, r) not in shadowed for r in range(table.num_rows)])
+                yield from table.filter(mask).to_batches(max_chunksize=batch_size)
 
     def records(self, *, batch_size: int = 1024) -> Iterator[DocRecord]:
         for batch in self.scan(batch_size=batch_size):
@@ -415,6 +472,11 @@ class RefineryReader:
                 yield record_from_row(row)
 
     def read_columns(self, columns: Sequence[str]) -> pa.Table:
+        if self._shadow:
+            batches = list(self.scan(columns))
+            if not batches:
+                return SCHEMA.empty_table().select(list(columns))
+            return pa.Table.from_batches(batches)
         parts = [pq.read_table(p, columns=list(columns)) for p in self.parts]  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
         if not parts:
             return SCHEMA.empty_table().select(list(columns))
