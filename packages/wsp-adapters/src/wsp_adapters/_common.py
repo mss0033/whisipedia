@@ -301,6 +301,51 @@ def default_workers() -> int:
     return min(workers, int(cap)) if cap.isdigit() and int(cap) > 0 else workers
 
 
+Reject = tuple[str, str]  # (record id or position, error)
+
+
+class TooManyRejectsError(RuntimeError):
+    """More records failed to convert than :class:`Rejects` tolerates: the input is suspect."""
+
+
+class Rejects:
+    """Records an adapter could not convert, kept out of the refine instead of aborting it (audit M4).
+
+    Each one is appended to ``<workdir>/_rejects-<generation>.jsonl`` (local disk) with its id and
+    error. A pass fails with :class:`TooManyRejectsError` once more than ``floor`` records *and*
+    more than ``ratio`` of those seen have failed: a few malformed records in 30 million are logged
+    and skipped, a systematic failure stops the refine early.
+    """
+
+    def __init__(self, workdir: Path, generation: str, *, ratio: float = 0.001, floor: int = 100) -> None:
+        workdir.mkdir(parents=True, exist_ok=True)
+        self.path = workdir / f"_rejects-{generation}.jsonl"
+        self.path.unlink(missing_ok=True)
+        self.ratio = ratio
+        self.floor = floor
+        self.seen = 0
+        self.count = 0
+
+    def add(self, rejects: Sequence[Reject], ok: int) -> None:
+        """Record one batch's outcome: ``ok`` converted records and ``rejects``."""
+        self.seen += ok + len(rejects)
+        if not rejects:
+            return
+        self.count += len(rejects)
+        with self.path.open("a", encoding="utf-8") as fh:
+            for record, error in rejects:
+                fh.write(json.dumps({"record": record, "error": error[:500]}) + "\n")
+        if self.count > self.floor and self.count > self.ratio * self.seen:
+            raise TooManyRejectsError(
+                f"{self.count} of {self.seen} records failed to convert (see {self.path}); "
+                f"last: {rejects[-1]}"
+            )
+
+
+def describe(exc: BaseException) -> str:
+    return f"{type(exc).__name__}: {exc}"
+
+
 DocRow = tuple[object, ...]
 _DOC_FIELDS = tuple(f.name for f in dataclasses.fields(DocRecord))
 
