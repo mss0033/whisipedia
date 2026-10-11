@@ -16,7 +16,8 @@ only when every planned file is complete (or already staged by an earlier, inter
    Kiwix publishes, fetched through the ``kiwix-opds`` adapter; otherwise the file is *unverifiable*
    (the ``.meta4`` files next to downloads are never stored);
 2. ``Vault.adopt`` hashes each file in place, checks it and renames it into staging;
-3. ``seal`` (signed manifest), ledger events, ``promote`` unless a newer generation is current;
+3. ``seal`` (signed manifest), ledger events, ``promote`` unless a newer generation is current
+   (for a partitioned source, ADR-0010: a newer generation *of the same partition*);
 4. ``README.txt``/``CATALOG.*`` are regenerated.
 
 Idempotent and resumable: sealed generations are skipped, staged files are recognised. Nothing is
@@ -60,6 +61,7 @@ from typing import Any, TextIO, cast
 
 from wsp_adapters.kiwix import KiwixOpdsAdapter, Selector
 from wsp_core.model import Checksum, Generation, SourceSpec, SourceStatus
+from wsp_core.partitions import partition_of
 from wsp_core.ports import Ctx, Fetcher
 from wsp_vault.atomic import IntegrityError
 from wsp_vault.docs import write_library_docs
@@ -510,6 +512,13 @@ class Ingestor:
 
     def _maybe_promote(self, gen: Generation) -> bool:
         current = self.vault.current(gen.source_id)
+        spec = self.specs.get(gen.source_id)
+        if spec is not None and spec.partitioned:  # ADR-0010: only the same partition can be newer
+            part = partition_of(gen.generation_id)
+            current = next(
+                (g for g in self.vault.current_set(gen.source_id) if partition_of(g.generation_id) == part),
+                None,
+            )
         if current is not None and current.generation_id > gen.generation_id:
             return False  # an older backfill must not replace a newer current generation
         self.vault.promote(gen.source_id, gen.generation_id)

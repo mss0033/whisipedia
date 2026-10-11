@@ -29,7 +29,7 @@ from wsp_adapters.doccollection.policy import CurrencyRules, Rules, Verdict
 from wsp_core.banners import HISTORICAL_BANNER, banner_for
 from wsp_core.ids import make_doc_id
 from wsp_core.model import Generation, GenerationStatus, VerdictStatus
-from wsp_core.ports import Ctx, SourceAdapter
+from wsp_core.ports import Ctx, GenerationDependencies, SourceAdapter
 from wsp_core.testing.adapter_contract import FakeFetcher, SourceAdapterContract
 
 BUCKET = "https://bucket.example.gov"
@@ -170,8 +170,52 @@ def test_verify_rejects_restricted_and_export_controlled_files(tmp_path: Path) -
     results = list(adapter.fetch(ctx, adapter.plan(ctx, None, release)))
     for remote, result in zip(release.files, results, strict=True):
         verdict = adapter.verify(ctx, remote, result.path)
-        assert verdict.status is VerdictStatus.MISMATCH
+        assert verdict.status is VerdictStatus.REJECTED  # ADR-0010: dropped, the release goes on
+        assert verdict.withheld
+        assert not verdict.ok
         assert "policy deny:marking=" in verdict.detail
+
+
+def test_verify_holds_documents_that_need_review(tmp_path: Path) -> None:
+    objects = [("unmarked.pdf", make_pdf([["Planning handbook", "Contents"]]))]
+    ctx = make_ctx(s3_spec(), FakeFetcher(s3_routes(objects)), tmp_path / "work")
+    adapter = unthrottled()
+    (release,) = adapter.discover(ctx)
+    (result,) = adapter.fetch(ctx, adapter.plan(ctx, None, release))
+    verdict = adapter.verify(ctx, release.files[0], result.path)
+    assert verdict.status is VerdictStatus.HELD
+    assert verdict.withheld
+    assert verdict.detail == "policy review:marking=missing-A"
+
+
+def test_a_file_that_is_not_a_pdf_is_still_a_mismatch(tmp_path: Path) -> None:
+    objects = [("broken.pdf", b"<html>error page</html>")]
+    ctx = make_ctx(s3_spec(), FakeFetcher(s3_routes(objects)), tmp_path / "work")
+    adapter = unthrottled()
+    (release,) = adapter.discover(ctx)
+    (result,) = adapter.fetch(ctx, adapter.plan(ctx, None, release))
+    assert adapter.verify(ctx, release.files[0], result.path).status is VerdictStatus.MISMATCH
+
+
+def test_depends_on_names_the_generations_the_catalog_points_at(tmp_path: Path) -> None:
+    ctx = make_ctx(s3_spec(), FakeFetcher({}), tmp_path / "work")
+    gen = tmp_path / "lib" / "2026-10-11.ca"
+    write_catalog(
+        gen / CATALOG,
+        [
+            DocumentMeta(doc_key="k:1", file="upstream/a.pdf", issuer="x", title="a"),
+            DocumentMeta(
+                doc_key="k:2", file="upstream/b.pdf", issuer="x", title="b", generation="2025-10-11.ca"
+            ),
+            DocumentMeta(
+                doc_key="k:3", file="upstream/c.pdf", issuer="x", title="c", generation="2026-10-11.ca"
+            ),
+        ],
+    )
+    adapter = unthrottled()
+    assert isinstance(adapter, GenerationDependencies)
+    assert adapter.depends_on(ctx, gen) == {"2025-10-11.ca"}
+    assert adapter.depends_on(ctx, tmp_path / "lib" / "no-catalog") == frozenset()
 
 
 def test_screen_file_stages(tmp_path: Path) -> None:

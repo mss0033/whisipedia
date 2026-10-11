@@ -3,6 +3,8 @@
 Layout under ``root``::
 
     library/<domain>/<source_id>/CURRENT.txt          pointer file (generation id + LF)
+    library/<domain>/<source_id>/CURRENT.d/<p>.txt    partitioned sources: current generation of
+                                                      partition <p> (ADR-0010)
     library/<domain>/<source_id>/<generation_id>/     sealed, read-only generation
         upstream/...  MANIFEST.json  MANIFEST.json.sig  parity/  [DEGRADED.txt]
     staging/<domain>/<source_id>/<generation_id>/     generation being assembled
@@ -23,6 +25,13 @@ Rules: all writes go through :mod:`wsp_vault.atomic`; nothing is ever deleted ex
 ``*.partial`` temporaries and the staging record; sealed files are chmod read-only (a no-op on SMB
 shares that ignore modes, which is tolerated). ``prune`` (retention) moves a generation under
 ``pruned/``; emptying that folder is a deliberate owner action, never automatic.
+
+**Partitioned sources** (ADR-0010, ``access.partitioned``): generation ids are ``<cycle>.<partition>``.
+``promote`` writes the partition's pointer under ``CURRENT.d/`` and then ``CURRENT.txt`` (which keeps
+naming the most recently promoted generation, so older readers still work); :meth:`FileVault.current_set`
+is the current generation of every partition; ``prune`` refuses all of them and the newest sealed
+generation of each partition. A source directory with a ``CURRENT.d/`` is read as partitioned
+whatever the registry says, so the pointers are never ignored.
 """
 
 from __future__ import annotations
@@ -52,6 +61,8 @@ from wsp_core.model import (
     Verdict,
     VerdictStatus,
 )
+from wsp_core.partitions import current_set_ids as set_ids_from_pointers
+from wsp_core.partitions import partition_of
 from wsp_core.ports import Ledger, ParityProvider, Signer
 from wsp_vault.atomic import (
     DEFAULT_RETRY,
@@ -84,6 +95,7 @@ QUARANTINE_DIR = "quarantine"
 PRUNED_DIR = "pruned"
 KEYS_DIR = "keys"
 CURRENT_NAME = "CURRENT.txt"
+PARTITIONS_DIR = "CURRENT.d"  # partitioned sources: <partition>.txt per partition (ADR-0010)
 READ_ONLY = stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH
 
 _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9.-]*$")
@@ -106,6 +118,11 @@ def utcnow() -> datetime:
 def domains_from_specs(specs: Iterable[SourceSpec]) -> dict[str, str]:
     """``source_id -> domain`` from the registry (:attr:`SourceSpec.vault_domain`, ADR-0005)."""
     return {s.id: s.vault_domain for s in specs}
+
+
+def partitioned_from_specs(specs: Iterable[SourceSpec]) -> frozenset[str]:
+    """Ids of the registry's partitioned sources (:attr:`SourceSpec.partitioned`, ADR-0010)."""
+    return frozenset(s.id for s in specs if s.partitioned)
 
 
 def check_expected(digests: Digests, expected: FetchResult | None) -> None:
@@ -143,6 +160,7 @@ class FileVault:
         *,
         domains: Mapping[str, str] | None = None,
         default_domain: str = "misc",
+        partitioned: Iterable[str] = (),
         ledger: Ledger | None = None,
         parity: ParityProvider | None = None,
         retry: RetryPolicy = DEFAULT_RETRY,
@@ -152,6 +170,7 @@ class FileVault:
         self._signer = signer
         self._domains = dict(domains or {})
         self._default_domain = default_domain
+        self._partitioned = frozenset(partitioned)
         self._ledger = ledger
         self._parity = parity
         self._retry = retry
@@ -509,19 +528,58 @@ class FileVault:
         (stg / STAGING_RECORD).unlink()
 
     def promote(self, source_id: str, generation_id: str) -> None:
-        """Atomically rewrite ``CURRENT.txt``. Only a sealed, validly signed, non-degraded generation."""
+        """Atomically rewrite ``CURRENT.txt``. Only a sealed, validly signed, non-degraded generation.
+
+        For a partitioned source the partition's pointer ``CURRENT.d/<partition>.txt`` is written
+        first (the other partitions keep theirs), then ``CURRENT.txt``.
+        """
         lib = self.library_path(source_id, generation_id)
         self.manifest(source_id, generation_id)
         if (lib / DEGRADED_NAME).exists():
             raise VaultError(f"{source_id}/{generation_id} is DEGRADED")
         previous = self._read_current(source_id)
+        data: dict[str, object] = {"previous": previous}
+        partition = partition_of(generation_id) if self.is_partitioned(source_id) else None
+        if partition is not None:
+            pointers = self._read_pointers(source_id)
+            data.update(partition=partition, previous_in_partition=pointers.get(partition))
+            (self.source_dir(source_id) / PARTITIONS_DIR).mkdir(exist_ok=True)
+            atomic_write_bytes(
+                self.source_dir(source_id) / PARTITIONS_DIR / f"{partition}.txt",
+                f"{generation_id}\n".encode(),
+                overwrite=True,
+                retry=self._retry,
+            )
         atomic_write_bytes(
             self.source_dir(source_id) / CURRENT_NAME,
             f"{generation_id}\n".encode(),
             overwrite=True,
             retry=self._retry,
         )
-        self._log("vault.promote", f"{source_id}/{generation_id}", {"previous": previous})
+        self._log("vault.promote", f"{source_id}/{generation_id}", data)
+
+    def is_partitioned(self, source_id: str) -> bool:
+        """Configured as partitioned, or already has per-partition pointers on disk."""
+        return source_id in self._partitioned or (self.source_dir(source_id) / PARTITIONS_DIR).is_dir()
+
+    def _read_pointers(self, source_id: str) -> dict[str, str]:
+        """``partition -> generation id`` from ``CURRENT.d/`` (empty for ordinary sources)."""
+        base = self.source_dir(source_id) / PARTITIONS_DIR
+        out: dict[str, str] = {}
+        if not base.is_dir():
+            return out
+        for path in sorted(base.glob("*.txt")):
+            value = path.read_text(encoding="utf-8").strip()
+            if value and partition_of(value) == path.stem:
+                out[path.stem] = value
+        return out
+
+    def current_set_ids(self, source_id: str) -> list[str]:
+        """Ids of :meth:`current_set` (no manifest reads)."""
+        current = self._read_current(source_id)
+        if not self.is_partitioned(source_id):
+            return [] if current is None else [current]
+        return set_ids_from_pointers(self._read_pointers(source_id), current)
 
     def _read_current(self, source_id: str) -> str | None:
         path = self.source_dir(source_id) / CURRENT_NAME
@@ -541,6 +599,16 @@ class FileVault:
         if not (lib / MANIFEST_NAME).exists():
             raise VaultError(f"{CURRENT_NAME} of {source_id} points at missing generation {generation_id}")
         return self._generation(source_id, generation_id, lib)
+
+    def current_set(self, source_id: str) -> Sequence[Generation]:
+        """The current generation of every partition (ADR-0010); ``[current]`` for ordinary sources."""
+        out: list[Generation] = []
+        for generation_id in self.current_set_ids(source_id):
+            lib = self.library_path(source_id, generation_id)
+            if not (lib / MANIFEST_NAME).exists():
+                raise VaultError(f"a pointer of {source_id} names missing generation {generation_id}")
+            out.append(self._generation(source_id, generation_id, lib))
+        return out
 
     def generations(self, source_id: str) -> Sequence[Generation]:
         out: list[Generation] = []
@@ -649,17 +717,21 @@ class FileVault:
     def prune(self, source_id: str, generation_id: str) -> Path:
         """Retire a sealed generation (retention, PLAN §6.4): move it under ``pruned/``. Never deletes.
 
-        Refuses the current generation and the newest sealed one, so a source always keeps data.
+        Refuses the current generation and the newest sealed one, so a source always keeps data. For
+        a partitioned source that holds per partition: no generation of the current set, and not the
+        newest sealed generation of its partition (a partition is never superseded by another one).
         """
         subject = f"{source_id}/{generation_id}"
         lib = self.library_path(source_id, generation_id)
         if not (lib / MANIFEST_NAME).exists():
             raise VaultError(f"{subject} is not a sealed generation")
-        if self._read_current(source_id) == generation_id:
+        if self._read_current(source_id) == generation_id or generation_id in self.current_set_ids(source_id):
             raise VaultError(f"refusing to prune the current generation {subject}")
         sealed = [
             g.generation_id for g in self.generations(source_id) if g.status is not GenerationStatus.STAGING
         ]
+        if self.is_partitioned(source_id):
+            sealed = [g for g in sealed if partition_of(g) == partition_of(generation_id)]
         if sealed and sealed[-1] == generation_id:
             raise VaultError(f"refusing to prune the newest sealed generation {subject}")
         stamp = self._clock().astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")

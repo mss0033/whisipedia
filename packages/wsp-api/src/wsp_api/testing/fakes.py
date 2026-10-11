@@ -299,6 +299,10 @@ class InMemoryVault:
         gid = self._current.get(source_id)
         return None if gid is None else self._gens[source_id][gid]
 
+    def current_set(self, source_id: str) -> Sequence[Generation]:
+        current = self.current(source_id)
+        return () if current is None else (current,)
+
     def generations(self, source_id: str) -> Sequence[Generation]:
         return tuple(sorted(self._gens.get(source_id, {}).values(), key=lambda g: g.generation_id))
 

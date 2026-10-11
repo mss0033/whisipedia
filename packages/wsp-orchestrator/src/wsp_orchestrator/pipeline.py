@@ -22,6 +22,15 @@ Guarantees:
   source; an unknown origin domain holds it in FETCHED); the signed ``PROVENANCE.json`` is written
   after sealing; before promotion a content profile is compared with the last promoted generation
   and the signed ``PROMOTION.json`` is written (out-of-range checks hold the release).
+* Document policy (ADR-0010): a file the adapter's ``verify`` *withholds* (``rejected``: restricted
+  or out of scope; ``held``: needs an owner decision) is dropped from the release and the rest goes
+  on. The narrowed plan is committed first (ledger ``release.withheld``), then a rejected file is
+  deleted and a held one moved to ``<workdir>/_quarantine/<source>/`` (never the vault); one alert
+  per release and the ``on_withheld`` hook (a doc-review proposal) report them. Withholding is not a
+  checksum failure: it never counts towards auto-pausing the source. A release whose every file is
+  withheld ends QUARANTINED.
+* Partitioned sources (ADR-0010): the promotion sanity checks compare a generation with earlier
+  generations of the same partition only.
 """
 
 from __future__ import annotations
@@ -34,7 +43,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from wsp_core.model import (
     FetchPlan,
@@ -47,6 +56,7 @@ from wsp_core.model import (
     VerdictStatus,
     allowed_transitions,
 )
+from wsp_core.partitions import same_partition
 from wsp_core.ports import Ctx, Fetcher, Ledger, SourceAdapter, Vault
 from wsp_orchestrator.alerts import Alert, Alerter, Severity
 from wsp_orchestrator.clock import Clock
@@ -67,6 +77,8 @@ log = logging.getLogger("wsp.orchestrator.pipeline")
 
 LEDGER_KIND_STATE = "release.state"
 LEDGER_KIND_HOLD = "release.hold"
+LEDGER_KIND_WITHHELD = "release.withheld"
+QUARANTINE_DIR = "_quarantine"
 _UNSAFE_GEN_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
 
 
@@ -104,6 +116,37 @@ class IndexStep(Protocol):
 
 
 AdapterResolver = Callable[[SourceSpec], SourceAdapter]
+
+
+@dataclass(frozen=True, slots=True)
+class Withheld:
+    """A fetched file that document policy keeps out of the vault (ADR-0010)."""
+
+    name: str
+    url: str
+    status: str  # VerdictStatus.REJECTED or VerdictStatus.HELD value
+    detail: str
+    quarantined: str = ""  # where a held file waits for the owner (local work directory)
+
+    def to_json(self) -> dict[str, str]:
+        out = {"name": self.name, "url": self.url, "status": self.status, "detail": self.detail}
+        if self.quarantined:
+            out["quarantined"] = self.quarantined
+        return out
+
+    @staticmethod
+    def from_json(d: Mapping[str, Any]) -> Withheld:
+        return Withheld(
+            str(d["name"]),
+            str(d.get("url", "")),
+            str(d["status"]),
+            str(d.get("detail", "")),
+            str(d.get("quarantined", "")),
+        )
+
+
+# Called once per release that withheld files: (source, version, withheld files).
+WithheldHook = Callable[[SourceSpec, str, Sequence[Withheld]], None]
 
 
 def adapter_resolver(adapters: Mapping[str, SourceAdapter]) -> AdapterResolver:
@@ -178,6 +221,7 @@ class ReleasePipeline:
         checksum_failures_to_pause: int = 2,
         checkpoint: Callable[[str], None] = _noop,
         integrity: IntegrityGuard | None = None,
+        on_withheld: WithheldHook | None = None,
     ) -> None:
         self.store = store
         self.sources = {s.id: s for s in sources}
@@ -196,6 +240,7 @@ class ReleasePipeline:
         self.checksum_failures_to_pause = checksum_failures_to_pause
         self.checkpoint = checkpoint  # test hook: called at every crash-relevant point
         self.integrity = integrity
+        self.on_withheld = on_withheld
 
     # --- public API ---------------------------------------------------------------------------
 
@@ -368,7 +413,10 @@ class ReleasePipeline:
                     fetched={r.path.name: fetch_result_to_json(r) for r in results},
                 )
             case ReleaseState.FETCHED:
-                self._verify(spec, rec)
+                rec = self._withhold(spec, rec, self._verify(spec, rec))
+                self._apply_withheld(rec)
+                if not self._plan(rec).files:
+                    return self._nothing_left(rec)
                 if self.integrity is not None and self._sealed_generation(rec) is None:
                     verdict = self.integrity.check_fetch(
                         spec, rec.version, self._plan(rec).files, rec.fetched
@@ -380,6 +428,7 @@ class ReleasePipeline:
                         return self._hold(rec, f"integrity: {verdict.reason}")
                 return self._transition(rec, ReleaseState.VERIFIED, health=self._reset_checksum_failures(rec))
             case ReleaseState.VERIFIED:
+                self._apply_withheld(rec)  # idempotent: a crash may have come between commit and action
                 gen = self._seal(rec)
                 if self.integrity is not None:
                     self.integrity.attest_provenance(rec.source_id, rec.version, rec.generation_id)
@@ -434,12 +483,17 @@ class ReleasePipeline:
                 return Path(p)
         raise StepError(f"{rec.subject}: fetched files do not include {name!r}")
 
-    def _verify(self, spec: SourceSpec, rec: ReleaseRecord) -> None:
+    def _verify(self, spec: SourceSpec, rec: ReleaseRecord) -> list[Withheld]:
+        """Check every planned file; returns the files document policy withholds (ADR-0010).
+
+        Raises for integrity problems (missing, mismatch) as before.
+        """
         if self._sealed_generation(rec) is not None:
-            return  # verified and read back by the vault when it was sealed
+            return []  # verified and read back by the vault when it was sealed
         adapter, ctx = self.resolve_adapter(spec), self.ctx(spec)
         fetched = self._fetched(rec)
         problems: list[str] = []
+        withheld: list[Withheld] = []
         mismatch = False
         for remote in self._plan(rec).files:
             local = self._local_for(rec, remote.name)
@@ -454,13 +508,107 @@ class ReleasePipeline:
             ):
                 continue  # the fetcher matched every upstream digest while downloading: no re-hash
             verdict = adapter.verify(ctx, remote, local)
-            if not verdict.ok:
+            if verdict.withheld:
+                withheld.append(Withheld(remote.name, remote.url, verdict.status.value, verdict.detail))
+            elif not verdict.ok:
                 mismatch = mismatch or verdict.status is VerdictStatus.MISMATCH
                 problems.append(f"{remote.name}: {verdict.status.value} {verdict.detail}".strip())
         self.checkpoint("adapter:verified")
         if problems:
             err = ChecksumMismatchError if mismatch else StepError
             raise err("; ".join(problems))
+        return withheld
+
+    # --- document policy (ADR-0010) -------------------------------------------------------------
+
+    def _quarantine_path(self, rec: ReleaseRecord, name: str) -> Path:
+        return self.workdir / QUARANTINE_DIR / rec.source_id / name
+
+    @staticmethod
+    def _withheld_of(rec: ReleaseRecord) -> list[Withheld]:
+        raw = rec.plan.get("withheld") if rec.plan is not None else None
+        return [Withheld.from_json(d) for d in cast(list[Mapping[str, Any]], raw or [])]
+
+    def _withhold(self, spec: SourceSpec, rec: ReleaseRecord, withheld: Sequence[Withheld]) -> ReleaseRecord:
+        """Commit the plan without the withheld files (before touching them), then report them."""
+        if not withheld:
+            return rec
+        names = {w.name for w in withheld}
+        items = [
+            replace(w, quarantined=str(self._quarantine_path(rec, w.name)))
+            if w.status == VerdictStatus.HELD.value
+            else w
+            for w in withheld
+        ]
+        plan = self._plan(rec)
+        narrowed = dict(
+            plan_to_json(replace(plan, files=tuple(f for f in plan.files if f.name not in names)))
+        )
+        narrowed["withheld"] = [w.to_json() for w in [*self._withheld_of(rec), *items]]
+        rejected = [w for w in items if w.status == VerdictStatus.REJECTED.value]
+        held = [w for w in items if w.status == VerdictStatus.HELD.value]
+        self._persist(
+            replace(rec, plan=narrowed),
+            event=(
+                LEDGER_KIND_WITHHELD,
+                {"rejected": [w.to_json() for w in rejected], "held": [w.to_json() for w in held]},
+            ),
+        )
+        rec = self._get(rec.source_id, rec.version)
+        self._apply_withheld(rec)
+        if self.alerter is not None:
+            self.alerter.raise_(
+                Alert(
+                    key=f"withheld:{rec.subject}",
+                    severity=Severity.WARNING,
+                    message=(
+                        f"{rec.subject}: document policy withheld {len(rejected)} rejected file(s) "
+                        f"(deleted) and {len(held)} held file(s) (quarantined for review); the release "
+                        "goes on without them"
+                    ),
+                    data={
+                        "source_id": rec.source_id,
+                        "version": rec.version,
+                        "rejected": [f"{w.name}: {w.detail}" for w in rejected][:50],
+                        "held": [f"{w.name}: {w.detail}" for w in held][:50],
+                    },
+                )
+            )
+        if self.on_withheld is not None:
+            try:
+                self.on_withheld(spec, rec.version, items)
+            except Exception:  # reporting must never fail the release; the ledger has the list
+                log.exception("on_withheld hook failed", extra={"fields": {"release": rec.subject}})
+        return rec
+
+    def _apply_withheld(self, rec: ReleaseRecord) -> None:
+        """Delete rejected files and move held ones out of the work directory (idempotent)."""
+        for w in self._withheld_of(rec):
+            try:
+                local = self._local_for(rec, w.name)
+            except StepError:
+                continue
+            if not local.is_file():
+                continue
+            if w.status == VerdictStatus.HELD.value and w.quarantined:
+                target = Path(w.quarantined)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                local.replace(target)
+            else:
+                local.unlink(missing_ok=True)  # restricted bytes are not kept anywhere
+
+    def _nothing_left(self, rec: ReleaseRecord) -> ReleaseRecord:
+        """Every file was withheld: there is no generation to make. Not a fault of the source."""
+        reason = "every fetched file was withheld by document policy"
+        failed = self._transition(
+            rec,
+            ReleaseState.FAILED,
+            attempts=rec.attempts + 1,
+            last_error=reason,
+            next_attempt_at=None,
+            extra={"error": reason, "failed_in": rec.state.value},
+        )
+        return self._transition(failed, ReleaseState.QUARANTINED, extra={"reason": reason})
 
     def _sealed_generation(self, rec: ReleaseRecord) -> Generation | None:
         for g in self.vault.generations(rec.source_id):
@@ -498,6 +646,9 @@ class ReleasePipeline:
     def _promote(self, spec: SourceSpec, rec: ReleaseRecord) -> ReleaseRecord:
         history = self.store.generation_stats(spec.id, limit=max(self.sanity.trend_window, 1))
         history = [h for h in history if h.generation_id != rec.generation_id]
+        if spec.partitioned:  # ADR-0010: compare a partition with itself, never with another partition
+            same = set(same_partition([h.generation_id for h in history], rec.generation_id))
+            history = [h for h in history if h.generation_id in same]
         result = check_promotion(
             [h.doc_count for h in history if h.doc_count is not None],
             [h.size_bytes for h in history if h.size_bytes is not None],
@@ -508,6 +659,8 @@ class ReleasePipeline:
         if self.integrity is not None:
             gen = self._require_sealed(rec)
             promoted = [h.generation_id for h in self.store.generation_stats(spec.id, limit=50)]
+            if spec.partitioned:
+                promoted = same_partition(promoted, rec.generation_id)
             report = self.integrity.promotion_report(
                 spec,
                 gen,

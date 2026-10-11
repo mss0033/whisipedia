@@ -40,12 +40,19 @@ from wsp_core.model import (
     Verdict,
     VerdictStatus,
 )
+from wsp_core.partitions import current_set_ids, partition_of
 from wsp_core.ports import Ctx
 from wsp_orchestrator.alerts import Alert, Alerter
 from wsp_orchestrator.clock import Clock, ManualClock, SystemClock
 from wsp_orchestrator.integrity.guard import IntegrityGuard, IntegrityHooks
 from wsp_orchestrator.orchestrator import Wiring
-from wsp_orchestrator.pipeline import RefineResult, ReleasePipeline, RetryPolicy, adapter_resolver
+from wsp_orchestrator.pipeline import (
+    RefineResult,
+    ReleasePipeline,
+    RetryPolicy,
+    WithheldHook,
+    adapter_resolver,
+)
 from wsp_orchestrator.settings import OrchestratorSettings
 from wsp_orchestrator.store import StateStore
 
@@ -178,6 +185,10 @@ class FakeAdapter:
     provenance: dict[tuple[str, str], Mapping[str, Any]] = field(
         default_factory=dict[tuple[str, str], Mapping[str, Any]]
     )
+    # file name -> verdict ``verify`` returns instead of checking digests (document policy, ADR-0010)
+    policy: dict[str, Verdict] = field(default_factory=dict[str, Verdict])
+    # generation id -> generations it reads from (``GenerationDependencies``); None: depends_on fails
+    dependencies: dict[str, frozenset[str]] | None = field(default_factory=dict[str, frozenset[str]])
 
     def add_release(
         self,
@@ -231,11 +242,18 @@ class FakeAdapter:
         self._maybe_fail("verify")
         if not local.is_file():
             return Verdict(VerdictStatus.MISSING, str(local))
+        if remote.name in self.policy:
+            return self.policy[remote.name]
         want = {c.algorithm: c.hexdigest for c in remote.checksums}
         if "sha256" not in want:
             return Verdict(VerdictStatus.UNVERIFIABLE)
         got = sha256_hex(local.read_bytes())
         return Verdict(VerdictStatus.OK) if got == want["sha256"] else Verdict(VerdictStatus.MISMATCH, got)
+
+    def depends_on(self, ctx: Ctx, generation_dir: Path) -> frozenset[str]:
+        if self.dependencies is None:
+            raise OSError("catalog unreadable")
+        return self.dependencies.get(generation_dir.name, frozenset())
 
     def documents(self, ctx: Ctx, generation_dir: Path) -> Iterator[DocRecord]:
         for i, path in enumerate(sorted((generation_dir / "upstream").glob("*"))):
@@ -280,11 +298,13 @@ class VaultError(RuntimeError):
 class FakeVault:
     """Filesystem-backed vault under a temporary root, with strict write-once semantics."""
 
-    def __init__(self, root: Path, clock: Clock | None = None) -> None:
+    def __init__(self, root: Path, clock: Clock | None = None, *, partitioned: Iterable[str] = ()) -> None:
         self.root = root
         self.clock = clock or SystemClock()
         self._gens: dict[tuple[str, str], Generation] = {}
         self._current: dict[str, str] = {}
+        self.partitioned = set(partitioned)  # ADR-0010: per-partition current pointers
+        self._pointers: dict[str, dict[str, str]] = {}
         self.calls: Counter[str] = Counter()
         self.pruned: list[tuple[str, str]] = []
 
@@ -364,11 +384,26 @@ class FakeVault:
         gen = self._gens.get((source_id, generation_id))
         if gen is None or gen.status is not GenerationStatus.SEALED:
             raise VaultError(f"{source_id}/{generation_id} is not sealed")
+        self._set_current(source_id, generation_id)
+
+    def _set_current(self, source_id: str, generation_id: str) -> None:
+        part = partition_of(generation_id) if source_id in self.partitioned else None
+        if part is not None:
+            self._pointers.setdefault(source_id, {})[part] = generation_id
         self._current[source_id] = generation_id
 
     def current(self, source_id: str) -> Generation | None:
         gid = self._current.get(source_id)
         return self._gens[(source_id, gid)] if gid else None
+
+    def current_set_ids(self, source_id: str) -> list[str]:
+        current = self._current.get(source_id)
+        if source_id not in self.partitioned:
+            return [] if current is None else [current]
+        return current_set_ids(self._pointers.get(source_id, {}), current)
+
+    def current_set(self, source_id: str) -> Sequence[Generation]:
+        return [self._gens[(source_id, gid)] for gid in self.current_set_ids(source_id)]
 
     def generations(self, source_id: str) -> Sequence[Generation]:
         return sorted(
@@ -379,7 +414,7 @@ class FakeVault:
         return self.root / source_id / generation_id
 
     def prune(self, source_id: str, generation_id: str) -> Path:
-        if self._current.get(source_id) == generation_id:
+        if generation_id in self.current_set_ids(source_id):
             raise VaultError("refusing to prune the current generation")
         gen = self._gens[(source_id, generation_id)]
         shutil.rmtree(self.generation_path(source_id, generation_id), ignore_errors=True)
@@ -392,7 +427,7 @@ class FakeVault:
         gen = Generation(source_id, generation_id, GenerationStatus.SEALED, sealed_at=self.clock.now())
         self._gens[(source_id, generation_id)] = gen
         if current:
-            self._current[source_id] = generation_id
+            self._set_current(source_id, generation_id)
         return gen
 
 
@@ -522,15 +557,19 @@ class PipelineHarness:
         retry: RetryPolicy | None = None,
         crash_at: int | None = None,
         integrity: IntegrityHooks | None = None,
+        on_withheld: WithheldHook | None = None,
     ) -> None:
         self.root = root
         self.integrity_hooks = integrity
+        self.on_withheld = on_withheld
         self.fetcher = FakeFetcher()
         self.guard: IntegrityGuard | None = None
         self.clock = clock or ManualClock(datetime(2026, 10, 15, tzinfo=UTC))
         self.sources = list(sources) or [make_spec("src")]
         self.adapters = {s.adapter or s.id: FakeAdapter(s.adapter or s.id, s.id) for s in self.sources}
-        self.vault = FakeVault(root / "vault", self.clock)
+        self.vault = FakeVault(
+            root / "vault", self.clock, partitioned=[s.id for s in self.sources if s.partitioned]
+        )
         self.ledger = FakeLedger(self.clock)
         self.refinery = FakeRefinery()
         self.sink = RecordingSink()
@@ -577,6 +616,7 @@ class PipelineHarness:
             retry=self.retry,
             checkpoint=self.injector,
             integrity=self.guard,
+            on_withheld=self.on_withheld,
         )
 
     def restart(self, *, crash_at: int | None = None) -> None:
@@ -617,7 +657,7 @@ class FakeWorld:
         return cls(
             sources=list(sources),
             adapters={s.adapter or s.id: FakeAdapter(s.adapter or s.id, s.id) for s in sources},
-            vault=FakeVault(root / "vault", clock),
+            vault=FakeVault(root / "vault", clock, partitioned=[s.id for s in sources if s.partitioned]),
             ledger=FakeLedger(clock),
             refinery=FakeRefinery(),
             sink=RecordingSink(),

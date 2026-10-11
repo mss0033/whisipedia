@@ -63,19 +63,53 @@ git diff registry/filters/ && git commit -am "chore(registry): owner review of <
 Accepting writes the publication numbers into `registry/filters/<source>.yaml`; the next fetch takes
 them. Delete quarantined files of rejected documents (`_incoming/_quarantine/<source>/`).
 
-## 4. The large D14 sets
+## 4. The large D14 sets (partitioned sources)
 
-Both are fetched as part generations, one partition at a time, so a cycle never holds the whole set
-in one plan. See research doc §8 for sizes and timing.
+Both are *partitioned* (`access.partitioned: true`, [ADR-0010](../adr/0010-partitioned-sources.md)):
+fetched one partition at a time, so a cycle never holds the whole set in one plan. See research doc
+§8 for sizes and timing.
 
 ```sh
 # USGS Historical Topographic Map Collection: one state per run (GeoPDF and GeoTIFF of that state)
 nice -n 19 wsp collections fetch --source usgs-historical-topo --partition hi
 wsp ingest --source usgs-historical-topo
+wsp index build --source usgs-historical-topo
 # CIA reading room (archive.org mirror of foia.cia.gov): batches of 10,000 items, b0001 … b0090
 nice -n 19 wsp collections fetch --source cia-reading-room --partition b0001
 wsp ingest --source cia-reading-room
+wsp index build --source cia-reading-room
 ```
+
+How partitions behave:
+
+* Each run is the cycle `<YYYY-MM-DD>.<partition>` (`--version 2026-10-11` resumes that day's cycle
+  of the partition; `--partition` is required, partition names are lowercase). The fetch carries over
+  only that partition's catalog, so documents of other partitions are never relabelled.
+* `wsp ingest` seals and promotes each partition into `library/<shelf>/<source>/<cycle>.<partition>/`
+  and writes `CURRENT.d/<partition>.txt`; `CURRENT.txt` names the part promoted last. Partitions can
+  be ingested in any order; only a newer generation *of the same partition* blocks a promotion.
+* The source's content is the **current set** (the current generation of every partition).
+  `wsp index build` refines each partition once and indexes their union as one set generation
+  (`index/refinery/<source>/<newest>.setNNNNN/`, hard links to `_parts/<generation>/`), so search
+  and documents cover every partition fetched so far.
+* Retention runs per partition and keeps every generation a current catalog still points at; it
+  never prunes one partition because another one is newer. Re-fetching a partition later (a new
+  cycle) supersedes only that partition's earlier generation.
+* The orchestrator does not schedule discovery for partitioned sources: acquisition stays with
+  `wsp collections fetch`, one partition per run.
+
+Check the current set by hand: `ls library/<shelf>/<source>/CURRENT.d/` and
+`cat library/<shelf>/<source>/CURRENT.d/*.txt`.
+
+## 5. Document policy in the orchestrator path
+
+When a scheduled release of a `doc-collection` source contains a document the policy rejects
+(restricted marking, safety list) or holds (needs review), the orchestrator drops that document and
+promotes the rest. The rejected file is deleted at once, a held one waits in
+`<orchestrator workdir>/_quarantine/<source>/`; the alert `withheld:<source>/<version>` lists both, the
+ledger has a `release.withheld` event, and held documents get one review proposal per release
+(`wsp proposals list`, decided as in §3). This never pauses the source. A release in which every
+document is withheld ends quarantined (`wsp status`), again without pausing the source.
 
 ## When an issuer is blocked (403)
 

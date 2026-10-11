@@ -11,6 +11,18 @@ Layout (readable without this code)::
 A generation without ``_SUCCESS.json`` is incomplete and is ignored by readers. Every file is
 written as ``*.partial`` and renamed after a read-back check, so a crash never leaves a torn file.
 
+**Partitioned sources** (ADR-0010)::
+
+    <root>/<source_id>/_parts/<generation_id>/   one vault generation (one partition), refined once
+    <root>/<source_id>/<cycle>.<p>.setNNNNN/     a *set* generation: the union of the current
+                                                 partitions (``_SUCCESS.json`` lists its ``members``)
+
+A set generation hard-links its members' part files (copies them where the filesystem cannot link)
+and merges their id indexes, so it costs O(documents) of index work and no text extraction; every
+reader (search index refresh, documents, history, catalog, rank, spelling) sees an ordinary sealed
+generation. A ``doc_id`` present in several members keeps the row of the member with the highest
+generation id (the others are shadowed). ``_parts`` is never sealed itself, so listings skip it.
+
 Point lookup: Parquet min/max statistics only help when a whole generation is globally sorted,
 which a streaming writer cannot guarantee without an external sort. Instead each generation carries
 a tiny sorted hash index (16 bytes per document; 112 MB for 7M articles) that is loaded into numpy
@@ -44,6 +56,8 @@ SUCCESS_FILE = "_SUCCESS.json"
 IDS_FILE = "_ids.parquet"
 SHADOW_FILE = "_shadowed.parquet"  # rows superseded by a later row with the same doc_id
 CURRENT_FILE = "CURRENT.txt"
+PARTS_DIR = "_parts"  # partitioned sources: refined vault generations, composed into set generations
+SET_MARK = ".set"  # set generation ids: <newest member id>.setNNNNN
 
 DEFAULT_ROW_GROUP_ROWS = 256
 DEFAULT_DOCS_PER_FILE = 50_000
@@ -94,6 +108,11 @@ def id_hash(doc_id: str) -> int:
 
 def generation_dir(root: Path, source_id: str, generation_id: str) -> Path:
     return root / source_id / generation_id
+
+
+def part_dir(root: Path, source_id: str, generation_id: str) -> Path:
+    """Where one partition generation of a partitioned source is refined (ADR-0010)."""
+    return root / source_id / PARTS_DIR / generation_id
 
 
 def is_sealed(gen_dir: Path) -> bool:
@@ -212,10 +231,12 @@ class RefineryWriter:
         row_group_rows: int = DEFAULT_ROW_GROUP_ROWS,
         docs_per_file: int = DEFAULT_DOCS_PER_FILE,
         zstd_level: int = DEFAULT_ZSTD_LEVEL,
+        directory: Path | None = None,
     ) -> None:
+        """``directory`` overrides ``<root>/<source_id>/<generation_id>`` (partition generations)."""
         if row_group_rows < 1 or docs_per_file < 1:
             raise ValueError("row_group_rows and docs_per_file must be positive")
-        self.dir = generation_dir(root, source_id, generation_id)
+        self.dir = directory if directory is not None else generation_dir(root, source_id, generation_id)
         if is_sealed(self.dir):
             raise RefineryError(f"generation already sealed: {self.dir}")
         self.dir.mkdir(parents=True, exist_ok=True)
@@ -310,74 +331,189 @@ class RefineryWriter:
         loc = np.concatenate(self._idx_loc) if self._idx_loc else np.empty((0, 3), np.uint32)
         order = np.argsort(h, kind="stable")
         h, loc = h[order], loc[order]
-        keep = self._shadow_duplicates(h, loc)
+        keep = _duplicates_mask(self.dir, h, loc)
         shadowed = int(len(h) - int(keep.sum()))
+        if shadowed:
+            _write_shadow(self.dir, loc[~keep])
         h, loc = h[keep], loc[keep]
-        ids = pa.Table.from_arrays(
-            [pa.array(h), pa.array(loc[:, 0]), pa.array(loc[:, 1]), pa.array(loc[:, 2])],
-            schema=_IDS_SCHEMA,
+        _write_ids(self.dir, h, loc)
+        _write_success(
+            self.dir,
+            {
+                "format": FORMAT_VERSION,
+                "docs": self._docs - shadowed,
+                "parts": self._parts,
+                "shadowed": shadowed + self._dropped,
+            },
         )
-        partial = self.dir / (IDS_FILE + ".partial")
-        pq.write_table(ids, partial, compression="zstd", row_group_size=1 << 20)  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
-        _atomic_replace(partial, self.dir / IDS_FILE)
-        success = {
-            "format": FORMAT_VERSION,
-            "docs": self._docs - shadowed,
-            "parts": self._parts,
-            "shadowed": shadowed + self._dropped,
-        }
-        partial = self.dir / (SUCCESS_FILE + ".partial")
-        partial.write_text(json.dumps(success, sort_keys=True) + "\n", encoding="utf-8")
-        _atomic_replace(partial, self.dir / SUCCESS_FILE)
         self._closed = True
         return WriteStats(self._docs, self._parts, self._bytes)
 
-    def _shadow_duplicates(
-        self, h: npt.NDArray[np.uint64], loc: npt.NDArray[np.uint32]
-    ) -> npt.NDArray[np.bool_]:
-        """Mask of index rows to keep. A doc_id written more than once keeps its LAST row in stream order
-        (dumps can list a page twice when it is moved mid-dump; the later entry is the newer page); the
-        earlier rows are recorded in ``_shadowed.parquet`` so scans skip them. Hash collisions between
-        different ids are kept."""
-        keep = np.ones(len(h), dtype=np.bool_)
-        if len(h) < 2:
-            return keep
-        dup = np.nonzero(h[1:] == h[:-1])[0]
-        if len(dup) == 0:
-            return keep
-        files: dict[int, pq.ParquetFile] = {}
 
-        def doc_id_at(i: int) -> str:
-            part, rg, row = (int(x) for x in loc[i])
-            pf = files.setdefault(part, pq.ParquetFile(self.dir / f"part-{part:05d}.parquet"))
-            table = pf.read_row_group(rg, columns=["doc_id"])  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
-            return cast(str, table.column(0)[row].as_py())
+def _write_ids(directory: Path, h: npt.NDArray[np.uint64], loc: npt.NDArray[np.uint32]) -> None:
+    ids = pa.Table.from_arrays(
+        [pa.array(h), pa.array(loc[:, 0]), pa.array(loc[:, 1]), pa.array(loc[:, 2])],
+        schema=_IDS_SCHEMA,
+    )
+    partial = directory / (IDS_FILE + ".partial")
+    pq.write_table(ids, partial, compression="zstd", row_group_size=1 << 20)  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
+    _atomic_replace(partial, directory / IDS_FILE)
 
-        # Runs of equal hashes; within a run, rows with the same id: keep the max (part, rg, row).
-        for i in sorted(set(dup.tolist())):
-            if i > 0 and h[i - 1] == h[i]:
-                continue  # not the start of a run
-            j = i + 1
-            while j < len(h) and h[j] == h[i]:
-                j += 1
-            groups: dict[str, list[int]] = {}
-            for k in range(i, j):
-                groups.setdefault(doc_id_at(k), []).append(k)
-            for rows in groups.values():
-                if len(rows) > 1:
-                    latest = max(rows, key=lambda k: tuple(int(x) for x in loc[k]))
-                    for k in rows:
-                        if k != latest:
-                            keep[k] = False
-        shadow = loc[~keep]
-        table = pa.Table.from_arrays(
-            [pa.array(shadow[:, 0]), pa.array(shadow[:, 1]), pa.array(shadow[:, 2])],
-            names=["part", "rg", "row"],
-        )
-        partial = self.dir / (SHADOW_FILE + ".partial")
-        pq.write_table(table, partial)  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
-        _atomic_replace(partial, self.dir / SHADOW_FILE)
+
+def _write_success(directory: Path, success: Mapping[str, object]) -> None:
+    partial = directory / (SUCCESS_FILE + ".partial")
+    partial.write_text(json.dumps(dict(success), sort_keys=True) + "\n", encoding="utf-8")
+    _atomic_replace(partial, directory / SUCCESS_FILE)
+
+
+def _write_shadow(directory: Path, shadow: npt.NDArray[np.uint32]) -> None:
+    table = pa.Table.from_arrays(
+        [pa.array(shadow[:, 0]), pa.array(shadow[:, 1]), pa.array(shadow[:, 2])],
+        names=["part", "rg", "row"],
+    )
+    partial = directory / (SHADOW_FILE + ".partial")
+    pq.write_table(table, partial)  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
+    _atomic_replace(partial, directory / SHADOW_FILE)
+
+
+def _duplicates_mask(
+    directory: Path, h: npt.NDArray[np.uint64], loc: npt.NDArray[np.uint32]
+) -> npt.NDArray[np.bool_]:
+    """Mask of (hash-sorted) index rows to keep. A doc_id written more than once keeps its LAST row in
+    stream order, i.e. the max (part, rg, row) (dumps can list a page twice when it is moved mid-dump;
+    the later entry is the newer page); callers record the others in ``_shadowed.parquet`` so scans
+    skip them. Hash collisions between different ids are kept."""
+    keep = np.ones(len(h), dtype=np.bool_)
+    if len(h) < 2:
         return keep
+    dup = np.nonzero(h[1:] == h[:-1])[0]
+    if len(dup) == 0:
+        return keep
+    files: dict[int, pq.ParquetFile] = {}
+
+    def doc_id_at(i: int) -> str:
+        part, rg, row = (int(x) for x in loc[i])
+        pf = files.setdefault(part, pq.ParquetFile(directory / f"part-{part:05d}.parquet"))
+        table = pf.read_row_group(rg, columns=["doc_id"])  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
+        return cast(str, table.column(0)[row].as_py())
+
+    # Runs of equal hashes; within a run, rows with the same id: keep the max (part, rg, row).
+    for i in sorted(set(dup.tolist())):
+        if i > 0 and h[i - 1] == h[i]:
+            continue  # not the start of a run
+        j = i + 1
+        while j < len(h) and h[j] == h[i]:
+            j += 1
+        groups: dict[str, list[int]] = {}
+        for k in range(i, j):
+            groups.setdefault(doc_id_at(k), []).append(k)
+        for rows in groups.values():
+            if len(rows) > 1:
+                latest = max(rows, key=lambda k: tuple(int(x) for x in loc[k]))
+                for k in rows:
+                    if k != latest:
+                        keep[k] = False
+    return keep
+
+
+# --- set generations (partitioned sources, ADR-0010) --------------------------------------------
+
+
+def set_members(gen_dir: Path) -> tuple[str, ...] | None:
+    """Member generation ids of a sealed set generation, ``None`` for an ordinary generation."""
+    meta = json.loads((gen_dir / SUCCESS_FILE).read_text(encoding="utf-8"))
+    members = meta.get("members")
+    return tuple(str(m) for m in cast(list[object], members)) if isinstance(members, list) else None
+
+
+def _link_or_copy(src: Path, dst: Path) -> None:
+    try:
+        os.link(src, dst)
+    except OSError:
+        import shutil
+
+        partial = dst.with_name(dst.name + ".partial")
+        shutil.copyfile(src, partial)
+        _atomic_replace(partial, dst)
+
+
+def compose_set(root: Path, source_id: str, members: Sequence[Path]) -> str:
+    """Seal (or reuse) the set generation that is the union of sealed ``members``; returns its id.
+
+    ``members`` are sealed refinery generations of ``source_id`` (normally ``_parts/<gid>``). A set
+    with exactly these member ids that is already sealed is reused. The new id is
+    ``<newest member id>.setNNNNN`` with a running number, so set ids sort in the order they were
+    made. Members are taken in generation-id order; a doc_id in several members keeps the row of the
+    last one.
+    """
+    if not members:
+        raise RefineryError(f"{source_id}: a set generation needs at least one member")
+    ordered = sorted(members, key=lambda m: m.name)
+    names = tuple(m.name for m in ordered)
+    for m in ordered:
+        if not is_sealed(m):
+            raise RefineryError(f"set member is not sealed: {m}")
+    existing = [g for g in sealed_generations(root, source_id) if SET_MARK in g]
+    for gid in reversed(existing):
+        if set_members(generation_dir(root, source_id, gid)) == names:
+            return gid
+    set_id = f"{names[-1]}{SET_MARK}{len(existing) + 1:05d}"
+    out = generation_dir(root, source_id, set_id)
+    if out.exists():
+        import shutil
+
+        shutil.rmtree(out)  # an interrupted compose: derived and unsealed, start again
+    out.mkdir(parents=True)
+    hs: list[npt.NDArray[np.uint64]] = []
+    locs: list[npt.NDArray[np.uint32]] = []
+    shadows: list[npt.NDArray[np.uint32]] = []
+    offset = docs = shadowed = 0
+    for m in ordered:
+        meta = json.loads((m / SUCCESS_FILE).read_text(encoding="utf-8"))
+        if meta.get("format") != FORMAT_VERSION:
+            raise RefineryError(f"unsupported refinery format {meta.get('format')!r} in {m}")
+        n_parts = int(meta["parts"])
+        for i in range(n_parts):
+            _link_or_copy(m / f"part-{i:05d}.parquet", out / f"part-{offset + i:05d}.parquet")
+        ids = pq.read_table(m / IDS_FILE)  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
+        loc = np.empty((ids.num_rows, 3), dtype=np.uint32)
+        loc[:, 0] = ids.column("part").to_numpy().astype(np.uint32) + offset
+        loc[:, 1] = ids.column("rg").to_numpy()
+        loc[:, 2] = ids.column("row").to_numpy()
+        hs.append(ids.column("h").to_numpy().astype(np.uint64))
+        locs.append(loc)
+        if (m / SHADOW_FILE).is_file():
+            sh = pq.read_table(m / SHADOW_FILE)  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
+            rows = np.empty((sh.num_rows, 3), dtype=np.uint32)
+            rows[:, 0] = sh.column("part").to_numpy().astype(np.uint32) + offset
+            rows[:, 1] = sh.column("rg").to_numpy()
+            rows[:, 2] = sh.column("row").to_numpy()
+            shadows.append(rows)
+        docs += int(meta.get("docs", ids.num_rows))
+        shadowed += int(meta.get("shadowed", 0))
+        offset += n_parts
+    h = np.concatenate(hs) if hs else np.empty(0, np.uint64)
+    loc = np.concatenate(locs) if locs else np.empty((0, 3), np.uint32)
+    order = np.argsort(h, kind="stable")
+    h, loc = h[order], loc[order]
+    keep = _duplicates_mask(out, h, loc)
+    dropped = int(len(h) - int(keep.sum()))
+    shadows.append(loc[~keep])
+    shadow = np.concatenate(shadows)
+    if len(shadow):
+        _write_shadow(out, shadow)
+    _write_ids(out, h[keep], loc[keep])
+    _write_success(
+        out,
+        {
+            "format": FORMAT_VERSION,
+            "docs": docs - dropped,
+            "parts": offset,
+            "shadowed": shadowed + dropped,
+            "members": list(names),
+        },
+    )
+    return set_id
 
 
 # --- reader ------------------------------------------------------------------------------------

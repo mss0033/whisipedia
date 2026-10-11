@@ -93,6 +93,16 @@ class VaultContract:
         assert current.generation_id == "2026-09-01"
         assert [g.generation_id for g in vault.generations("contract-src")] == ["2026-09-01", "2026-10-01"]
 
+    def test_current_set_of_an_ordinary_source_is_the_current_generation(
+        self, vault: Vault, local: Path
+    ) -> None:
+        assert list(vault.current_set("contract-src")) == []
+        self._seal_one(vault, local, "2026-09-01")
+        self._seal_one(vault, local, "2026-10-01")
+        vault.promote("contract-src", "2026-09-01")
+        vault.promote("contract-src", "2026-10-01")
+        assert [g.generation_id for g in vault.current_set("contract-src")] == ["2026-10-01"]
+
     def test_promote_requires_sealed_generation(self, vault: Vault, local: Path) -> None:
         vault.stage("contract-src", "2026-10-01")
         vault.ingest("contract-src", "2026-10-01", local, "upstream/sample.bin")

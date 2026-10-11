@@ -20,7 +20,7 @@ from typing import cast
 from urllib.parse import urlparse
 
 from wsp_core.model import Generation, ReleaseRef, ReleaseState, SourceSpec
-from wsp_core.ports import Fetcher, Ledger, SourceAdapter, Vault
+from wsp_core.ports import Fetcher, GenerationDependencies, Ledger, SourceAdapter, Vault
 from wsp_orchestrator.alerts import Alert, Alerter, AlertSink, Severity
 from wsp_orchestrator.bots import Bot, BotContext, BotResult
 from wsp_orchestrator.clock import Clock, SystemClock, ensure_utc
@@ -35,6 +35,7 @@ from wsp_orchestrator.pipeline import (
     RefineStep,
     ReleasePipeline,
     StepError,
+    WithheldHook,
     adapter_resolver,
     generation_id_for,
     pause_source,
@@ -49,7 +50,12 @@ from wsp_orchestrator.policy import (
     auto_pause_findings,
     evaluate_candidate,
 )
-from wsp_orchestrator.retention import GenerationInfo, GfsPolicy, plan_retention
+from wsp_orchestrator.retention import (
+    GenerationInfo,
+    GfsPolicy,
+    plan_partitioned_retention,
+    plan_retention,
+)
 from wsp_orchestrator.scheduler import GLOBAL_KEY, PARITY_KEY, Scheduler
 from wsp_orchestrator.settings import OrchestratorSettings
 from wsp_orchestrator.store import StateStore
@@ -91,6 +97,8 @@ class Wiring:
     proposal_recorder: Callable[[ProposalRecord], object] | None = None  # proposal files
     parity: ParityHook | None = None
     integrity: IntegrityHooks | None = None  # source integrity guard (ADR-0009); None = off
+    # Files document policy withheld from a release (ADR-0010): e.g. file one doc-review proposal.
+    on_withheld: WithheldHook | None = None
     # Called once on shutdown (SIGTERM): cancel downloads, stop scrub/parity, kill par2. The
     # fetcher's own ``cancel()`` is called too when it has one.
     on_shutdown: Sequence[Callable[[], None]] = ()
@@ -167,6 +175,7 @@ class Orchestrator:
             retry=settings.retry,
             checkpoint=checkpoint or _no_checkpoint,
             integrity=self.integrity,
+            on_withheld=wiring.on_withheld,
         )
         self.scheduler = Scheduler(
             store=self.store,
@@ -568,6 +577,8 @@ class Orchestrator:
             return JobResult(note="non-GFS retention: nothing to prune")
         vault = self.wiring.vault
         current = vault.current(spec.id)
+        current_set = list(vault.current_set(spec.id))
+        needed = self._needed_generations(spec, current_set)
         promoted = {
             g.generation_id: g.promoted_at for g in self.store.generation_stats(spec.id, limit=10_000)
         }
@@ -577,10 +588,14 @@ class Orchestrator:
                 holds_last_copy=self.holds_last_copy(spec.id, g),
                 known_good=g.generation_id in promoted,
                 settled=self._settled(spec.id, g.generation_id, promoted.get(g.generation_id)),
+                needed=g.generation_id in needed,
             )
             for g in vault.generations(spec.id)
         ]
-        plan = plan_retention(infos, policy, current=current.generation_id if current else None)
+        if spec.partitioned:  # ADR-0010: a partition never supersedes another partition
+            plan = plan_partitioned_retention(infos, policy, current=[g.generation_id for g in current_set])
+        else:
+            plan = plan_retention(infos, policy, current=current.generation_id if current else None)
         dry_run = self.wiring.pruner is None or self.settings.prune_dry_run
         last_copies = [i.generation_id for i in infos if i.holds_last_copy]
         self.pipeline.ledger_outbox_writer(
@@ -608,6 +623,28 @@ class Orchestrator:
         if failed:
             raise StepError(f"{spec.id}: could not prune {'; '.join(failed)}")
         return JobResult()
+
+    def _needed_generations(self, spec: SourceSpec, current_set: Sequence[Generation]) -> set[str]:
+        """Generations the current ones read files from (adapters with ``GenerationDependencies``).
+
+        Raises :class:`StepError` if a dependency list cannot be read: nothing is pruned blind.
+        """
+        try:
+            adapter = self.pipeline.resolve_adapter(spec)
+        except StepError:
+            return set()
+        if not isinstance(adapter, GenerationDependencies):
+            return set()
+        needed: set[str] = set()
+        ctx = self.pipeline.ctx(spec)
+        for g in current_set:
+            try:
+                needed |= adapter.depends_on(ctx, self.wiring.vault.generation_path(spec.id, g.generation_id))
+            except Exception as exc:
+                raise StepError(
+                    f"{spec.id}/{g.generation_id}: cannot list what it reads from: {exc}"
+                ) from exc
+        return needed
 
     def _settled(self, source_id: str, generation_id: str, promoted_at: datetime | None) -> bool:
         """A promoted generation is the known-good anchor once it survived ``settle_days`` and a scrub."""

@@ -3,6 +3,8 @@
 Layout under ``index.root`` (local disk only, ADR-0002)::
 
     refinery/<source_id>/<generation_id>/   Refinery Parquet (wsp_index.refinery), CURRENT.txt per source
+    refinery/<source_id>/_parts/<gen_id>/   partitioned sources (ADR-0010): one per partition generation,
+                                            composed into a set generation <newest>.setNNNNN that is indexed
     lexical/                                Tantivy + suggest tries (TantivyIndex), static_rank.bin,
                                             spelling.bin ("did you mean")
     changes.sqlite                          change feed (SqliteChangeFeed)
@@ -14,6 +16,11 @@ Layout under ``index.root`` (local disk only, ADR-0002)::
 Every step is resumable: a refined generation is sealed by ``_SUCCESS.json`` and skipped next time
 (an unsealed one is rebuilt from scratch); indexing diffs the last indexed generation against the
 new one, so re-running after a crash re-applies at most one idempotent batch.
+
+A partitioned source's content is the union of its partitions' current generations
+(``Vault.current_set``): each partition generation is refined once, then a set generation hard-links
+their Parquet parts and is indexed like any other generation, so search, documents, history and the
+catalog see every partition, not only the last one ingested.
 """
 
 from __future__ import annotations
@@ -33,6 +40,7 @@ from wsp_adapters.entries import EntrySource, Redirect
 from wsp_core.errors import FetchError
 from wsp_core.ids import InvalidDocIdError, make_doc_id
 from wsp_core.model import DocRecord, FetchResult, Generation, GenerationStatus, RemoteFile, SourceSpec
+from wsp_core.partitions import partition_of
 from wsp_core.ports import ChangeFeed, Ctx, SourceAdapter, Vault
 from wsp_index import RefineryReader, RefineryWriter, TantivyIndex, ensure_local, refresh
 from wsp_index.catalog import (
@@ -43,7 +51,14 @@ from wsp_index.catalog import (
     refresh_featured,
 )
 from wsp_index.linkrank import RankConfig, RankStats, StaticRank, compute_static_rank
-from wsp_index.refinery import CURRENT_FILE, current_generation, generation_dir, is_sealed
+from wsp_index.refinery import (
+    CURRENT_FILE,
+    compose_set,
+    current_generation,
+    generation_dir,
+    is_sealed,
+    part_dir,
+)
 from wsp_index.spelling import SPELL_FILE, SpellConfig, VocabStats, build_vocabulary
 from wsp_orchestrator.pipeline import RefineResult
 
@@ -133,10 +148,16 @@ class Indexer:
 
     # --- refine --------------------------------------------------------------------------------
 
+    def refined_dir(self, spec: SourceSpec, generation_id: str) -> Path:
+        """Where a vault generation is refined: ``_parts/<gid>`` for a partitioned source (ADR-0010)."""
+        if spec.partitioned:
+            return part_dir(self.refinery, spec.id, generation_id)
+        return generation_dir(self.refinery, spec.id, generation_id)
+
     def refine(self, spec: SourceSpec, generation: Generation, generation_path: Path) -> RefineResult:
         """Write the generation's documents to Refinery Parquet (skipped if already sealed)."""
         gid = generation.generation_id
-        out_dir = generation_dir(self.refinery, spec.id, gid)
+        out_dir = self.refined_dir(spec, gid)
         if is_sealed(out_dir):
             return RefineResult(len(RefineryReader(out_dir)))
         adapter = self.adapter_for(spec)
@@ -148,7 +169,10 @@ class Indexer:
         redirects = ctx.workdir / "redirects.sqlite"
         redirects.unlink(missing_ok=True)
         started, n = self.clock(), 0
-        with closing(sqlite3.connect(redirects)) as db, RefineryWriter(self.refinery, spec.id, gid) as writer:
+        with (
+            closing(sqlite3.connect(redirects)) as db,
+            RefineryWriter(self.refinery, spec.id, gid, directory=out_dir) as writer,
+        ):
             db.execute("CREATE TABLE redirects (target TEXT NOT NULL, alias TEXT NOT NULL)")
             for doc in self._documents(adapter, ctx, generation_path, db):
                 writer.write([doc])
@@ -206,6 +230,36 @@ class Indexer:
             f"  indexed {spec.id}/{generation_id}: +{stats.upserted:,} upserted, -{stats.deleted:,} removed"
         )
         return SourceReport(spec.id, indexed=generation_id, upserted=stats.upserted, deleted=stats.deleted)
+
+    def index_partitioned(self, spec: SourceSpec, include: str | None = None) -> SourceReport:
+        """Index the union of a partitioned source's current partitions (ADR-0010).
+
+        The members are the vault's current set; ``include`` (a sealed generation about to be
+        promoted, from the release pipeline) replaces the current generation of its partition. Members
+        not refined yet are refined first; the set generation is composed (or reused) and indexed.
+        """
+        ids = [g.generation_id for g in self.vault.current_set(spec.id)]
+        if include is not None:
+            ids = [g for g in ids if partition_of(g) != partition_of(include)] + [include]
+        if not ids:
+            return SourceReport(spec.id, skipped="no current generation")
+        sealed = {g.generation_id: g for g in self.vault.generations(spec.id)}
+        members: list[Path] = []
+        for gid in sorted(ids):
+            out_dir = part_dir(self.refinery, spec.id, gid)
+            if not is_sealed(out_dir):
+                gen = sealed.get(gid)
+                if gen is None or gen.status is not GenerationStatus.SEALED:
+                    raise LookupError(f"{spec.id}/{gid} is not a sealed generation")
+                self.refine(spec, gen, self.vault.generation_path(spec.id, gid))
+            members.append(out_dir)
+        set_id = compose_set(self.refinery, spec.id, members)
+        self._say(f"  {spec.id}: set {set_id} of {len(members)} partition(s)")
+        report = self.index_generation(spec, set_id)
+        for gid in ids:  # aliases of every member (index_generation only knows the set's own work dir)
+            self._apply_redirect_aliases(spec, gid)
+        self.index.commit()
+        return report
 
     def build_catalog(self, spec: SourceSpec, generation_id: str) -> Path | None:
         """Precompute the portal/directory/random data of one indexed generation (derived, local)."""
@@ -322,10 +376,16 @@ class Indexer:
             self._say(f"{sid}: {len(gens)} sealed generation(s)")
             refined: list[tuple[str, int]] = []
             for g in gens:
-                if is_sealed(generation_dir(self.refinery, sid, g.generation_id)):
+                if is_sealed(self.refined_dir(spec, g.generation_id)):
                     continue
                 result = self.refine(spec, g, self.vault.generation_path(sid, g.generation_id))
                 refined.append((g.generation_id, result.doc_count or 0))
+            if spec.partitioned:
+                rep = self.index_partitioned(spec)
+                reports.append(
+                    SourceReport(sid, tuple(refined), rep.indexed, rep.upserted, rep.deleted, rep.skipped)
+                )
+                continue
             current = self.vault.current(sid)
             if current is None:
                 reports.append(SourceReport(sid, tuple(refined), skipped="no current generation"))

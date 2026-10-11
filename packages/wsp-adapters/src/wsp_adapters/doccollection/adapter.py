@@ -18,15 +18,21 @@ under ``upstream/`` plus ``meta/documents.jsonl``: the *whole* collection as of 
 per document version, with ``generation`` naming the generation that holds the bytes when it is an
 earlier one. Superseded editions therefore stay where they were sealed and remain reachable;
 :meth:`documents` reads the catalog of the generation it is given and resolves files across the
-source's generations.
+source's generations, and :meth:`depends_on` names those earlier generations so retention keeps them.
+
+**Partitions** (ADR-0010, ``partitioned: true``): very large sets are fetched one partition per run
+(a US state, a batch of 10,000 items) into generations ``<cycle>.<partition>``. A partition's catalog
+lists that partition only and carries over the partition's own earlier generation; the index serves
+the union of every partition's current generation.
 
 **Policy.** :meth:`discover` applies the metadata stage of :mod:`~wsp_adapters.doccollection.policy`
 (denied documents are never fetched; review documents are left out of the release) and writes an
 audit file of every decision to ``ctx.workdir``. :meth:`verify` runs the distribution gate and the
-content screen on each fetched file's front matter. In the orchestrator pipeline a rejected or held
-document fails the release (a ``mismatch`` verdict, which also auto-pauses the source and alerts);
-``wsp collections fetch`` is the acquisition path that deletes restricted files, quarantines held
-ones and files proposals per document.
+content screen on each fetched file's front matter. A rejected document gets a ``rejected`` verdict
+and a held one a ``held`` verdict: the orchestrator pipeline drops that file (deletes it, or moves it
+to its quarantine), alerts, files a review proposal and goes on with the rest of the release
+(ADR-0010). ``wsp collections fetch`` does the same per document on the acquisition path. A file that
+is not what it claims to be (an HTML error page instead of a PDF) is still a ``mismatch``.
 """
 
 from __future__ import annotations
@@ -303,9 +309,20 @@ class DocCollectionAdapter:
         if problem:
             return FileVerdict(VerdictStatus.MISMATCH, problem)
         screen = screen_file(local, self.config(ctx.source).rules)
-        if screen.decision.verdict is not Verdict.ALLOW:
-            return FileVerdict(VerdictStatus.MISMATCH, f"policy {screen.decision}")
+        if screen.decision.verdict is Verdict.DENY:
+            return FileVerdict(VerdictStatus.REJECTED, f"policy {screen.decision}")
+        if screen.decision.verdict is Verdict.REVIEW:
+            return FileVerdict(VerdictStatus.HELD, f"policy {screen.decision}")
         return base
+
+    def depends_on(self, ctx: Ctx, generation_dir: Path) -> frozenset[str]:
+        """Earlier generations whose files this generation's catalog lists (``GenerationDependencies``)."""
+        catalog = generation_dir / CATALOG
+        if not catalog.is_file():
+            return frozenset()
+        return frozenset(m.generation for m in read_catalog(generation_dir) if m.generation) - {
+            generation_dir.name
+        }
 
     # --- documents ---------------------------------------------------------------------------------
 

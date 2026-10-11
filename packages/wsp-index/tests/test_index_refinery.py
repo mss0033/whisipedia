@@ -23,8 +23,15 @@ from wsp_index.refinery import (
 from wsp_index_helpers import doc
 
 
-def write(root: Path, gen: str, docs: list[DocRecord], **kw: int) -> RefineryReader:
-    with RefineryWriter(root, "src", gen, **kw) as w:
+def write(
+    root: Path,
+    gen: str,
+    docs: list[DocRecord],
+    *,
+    row_group_rows: int = refinery.DEFAULT_ROW_GROUP_ROWS,
+    docs_per_file: int = refinery.DEFAULT_DOCS_PER_FILE,
+) -> RefineryReader:
+    with RefineryWriter(root, "src", gen, row_group_rows=row_group_rows, docs_per_file=docs_per_file) as w:
         w.write(docs)
     return RefineryReader(generation_dir(root, "src", gen))
 

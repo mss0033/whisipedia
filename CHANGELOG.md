@@ -4,6 +4,22 @@ All notable changes are documented here. The format follows [Keep a Changelog](h
 
 ## [Unreleased]
 ### Added
+- Partitioned sources (ADR-0010, port revision v0.4): `access.partitioned: true` sources such as
+  `usgs-historical-topo` (one state per run) and `cia-reading-room` (batches `b0001`…`b0090`) keep
+  one generation `<cycle>.<partition>` per partition. `FileVault.promote` writes
+  `CURRENT.d/<partition>.txt` (plus `CURRENT.txt` as before); `Vault.current_set` is the current
+  generation of every partition; the indexer refines each partition once (`refinery/<id>/_parts/`)
+  and indexes their union as a hard-linked set generation, so search, documents and history cover
+  every partition fetched so far. `wsp collections fetch --partition` carries over only that
+  partition's catalog; `wsp ingest` promotes unless a newer generation of the same partition is current.
+- Retention plans partitioned sources per partition (`plan_partitioned_retention`) and never prunes a
+  generation a current one reads from (new optional adapter capability `GenerationDependencies`,
+  implemented by `doc-collection` from its catalog); `FileVault.prune` refuses every generation of the
+  current set and the newest of each partition.
+- Document policy in the release pipeline: `VerdictStatus.REJECTED` / `HELD`. A rejected document is
+  deleted and a held one quarantined in the orchestrator work directory, the release goes on without
+  them (ledger `release.withheld`, alert `withheld:<source>/<version>`, one doc-review proposal via
+  `Wiring.on_withheld`); withholding never counts as a checksum failure or pauses the source.
 - Source integrity (ADR-0009): per-release provenance (URLs, redirect chains, TLS peer certificates,
   HTTP validators, which mirror served which byte ranges, rejected mirrors, spot checks) stored as a
   signed `PROVENANCE.json` next to the manifest; digests re-fetched through an independent channel
@@ -97,6 +113,11 @@ All notable changes are documented here. The format follows [Keep a Changelog](h
   overrides (`acquirer.follow_cycle_cadences` removed). `pytest` is now the optional `wsp-core[testing]` extra.
 - Default update cycle is monthly instead of weekly, with quarterly as a single config option (PLAN §6.7).
 ### Fixed
+- Partitioned collections (ADR-0010): only the last ingested partition was current, searchable and
+  safe from retention; a partition's fetch carried another partition's catalog over (labelling its
+  documents `withdrawn-from-index`); `wsp ingest` refused to promote a partition whose cycle sorted
+  before the current one. One restricted or held document no longer fails a whole orchestrator
+  release, counts as a checksum failure or auto-pauses the source.
 - Browser-test findings (docs/testing/e2e-findings.md): Stack Exchange book front pages linked outside
   their book (E2E-4); re-released ZIMs (`_2026-07a`) were listed under a name that did not open
   (E2E-3); "wikipedia Alan Turing" did not jump to a page served straight from a ZIM (E2E-7); the

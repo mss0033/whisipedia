@@ -11,6 +11,11 @@ separate :class:`Warden` port; ``Ledger`` gains ``tail`` and idempotent appends;
 
 Port revision v0.3 (ADR-0008): the ``Generator`` port (local LLM for summaries) is removed; the user
 experience has no generative features.
+
+Port revision v0.4 (ADR-0010): partitioned sources. ``Vault`` gains ``current_set`` and ``promote``
+makes a partitioned source's generation current for its partition only; adapters may implement
+:class:`GenerationDependencies` so retention keeps generations a current one still reads from;
+``Verdict`` gains the document-policy statuses ``rejected`` and ``held``.
 """
 
 from __future__ import annotations
@@ -111,6 +116,20 @@ class SourceAdapter(Protocol):
         ...
 
 
+@runtime_checkable
+class GenerationDependencies(Protocol):
+    """Optional adapter capability (ADR-0010): which *other* generations a generation reads from.
+
+    Incremental adapters (``doc-collection``: a generation stores only new or changed documents and
+    its catalog points at earlier generations for the rest) implement it so retention never prunes a
+    generation that a current one still needs.
+    """
+
+    def depends_on(self, ctx: Ctx, generation_dir: Path) -> frozenset[str]:
+        """Ids of the source's other generations whose files this sealed generation reads."""
+        ...
+
+
 # --- Vault ---------------------------------------------------------------------------------------
 
 
@@ -165,10 +184,24 @@ class Vault(Protocol):
         ...
 
     def promote(self, source_id: str, generation_id: str) -> None:
-        """Atomically point ``CURRENT.txt`` at a sealed generation."""
+        """Atomically point ``CURRENT.txt`` at a sealed generation.
+
+        For a partitioned source (ADR-0010) the generation becomes current for its partition only;
+        the other partitions keep theirs.
+        """
         ...
 
-    def current(self, source_id: str) -> Generation | None: ...
+    def current(self, source_id: str) -> Generation | None:
+        """The most recently promoted generation (for a partitioned source: of any partition)."""
+        ...
+
+    def current_set(self, source_id: str) -> Sequence[Generation]:
+        """The generations that together are the source's current content, oldest id first.
+
+        ``[current]`` (or empty) for an ordinary source; for a partitioned source the current
+        generation of every partition (ADR-0010).
+        """
+        ...
 
     def generations(self, source_id: str) -> Sequence[Generation]: ...
 
@@ -210,7 +243,8 @@ class Warden(Protocol):
         ...
 
     def prune(self, source_id: str, generation_id: str) -> Path:
-        """Retire a generation per retention policy. Refuses the current or newest sealed generation.
+        """Retire a generation per retention policy. Refuses the current or newest sealed generation
+        (for a partitioned source: any generation of the current set, and the newest of each partition).
 
         Returns where the generation went; implementations may move it aside rather than delete it.
         """

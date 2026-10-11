@@ -106,8 +106,9 @@ class Scheduler:
         for spec in self.active_sources():
             cadence = self.source_cadence(spec)
             payload = {"source_id": spec.id}
-            out.append(ScheduleEntry(JobKind.DISCOVER, spec.id, cadence, payload, spec.id))
-            out.append(ScheduleEntry(JobKind.HEALTH_PROBE, spec.id, probe, payload, spec.id))
+            if not spec.partitioned:  # ADR-0010: acquired one partition per run by `wsp collections fetch`
+                out.append(ScheduleEntry(JobKind.DISCOVER, spec.id, cadence, payload, spec.id))
+                out.append(ScheduleEntry(JobKind.HEALTH_PROBE, spec.id, probe, payload, spec.id))
             out.append(ScheduleEntry(JobKind.PRUNE, spec.id, cadence, payload, spec.id))
         out.append(ScheduleEntry(JobKind.DISCOVERY_BOTS, GLOBAL_KEY, self.cycle))
         for name, iso in sorted(self.bots.items()):
@@ -218,7 +219,7 @@ class Scheduler:
         raised: list[str] = []
         for spec in self.active_sources():
             window = self.retention_window(spec)
-            if window is None:
+            if window is None or spec.partitioned:  # no orchestrator cycles for partitioned sources
                 continue
             key = f"retention-window:{spec.id}"
             health = self.store.source_health(spec.id)

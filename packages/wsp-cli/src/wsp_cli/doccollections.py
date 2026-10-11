@@ -11,6 +11,11 @@ held ones under ``_incoming/_quarantine/<source>/`` with one review proposal per
 the catalog ``meta/documents.jsonl`` and the ingest plan ``_incoming/_plans/targets.d/<source>-<cycle>.json``.
 ``wsp ingest --source <id>`` then seals the generation. Git repositories are fetched as a single
 ``git bundle`` of a mirror clone.
+
+Partitioned sources (``access.partitioned``, ADR-0010) are fetched one ``--partition`` per run into
+the cycle ``<YYYY-MM-DD>.<partition>``; the catalog carried over is that partition's current one
+(``CURRENT.d/<partition>.txt``), never another partition's, so ``withdrawn-from-index`` labels and
+skipped duplicates stay within the partition.
 """
 
 from __future__ import annotations
@@ -46,6 +51,7 @@ from wsp_adapters.doccollection.policy import Rules, Verdict
 from wsp_cli import bootstrap
 from wsp_core.errors import FetchError
 from wsp_core.model import RemoteFile, SourceSpec, SourceStatus
+from wsp_core.partitions import PartitionError, check_partition, partition_generation_id, partition_of
 from wsp_core.ports import Ctx, Fetcher, SupportsHead
 
 # Research doc §6, in order. Git-hosted and file-set sources are surveyed through the same path.
@@ -379,12 +385,21 @@ class CollectionFetcher:
             self.out.write(text + "\n")
             self.out.flush()
 
-    def previous_catalog(self, spec: SourceSpec) -> tuple[str | None, list[Any]]:
+    def previous_catalog(
+        self, spec: SourceSpec, partition: str | None = None
+    ) -> tuple[str | None, list[Any]]:
+        """The current generation's id and catalog; for a partition, that partition's (ADR-0010)."""
         lib = self.vault_root / "library" / spec.vault_domain / spec.id
-        pointer = lib / "CURRENT.txt"
-        if not pointer.is_file():
+        gen = _pointer(lib / "CURRENT.txt")
+        if partition is not None:
+            own = _pointer(lib / "CURRENT.d" / f"{partition}.txt")
+            gen = (
+                own
+                if own is not None
+                else (gen if gen is not None and partition_of(gen) == partition else None)
+            )
+        if gen is None:
             return None, []
-        gen = pointer.read_text(encoding="utf-8").strip()
         return gen, read_catalog_file(lib / gen / CATALOG)
 
     def run(
@@ -410,7 +425,7 @@ class CollectionFetcher:
         for cand, decision in survey.decisions:
             if decision.verdict is Verdict.REVIEW:
                 report.review.append(_review_row(cand, str(decision)))
-        prev_gen, prev_catalog = self.previous_catalog(spec)
+        prev_gen, prev_catalog = self.previous_catalog(spec, partition if spec.partitioned else None)
         held_sha = {m.doc_key: m.sha256 for m in prev_catalog}
         dest_dir = self.incoming / spec.id / version
         docs = survey.allowed[:limit] if limit else survey.allowed
@@ -570,6 +585,14 @@ class CollectionFetcher:
         self._say(f"{spec.id}: {len(report.fetched)} documents ready; plan {plan}")
 
 
+def _pointer(path: Path) -> str | None:
+    try:
+        value = path.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return None
+    return value or None
+
+
 def _rights_basis(cand: Candidate) -> str:
     return cand.rights if cand.rights.startswith("license:") else ""
 
@@ -582,6 +605,14 @@ def _review_row(cand: Candidate, rule: str) -> dict[str, str]:
         "url": cand.url,
         "rule": rule,
     }
+
+
+def withheld_review_row(name: str, url: str, rule: str) -> dict[str, str]:
+    """Review row for a file the release pipeline held (ADR-0010); the key is read from the file name
+    (``<key with ':' as '__'>-<hash8>.<ext>``, see :attr:`Candidate.file_name`)."""
+    stem = name.rsplit(".", 1)[0]
+    key = stem.rsplit("-", 1)[0].replace("__", ":")
+    return {"key": key, "pub_number": "", "title": key, "url": url, "rule": rule.removeprefix("policy ")}
 
 
 def write_review_proposal(
@@ -671,14 +702,22 @@ def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
     if spec.status is SourceStatus.EXCLUDED or spec.raw.get("legal_basis") == "none":
         print(f"error: {spec.id} is excluded or has no legal basis", file=sys.stderr)
         return 2
-    access_block = cast(Mapping[str, Any], spec.raw.get("access") or {})
-    if access_block.get("partitioned") and not args.partition and not args.dry_run:
+    if spec.partitioned and not args.partition and not args.dry_run:
         print(f"error: {spec.id} is fetched one partition per run: add --partition", file=sys.stderr)
+        return 2
+    if args.partition and not spec.partitioned:
+        print(f"error: {spec.id} is not partitioned (access.partitioned): drop --partition", file=sys.stderr)
+        return 2
+    try:
+        partition = check_partition(args.partition.lower()) if args.partition else None
+    except PartitionError as exc:
+        print(f"error: {exc}", file=sys.stderr)
         return 2
     paths = bootstrap.paths(cfg)
     vault_root = paths.require_vault()
     today = datetime.now(UTC).strftime("%Y-%m-%d")
-    version = args.version or (f"{today}.{args.partition}" if args.partition else today)
+    cycle = args.version or today
+    version = partition_generation_id(cycle, partition) if partition else cycle
     workdir = (paths.workdir or state_dir()) / "collections"
     runner = CollectionFetcher(
         vault_root,
@@ -694,7 +733,7 @@ def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
         limit=args.limit,
         max_pages=args.max_pages,
         dry_run=args.dry_run,
-        partition=args.partition,
+        partition=partition,
     )
     rows = [*report.review, *report.held]
     proposal = None if args.dry_run else write_review_proposal(cfg, spec, version, rows)
@@ -748,7 +787,9 @@ def register(sub: Any, add: Any) -> None:
     s.add_argument("--max-pages", type=int, default=None, help="listing pages per discoverer")
     s.add_argument("--dry-run", action="store_true", help="discover and classify only")
     s.add_argument(
-        "--partition", default=None, help="very large sets: one state (usgs-historical-topo) or batch b0001"
+        "--partition",
+        default=None,
+        help="partitioned sets: one state (usgs-historical-topo) or batch b0001 (cycle <date>.<partition>)",
     )
 
 

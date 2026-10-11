@@ -294,7 +294,7 @@ def build_vault(
 ) -> FileVault:
     """``FileVault`` at ``vault.root`` with registry domains and (optionally) the ledger attached."""
     from wsp_vault.parity import Par2Parity
-    from wsp_vault.vault import FileVault, domains_from_specs
+    from wsp_vault.vault import FileVault, domains_from_specs, partitioned_from_specs
 
     p = paths(cfg)
     root = p.require_vault()
@@ -303,6 +303,7 @@ def build_vault(
         root,
         signer,
         domains=domains_from_specs(specs),
+        partitioned=partitioned_from_specs(specs),
         ledger=build_ledger(cfg, signer) if ledger else None,
         parity=parity,
     )

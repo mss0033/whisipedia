@@ -14,17 +14,24 @@ Hard guarantees, whatever the policy says:
 * **known-good anchoring** (ADR-0009): the newest generation that passed every pre-promotion check
   (``known_good``: it was promoted) is never pruned, and neither is the newest one that is also
   ``settled`` (promoted ``integrity.settle_days`` ago and fully verified by the scrub since). While
-  a new generation is still settling, the older anchor therefore stays.
+  a new generation is still settling, the older anchor therefore stays;
+* a generation ``needed`` by a current one (an incremental generation reads files from it, e.g. a
+  ``doc-collection`` catalog pointing at earlier editions) is never pruned.
+
+**Partitioned sources** (ADR-0010): a partition is not a newer version of another partition, so
+:func:`plan_partitioned_retention` plans every partition on its own (its own newest, current, last
+``n``, months and years) and keeps the union.
 """
 
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date
 
 from wsp_core.model import Generation, GenerationStatus
+from wsp_core.partitions import group_by_partition
 
 _DATE_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})")
 
@@ -70,12 +77,21 @@ class GenerationInfo:
     holds_last_copy: bool = False
     known_good: bool = False  # passed every check before promotion (it was promoted)
     settled: bool = False  # known good, old enough and verified by the scrub since
+    needed: bool = False  # a current generation reads files from it (incremental sources)
 
     @classmethod
     def from_generation(
-        cls, g: Generation, *, holds_last_copy: bool = False, known_good: bool = False, settled: bool = False
+        cls,
+        g: Generation,
+        *,
+        holds_last_copy: bool = False,
+        known_good: bool = False,
+        settled: bool = False,
+        needed: bool = False,
     ) -> GenerationInfo:
-        return cls(g.generation_id, generation_date(g), g.status, holds_last_copy, known_good, settled)
+        return cls(
+            g.generation_id, generation_date(g), g.status, holds_last_copy, known_good, settled, needed
+        )
 
 
 def generation_date(g: Generation) -> date:
@@ -121,6 +137,8 @@ def plan_retention(
             keep(g.generation_id, "current")
         if g.holds_last_copy:
             keep(g.generation_id, "last copy of content gone upstream")
+        if g.needed:
+            keep(g.generation_id, "read by a current generation")
     for g in sealed[: policy.last]:
         keep(g.generation_id, f"last {policy.last}")
     good = next((g for g in sealed if g.known_good), None)
@@ -146,3 +164,32 @@ def plan_retention(
     kept = tuple(g.generation_id for g in generations if g.generation_id in reasons)
     pruned = tuple(g.generation_id for g in sealed[::-1] if g.generation_id not in reasons)
     return RetentionPlan(keep=kept, prune=pruned, reasons={k: tuple(v) for k, v in reasons.items()})
+
+
+def plan_partitioned_retention(
+    generations: Sequence[GenerationInfo], policy: GfsPolicy, *, current: Collection[str]
+) -> RetentionPlan:
+    """:func:`plan_retention` per partition (ADR-0010); ``current`` is the source's current set.
+
+    Generation ids name their partition (``<cycle>.<partition>``); ids that name none form one more
+    group. Each group keeps its own newest, current, last ``n`` and monthly/yearly generations, so
+    acquiring partition after partition never prunes an earlier partition.
+    """
+    keep: list[str] = []
+    prune: list[str] = []
+    reasons: dict[str, tuple[str, ...]] = {}
+    for group in group_by_partition(generations, lambda g: g.generation_id).values():
+        ids = {g.generation_id for g in group}
+        cur = [gid for gid in current if gid in ids]
+        sub = plan_retention(group, policy, current=max(cur) if cur else None)
+        extra = {gid: ("current",) for gid in cur if gid not in sub.reasons}  # several current: keep all
+        keep += [*sub.keep, *extra]
+        prune += [gid for gid in sub.prune if gid not in extra]
+        reasons.update(sub.reasons)
+        reasons.update(extra)
+    order = {g.generation_id: i for i, g in enumerate(generations)}
+    return RetentionPlan(
+        keep=tuple(sorted(set(keep), key=order.__getitem__)),
+        prune=tuple(prune),
+        reasons=reasons,
+    )

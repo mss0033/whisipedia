@@ -61,6 +61,16 @@ class SourceSpec:
         """
         return self.domain[0] if self.domain else "misc"
 
+    @property
+    def partitioned(self) -> bool:
+        """``access.partitioned: true``: acquired one partition per run (ADR-0010).
+
+        Its generations are ``<cycle>.<partition>`` and its content is the current generation of
+        every partition (:mod:`wsp_core.partitions`), not just the newest generation.
+        """
+        access = self.raw.get("access")
+        return isinstance(access, Mapping) and access.get("partitioned") is True  # pyright: ignore[reportUnknownMemberType]
+
 
 @dataclass(frozen=True, slots=True)
 class Checksum:
@@ -133,6 +143,9 @@ class VerdictStatus(StrEnum):
     MISMATCH = "mismatch"
     MISSING = "missing"
     UNVERIFIABLE = "unverifiable"  # upstream publishes no checksum
+    # Document policy (ADR-0010): the bytes are intact but must not enter the vault.
+    REJECTED = "rejected"  # restricted or out of scope: deleted at once, the release goes on without it
+    HELD = "held"  # needs an owner decision: quarantined outside the vault, the release goes on
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,6 +156,11 @@ class Verdict:
     @property
     def ok(self) -> bool:
         return self.status in (VerdictStatus.OK, VerdictStatus.UNVERIFIABLE)
+
+    @property
+    def withheld(self) -> bool:
+        """The file is left out of the generation by document policy (not an integrity failure)."""
+        return self.status in (VerdictStatus.REJECTED, VerdictStatus.HELD)
 
 
 @dataclass(frozen=True, slots=True)

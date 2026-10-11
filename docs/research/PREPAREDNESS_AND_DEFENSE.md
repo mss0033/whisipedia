@@ -512,7 +512,8 @@ www.cia.gov); refined sources re-run after tuning. "est." extrapolates samples t
   phrases such as mine warfare), 112 review (abstract hits). Release stamps make old banners acceptable.
 * **Fetch**: one batch of 10,000 items per run (`--partition b0001` …, 90 batches), two requests per
   document (file list + PDF) at ≤ 1 request/s: about **21 days** of wall time for the whole set,
-  each batch a part generation `<date>.bNNNN` sealed by `wsp ingest`.
+  each batch a part generation `<date>.bNNNN` sealed by `wsp ingest` (a partitioned source,
+  [ADR-0010](../adr/0010-partitioned-sources.md): every batch stays current and searchable).
 
 ### 8.3 USGS Historical Topographic Map Collection (D14)
 
@@ -522,4 +523,5 @@ www.cia.gov); refined sources re-run after tuning. "est." extrapolates samples t
   (≈ 186k sheets each), well below the 10–20 TB estimate. ETags give MD5 for single-part objects.
 * **Filter**: all in scope (two "Explosive Rock" quadrangles go to review on the place name).
 * **Fetch**: one state per run (`--partition ca`; the listing is narrowed to that state's prefix), GeoPDF
-  and GeoTIFF together, at ≤ 1 request/s: ≈ 4.3 days per format; each state a part generation `<date>.<st>`.
+  and GeoTIFF together, at ≤ 1 request/s: ≈ 4.3 days per format; each state a part generation `<date>.<st>`
+  (partitioned source, ADR-0010: the library is the union of every state's current generation).

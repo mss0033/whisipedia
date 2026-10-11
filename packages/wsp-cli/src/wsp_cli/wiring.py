@@ -26,7 +26,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
-from wsp_cli import bootstrap
+from wsp_cli import bootstrap, doccollections
 from wsp_cli.indexer import Indexer
 from wsp_cli.integrity import integrity_hooks
 from wsp_core.activity import recently_active
@@ -42,7 +42,7 @@ from wsp_orchestrator.curator import (
 )
 from wsp_orchestrator.curator.registry_edit import upsert_overlay
 from wsp_orchestrator.orchestrator import LastCopyHook, Wiring
-from wsp_orchestrator.pipeline import RefineResult
+from wsp_orchestrator.pipeline import RefineResult, Withheld
 from wsp_orchestrator.policy import GateConfig, Proposal
 from wsp_vault.attest import is_attestation_path
 from wsp_vault.drill import DrillKind, run_drill
@@ -339,7 +339,10 @@ class IndexHooks:
     def index(self, source: SourceSpec, generation: Generation) -> None:
         ix = self._indexer()
         try:
-            ix.index_generation(source, generation.generation_id)
+            if source.partitioned:  # ADR-0010: index the union of the partitions, this one included
+                ix.index_partitioned(source, include=generation.generation_id)
+            else:
+                ix.index_generation(source, generation.generation_id)
         finally:
             ix.index.close()
             ix.feed.close()
@@ -390,6 +393,13 @@ def build_wiring(config: Mapping[str, Any]) -> Wiring:
     files = ProposalFiles(bootstrap.paths(config).proposals)
     overlay = bootstrap.overlay_path(config, lay)
 
+    def on_withheld(spec: SourceSpec, version: str, items: Sequence[Withheld]) -> None:
+        """Held documents of a release (ADR-0010): one owner-review proposal, as `collections fetch` does."""
+        rows = [
+            doccollections.withheld_review_row(w.name, w.url, w.detail) for w in items if w.status == "held"
+        ]
+        doccollections.write_review_proposal(config, spec, version, rows)
+
     def promote(proposal: Proposal) -> None:
         entry = dict(proposal.candidate.registry_entry)
         if entry.get("id"):
@@ -414,5 +424,6 @@ def build_wiring(config: Mapping[str, Any]) -> Wiring:
         proposal_recorder=files.write,
         parity=parity,
         integrity=integrity_hooks(config, vault, scrub),
+        on_withheld=on_withheld,
         on_shutdown=[stopping.set],
     )

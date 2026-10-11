@@ -138,14 +138,14 @@ One registry source made of many independently published documents (spec: resear
 | `policy` | The deterministic filter and edition labels. No network, no document bytes beyond front matter. |
 | `discovery` | Discoverers (`index-page`, `api`, `oai-pmh`, `archive-org`, `s3-listing`, `git`, `list`/`document`), resolvers for landing pages, the per-host `Throttle` |
 | `catalog` | `meta/documents.jsonl`: the whole collection per generation, carried-over documents point at the generation that holds their bytes |
-| `adapter` | The `SourceAdapter`: `discover` (metadata stage + audit file), `plan` (skip held name+size), `fetch` (HTTPS from `origins` only), `verify` (format, distribution gate, content screen), `documents` (PDF text with `pypdfium2`, HTML via selectolax) |
+| `adapter` | The `SourceAdapter`: `discover` (metadata stage + audit file), `plan` (skip held name+size), `fetch` (HTTPS from `origins` only), `verify` (format → `mismatch`; distribution gate and content screen → `rejected` / `held`, which the pipeline drops while the release goes on, ADR-0010), `documents` (PDF text with `pypdfium2`, HTML via selectolax), `depends_on` (earlier generations the catalog points at, kept by retention) |
 
 **Discovery kinds** (`access.discovery[]`): `index-page` (`url(s)`, `documents` regex, `follow` +
 `depth` + `max_pages`, `follow_rewrite`, `filter_follow` so a denied series is never opened, `rows` +
 `columns` + `detail_documents` for table indexes such as APD); `api` with `flavor` `nga-msi`,
 `govinfo`, `congress-crs` (keys), `ntrs`, `osti`, `usgs-pubs`, `govuk-search`, `dspace7`, `tnm`;
 `oai-pmh`; `archive-org` (scrape API; `provenance` is required and recorded per document); `s3-listing`
-(ETag = MD5, `partition` for per-state part generations); `git` (GitHub repository fetched as one
+(ETag = MD5, `partition` for per-state part generations of a `partitioned: true` source, ADR-0010); `git` (GitHub repository fetched as one
 `git bundle`). Listings report upstream totals so a dry run can sample.
 
 **Filter** (`access.filter` + `registry/filters/<source>.yaml`), deny-first:
