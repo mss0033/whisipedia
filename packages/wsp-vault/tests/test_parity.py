@@ -15,7 +15,7 @@ class Recorder:
     def __call__(self, args: Sequence[str]) -> int:
         self.calls.append(list(args))
         if args[1] == "create" and self.rc == 0:
-            index = Path(args[5])
+            index = Path(next(a for a in args if a.endswith(".par2")))
             index.write_bytes(b"idx")
             index.with_name("recovery.vol00+01.par2").write_bytes(b"vol")
         return self.rc
@@ -38,9 +38,10 @@ def test_create_and_repair_command_lines(files: list[Path], tmp_path: Path) -> N
     created = parity.create(files, out, 10)
     assert [p.name for p in created] == [INDEX_NAME, "recovery.vol00+01.par2"]
     base = f"-B{tmp_path / 'gen' / 'upstream'}"
-    assert run.calls[0] == ["par2", "create", "-q", "-r10", base, str(out / INDEX_NAME), *map(str, files)]
+    index = str(out / INDEX_NAME)
+    assert run.calls[0] == ["par2", "create", "-q", "-t2", "-r10", base, index, *map(str, files)]
     assert parity.repair(files, out)
-    assert run.calls[1][:4] == ["par2", "repair", "-q", base]
+    assert run.calls[1][:5] == ["par2", "repair", "-q", "-t2", base]
 
 
 def test_failures(files: list[Path], tmp_path: Path) -> None:
