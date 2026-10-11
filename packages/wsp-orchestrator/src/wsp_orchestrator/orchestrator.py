@@ -13,7 +13,6 @@ import threading
 import time
 from collections import Counter
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from enum import StrEnum
@@ -27,6 +26,7 @@ from wsp_orchestrator.bots import Bot, BotContext, BotResult
 from wsp_orchestrator.clock import Clock, SystemClock, ensure_utc
 from wsp_orchestrator.codec import release_from_json
 from wsp_orchestrator.curator.proposals import ProposalRecord
+from wsp_orchestrator.integrity.guard import IntegrityGuard, IntegrityHooks
 from wsp_orchestrator.jobs import Job, JobKind, JobQueue
 from wsp_orchestrator.metrics import Metrics
 from wsp_orchestrator.pipeline import (
@@ -90,6 +90,10 @@ class Wiring:
     promoter: Callable[[Proposal], None] | None = None  # applies AUTO_PROMOTE (registry overlay)
     proposal_recorder: Callable[[ProposalRecord], object] | None = None  # proposal files
     parity: ParityHook | None = None
+    integrity: IntegrityHooks | None = None  # source integrity guard (ADR-0009); None = off
+    # Called once on shutdown (SIGTERM): cancel downloads, stop scrub/parity, kill par2. The
+    # fetcher's own ``cancel()`` is called too when it has one.
+    on_shutdown: Sequence[Callable[[], None]] = ()
 
 
 class Handled(StrEnum):
@@ -137,6 +141,16 @@ class Orchestrator:
         self.queue = JobQueue(self.store)
         self.alerter = Alerter(self.store, self.clock, wiring.alert_sinks)
         self.sources = {s.id: s for s in wiring.sources}
+        self.integrity: IntegrityGuard | None = None
+        if wiring.integrity is not None and wiring.integrity.settings.enabled:
+            self.integrity = IntegrityGuard(
+                self.store,
+                wiring.fetcher,
+                wiring.integrity,
+                clock=self.clock,
+                alerter=self.alerter,
+                profiles_dir=settings.state_db.parent / "profiles",
+            )
         self.pipeline = ReleasePipeline(
             store=self.store,
             sources=wiring.sources,
@@ -152,6 +166,7 @@ class Orchestrator:
             alerter=self.alerter,
             retry=settings.retry,
             checkpoint=checkpoint or _no_checkpoint,
+            integrity=self.integrity,
         )
         self.scheduler = Scheduler(
             store=self.store,
@@ -178,8 +193,9 @@ class Orchestrator:
         self._lock = threading.Lock()
         self._running_kind: Counter[JobKind] = Counter()
         self._running_host: Counter[str] = Counter()
-        self._executor: ThreadPoolExecutor | None = None
-        self._futures: set[Future[None]] = set()
+        # Job threads are daemon threads: a job that ignores cancellation can never keep the
+        # process alive past shutdown (systemd's TimeoutStopSec); its work resumes on next start.
+        self._threads: set[threading.Thread] = set()
 
     # --- lifecycle -----------------------------------------------------------------------------
 
@@ -254,32 +270,76 @@ class Orchestrator:
         return done
 
     def dispatch(self) -> int:
-        """Threaded mode: submit claimed jobs to the worker pool. Returns how many were submitted."""
+        """Threaded mode: start claimed jobs on daemon worker threads. Returns how many started.
+
+        Concurrency is bounded by :meth:`claim_ready` (``max_workers`` and per-type/host limits).
+        """
         if self.stopping.is_set():
             return 0
-        if self._executor is None:
-            self._executor = ThreadPoolExecutor(self.settings.max_workers, thread_name_prefix="wsp-job")
         jobs = self.claim_ready()
         for job in jobs:
-            fut = self._executor.submit(self.execute, job)
-            self._futures.add(fut)
-            fut.add_done_callback(self._futures.discard)
+            t = threading.Thread(
+                target=self._run_job, args=(job,), name=f"wsp-job-{job.kind.value}", daemon=True
+            )
+            with self._lock:
+                self._threads.add(t)
+            t.start()
         return len(jobs)
 
+    def _run_job(self, job: Job) -> None:
+        try:
+            self.execute(job)
+        except Exception:
+            if not self.stopping.is_set():
+                raise
+            # A job abandoned at shutdown finished after the state DB was closed: its outcome is
+            # not recorded and it runs again on the next start (it is still "running" there).
+            log.info(
+                "job finished after shutdown", extra={"fields": {"kind": job.kind.value, "key": job.key}}
+            )
+        finally:
+            with self._lock:
+                self._threads.discard(threading.current_thread())
+
+    def running_jobs(self) -> int:
+        with self._lock:
+            return sum(1 for t in self._threads if t.is_alive())
+
+    def _cancel_work(self) -> None:
+        """Ask running work to stop now: wired hooks, then the fetcher's ``cancel()``."""
+        hooks: list[Callable[[], None]] = list(self.wiring.on_shutdown)
+        cancel = getattr(self.wiring.fetcher, "cancel", None)
+        if callable(cancel):
+            hooks.append(cast(Callable[[], None], cancel))
+        for hook in hooks:
+            try:
+                hook()
+            except Exception:
+                log.exception("shutdown hook failed")
+
     def shutdown(self, grace_seconds: float | None = None) -> bool:
-        """Stop claiming, ask pipelines to stop between steps, wait for workers. True if all finished."""
+        """Stop claiming, cancel running work, wait up to the grace period. True if all finished.
+
+        Downloads, scrub and parity stop within about a second (cooperative cancellation); a job
+        still running after the grace period is abandoned (its thread is a daemon) and resumes on
+        the next start, so the process always exits promptly.
+        """
         self.stopping.set()
+        self._cancel_work()
         grace = self.settings.shutdown_grace_seconds if grace_seconds is None else grace_seconds
         deadline = time.monotonic() + grace
-        while self._futures and time.monotonic() < deadline:
+        while self.running_jobs() and time.monotonic() < deadline:
             time.sleep(0.05)
-        finished = not self._futures
-        if self._executor is not None:
-            self._executor.shutdown(wait=finished, cancel_futures=True)
-            self._executor = None
+        finished = not self.running_jobs()
         if not finished:
-            log.warning("shutdown grace expired; unfinished jobs resume on next start")
-        self.refresh_metrics()
+            log.warning(
+                "shutdown grace expired; unfinished jobs resume on next start",
+                extra={"fields": {"running": self.running_jobs()}},
+            )
+        try:
+            self.refresh_metrics()
+        except Exception:  # a job abandoned mid-write must not turn a clean stop into a crash
+            log.exception("final metrics refresh failed")
         return finished
 
     def execute(self, job: Job) -> None:
@@ -334,6 +394,9 @@ class Orchestrator:
 
     def resume_source(self, source_id: str) -> None:
         resume_source(self.store, self.pipeline.ledger_outbox_writer, source_id, alerter=self.alerter)
+        for row in self.store.open_alerts():  # the owner investigated the quarantined release(s)
+            if str(row["key"]).startswith(f"integrity:{source_id}/"):
+                self.alerter.resolve(str(row["key"]))
         self.pipeline.flush_ledger()
         self.queue.enqueue(
             JobKind.DISCOVER, source_id, now=self.clock.now(), payload={"source_id": source_id}
@@ -505,8 +568,16 @@ class Orchestrator:
             return JobResult(note="non-GFS retention: nothing to prune")
         vault = self.wiring.vault
         current = vault.current(spec.id)
+        promoted = {
+            g.generation_id: g.promoted_at for g in self.store.generation_stats(spec.id, limit=10_000)
+        }
         infos = [
-            GenerationInfo.from_generation(g, holds_last_copy=self.holds_last_copy(spec.id, g))
+            GenerationInfo.from_generation(
+                g,
+                holds_last_copy=self.holds_last_copy(spec.id, g),
+                known_good=g.generation_id in promoted,
+                settled=self._settled(spec.id, g.generation_id, promoted.get(g.generation_id)),
+            )
             for g in vault.generations(spec.id)
         ]
         plan = plan_retention(infos, policy, current=current.generation_id if current else None)
@@ -537,6 +608,12 @@ class Orchestrator:
         if failed:
             raise StepError(f"{spec.id}: could not prune {'; '.join(failed)}")
         return JobResult()
+
+    def _settled(self, source_id: str, generation_id: str, promoted_at: datetime | None) -> bool:
+        """A promoted generation is the known-good anchor once it survived ``settle_days`` and a scrub."""
+        if self.integrity is not None:
+            return self.integrity.settled(source_id, generation_id, promoted_at)
+        return promoted_at is not None  # without the guard: any promoted generation (old behaviour)
 
     def _scrub_slice(self, job: Job) -> JobResult:
         index, count = int(job.payload["slice"]), int(job.payload["slices"])
