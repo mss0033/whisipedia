@@ -537,3 +537,22 @@ def test_classified_errors_from_hooks(tmp_path: Path) -> None:
     rec = h.store.get_release("src", "2026-10-01")
     assert rec is not None
     assert (rec.attempts, rec.crash_count) == (0, 0)
+
+
+# --- adapters C1 follow-up: an unchanged release plans no files -----------------------------------------
+
+
+def test_a_release_with_nothing_new_is_superseded_without_an_attempt_or_alert(tmp_path: Path) -> None:
+    h = PipelineHarness(tmp_path)
+    ad = h.adapter
+
+    def plan(ctx: Ctx, have: Generation | None, want: object) -> FetchPlan:
+        return FetchPlan(release=want, files=(), previous_generation=None)  # type: ignore[arg-type]
+
+    ad.plan = plan  # type: ignore[method-assign,assignment]
+    h.pipeline.register(ad.add_release("2026-10-01", FILES))
+    result = h.pipeline.run("src", "2026-10-01")
+    assert result.record.state is S.QUARANTINED
+    assert "superseded" in (result.record.last_error or "")
+    assert result.record.attempts == 0
+    assert not [k for k in h.alerter.open_keys() if "src/2026-10-01" in k]
