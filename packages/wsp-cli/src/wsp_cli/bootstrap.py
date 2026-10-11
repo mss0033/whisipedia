@@ -304,7 +304,9 @@ def _has_par2() -> bool:
 def build_ledger(cfg: Mapping[str, Any], signer: Signer) -> JsonlLedger:
     from wsp_vault.ledger import JsonlLedger
 
-    return JsonlLedger(paths(cfg).ledger_dir, signer)
+    p = paths(cfg)
+    lock = None if p.index_root is None else p.index_root.parent / "locks" / "ledger.lock"
+    return JsonlLedger(p.ledger_dir, signer, lock_path=lock)
 
 
 def build_fetcher(cfg: Mapping[str, Any]) -> Fetcher:

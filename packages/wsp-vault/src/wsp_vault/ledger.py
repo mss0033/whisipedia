@@ -28,11 +28,15 @@ by one scan of the ledger on first use and kept in memory (single writer).
 from __future__ import annotations
 
 import base64
+import contextlib
+import fcntl
+import hashlib
 import json
 import os
 import re
+import threading
 from collections import deque
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Generator, Iterator, Mapping, Sequence
 from contextlib import suppress
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -102,12 +106,19 @@ class JsonlLedger:
         *,
         clock: Callable[[], datetime] = utcnow,
         retry: RetryPolicy = DEFAULT_RETRY,
+        lock_path: Path | None = None,
     ) -> None:
+        """``lock_path`` (on LOCAL disk; SMB locks are unreliable) serializes writers across processes,
+        e.g. the orchestrator daemon and a manual ``wsp ingest``. Threads in one process are always
+        serialized."""
         self._dir = directory
         self._signer = signer
         self._clock = clock
         self._retry = retry
+        self._lock_path = lock_path
+        self._mutex = threading.RLock()
         self._tail: tuple[int, str, date | None, bool] | None = None
+        self._tail_size = -1  # size of the newest day file when the tail was cached
         self._keys: dict[str, LedgerEvent] | None = None
 
     @property
@@ -126,8 +137,37 @@ class JsonlLedger:
 
     # --- writing ---------------------------------------------------------------------------------
 
+    @contextlib.contextmanager
+    def _writer(self) -> Generator[None]:
+        """One writer at a time: a thread lock, plus an ``flock`` across processes when configured.
+        The cached tail is dropped if another process appended since we last looked."""
+        with self._mutex:
+            fd: int | None = None
+            if self._lock_path is not None:
+                self._lock_path.parent.mkdir(parents=True, exist_ok=True)
+                fd = os.open(self._lock_path, os.O_RDWR | os.O_CREAT, 0o644)
+                fcntl.flock(fd, fcntl.LOCK_EX)
+            try:
+                if self._tail is not None and self._newest_size() != self._tail_size:
+                    self._tail = None
+                    self._keys = None
+                yield
+            finally:
+                if fd is not None:
+                    os.close(fd)
+
+    def _newest_size(self) -> int:
+        files = self.day_files()
+        return files[-1][1].stat().st_size if files else 0
+
     def append(
         self, kind: str, subject: str, data: Mapping[str, object], *, idempotency_key: str | None = None
+    ) -> LedgerEvent:
+        with self._writer():
+            return self._append_keyed(kind, subject, data, idempotency_key)
+
+    def _append_keyed(
+        self, kind: str, subject: str, data: Mapping[str, object], idempotency_key: str | None
     ) -> LedgerEvent:
         if idempotency_key is not None:
             keys = self._key_index()
@@ -172,6 +212,35 @@ class JsonlLedger:
 
     def checkpoint_past_days(self) -> int:
         """Close any day file older than today that lacks a checkpoint. Returns how many were closed."""
+        with self._writer():
+            return self._checkpoint_past_days()
+
+    def quarantine_day(self, day: date, reason: str) -> LedgerEvent:
+        """Set a damaged day file aside (never edited or deleted) and continue the chain from the last
+        intact event, recording what was set aside and why. The renamed file no longer matches the
+        day-file pattern, so verification covers the intact chain only."""
+        with self._writer():
+            path = self._path(day)
+            if not path.is_file():
+                raise LedgerError(f"no day file for {day}")
+            data = path.read_bytes()
+            stamp = self._clock().astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
+            target = path.with_name(f"{path.name}.quarantined-{stamp}")
+            os.rename(path, target)
+            fsync_dir(self._dir)
+            self._tail, self._keys = None, None
+            return self._append(
+                "ledger.quarantine",
+                day.isoformat(),
+                {
+                    "file": target.name,
+                    "bytes": len(data),
+                    "sha256": hashlib.sha256(data).hexdigest(),
+                    "reason": reason,
+                },
+            )
+
+    def _checkpoint_past_days(self) -> int:
         seq, prev, last_day, closed = self._load_tail()
         if last_day is None or closed or last_day >= self._clock().astimezone(UTC).date():
             return 0
@@ -214,6 +283,7 @@ class JsonlLedger:
                 fsync_dir(self._dir)
 
         self._retry.run(attempt)
+        self._tail_size = path.stat().st_size
 
     def _load_tail(self) -> tuple[int, str, date | None, bool]:
         if self._tail is not None:
@@ -236,6 +306,7 @@ class JsonlLedger:
         if seq == 0:
             raise LedgerError(f"{path}: day file has no events")
         self._tail = (seq, prev, day, closed)
+        self._tail_size = path.stat().st_size
         return self._tail
 
     @staticmethod
