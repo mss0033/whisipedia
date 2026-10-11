@@ -73,7 +73,7 @@ def test_empty_keys_dir_with_signed_content(vault: FileVault, seal: SealFn, tmp_
     seal()
     shutil.rmtree(tmp_path / "vault" / KEYS_DIR)
     stranger = FileVault(tmp_path / "vault", Ed25519Signer.generate(), domains={SOURCE: "reference"})
-    with pytest.raises(KeyPinError, match="does not verify"):
+    with pytest.raises(KeyPinError, match="verifies with this key"):
         stranger.stage(SOURCE, "2026-11-01")
     owner = FileVault(tmp_path / "vault", vault.signer, domains={SOURCE: "reference"})
     owner.check_signer()

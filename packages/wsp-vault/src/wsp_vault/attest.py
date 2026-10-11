@@ -66,32 +66,32 @@ def write_attestation(
     clash = _RESERVED_KEYS & set(body)
     if clash:
         raise VaultError(f"attestation body may not set {sorted(clash)}")
-    lib = vault.library_path(source_id, generation_id)
-    vault.manifest(source_id, generation_id)  # sealed and validly signed, or SignatureError
-    doc = {
-        **body,
-        "format": FORMATS[name],
-        "source_id": source_id,
-        "generation_id": generation_id,
-        "manifest_blake3": manifest_blake3(vault, source_id, generation_id),
-    }
-    data = _encode(doc)
-    digest = blake3.blake3(data).hexdigest()
-    path, sig = lib / name, lib / (name + SIG_SUFFIX)
-    if path.exists():
-        try:
-            existing = read_attestation(vault, source_id, generation_id, name)
-        except SignatureError:
-            existing = None  # torn write (data without a matching signature): write it again
-        if existing is not None:
-            if path.read_bytes() == data:
-                return digest
-            if name not in REPLACEABLE:
-                raise VaultError(f"{source_id}/{generation_id}: {name} exists with other content")
-    atomic_write_bytes(path, data, overwrite=True)
-    atomic_write_bytes(sig, vault.signer.sign(data), overwrite=True)
-    make_read_only(path)
-    make_read_only(sig)
+    with vault.exclusive_generation(source_id, generation_id) as lib:  # one writer per generation
+        vault.manifest(source_id, generation_id, fresh=True)  # sealed and validly signed, or SignatureError
+        doc = {
+            **body,
+            "format": FORMATS[name],
+            "source_id": source_id,
+            "generation_id": generation_id,
+            "manifest_blake3": manifest_blake3(vault, source_id, generation_id),
+        }
+        data = _encode(doc)
+        digest = blake3.blake3(data).hexdigest()
+        path, sig = lib / name, lib / (name + SIG_SUFFIX)
+        if path.exists():
+            try:
+                existing = read_attestation(vault, source_id, generation_id, name)
+            except SignatureError:
+                existing = None  # torn write (data without a matching signature): write it again
+            if existing is not None:
+                if path.read_bytes() == data:
+                    return digest
+                if name not in REPLACEABLE:
+                    raise VaultError(f"{source_id}/{generation_id}: {name} exists with other content")
+        atomic_write_bytes(path, data, overwrite=True)
+        atomic_write_bytes(sig, vault.signer.sign(data), overwrite=True)
+        make_read_only(path)
+        make_read_only(sig)
     ledger = vault.ledger
     if ledger is not None:
         ledger.append("vault.attest", f"{source_id}/{generation_id}", {"name": name, "blake3": digest})

@@ -128,6 +128,7 @@ PAR2_MAX_FILES = 32_000  # par2 needs one source block per file and allows 32768
 _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9.-]*$")
 _MANIFEST_CACHE_BYTES = 64 * 1024 * 1024  # of manifest JSON; the whole vault holds ~25 MB today
 _GENERATION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+_PIN_SAMPLES = 5  # manifests tried when keys/ is empty
 
 
 class VaultError(Exception):
@@ -208,21 +209,27 @@ def pinned_keys(root: Path) -> list[tuple[str, str]]:
     return [(p.stem, p.read_text(encoding="utf-8")) for p in sorted(keys.glob("*.pub")) if p.is_file()]
 
 
+def signed_manifests(root: Path, limit: int | None = None) -> list[Path]:
+    """Sealed ``MANIFEST.json`` files that have a signature next to them, in path order (at most
+    ``limit``; the walk stops as soon as it has enough)."""
+    lib = root / LIBRARY_DIR
+    out: list[Path] = []
+    if not lib.is_dir():
+        return out
+    for domain in sorted(lib.iterdir()):
+        for source in sorted(domain.iterdir()) if domain.is_dir() else ():
+            for gen in sorted(source.iterdir()) if source.is_dir() else ():
+                if (gen / MANIFEST_NAME).is_file() and (gen / SIGNATURE_NAME).is_file():
+                    out.append(gen / MANIFEST_NAME)
+                    if limit is not None and len(out) >= limit:
+                        return out
+    return out
+
+
 def first_signed_manifest(root: Path) -> Path | None:
     """Any sealed ``MANIFEST.json`` with a signature next to it (stops at the first one found)."""
-    lib = root / LIBRARY_DIR
-    if not lib.is_dir():
-        return None
-    for domain in sorted(lib.iterdir()):
-        if not domain.is_dir():
-            continue
-        for source in sorted(domain.iterdir()):
-            if not source.is_dir():
-                continue
-            for gen in sorted(source.iterdir()):
-                if (gen / MANIFEST_NAME).is_file() and (gen / SIGNATURE_NAME).is_file():
-                    return gen / MANIFEST_NAME
-    return None
+    found = signed_manifests(root, 1)
+    return found[0] if found else None
 
 
 def has_signed_content(root: Path) -> bool:
@@ -323,15 +330,17 @@ class FileVault:
                         "vault-signing-ed25519.pem). Key rotation is never automatic."
                     )
             else:
-                sample = first_signed_manifest(self._root)
-                if sample is not None and not signer.verify(
-                    sample.read_bytes(), sample.with_name(SIGNATURE_NAME).read_bytes()
+                # keys/ lost but signed content exists: the signer must verify one of a few manifests
+                # (several, so a single damaged signature does not make the right key look foreign)
+                samples = signed_manifests(self._root, _PIN_SAMPLES)
+                if samples and not any(
+                    signer.verify(m.read_bytes(), m.with_name(SIGNATURE_NAME).read_bytes()) for m in samples
                 ):
                     raise KeyPinError(
                         f"refusing to use signing key {mine} with the vault at {self._root}: keys/ is "
-                        f"empty but the vault has signed manifests and {sample} does not verify with "
-                        "this key. Restore the original private key, or put its public key back under "
-                        "keys/ if only that directory was lost."
+                        f"empty but the vault has signed manifests and none of {len(samples)} sampled "
+                        f"({samples[0]}, ...) verifies with this key. Restore the original private key, "
+                        "or put its public key back under keys/ if only that directory was lost."
                     )
         self._pin_ok = True
 
