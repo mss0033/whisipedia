@@ -165,11 +165,55 @@ def https(url: str, *, upgrade: bool = False) -> str:
 
 
 def origin_ok(url: str, origins: Sequence[str]) -> bool:
-    parts = urlsplit(url)
-    if parts.scheme != "https":
+    """``url`` is HTTPS on an allowed host (or a subdomain of one), default port, no userinfo.
+
+    Parsed strictly: a netloc with userinfo, a backslash or a non-443 port is refused, because
+    HTTP clients and ``urlsplit`` disagree about where such a host begins.
+    """
+    try:
+        parts = urlsplit(url)
+        port = parts.port
+    except ValueError:
         return False
-    host = parts.netloc.lower()
+    if parts.scheme.lower() != "https" or "@" in parts.netloc or "\\" in url or port not in (None, 443):
+        return False
+    host = (parts.hostname or "").rstrip(".").lower()
+    if not host:
+        return False
     return not origins or any(host == o or host.endswith("." + o) for o in origins)
+
+
+def off_origin_hops(result: object, origins: Sequence[str]) -> list[str] | None:
+    """Every URL a download touched (each mirror's URL, redirect hop and final URL) that is not
+    an allowed origin; ``None`` when ``result`` carries no record of its hops.
+
+    ``wsp_fetch`` records the hops in ``FetchReport.provenance['sources']``. A result without a
+    ``provenance`` attribute comes from a fetcher that does not speak HTTP (test fakes) and has no
+    hops. A result *with* provenance but no ``sources`` list is unverifiable and returns ``None``;
+    callers treat that as a failure.
+    """
+    prov = getattr(result, "provenance", _NO_PROVENANCE)
+    if prov is _NO_PROVENANCE:
+        return []
+    sources: object = cast(Mapping[str, object], prov).get("sources") if isinstance(prov, Mapping) else None
+    if not isinstance(sources, list) or not sources:
+        return None
+    seen: list[str] = []
+    for src in cast(list[object], sources):
+        if not isinstance(src, Mapping):
+            return None
+        s = cast(Mapping[str, Any], src)
+        urls = [str(s.get("url") or ""), str(s.get("final_url") or "")]
+        for hop in cast(list[Mapping[str, Any]], s.get("redirects") or []):
+            here = str(hop.get("url") or "")
+            urls.append(here)
+            if hop.get("location"):
+                urls.append(urljoin(here, str(hop["location"])))
+        seen.extend(u for u in urls if u and not origin_ok(u, origins) and u not in seen)
+    return seen
+
+
+_NO_PROVENANCE = object()
 
 
 def _s(value: object) -> str:

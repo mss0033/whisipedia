@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import io
 import json
+import subprocess
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -11,18 +13,22 @@ import pytest
 import yaml
 
 from wsp_adapters.doccollection import DocCollectionAdapter
-from wsp_adapters.doccollection.adapter import CATALOG
+from wsp_adapters.doccollection.adapter import CATALOG, screen_text
 from wsp_adapters.doccollection.catalog import read_catalog_file
+from wsp_adapters.doccollection.model import Candidate
+from wsp_adapters.doccollection.policy import Rules
 from wsp_adapters.doccollection.testing import PUBLIC_A, RESTRICTED_C, make_pdf, s3_listing
 from wsp_cli.doccollections import (
     CollectionFetcher,
     apply_review_decision,
     collection_spec,
     dry_run,
+    github_repo,
+    registry_repos,
     render_dry_run,
 )
 from wsp_cli.ingest import Ingestor, VersionStatus
-from wsp_core.model import SourceSpec, SourceStatus, Tier
+from wsp_core.model import FetchResult, RemoteFile, SourceSpec, SourceStatus, Tier
 from wsp_core.ports import Ctx
 from wsp_core.testing.adapter_contract import FakeFetcher
 from wsp_vault.ledger import JsonlLedger
@@ -203,3 +209,106 @@ def test_api_keys_come_from_local_config_and_environment(monkeypatch: pytest.Mon
     monkeypatch.setenv("WSP_API_KEY_CONGRESS", "env-key")
     keys = api_keys({"curator": {"api_keys": {"govinfo_key": "cfg-key", "empty_key": ""}}})
     assert keys == {"govinfo": "cfg-key", "congress": "env-key"}
+
+
+# --- C3 (2026-10-11 audit): git bundles and redirect hops are screened -------------------------------
+
+
+def _git_spec(endpoints: list[str]) -> SourceSpec:
+    return SourceSpec(
+        id="frus",
+        name="FRUS",
+        tier=Tier.T1,
+        status=SourceStatus.CANDIDATE,
+        license="LicenseRef-US-Gov-PD",
+        legal_basis="public-domain",
+        domain=("defense",),
+        adapter="git-mirror",
+        raw={"id": "frus", "access": {"adapter": "git-mirror", "endpoints": endpoints}},
+    )
+
+
+def test_git_allow_list_is_the_registry_endpoints() -> None:
+    spec_ = _git_spec(["https://github.com/HistoryAtState/frus", "https://cwe.mitre.org/data/downloads.html"])
+    assert registry_repos(spec_) == frozenset({"historyatstate/frus"})
+    assert github_repo("https://github.com/HistoryAtState/frus.git") == "historyatstate/frus"
+    assert github_repo("https://github.com/a/b/../../evil/x") is None
+    assert github_repo("http://github.com/a/b") is None
+    assert github_repo("https://github.com.evil.example/a/b") is None
+
+
+def test_unlisted_repository_is_never_cloned(tmp_path: Path) -> None:
+    fetcher = CollectionFetcher(
+        tmp_path / "vault", FakeFetcher(), keys={}, user_agent="t", workdir=tmp_path / "w", git="/bin/false"
+    )
+    cand = Candidate(
+        key="x:evil-repo", url="https://github.com/evil/repo.git", title="t", issuer="i", resolve="git"
+    )
+    with pytest.raises(ValueError, match="not a repository the registry lists"):
+        fetcher._git_bundle(cand, tmp_path / "out", Rules(), frozenset({"historyatstate/frus"}))  # pyright: ignore[reportPrivateUsage]
+    assert not (tmp_path / "w" / "git").exists()
+
+
+def _local_repo(root: Path, files: dict[str, str]) -> Path:
+    root.mkdir(parents=True)
+    for name, text in files.items():
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / name).write_text(text)
+    env = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@invalid", "GIT_COMMITTER_NAME": "t"}
+    env |= {"GIT_COMMITTER_EMAIL": "t@invalid", "PATH": "/usr/bin:/bin", "HOME": str(root)}
+    for args in (["init", "-q"], ["add", "-A"], ["commit", "-q", "-m", "x"]):
+        subprocess.run(["git", "-C", str(root), *args], check=True, env=env)
+    return root
+
+
+@pytest.mark.parametrize(
+    ("files", "verdict"),
+    [
+        ({"README.md": "Foreign Relations of the United States volumes. " * 4, "v/1.xml": "<x/>"}, "allow"),
+        ({"README.md": "Tools for exploit development and malware development. " * 3}, "deny"),
+        (
+            {"README.md": "Collected notes and references for practitioners. " * 3, "weaponeering/a.md": "x"},
+            "deny",
+        ),
+        ({"data.bin": "x"}, "review"),  # nothing to read: held
+    ],
+)
+def test_git_repository_is_screened_by_readme_and_paths(
+    tmp_path: Path, files: dict[str, str], verdict: str
+) -> None:
+    repo = _local_repo(tmp_path / "repo", files)
+    fetcher = CollectionFetcher(tmp_path / "vault", FakeFetcher(), keys={}, user_agent="t", workdir=tmp_path)
+    got = fetcher._repo_screen_text(repo)  # pyright: ignore[reportPrivateUsage]
+    assert screen_text(got, Rules(allow_all=True)).decision.verdict.value == verdict
+
+
+@dataclass(frozen=True, slots=True)
+class _ProvenanceReport(FetchResult):
+    provenance: dict[str, Any] = field(default_factory=dict[str, Any])
+
+
+class _Redirecting(FakeFetcher):
+    """Serves the bytes but reports a redirect to another host, as ``HttpFetcher`` would."""
+
+    def download(self, remote: RemoteFile, dest: Path) -> FetchResult:
+        got = super().download(remote, dest)
+        hop = {"url": remote.url, "status": 302, "location": "https://cdn.evil.example/x.pdf"}
+        src = {"url": remote.url, "final_url": "https://cdn.evil.example/x.pdf", "redirects": [hop]}
+        return _ProvenanceReport(got.path, got.size, got.sha256, got.blake3, provenance={"sources": [src]})
+
+
+def test_fetch_refuses_a_document_redirected_off_origin(vault: FileVault, tmp_path: Path) -> None:
+    objects = [("FM-5-0_2022.pdf", GOOD)]
+    fetch = CollectionFetcher(
+        vault.root,
+        _Redirecting(routes(objects)),
+        keys={},
+        user_agent="t",
+        workdir=tmp_path / "w",
+        throttle=False,
+    )
+    report = fetch.run(spec(objects), version="2026-10-10")
+    assert report.fetched == []
+    assert report.failed
+    assert "OriginError" in report.failed[0][1]
+    assert not list((vault.root / "_incoming" / "test-pubs" / "2026-10-10").glob("*.pdf"))

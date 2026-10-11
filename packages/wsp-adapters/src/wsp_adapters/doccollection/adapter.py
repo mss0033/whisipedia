@@ -40,17 +40,19 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, NamedTuple, cast
 
 from wsp_adapters._common import access, upstream_dir, verify_file
 from wsp_adapters.doccollection.discovery import (
     DiscoverEnv,
     Throttle,
     discover_all,
+    off_origin_hops,
     origin_ok,
     resolve,
 )
@@ -66,6 +68,7 @@ from wsp_adapters.doccollection.policy import (
     classify_content,
     classify_metadata,
     load_rules,
+    normalize_pub_number,
     parse_markings,
 )
 from wsp_adapters.html_text import html_to_text
@@ -84,7 +87,7 @@ from wsp_core.model import (
 from wsp_core.model import (
     Verdict as FileVerdict,
 )
-from wsp_core.ports import Ctx
+from wsp_core.ports import Ctx, Fetcher
 
 log = logging.getLogger(__name__)
 
@@ -296,10 +299,7 @@ class DocCollectionAdapter:
         )
         ctx.workdir.mkdir(parents=True, exist_ok=True)
         for remote in plan.files:
-            for url in (remote.url, *remote.mirrors):
-                if not origin_ok(url, cfg.origins):
-                    raise ValueError(f"{ctx.source.id}: {url} is not an allowed HTTPS origin {cfg.origins}")
-            yield fetcher.download(remote, ctx.workdir / remote.name)
+            yield download_from_origins(fetcher, remote, ctx.workdir / remote.name, cfg.origins)
 
     def verify(self, ctx: Ctx, remote: RemoteFile, local: Path) -> FileVerdict:
         base = verify_file(remote, local)
@@ -308,7 +308,7 @@ class DocCollectionAdapter:
         problem = well_formed(local)
         if problem:
             return FileVerdict(VerdictStatus.MISMATCH, problem)
-        screen = screen_file(local, self.config(ctx.source).rules)
+        screen = screen_file(local, self.config(ctx.source).rules, keys=(key_of_file_name(remote.name),))
         if screen.decision.verdict is Verdict.DENY:
             return FileVerdict(VerdictStatus.REJECTED, f"policy {screen.decision}")
         if screen.decision.verdict is Verdict.REVIEW:
@@ -355,6 +355,39 @@ class DocCollectionAdapter:
 
 
 # --- helpers ---------------------------------------------------------------------------------------
+
+
+def key_of_file_name(name: str) -> str:
+    """The document key a stored file name was made from (:attr:`Candidate.file_name`; best effort:
+    characters outside ``[A-Za-z0-9._-]`` were flattened to ``_``)."""
+    stem = name.rsplit(".", 1)[0]
+    return stem.rsplit("-", 1)[0].replace("__", ":")
+
+
+class OriginError(ValueError):
+    """A document URL, mirror, redirect hop or final URL is not an allowed HTTPS origin."""
+
+
+def download_from_origins(
+    fetcher: Fetcher, remote: RemoteFile, dest: Path, origins: Sequence[str]
+) -> FetchResult:
+    """``fetcher.download`` restricted to ``origins`` on every URL the download touched.
+
+    The configured URL and mirrors are checked before the request; every redirect hop and final URL
+    the fetcher recorded (``FetchReport.provenance``) after it. Off-origin or unverifiable bytes are
+    deleted at once and :class:`OriginError` is raised. (The fetcher follows redirects itself, so the
+    bytes do reach local disk first; they never reach the vault.)
+    """
+    for url in (remote.url, *remote.mirrors):
+        if not origin_ok(url, origins):
+            raise OriginError(f"{url} is not an allowed HTTPS origin {tuple(origins)}")
+    result = fetcher.download(remote, dest)
+    bad = off_origin_hops(result, origins)
+    if bad is None or bad:
+        Path(result.path).unlink(missing_ok=True)
+        why = "no record of redirect hops" if bad is None else f"redirected to {', '.join(bad[:3])}"
+        raise OriginError(f"{remote.url}: {why}; allowed origins {tuple(origins)}")
+    return result
 
 
 def remote_for(cand: Candidate) -> RemoteFile:
@@ -411,42 +444,93 @@ def pdf_text(path: Path, max_pages: int) -> str:
         pdf.close()
 
 
-def document_text(path: Path, *, max_pages: int) -> str:
+class Extracted(NamedTuple):
+    """Text of a document, or why there is none (``problem``: see :data:`NO_TEXT`)."""
+
+    text: str
+    problem: str = ""  # "" | "unsupported-format" | "extraction-error" | "no-text-layer"
+
+
+# Fewer letters than this in the front matter is no text layer: a scan, or only page numbers.
+MIN_FRONT_MATTER_LETTERS = 64
+_LETTER_RE = re.compile(r"[^\W\d_]")
+TEXT_SUFFIXES = (".txt", ".xml", ".json", ".md")
+
+
+def extract_text(path: Path, *, max_pages: int) -> Extracted:
     with path.open("rb") as fh:
         head = fh.read(512)
+    lowered = head.lower()
+    suffix = path.suffix.lower()
     try:
         if head.lstrip().startswith(b"%PDF-"):
-            return pdf_text(path, max_pages)
-        lowered = head.lower()
-        if b"<html" in lowered or b"<!doctype html" in lowered or path.suffix.lower() in (".html", ".htm"):
-            return html_to_text(path.read_bytes()[: 16 * 1024 * 1024])
-        if path.suffix.lower() in (".txt", ".xml", ".json", ".md"):
-            return path.read_bytes()[: 16 * 1024 * 1024].decode("utf-8", "replace")
+            return Extracted(pdf_text(path, max_pages))
+        if b"<html" in lowered or b"<!doctype html" in lowered or suffix in (".html", ".htm"):
+            return Extracted(html_to_text(path.read_bytes()[: 16 * 1024 * 1024]))
+        if suffix in TEXT_SUFFIXES:
+            return Extracted(path.read_bytes()[: 16 * 1024 * 1024].decode("utf-8", "replace"))
     except Exception as exc:
         log.warning("text extraction failed for %s: %s", path.name, exc)
-    return ""
+        return Extracted("", "extraction-error")
+    return Extracted("", "unsupported-format")
 
 
-def front_matter(path: Path, pages: int = FRONT_MATTER_PAGES) -> str:
+def document_text(path: Path, *, max_pages: int) -> str:
+    return extract_text(path, max_pages=max_pages).text
+
+
+def front_matter(path: Path, pages: int = FRONT_MATTER_PAGES) -> Extracted:
     """Title page, contents and preface: the only part of a document the gate reads."""
-    return document_text(path, max_pages=pages)[:60_000]
+    got = extract_text(path, max_pages=pages)
+    return checked_front_matter(got.text, got.problem)
 
 
-def screen_file(path: Path, rules: Rules) -> Screen:
-    """Distribution gate, then content screen, on a fetched file's front matter (research doc §5.3)."""
-    text = front_matter(path)
-    marking = parse_markings(text)
+def checked_front_matter(text: str, problem: str = "") -> Extracted:
+    """At most 60,000 characters; too few letters to screen anything is ``no-text-layer``."""
+    text = text[:60_000]
+    if not problem and len(_LETTER_RE.findall(text)) < MIN_FRONT_MATTER_LETTERS:
+        return Extracted(text, "no-text-layer")
+    return Extracted(text, problem)
+
+
+def screen_file(path: Path, rules: Rules, *, keys: Iterable[str] = ()) -> Screen:
+    """Distribution gate, then content screen, on a fetched file's front matter (research doc §5.3).
+
+    Fails closed: a file whose front matter cannot be read (unsupported format, extraction error,
+    no text layer) is held for review, because neither screen saw anything. A scanned PDF passes
+    that hold only where the registry sets ``filter.allow_image_only``. ``keys`` (document key and
+    publication number) let an owner ``allow_documents`` decision release a document from the two
+    holds that are about missing evidence (no text, a required marking not found); it never
+    overrides a deny or a content review.
+    """
+    return screen_text(front_matter(path), rules, keys=keys)
+
+
+def screen_text(got: Extracted, rules: Rules, *, keys: Iterable[str] = ()) -> Screen:
+    """:func:`screen_file` on already extracted front matter (also used for git bundles)."""
+    text_found = not got.problem
+    # allow_documents holds normalized numbers and keys (Rules.merged), so normalize to compare.
+    owner_allowed = bool({normalize_pub_number(k) for k in keys if k} & rules.allow_documents)
+    marking = parse_markings(got.text)
     gate = check_distribution(marking, rules.require, declassified_ok=rules.declassified_ok)
     if gate.verdict is Verdict.DENY:
-        return Screen(gate, marking, bool(text.strip()))
-    content = classify_content(text, rules)
+        return Screen(gate, marking, text_found)
+    content = classify_content(got.text, rules)
     if content.verdict is Verdict.DENY:
-        return Screen(content, marking, bool(text.strip()))
-    if gate.verdict is Verdict.REVIEW:
-        return Screen(gate, marking, bool(text.strip()))
+        return Screen(content, marking, text_found)
+    if gate.verdict is Verdict.REVIEW and not owner_allowed:
+        return Screen(gate, marking, text_found)
+    image_only_ok = got.problem == "no-text-layer" and rules.allow_image_only
+    if not text_found and not owner_allowed and not image_only_ok:
+        return Screen(Decision(Verdict.REVIEW, f"text={got.problem}", Stage.CONTENT), marking, text_found)
     if content.verdict is Verdict.REVIEW:
-        return Screen(content, marking, bool(text.strip()))
-    return Screen(Decision(Verdict.ALLOW, gate.rule, Stage.DISTRIBUTION), marking, bool(text.strip()))
+        return Screen(content, marking, text_found)
+    rule = gate.rule
+    if gate.verdict is Verdict.REVIEW:
+        rule = f"owner=allow+{gate.rule}"
+    if not text_found:
+        rule += f"+text={got.problem}" + ("" if image_only_ok else "+owner=allow")
+    return Screen(Decision(Verdict.ALLOW, rule, Stage.DISTRIBUTION), marking, text_found)
 
 
 def read_catalog(generation_dir: Path) -> Iterator[DocumentMeta]:
