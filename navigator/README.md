@@ -29,6 +29,9 @@ npm run check      # API types fresh + typecheck + lint + tests + build + budget
 | `npm test` | Vitest (jsdom) |
 | `npm run budget` | Gzip budget (JS < 150 KB, CSS < 40 KB) and offline/CSP checks on `dist/` |
 | `npm run smoke` | Serves `dist/` + mock API on an ephemeral port and fetches every asset |
+| `npm run e2e` | Playwright journeys in real Chromium against the built bundle + mock API ([docs/testing/e2e.md](../docs/testing/e2e.md)) |
+| `npm run e2e:live` | The same journeys against the running library (`WSP_E2E_URL`, default `http://127.0.0.1:8737`) |
+| `npm run e2e:report` | Open the last Playwright HTML report (`e2e-report/`) |
 
 ## The API contract
 
@@ -68,6 +71,7 @@ src/
 mock/               mock API (handler + fixtures + Vite plugin)
 scripts/            API type generator, bundle budget and smoke checks
 tests/              Vitest unit + jsdom app tests
+e2e/                Playwright end-to-end journeys (real browser)
 ```
 
 See [`docs/components/navigator.md`](../docs/components/navigator.md) for the

@@ -111,5 +111,7 @@ rewrites ZIM image references there, and the sanitizer drops anything else.
   Congress / LCC trees are still to come. "On this day" comes from indexed Wikipedia
   date pages; "Did you know" stays empty (not in the dumps or ZIMs). The System Monitor
   page does not render the new `ops` block of `/v1/system` yet.
-- There is no Playwright suite. App flows are covered by jsdom tests, and real
-  Chrome was checked by hand under the CSP.
+- App flows are covered by jsdom tests and by a Playwright suite that drives real
+  Chromium under the CSP, against the mock API in CI and against the live library
+  on demand ([testing/e2e.md](../testing/e2e.md)). Bugs it found are tracked in
+  [testing/e2e-findings.md](../testing/e2e-findings.md).
