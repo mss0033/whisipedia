@@ -39,19 +39,18 @@ from wsp_adapters._common import (
     IncompleteGenerationError,
     WorkerPool,
     access,
-    default_workers,
     doc_from_row,
     doc_row,
     earlier_generations,
     fetch_all,
     holder_of,
-    int_option,
     normalize_algorithm,
     parse_checksum_file,
     plan_missing,
     str_list,
     upstream_dir,
     verify_file,
+    workers_for,
 )
 from wsp_adapters.entries import Entry, Redirect
 from wsp_adapters.html_text import html_to_text
@@ -449,7 +448,8 @@ class KiwixOpdsAdapter:
         meta: dict[str, str] = {"books": ",".join(e.name for e in chosen)}
         for entry in chosen:
             sums = parse_checksum_file(
-                ctx.fetcher.get_bytes(entry.file_url + ".sha256", max_bytes=64 * 1024).decode()
+                ctx.fetcher.get_bytes(entry.file_url + ".sha256", max_bytes=64 * 1024).decode(),
+                entry.file_name,
             )
             digest = sums.get(entry.file_name)
             files.append(
@@ -482,7 +482,7 @@ class KiwixOpdsAdapter:
             data = ctx.fetcher.get_bytes(file_url + ".sha256", max_bytes=64 * 1024)
         except FetchError:
             return ()
-        digest = parse_checksum_file(data.decode("utf-8", "replace")).get(name)
+        digest = parse_checksum_file(data.decode("utf-8", "replace"), name).get(name)
         return (Checksum("sha256", digest),) if digest else ()
 
     def plan(self, ctx: Ctx, have: Generation | None, want: ReleaseRef) -> FetchPlan:
@@ -544,7 +544,7 @@ class KiwixOpdsAdapter:
                 f"{spec.id}: access.prefix_books is false but the generation holds {len(zims)} books "
                 "(their ids would collide); pin prefix_books: true for a bundle"
             )
-        with WorkerPool(int_option(spec, "workers", default_workers())) as pool:
+        with WorkerPool(workers_for(spec)) as pool:
             for _, zim in sorted(zims.items()):
                 params = zim_params(zim, spec.id, spec.license, prefix, skip_pattern(spec))
                 yield from read_zim(zim, params, workdir=ctx.workdir, pool=pool)

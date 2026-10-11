@@ -44,12 +44,12 @@ from wsp_adapters._common import (
     doc_from_row,
     doc_row,
     fetch_all,
-    int_option,
     ordered_parallel_map,
     plan_missing,
     str_list,
     upstream_dir,
     verify_file,
+    workers_for,
 )
 from wsp_adapters._streams import Bitset, Throttle, listing_links, listing_rows, open_any
 from wsp_core.ids import content_hash, make_doc_id
@@ -277,7 +277,7 @@ class PubmedAdapter:
 
     def documents(self, ctx: Ctx, generation_dir: Path) -> Iterator[DocRecord]:
         spec = ctx.source
-        workers = min(int_option(spec, "workers", 4), default_workers())
+        workers = min(workers_for(spec, 4), default_workers())
         files = [p for _, p in sorted(content_set(generation_dir).items(), reverse=True)]
         tasks = (_FileTask(p, spec.id, spec.license) for p in files)
         seen = Bitset()

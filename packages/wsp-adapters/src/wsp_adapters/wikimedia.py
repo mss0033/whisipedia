@@ -43,7 +43,6 @@ from xml.etree import ElementTree as ET
 from wsp_adapters._common import (
     DocRow,
     access,
-    default_workers,
     doc_from_row,
     doc_row,
     fetch_all,
@@ -54,6 +53,7 @@ from wsp_adapters._common import (
     str_list,
     upstream_dir,
     verify_file,
+    workers_for,
 )
 from wsp_adapters._streams import open_bz2
 from wsp_adapters.entries import Entry, Redirect
@@ -367,7 +367,7 @@ class WikimediaDumpsAdapter:
 
     def entries(self, ctx: Ctx, generation_dir: Path) -> Iterator[Entry]:
         spec = ctx.source
-        workers = int_option(spec, "workers", default_workers())
+        workers = workers_for(spec)
         files = sorted(upstream_dir(generation_dir).iterdir())
         if is_entity_source(spec):
             for path in files:

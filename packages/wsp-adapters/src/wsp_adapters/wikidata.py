@@ -43,13 +43,12 @@ from wsp_adapters._common import (
     DocRow,
     IncompleteGenerationError,
     access,
-    default_workers,
     doc_from_row,
     doc_row,
-    int_option,
     ordered_parallel_map,
     str_list,
     upstream_dir,
+    workers_for,
 )
 from wsp_adapters.wikimedia import WikimediaDumpsAdapter, entity_lines, parse_entity
 from wsp_core.ids import content_hash, make_doc_id
@@ -260,7 +259,7 @@ class WikidataAdapter(WikimediaDumpsAdapter):
 
     def documents(self, ctx: Ctx, generation_dir: Path) -> Iterator[DocRecord]:
         spec = ctx.source
-        workers = int_option(spec, "workers", default_workers())
+        workers = workers_for(spec)
         languages = languages_for(spec)
         dumps = sorted(p for p in upstream_dir(generation_dir).iterdir() if p.name.endswith(_DUMP_SUFFIX))
         if not dumps:

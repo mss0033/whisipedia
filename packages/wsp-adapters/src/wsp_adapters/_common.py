@@ -69,15 +69,24 @@ def normalize_algorithm(name: str) -> str:
     return _HASH_ALIASES.get(name, name)
 
 
-def parse_checksum_file(text: str) -> dict[str, str]:
-    """Parse ``<hexdigest>  <filename>`` lines (coreutils ``*sum`` format) into ``{filename: digest}``."""
+def parse_checksum_file(text: str, name: str | None = None) -> dict[str, str]:
+    """Parse ``<hexdigest>  <filename>`` lines (coreutils ``*sum`` format) into ``{filename: digest}``.
+
+    A sidecar that holds only a bare digest (``<file>.sha256`` containing just the hex) is the digest
+    of ``name`` when one is given (audit LOW: such files used to yield nothing).
+    """
     out: dict[str, str] = {}
     for line in text.splitlines():
         parts = line.strip().split(maxsplit=1)
         if len(parts) == 2:
-            digest, name = parts
-            out[name.lstrip("*").strip()] = digest.lower()
+            digest, fname = parts
+            out[fname.lstrip("*").strip()] = digest.lower()
+        elif len(parts) == 1 and name is not None and _HEX_RE.fullmatch(parts[0]):
+            out.setdefault(name, parts[0].lower())
     return out
+
+
+_HEX_RE = re.compile(r"[0-9a-fA-F]{32,128}")
 
 
 def strongest(checksums: Iterable[Checksum]) -> Checksum | None:
@@ -294,11 +303,55 @@ def upstream_dir(generation_dir: Path) -> Path:
     return sub if sub.is_dir() else generation_dir
 
 
-def default_workers() -> int:
-    """All cores but one, capped by ``WSP_MAX_WORKERS`` so background jobs leave the machine usable."""
-    workers = max(1, (os.cpu_count() or 2) - 1)
+def available_cpus(cgroup_root: Path = Path("/sys/fs/cgroup")) -> int:
+    """CPUs this process may use: its affinity mask, lowered by a cgroup v2 ``cpu.max`` quota.
+
+    ``os.cpu_count`` reports the host; a service in a slice capped at, say, 400% CPU would start
+    one worker per host core and thrash (audit LOW).
+    """
+    try:
+        cpus = len(os.sched_getaffinity(0))
+    except (AttributeError, OSError):
+        cpus = os.cpu_count() or 1
+    try:
+        own = (Path("/proc/self/cgroup").read_text().strip().split("::", 1)[-1] or "/").lstrip("/")
+    except OSError:
+        own = ""
+    here = cgroup_root / own
+    while True:
+        try:
+            quota, period = (here / "cpu.max").read_text().split()[:2]
+            if quota != "max" and int(period) > 0:
+                cpus = min(cpus, max(1, -(-int(quota) // int(period))))
+        except (OSError, ValueError):
+            pass
+        if here == cgroup_root or cgroup_root not in here.parents:
+            break
+        here = here.parent
+    return max(1, cpus)
+
+
+def worker_cap() -> int | None:
+    """``WSP_MAX_WORKERS`` (a positive integer), else ``None``."""
     cap = os.environ.get("WSP_MAX_WORKERS", "")
-    return min(workers, int(cap)) if cap.isdigit() and int(cap) > 0 else workers
+    return int(cap) if cap.isdigit() and int(cap) > 0 else None
+
+
+def default_workers() -> int:
+    """All usable CPUs but one, capped by ``WSP_MAX_WORKERS`` so background jobs leave room."""
+    workers = max(1, available_cpus() - 1)
+    cap = worker_cap()
+    return min(workers, cap) if cap is not None else workers
+
+
+def workers_for(spec: SourceSpec, default: int | None = None) -> int:
+    """``access.workers`` (or ``default``, else :func:`default_workers`), never above ``WSP_MAX_WORKERS``.
+
+    The registry option used to bypass the cap (audit LOW).
+    """
+    workers = int_option(spec, "workers", default if default is not None else default_workers())
+    cap = worker_cap()
+    return min(workers, cap) if cap is not None else workers
 
 
 Reject = tuple[str, str]  # (record id or position, error)

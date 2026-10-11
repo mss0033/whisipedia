@@ -40,17 +40,16 @@ from typing import IO, Any, cast
 
 from wsp_adapters._common import (
     access,
-    default_workers,
     fetch_all,
     files_across_generations,
     head_release,
     head_version,
     holder_of,
-    int_option,
     ordered_parallel_map,
     plan_by_head,
     str_list,
     verify_file,
+    workers_for,
 )
 from wsp_core.ids import content_hash, make_doc_id
 from wsp_core.model import (
@@ -138,7 +137,7 @@ class OpenLibraryAdapter:
 
     def documents(self, ctx: Ctx, generation_dir: Path) -> Iterator[DocRecord]:
         spec = ctx.source
-        workers = int_option(spec, "workers", default_workers())
+        workers = workers_for(spec)
         wanted = set(str_list(access(spec).get("kinds")) or KINDS)
         # One file per kind: the release's own names, from this or an earlier generation.
         files = {
