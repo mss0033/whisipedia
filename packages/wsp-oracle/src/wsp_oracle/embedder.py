@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
@@ -106,10 +107,13 @@ class TransformerEmbedder:
         self.dimensions = dimensions if 0 < dimensions < full else full
         self._lock = threading.Lock()
 
-    def _forward(self, texts: list[str]) -> Matrix:
+    def _tokenize(self, texts: list[str]) -> Any:
+        tok = self._tok
+        return tok(texts, padding=True, truncation=True, max_length=self.max_tokens, return_tensors="pt")
+
+    def _forward(self, batch: Any) -> Matrix:
         torch = self._torch
-        enc = self._tok(texts, padding=True, truncation=True, max_length=self.max_tokens, return_tensors="pt")
-        enc = {k: v.to(self.device) for k, v in enc.items()}
+        enc = {k: v.to(self.device, non_blocking=True) for k, v in batch.items()}
         with torch.inference_mode():
             hidden = self._model(**enc).last_hidden_state
             mask = enc["attention_mask"]
@@ -131,10 +135,15 @@ class TransformerEmbedder:
             return np.zeros((0, self.dimensions), dtype=np.float32)
         order = sorted(range(len(texts)), key=lambda i: len(texts[i]), reverse=True)
         out = np.empty((len(texts), self.dimensions), dtype=np.float32)
-        with self._lock:
-            for start in range(0, len(order), self.batch_size):
-                idx = order[start : start + self.batch_size]
-                out[idx] = self._forward([prefix + texts[i] for i in idx])
+        batches = [order[s : s + self.batch_size] for s in range(0, len(order), self.batch_size)]
+        with self._lock, ThreadPoolExecutor(1, thread_name_prefix="tokenize") as pool:
+            # tokenize the next batch on the CPU while the GPU runs this one
+            pending = pool.submit(self._tokenize, [prefix + texts[i] for i in batches[0]])
+            for n, idx in enumerate(batches):
+                batch = pending.result()
+                if n + 1 < len(batches):
+                    pending = pool.submit(self._tokenize, [prefix + texts[i] for i in batches[n + 1]])
+                out[idx] = self._forward(batch)
         return out
 
     def embed(self, texts: Sequence[str]) -> Sequence[Sequence[float]]:

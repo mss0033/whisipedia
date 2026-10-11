@@ -47,12 +47,19 @@ CANDIDATES = (
 )
 
 
-def load_chunks(root: Path, source: str) -> list[Chunk]:
+def load_chunks(root: Path, source: str, *, gold: Path | None = None, limit: int = 0) -> list[Chunk]:
+    """Every passage of the sample; with ``limit``, the gold documents' plus the first others up to it."""
     gen = current_generation(root / "refinery", source)
     if gen is None:
         raise SystemExit(f"no Refinery generation for {source} under {root / 'refinery'}")
     reader = RefineryReader(generation_dir(root / "refinery", source, gen))
-    return [c for d in reader.records() for c in chunk_document(d)]
+    chunks = [c for d in reader.records() for c in chunk_document(d)]
+    if not limit or len(chunks) <= limit:
+        return chunks
+    wanted = {d for g in load_gold(gold) for d in g.relevant} if gold else set[str]()
+    keep = [c for c in chunks if c.doc_id in wanted]
+    rest = [c for c in chunks if c.doc_id not in wanted]
+    return keep + rest[: max(0, limit - len(keep))]
 
 
 def sync_cuda() -> None:
@@ -88,7 +95,7 @@ def dense_eval(
 
 
 def cmd_models(args: argparse.Namespace) -> dict[str, Any]:
-    chunks = load_chunks(args.root, args.source)
+    chunks = load_chunks(args.root, args.source, gold=args.gold, limit=args.max_chunks)
     texts = [c.embed_text() for c in chunks]
     words = sum(len(c.text.split()) for c in chunks) / len(chunks)
     print(f"{len(chunks):,} chunks, {words:.0f} words on average")
@@ -256,6 +263,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     ap.add_argument("--batch", type=int, default=256)
     ap.add_argument("--max-tokens", type=int, default=512)
     ap.add_argument("--queries", type=int, default=1000)
+    ap.add_argument("--max-chunks", type=int, default=0, help="models: cap the corpus (gold documents kept)")
     ap.add_argument("--oversample", type=int, default=8)
     ap.add_argument("--with-faiss", action="store_true")
     args = ap.parse_args(argv)

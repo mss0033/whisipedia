@@ -3,12 +3,15 @@
 Refinery text keeps one paragraph per line and headings as short lines of their own (see
 ``wsp_adapters.html_text``). The chunker:
 
-* detects headings (short lines without closing punctuation that are followed by text) and never
-  lets a chunk span two sections; each chunk remembers its section heading;
+* detects headings (short capitalized lines without closing punctuation that are followed by
+  longer text) and starts a new chunk at each one, except that a chunk shorter than half the target
+  continues into the next section (formula fragments, one-line sections); each chunk remembers the
+  section it starts in;
 * packs whole paragraphs up to ``target_words``; a paragraph longer than ``max_words`` is split at
   sentence boundaries, and a run-on sentence at word boundaries;
 * merges a short tail (< ``min_words``) into the previous chunk of the same section;
-* drops reference-like trailing sections ("References", "External links", ...);
+* stops at the first reference-like section ("See also", "References", "External links", ...),
+  which is where Wikipedia's navigation boxes and category lines follow;
 * prefixes the title (and section) to the text that is embedded, so a passage about "his early
   life" still knows whose life it is.
 
@@ -88,13 +91,19 @@ def doc_of(chunk_or_doc_id: str) -> str:
     return doc_id if sep and n.isdigit() else chunk_or_doc_id
 
 
+_HATNOTES = ("main article:", "see also:", "further information:", "main articles:", "for ", "this article ")
+_END_LINES = ("categories:", "hidden categories:")
+
+
 def _is_heading(line: str, nxt: str | None) -> bool:
     if nxt is None or len(line) > 90:
         return False
     words = line.split()
     if not words or len(words) > 10 or line.endswith(_CLOSING):
         return False
-    if line[0] in "-*•·\u2013—|":  # list items and table rows
+    if not (line[0].isupper() or line[0].isdigit()) or sum(ch.isalpha() for ch in line) < 3:
+        return False  # list items, table cells, formula fragments ("λ", "2", "¯")
+    if line.casefold().startswith(_HATNOTES):
         return False
     return len(nxt.split()) > len(words)
 
@@ -156,28 +165,38 @@ def chunk_text(
     hard = max_words or int(target_words * 1.5)
     small = min_words if min_words is not None else max(1, target_words // 5)
     out: list[tuple[str, str]] = []
+    cur: list[str] = []
+    cur_section = ""
+
+    def flush() -> None:
+        nonlocal cur
+        if cur:
+            out.append((cur_section, " ".join(cur)))
+            cur = []
+
     for section, paras in _sections(text, title):
         if section.casefold() in _SKIP_SECTIONS:
-            continue
-        cur: list[str] = []
-        sec_start = len(out)
+            break  # "See also", "References", ... and the navigation that follows them
+        if len(cur) >= target_words // 2:
+            flush()  # sections are boundaries, but short sections merge into their neighbours
+        if not cur:
+            cur_section = section
         for para in paras:
+            if para.casefold().startswith(_END_LINES):
+                break
             for piece in _pieces(para, target_words, hard):
                 if cur and len(cur) + len(piece) > target_words:
-                    out.append((section, " ".join(cur)))
-                    cur = []
+                    flush()
+                    cur_section = section
                 cur += piece
-        if cur:
-            if len(cur) < small and len(out) > sec_start:
-                prev_section, prev = out[-1]
-                if len(prev.split()) + len(cur) <= hard:
-                    out[-1] = (prev_section, f"{prev} {' '.join(cur)}")
-                    cur = []
-            if cur:
-                out.append((section, " ".join(cur)))
         if len(out) >= max_chunks:
             return out[:max_chunks]
-    return out
+    if cur and len(cur) < small and out and len(out[-1][1].split()) + len(cur) <= hard:
+        prev_section, prev = out[-1]
+        out[-1] = (prev_section, f"{prev} {' '.join(cur)}")
+        cur = []
+    flush()
+    return out[:max_chunks]
 
 
 def chunk_document(

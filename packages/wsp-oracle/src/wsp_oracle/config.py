@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, cast
 
 DEFAULT_MODELS_DIR = "~/.cache/whisipedia/models"
-DEFAULT_EMBED_MODEL = "ibm-granite--granite-embedding-97m-multilingual-r2"
+DEFAULT_EMBED_MODEL = "intfloat--multilingual-e5-base"
 DEFAULT_RERANK_MODEL = "BAAI--bge-reranker-v2-m3"
 DEFAULT_LLM_MODEL = "llm/Qwen3.5-9B-Q6_K.gguf"
 DEFAULT_LLM_URL = "http://127.0.0.1:8738"

@@ -136,7 +136,7 @@ Every key is optional; unknown keys are rejected.
 | `chunk_words`, `max_chunks_per_doc` | `200`, `256` | chunker |
 | `cache_size` | `256` | result lists kept for paging and facets |
 | `budget_ms` | `100` | logged when a query exceeds it |
-| `embedder.model` | `ibm-granite--granite-embedding-97m-multilingual-r2` | model directory |
+| `embedder.model` | `intfloat--multilingual-e5-base` | model directory |
 | `embedder.preset` | `auto` | pooling and prefixes: `granite`, `e5`, `bge-m3`, `qwen3`, `gte` |
 | `embedder.device` | `auto` | `auto`, `cuda`, `cuda:N`, `cpu` |
 | `embedder.batch_size`, `embedder.max_tokens` | `256`, `512` | |
