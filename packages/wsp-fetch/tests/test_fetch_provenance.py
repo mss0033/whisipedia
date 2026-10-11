@@ -57,7 +57,9 @@ def test_size_disagreement_is_recorded(tmp_path: Path, servers: Servers) -> None
     assert rejected[0]["size"] == len(data) + 4
 
 
-def test_tampered_mirror_is_caught_by_spot_check(tmp_path: Path, servers: Servers) -> None:
+def test_tampered_mirror_is_caught_by_spot_check(
+    tmp_path: Path, servers: Servers, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A mirror that serves altered bytes is caught even when the verified file came out right."""
     data = payload(16 * 64 * 1024, seed=5)
     good, bad = servers(), servers()
@@ -68,10 +70,12 @@ def test_tampered_mirror_is_caught_by_spot_check(tmp_path: Path, servers: Server
     # there fails its Metalink hash and is refetched; the spot check then sees other bytes.
     import random
 
+    # Offsets are unpredictable in production (SystemRandom); the test pins the generator.
     n = CFG.spot_check_bytes
     rng = random.Random(remote.url)
     offsets = sorted({rng.randrange(0, len(data) - n + 1) for _ in range(CFG.spot_checks)})
     bad.faults.corrupt_offsets = {offsets[0] + 7}
+    monkeypatch.setattr("wsp_fetch.http._spot_rng", lambda: random.Random(remote.url))
     with HttpFetcher(CFG) as f:
         report = f.fetch(remote, tmp_path / "z.zim")
     assert (tmp_path / "z.zim").read_bytes() == data

@@ -2,17 +2,26 @@
 
 Serialization is canonical (sorted keys, entries sorted by path, two-space indent, trailing LF) so
 the same generation always produces the same bytes and the signature covers exactly those bytes.
+The bytes are exactly ``json.dumps(doc, sort_keys=True, indent=2, ensure_ascii=False) + "\\n"``; they
+are produced by a specialised writer because the standard library falls back to its pure-Python
+encoder whenever ``indent`` is set (300k entries: 2.5 s instead of well under a second).
+
+Every path read from a manifest or a staging record is validated (:func:`check_stored_path`): a
+manifest whose signature verifies is still never allowed to name ``../`` or an absolute path.
 """
 
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+import re
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass, field
 from datetime import datetime
+from json.encoder import encode_basestring  # the C implementation when available
 from pathlib import PurePosixPath
 from typing import Any, cast
 
+from wsp_core.checksums import normalize_algorithm
 from wsp_core.model import Artifact, Checksum
 from wsp_vault.hashing import Digests
 
@@ -34,27 +43,68 @@ ATTESTATION_NAMES = frozenset(
 RESERVED_NAMES = frozenset(
     {MANIFEST_NAME, SIGNATURE_NAME, DEGRADED_NAME, STAGING_RECORD, PARITY_DIR, *ATTESTATION_NAMES}
 )
+_RESERVED_FOLDED = frozenset(n.casefold() for n in RESERVED_NAMES)
+# Suffixes of the vault's own temporaries: never valid names for content.
+RESERVED_SUFFIXES = (".partial", ".repair", ".adopting")
 
 
 class ManifestError(ValueError):
     pass
 
 
-def check_relpath(relpath: str) -> PurePosixPath:
-    """Validate a path relative to a generation directory (e.g. ``upstream/x.zim``)."""
-    path = PurePosixPath(relpath)
+_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")  # Unicode category Cc
+
+
+def check_stored_path(relpath: str, role: str = ROLE_DATA) -> None:
+    """Safety check for a path *read* from a manifest, sidecar or staging record.
+
+    Rejects anything that could leave the generation directory (absolute, ``..``, empty or ``.``
+    parts, backslashes, NUL and other control characters) and parity entries outside ``parity/``.
+    It deliberately does not apply the naming reservations of :func:`check_relpath`, so manifests
+    sealed before a reservation was added stay readable. String operations only: it runs once per
+    entry of manifests with hundreds of thousands of entries.
+    """
+    parts = relpath.split("/")
     bad = (
         not relpath
+        or relpath[0] == "/"
         or "\\" in relpath
-        or path.is_absolute()
-        or str(path) != relpath
-        or any(part in ("", ".", "..") for part in path.parts)
-        or path.parts[0] in RESERVED_NAMES
-        or path.name.endswith(".partial")
+        or _CONTROL.search(relpath) is not None
+        or any(part in ("", ".", "..") for part in parts)
+        or (role == ROLE_PARITY and (len(parts) < 2 or parts[0] != PARITY_DIR))
+    )
+    if bad:
+        raise ManifestError(f"unsafe path in manifest: {relpath!r}")
+
+
+def check_relpath(relpath: str) -> PurePosixPath:
+    """Validate a *new* path relative to a generation directory (e.g. ``upstream/x.zim``).
+
+    On top of :func:`check_stored_path`: the first part may not be a reserved name, compared without
+    case (the SMB share is case-insensitive, so ``manifest.json`` *is* ``MANIFEST.json``), and no
+    part may end in a suffix the vault uses for its temporaries (``.partial``, ``.repair``,
+    ``.adopting``).
+    """
+    check_stored_path(relpath)
+    path = PurePosixPath(relpath)
+    bad = path.parts[0].casefold() in _RESERVED_FOLDED or any(
+        part.casefold().endswith(RESERVED_SUFFIXES) for part in path.parts
     )
     if bad:
         raise ManifestError(f"invalid or reserved relpath: {relpath!r}")
     return path
+
+
+def casefold_collisions(paths: Iterable[str]) -> list[tuple[str, str]]:
+    """Pairs of distinct paths that name the same file on a case-insensitive share."""
+    seen: dict[str, str] = {}
+    out: list[tuple[str, str]] = []
+    for p in paths:
+        key = p.casefold()
+        other = seen.setdefault(key, p)
+        if other != p:
+            out.append((other, p))
+    return out
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,7 +120,12 @@ class ManifestEntry:
     def from_digests(
         cls, path: str, digests: Digests, *, role: str = ROLE_DATA, upstream: Sequence[Checksum] = ()
     ) -> ManifestEntry:
-        ups = tuple(sorted({Checksum(c.algorithm.lower(), c.hexdigest.lower()) for c in upstream}, key=_ck))
+        ups = tuple(
+            sorted(
+                {Checksum(normalize_algorithm(c.algorithm), c.hexdigest.strip().lower()) for c in upstream},
+                key=_ck,
+            )
+        )
         return cls(path, digests.size, digests.sha256, digests.blake3, role, ups)
 
     @property
@@ -100,13 +155,20 @@ class ManifestEntry:
 
     @classmethod
     def from_json(cls, obj: Mapping[str, Any]) -> ManifestEntry:
+        """Parse and validate one entry (path safety, field types)."""
         ups = cast(list[Mapping[str, str]], obj.get("upstream", []))
+        role = str(obj.get("role", ROLE_DATA))
+        path = obj["path"]
+        size = obj["size"]
+        if not isinstance(path, str) or not isinstance(size, int) or isinstance(size, bool) or size < 0:
+            raise ManifestError(f"malformed manifest entry: {obj!r}"[:200])
+        check_stored_path(path, role)
         return cls(
-            path=str(obj["path"]),
-            size=int(obj["size"]),
+            path=path,
+            size=size,
             sha256=str(obj["sha256"]),
             blake3=str(obj["blake3"]),
-            role=str(obj.get("role", ROLE_DATA)),
+            role=role,
             upstream=tuple(Checksum(u["algorithm"], u["hexdigest"]) for u in ups),
         )
 
@@ -115,18 +177,45 @@ def _ck(c: Checksum) -> tuple[str, str]:
     return (c.algorithm, c.hexdigest)
 
 
+def _entry_text(e: ManifestEntry) -> str:
+    """One entry exactly as ``json.dumps(..., sort_keys=True, indent=2)`` writes it at depth 2."""
+    if e.upstream:
+        ups = ",\n".join(
+            "        {\n"
+            f'          "algorithm": {encode_basestring(c.algorithm)},\n'
+            f'          "hexdigest": {encode_basestring(c.hexdigest)}\n'
+            "        }"
+            for c in e.upstream
+        )
+        upstream = f"[\n{ups}\n      ]"
+    else:
+        upstream = "[]"
+    return (
+        "    {\n"
+        f'      "blake3": {encode_basestring(e.blake3)},\n'
+        f'      "path": {encode_basestring(e.path)},\n'
+        f'      "role": {encode_basestring(e.role)},\n'
+        f'      "sha256": {encode_basestring(e.sha256)},\n'
+        f'      "size": {int(e.size)},\n'
+        f'      "upstream": {upstream}\n'
+        "    }"
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class Manifest:
     source_id: str
     generation_id: str
     sealed_at: datetime
     entries: tuple[ManifestEntry, ...]
+    _by_path: dict[str, ManifestEntry] = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
-        paths = [e.path for e in self.entries]
-        if len(set(paths)) != len(paths):
+        by_path = {e.path: e for e in self.entries}
+        if len(by_path) != len(self.entries):
             raise ManifestError("duplicate paths in manifest")
         object.__setattr__(self, "entries", tuple(sorted(self.entries, key=lambda e: e.path)))
+        object.__setattr__(self, "_by_path", by_path)
 
     @property
     def data(self) -> tuple[ManifestEntry, ...]:
@@ -141,12 +230,31 @@ class Manifest:
         return sum(e.size for e in self.entries)
 
     def entry(self, path: str) -> ManifestEntry | None:
-        return next((e for e in self.entries if e.path == path), None)
+        """O(1): the entry for ``path``, if listed."""
+        return self._by_path.get(path)
 
     def artifacts(self) -> tuple[Artifact, ...]:
         return tuple(e.to_artifact(self.source_id, self.generation_id) for e in self.data)
 
     def to_bytes(self) -> bytes:
+        """Canonical bytes; identical to the ``json.dumps`` form described in the module docstring."""
+        files = ",\n".join(_entry_text(e) for e in self.entries)
+        files_text = f"[\n{files}\n  ]" if self.entries else "[]"
+        text = (
+            "{\n"
+            f'  "file_count": {len(self.entries)},\n'
+            f'  "files": {files_text},\n'
+            f'  "format": {encode_basestring(FORMAT)},\n'
+            f'  "generation_id": {encode_basestring(self.generation_id)},\n'
+            f'  "sealed_at": {encode_basestring(self.sealed_at.isoformat())},\n'
+            f'  "source_id": {encode_basestring(self.source_id)},\n'
+            f'  "total_bytes": {self.total_bytes}\n'
+            "}\n"
+        )
+        return text.encode("utf-8")
+
+    def to_bytes_reference(self) -> bytes:
+        """The definition of the canonical form (slow; used by tests to check :meth:`to_bytes`)."""
         doc = {
             "format": FORMAT,
             "source_id": self.source_id,

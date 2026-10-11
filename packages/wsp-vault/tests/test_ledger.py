@@ -139,10 +139,15 @@ def test_torn_tail_is_set_aside_not_deleted(tmp_path: Path, clock: Clock) -> Non
     path = ledger.day_files()[0][1]
     with path.open("ab") as f:
         f.write(b'{"seq": 2, "trunc')
-    assert not JsonlLedger(tmp_path, SIGNER).verify()
+    # readers ignore a trailing line without a newline (an append in progress, or torn)
+    assert JsonlLedger(tmp_path, SIGNER).verify()
+    assert [e.seq for e in JsonlLedger(tmp_path, SIGNER).events()] == [1]
     reopened = JsonlLedger(tmp_path, SIGNER, clock=clock)
     event = reopened.append("a", "s", {"n": 2})
-    assert event.seq == 2
+    recovered = next(e for e in reopened.events() if e.kind == "ledger.recovered")
+    assert recovered.seq == 2  # the cut is recorded in the chain before the new event
+    assert recovered.data["cut_bytes"] == len(b'{"seq": 2, "trunc')
+    assert event.seq == 3
     assert reopened.verify()
     assert path.with_name(path.name + ".torn").read_bytes() == b'{"seq": 2, "trunc\n'
 

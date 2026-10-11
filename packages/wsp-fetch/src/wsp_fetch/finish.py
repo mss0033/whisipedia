@@ -28,6 +28,10 @@ class FetchReport(FetchResult):
     per_mirror_bytes: Mapping[str, int] = field(default_factory=dict[str, int])
     # Where the bytes and digests came from (JSON-safe; see wsp_fetch.provenance, ADR-0009).
     provenance: Mapping[str, Any] = field(default_factory=dict[str, Any])
+    # How the content was established (FetchConfig.unverified_policy): "verified" (an upstream
+    # checksum or Metalink piece hashes matched), "corroborated" (no upstream digest; two full
+    # downloads agreed) or "unverified" (no upstream digest; policy "allow").
+    integrity: str = "verified"
 
 
 def make_report(

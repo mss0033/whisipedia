@@ -162,3 +162,27 @@ class SshSigner:
             args = ["-Y", "verify", "-f", str(allowed), "-I", self._identity, "-n", self._namespace]
             proc = self._run([*args, "-s", str(sig)], payload)
         return proc.returncode == 0
+
+
+class KeyringVerifier:
+    """Verify-only signer over the public keys published under a vault's ``keys/``.
+
+    For readers that have no private key (the API, index children, ``wsp doctor``): a signature
+    verifies if any listed Ed25519 key made it. It cannot sign (:class:`SigningError`), and it has no
+    ``public_key_text``, so a vault never publishes or pins anything because of it.
+    """
+
+    def __init__(self, keys: list[Ed25519Signer]) -> None:
+        if not keys:
+            raise SigningError("no public keys to verify with")
+        self._keys = keys
+
+    @classmethod
+    def from_public_texts(cls, texts: list[str]) -> KeyringVerifier:
+        return cls([Ed25519Signer.verifier(t) for t in texts])
+
+    def sign(self, payload: bytes) -> bytes:
+        raise SigningError("verify-only keyring (no private key configured)")
+
+    def verify(self, payload: bytes, signature: bytes) -> bool:
+        return any(k.verify(payload, signature) for k in self._keys)
