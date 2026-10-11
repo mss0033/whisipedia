@@ -5,6 +5,13 @@ On-disk layout under the index directory (local disk only, ADR-0002)::
     tantivy/        Tantivy index
     meta.sqlite     doc_id -> (source, title, lang, prior) and aliases; feeds suggest and ``lookup``
     suggest/        mmapped MARISA tries (see ``wsp_index.suggest``)
+    static_rank.bin link-analysis static rank (``wsp_index.linkrank``), written by ``wsp index rank``
+    spelling/       vocabulary for "did you mean" (``wsp_index.spelling``), written by ``wsp index spell``
+
+Static rank: when ``static_rank.bin`` exists, the top ``rank_depth`` BM25 hits are re-sorted by
+``bm25 + rank_weight * feature`` (feature ≈ 0.14 for an unlinked page, 0.69 average, up to ~10).
+Deeper hits keep their BM25 order, so paging stays consistent. The file is re-checked every few
+seconds, so a rank rebuilt by another process is picked up without a restart.
 
 Per-language analysis: each configured language ``L`` gets ``title_L``/``text_L`` fields analyzed
 with ``wsp_L`` (Snowball stemmer where Tantivy has one); every other language goes to
@@ -23,7 +30,7 @@ import json
 import sqlite3
 import threading
 import time
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import TracebackType
@@ -33,6 +40,7 @@ import tantivy
 
 from wsp_core.ids import DocId
 from wsp_core.model import DocRecord, SearchHit
+from wsp_index.linkrank import RANK_FILE, StaticRank
 from wsp_index.localfs import ensure_local
 from wsp_index.suggest import (
     DEFAULT_HEAVY_THRESHOLD,
@@ -80,6 +88,10 @@ class TantivyConfig:
     source_priors: Mapping[str, float] = field(default_factory=dict[str, float])
     """Constant score added to matches from a source (PLAN §9.3 source-quality priors): lets curated
     references outrank sheer volume, e.g. an encyclopedia article over millions of dictionary stubs."""
+    rank_weight: float = 1.0
+    """Weight of the link-analysis static rank added to BM25 (0 switches it off)."""
+    rank_depth: int = 100
+    """BM25 hits re-sorted with the static rank; deeper hits keep their BM25 order."""
 
     def schema_signature(self) -> str:
         return json.dumps({"languages": sorted(self.languages), "store_text": self.store_text})
@@ -119,6 +131,10 @@ class TantivyIndex:
         self._closed = False
 
         self._prior_clauses = self._build_prior_clauses()
+        self._rank_path = self.path / RANK_FILE
+        self._rank: StaticRank | None = StaticRank.open(self._rank_path)
+        self._rank_stamp = _stamp(self._rank_path)
+        self._rank_checked = time.monotonic()
         self._suggest_dir = self.path / "suggest"
         self._suggester = Suggester()
         self._pending_suggest: list[SuggestEntry] = []
@@ -410,6 +426,44 @@ class TantivyIndex:
             self._suggester.replace_base(TitleTrie.open(self._suggest_dir))
             self._trie_stamp = stamp
 
+    # --- static rank ---------------------------------------------------------------------------
+
+    @property
+    def rank_path(self) -> Path:
+        return self._rank_path
+
+    def static_rank(self) -> StaticRank | None:
+        """The link-analysis rank sidecar (reloaded when ``wsp index rank`` replaced it)."""
+        now = time.monotonic()
+        if now - self._rank_checked >= 5.0:
+            self._rank_checked = now
+            stamp = _stamp(self._rank_path)
+            if stamp != self._rank_stamp:
+                self._rank_stamp = stamp
+                self._rank = StaticRank.open(self._rank_path)
+        return self._rank
+
+    def reload_static_rank(self) -> StaticRank | None:
+        self._rank_checked = 0.0
+        self._rank_stamp = (-1, -1, -1)
+        return self.static_rank()
+
+    def iter_aliases(self, *, batch: int = 50_000) -> Iterator[tuple[str, str]]:
+        """Every ``(doc_id, alias)`` pair (redirects and alternative names), in batches."""
+        last = ("", "")
+        while True:
+            with self._lock:
+                rows = self._db.execute(
+                    "SELECT doc_id, alias FROM aliases WHERE (doc_id, alias) > (?, ?) "
+                    "ORDER BY doc_id, alias LIMIT ?",
+                    (*last, batch),
+                ).fetchall()
+            if not rows:
+                return
+            for d, a in rows:
+                yield str(d), str(a)
+            last = (str(rows[-1][0]), str(rows[-1][1]))
+
     # --- reads ---------------------------------------------------------------------------------
 
     @property
@@ -459,11 +513,23 @@ class TantivyIndex:
         clauses += self._prior_clauses
         q = parsed if len(clauses) == 1 else tantivy.Query.boolean_query(clauses)
         searcher = self._index.searcher()
-        result = searcher.search(q, limit, count=False, offset=offset)
+        rank = self.static_rank() if self.config.rank_weight > 0 else None
+        depth = self.config.rank_depth
+        if rank is None or depth <= 0 or offset >= depth:
+            result = searcher.search(q, limit, count=False, offset=offset)
+            scored = [(float(sc), searcher.doc(a)) for sc, a in result.hits]
+        else:
+            result = searcher.search(q, max(depth, offset + limit), count=False, offset=0)
+            pool = [(float(sc), searcher.doc(a)) for sc, a in result.hits]
+            head, tail = pool[:depth], pool[depth:]
+            feats = rank.features([str(d.get_first("doc_id")) for _, d in head])
+            w = self.config.rank_weight
+            head = [(sc + w * float(f), d) for (sc, d), f in zip(head, feats, strict=True)]
+            head.sort(key=lambda t: -t[0])
+            scored = [*head, *tail][offset : offset + limit]
         generators: dict[str, tantivy.SnippetGenerator] = {}
         hits: list[SearchHit] = []
-        for score, address in result.hits:
-            doc = searcher.doc(address)
+        for score, doc in scored:
             route = self.route(str(doc.get_first("lang") or ""))
             title = str(doc.get_first(f"title_{route}") or "")
             snippet = ""
@@ -486,6 +552,14 @@ class TantivyIndex:
                 )
             )
         return hits
+
+
+def _stamp(path: Path) -> tuple[int, int, int]:
+    try:
+        st = path.stat()
+    except OSError:
+        return (0, 0, 0)
+    return (st.st_ino, st.st_mtime_ns, st.st_size)
 
 
 def _lead(text: str, max_chars: int) -> str:
