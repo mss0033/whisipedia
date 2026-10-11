@@ -1,0 +1,3 @@
+# Playwright end-to-end output (see docs/testing/e2e.md)
+/e2e-report/
+/e2e-results/

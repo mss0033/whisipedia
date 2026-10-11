@@ -21,10 +21,14 @@
     "test:watch": "vitest",
     "budget": "node scripts/check-bundle.mjs",
     "smoke": "node scripts/smoke-dist.mjs",
+    "e2e": "env -u WSP_E2E_URL nice -n 10 playwright test",
+    "e2e:live": "WSP_E2E_URL=${WSP_E2E_URL:-http://127.0.0.1:8737} nice -n 10 playwright test",
+    "e2e:report": "playwright show-report e2e-report",
     "check": "npm run check:api && npm run typecheck && npm run lint && npm run test && npm run build && npm run budget && npm run smoke"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.15",
+    "@playwright/test": "1.64.0",
     "@types/node": "^24.19.2",
     "jsdom": "^29.1.1",
     "typescript": "^7.0.2",
