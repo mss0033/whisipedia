@@ -73,3 +73,14 @@ def test_borrowed_rendition_matches_language_and_title() -> None:
     german = DocRecord(make_doc_id("dump", "de/X"), "dump", "de/X", "X", "de", "x", "t")
     assert borrowed(dump, german, Vault({"zim-src": GEN})) is None  # type: ignore[arg-type]
     assert borrowed(dump, doc, Vault({})) is None  # type: ignore[arg-type]
+
+
+def test_live_text_leaves_out_scripts_and_styles() -> None:
+    page = (
+        "<html><head><title>T</title><style>a { color: red }</style>"
+        "<script>RLCONF = {};</script></head><body><p>Readable.</p>"
+        "<SCRIPT type='x'>if (a < b) {}</SCRIPT><noscript><p>Enable JS</p></noscript></body></html>"
+    )
+    doc = zim_document(spec("zim-src", "kiwix-opds"), "T", Vault({"zim-src": GEN}), Assets({"zim:T": page}))  # type: ignore[arg-type]
+    assert doc is not None
+    assert doc.text == "Readable."

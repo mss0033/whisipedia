@@ -127,3 +127,18 @@ def test_document_html_and_image_through_the_api(tmp_path: Path) -> None:
         img = c.get(f"/v1/assets/wikipedia-en-zim/{SAMPLE_GEN_2}/I/t.svg")
         assert img.status_code == 200
         assert img.headers["content-type"].startswith("image/svg+xml")
+
+
+def test_link_base_is_the_entry_actually_served(tmp_path: Path) -> None:
+    up = tmp_path / "wiki" / SAMPLE_GEN_2 / "upstream"
+    _zim(up / "askubuntu_2026-07a.zim", "askubuntu", [("questions", "text/html", "<p>front</p>")], [])
+    _zim(up / "b_2026-09.zim", "book_b", [("A/Two", "text/html", "<p>two</p>")], [("A/Old", "A/Two")])
+    store = ZimAssetStore(_vault(tmp_path, []))
+    assert store.books("wiki", SAMPLE_GEN_2) == ["askubuntu", "b"]  # re-release suffix "a" stripped
+    assert store.html("wiki", SAMPLE_GEN_2, "zim:askubuntu") == "<p>front</p>"
+    # A book front page (no slash) resolves its links inside the book, not at the source root.
+    assert store.base("wiki", SAMPLE_GEN_2, "askubuntu") == "askubuntu/questions"
+    assert store.base("wiki", SAMPLE_GEN_2, "askubuntu/") == "askubuntu/questions"
+    assert store.base("wiki", SAMPLE_GEN_2, "book_b/A/Old") == "book_b/A/Two"
+    assert store.base("wiki", SAMPLE_GEN_2, "book_b/A/Missing") == "book_b/A/Missing"
+    assert store.base("wiki", SAMPLE_GEN_2, "_books") == "_books"

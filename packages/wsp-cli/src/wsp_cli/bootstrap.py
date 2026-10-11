@@ -132,7 +132,12 @@ def api_settings(cfg: Mapping[str, Any], lay: Layout, *, static_dir: Path | None
     static = static_dir or (Path(api["static_dir"]) if api.get("static_dir") else lay.navigator_dist)
     extra = tuple(str(h) for h in api.get("allowed_hosts", ()))
     marker = activity_marker(cfg)
-    return ApiSettings(static_dir=static, allowed_hosts=(*LOOPBACK_HOSTS, *extra), activity_marker=marker)
+    return ApiSettings(
+        static_dir=static,
+        allowed_hosts=(*LOOPBACK_HOSTS, *extra),
+        activity_marker=marker,
+        source_info_seconds=30.0,
+    )
 
 
 def activity_marker(cfg: Mapping[str, Any]) -> Path | None:

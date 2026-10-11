@@ -85,10 +85,8 @@ test('a plain-language query in the location bar: results, filters, paging, back
   });
 });
 
-test("a kind filter narrows the results to that kind's count", async ({ nav, data, target }) => {
-  // E2E-5 (docs/testing/e2e-findings.md): live, `total` ignores the kind filter,
-  // so "of more than 200" stays and paging runs into empty pages.
-  test.fail(target === 'live', 'E2E-5');
+test("a kind filter narrows the results to that kind's count", async ({ nav, data }) => {
+  // E2E-5 (docs/testing/e2e-findings.md, fixed): facet counts and filtered totals agree.
   await nav.open(`wsp://search?q=${encodeURIComponent(data.question)}`);
   const before = await resultsBar(nav.main);
   const filters = nav.main.getByRole('navigation', { name: 'Filter by kind' });
@@ -130,10 +128,8 @@ test("I'm Feeling Lucky goes straight to a document", async ({ page, nav }) => {
   await expect(page.getByText('Location:', { exact: true })).toBeVisible();
 });
 
-test("I'm Feeling Lucky opens the page that tops the results", async ({ nav, target }) => {
-  // E2E-6 (docs/testing/e2e-findings.md): live, the top hit depends on the page
-  // size, so Lucky (page_size 1) lands somewhere other than result #1.
-  test.fail(target === 'live', 'E2E-6');
+test("I'm Feeling Lucky opens the page that tops the results", async ({ nav }) => {
+  // E2E-6 (docs/testing/e2e-findings.md, fixed): the top hit must not depend on the page size.
   await nav.open('wsp://search?q=alan%20turing');
   const first = nav.main
     .getByRole('list', { name: 'Search results' })
@@ -199,11 +195,8 @@ test('a shortcut in the location bar opens the page directly', async ({ page, na
 
 test('a navigational query ("wikipedia Alan Turing") jumps straight to the article', async ({
   nav,
-  target,
 }) => {
-  // E2E-7 (docs/testing/e2e-findings.md): live, navigate_to is null although
-  // wsp://wikipedia-en-zim/Alan_Turing renders, so a results page appears.
-  test.fail(target === 'live', 'E2E-7');
+  // E2E-7 (docs/testing/e2e-findings.md, fixed): pages served straight from a ZIM count.
   await nav.open('wsp://home');
   await nav.go('wikipedia Alan Turing');
   await nav.expectAddress(/^wsp:\/\/wikipedia[^/]*\/Alan_Turing$/);

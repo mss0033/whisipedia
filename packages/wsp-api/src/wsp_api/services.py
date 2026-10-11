@@ -63,4 +63,5 @@ class ApiSettings:
     sse_heartbeat_seconds: float = 15.0
     ledger_tail: int = 20
     ledger_verify_seconds: float = 300.0  # /v1/system re-verifies the ledger chain at most this often
+    source_info_seconds: float = 0.0  # reuse a site's card (NAS reads) this long; `wsp serve` uses 30
     activity_marker: Path | None = None  # touched on interactive requests; scrub/parity yield (ADR-0009)

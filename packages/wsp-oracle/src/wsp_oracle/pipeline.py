@@ -234,7 +234,9 @@ class OracleSearcher:
         t = lap("route", t0)
         if not route.lexical and not route.dense:
             return OracleResult(query, route, (), low_confidence=True, timings_ms=timings, scope=scope)
-        depth = max(depth or self.fusion.depth, self.rerank_top)
+        # Never fewer candidates than the configured depth: the ranking of the first results must not
+        # depend on the page size (I'm Feeling Lucky asks for one hit, the results page for ten; E2E-6).
+        depth = self.depth_for(depth)
         dense, best_chunk = self._dense(route, depth, sources)
         t = lap("dense", t)
         hybrid = HybridSearcher(
@@ -272,6 +274,10 @@ class OracleSearcher:
         low = not hits or (confidence is not None and confidence < self.low_confidence)
         return OracleResult(query, route, hits, passages, confidence, low, timings, scope)
 
+    def depth_for(self, depth: int | None) -> int:
+        """How many candidates :meth:`run` fuses and ranks for a requested depth."""
+        return max(depth or 0, self.fusion.depth, self.rerank_top)
+
     def search(self, query: str, *, limit: int = 10, sources: Sequence[str] | None = None) -> list[SearchHit]:
         return list(self.run(query, sources=sources).hits[:limit])
 
@@ -285,20 +291,24 @@ class OracleIndex:
     def __init__(self, searcher: OracleSearcher, *, cache_size: int = 256) -> None:
         self.searcher = searcher
         self.lexical = searcher.lexical
-        self._cache: OrderedDict[tuple[str, tuple[str, ...] | None], OracleResult] = OrderedDict()
+        # (result, the depth it was computed for): a result shorter than that depth is exhaustive.
+        self._cache: OrderedDict[tuple[str, tuple[str, ...] | None], tuple[OracleResult, int]] = OrderedDict()
         self._cache_size = cache_size
         self._lock = threading.Lock()
 
     def result(self, query: str, *, sources: Sequence[str] | None = None, depth: int = 0) -> OracleResult:
         key = (" ".join(query.split()), None if sources is None else tuple(sorted(sources)))
+        searched = self.searcher.depth_for(depth)
         with self._lock:
-            hit = self._cache.get(key)
-            if hit is not None and (depth <= len(hit.hits) or len(hit.hits) < self.searcher.fusion.depth):
-                self._cache.move_to_end(key)
-                return hit
+            cached = self._cache.get(key)
+            if cached is not None:
+                hit, deep = cached
+                if depth <= deep or len(hit.hits) < deep:  # deep enough, or every match already found
+                    self._cache.move_to_end(key)
+                    return hit
         res = self.searcher.run(query, sources=sources, depth=depth or None)
         with self._lock:
-            self._cache[key] = res
+            self._cache[key] = (res, searched)
             while len(self._cache) > self._cache_size:
                 self._cache.popitem(last=False)
         return res

@@ -92,6 +92,10 @@ class TantivyConfig:
     """Weight of the link-analysis static rank added to BM25 (0 switches it off)."""
     rank_depth: int = 100
     """BM25 hits re-sorted with the static rank; deeper hits keep their BM25 order."""
+    coordination_boost: float = 1.0
+    """Extra BM25 weight for documents that match every query word (0 switches it off). Matching is
+    any-word, so without it a page holding one rare word plus a source prior can outrank pages about
+    the whole query (``alan turing`` ranked a syndrome named after Allan first; E2E-6)."""
 
     def schema_signature(self) -> str:
         return json.dumps({"languages": sorted(self.languages), "store_text": self.store_text})
@@ -483,7 +487,18 @@ class TantivyIndex:
         fields = [f"{kind}_{lang}" for lang in self._routes for kind in ("title", "text")]
         boosts = {f"title_{lang}": self.config.title_boost for lang in self._routes}
         parsed, _errors = self._index.parse_query_lenient(text, fields, field_boosts=boosts)
-        return parsed
+        words = text.split()
+        if self.config.coordination_boost <= 0 or len(words) < 2 or '"' in text:
+            return parsed
+        every, _errors = self._index.parse_query_lenient(
+            " ".join(f"+{w}" for w in words), fields, field_boosts=boosts
+        )
+        return tantivy.Query.boolean_query(
+            [
+                (tantivy.Occur.Should, parsed),
+                (tantivy.Occur.Should, tantivy.Query.boost_query(every, self.config.coordination_boost)),
+            ]
+        )
 
     def search(
         self, query: str, *, limit: int = 10, offset: int = 0, sources: Sequence[str] | None = None

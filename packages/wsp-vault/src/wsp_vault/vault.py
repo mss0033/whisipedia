@@ -31,7 +31,8 @@ import json
 import os
 import re
 import stat
-from collections import deque
+import threading
+from collections import OrderedDict, deque
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import suppress
@@ -86,6 +87,7 @@ CURRENT_NAME = "CURRENT.txt"
 READ_ONLY = stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH
 
 _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9.-]*$")
+_MANIFEST_CACHE_BYTES = 64 * 1024 * 1024  # of manifest JSON; the whole vault holds ~25 MB today
 _GENERATION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
@@ -154,6 +156,10 @@ class FileVault:
         self._parity = parity
         self._retry = retry
         self._clock = clock
+        # Parsed manifests by path, revalidated by (mtime_ns, size): sealed manifests never change, and
+        # re-reading megabytes of them over SMB on every read made the API's source list take seconds.
+        self._manifests: OrderedDict[Path, tuple[tuple[int, int], Manifest]] = OrderedDict()
+        self._manifests_lock = threading.Lock()
         for domain in [*self._domains.values(), default_domain]:
             if not _NAME_RE.match(domain):
                 raise VaultError(f"invalid domain name: {domain!r}")
@@ -581,7 +587,7 @@ class FileVault:
         """Unverified view of a sealed generation. An unparseable manifest is reported as DEGRADED."""
         if manifest is None:
             try:
-                manifest = Manifest.from_bytes((lib / MANIFEST_NAME).read_bytes())
+                manifest = self._cached_manifest(lib / MANIFEST_NAME)
             except ManifestError:
                 return Generation(source_id, generation_id, GenerationStatus.DEGRADED)
         degraded = (lib / DEGRADED_NAME).exists()
@@ -592,6 +598,24 @@ class FileVault:
             artifacts=manifest.artifacts(),
             sealed_at=manifest.sealed_at,
         )
+
+    def _cached_manifest(self, path: Path) -> Manifest:
+        st = path.stat()
+        stamp = (st.st_mtime_ns, st.st_size)
+        with self._manifests_lock:
+            hit = self._manifests.get(path)
+            if hit is not None and hit[0] == stamp:
+                self._manifests.move_to_end(path)
+                return hit[1]
+        manifest = Manifest.from_bytes(path.read_bytes())
+        with self._manifests_lock:
+            self._manifests[path] = (stamp, manifest)
+            while (
+                sum(v[0][1] for v in self._manifests.values()) > _MANIFEST_CACHE_BYTES
+                and len(self._manifests) > 1
+            ):
+                self._manifests.popitem(last=False)
+        return manifest
 
     def _staging_generation(self, source_id: str, stg: Path) -> Generation:
         records = _read_staging(stg)

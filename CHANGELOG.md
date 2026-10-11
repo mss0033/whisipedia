@@ -73,6 +73,20 @@ All notable changes are documented here. The format follows [Keep a Changelog](h
   overrides (`acquirer.follow_cycle_cadences` removed). `pytest` is now the optional `wsp-core[testing]` extra.
 - Default update cycle is monthly instead of weekly, with quarterly as a single config option (PLAN §6.7).
 ### Fixed
+- Browser-test findings (docs/testing/e2e-findings.md): Stack Exchange book front pages linked outside
+  their book (E2E-4); re-released ZIMs (`_2026-07a`) were listed under a name that did not open
+  (E2E-3); "wikipedia Alan Turing" did not jump to a page served straight from a ZIM (E2E-7); the
+  oracle's result cache cut filtered result pages short (E2E-5) and the top hit depended on the page
+  size (E2E-6); facet counts now count each kind on its own; live page text no longer includes
+  script and style source (E2E-9); the HTML rewrite drops inline styles, which the Navigator's CSP
+  reported as violations (E2E-1).
+- Slow site list and System Monitor on a busy NAS (E2E-2): the vault caches parsed manifests
+  (revalidated by mtime and size), the API reuses site cards for 30 s and refreshes them in the
+  background, the ledger replay no longer blocks requests, and the Navigator renders a page after
+  waiting at most 3 s for the site list.
+- Lexical ranking: documents matching every query word get a coordination bonus
+  (`index.coordination_boost`), so one rare word plus a source prior no longer outranks pages about
+  the whole query.
 - The orchestrator now stops within seconds of SIGTERM instead of being killed after systemd's
   `TimeoutStopSec`: downloads, scrub, parity and par2 are cancelled, job threads are daemon threads
   and a lingering non-daemon thread no longer keeps the process alive.

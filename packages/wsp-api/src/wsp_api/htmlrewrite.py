@@ -4,6 +4,8 @@
   Navigator's ``default-src 'self'`` allows it). ``srcset`` is dropped: it would bypass the rewrite.
 * ``<a href>`` relative to the page → ``wsp://<source>/<native id>[#fragment]``.
 * Absolute and scheme-relative URLs are left alone. Clients show them as "not in library".
+* ``style`` attributes and ``<style>`` elements are dropped: the Navigator's CSP refuses them anyway,
+  and Chrome reports every one as a violation while merely parsing the page (E2E-1).
 
 This is not a sanitizer: the HTML stays untrusted and clients must sanitize it (the Navigator does).
 """
@@ -45,6 +47,7 @@ class _Rewriter(HTMLParser):
         super().__init__(convert_charrefs=False)
         self._source, self._gen, self._base = source_id, generation_id, native_id
         self.out: list[str] = []
+        self._in_style = False
 
     def _attrs(self, tag: str, attrs: list[tuple[str, str | None]]) -> list[tuple[str, str | None]] | None:
         changed = False
@@ -68,7 +71,12 @@ class _Rewriter(HTMLParser):
         return new if changed else None
 
     def _emit_tag(self, tag: str, attrs: list[tuple[str, str | None]], closing: bool) -> None:
+        if tag == "style":
+            self._in_style = not closing
+            return
         new = self._attrs(tag, attrs) if tag in ("a", "img") else None
+        if any(name == "style" for name, _ in new or attrs):
+            new = [(name, value) for name, value in new or attrs if name != "style"]
         if new is None:
             self.out.append(self.get_starttag_text() or "")
             return
@@ -82,10 +90,14 @@ class _Rewriter(HTMLParser):
         self._emit_tag(tag, attrs, True)
 
     def handle_endtag(self, tag: str) -> None:
+        if tag == "style":
+            self._in_style = False
+            return
         self.out.append(f"</{tag}>")
 
     def handle_data(self, data: str) -> None:
-        self.out.append(data)
+        if not self._in_style:
+            self.out.append(data)
 
     def handle_entityref(self, name: str) -> None:
         self.out.append(f"&{name};")

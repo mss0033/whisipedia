@@ -19,7 +19,7 @@ from libzim.reader import Archive, Entry
 from wsp_core.model import Asset
 from wsp_core.ports import Vault
 
-_ZIM_DATE_RE = re.compile(r"_(\d{4}-\d{2})\.zim$")
+_ZIM_DATE_RE = re.compile(r"_(\d{4}-\d{2})[a-z]?\.zim$")  # "_2026-07", "_2026-07a" (a re-release)
 _MAX_REDIRECTS = 5
 BOOKS_PAGE = "_books"  # native id of the generated book list of a bundle source
 
@@ -74,11 +74,18 @@ class ZimAssetStore:
         return archives
 
     def _entry(self, source_id: str, generation_id: str, path: str) -> Entry | None:
+        found = self._located(source_id, generation_id, path)
+        return None if found is None else found[1]
+
+    def _located(self, source_id: str, generation_id: str, path: str) -> tuple[str, Entry] | None:
+        """``(book prefix, entry)`` for a native id, following redirects; the prefix is ``""`` for a
+        single-book source and ``"<book>/"`` for a bundle."""
         archives = self._archives(source_id, generation_id)
         if "" in archives:
-            archive, entry_path = archives[""], path
+            prefix, archive, entry_path = "", archives[""], path
         else:
             book, _, entry_path = path.partition("/")
+            prefix = f"{book}/"
             archive = archives.get(book) or self._book(source_id, generation_id, archives, book)
             if archive is None:
                 return None
@@ -92,9 +99,18 @@ class ZimAssetStore:
             entry = archive.get_entry_by_path(entry_path)
         for _ in range(_MAX_REDIRECTS):
             if not entry.is_redirect:
-                return entry
+                return prefix, entry
             entry = entry.get_redirect_entry()
         return None
+
+    def base(self, source_id: str, generation_id: str, native_id: str) -> str:
+        """The native id that relative links in a page resolve against: the entry actually served,
+        after redirects and front-page lookup (``askubuntu.com_en_all`` is served by the book's main
+        entry, so its ``questions/1`` means ``askubuntu.com_en_all/questions/1``)."""
+        if native_id == BOOKS_PAGE:
+            return native_id
+        found = self._located(source_id, generation_id, native_id)
+        return native_id if found is None else found[0] + found[1].path
 
     def _book(
         self, source_id: str, generation_id: str, archives: dict[str, Archive], book: str

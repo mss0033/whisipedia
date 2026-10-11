@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import logging
+import threading
+import time
 from collections.abc import Sequence
 from pathlib import Path, PurePosixPath
 
 from wsp_api import convert
 from wsp_api.catalog import FeedCatalog
 from wsp_api.errors import ApiError
+from wsp_api.renditions import zim_document
 from wsp_api.schemas import Change, DocumentLink, SourceInfo, VaultLocation
 from wsp_api.services import Services
 from wsp_api.zim import ZimAssetStore
@@ -15,6 +19,7 @@ from wsp_core.ids import DocId, InvalidDocIdError, make_doc_id, parse_doc_id
 from wsp_core.model import ChangeRecord, DocRecord, Generation, GenerationStatus, SourceSpec
 from wsp_core.ports import AssetStore, Catalog
 
+log = logging.getLogger(__name__)
 MANIFEST_NAME = "MANIFEST.json"  # same name as wsp_vault.manifest.MANIFEST_NAME
 _MAX_LINK_LOOKUPS = 1000
 
@@ -28,8 +33,12 @@ def parse_doc(raw: str) -> DocId:
 
 
 class Library:
-    def __init__(self, services: Services) -> None:
+    def __init__(self, services: Services, *, info_seconds: float = 0.0) -> None:
         self.s = services
+        self._info_seconds = info_seconds
+        self._infos: dict[str, tuple[float, SourceInfo]] = {}
+        self._refreshing: set[str] = set()
+        self._infos_lock = threading.Lock()
         self.catalog: Catalog = services.catalog or FeedCatalog(services.changes)
         # TODO(integration): wire both in wsp_cli.bootstrap; these defaults keep `wsp serve` working.
         self.assets: AssetStore = services.assets or ZimAssetStore(services.vault)
@@ -46,6 +55,38 @@ class Library:
         return spec
 
     def source_info(self, spec: SourceSpec) -> SourceInfo:
+        """A site's card. With ``info_seconds`` set, a card is reused that long and then refreshed in
+        the background while the old one is served: each card costs NAS reads, and every Navigator
+        page needs the site list, so a busy NAS must not stall browsing (E2E-2)."""
+        if self._info_seconds <= 0:
+            return self._fresh_info(spec)
+        with self._infos_lock:
+            hit = self._infos.get(spec.id)
+            stale = hit is not None and time.monotonic() - hit[0] > self._info_seconds
+            refresh = stale and spec.id not in self._refreshing
+            if refresh:
+                self._refreshing.add(spec.id)
+        if hit is None:
+            info = self._fresh_info(spec)
+            with self._infos_lock:
+                self._infos[spec.id] = (time.monotonic(), info)
+            return info
+        if refresh:
+            threading.Thread(target=self._refresh_info, args=(spec,), name="source-info", daemon=True).start()
+        return hit[1]
+
+    def _refresh_info(self, spec: SourceSpec) -> None:
+        try:
+            info = self._fresh_info(spec)
+            with self._infos_lock:
+                self._infos[spec.id] = (time.monotonic(), info)
+        except Exception:  # keep serving the old card; the next request retries
+            log.warning("could not refresh the card of %s", spec.id, exc_info=True)
+        finally:
+            with self._infos_lock:
+                self._refreshing.discard(spec.id)
+
+    def _fresh_info(self, spec: SourceSpec) -> SourceInfo:
         current = self.s.vault.current(spec.id)
         return convert.source_info(
             spec,
@@ -77,6 +118,16 @@ class Library:
         return source_id if spec is None else spec.name
 
     # --- documents & changes ---
+
+    def exists(self, did: DocId) -> bool:
+        """In the document store, or (Kiwix sources) a page of the current ZIM."""
+        if self.s.documents.get(did) is not None:
+            return True
+        source_id, native_id = parse_doc_id(did)
+        try:
+            return zim_document(self.s.source(source_id), native_id, self.s.vault, self.assets) is not None
+        except Exception:  # an unreadable archive is "not here", not an error page
+            return False
 
     def title(self, did: str) -> str | None:
         try:

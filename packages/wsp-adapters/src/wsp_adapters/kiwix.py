@@ -71,7 +71,7 @@ _ZIM_CHUNK = 2_000  # entries per worker task
 _ATOM = "{http://www.w3.org/2005/Atom}"
 _DC = "{http://purl.org/dc/terms/}"
 _ACQUISITION = "http://opds-spec.org/acquisition/open-access"
-_ZIM_DATE_RE = re.compile(r"_(\d{4}-\d{2})\.zim$")
+_ZIM_DATE_RE = re.compile(r"_(\d{4}-\d{2})[a-z]?\.zim$")  # "_2026-07", "_2026-07a" (a re-release)
 _METALINK = "{urn:ietf:params:xml:ns:metalink}"
 
 # ISO 639-3 (ZIM metadata) to the ISO 639-1 codes used in DocRecord.lang, for common languages.

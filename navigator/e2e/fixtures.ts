@@ -35,20 +35,7 @@ export interface Fixtures {
  * that test starts passing "unexpectedly" and fails the suite, which is the
  * cue to delete the entry here. See docs/testing/e2e-findings.md.
  */
-export const KNOWN_ISSUES: Array<{ id: string; console: RegExp }> = [
-  {
-    // E2E-1: parsing document HTML with DOMParser reports a CSP violation for
-    // every inline style attribute, although the sanitizer drops them.
-    id: 'E2E-1',
-    console: /Refused to apply inline style|CSP violation: style-src-(attr|elem) blocked inline/,
-  },
-  {
-    // E2E-4: in multi-book ZIMs (Stack Exchange) the API resolves a book front
-    // page's relative images against the source root, dropping the book: 404s.
-    id: 'E2E-4',
-    console: /status of 404 .*\/v1\/assets\/stackexchange\/[^/]+\/(images|static)\//,
-  },
-];
+export const KNOWN_ISSUES: Array<{ id: string; console: RegExp }> = [];
 
 export const test = base.extend<Fixtures>({
   target: [process.env.WSP_E2E_URL ? 'live' : 'mock', { option: true }],

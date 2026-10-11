@@ -13,7 +13,7 @@ import contextlib
 import threading
 import time
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import replace
 from typing import Annotated, Any, Literal, cast
 from urllib.parse import unquote
@@ -87,7 +87,7 @@ _TELEMETRY_OFF: TelemetryConfig = {
     "auto_configure": False,
 }
 
-# Search: facets and totals come from the top of the ranking; beyond it the index is paged directly.
+# Search: totals and facet counts are counted up to this many hits; beyond it the index is paged directly.
 _WINDOW = 200
 _SPARSE = 5  # fewer hits than this: "did you mean" may correct any unknown or rare word
 
@@ -134,7 +134,7 @@ def create_app(services: Services, settings: ApiSettings | None = None) -> FastA
         telemetry=_TELEMETRY_OFF,
         responses={500: {"model": ErrorResponse, "description": "internal_error"}},
     )
-    lib = Library(services)
+    lib = Library(services, info_seconds=settings.source_info_seconds)
     install_error_handlers(app)
     app.add_middleware(RawSegmentRouting)
     app.add_middleware(SecurityMiddleware, settings=settings)
@@ -154,7 +154,14 @@ def create_app(services: Services, settings: ApiSettings | None = None) -> FastA
             services.index.suggest("a", limit=10)
 
     threading.Thread(target=warm_search, name="search-warm", daemon=True).start()
+    if settings.source_info_seconds > 0:  # fill the site cards before the first page asks for them
+        threading.Thread(target=lambda: _quietly(lib.source_infos), name="sources-warm", daemon=True).start()
     return app
+
+
+def _quietly(fn: Callable[[], object]) -> None:
+    with contextlib.suppress(Exception):
+        fn()
 
 
 def _v1(lib: Library, settings: ApiSettings) -> APIRouter:
@@ -243,7 +250,9 @@ def _v1(lib: Library, settings: ApiSettings) -> APIRouter:
                     original,
                     source_id=doc.source_id,
                     generation_id=gen.generation_id,
-                    native_id=doc.native_id,
+                    native_id=_link_base(
+                        lib.assets, doc.source_id, gen.generation_id, doc.html_ref, doc.native_id
+                    ),
                 )
         if html is None and at is None and (alt := borrowed(s.source(doc.source_id), doc, s.vault)):
             # e.g. the Wikipedia dump (indexed text) rendered with the Kiwix ZIM's page for its title.
@@ -253,7 +262,13 @@ def _v1(lib: Library, settings: ApiSettings) -> APIRouter:
                     original,
                     source_id=alt.source_id,
                     generation_id=alt.generation.generation_id,
-                    native_id=alt.html_ref.removeprefix("zim:"),
+                    native_id=_link_base(
+                        lib.assets,
+                        alt.source_id,
+                        alt.generation.generation_id,
+                        alt.html_ref,
+                        alt.html_ref[4:],
+                    ),
                 )
         return convert.document(
             doc,
@@ -339,9 +354,16 @@ def _v1(lib: Library, settings: ApiSettings) -> APIRouter:
         total = max(len(window), offset + len(page) + (1 if more else 0))
         facet_hits = window if kind is None else _window(q, wanted)
         kinds: dict[str, DocKind] = {spec.id: sites.kind_of(spec) for spec in s.sources}
-        counts = Counter(
+        present = Counter(
             kinds.get(h.source_id or h.doc_id[4:].partition("/")[0], DocKind.OTHER) for h in facet_hits
         )
+        # Each facet counts its own kind (up to the window), so clicking "Dictionary (52)" shows 52
+        # results rather than the top 200's share of them (E2E-5).
+        counts = {
+            k: len(window) if k is kind else len(_window(q, _kind_sources(k, wanted)))
+            for k in present
+            if k is not DocKind.OTHER
+        } | ({DocKind.OTHER: present[DocKind.OTHER]} if DocKind.OTHER in present else {})
         terms = search.terms(q)
         hits: list[Hit] = []
         for h in page:
@@ -356,7 +378,7 @@ def _v1(lib: Library, settings: ApiSettings) -> APIRouter:
             )
         scope_of = getattr(s.index, "scope", None)
         routed = cast(Any, scope_of(q, scope)) if callable(scope_of) else None
-        nav = search.navigate_to(s, q) if offset == 0 else None
+        nav = search.navigate_to(s, q, exists=lib.exists) if offset == 0 else None
         did_you_mean = _did_you_mean(q, scope, window) if offset == 0 else None
         if s.queries is not None and offset == 0:
             s.queries.record(s.clock(), q, total, not window)
@@ -453,11 +475,21 @@ def _v1(lib: Library, settings: ApiSettings) -> APIRouter:
     # --- System Monitor -------------------------------------------------------------------------
 
     verified: list[tuple[float, bool]] = []  # (monotonic time, result) of the last chain replay
+    replaying = threading.Lock()
+
+    def replay() -> None:
+        with replaying:
+            verified[:] = [(time.monotonic(), s.ledger.verify())]
+
+    threading.Thread(target=lambda: _quietly(replay), name="ledger-verify", daemon=True).start()
 
     def ledger_ok() -> bool:
-        now = time.monotonic()
-        if not verified or now - verified[0][0] > settings.ledger_verify_seconds:
-            verified[:] = [(now, s.ledger.verify())]
+        """Replaying the chain reads every ledger file (tens of seconds on a busy NAS): only the first
+        call waits for it; later re-checks run in the background and the page shows the last result."""
+        if not verified:
+            replay()
+        elif time.monotonic() - verified[0][0] > settings.ledger_verify_seconds and not replaying.locked():
+            threading.Thread(target=replay, name="ledger-verify", daemon=True).start()
         return verified[0][1]
 
     @r.get("/proposals", tags=["system"])
@@ -508,6 +540,14 @@ def _v1(lib: Library, settings: ApiSettings) -> APIRouter:
         )
 
     return r
+
+
+def _link_base(assets: object, source_id: str, generation_id: str, html_ref: str, native_id: str) -> str:
+    """What relative links in a page resolve against: the ZIM entry actually served (a bundle's book
+    front page or a redirect target lives elsewhere than the address asked for), else the native id."""
+    if isinstance(assets, ZimAssetStore) and html_ref.startswith("zim:"):
+        return assets.base(source_id, generation_id, html_ref.removeprefix("zim:"))
+    return native_id
 
 
 def _go(s: Services) -> APIRouter:

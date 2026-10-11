@@ -283,3 +283,25 @@ def test_prune_moves_aside_and_guards_current(vault: FileVault, seal: SealFn, le
     assert ledger.tail(1)[0].kind == "vault.prune"
     with pytest.raises(VaultError, match="not a sealed"):
         vault.prune(SOURCE, "2026-08-01")
+
+
+def test_manifests_are_parsed_once_and_revalidated(
+    vault: FileVault, seal: SealFn, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lib = seal()
+    calls: list[int] = []
+    parse = Manifest.from_bytes
+
+    def counting(data: bytes) -> Manifest:
+        calls.append(1)
+        return parse(data)
+
+    monkeypatch.setattr(Manifest, "from_bytes", staticmethod(counting))
+    first = vault.current(SOURCE)
+    assert vault.current(SOURCE) == first
+    assert len(calls) == 1
+    path = lib / "MANIFEST.json"
+    os.chmod(path, 0o644)
+    os.utime(path, ns=(1, 1))  # a changed stamp (e.g. a repaired manifest) is read again
+    assert vault.current(SOURCE) == first
+    assert len(calls) == 2

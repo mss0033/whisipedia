@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 from oracle_helpers import CORPUS, FIXTURE_GOLD, OverlapReranker, doc
 
-from wsp_core.model import DocRecord
+from wsp_core.ids import DocId
+from wsp_core.model import DocRecord, SearchHit
 from wsp_index import HashingEmbedder, RefineryReader, RefineryWriter, TantivyConfig, TantivyIndex
 from wsp_index.refinery import generation_dir
 from wsp_oracle.config import OracleConfig, OracleConfigError
@@ -285,3 +287,39 @@ def test_rank_and_spelling_ablations_on_fixtures(tmp_path: Path, lexical: Tantiv
     assert "restored=" in sp.summary()
     assert corrected(speller, "alligatr vs crocodile") == "alligator vs crocodile"
     assert corrected(speller, "alligator vs crocodile") == "alligator vs crocodile"
+
+
+class _Many:
+    """A lexical index with 100 matches for anything, best first."""
+
+    def __init__(self) -> None:
+        self.limits: list[int] = []
+
+    def search(
+        self, query: str, *, limit: int = 10, offset: int = 0, sources: object = None
+    ) -> list[SearchHit]:
+        self.limits.append(limit)
+        hits = [
+            SearchHit(DocId(f"wsp:encyclo/d{i:03}"), 100.0 - i, f"d{i}", "", "encyclo") for i in range(100)
+        ]
+        return hits[offset : offset + limit]
+
+
+def test_deep_pages_after_a_shallow_one_are_not_cut_short() -> None:
+    lex = _Many()
+    searcher = OracleSearcher(lex)  # type: ignore[arg-type]
+    searcher.rerank_top, searcher.fusion = 30, replace(searcher.fusion, depth=30)
+    index = OracleIndex(searcher)
+    assert len(index.search("anything", limit=11)) == 11  # computed 30 deep
+    assert [h.title for h in index.search("anything", limit=10, offset=30)] == [
+        f"d{i}" for i in range(30, 40)
+    ]
+
+
+def test_first_results_do_not_depend_on_the_page_size() -> None:
+    lex = _Many()
+    searcher = OracleSearcher(lex, reranker=OverlapReranker())  # type: ignore[arg-type]
+    one = searcher.run("anything", depth=1).hits[0]
+    ten = searcher.run("anything", depth=10).hits[0]
+    assert one.doc_id == ten.doc_id
+    assert searcher.depth_for(1) == searcher.depth_for(10) == searcher.depth_for(None)

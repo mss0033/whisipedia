@@ -137,13 +137,12 @@ test.describe('a missing page', () => {
   });
 });
 
-test.describe('known bug E2E-1', () => {
+test.describe('fixed bug E2E-1', () => {
   test.use({ tolerate: [] });
 
   test('opening a page with inline styles reports no CSP violation', async ({ nav }) => {
-    // E2E-1 (docs/testing/e2e-findings.md): DOMParser reports a CSP violation for
-    // every style="" attribute in document HTML. Remove test.fail() once fixed.
-    test.fail();
+    // E2E-1 (docs/testing/e2e-findings.md): the API now drops inline styles, which
+    // DOMParser used to report as CSP violations.
     await nav.open('wsp://wikipedia-en-zim/Alan_Turing');
     await expect(nav.heading).toHaveText(/Alan Turing/);
   });

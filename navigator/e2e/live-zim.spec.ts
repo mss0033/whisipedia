@@ -82,14 +82,12 @@ test('Stack Exchange: site page, Enter site, the book list, a book front page', 
   });
 });
 
-test.describe('known bug E2E-4', () => {
+test.describe('fixed bug E2E-4', () => {
   test.use({ tolerate: [] });
 
   test('a question on a Stack Exchange book front page opens', async ({ nav }) => {
     // E2E-4 (docs/testing/e2e-findings.md): links and images on a book front page
-    // resolve without the book prefix (wsp://stackexchange/questions/…): 404.
-    // Remove test.fail() once fixed.
-    test.fail();
+    // used to resolve without the book prefix (wsp://stackexchange/questions/…).
     await nav.open('wsp://stackexchange/askubuntu.com_en_all');
     const q = nav.main
       .locator('.doc-body a[data-wsp]:not(.broken-link):visible', { hasText: /\?\s*$/ })
@@ -102,14 +100,12 @@ test.describe('known bug E2E-4', () => {
   });
 });
 
-test.describe('known bug E2E-3', () => {
+test.describe('fixed bug E2E-3', () => {
   test.use({ allowConsole: [/status of 404/] });
 
   test('the first book in the Stack Exchange list opens', async ({ nav }) => {
-    // E2E-3 (docs/testing/e2e-findings.md): the book list links
-    // 3dprinting.stackexchange.com_en_all_2026-07a, which is 404; the undated
-    // id works. Remove test.fail() once fixed.
-    test.fail();
+    // E2E-3 (docs/testing/e2e-findings.md): the book list used to link
+    // 3dprinting.stackexchange.com_en_all_2026-07a (a re-release), which was 404.
     await nav.open('wsp://stackexchange/_books');
     await nav.main.locator('.doc-body li a').first().click();
     await nav.settled();

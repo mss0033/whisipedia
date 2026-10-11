@@ -48,6 +48,8 @@ import type {
 import * as whatsnewPage from './pages/whatsnew.ts';
 import { errorPage, wspLink } from './ui/components.ts';
 
+const SOURCES_WAIT_MS = 3000;
+
 const RENDERERS: Record<Route['page'], PageRenderer> = {
   home: homePage.render,
   directory: directoryPage.render,
@@ -123,7 +125,14 @@ export class App implements AppServices {
         return [];
       });
     }
-    return this.sourcesPromise;
+    // Pages use the list for site names and the webring only: a slow library (busy NAS) must not
+    // hold a page back, so after a short wait they render without it (E2E-2). The request carries
+    // on, and later pages get the list once it arrives.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<SourceInfo[]>((resolve) => {
+      timer = setTimeout(() => resolve([]), SOURCES_WAIT_MS);
+    });
+    return Promise.race([this.sourcesPromise, late]).finally(() => clearTimeout(timer));
   }
 
   status(text: string): void {

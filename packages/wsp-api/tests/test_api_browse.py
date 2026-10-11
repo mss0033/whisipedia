@@ -160,6 +160,11 @@ def test_search_kind_filter_keeps_facets_of_all_kinds(browse: httpx.Client) -> N
     res = SearchResults.model_validate(browse.get("/v1/search", params={"q": "the", "kind": "papers"}).json())
     assert {h.source_id for h in res.hits} == {"rfc"}
     assert len(res.facets) > 1
+    for facet in res.facets:  # each facet's count is what filtering by it shows (E2E-5)
+        only = SearchResults.model_validate(
+            browse.get("/v1/search", params={"q": "the", "kind": facet.kind.value}).json()
+        )
+        assert only.total == facet.count
     none = SearchResults.model_validate(browse.get("/v1/search", params={"q": "the", "kind": "maps"}).json())
     assert none.hits == []
     assert none.low_confidence
@@ -300,3 +305,41 @@ def test_jsonl_gap_log(tmp_path: Path) -> None:
     lines = [json.loads(x) for x in log.path.read_text(encoding="utf-8").splitlines()]
     assert lines[0]["href"] == "https://example.org/ü"
     assert lines[1]["from_doc_id"] == "wsp:rfc/2"
+
+
+def test_site_cards_are_reused_then_refreshed_in_the_background(monkeypatch: pytest.MonkeyPatch) -> None:
+    import threading
+    import time
+
+    from wsp_api.views import Library
+
+    lib = Library(sample_services(), info_seconds=30.0)
+    spec = lib.s.sources[0]
+    calls: list[str] = []
+    fresh = lib._fresh_info  # pyright: ignore[reportPrivateUsage]
+    done = threading.Event()
+
+    def counting(x: object) -> object:
+        calls.append("x")
+        info = fresh(x)  # type: ignore[arg-type]
+        done.set()
+        return info
+
+    monkeypatch.setattr(lib, "_fresh_info", counting)
+    first = lib.source_info(spec)
+    assert lib.source_info(spec) is first  # within 30 s: no NAS reads
+    assert calls == ["x"]
+    now = time.monotonic()
+    monkeypatch.setattr(time, "monotonic", lambda: now + 31)
+    done.clear()
+    assert lib.source_info(spec) is first  # stale: served at once, refreshed behind the scenes
+    assert done.wait(5)
+    assert calls == ["x", "x"]
+
+
+def test_rewrite_drops_inline_styles() -> None:
+    page = (
+        '<head><style>p { color: red }</style></head><p style="x" class="c">Hi <b STYLE=\'y\'>there</b></p>'
+    )
+    out = rewrite_html(page, source_id="s", generation_id="g", native_id="A/P")
+    assert out == '<head></head><p class="c">Hi <b>there</b></p>'

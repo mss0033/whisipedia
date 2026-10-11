@@ -29,6 +29,7 @@ from wsp_core.ports import Vault
 
 _TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 _TAG_RE = re.compile(r"<[^>]+>")
+_CODE_RE = re.compile(r"<(script|style|noscript)\b[^>]*>.*?</\1\s*>", re.IGNORECASE | re.DOTALL)
 _WS_RE = re.compile(r"\s+")
 _ZIM_ADAPTER = "kiwix-opds"
 
@@ -63,7 +64,8 @@ def zim_document(
         return None
     match = _TITLE_RE.search(html)
     title = htmllib.unescape(match.group(1)).strip() if match else ""
-    text = _WS_RE.sub(" ", htmllib.unescape(_TAG_RE.sub(" ", html))).strip()
+    body = _CODE_RE.sub(" ", _TITLE_RE.sub(" ", html))  # readable text only (E2E-9)
+    text = _WS_RE.sub(" ", htmllib.unescape(_TAG_RE.sub(" ", body))).strip()
     return DocRecord(
         doc_id=make_doc_id(spec.id, native_id),
         source_id=spec.id,

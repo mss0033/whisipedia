@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import html
 import re
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 
 from wsp_api.schemas import QueryIntent
 from wsp_api.services import Services
@@ -108,10 +108,19 @@ def _exists(services: Services, doc_id: DocId) -> bool:
 
 def _native_candidates(rest: str) -> list[str]:
     under = rest.replace(" ", "_")
-    return list(dict.fromkeys([rest, under, f"A/{under}"]))
+    upper = under[:1].upper() + under[1:]  # MediaWiki titles: "alan turing" is "Alan_turing", a redirect
+    return list(dict.fromkeys([rest, under, upper, f"A/{under}", f"A/{upper}"]))
 
 
-def navigate_to(services: Services, query: str) -> DocId | None:
+def navigate_to(
+    services: Services, query: str, exists: Callable[[DocId], bool] | None = None
+) -> DocId | None:
+    """The page a navigational query names, if it exists. ``exists`` defaults to the document store;
+    the API also counts pages served straight from a ZIM (E2E-7)."""
+
+    def _check(doc_id: DocId) -> bool:
+        return exists(doc_id) if exists is not None else _exists(services, doc_id)
+
     q = query.strip()
     if q.startswith("wsp:"):
         raw = q.removeprefix("wsp://") if q.startswith("wsp://") else q.removeprefix("wsp:")
@@ -120,10 +129,10 @@ def navigate_to(services: Services, query: str) -> DocId | None:
             doc_id = make_doc_id(source_id, native_id)
         except InvalidDocIdError:
             return None
-        return doc_id if _exists(services, doc_id) else None
+        return doc_id if _check(doc_id) else None
     if _QID.match(q) and services.source("wikidata") is not None:
         doc_id = make_doc_id("wikidata", q)
-        return doc_id if _exists(services, doc_id) else None
+        return doc_id if _check(doc_id) else None
 
     head, _, rest = q.partition(" ")
     rest = rest.strip()
@@ -137,7 +146,7 @@ def navigate_to(services: Services, query: str) -> DocId | None:
                 doc_id = make_doc_id(source_id, native_id)
             except InvalidDocIdError:
                 continue
-            if _exists(services, doc_id):
+            if _check(doc_id):
                 return doc_id
         title = rest.casefold()
         if not any(t.casefold() == title for t in services.index.suggest(rest, limit=20)):
