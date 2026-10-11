@@ -1,0 +1,16 @@
+# Document-level rules for cia-reading-room (D14). Officially declassified releases: old classification
+# banners with a release stamp are expected (declassified_ok in the registry). Intelligence *analysis* of
+# foreign programmes is historical-analytical material (research doc §3.2, in scope), so the built-in
+# noun-level review list is off for this collection (a million titles mention weapons); the built-in deny
+# list (production, weaponisation, targeting, offensive tooling) and the front-matter screens still apply.
+builtin_review: false
+review_keywords:
+  - nerve agent
+  - weapons design
+  - bomb design
+  - improvised explosive
+neutral_phrases:
+  - nuclear power
+  - chemical industry
+allow_documents: []
+deny_documents: []

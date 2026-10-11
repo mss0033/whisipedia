@@ -14,6 +14,7 @@ of one source into a change set and a net-diff segment (PLAN §6.4, §6.7).
 | `open-library` | `wsp_adapters.openlibrary:OpenLibraryAdapter` | `open-library` |
 | `gutenberg` | `wsp_adapters.gutenberg:GutenbergAdapter` | `gutenberg` |
 | `osm-planet` | `wsp_adapters.osm:OsmPlanetAdapter` | `osm-planet` |
+| `doc-collection` | `wsp_adapters.doccollection:DocCollectionAdapter` | the preparedness and defense shelves (`nist-csrc`, `army-pubs-public`, `nga-nautical-pubs`, …), `cia-reading-room`, `usgs-historical-topo`; see below |
 
 `wsp_adapters.load_adapter(name)` instantiates an adapter by its registry name. Every adapter passes
 the shared contract suite `wsp_core.testing.adapter_contract.SourceAdapterContract`, which also
@@ -126,6 +127,65 @@ or a dense file on local NVMe); a later step can add it.
   threads and renames it into staging (staging record flushed per 1,000 files, not per file, which
   would be quadratic); the manifest is adopted; the part is sealed and never promoted. A crash at any
   point resumes: sealed parts are skipped, staged files are re-hashed and recorded.
+
+## `doc-collection` (curated document sets, PLAN D11/D13/D14)
+
+One registry source made of many independently published documents (spec: research doc
+[§5.2](../research/PREPAREDNESS_AND_DEFENSE.md#52-doc-collection-adapter-specification)). Modules:
+
+| Module | Role |
+|---|---|
+| `policy` | The deterministic filter and edition labels. No network, no document bytes beyond front matter. |
+| `discovery` | Discoverers (`index-page`, `api`, `oai-pmh`, `archive-org`, `s3-listing`, `git`, `list`/`document`), resolvers for landing pages, the per-host `Throttle` |
+| `catalog` | `meta/documents.jsonl`: the whole collection per generation, carried-over documents point at the generation that holds their bytes |
+| `adapter` | The `SourceAdapter`: `discover` (metadata stage + audit file), `plan` (skip held name+size), `fetch` (HTTPS from `origins` only), `verify` (format, distribution gate, content screen), `documents` (PDF text with `pypdfium2`, HTML via selectolax) |
+
+**Discovery kinds** (`access.discovery[]`): `index-page` (`url(s)`, `documents` regex, `follow` +
+`depth` + `max_pages`, `follow_rewrite`, `filter_follow` so a denied series is never opened, `rows` +
+`columns` + `detail_documents` for table indexes such as APD); `api` with `flavor` `nga-msi`,
+`govinfo`, `congress-crs` (keys), `ntrs`, `osti`, `usgs-pubs`, `govuk-search`, `dspace7`, `tnm`;
+`oai-pmh`; `archive-org` (scrape API; `provenance` is required and recorded per document); `s3-listing`
+(ETag = MD5, `partition` for per-state part generations); `git` (GitHub repository fetched as one
+`git bundle`). Listings report upstream totals so a dry run can sample.
+
+**Filter** (`access.filter` + `registry/filters/<source>.yaml`), deny-first:
+
+1. owner `deny_documents`; restricted markings in a rights field *or the title* (`(S/NF)`) → deny + alert;
+2. the built-in §13 safety deny list on the heading (number, title, subjects) → deny; a deny phrase only in
+   an abstract → review;
+3. `deny_series` / `deny_series_prefix`, then source `deny_keywords` → deny;
+4. owner `allow_documents` → allow;
+5. built-in noun review list (`builtin_review: false` only for official-history sets such as the CIA
+   reading room and WHO guidance) and source `review_keywords` → review;
+6. `allow_series` / `allow_series_prefix` → allow; `allow_all` (single-purpose collections) → allow;
+7. otherwise `default` (review).
+
+`neutral_phrases` blank civil uses before matching (`bomb threat`, `nuclear power`, `surveillance
+detection`). After fetching, `verify` (and `wsp collections fetch`) read the first four pages: any
+Distribution Statement B–F, FOUO/CUI/NOFORN/limited-distribution banner or export-control warning
+rejects the file (declassified sets accept old classification banners only with a release stamp);
+`distribution.require` (`A`, `public-release`, `license:<SPDX>`, `declassified`) not met → review; a
+safety phrase on the title page, or three in the front matter → deny; fewer → review. Every decision
+is recorded as `filter_decision` (`allow:series=FM 5-0`, `deny:marking=distribution-C`, …).
+
+**Editions.** `currency`: `current`, `superseded` (with `superseded_by`/`supersedes`, chained),
+`historical` (registry `currency: {collection: historical}`, `historical_before`, or
+`historical_series_prefix`), `rescinded` (issuer status), `withdrawn-from-index`. Historical documents
+carry `meta.banner = "Historical document — methods may be outdated or unsafe."`, which the API returns
+as `Document.banner` and the Navigator shows above the text (`wsp_core.banners`).
+
+**Records.** `native_id` is the document key (`army:FM-5-0:2022-11-04`), `revision` the edition date,
+`html_ref` `file:<generation>/<path>`, `aliases` the publication number, `meta` the catalog fields
+(`DocRecord.meta`, additive in v0.3; stored as an optional Refinery column).
+
+**Acquisition path.** `wsp collections fetch --source <id>` (polite, ≤ 1 request/s per host, longer where
+`robots.txt` asks) writes `_incoming/<id>/<cycle>/`, deletes restricted files at once, quarantines held
+ones in `_incoming/_quarantine/<id>/`, files one review proposal per batch, and writes
+`_incoming/_plans/targets.d/<id>-<cycle>.json`; `wsp ingest --source <id>` seals it (the catalog goes to
+`meta/documents.jsonl` through the target's `meta.relpath`). In the orchestrator pipeline a held or
+rejected file fails `verify` (a mismatch: the release fails and the source auto-pauses with an alert), so
+restricted bytes never reach the vault either way. `wsp collections dry-run` lists what would be fetched
+(see the [runbook](../runbooks/document-collections.md)).
 
 ## Snapshot diff (`wsp_adapters.diff`)
 

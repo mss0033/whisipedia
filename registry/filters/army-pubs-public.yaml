@@ -1,0 +1,87 @@
+# Document-level rules for army-pubs-public (research doc §3.3, §5.2; PLAN §13, D13).
+# Deny-first: deny_* beats allow_*; anything no rule allows goes to owner review (`wsp proposals`).
+# The built-in safety lists (wsp_adapters.doccollection.policy) apply on top of these and cannot be
+# switched off. Owner decisions from accepted/rejected review proposals land in allow_documents /
+# deny_documents below.
+
+allow_series:
+  - FM 1
+  - FM 3-0
+  - FM 5-0
+  - FM 6-0
+  - FM 6-22
+  - FM 6-27
+  - FM 7-0
+  - ATP 3-39.32   # physical security
+  - ATP 3-37.2    # antiterrorism (defender side, incl. surveillance detection)
+  - TC 3-25.26    # map reading and land navigation
+  - TC 4-02.1     # first aid
+  - TC 4-02.3     # field hygiene and sanitation
+  - ATP 3-50.21  # survival
+allow_series_prefix:
+  - "ADP "        # doctrine principles (leadership, mission command, sustainment ...)
+  - "FM 4-"       # sustainment
+  - "ATP 4-02"    # Army health system, medical
+  - "ATP 4-25"    # health service support
+  - "ATP 4-44"    # water support operations
+  - "ATP 4-43"    # petroleum supply
+  - "ATP 3-34.4"  # engineer reference, general engineering
+  - "ATP 6-22"    # leadership
+  - "ATP 6-0"     # mission command, staff
+  - "ATP 5-0"     # planning
+  - "TC 4-02"     # medical training circulars
+  - "TC 7-"       # training management
+deny_series_prefix:
+  - "FM 3-09"     # fires
+  - "ATP 3-09"
+  - "TC 3-09"
+  - "ATP 3-60"    # targeting
+  - "FM 3-60"
+  - "TM 9-"       # weapons and munitions technical manuals
+  - "TM 43-"
+  - "ATP 3-11."   # CBRN operations (defense medical guidance comes from CHEMM/REMM instead)
+  - "ATP 3-34.210" # explosive hazards
+  - "ATP 3-34.20"  # countering explosive hazards
+  - "TC 3-22."    # weapons and marksmanship
+  - "TC 3-23."    # weapons, demolitions
+  - "TC 3-20."    # gunnery
+  - "ATP 3-20."   # armored formations
+  - "FM 3-22"     # weapons qualification
+  - "ATP 3-01."   # air and missile defense employment
+  - "FM 3-01"
+  - "ATP 3-04.1"  # aviation tactical employment
+  - "ATP 3-18."   # special forces
+  - "ATP 3-05."   # special operations
+  - "FM 3-05"
+  - "ATP 3-12."   # cyberspace and electromagnetic warfare
+  - "FM 3-12"
+  - "ATP 3-13."   # information operations
+  - "FM 3-13"
+  - "ATP 3-21."   # infantry tactics
+  - "ATP 3-90."   # offense and defense tactics
+  - "FM 3-90"
+  - "ATP 3-96."   # brigade combat team
+  - "FM 3-96"
+deny_keywords:
+  - demolition
+  - explosive ordnance
+  - weapon system
+  - weapons system
+  - gunnery
+  - mortar
+  - artillery
+  - sniper
+  - fire support
+  - sabotage
+review_keywords:
+  - electronic warfare
+  - surveillance
+  - cyberspace operations
+  - information operations
+  - reconnaissance
+  - security cooperation
+neutral_phrases:
+  - surveillance detection
+  - field hygiene
+allow_documents: []
+deny_documents: []

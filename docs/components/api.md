@@ -46,7 +46,7 @@ an image and a few categories to the sample library.
 |---|---|
 | `GET /v1/health` | Liveness check, API version, source count |
 | `GET /v1/sources`, `/v1/sources/{id}`, `/v1/sources/{id}/generations` | Registry plus the vault's generations (snapshot handles) |
-| `GET /v1/documents/{doc_id}` (`?at=<generation>`), `/v1/documents/{doc_id}/history` | Documents (text, original HTML when available, link table, vault location) and their versions |
+| `GET /v1/documents/{doc_id}` (`?at=<generation>`), `/v1/documents/{doc_id}/history` | Documents (text, original HTML when available, link table, vault location) and their versions; document collections add `currency` (current, superseded, historical, rescinded, withdrawn-from-index) and `banner`, the reader warning such as "Historical document — methods may be outdated or unsafe." (PLAN D13, `wsp_core.banners`) |
 | `GET /v1/search?q=&sources=&kind=&limit=&offset=`, `GET /v1/suggest?q=` | Search (facets, code-point highlights, `navigate_to` for navigational queries) and title autocomplete |
 | `GET /v1/changes?since=`, `GET /v1/changes/stream` (SSE), `GET /v1/changes/recent` | Change feed; `recent` is newest first with the cursor to follow live |
 | `GET /v1/system` | System Monitor data: freshness and health, degraded generations, ledger tail and its integrity; `ops`: SLO lag, scrub progress, parity coverage, disks and domain budgets, download lanes, queue, alerts, bot runs, proposals |

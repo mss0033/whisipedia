@@ -1,0 +1,22 @@
+# Document-level rules for cisa-protective-security (research doc §4.10). Defender-side guidance only.
+# The ISC Design-Basis Threat and countermeasure appendices are restricted and must never be fetched.
+allow_series_prefix: []
+deny_keywords:
+  - design-basis threat
+  - design basis threat
+  - countermeasures appendix
+review_keywords: [bomb-making materials]
+neutral_phrases:
+  - bomb threat
+  - bomb threats
+  - active shooter
+  - behavioral threat assessment
+  - targeted violence
+  - mass attacks
+  - insider threat
+  - unmanned aircraft systems
+  - prohibited items
+  - violence in the federal workplace
+allow_all: true
+allow_documents: []
+deny_documents: []
