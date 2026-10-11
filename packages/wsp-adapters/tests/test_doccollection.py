@@ -501,6 +501,38 @@ def test_archive_org_records_provenance_and_resolves_the_original_pdf() -> None:
     assert (doc.size, doc.md5) == (321, "abc")
 
 
+def test_archive_org_buckets_are_stable_whatever_the_listing_order() -> None:
+    idents = [f"CIA-RDP{i:05d}" for i in range(40)]
+
+    def batches(order: list[str], partition: str | None) -> dict[str, str]:
+        pages = [order[:20], order[20:]]
+        first = {"items": [{"identifier": i, "title": i} for i in pages[0]], "total": 40, "cursor": "c2"}
+        second = {"items": [{"identifier": i, "title": i} for i in pages[1]], "total": 40}
+        routes = {
+            "https://archive.org/services/search/v1/scrape?q=collection%3Ax&fields=identifier%2Ctitle%2Cdate"
+            "%2Citem_size%2Csubject%2Ccreator%2Cdescription&count=20": json.dumps(first).encode(),
+            "https://archive.org/services/search/v1/scrape?q=collection%3Ax&fields=identifier%2Ctitle%2Cdate"
+            "%2Citem_size%2Csubject%2Ccreator%2Cdescription&count=20&cursor=c2": json.dumps(second).encode(),
+        }
+        env = env_for(routes, origins=("archive.org",), partition=partition)
+        cfg = {
+            "kind": "archive-org",
+            "query": "collection:x",
+            "provenance": "mirror",
+            "page_size": 20,
+            "buckets": 4,
+        }
+        return {c.landing_url.rsplit("/", 1)[-1]: c.partition for c in discover_all([cfg], env)}
+
+    everything = batches(idents, None)
+    assert len(everything) == 40
+    assert set(everything.values()) <= {"b0001", "b0002", "b0003", "b0004"}
+    assert batches(list(reversed(idents)), None) == everything  # new items shifting pages move nothing
+    b2 = batches(idents, "b0002")  # a batch run lists every page and keeps only its own items
+    assert b2 == {i: p for i, p in everything.items() if p == "b0002"}
+    assert b2
+
+
 def test_govinfo_needs_a_key_unless_demo_is_allowed() -> None:
     env = env_for({}, origins=("www.govinfo.gov",))
     list(discover_all([{"kind": "api", "flavor": "govinfo", "collection": "GOVPUB"}], env))

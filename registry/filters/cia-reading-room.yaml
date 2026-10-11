@@ -4,11 +4,9 @@
 # noun-level review list is off for this collection (a million titles mention weapons); the built-in deny
 # list (production, weaponisation, targeting, offensive tooling) and the front-matter screens still apply.
 builtin_review: false
-review_keywords:
-  - nerve agent
-  - weapons design
-  - bomb design
-  - improvised explosive
+# Owner decision 2026-10-11: every officially released document is approved; no review list. The
+# built-in deny list and the classification/export-control screens still apply.
+review_keywords: []
 neutral_phrases:
   - nuclear power
   - chemical industry

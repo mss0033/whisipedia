@@ -32,6 +32,7 @@ carry ``Candidate.resolve`` and are resolved only for documents the metadata fil
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -901,12 +902,18 @@ def archive_org(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]
 
     ``provenance`` (required in the registry) records why the copy is acceptable: an upload by the
     issuing agency, or an item that mirrors an official release one-to-one (PLAN D11).
+
+    Partitions: with ``buckets: N`` an item's batch ``b0001``..``bN`` is a hash of its identifier, so it
+    never moves between batches while the collection grows during a weeks-long acquisition (a batch
+    then lists the whole collection: about ``total / page_size`` requests). Without ``buckets`` a batch
+    is a listing page, which shifts as items are added (small collections only).
     """
     query = _s(cfg.get("query"))
     fields = "identifier,title,date,item_size,subject,creator,description"
     cursor: str | None = None
     pages = 0
     count = int(cfg.get("page_size", 1000))
+    buckets = int(cfg.get("buckets") or 0)
     while pages < env.pages():
         params = {"q": query, "fields": fields, "count": count}
         if cursor:
@@ -932,13 +939,24 @@ def archive_org(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]
                 discovered_by="archive-org",
                 resolve="archive-org",
                 extra={"provenance": _s(cfg.get("provenance")), "creator": _s(it.get("creator"))},
-                partition=f"b{pages:04d}",
+                partition=f"b{_bucket(ident, buckets):04d}" if buckets else f"b{pages:04d}",
             )
         cursor = _s(data.get("cursor")) or None
-        if env.partition and env.partition.startswith("b") and env.partition <= f"b{pages:04d}":
+        if (
+            not buckets
+            and env.partition
+            and env.partition.startswith("b")
+            and env.partition <= f"b{pages:04d}"
+        ):
             break  # the wanted batch has been listed
         if not cursor:
             break
+
+
+def _bucket(ident: str, buckets: int) -> int:
+    """Stable batch number 1..``buckets`` for an archive.org identifier (independent of listing order)."""
+    digest = hashlib.blake2b(ident.encode("utf-8"), digest_size=8).digest()
+    return int.from_bytes(digest, "big") % buckets + 1
 
 
 def resolve_archive_org(cand: Candidate, env: DiscoverEnv) -> list[Candidate]:

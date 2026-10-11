@@ -5,7 +5,7 @@ deny_keywords:
   - design-basis threat
   - design basis threat
   - countermeasures appendix
-review_keywords: [bomb-making materials]
+review_keywords: []  # owner decision 2026-10-11: all public CISA/ISC/NTAC documents approved
 neutral_phrases:
   - bomb threat
   - bomb threats

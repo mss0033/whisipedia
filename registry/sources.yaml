@@ -1040,13 +1040,14 @@ sources:
       adapter: doc-collection
       issuer: Central Intelligence Agency (FOIA Electronic Reading Room)
       key_prefix: cia-rr
-      partitioned: true  # fetch one batch per run: wsp collections fetch --partition b0001
+      partitioned: true  # fetch one batch per run: wsp collections fetch --partition b0001 (..b0100)
       origins: [archive.org, www.cia.gov]
       rate: {requests_per_second: 1, per_host: {www.cia.gov: 10}}
       discovery:
         - kind: archive-org
           query: "collection:ciareadingroom"
           page_size: 10000
+          buckets: 100  # stable batches b0001..b0100 (~9,850 items each), hashed from the identifier
           provenance: "Internet Archive's one-to-one mirror of foia.cia.gov (creator 'CIA Reading Room'; identifiers are the CIA document numbers, e.g. CIA-RDP84-00499R000900030045-6); spot-check bytes against www.cia.gov when deep links answer"
       filter: {rules: registry/filters/cia-reading-room.yaml, declassified_ok: true, distribution: {require: [declassified, public-release]}, default: allow}
       mirrors:
