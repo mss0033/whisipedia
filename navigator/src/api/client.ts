@@ -21,8 +21,6 @@ import type {
   SourceInfo,
   SourcePage,
   Suggestions,
-  SummarizeRequest,
-  SummaryEvent,
   SystemStatus,
 } from './types.ts';
 
@@ -238,37 +236,6 @@ export class WspClient {
       });
     } catch {
       /* reporting must never disturb browsing */
-    }
-  }
-
-  /** Streams summary events (SSE). Throws ApiRequestError when unavailable. */
-  async *summarize(req: SummarizeRequest, signal?: AbortSignal): AsyncGenerator<SummaryEvent> {
-    const body: Routes['POST /v1/summarize']['body'] = req;
-    const res = await this.fetchImpl(this.base + routePath('POST /v1/summarize', NO_PATH), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
-      body: JSON.stringify(body),
-      ...(signal ? { signal } : {}),
-    });
-    if (!res.ok || !res.body) {
-      await this.parse(res.ok ? new Response(null, { status: 501 }) : res);
-      return;
-    }
-    const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
-    const parser = new SseParser();
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      for (const data of parser.push(value)) {
-        let ev: SummaryEvent;
-        try {
-          ev = JSON.parse(data) as SummaryEvent;
-        } catch {
-          continue;
-        }
-        yield ev;
-        if (ev.type === 'done' || ev.type === 'error') return;
-      }
     }
   }
 }

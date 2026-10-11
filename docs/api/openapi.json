@@ -3,7 +3,7 @@
   "info": {
     "title": "Whisipedia API",
     "description": "Read API of a private offline library. Everything is served from local storage; the server makes no\noutbound connections. Errors always use the envelope `{\"error\": {\"code\", \"message\"}}`.\n\nList endpoints use opaque cursors: pass `next_cursor` back as `cursor`. The change feed uses its own\ncursor (`since`). Document ids are `wsp:<source_id>/<native_id>`; in URL paths a doc id is ONE\npercent-encoded segment (`/v1/documents/wsp%3Arfc%2F9110`), as produced by `encodeURIComponent`.\n",
-    "version": "1.2.0"
+    "version": "1.3.0"
   },
   "paths": {
     "/v1/health": {
@@ -1059,87 +1059,6 @@
           },
           "422": {
             "description": "invalid_request",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/summarize": {
-      "post": {
-        "tags": [
-          "search"
-        ],
-        "summary": "Summarize",
-        "operationId": "summarize_v1_summarize_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SummarizeRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "SSE stream: `event: <type>` and `data: <SummaryEvent JSON>` per event. Without a local language model the endpoint answers 501.",
-            "content": {
-              "text/event-stream": {
-                "schema": {
-                  "$ref": "#/components/schemas/SummaryEvent"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "internal_error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "bad_request",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "not_found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "invalid_request",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "501": {
-            "description": "not_implemented",
             "content": {
               "application/json": {
                 "schema": {
@@ -2736,7 +2655,7 @@
           "api_version": {
             "type": "string",
             "title": "Api Version",
-            "default": "1.2.0"
+            "default": "1.3.0"
           },
           "sources": {
             "type": "integer",
@@ -3864,7 +3783,19 @@
                 "type": "null"
               }
             ],
-            "title": "Did You Mean"
+            "title": "Did You Mean",
+            "description": "A spelling correction from the library's vocabulary, offered when results are sparse or a query word is unknown."
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SearchScope"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set when the query named a site (`rfc 9110`): totals and facets count that scope."
           },
           "low_confidence": {
             "type": "boolean",
@@ -3889,9 +3820,40 @@
           "navigate_to",
           "instant",
           "did_you_mean",
+          "scope",
           "low_confidence"
         ],
         "title": "SearchResults"
+      },
+      "SearchScope": {
+        "properties": {
+          "site": {
+            "type": "string",
+            "title": "Site",
+            "description": "The site named in the query, as typed (`rfc` in `rfc 9110`)."
+          },
+          "sources": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Sources",
+            "description": "Source ids that site names."
+          },
+          "fallback": {
+            "type": "boolean",
+            "title": "Fallback",
+            "description": "True when those sources had nothing for the query and the whole library was searched.",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "site",
+          "sources",
+          "fallback"
+        ],
+        "title": "SearchScope"
       },
       "SourceFreshness": {
         "properties": {
@@ -4397,181 +4359,6 @@
         ],
         "title": "Suggestions"
       },
-      "SummarizeRequest": {
-        "properties": {
-          "query": {
-            "type": "string",
-            "maxLength": 1000,
-            "minLength": 1,
-            "title": "Query"
-          },
-          "doc_ids": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "maxItems": 20,
-            "minItems": 1,
-            "title": "Doc Ids",
-            "description": "Results to summarize, ranked."
-          },
-          "max_tokens": {
-            "type": "integer",
-            "maximum": 4096.0,
-            "minimum": 16.0,
-            "title": "Max Tokens",
-            "default": 512
-          }
-        },
-        "type": "object",
-        "required": [
-          "query",
-          "doc_ids"
-        ],
-        "title": "SummarizeRequest"
-      },
-      "SummaryCitation": {
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "citation",
-            "title": "Type",
-            "default": "citation"
-          },
-          "index": {
-            "type": "integer",
-            "title": "Index",
-            "description": "1-based position in the request's `doc_ids`."
-          },
-          "doc_id": {
-            "type": "string",
-            "title": "Doc Id"
-          },
-          "title": {
-            "type": "string",
-            "title": "Title"
-          },
-          "address": {
-            "type": "string",
-            "title": "Address"
-          }
-        },
-        "type": "object",
-        "required": [
-          "type",
-          "index",
-          "doc_id",
-          "title",
-          "address"
-        ],
-        "title": "SummaryCitation"
-      },
-      "SummaryDone": {
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "done",
-            "title": "Type",
-            "default": "done"
-          }
-        },
-        "type": "object",
-        "required": [
-          "type"
-        ],
-        "title": "SummaryDone"
-      },
-      "SummaryError": {
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "error",
-            "title": "Type",
-            "default": "error"
-          },
-          "message": {
-            "type": "string",
-            "title": "Message"
-          }
-        },
-        "type": "object",
-        "required": [
-          "type",
-          "message"
-        ],
-        "title": "SummaryError"
-      },
-      "SummaryEvent": {
-        "oneOf": [
-          {
-            "$ref": "#/components/schemas/SummaryToken"
-          },
-          {
-            "$ref": "#/components/schemas/SummaryCitation"
-          },
-          {
-            "$ref": "#/components/schemas/SummaryNotice"
-          },
-          {
-            "$ref": "#/components/schemas/SummaryDone"
-          },
-          {
-            "$ref": "#/components/schemas/SummaryError"
-          }
-        ],
-        "title": "SummaryEvent",
-        "description": "One server-sent event of ``POST /v1/summarize``: ``event: <type>``, ``data: <this JSON>``.\n\nOrder: ``notice``* then ``token``/``citation`` interleaved, then ``done`` (or ``error``).",
-        "discriminator": {
-          "propertyName": "type",
-          "mapping": {
-            "citation": "#/components/schemas/SummaryCitation",
-            "done": "#/components/schemas/SummaryDone",
-            "error": "#/components/schemas/SummaryError",
-            "notice": "#/components/schemas/SummaryNotice",
-            "token": "#/components/schemas/SummaryToken"
-          }
-        }
-      },
-      "SummaryNotice": {
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "notice",
-            "title": "Type",
-            "default": "notice"
-          },
-          "text": {
-            "type": "string",
-            "title": "Text"
-          }
-        },
-        "type": "object",
-        "required": [
-          "type",
-          "text"
-        ],
-        "title": "SummaryNotice"
-      },
-      "SummaryToken": {
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "token",
-            "title": "Type",
-            "default": "token"
-          },
-          "text": {
-            "type": "string",
-            "title": "Text"
-          }
-        },
-        "type": "object",
-        "required": [
-          "type",
-          "text"
-        ],
-        "title": "SummaryToken"
-      },
       "SystemStatus": {
         "properties": {
           "generated_at": {
@@ -4609,7 +4396,7 @@
           "api_version": {
             "type": "string",
             "title": "Api Version",
-            "default": "1.2.0"
+            "default": "1.3.0"
           },
           "uptime_seconds": {
             "type": "number",

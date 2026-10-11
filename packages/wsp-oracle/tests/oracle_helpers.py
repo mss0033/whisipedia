@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
 
@@ -105,25 +105,6 @@ class OverlapReranker:
         self.calls += 1
         scored = [replace(h, score=overlap(query, f"{h.title} {h.snippet}")) for h in hits]
         return sorted(scored, key=lambda h: -h.score)
-
-
-class ScriptedLLM:
-    """A ``Generator``/``ChatGenerator`` that replays fixed pieces and records the messages."""
-
-    def __init__(self, pieces: Sequence[str]) -> None:
-        self.pieces = list(pieces)
-        self.messages: list[Mapping[str, str]] = []
-
-    async def stream_chat(
-        self, messages: Sequence[Mapping[str, str]], *, max_tokens: int = 512
-    ) -> AsyncIterator[str]:
-        self.messages = list(messages)
-        for p in self.pieces:
-            yield p
-
-    async def stream(self, prompt: str, *, max_tokens: int = 512) -> AsyncIterator[str]:
-        async for p in self.stream_chat([{"role": "user", "content": prompt}], max_tokens=max_tokens):
-            yield p
 
 
 def needs_model(name: str) -> pytest.MarkDecorator:

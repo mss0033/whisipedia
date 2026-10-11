@@ -1,10 +1,8 @@
-import asyncio
 from pathlib import Path
 
 import pytest
 
 from wsp_api.testing.fakes import (
-    EchoGenerator,
     InMemoryChangeFeed,
     InMemoryDocumentStore,
     InMemoryLedger,
@@ -15,7 +13,7 @@ from wsp_api.testing.fakes import (
 )
 from wsp_core.ids import make_doc_id
 from wsp_core.model import GenerationStatus
-from wsp_core.ports import ChangeFeed, DocumentStore, Generator, Ledger, LexicalIndex, Vault
+from wsp_core.ports import ChangeFeed, DocumentStore, Ledger, LexicalIndex, Vault
 
 
 def test_fakes_satisfy_the_ports() -> None:
@@ -24,7 +22,6 @@ def test_fakes_satisfy_the_ports() -> None:
     assert isinstance(InMemoryChangeFeed(), ChangeFeed)
     assert isinstance(InMemoryVault(), Vault)
     assert isinstance(InMemoryLedger(), Ledger)
-    assert isinstance(EchoGenerator(), Generator)
 
 
 def test_index_upsert_is_invisible_until_commit_and_delete_works() -> None:
@@ -79,10 +76,3 @@ def test_ledger_chain_detects_tampering() -> None:
     assert [e.seq for e in ledger.events(since_seq=1)] == [2]
     ledger.tamper(1, n=99)
     assert not ledger.verify()
-
-
-def test_echo_generator_honours_max_tokens() -> None:
-    async def collect() -> list[str]:
-        return [t async for t in EchoGenerator().stream("[1] a\n[2] b", max_tokens=3)]
-
-    assert asyncio.run(collect()) == ["Summary ", "of ", "2 "]

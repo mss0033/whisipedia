@@ -9,7 +9,7 @@ import {
   SseParser,
   WspClient,
 } from '../src/api/client.ts';
-import type { Change, SummaryEvent } from '../src/api/types.ts';
+import type { Change } from '../src/api/types.ts';
 import { mockFetch, until } from './helpers.ts';
 
 describe('WspClient', () => {
@@ -81,24 +81,6 @@ describe('WspClient', () => {
     expect((err as ApiRequestError).status).toBe(404);
     expect((err as ApiRequestError).code).toBe('document_not_found');
     expect((err as ApiRequestError).isUnavailable).toBe(true);
-  });
-
-  it('streams summaries as SSE events', async () => {
-    const events: SummaryEvent[] = [];
-    for await (const ev of api.summarize({
-      query: 'x',
-      doc_ids: ['wsp:rfc/9110', 'wsp:rfc/9111'],
-    })) {
-      events.push(ev);
-    }
-    expect(events.at(-1)).toEqual({ type: 'done' });
-    expect(events.filter((e) => e.type === 'citation')).toHaveLength(2);
-  });
-
-  it('reports a missing summarizer as unavailable', async () => {
-    const none = new WspClient({ fetch: async () => new Response('', { status: 501 }) });
-    const gen = none.summarize({ query: 'x', doc_ids: ['a'] });
-    await expect(gen.next()).rejects.toMatchObject({ status: 501, isUnavailable: true });
   });
 
   it('reports each gap once and never throws', async () => {

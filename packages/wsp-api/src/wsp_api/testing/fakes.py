@@ -11,7 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import AsyncIterator, Callable, Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
@@ -47,7 +47,6 @@ def _tokens(text: str) -> list[str]:
 
 
 __all__ = [
-    "EchoGenerator",
     "InMemoryChangeFeed",
     "InMemoryDocumentStore",
     "InMemoryLedger",
@@ -366,24 +365,6 @@ def _event_hash(
     return hashlib.sha256(body.encode("utf-8")).hexdigest()
 
 
-# --- Generator -----------------------------------------------------------------------------------
-
-
-class EchoGenerator:
-    """Deterministic stand-in for the local LLM: cites every numbered passage in the prompt."""
-
-    def __init__(self) -> None:
-        self.prompts: list[str] = []
-
-    async def stream(self, prompt: str, *, max_tokens: int = 512) -> AsyncIterator[str]:
-        self.prompts.append(prompt)
-        markers = re.findall(r"^\[(\d+)\]", prompt, flags=re.MULTILINE)
-        words = ["Summary", "of", f"{len(markers)}", "results"]
-        words += [f"[{m}]" for m in markers]
-        for word in words[:max_tokens]:
-            yield word + " "
-
-
 # --- Sample library ------------------------------------------------------------------------------
 
 SAMPLE_SOURCES: tuple[SourceSpec, ...] = (
@@ -524,7 +505,7 @@ def seed_sample_library(
     index.commit()
 
 
-def sample_services(*, sources: Sequence[SourceSpec] | None = None, with_generator: bool = True) -> Services:
+def sample_services(*, sources: Sequence[SourceSpec] | None = None) -> Services:
     """A fully wired :class:`Services` over the sample library. ``sources`` overrides the registry."""
     index, documents, changes = InMemoryLexicalIndex(), InMemoryDocumentStore(), InMemoryChangeFeed()
     vault, ledger = InMemoryVault(), InMemoryLedger()
@@ -536,5 +517,4 @@ def sample_services(*, sources: Sequence[SourceSpec] | None = None, with_generat
         vault=vault,
         ledger=ledger,
         sources=tuple(SAMPLE_SOURCES if sources is None else sources),
-        generator=EchoGenerator() if with_generator else None,
     )

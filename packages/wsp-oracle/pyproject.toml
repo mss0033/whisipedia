@@ -1,12 +1,11 @@
 [project]
 name = "wsp-oracle"
 version = "0.1.0"
-description = "Whisipedia Oracle: chunking, embeddings, ANN, router, hybrid search, reranking and cited summaries"
+description = "Whisipedia Oracle: chunking, embeddings, ANN, router, hybrid search, and reranking"
 requires-python = ">=3.12"
 dependencies = [
   "wsp-core",
   "wsp-index",
-  "httpx>=0.27",  # loopback client for the local llama.cpp server
   "numpy>=2.0",
   "pyarrow>=17",
   "usearch>=2.21",  # binary HNSW (PLAN §9.4); see docs/adr/0007-oracle-models.md
@@ -22,7 +21,6 @@ gpu = [
 [project.scripts]
 wsp-oracle-embed = "wsp_oracle.embedbuild:main"
 wsp-oracle-eval = "wsp_oracle.evaluation:main"
-wsp-oracle-llm = "wsp_oracle.llmserver:main"
 
 [tool.uv.sources]
 wsp-core = { workspace = true }

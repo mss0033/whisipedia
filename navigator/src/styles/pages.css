@@ -401,6 +401,10 @@
 .did-you-mean {
   color: var(--bad);
 }
+.scope-hint {
+  margin: 4px 0;
+  font-size: 0.9em;
+}
 .results {
   margin: 0;
   padding-left: 2em;
@@ -516,33 +520,6 @@
 .locator .ring {
   fill: none;
   stroke: var(--bad);
-}
-
-.summary-panel {
-  max-width: 44rem;
-  margin: 8px 0 14px;
-}
-.summary-panel.is-open {
-  padding: 8px 12px;
-  border: 1px dashed var(--box-border);
-}
-.summary-text:empty {
-  display: none;
-}
-.summary-text {
-  margin: 8px 0 0;
-}
-.cite {
-  font-size: 0.75em;
-}
-@keyframes cursor-blink {
-  50% {
-    opacity: 0;
-  }
-}
-.blink-cursor::after {
-  content: "▌";
-  animation: cursor-blink 1s steps(1) infinite;
 }
 
 /* ---------------------------- documents ------------------------------ */

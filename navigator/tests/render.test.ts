@@ -75,12 +75,12 @@ describe('results page render budget', () => {
       { page: 'search' }
     >;
     // warm up (JIT), then take the median of several runs
-    for (let i = 0; i < 5; i += 1) renderResultsPage(resp, route, null, null);
+    for (let i = 0; i < 5; i += 1) renderResultsPage(resp, route, null);
     const times: number[] = [];
     let last: DocumentFragment | null = null;
     for (let i = 0; i < 15; i += 1) {
       const t0 = performance.now();
-      last = renderResultsPage(resp, route, null, null);
+      last = renderResultsPage(resp, route, null);
       times.push(performance.now() - t0);
     }
     times.sort((a, b) => a - b);
@@ -91,5 +91,40 @@ describe('results page render budget', () => {
     expect(div.querySelector('.result-address')?.textContent).toMatch(/^wsp:\/\//);
     // jsdom is several times slower than a browser; holding it to 16 ms is conservative.
     expect(median).toBeLessThan(16);
+  });
+});
+
+describe('did you mean and site scope', () => {
+  const route = (q: string) =>
+    resolveRoute(`wsp://search?q=${encodeURIComponent(q)}`) as Extract<
+      ReturnType<typeof resolveRoute>,
+      { page: 'search' }
+    >;
+  const render = (q: string) => {
+    const resp = search(new URLSearchParams({ q, page_size: '10' }));
+    const div = document.createElement('div');
+    div.append(
+      renderResultsPage(resp, route(q), null, new Map([['gutenberg', 'Project Gutenberg']])),
+    );
+    return div;
+  };
+
+  it('offers a correction in the period style', () => {
+    const p = render('vacine').querySelector('.did-you-mean');
+    expect(p?.textContent).toBe('Did you mean: vaccine?');
+    expect(p?.querySelector('a')?.getAttribute('href')).toContain('vaccine');
+  });
+
+  it('says quietly when a named site had nothing and the whole library was searched', () => {
+    const div = render('gutenberg vaccines');
+    const hint = div.querySelector('.scope-hint');
+    expect(hint?.textContent).toBe(
+      'No results on site Project Gutenberg; showing results from the whole library.',
+    );
+    expect(div.querySelector('.notice-warn.scope-hint')).toBeNull();
+    expect(render('rfc caching').querySelector('.scope-hint')?.textContent).toBe(
+      'Showing results from rfc.',
+    );
+    expect(render('http caching').querySelector('.scope-hint')).toBeNull();
   });
 });

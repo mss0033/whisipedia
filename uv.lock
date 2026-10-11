@@ -2830,7 +2830,6 @@ name = "wsp-oracle"
 version = "0.1.0"
 source = { editable = "packages/wsp-oracle" }
 dependencies = [
-    { name = "httpx" },
     { name = "numpy" },
     { name = "pyarrow" },
     { name = "usearch" },
@@ -2852,7 +2851,6 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "httpx", specifier = ">=0.27" },
     { name = "numpy", specifier = ">=2.0" },
     { name = "pyarrow", specifier = ">=17" },
     { name = "torch", marker = "extra == 'gpu'", specifier = ">=2.8" },

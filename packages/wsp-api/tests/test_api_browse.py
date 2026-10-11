@@ -21,10 +21,7 @@ from wsp_api.schemas import (
     Portal,
     RecentChanges,
     SearchResults,
-    SummaryCitation,
-    SummaryToken,
 )
-from wsp_api.summaries import CitationSplitter
 from wsp_api.testing import local_client
 from wsp_api.testing.browse import ENIGMA, PIXEL_PNG, CategorizedCatalog, InMemoryGapLog, browse_services
 from wsp_api.testing.fakes import SAMPLE_GEN_2, sample_services
@@ -303,18 +300,3 @@ def test_jsonl_gap_log(tmp_path: Path) -> None:
     lines = [json.loads(x) for x in log.path.read_text(encoding="utf-8").splitlines()]
     assert lines[0]["href"] == "https://example.org/ü"
     assert lines[1]["from_doc_id"] == "wsp:rfc/2"
-
-
-# --- summaries ---------------------------------------------------------------------------------
-
-
-def test_citation_markers_split_across_chunks() -> None:
-    cite = SummaryCitation(index=1, doc_id="wsp:a/b", title="B", address="wsp://a/b")
-    sp = CitationSplitter({1: cite})
-    events = sp.feed("Cats purr [") + sp.feed("1] and [9] dogs [") + sp.flush()
-    assert events == [
-        SummaryToken(text="Cats purr "),
-        cite,
-        SummaryToken(text=" and [9] dogs "),
-        SummaryToken(text="["),
-    ]

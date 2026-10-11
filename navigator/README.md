@@ -58,7 +58,7 @@ only needs to serve `index.html` at `/`; no SPA fallback rules are required.
 src/
   api/generated.ts  wire types GENERATED from docs/api/openapi.json (do not edit)
   api/types.ts      UI names for the generated types, plus UI-only types
-  api/client.ts     fetch client typed by the generated Routes table; SSE summaries
+  api/client.ts     fetch client typed by the generated Routes table
   api/changes.ts    live change feed: EventSource, polling fallback
   core/             address parsing, router, history/hotlist, themes,
                     link rewriting + HTML sanitizer, highlighting, diff

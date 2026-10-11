@@ -10,7 +10,7 @@ Defaults when a composition root leaves them unset (see ``wsp_api.services.Servi
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from datetime import datetime
 from typing import Protocol, runtime_checkable
 
@@ -30,10 +30,33 @@ class OpsProvider(Protocol):
 
 
 @runtime_checkable
+class SpellingCorrector(Protocol):
+    """Spelling correction ("did you mean") over the library's own vocabulary (``wsp_index.spelling``)."""
+
+    def correct(self, query: str, *, only: Iterable[str] | None = None) -> str | None:
+        """The corrected query, or None when nothing changes. ``only``: words that may change."""
+        ...
+
+    def unknown(self, query: str) -> Sequence[str]:
+        """Words of the query (lower case) that the vocabulary does not know."""
+        ...
+
+
+@runtime_checkable
 class QueryLog(Protocol):
     """Local-only search log for the gap miner (PLAN §5.3): query text and result count."""
 
     def record(self, at: datetime, query: str, total: int, low_confidence: bool) -> None: ...
 
 
-__all__ = ["Asset", "AssetStore", "Catalog", "Category", "Gap", "GapLog", "OpsProvider", "QueryLog"]
+__all__ = [
+    "Asset",
+    "AssetStore",
+    "Catalog",
+    "Category",
+    "Gap",
+    "GapLog",
+    "OpsProvider",
+    "QueryLog",
+    "SpellingCorrector",
+]
