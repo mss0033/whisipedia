@@ -302,9 +302,22 @@ class DocCollectionAdapter:
             yield download_from_origins(fetcher, remote, ctx.workdir / remote.name, cfg.origins)
 
     def verify(self, ctx: Ctx, remote: RemoteFile, local: Path) -> FileVerdict:
+        """Checksum and size (:func:`verify_file`), then the document-policy :meth:`screen`."""
         base = verify_file(remote, local)
         if base.status in (VerdictStatus.MISSING, VerdictStatus.MISMATCH):
             return base
+        screened = self.screen(ctx, remote, local)
+        return base if screened.status is VerdictStatus.OK else screened
+
+    def screen(self, ctx: Ctx, remote: RemoteFile, local: Path) -> FileVerdict:
+        """The document-policy screen alone (``DocumentScreen``; no checksum work).
+
+        ``mismatch`` when the file is not what it claims (an HTML page named ``.pdf``), ``rejected``
+        when a marking or the safety list denies it, ``held`` when it needs the owner (including a
+        file with no text to screen), else ``ok``.
+        """
+        if not local.is_file():
+            return FileVerdict(VerdictStatus.MISSING, f"{local.name} not found")
         problem = well_formed(local)
         if problem:
             return FileVerdict(VerdictStatus.MISMATCH, problem)
@@ -313,7 +326,7 @@ class DocCollectionAdapter:
             return FileVerdict(VerdictStatus.REJECTED, f"policy {screen.decision}")
         if screen.decision.verdict is Verdict.REVIEW:
             return FileVerdict(VerdictStatus.HELD, f"policy {screen.decision}")
-        return base
+        return FileVerdict(VerdictStatus.OK, f"policy {screen.decision}")
 
     def depends_on(self, ctx: Ctx, generation_dir: Path) -> frozenset[str]:
         """Earlier generations whose files this generation's catalog lists (``GenerationDependencies``)."""

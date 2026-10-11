@@ -3,6 +3,7 @@ from __future__ import annotations
 import gzip
 import hashlib
 from pathlib import Path
+from typing import Any
 
 import pytest
 from adapters_testkit import make_ctx, make_spec
@@ -209,6 +210,50 @@ def test_a_gap_in_the_update_files_raises(tmp_path: Path) -> None:
     short = _gen(lib, "pubmed26-u0009", {"pubmed26n0002.xml.gz": UPDATE})
     with pytest.raises(IncompleteGenerationError, match="end at"):
         content_set(short)
+
+
+def test_workers_honour_wsp_max_workers(
+    generation_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import wsp_adapters.pubmed as pubmed_module
+
+    seen: list[int] = []
+    real = pubmed_module.ordered_parallel_map  # pyright: ignore[reportPrivateImportUsage]
+
+    def spy(fn: Any, items: Any, workers: int, **kw: Any) -> Any:
+        seen.append(workers)
+        return real(fn, items, 1, **kw)
+
+    monkeypatch.setattr(pubmed_module, "ordered_parallel_map", spy)
+    monkeypatch.setenv("WSP_MAX_WORKERS", "2")
+    spec = make_spec("pubmed", {"adapter": "pubmed", "workers": 8}, license_="LicenseRef-NLM-terms")
+    list(PubmedAdapter().documents(make_ctx(spec, FakeFetcher(), tmp_path), generation_dir))
+    assert seen == [2]
+
+
+def test_a_broken_article_is_a_reject_not_an_aborted_refine(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import wsp_adapters.pubmed as pubmed_module
+
+    real = pubmed_module.article_record
+
+    def flaky(elem: Any, source_id: str, license_: str) -> Any:
+        if (elem.findtext("MedlineCitation/PMID") or "").strip() == "9":
+            raise ValueError("boom")
+        return real(elem, source_id, license_)
+
+    monkeypatch.setattr(pubmed_module, "article_record", flaky)  # workers=1 runs inline
+    gen = _gen(
+        tmp_path / "pubmed", "x", {"pubmed26n0001.xml.gz": xml_file(article(1, "Fine"), article(9, "Bad"))}
+    )
+    docs = [
+        d.native_id for d in PubmedAdapter().documents(make_ctx(SPEC, FakeFetcher(), tmp_path / "w"), gen)
+    ]
+    assert docs == ["1"]
+    rejects = (tmp_path / "w" / "_rejects-x.jsonl").read_text()
+    assert "PMID 9" in rejects
+    assert "boom" in rejects
 
 
 def test_doi_comes_from_the_article_not_its_references(tmp_path: Path) -> None:
