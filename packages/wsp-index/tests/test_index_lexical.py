@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator, Sequence
 from dataclasses import replace
 from pathlib import Path
@@ -266,3 +267,17 @@ def test_source_priors_lift_curated_sources(tmp_path: Path) -> None:
 
     assert top("plain", {}) == "dict"
     assert top("prior", {"enc": 50.0}) == "enc"
+
+
+def test_an_index_built_with_older_analyzers_is_refused(tmp_path: Path) -> None:
+    # An index analyzed by older rules would silently miss matches (rank-oracle audit #14).
+    TantivyIndex(tmp_path / "ix", SMALL).close()
+    import sqlite3
+
+    db = sqlite3.connect(tmp_path / "ix" / "meta.sqlite")
+    old = json.dumps({"languages": sorted(SMALL.languages), "store_text": SMALL.store_text})
+    db.execute("UPDATE meta SET value=? WHERE key='schema'", (old,))
+    db.commit()
+    db.close()
+    with pytest.raises(SchemaMismatchError):
+        TantivyIndex(tmp_path / "ix", SMALL)

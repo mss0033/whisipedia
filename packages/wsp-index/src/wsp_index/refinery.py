@@ -575,11 +575,16 @@ class RefineryReader:
         if meta.get("format") != FORMAT_VERSION:
             raise RefineryError(f"unsupported refinery format {meta.get('format')!r} in {gen_dir}")
         self._n_parts = int(meta["parts"])
-        ids = pq.read_table(gen_dir / IDS_FILE)  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
-        self._h: npt.NDArray[np.uint64] = ids.column("h").to_numpy()
-        self._part: npt.NDArray[np.uint32] = ids.column("part").to_numpy()
-        self._rg: npt.NDArray[np.uint32] = ids.column("rg").to_numpy()
-        self._row: npt.NDArray[np.uint32] = ids.column("row").to_numpy()
+        # Live documents (the id index has one row per live document); loading that index costs
+        # ~20 bytes a document (1.4 GB peak for 32M), so it is read on the first point lookup only:
+        # scans (rank, spelling, catalog, diff) never need it.
+        self._docs = int(meta.get("docs", -1))
+        self._ids: (
+            tuple[
+                npt.NDArray[np.uint64], npt.NDArray[np.uint32], npt.NDArray[np.uint32], npt.NDArray[np.uint32]
+            ]
+            | None
+        ) = None
         # Shadowed rows per part as (rg, row) pairs in numpy (a set of tuples costs ~150 bytes a row;
         # a pubmed set generation shadows millions).
         self._shadow: dict[int, npt.NDArray[np.int64]] = {}
@@ -602,8 +607,29 @@ class RefineryReader:
         self._cache_size = cache_row_groups
         self._lock = threading.Lock()
 
+    def _id_index(
+        self,
+    ) -> tuple[
+        npt.NDArray[np.uint64], npt.NDArray[np.uint32], npt.NDArray[np.uint32], npt.NDArray[np.uint32]
+    ]:
+        ids = self._ids
+        if ids is None:
+            with self._lock:
+                if self._ids is None:
+                    table = pq.read_table(self.dir / IDS_FILE)  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
+                    self._ids = (
+                        table.column("h").to_numpy(),
+                        table.column("part").to_numpy(),
+                        table.column("rg").to_numpy(),
+                        table.column("row").to_numpy(),
+                    )
+                ids = self._ids
+        return ids
+
     def __len__(self) -> int:
-        return len(self._h)
+        if self._docs >= 0:
+            return self._docs
+        return len(self._id_index()[0])
 
     @property
     def parts(self) -> list[Path]:
@@ -657,10 +683,11 @@ class RefineryReader:
         """Row of ``doc_id`` restricted to ``columns`` (``doc_id`` is always included), or ``None``."""
         cols = tuple(dict.fromkeys(("doc_id", *columns)))
         h = np.uint64(id_hash(doc_id))
-        i = int(np.searchsorted(self._h, h))
-        while i < len(self._h) and self._h[i] == h:
-            table = self._row_group(int(self._part[i]), int(self._rg[i]), cols)
-            row = int(self._row[i])
+        hs, parts, rgs, rows = self._id_index()
+        i = int(np.searchsorted(hs, h))
+        while i < len(hs) and hs[i] == h:
+            table = self._row_group(int(parts[i]), int(rgs[i]), cols)
+            row = int(rows[i])
             if table.column(0)[row].as_py() == doc_id:
                 return {name: table.column(name)[row].as_py() for name in table.column_names}
             i += 1

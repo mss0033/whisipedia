@@ -51,7 +51,14 @@ from wsp_index.suggest import (
     Suggester,
     TitleTrie,
 )
-from wsp_index.text import FALLBACK_LANG, build_analyzer, drop_stopwords, primary_lang, sanitize_query
+from wsp_index.text import (
+    ANALYZER_VERSION,
+    FALLBACK_LANG,
+    build_analyzer,
+    drop_stopwords,
+    primary_lang,
+    sanitize_query,
+)
 
 _META_SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -108,7 +115,11 @@ class TantivyConfig:
     the whole query (``alan turing`` ranked a syndrome named after Allan first; E2E-6)."""
 
     def schema_signature(self) -> str:
-        return json.dumps({"languages": sorted(self.languages), "store_text": self.store_text})
+        """Everything that changes how documents are analyzed: an index built otherwise is refused
+        (it would silently miss matches) and must be rebuilt."""
+        return json.dumps(
+            {"languages": sorted(self.languages), "store_text": self.store_text, "analyzer": ANALYZER_VERSION}
+        )
 
 
 class SchemaMismatchError(RuntimeError):

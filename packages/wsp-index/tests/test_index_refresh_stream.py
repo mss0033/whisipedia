@@ -154,3 +154,14 @@ def test_set_numbers_never_repeat_after_a_set_is_deleted(tmp_path: Path) -> None
     third = compose_set(tmp_path, "src", [ak, ca2])
     assert third != second
     assert second in sealed_generations(tmp_path, "src")
+
+
+def test_scans_never_load_the_id_index(tmp_path: Path) -> None:
+    # Loading _ids costs ~20 bytes a document (1.4 GB for 32M); scans and counts must not need it.
+    g = gen(tmp_path, "g1", docs_v1())
+    reader = RefineryReader(g.dir)
+    assert len(reader) == 20
+    assert sum(b.num_rows for b in reader.scan(["doc_id"])) == 20
+    assert reader._ids is None  # pyright: ignore[reportPrivateUsage]
+    assert reader.get(make_doc_id("enc", "d05")) is not None
+    assert reader._ids is not None  # pyright: ignore[reportPrivateUsage]
