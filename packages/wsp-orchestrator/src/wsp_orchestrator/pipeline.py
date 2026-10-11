@@ -612,6 +612,10 @@ class ReleasePipeline:
                 rec = self._withhold(spec, rec, self._verify(spec, rec))
                 self._apply_withheld(rec)
                 if not self._plan(rec).files:
+                    if not self._withheld_of(rec):
+                        # Nothing new upstream: every file is already held by an earlier generation
+                        # (content sets carry it). Not a fault and not a hold: no attempt, no alert.
+                        return self._supersede(rec, "nothing new: earlier generations hold every file")
                     return self._nothing_left(rec)
                 if self.integrity is not None and self._sealed_generation(rec) is None:
                     verdict = self.integrity.check_fetch(

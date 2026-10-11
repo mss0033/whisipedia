@@ -146,6 +146,9 @@ class VerdictStatus(StrEnum):
     # Document policy (ADR-0010): the bytes are intact but must not enter the vault.
     REJECTED = "rejected"  # restricted or out of scope: deleted at once, the release goes on without it
     HELD = "held"  # needs an owner decision: quarantined outside the vault, the release goes on
+    # Storage could not be read (an I/O error that outlived the retries, e.g. a soft-mount outage).
+    # Says nothing about the content: never a reason to repair, degrade or roll back.
+    UNREADABLE = "unreadable"
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,10 +180,17 @@ class FetchResult:
     sha256: str
     blake3: str
     verified: tuple[Checksum, ...] = ()
+    # Upstream publishes no checksum, but two independent full downloads produced the same bytes
+    # (the fetcher's ``unverified_policy = "corroborate"``). Still UNVERIFIABLE: agreement is not
+    # authenticity, but a truncated or spliced download cannot pass it. Keyword-only, so subclasses
+    # that add fields positionally (``wsp_fetch.FetchReport``, test doubles) are unaffected.
+    corroborated: bool = field(default=False, kw_only=True)
 
     @property
     def verdict(self) -> Verdict:
         if not self.verified:
+            if self.corroborated:
+                return Verdict(VerdictStatus.UNVERIFIABLE, "no upstream checksum; two full downloads agree")
             return Verdict(VerdictStatus.UNVERIFIABLE, "upstream publishes no checksum")
         return Verdict(VerdictStatus.OK, ", ".join(c.algorithm for c in self.verified))
 
@@ -234,9 +244,15 @@ _FORWARD: tuple[ReleaseState, ...] = (
 
 
 def allowed_transitions(state: ReleaseState) -> frozenset[ReleaseState]:
-    """Legal next states. Any non-terminal state may fail; failed may retry from PLANNED or quarantine."""
-    if state is ReleaseState.PROMOTED or state is ReleaseState.QUARANTINED:
+    """Legal next states. Any non-terminal state may fail; failed may retry from PLANNED or quarantine.
+
+    QUARANTINED is not a final judgement on the data: the owner's retry (``wsp retry``) returns it
+    to FAILED, from where the normal retry path applies. PROMOTED is the only terminal state.
+    """
+    if state is ReleaseState.PROMOTED:
         return frozenset()
+    if state is ReleaseState.QUARANTINED:
+        return frozenset({ReleaseState.FAILED})
     if state is ReleaseState.FAILED:
         return frozenset({ReleaseState.PLANNED, ReleaseState.QUARANTINED})
     nxt = _FORWARD[_FORWARD.index(state) + 1]

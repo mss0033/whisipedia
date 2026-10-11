@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import random
 from pathlib import Path
+from typing import Any
 
 import pytest
 from adapters_testkit import build_zim, make_ctx, make_spec
 
+from wsp_adapters._common import WorkerPool
 from wsp_adapters.diff import (
     SnapshotDiff,
     apply_unified_diff,
@@ -154,6 +156,34 @@ def test_parallel_diff_matches(snapshots: tuple[Path, Path], tmp_path: Path) -> 
         return [changes, list(read_segment(seg))[1:]]
 
     assert run(2) == run(1)
+
+
+def test_one_pool_for_every_flush(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Audit 2026-10-11 M9: the diff used to start a spawn pool per flush of modified pairs."""
+    import wsp_adapters.diff as diff_module
+
+    pools: list[object] = []
+    maps: list[int] = []
+
+    class CountingPool(WorkerPool):
+        def __init__(self, workers: int) -> None:
+            super().__init__(workers)
+            pools.append(self)
+
+        def map(self, fn: Any, items: Any, *, window: int | None = None) -> Any:
+            maps.append(1)
+            return super().map(fn, items, window=window)
+
+    old, new = tmp_path / "old.snap.zst", tmp_path / "new.snap.zst"
+    write_snapshot([doc(f"P{i}", f"old text {i}") for i in range(10)], old)
+    write_snapshot([doc(f"P{i}", f"new text {i}") for i in range(10)], new)
+    monkeypatch.setattr(diff_module, "WorkerPool", CountingPool)
+    monkeypatch.setattr(diff_module, "_DIFF_BATCH", 1)  # a flush per two modified pairs (2 workers)
+    seg = tmp_path / "seg.jsonl.zst"
+    changes = list(SnapshotDiff(old, new, source_id=SOURCE, generation_id="g", segment=seg, workers=2))
+    assert len(changes) == 10
+    assert len(maps) == 5
+    assert len(pools) == 1
 
 
 def test_segment_needs_text(tmp_path: Path) -> None:

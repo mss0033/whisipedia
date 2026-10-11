@@ -61,6 +61,7 @@ from wsp_orchestrator.curator import (
 )
 from wsp_orchestrator.curator.registry_edit import upsert_overlay
 from wsp_orchestrator.durations import IsoDuration
+from wsp_orchestrator.errors import StorageUnavailableError
 from wsp_orchestrator.isolation import IsolatedRunner, Launcher, UnitLimits
 from wsp_orchestrator.orchestrator import LastCopyHook, Wiring
 from wsp_orchestrator.pipeline import RefineResult, Withheld
@@ -70,9 +71,9 @@ from wsp_vault.drill import DrillKind, run_drill
 from wsp_vault.parity import Par2Parity
 from wsp_vault.paritykeeper import GIB, ParityKeeper
 from wsp_vault.paritymeta import is_parity_path
-from wsp_vault.repair import RepairLadder
+from wsp_vault.repair import RepairCircuitOpenError, RepairLadder
 from wsp_vault.scrub import Scrubber, ScrubFinding
-from wsp_vault.vault import FileVault
+from wsp_vault.vault import FileVault, KeyPinError
 
 
 def scrubber(
@@ -283,7 +284,7 @@ def parity_keeper(
         percent=int(v.get("parity_percent", 10)),
         max_set_bytes=int(float(v.get("parity_max_set_gb", 64)) * GIB),
         bytes_per_sec=float(rate) if rate else None,
-        verified=scrub.verified_ok if scrub is not None else None,
+        verified=scrub.verified_md5 if scrub is not None else None,  # parity bound to verified bytes
         should_stop=should_stop,
         should_pause=should_pause,
     )
@@ -317,6 +318,8 @@ def split_parity_findings(
     data: list[ScrubFinding] = []
     parity: set[tuple[str, str]] = set()
     for f in findings:
+        if f.unreadable:
+            continue  # an I/O error says nothing about the bytes: never repaired, never set aside
         if is_attestation_path(f.relpath):
             continue  # a bad PROVENANCE/PROMOTION signature is evidence: reported, never "repaired"
         if is_parity_path(f.relpath) and not vault.manifest(f.source_id, f.generation_id).entry(
@@ -610,16 +613,23 @@ def build_wiring(config: Mapping[str, Any]) -> Wiring:
     scope = str(vcfg.get("parity_scope", "all"))
     per_run = int(float(vcfg.get("parity_bytes_per_run", 200e9)))
 
-    def scrub_slice(index: int, count: int) -> None:
+    def scrub_slice(index: int, count: int) -> Mapping[str, object]:
         with exclusive(locks, SCRUB):  # `wsp scrub` holds it: the slice is deferred (no attempt)
             budget = max(1, sealed_bytes(vault) // max(count, slices, 1))
-            report = scrub.run(max_bytes=budget)
-            data, parity_damage = split_parity_findings(vault, report.findings)
-            if data:
-                ladder.repair_findings(data)
+            try:
+                report = scrub.run(max_bytes=budget)
+                if report.aborted is not None:  # the share is gone: defer, record nothing (audit #2)
+                    raise StorageUnavailableError(f"scrub slice aborted: {report.aborted}")
+                data, parity_damage = split_parity_findings(vault, report.findings)
+                if data:
+                    ladder.repair_findings(data)
+            except (RepairCircuitOpenError, KeyPinError) as exc:
+                # Widespread signature failures or a foreign key: nothing was touched; the owner must look.
+                return {"critical": f"{type(exc).__name__}: {exc}"}
             if keeper is not None:
                 for sid, gid in parity_damage:  # derived data: set aside, the backfill makes it again
                     keeper.invalidate(sid, gid, "scrub found damaged parity")
+            return {"unreadable": sum(1 for f in report.findings if f.unreadable)}
 
     def drill() -> Mapping[str, object]:
         with exclusive(locks, DRILL):

@@ -24,6 +24,7 @@ import argparse
 import dataclasses
 import json
 import os
+import re
 import shutil
 import statistics
 import subprocess
@@ -40,14 +41,19 @@ import yaml
 from wsp_adapters.doccollection.adapter import (
     CATALOG,
     DocCollectionAdapter,
+    Extracted,
+    Screen,
     Survey,
+    checked_front_matter,
+    download_from_origins,
     screen_file,
+    screen_text,
     well_formed,
 )
 from wsp_adapters.doccollection.catalog import FetchedDoc, build_catalog, read_catalog_file, write_catalog
-from wsp_adapters.doccollection.discovery import Throttle, origin_ok
+from wsp_adapters.doccollection.discovery import Throttle
 from wsp_adapters.doccollection.model import Candidate
-from wsp_adapters.doccollection.policy import Rules, Verdict
+from wsp_adapters.doccollection.policy import Decision, Marking, Rules, Stage, Verdict
 from wsp_cli import bootstrap
 from wsp_core.errors import FetchError
 from wsp_core.model import RemoteFile, SourceSpec, SourceStatus
@@ -436,47 +442,94 @@ class CollectionFetcher:
         if dry_run:
             return report
         throttle = env.fetcher
+        repos = registry_repos(coll)
         for cand in docs:
             if cand.key in held_sha and not cand.size:
                 report.skipped += 1  # same key held by an earlier generation; size unknown, keep it
                 continue
             try:
                 if cand.resolve == "git":
-                    path = self._git_bundle(cand, dest_dir)
+                    path, screen = self._git_bundle(cand, dest_dir, cfg.rules, repos)
                 else:
                     path = self._download(throttle, cand, dest_dir, cfg.origins)
+                    screen = None
             except (FetchError, OSError, ValueError, subprocess.CalledProcessError) as exc:
                 report.failed.append((cand.key, f"{type(exc).__name__}: {exc}"))
                 continue
-            self._screen(cand, path, cfg.rules, report, held_sha)
+            self._screen(cand, path, cfg.rules, report, held_sha, screen=screen)
         self._finish(spec, coll, report, prev_gen, prev_catalog, survey, dest_dir)
         return report
 
     def _download(self, fetcher: Fetcher, cand: Candidate, dest_dir: Path, origins: Sequence[str]) -> Path:
-        if not all(origin_ok(u, origins) for u in (cand.url, *cand.mirrors)):
-            raise ValueError(f"{cand.url} is not an allowed HTTPS origin")
-        dest = dest_dir / cand.file_name
-        result = fetcher.download(
-            RemoteFile(url=cand.url, name=cand.file_name, size=cand.size, mirrors=cand.mirrors), dest
-        )
-        return result.path
+        """Download within ``origins``; every redirect hop and the final URL are checked too."""
+        remote = RemoteFile(url=cand.url, name=cand.file_name, size=cand.size, mirrors=cand.mirrors)
+        return Path(download_from_origins(fetcher, remote, dest_dir / cand.file_name, origins).path)
 
-    def _git_bundle(self, cand: Candidate, dest_dir: Path) -> Path:
+    def _git(self, *args: str, cwd: Path | None = None, capture: bool = False) -> str:
+        """``git`` over HTTPS only, no redirects, no prompts, no hooks from the remote."""
+        assert self.git is not None
+        cmd = [self.git, *GIT_SAFE_CONFIG]
+        if cwd is not None:
+            cmd += ["-C", str(cwd)]
+        env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "", "GIT_CONFIG_NOSYSTEM": "1"}
+        done = subprocess.run(  # noqa: S603
+            [*cmd, *args], check=True, env=env, stdout=subprocess.PIPE if capture else None
+        )
+        return done.stdout.decode("utf-8", "replace") if capture else ""
+
+    def _git_bundle(
+        self, cand: Candidate, dest_dir: Path, rules: Rules, repos: frozenset[str]
+    ) -> tuple[Path, Screen]:
+        """Mirror-clone a registry-listed GitHub repository into one ``git bundle`` and screen it.
+
+        Only repositories named in the source's registry ``endpoints`` are cloned (the allow-list),
+        over HTTPS from ``github.com`` with redirects refused. The screen reads the default
+        branch's README and its file paths (:meth:`_repo_screen_text`); file contents beyond the
+        README are not screened.
+        """
         if self.git is None:
             raise OSError("git is not installed")
+        repo = github_repo(cand.url)
+        if repo is None or repo not in repos:
+            raise ValueError(f"{cand.url} is not a repository the registry lists ({sorted(repos)})")
         dest_dir.mkdir(parents=True, exist_ok=True)
         mirror = self.workdir / "git" / cand.key.replace(":", "_")
         if mirror.is_dir():
-            subprocess.run([self.git, "-C", str(mirror), "remote", "update", "--prune"], check=True)  # noqa: S603
+            self._git("remote", "update", "--prune", cwd=mirror)
         else:
             mirror.parent.mkdir(parents=True, exist_ok=True)
-            subprocess.run([self.git, "clone", "--mirror", cand.url, str(mirror)], check=True)  # noqa: S603
+            self._git("clone", "--mirror", "--no-local", f"https://github.com/{repo}.git", str(mirror))
+        screen = screen_text(self._repo_screen_text(mirror), rules, keys=(cand.key, cand.pub_number))
         bundle = dest_dir / cand.file_name.rsplit(".", 1)[0]
         bundle = bundle.with_name(bundle.name + ".bundle")
         partial = bundle.with_name(bundle.name + ".partial")
-        subprocess.run([self.git, "-C", str(mirror), "bundle", "create", str(partial), "--all"], check=True)  # noqa: S603
+        self._git("bundle", "create", str(partial), "--all", cwd=mirror)
         partial.replace(bundle)
-        return bundle
+        return bundle, screen
+
+    def _repo_screen_text(self, mirror: Path) -> Extracted:
+        """What the gate reads of a repository: the default branch's README, then its file paths.
+
+        A path list names a repository's contents the way a table of contents names a book's
+        (``exploit-development/``, ``weaponeering.md``), so the content screen's title-page and
+        three-phrase rules apply to it. File contents other than the README are not read.
+        """
+        try:
+            names = self._git("ls-tree", "-r", "--name-only", "HEAD", cwd=mirror, capture=True)
+        except subprocess.CalledProcessError:
+            return Extracted("", "extraction-error")
+        readme = next(
+            (n for n in names.splitlines() if "/" not in n and n.lower().startswith("readme")),
+            None,
+        )
+        text = ""
+        if readme is not None:
+            try:
+                text = self._git("show", f"HEAD:{readme}", cwd=mirror, capture=True)[:50_000]
+            except subprocess.CalledProcessError:
+                return Extracted("", "extraction-error")
+        paths = names[:GIT_SCREEN_PATHS_CHARS].replace("/", " / ").replace("_", " ")
+        return checked_front_matter(f"{text}\n\n{paths}", "")
 
     def _screen(
         self,
@@ -485,22 +538,27 @@ class CollectionFetcher:
         rules: Rules,
         report: FetchReport,
         held_sha: Mapping[str, str],
+        *,
+        screen: Screen | None = None,
     ) -> None:
         import hashlib
 
-        problem = None if path.suffix == ".bundle" else well_formed(path)
-        if problem:
-            report.failed.append((cand.key, problem))
-            path.unlink(missing_ok=True)
-            return
-        screen = screen_file(path, rules) if path.suffix != ".bundle" else None
-        if screen is not None and screen.decision.verdict is Verdict.DENY:
+        if path.suffix != ".bundle":
+            problem = well_formed(path)
+            if problem:
+                report.failed.append((cand.key, problem))
+                path.unlink(missing_ok=True)
+                return
+            screen = screen_file(path, rules, keys=(cand.key, cand.pub_number))
+        elif screen is None:  # a bundle is never kept unscreened
+            screen = Screen(Decision(Verdict.REVIEW, "git=unscreened", Stage.CONTENT), Marking(), False)
+        if screen.decision.verdict is Verdict.DENY:
             path.unlink(missing_ok=True)  # restricted or out-of-scope bytes are not kept anywhere
             report.rejected.append((cand.key, str(screen.decision)))
             if screen.decision.alert:
                 report.alerts.append(f"{cand.key}: {screen.decision.rule} ({cand.url})")
             return
-        if screen is not None and screen.decision.verdict is Verdict.REVIEW:
+        if screen.decision.verdict is Verdict.REVIEW:
             qdir = self.incoming / "_quarantine" / report.source_id
             qdir.mkdir(parents=True, exist_ok=True)
             target = qdir / path.name
@@ -519,16 +577,16 @@ class CollectionFetcher:
             path.unlink()  # byte-identical to the stored edition: nothing new
             report.skipped += 1
             return
-        marking = screen.marking if screen is not None else None
+        marking = screen.marking
         report.fetched.append(
             FetchedDoc(
                 cand=cand,
                 file=f"upstream/{path.name}",
                 sha256=sha,
                 bytes=path.stat().st_size,
-                decision=str(screen.decision) if screen is not None else "allow:git",
-                distribution=(marking.distribution if marking else "") or _rights_basis(cand),
-                distribution_text=marking.text if marking else "",
+                decision=str(screen.decision),
+                distribution=marking.distribution or _rights_basis(cand),
+                distribution_text=marking.text,
                 fetched_at=datetime.now(UTC).isoformat(timespec="seconds"),
                 license=cand.rights.removeprefix("license:") if cand.rights.startswith("license:") else "",
             )
@@ -583,6 +641,37 @@ class CollectionFetcher:
         tmp.write_text(json.dumps(targets, indent=1), encoding="utf-8")
         tmp.replace(plan)
         self._say(f"{spec.id}: {len(report.fetched)} documents ready; plan {plan}")
+
+
+# Clone and fetch over HTTPS only, refuse redirects (the origin is the URL the registry names), and
+# never let the remote pick a protocol or credentials helper.
+GIT_SAFE_CONFIG: tuple[str, ...] = (
+    "-c",
+    "protocol.allow=never",
+    "-c",
+    "protocol.https.allow=always",
+    "-c",
+    "http.followRedirects=false",
+    "-c",
+    "credential.helper=",
+    "-c",
+    "core.hooksPath=/dev/null",
+)
+_GITHUB_RE = re.compile(r"https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?$")
+GIT_SCREEN_PATHS_CHARS = 200_000
+
+
+def github_repo(url: str) -> str | None:
+    """``owner/name`` of an ``https://github.com/owner/name[.git]`` URL, else ``None``."""
+    m = _GITHUB_RE.match(url.strip())
+    return f"{m.group(1)}/{m.group(2)}".lower() if m else None
+
+
+def registry_repos(spec: SourceSpec) -> frozenset[str]:
+    """The repositories a git-mirror source's registry ``endpoints`` name: its git allow-list."""
+    acc = cast(Mapping[str, Any], spec.raw.get("access") or {})
+    named = (github_repo(str(u)) for u in cast(list[object], acc.get("endpoints") or []))
+    return frozenset(r for r in named if r)
 
 
 def _pointer(path: Path) -> str | None:

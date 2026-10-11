@@ -43,9 +43,40 @@ def test_wikitext_to_text() -> None:
     assert links == ("Mathematician", "Computer_science", "Logic", "Bicycle", "Maida_Vale", "Two")
 
 
-def test_wikitext_unbalanced_template_drops_tail() -> None:
-    assert wikitext_to_text("Before {{broken|x")[0] == "Before"
+def test_wikitext_unbalanced_template_keeps_the_rest_of_the_page() -> None:
+    """Audit 2026-10-11 M2: a stray ``{{`` used to drop everything after it."""
+    assert wikitext_to_text("Before {{broken|x")[0] == "Before broken|x"
+    text, _ = wikitext_to_text("Intro {{ stray.\n\nA long article {{cite|x}} goes on.\n\nEnd.")
+    assert text == "Intro stray.\nA long article goes on.\nEnd."
+    assert wikitext_to_text("a {{x {{y}} }} b }} c")[0] == "a b }} c"
     assert wikitext_to_text("[[lower case]]", capitalize_links=False)[1] == ("lower_case",)
+
+
+def test_wikitext_nowiki_interwiki_math_and_captions() -> None:
+    text, links = wikitext_to_text(
+        "Use <nowiki>[[not a link]] {{not a template}}</nowiki> here.<nowiki/>\n"
+        "See [[wikt:serendipity|serendipity]], [[:fr:Paris]], [[Help:Editing|help]] and [[Real page]].\n"
+        "Area <math>\\pi r^2</math> and <ce>H2O</ce>.\n"
+        '{|\n|+ style="x" | Table caption\n|-\n| a || b\n|}'
+    )
+    assert text.split("\n") == [
+        "Use [[not a link]] {{not a template}} here.",
+        "See serendipity, Paris, help and Real page.",
+        "Area \\pi r^2 and H2O .",
+        "Table caption",
+        "a • b",
+    ]
+    assert links == ("Real_page",)
+
+
+def test_unclosed_refs_are_linear() -> None:
+    import time
+
+    page = "Text <ref>unclosed " * 20_000 + "end"
+    start = time.perf_counter()
+    text, _ = wikitext_to_text(page)
+    assert time.perf_counter() - start < 1.0  # was quadratic: every <ref> rescanned to the end
+    assert text.endswith("end")
 
 
 def test_html_to_text() -> None:
@@ -56,3 +87,19 @@ def test_html_to_text() -> None:
     )
     assert html_to_text(html) == "Title\nHello world.\na\nb & c"
     assert html_to_text(b"") == ""
+
+
+def test_html_to_text_drops_boilerplate_and_keeps_math_source() -> None:
+    """Audit 2026-10-11 M1: navigation, category lists, hatnotes and the ZIM footer are not prose."""
+    html = (
+        '<body><h1>Water</h1><div class="hatnote">For other uses, see Water (disambiguation).</div>'
+        '<table class="sidebar"><tr><td>Part of a series</td></tr></table>'
+        '<p>Water is <math alttext="{\\displaystyle H_{2}O}"><mi>H</mi><mn>2</mn><mi>O</mi>'
+        "<annotation>H_2O</annotation></math>.</p>"
+        '<p>Bare <math><mi>x</mi><annotation encoding="application/x-tex">x</annotation></math>.</p>'
+        '<div class="navbox">Chemistry topics</div>'
+        '<div id="catlinks"><ul><li>Chemical compounds</li></ul>'
+        '<div class="mw-hidden-catlinks">Articles with short description</div></div>'
+        '<div class="zim-footer">This page is issued from Wikipedia.</div></body>'
+    )
+    assert html_to_text(html) == "Water\nWater is {\\displaystyle H_{2}O} .\nBare x."

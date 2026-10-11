@@ -190,6 +190,15 @@ def test_documents_union_newest_wins_and_pdf_refs(source_dir: Path, tmp_path: Pa
     assert "2301.09999" in older
 
 
+def test_depends_on_keeps_earlier_harvests_and_pdf_parts(source_dir: Path, tmp_path: Path) -> None:
+    """Audit 2026-10-11 C1: retention must not prune what a current generation reads."""
+    ctx = make_ctx(SPEC, FakeFetcher(), tmp_path / "work")
+    parts = {"2026-10.pdf.arxiv-2301", "2026-10.pdf.hep-th-9901"}
+    adapter = ArxivAdapter()
+    assert adapter.depends_on(ctx, source_dir / "2026-10-10") == frozenset({"2026-09-10", *parts})
+    assert adapter.depends_on(ctx, source_dir / "2026-09-10") == frozenset(parts)
+
+
 def test_parsing_helpers() -> None:
     assert arxiv_id_of("pdf/arxiv/2301/2301.01234v12.pdf") == ("2301.01234", 12)
     assert arxiv_id_of("pdf/math/0501/0501001v2.pdf") == ("math/0501001", 2)

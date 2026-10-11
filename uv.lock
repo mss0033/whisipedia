@@ -2649,6 +2649,7 @@ source = { editable = "packages/wsp-adapters" }
 dependencies = [
     { name = "indexed-bzip2" },
     { name = "libzim" },
+    { name = "numpy" },
     { name = "osmium" },
     { name = "pypdfium2" },
     { name = "selectolax" },
@@ -2665,6 +2666,7 @@ dev = [
 requires-dist = [
     { name = "indexed-bzip2", specifier = ">=1.6" },
     { name = "libzim", specifier = ">=3.6" },
+    { name = "numpy", specifier = ">=2.0" },
     { name = "osmium", specifier = ">=4.0" },
     { name = "pypdfium2", specifier = ">=4.30" },
     { name = "selectolax", specifier = ">=0.3.27" },

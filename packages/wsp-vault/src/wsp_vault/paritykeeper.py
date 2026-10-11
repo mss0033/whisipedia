@@ -5,16 +5,24 @@ created for newly sealed generations and backfilled for older ones, in bounded, 
 
 1. The generation's data files are grouped into recovery sets (``max_set_files`` files or
    ``max_set_bytes`` bytes; a bigger file is a set on its own).
-2. For each set, the data files are verified against the signed manifest first (skipped for files
-   the rolling scrub verified within its cycle), so parity never encodes damaged bytes.
-3. ``par2 create`` writes the set to **local scratch** (low CPU/IO priority); each file is then copied
-   to ``<vault>/parity-staging/<domain>/<source>/<generation>/<set>/`` with a verified atomic copy,
-   and progress is recorded on local disk. A crash loses at most the set in flight.
+2. For each set, every data file's MD5 is taken from bytes verified against the signed manifest:
+   read and hashed now, or, for a file the rolling scrub verified within its cycle, the MD5 the scrub
+   recorded for those bytes (``verified`` returning ``{key: md5}``; a ``verified`` that only returns
+   key sets cannot vouch for content, so those files are read again).
+3. ``par2 create`` writes the set to **local scratch** (low CPU priority); par2's own FileDescription
+   MD5 and length of every file must then equal the verified ones (:func:`check_parity_binding`), so
+   parity never encodes bytes that changed after they were verified (vault-fetch audit #7). Each
+   file is then copied to ``<vault>/parity-staging/<domain>/<source>/<generation>/<set>/`` with a
+   verified atomic copy, and progress is recorded (fsynced) on local disk. A crash loses at most the
+   set in flight; an unreadable progress file is set aside and the generation starts over.
 4. When every set is done, the signed ``PARITY.json`` sidecar (:mod:`wsp_vault.paritymeta`) is
-   written into the staging directory, which is then renamed to ``<generation>/parity/`` in one step.
+   written into the staging directory, which is then renamed to ``<generation>/parity/`` in one step
+   under the generation's exclusive vault lock.
 
-Throughput is limited to ``bytes_per_sec`` (verification reads and par2 input together) and each
-call does at most ``max_bytes`` of work. Damaged parity is never repaired in place: it is moved to
+Throughput is limited to ``bytes_per_sec`` (verification reads and par2 input together; a token
+bucket that does not bank idle time, :mod:`wsp_vault.ratelimit`) and each call does at most
+``max_bytes`` of work. A file that cannot be read skips the generation for this run (it is retried
+later); it never marks anything damaged. Damaged parity is never repaired in place: it is moved to
 ``quarantine/`` (:meth:`ParityKeeper.invalidate`) and created again from verified data.
 """
 
@@ -25,7 +33,7 @@ import os
 import shutil
 import time
 from collections import Counter
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -34,9 +42,18 @@ from pathlib import Path
 from typing import Any, cast
 
 from wsp_core.ports import Ledger, ParityProvider
-from wsp_vault.atomic import DEFAULT_RETRY, RetryPolicy, atomic_copy, atomic_write_bytes, fsync_dir, readback
+from wsp_vault.atomic import (
+    DEFAULT_RETRY,
+    RetryPolicy,
+    atomic_copy,
+    atomic_write_bytes,
+    fsync_dir,
+    readback,
+    rename_with_retry,
+)
 from wsp_vault.cancel import Interrupted, never
 from wsp_vault.manifest import PARITY_DIR, ROLE_PARITY, Manifest, ManifestEntry
+from wsp_vault.parity import DescribesParity, check_parity_binding
 from wsp_vault.paritymeta import (
     SIDECAR_NAME,
     SIDECAR_SIG,
@@ -45,7 +62,7 @@ from wsp_vault.paritymeta import (
     manifest_blake3,
     read_sidecar,
 )
-from wsp_vault.scrub import RateLimiter
+from wsp_vault.ratelimit import RateLimiter
 from wsp_vault.vault import FileVault, SignatureError, VaultError, make_read_only
 
 PARITY_STAGING_DIR = "parity-staging"
@@ -65,6 +82,15 @@ COVERED = frozenset({ParityState.MANIFEST, ParityState.SIDECAR})
 
 class ParityDataError(VaultError):
     """A data file does not match the manifest; parity must not be created from it."""
+
+
+class ParityUnreadableError(VaultError):
+    """A data file could not be read (I/O error); the generation is retried in a later run."""
+
+
+Verified = Callable[[Sequence[str]], "set[str] | Mapping[str, str]"]
+"""Scrub results for keys ``<source>/<generation>/<path>``: a set of keys verified within the cycle,
+or ``{key: md5}`` of the verified bytes (only the latter lets a file skip being read again)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,7 +140,7 @@ class ParityKeeper:
         max_set_files: int = 500,
         bytes_per_sec: float | None = None,
         ledger: Ledger | None = None,
-        verified: Callable[[Sequence[str]], set[str]] | None = None,
+        verified: Verified | None = None,
         retry: RetryPolicy = DEFAULT_RETRY,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         monotonic: Callable[[], float] = time.monotonic,
@@ -141,7 +167,11 @@ class ParityKeeper:
         self.should_stop = should_stop or never
         self.should_pause = should_pause or never  # e.g. the owner is using the library right now
         self.limiter = RateLimiter(
-            bytes_per_sec, monotonic=monotonic, sleep=sleep, should_stop=self.should_stop
+            bytes_per_sec,
+            monotonic=monotonic,
+            sleep=sleep,
+            should_stop=self.should_stop,
+            should_pause=self.should_pause,
         )
 
     # --- state -----------------------------------------------------------------------------------
@@ -209,8 +239,15 @@ class ParityKeeper:
     ) -> dict[str, Any]:
         path = self._progress_path(source_id, generation_id)
         if path.is_file():
-            progress = cast(dict[str, Any], json.loads(path.read_text(encoding="utf-8")))
-            if progress.get("manifest_blake3") == mhash and progress.get("percent") == self.percent:
+            try:
+                progress = cast(dict[str, Any], json.loads(path.read_text(encoding="utf-8")))
+                usable = isinstance(progress.get("sets"), list) and isinstance(progress.get("done"), dict)
+            except (ValueError, OSError):
+                progress, usable = {}, False
+            if not usable:  # torn by a crash: set it aside and start over (it used to skip forever)
+                stamp = self.clock().astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
+                path.rename(path.with_name(f"{path.name}.corrupt-{stamp}"))
+            elif progress.get("manifest_blake3") == mhash and progress.get("percent") == self.percent:
                 return progress
         return {
             "manifest_blake3": mhash,
@@ -223,25 +260,42 @@ class ParityKeeper:
         path = self._progress_path(source_id, generation_id)
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_name(path.name + ".partial")
-        tmp.write_text(json.dumps(progress, sort_keys=True), encoding="utf-8")
+        with tmp.open("w", encoding="utf-8") as f:
+            f.write(json.dumps(progress, sort_keys=True))
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp, path)
+        fsync_dir(path.parent)
 
     # --- creation --------------------------------------------------------------------------------
 
-    def _preverify(self, source_id: str, generation_id: str, entries: Sequence[ManifestEntry]) -> None:
+    def _preverify(
+        self, source_id: str, generation_id: str, entries: Sequence[ManifestEntry]
+    ) -> dict[Path, tuple[str, int]]:
+        """``{path: (md5, size)}`` of each file's verified bytes (see the module docstring, step 2)."""
         lib = self.vault.library_path(source_id, generation_id)
         keys = [f"{source_id}/{generation_id}/{e.path}" for e in entries]
-        fresh: set[str] = self.verified(keys) if self.verified is not None else set()
+        fresh = self.verified(keys) if self.verified is not None else set[str]()
+        md5s: Mapping[str, str] = fresh if isinstance(fresh, Mapping) else {}
+        out: dict[Path, tuple[str, int]] = {}
         for key, e in zip(keys, entries, strict=True):
-            if key in fresh:
-                continue
             path = lib / e.path
+            known = md5s.get(key)
+            if known:
+                out[path] = (known, e.size)
+                continue
             try:
-                got = self.retry.run(lambda p=path: readback(p, on_chunk=self.limiter.consume))
+                got = readback(path, extra=("md5",), on_chunk=self.limiter.consume)
+            except FileNotFoundError as exc:
+                raise ParityDataError(f"{source_id}/{generation_id} {e.path}: missing") from exc
             except OSError as exc:
-                raise ParityDataError(f"{source_id}/{generation_id} {e.path}: unreadable ({exc})") from exc
+                raise ParityUnreadableError(
+                    f"{source_id}/{generation_id} {e.path}: unreadable ({exc})"
+                ) from exc
             if got != e.digests:
                 raise ParityDataError(f"{source_id}/{generation_id} {e.path}: does not match the manifest")
+            out[path] = (got.extra["md5"], got.size)
+        return out
 
     def create(
         self, source_id: str, generation_id: str, *, max_bytes: int | None = None
@@ -270,8 +324,9 @@ class ParityKeeper:
                 self._save_progress(source_id, generation_id, progress)
                 return False, processed, sets_done
             entries = [e for e in (manifest.entry(p) for p in files) if e is not None]
-            self._preverify(source_id, generation_id, entries)
-            out = self._create_set(source_id, generation_id, name, [lib / e.path for e in entries], stage)
+            verified = self._preverify(source_id, generation_id, entries)
+            paths = [lib / e.path for e in entries]
+            out = self._create_set(source_id, generation_id, name, paths, stage, verified)
             done[name] = [e.to_json() for e in out]
             self._save_progress(source_id, generation_id, progress)
             set_bytes = sum(e.size for e in entries)
@@ -282,7 +337,13 @@ class ParityKeeper:
         return True, processed, sets_done
 
     def _create_set(
-        self, source_id: str, generation_id: str, name: str, files: Sequence[Path], stage: Path
+        self,
+        source_id: str,
+        generation_id: str,
+        name: str,
+        files: Sequence[Path],
+        stage: Path,
+        verified: Mapping[Path, tuple[str, int]],
     ) -> list[ManifestEntry]:
         tmp = self.scratch / f"{source_id}--{generation_id}--{name}"
         shutil.rmtree(tmp, ignore_errors=True)  # our own local scratch
@@ -291,6 +352,8 @@ class ParityKeeper:
             if self.parity is None:
                 raise VaultError("no parity provider (par2) configured")
             created = self.parity.create(files, tmp, self.percent)
+            if isinstance(self.parity, DescribesParity):
+                check_parity_binding(self.parity.describe(created, files), verified)
             out: list[ManifestEntry] = []
             for path in created:
                 dest = stage / name / path.name
@@ -333,12 +396,16 @@ class ParityKeeper:
         atomic_write_bytes(
             stage / SIDECAR_SIG, self.vault.signer.sign(data), overwrite=True, retry=self.retry
         )
-        lib = self.vault.library_path(source_id, generation_id)
-        os.rename(stage, lib / PARITY_DIR)
-        fsync_dir(lib)
-        for path in (lib / PARITY_DIR).rglob("*"):
-            if path.is_file():
-                make_read_only(path)
+        with self.vault.exclusive_generation(source_id, generation_id) as lib:
+            if manifest_blake3(self.vault, source_id, generation_id) != mhash:
+                raise VaultError(f"{source_id}/{generation_id}: manifest changed while parity was made")
+            if (lib / PARITY_DIR).exists():
+                raise VaultError(f"{source_id}/{generation_id}: parity/ appeared meanwhile; not replacing it")
+            rename_with_retry(stage, lib / PARITY_DIR)
+            fsync_dir(lib)
+            for path in (lib / PARITY_DIR).rglob("*"):
+                if path.is_file():
+                    make_read_only(path)
         for parent in (stage.parent, stage.parent.parent, stage.parent.parent.parent):
             with suppress(OSError):
                 parent.rmdir()
@@ -366,6 +433,7 @@ class ParityKeeper:
         skipped: list[str] = []
         in_progress: str | None = None
         processed = sets = 0
+        self.limiter.reset()
         for source_id, generation_id in targets:
             subject = f"{source_id}/{generation_id}"
             if should_stop() or self.should_stop() or (max_bytes is not None and processed >= max_bytes):
@@ -375,9 +443,13 @@ class ParityKeeper:
             budget = None if max_bytes is None else max_bytes - processed
             try:
                 complete, nbytes, nsets = self.create(source_id, generation_id, max_bytes=budget)
-            except Interrupted:  # shutdown mid-set: progress of finished sets is on disk
+            except Interrupted:  # shutdown or busy mid-set: progress of finished sets is on disk
                 in_progress = subject
                 break
+            except ParityUnreadableError as exc:  # storage trouble: try again next run, decide nothing
+                skipped.append(f"{subject}: {exc}")
+                self._log("parity.deferred", subject, {"reason": str(exc)})
+                continue
             except (ParityDataError, VaultError, OSError) as exc:
                 skipped.append(f"{subject}: {exc}")
                 self._log("parity.skipped", subject, {"reason": str(exc)})
@@ -398,12 +470,12 @@ class ParityKeeper:
 
     def invalidate(self, source_id: str, generation_id: str, reason: str) -> Path | None:
         """Move a damaged or untrusted ``parity/`` aside (quarantine) so it is created again."""
-        lib = self.vault.library_path(source_id, generation_id)
-        if not (lib / PARITY_DIR).is_dir():
-            return None
-        if self.vault.manifest(source_id, generation_id).parity:
-            return None  # parity listed in the signed manifest itself is never moved
-        dest = self.vault.quarantine(lib / PARITY_DIR)
+        with self.vault.exclusive_generation(source_id, generation_id) as lib:
+            if not (lib / PARITY_DIR).is_dir():
+                return None
+            if self.vault.manifest(source_id, generation_id).parity:
+                return None  # parity listed in the signed manifest itself is never moved
+            dest = self.vault.quarantine(lib / PARITY_DIR)
         self._log(
             "parity.invalidated",
             f"{source_id}/{generation_id}",

@@ -32,10 +32,7 @@ import bz2
 import json
 import logging
 import re
-import shutil
-import subprocess
-from collections.abc import Generator, Iterable, Iterator, Mapping, Sequence
-from contextlib import contextmanager
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -44,8 +41,10 @@ from urllib.parse import quote
 from xml.etree import ElementTree as ET
 
 from wsp_adapters._common import (
+    DocRow,
     access,
-    default_workers,
+    doc_from_row,
+    doc_row,
     fetch_all,
     int_option,
     ordered_parallel_map,
@@ -54,7 +53,9 @@ from wsp_adapters._common import (
     str_list,
     upstream_dir,
     verify_file,
+    workers_for,
 )
+from wsp_adapters._streams import open_bz2
 from wsp_adapters.entries import Entry, Redirect
 from wsp_adapters.wikitext import wikitext_to_text
 from wsp_core.ids import InvalidDocIdError, content_hash, make_doc_id
@@ -103,7 +104,6 @@ _INDEX_NAME_RE = re.compile(r"^(.*-pages-articles-multistream)(\d*)\.xml(.*)\.bz
 _ENTITY_DUMP_RE = re.compile(r"^wikidata-\d{8}-all\.json\.bz2$")
 _PAGE_RE = re.compile(rb"<page>.*?</page>", re.DOTALL)
 _GROUP_BYTES = 8 * 1024 * 1024
-_ENTITY_BATCH = 500
 
 
 # --- wiki naming ---------------------------------------------------------------------------------
@@ -367,7 +367,7 @@ class WikimediaDumpsAdapter:
 
     def entries(self, ctx: Ctx, generation_dir: Path) -> Iterator[Entry]:
         spec = ctx.source
-        workers = int_option(spec, "workers", default_workers())
+        workers = workers_for(spec)
         files = sorted(upstream_dir(generation_dir).iterdir())
         if is_entity_source(spec):
             for path in files:
@@ -444,7 +444,7 @@ def read_multistream(
 ) -> Iterator[Entry]:
     """Pages of one dump file, decoded in parallel when the multistream index is available."""
     if index is None:
-        with _open_bz2(path, workers) as fh:
+        with open_bz2(path, workers) as fh:
             for chunk in _page_chunks(fh):
                 yield from _parse_pages(chunk, cfg)
         return
@@ -475,27 +475,6 @@ def _page_chunks(fh: IO[bytes], chunk: int = 16 * 1024 * 1024) -> Iterator[bytes
         tail = buf[cut:]
     if tail:
         yield tail
-
-
-@contextmanager
-def _open_bz2(path: Path, workers: int) -> Generator[IO[bytes]]:
-    """Sequential bz2 reader; uses a parallel external decompressor when one is installed."""
-    tool = shutil.which("lbzip2") or shutil.which("pbzip2")
-    if tool is None or workers <= 1:
-        with bz2.open(path, "rb") as fh:
-            yield fh
-        return
-    proc = subprocess.Popen(  # noqa: S603 - fixed argv, no shell
-        [tool, "-dc", f"-n{workers}" if tool.endswith("lbzip2") else f"-p{workers}", str(path)],
-        stdout=subprocess.PIPE,
-    )
-    assert proc.stdout is not None
-    try:
-        yield proc.stdout
-    finally:
-        proc.stdout.close()
-        if proc.wait() not in (0, -13):  # -13: SIGPIPE when the consumer stops early
-            raise OSError(f"{tool} failed on {path.name} with status {proc.returncode}")
 
 
 def _parse_pages(xml: bytes, cfg: _PageConfig) -> Iterator[Entry]:
@@ -564,38 +543,91 @@ class _EntityBatch:
 def read_entities(path: Path, spec: SourceSpec, *, workers: int = 1) -> Iterator[DocRecord]:
     """Entities of a ``wikidata-*-all.json.bz2`` dump (one JSON object per line inside an array).
 
-    Decompression is sequential (the file is not multistream), but goes through ``lbzip2`` when it
-    is installed; JSON parsing and rendering run in worker processes.
+    Decompression is sequential (the file is not multistream) but parallel per block
+    (:func:`wsp_adapters._streams.open_bz2`); claims are cut in the parent (:func:`entity_lines`)
+    and JSON parsing and rendering run in worker processes.
     """
     lang = str(access(spec).get("lang", "en"))
-
-    def batches() -> Iterator[_EntityBatch]:
-        with _open_bz2(path, workers) as fh:
-            batch: list[bytes] = []
-            for line in fh:
-                batch.append(line)
-                if len(batch) >= _ENTITY_BATCH:
-                    yield _EntityBatch(tuple(batch), spec.id, spec.license, lang)
-                    batch = []
-            if batch:
-                yield _EntityBatch(tuple(batch), spec.id, spec.license, lang)
-
-    for docs in ordered_parallel_map(_decode_entities, batches(), workers):
-        yield from docs
+    batches = (_EntityBatch(lines, spec.id, spec.license, lang) for lines in entity_lines(path, workers))
+    for rows in ordered_parallel_map(_decode_entities, batches, workers):
+        yield from map(doc_from_row, rows)
 
 
-def _decode_entities(batch: _EntityBatch) -> list[DocRecord]:
-    out: list[DocRecord] = []
-    for raw in batch.lines:
-        line = raw.strip().rstrip(b",")
-        if not line or line in (b"[", b"]"):
-            continue
-        doc = entity_record(
-            cast(Mapping[str, Any], json.loads(line)), batch.source_id, batch.license, batch.lang
-        )
+def _decode_entities(batch: _EntityBatch) -> list[DocRow]:
+    out: list[DocRow] = []
+    for line in batch.lines:
+        doc = entity_record(parse_entity(line), batch.source_id, batch.license, batch.lang)
         if doc is not None:
-            out.append(doc)
+            out.append(doc_row(doc))
     return out
+
+
+# Top-level layout of a dump line (2026-10-05, every entity of a 5,000-line sample): type, id,
+# labels, descriptions, aliases, claims, sitelinks, pageid, ns, title, lastrevid, modified.
+_CLAIMS = b'"claims":'
+_NEXT = b',"sitelinks":'
+_BEFORE = (b'"labels":', b'"descriptions":', b'"aliases":')  # read keys that must precede claims
+_AFTER = (b'"lastrevid":', b'"modified":')  # read keys that must follow sitelinks
+ENTITY_BATCH_BYTES = 8 << 20  # bytes of (claims-stripped) entity JSON per worker task
+ENTITY_BATCH_LINES = 10_000
+
+
+class EntityFormatError(ValueError):
+    """A claims-stripped entity line is not valid JSON: the dump's layout changed."""
+
+
+def strip_claims(line: bytes) -> bytes:
+    """One entity's JSON without its top-level ``claims`` member (audit 2026-10-11 H2).
+
+    Claims are about three quarters of the dump's bytes and no adapter reads them. The cut is
+    structural: in valid JSON, ``"claims":`` and ``,"sitelinks":`` with unescaped quotes can only
+    be key tokens. It is made only when every key this module reads is outside the cut: labels,
+    descriptions and aliases before ``"claims":``, lastrevid and modified after ``,"sitelinks":``
+    (an object has no duplicate keys, so they cannot also be inside it). The claims bytes are
+    scanned once. :func:`parse_entity` rejects a result that does not parse or lacks ``id``;
+    a line of any other layout is returned whole.
+    """
+    a = line.find(_CLAIMS)
+    if a < 0 or any(line.find(key, 0, a) < 0 for key in _BEFORE):
+        return line
+    b = line.find(_NEXT, a)
+    if b < 0 or any(line.find(key, b) < 0 for key in _AFTER):
+        return line
+    return line[:a] + line[b + 1 :]  # drop '"claims":{...},' (the comma before "sitelinks")
+
+
+def parse_entity(line: bytes) -> Mapping[str, Any]:
+    """The JSON object of one (possibly claims-stripped) dump line."""
+    try:
+        entity: object = json.loads(line)
+    except ValueError as exc:
+        raise EntityFormatError(f"entity line does not parse after cutting claims: {line[:120]!r}") from exc
+    if not isinstance(entity, dict) or "id" not in entity:
+        raise EntityFormatError(f"entity line has no id: {line[:120]!r}")
+    return cast(Mapping[str, Any], entity)
+
+
+def entity_lines(path: Path, workers: int) -> Iterator[tuple[bytes, ...]]:
+    """Claims-stripped entity lines of a JSON dump in batches of at most ``ENTITY_BATCH_BYTES``.
+
+    Batches are bounded by bytes, not lines: the first entities of the dump are hundreds of KB
+    each (a 1,000-line batch pickled to 79 MB), later ones a few KB.
+    """
+    with open_bz2(path, workers) as fh:
+        batch: list[bytes] = []
+        size = 0
+        for raw in fh:
+            line = raw.strip().rstrip(b",")
+            if not line or line in (b"[", b"]"):
+                continue
+            line = strip_claims(line)
+            batch.append(line)
+            size += len(line)
+            if size >= ENTITY_BATCH_BYTES or len(batch) >= ENTITY_BATCH_LINES:
+                yield tuple(batch)
+                batch, size = [], 0
+        if batch:
+            yield tuple(batch)
 
 
 def _lang_value(values: object, lang: str) -> str:

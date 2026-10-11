@@ -40,17 +40,28 @@ from typing import IO, Any, cast
 
 from wsp_adapters._common import (
     access,
-    default_workers,
     fetch_all,
-    int_option,
+    files_across_generations,
+    head_release,
+    head_version,
+    holder_of,
     ordered_parallel_map,
-    plan_missing,
+    plan_by_head,
     str_list,
-    upstream_dir,
     verify_file,
+    workers_for,
 )
 from wsp_core.ids import content_hash, make_doc_id
-from wsp_core.model import DocRecord, FetchPlan, FetchResult, Generation, ReleaseRef, RemoteFile, Verdict
+from wsp_core.model import (
+    DocRecord,
+    FetchPlan,
+    FetchResult,
+    Generation,
+    ReleaseRef,
+    RemoteFile,
+    SourceSpec,
+    Verdict,
+)
 from wsp_core.ports import Ctx, SupportsHead
 
 log = logging.getLogger(__name__)
@@ -82,30 +93,39 @@ class OpenLibraryAdapter:
         spec = ctx.source
         base = (str_list(access(spec).get("endpoints")) or (DATA_URL,))[0]
         base = base if base.endswith("/") else base + "/"
-        kinds = str_list(access(spec).get("kinds")) or KINDS
-        files: list[RemoteFile] = []
-        version: str | None = None
-        for kind in kinds:
-            url = f"{base}ol_dump_{kind}_latest.txt.gz"
-            size: int | None = None
-            if isinstance(ctx.fetcher, SupportsHead):
-                head = ctx.fetcher.head(url)
-                size = head.size
-                if match := _DATED_RE.search(head.url):
-                    version = max(version or "", match.group(1))
-            files.append(RemoteFile(url=url, name=f"ol_dump_{kind}_latest.txt.gz", size=size))
+        names = self.file_names(spec)
+        files, meta = head_release(ctx.fetcher, [(f"{base}{n}", n) for n in names])
+        # ``*_latest`` redirects to the dated dump; that date names the release. Without it the
+        # version is the HEAD identity (audit H3); today's date only when HEAD says nothing.
+        dated = ""
+        if isinstance(ctx.fetcher, SupportsHead):
+            for f in files:
+                if match := _DATED_RE.search(ctx.fetcher.head(f.url).url):
+                    dated = max(dated, match.group(1))
+        version = dated or head_version(files, meta) or datetime.now(UTC).strftime("%Y-%m-%d")
         return [
             ReleaseRef(
                 source_id=spec.id,
-                version=version or datetime.now(UTC).strftime("%Y-%m-%d"),
+                version=version,
                 published=None,
                 files=tuple(files),
+                meta=meta,
                 format="openlibrary-tsv",
             )
         ]
 
+    @staticmethod
+    def file_names(spec: SourceSpec) -> tuple[str, ...]:
+        return tuple(f"ol_dump_{k}_latest.txt.gz" for k in (str_list(access(spec).get("kinds")) or KINDS))
+
     def plan(self, ctx: Ctx, have: Generation | None, want: ReleaseRef) -> FetchPlan:
-        return plan_missing(have, want)
+        """Skip dump files the previous generation holds unchanged (no checksums upstream)."""
+        return plan_by_head(have, want)
+
+    def depends_on(self, ctx: Ctx, generation_dir: Path) -> frozenset[str]:
+        """Earlier generations holding dump files this one reads (``GenerationDependencies``)."""
+        files = files_across_generations(generation_dir, self.file_names(ctx.source))
+        return frozenset(holder_of(p) for p in files.values()) - {generation_dir.name}
 
     def fetch(self, ctx: Ctx, plan: FetchPlan) -> Iterable[FetchResult]:
         return fetch_all(ctx, plan)
@@ -117,13 +137,19 @@ class OpenLibraryAdapter:
 
     def documents(self, ctx: Ctx, generation_dir: Path) -> Iterator[DocRecord]:
         spec = ctx.source
-        workers = int_option(spec, "workers", default_workers())
+        workers = workers_for(spec)
         wanted = set(str_list(access(spec).get("kinds")) or KINDS)
-        files = {k: p for p in upstream_dir(generation_dir).iterdir() if (k := kind_of(p.name))}
+        # One file per kind: the release's own names, from this or an earlier generation.
+        files = {
+            k: p
+            for p in files_across_generations(generation_dir, self.file_names(spec)).values()
+            if (k := kind_of(p.name))
+        }
         ctx.workdir.mkdir(parents=True, exist_ok=True)
         names_db = ctx.workdir / "openlibrary-authors.sqlite"
         names_db.unlink(missing_ok=True)
-        with sqlite3.connect(names_db) as db:
+        db = sqlite3.connect(names_db)
+        try:  # the lookup is local scratch: removed however the pass ends (audit LOW)
             db.executescript(
                 "PRAGMA journal_mode=OFF; PRAGMA synchronous=OFF;"
                 "CREATE TABLE authors (key TEXT PRIMARY KEY, name TEXT) WITHOUT ROWID;"
@@ -143,7 +169,9 @@ class OpenLibraryAdapter:
                     batches = _with_names(_batches(files[kind], spec.id, spec.license, workers), db)
                     for docs in ordered_parallel_map(decode_batch, batches, workers):
                         yield from docs
-        names_db.unlink(missing_ok=True)
+        finally:
+            db.close()
+            names_db.unlink(missing_ok=True)
 
 
 def _with_names(batches: Iterable[_Batch], db: sqlite3.Connection) -> Iterator[_Batch]:

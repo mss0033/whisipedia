@@ -23,26 +23,35 @@ autocomplete). ``native_id`` is the PMID, ``revision`` the ``DateRevised``.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import IO
+from typing import IO, cast
 from xml.etree import ElementTree as ET
 
 from wsp_adapters._common import (
+    DocRow,
+    IncompleteGenerationError,
+    Reject,
+    Rejects,
     access,
+    default_workers,
+    describe,
+    doc_from_row,
+    doc_row,
     fetch_all,
-    int_option,
     ordered_parallel_map,
     plan_missing,
     str_list,
     upstream_dir,
     verify_file,
+    workers_for,
 )
-from wsp_adapters._streams import Bitset, Throttle, listing_links, open_any
+from wsp_adapters._streams import Bitset, Throttle, listing_links, listing_rows, open_any
 from wsp_core.ids import content_hash, make_doc_id
 from wsp_core.model import (
     Checksum,
@@ -80,6 +89,113 @@ def file_key(name: str) -> tuple[str, int] | None:
     return (match.group("yy"), int(match.group("num"))) if match else None
 
 
+GENERATION_RE = re.compile(r"^pubmed(?P<yy>\d{2})(?:-u(?P<upto>\d{4,}))?$")
+
+
+def content_set(generation_dir: Path) -> dict[int, Path]:
+    """Every file of a generation's release, by number: ``{1: .../pubmed26n0001.xml.gz, ...}``."""
+    return {n: path for n, (_, path) in content_members(generation_dir).items()}
+
+
+def content_members(generation_dir: Path) -> dict[int, tuple[str, Path]]:
+    """Every file of a generation's release, by file number, with the generation that holds it.
+
+    ``plan`` fetches only the files the previous generation does not hold, so ``pubmed26-u1671``
+    stores update files 1335-1671 and reads the baseline (1-1334) from ``pubmed26``. The content set
+    is therefore the union of this generation and the earlier generations of the same baseline year
+    (``pubmed26``, ``pubmed26-uNNNN`` with ``NNNN`` at most this one's), a file number's newest copy
+    winning. It must be exactly the files ``1..N`` (``N`` = the generation's update number, or the
+    last baseline file): a missing baseline or update file raises :class:`IncompleteGenerationError`
+    instead of refining a partial release, whose diff would delete every document it lacks.
+
+    A generation directory whose name is not a PubMed release id (tests, hand-made generations)
+    is read on its own, under the same completeness rule.
+    """
+    me = GENERATION_RE.match(generation_dir.name)
+    chain = [generation_dir]
+    upto = 0
+    if me is not None:
+        upto = int(me.group("upto") or 0)
+        siblings = sorted(
+            (
+                (int(m.group("upto") or 0), p)
+                for p in generation_dir.parent.iterdir()
+                if p.is_dir() and p != generation_dir and (m := GENERATION_RE.match(p.name))
+                if m.group("yy") == me.group("yy") and int(m.group("upto") or 0) <= upto
+            ),
+            key=lambda up: (up[0], up[1].name),
+        )
+        chain = [p for _, p in siblings] + [generation_dir]
+    files: dict[int, tuple[str, Path]] = {}
+    for gen in chain:  # oldest first: a later generation's copy of a number replaces an earlier one
+        up = upstream_dir(gen)
+        if not up.is_dir():
+            continue
+        for path in up.iterdir():
+            key = file_key(path.name)
+            if key is not None and (me is None or key[0] == me.group("yy")):
+                files[key[1]] = (gen.name, path)
+    if 1 not in files:
+        raise IncompleteGenerationError(
+            f"{generation_dir.name}: no baseline file (pubmed<YY>n0001) in it or its earlier generations"
+        )
+    last = max(files)
+    if upto and last != upto:
+        raise IncompleteGenerationError(f"{generation_dir.name}: update files end at {last}, not {upto}")
+    missing = [n for n in range(1, last + 1) if n not in files]
+    if missing:
+        shown = ", ".join(f"{n:04d}" for n in missing[:10])
+        raise IncompleteGenerationError(
+            f"{generation_dir.name}: {len(missing)} file(s) missing from the content set: {shown}"
+        )
+    return files
+
+
+MD5_CACHE = "pubmed-md5.json"
+
+
+class Md5Cache:
+    """``.md5`` sidecar digests by URL, valid while the sidecar's listing row is unchanged (M8).
+
+    Discovery used to fetch all ~1,700 sidecars on every run (about ten minutes at NCBI's three
+    requests per second). A sidecar is fetched again only when its row in the directory listing
+    (modification time and size as the server prints them) differs from the cached one, or when
+    the listing shows no row for it. A stale digest could only fail verification, never pass it.
+    """
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self.entries: dict[str, list[str]] = {}
+        self.dirty = False
+        try:
+            raw: object = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                self.entries = {
+                    str(k): [str(x) for x in cast(list[object], v)]
+                    for k, v in cast(dict[str, object], raw).items()
+                    if isinstance(v, list) and len(cast(list[object], v)) == 2
+                }
+        except (OSError, ValueError):
+            pass
+
+    def get(self, url: str, row: str) -> str | None:
+        hit = self.entries.get(url)
+        return hit[1] if hit is not None and row and hit[0] == row and hit[1] else None
+
+    def put(self, url: str, row: str, digest: str | None) -> None:
+        if row and digest:
+            self.entries[url] = [row, digest]
+            self.dirty = True
+
+    def save(self) -> None:
+        if not self.dirty:
+            return
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.path.with_name(self.path.name + ".partial")
+        tmp.write_text(json.dumps(self.entries, sort_keys=True), encoding="utf-8")
+        tmp.replace(self.path)
+
+
 def parse_md5(text: str) -> str | None:
     """``MD5(pubmed26n0001.xml.gz)= 0123...`` -> the hex digest."""
     match = _MD5_RE.search(text)
@@ -100,10 +216,13 @@ class PubmedAdapter:
         endpoints = str_list(access(ctx.source).get("endpoints")) or DEFAULT_ENDPOINTS
         throttle = Throttle(self.interval)
         found: dict[str, tuple[int, str]] = {}  # name -> (endpoint index, URL); the first endpoint wins
+        rows: dict[str, str] = {}  # URL -> its listing row (date and size as the server prints them)
         for i, base in enumerate(endpoints):
             base = base if base.endswith("/") else base + "/"
             throttle.wait()
-            for url in listing_links(ctx.fetcher.get_bytes(base, max_bytes=16 * 1024 * 1024), base):
+            listing = ctx.fetcher.get_bytes(base, max_bytes=16 * 1024 * 1024)
+            rows.update(listing_rows(listing, base))
+            for url in listing_links(listing, base):
                 name = url.rsplit("/", 1)[-1]
                 if file_key(name) is not None:
                     found.setdefault(name, (i, url))
@@ -112,13 +231,19 @@ class PubmedAdapter:
             return []
         year = max(k[0] for k in keys.values())
         names = sorted((n for n in keys if keys[n][0] == year), key=lambda n: keys[n][1])
+        cache = Md5Cache(ctx.workdir / MD5_CACHE)
         files: list[RemoteFile] = []
         for name in names:
-            throttle.wait()
             url = found[name][1]
-            digest = parse_md5(ctx.fetcher.get_bytes(url + ".md5", max_bytes=4096).decode("ascii", "replace"))
+            sidecar = url + ".md5"
+            digest = cache.get(sidecar, rows.get(sidecar, ""))
+            if digest is None:
+                throttle.wait()
+                digest = parse_md5(ctx.fetcher.get_bytes(sidecar, max_bytes=4096).decode("ascii", "replace"))
+                cache.put(sidecar, rows.get(sidecar, ""), digest)
             checksums = (Checksum("md5", digest),) if digest else ()
             files.append(RemoteFile(url=url, name=name, checksums=checksums))
+        cache.save()
         baseline = [n for n in names if found[n][0] == 0]
         updates = [n for n in names if found[n][0] > 0]
         version = f"pubmed{year}"
@@ -146,20 +271,25 @@ class PubmedAdapter:
 
     # --- documents -------------------------------------------------------------------------------
 
+    def depends_on(self, ctx: Ctx, generation_dir: Path) -> frozenset[str]:
+        """Earlier generations holding files of this generation's content set (``GenerationDependencies``)."""
+        return frozenset(gen for gen, _ in content_members(generation_dir).values()) - {generation_dir.name}
+
     def documents(self, ctx: Ctx, generation_dir: Path) -> Iterator[DocRecord]:
         spec = ctx.source
-        workers = int_option(spec, "workers", 4)
-        numbered = [(k[1], p) for p in upstream_dir(generation_dir).iterdir() if (k := file_key(p.name))]
-        files = [p for _, p in sorted(numbered, reverse=True)]
+        workers = min(workers_for(spec, 4), default_workers())
+        files = [p for _, p in sorted(content_set(generation_dir).items(), reverse=True)]
         tasks = (_FileTask(p, spec.id, spec.license) for p in files)
         seen = Bitset()
+        rejects = Rejects(ctx.workdir, generation_dir.name)
         for result in ordered_parallel_map(parse_file, tasks, workers, window=workers + 1):
+            rejects.add(result.rejects, len(result.docs))
             for pmid in result.deleted:
                 seen.add(pmid)
-            for pmid, doc in result.docs:
+            for pmid, row in result.docs:
                 if pmid not in seen:
                     seen.add(pmid)
-                    yield doc
+                    yield doc_from_row(row)
 
 
 @dataclass(frozen=True, slots=True)
@@ -171,21 +301,27 @@ class _FileTask:
 
 @dataclass(frozen=True, slots=True)
 class FileResult:
-    docs: tuple[tuple[int, DocRecord], ...]
+    docs: tuple[tuple[int, DocRow], ...]  # (pmid, doc_row(doc)): tuples unpickle 6x faster (H5)
     deleted: tuple[int, ...]
+    rejects: tuple[Reject, ...] = ()
 
 
 def parse_file(task: _FileTask) -> FileResult:
     """Worker: every article of one PubMed XML file plus its ``DeleteCitation`` PMIDs."""
+    rejects: list[Reject] = []
     with open_any(task.path) as fh:
-        docs, deleted = parse_stream(fh, task.source_id, task.license)
-    return FileResult(tuple(docs), tuple(deleted))
+        docs, deleted = parse_stream(fh, task.source_id, task.license, rejects=rejects)
+    return FileResult(tuple((pmid, doc_row(doc)) for pmid, doc in docs), tuple(deleted), tuple(rejects))
 
 
 def parse_stream(
-    fh: IO[bytes], source_id: str, license_: str
+    fh: IO[bytes], source_id: str, license_: str, *, rejects: list[Reject] | None = None
 ) -> tuple[list[tuple[int, DocRecord]], list[int]]:
-    """Articles (as ``(pmid, doc)``) and deleted PMIDs of one XML stream, in file order."""
+    """Articles (as ``(pmid, doc)``) and deleted PMIDs of one XML stream, in file order.
+
+    An article that cannot be rendered is appended to ``rejects`` (or raises when ``rejects`` is
+    ``None``); the rest of the file is still read.
+    """
     docs: list[tuple[int, DocRecord]] = []
     deleted: list[int] = []
     context: Iterator[tuple[str, ET.Element]] = ET.iterparse(fh, events=("start", "end"))  # noqa: S314
@@ -196,7 +332,16 @@ def parse_stream(
                 root = elem
             continue
         if elem.tag in ("PubmedArticle", "PubmedBookArticle"):
-            doc = article_record(elem, source_id, license_)
+            try:
+                doc = article_record(elem, source_id, license_)
+            except Exception as exc:
+                if rejects is None:
+                    raise
+                pmid = (
+                    elem.findtext("MedlineCitation/PMID") or elem.findtext("BookDocument/PMID") or "?"
+                ).strip()
+                rejects.append((f"PMID {pmid.strip()} in {getattr(fh, 'name', '?')}", describe(exc)))
+                doc = None
             if doc is not None:
                 docs.append((int(doc.native_id), doc))
             elem.clear()
@@ -299,7 +444,14 @@ def article_record(elem: ET.Element, source_id: str, license_: str) -> DocRecord
         if ui := descriptor.get("UI"):
             mesh_links.append(f"https://id.nlm.nih.gov/mesh/{ui}")
     keywords = [_text(k) for k in cite.iter("Keyword") if _text(k)]
-    ids = {a.get("IdType", ""): (a.text or "").strip() for a in elem.iter("ArticleId")}
+    # The article's own ids only: ``elem.iter`` would also walk ReferenceList/Reference/ArticleIdList,
+    # where the cited papers' DOIs live, and the last one would win (audit 2026-10-11 H1).
+    own = elem.findall(
+        "PubmedBookData/ArticleIdList/ArticleId" if is_book else "PubmedData/ArticleIdList/ArticleId"
+    )
+    ids: dict[str, str] = {}
+    for a in own:
+        ids.setdefault(a.get("IdType", ""), (a.text or "").strip())
     doi = ids.get("doi") or next(
         ((e.text or "").strip() for e in cite.iter("ELocationID") if e.get("EIdType") == "doi"), ""
     )

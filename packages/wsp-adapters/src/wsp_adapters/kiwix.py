@@ -20,8 +20,10 @@ only full URLs of byte-identical copies.
 
 from __future__ import annotations
 
+import hashlib
+import itertools
 import re
-import threading
+import tempfile
 import xml.etree.ElementTree as ET
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -31,18 +33,24 @@ from urllib.parse import urlencode
 
 from libzim.reader import Archive
 
+from wsp_adapters import zimscan
 from wsp_adapters._common import (
+    DocRow,
+    IncompleteGenerationError,
+    WorkerPool,
     access,
-    default_workers,
+    doc_from_row,
+    doc_row,
+    earlier_generations,
     fetch_all,
-    int_option,
+    holder_of,
     normalize_algorithm,
-    ordered_parallel_map,
     parse_checksum_file,
     plan_missing,
     str_list,
     upstream_dir,
     verify_file,
+    workers_for,
 )
 from wsp_adapters.entries import Entry, Redirect
 from wsp_adapters.html_text import html_to_text
@@ -66,12 +74,11 @@ ZIM_FORMAT = "zim"
 DEFAULT_MIRRORS = ("https://mirror.download.kiwix.org/",)
 FLAVOUR_PREFERENCE = ("maxi", "", "nopic", "mini", "nodet")
 _PAGE_SIZE = 500
-_ZIM_CHUNK = 2_000  # entries per worker task
 
 _ATOM = "{http://www.w3.org/2005/Atom}"
 _DC = "{http://purl.org/dc/terms/}"
 _ACQUISITION = "http://opds-spec.org/acquisition/open-access"
-_ZIM_DATE_RE = re.compile(r"_(\d{4}-\d{2})[a-z]?\.zim$")  # "_2026-07", "_2026-07a" (a re-release)
+_ZIM_DATE_RE = re.compile(r"_(\d{4}-\d{2})([a-z]?)\.zim$")  # "_2026-07", "_2026-07a" (a re-release)
 _METALINK = "{urn:ietf:params:xml:ns:metalink}"
 
 # ISO 639-3 (ZIM metadata) to the ISO 639-1 codes used in DocRecord.lang, for common languages.
@@ -110,6 +117,12 @@ class OpdsEntry:
     def zim_date(self) -> str:
         match = _ZIM_DATE_RE.search(self.file_name)
         return match.group(1) if match else ""
+
+    @property
+    def release_date(self) -> str:
+        """``zim_date`` with its re-release letter: ``2026-07a`` is a newer build than ``2026-07``."""
+        match = _ZIM_DATE_RE.search(self.file_name)
+        return match.group(1) + match.group(2) if match else ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -226,14 +239,20 @@ def select_entries(entries: Iterable[OpdsEntry], selector: Selector) -> list[Opd
     return sorted(best.values(), key=lambda x: x.name)
 
 
-def _rank(entry: OpdsEntry) -> tuple[int, int]:
+def _rank(entry: OpdsEntry) -> tuple[int, int, int]:
     """Lower is better: preferred flavour first, then the newest date."""
     flavour_rank = (
         FLAVOUR_PREFERENCE.index(entry.flavour)
         if entry.flavour in FLAVOUR_PREFERENCE
         else len(FLAVOUR_PREFERENCE)
     )
-    return flavour_rank, -int(entry.zim_date.replace("-", "") or 0)
+    return flavour_rank, -int(entry.zim_date.replace("-", "") or 0), _letter_rank(entry.release_date)
+
+
+def _letter_rank(release_date: str) -> int:
+    """Lower is newer: ``2026-07b`` before ``2026-07a`` before ``2026-07``."""
+    letter = release_date[7:8]
+    return -(ord(letter) - ord("a") + 1) if letter else 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -285,6 +304,115 @@ def _mirror_urls(file_url: str, bases: Sequence[str]) -> tuple[str, ...]:
     return tuple(f"{b.rstrip('/')}/zim/{rel}" for b in bases)
 
 
+# --- release identity and content set (audit 2026-10-11 C1, H3) ------------------------------------
+
+_BUNDLE_ID_RE = re.compile(r"^(?P<date>\d{4}-\d{2}[a-z]?)[-+](?P<digest>[0-9a-f]{8})$")
+MAX_DROPPED_BOOKS = 2  # books a bundle may drop between two generations (content-set search bound)
+
+
+def names_digest(names: Iterable[str]) -> str:
+    """First 8 hex digits of the SHA-256 of the sorted file names, one per line."""
+    return hashlib.sha256("\n".join(sorted(names)).encode()).hexdigest()[:8]
+
+
+def release_version(names: Sequence[str], *, bundle: bool) -> str:
+    """``ReleaseRef.version`` of a selection of ZIM files.
+
+    A single book is its newest file's date with the re-release letter (``2026-07a``), so a
+    re-release is a new version. A bundle is ``<newest date>+<names_digest>``: a re-release or an
+    update of *any* book changes the file names and therefore the version (the newest date alone
+    missed updates to every book but the newest), and the digest lets :func:`bundle_content`
+    check a generation's content set against its id.
+    """
+    newest = max((d for n in names if (d := file_release_date(n))), default="0000-00")
+    return f"{newest}+{names_digest(names)}" if bundle else newest
+
+
+def file_release_date(file_name: str) -> str:
+    """``..._2026-07a.zim`` -> ``2026-07a`` (``""`` when the name carries no date)."""
+    m = _ZIM_DATE_RE.search(file_name)
+    return m.group(1) + m.group(2) if m else ""
+
+
+def book_key(file_name: str) -> str:
+    """``wikipedia_en_all_maxi_2026-07a.zim`` -> ``wikipedia_en_all_maxi`` (book and flavour)."""
+    return _ZIM_DATE_RE.sub("", file_name).removesuffix(".zim")
+
+
+def _zims(generation_dir: Path) -> dict[str, Path]:
+    up = upstream_dir(generation_dir)
+    if not up.is_dir():
+        return {}
+    found: dict[str, Path] = {}
+    for path in sorted(up.glob("*.zim"), key=lambda p: (file_release_date(p.name), p.name)):
+        found[book_key(path.name)] = path  # the newest build of a book wins
+    return found
+
+
+def bundle_content(generation_dir: Path, *, single_book: bool = False) -> dict[str, Path]:
+    """Every ZIM of a generation's release, by book key, in this generation or an earlier one.
+
+    ``plan`` downloads only books the previous generation does not hold, so a bundle generation
+    stores the new and changed books and reads the rest from earlier generations. The content set
+    is built along the chain of the source's generations (directories with ``upstream/``) up to this
+    one, in release order (:func:`~wsp_adapters._common.generation_order_key`): each generation's
+    own files, plus its predecessor's content set for books it does not hold itself.
+    When a generation id carries the bundle digest (:func:`release_version`), the set must
+    reproduce it; books dropped from the bundle since the predecessor (at most
+    :data:`MAX_DROPPED_BOOKS`) are found by search. A set that cannot be reproduced raises
+    :class:`IncompleteGenerationError`: refining a wrong set would delete or resurrect documents.
+    A single-book source's content is its newest generation's file (a flavour change replaces the
+    book rather than adding one).
+    """
+    chain = earlier_generations(generation_dir)
+    content: dict[str, Path] = {}
+    for gen in [*chain, generation_dir]:
+        content = _next_content(gen, content, single_book=single_book)
+    return content
+
+
+def _next_content(gen: Path, previous: Mapping[str, Path], *, single_book: bool) -> dict[str, Path]:
+    own = _zims(gen)
+    if single_book:
+        if not own:
+            return dict(previous)
+        newest = max(own.values(), key=lambda p: (file_release_date(p.name), p.name))
+        return {book_key(newest.name): newest}
+    carried = {k: p for k, p in previous.items() if k not in own}
+    m = _BUNDLE_ID_RE.match(gen.name)
+    if m is None:  # a single book, or a bundle sealed before ids carried the digest: unverifiable
+        return dict(sorted({**carried, **own}.items()))
+    names = [p.name for p in own.values()]
+    keys = sorted(carried)
+    for drops in range(min(MAX_DROPPED_BOOKS, len(keys)) + 1):
+        for dropped in itertools.combinations(keys, drops):
+            kept = [carried[k].name for k in keys if k not in dropped]
+            if names_digest([*names, *kept]) == m.group("digest"):
+                gone = set(dropped)
+                return dict(sorted({**{k: p for k, p in carried.items() if k not in gone}, **own}.items()))
+    raise IncompleteGenerationError(
+        f"{gen.name}: no set of its {len(own)} own and {len(carried)} carried ZIM(s) matches the "
+        f"bundle digest {m.group('digest')} (a carried book is missing from earlier generations, or "
+        f"more than {MAX_DROPPED_BOOKS} books were dropped at once)"
+    )
+
+
+def prefix_books(spec: SourceSpec) -> bool:
+    """Whether native ids carry ``<book>/`` (audit 2026-10-11 H4).
+
+    ``access.prefix_books`` pins it in the registry, so adding a book to a source never renames
+    every id of the books it already had (millions of removals and additions in the diff). Without
+    it the old rule holds: no prefix for a one-name selector, a prefix otherwise. Pin it for every
+    Kiwix source: ``false`` for a single book, ``true`` for a bundle.
+    """
+    pinned = access(spec).get("prefix_books")
+    if pinned is None:
+        return not Selector.from_spec(spec).single_book
+    if not isinstance(pinned, bool):
+        raise ValueError(f"{spec.id}: access.prefix_books must be true or false")
+    return pinned
+
+
 class KiwixOpdsAdapter:
     """Reference ``SourceAdapter`` for Kiwix ZIM files."""
 
@@ -320,7 +448,8 @@ class KiwixOpdsAdapter:
         meta: dict[str, str] = {"books": ",".join(e.name for e in chosen)}
         for entry in chosen:
             sums = parse_checksum_file(
-                ctx.fetcher.get_bytes(entry.file_url + ".sha256", max_bytes=64 * 1024).decode()
+                ctx.fetcher.get_bytes(entry.file_url + ".sha256", max_bytes=64 * 1024).decode(),
+                entry.file_name,
             )
             digest = sums.get(entry.file_name)
             files.append(
@@ -338,7 +467,7 @@ class KiwixOpdsAdapter:
         issued = [e.issued for e in chosen if e.issued is not None]
         release = ReleaseRef(
             source_id=spec.id,
-            version=max(e.zim_date for e in chosen),
+            version=release_version([e.file_name for e in chosen], bundle=not selector.single_book),
             published=max(issued) if issued else None,
             files=tuple(files),
             meta=meta,
@@ -353,7 +482,7 @@ class KiwixOpdsAdapter:
             data = ctx.fetcher.get_bytes(file_url + ".sha256", max_bytes=64 * 1024)
         except FetchError:
             return ()
-        digest = parse_checksum_file(data.decode("utf-8", "replace")).get(name)
+        digest = parse_checksum_file(data.decode("utf-8", "replace"), name).get(name)
         return (Checksum("sha256", digest),) if digest else ()
 
     def plan(self, ctx: Ctx, have: Generation | None, want: ReleaseRef) -> FetchPlan:
@@ -397,27 +526,55 @@ class KiwixOpdsAdapter:
     def documents(self, ctx: Ctx, generation_dir: Path) -> Iterator[DocRecord]:
         return (e for e in self.entries(ctx, generation_dir) if isinstance(e, DocRecord))
 
+    def content(self, ctx: Ctx, generation_dir: Path) -> dict[str, Path]:
+        """The generation's ZIMs by book key, in it or in earlier generations (:func:`bundle_content`)."""
+        return bundle_content(generation_dir, single_book=Selector.from_spec(ctx.source).single_book)
+
+    def depends_on(self, ctx: Ctx, generation_dir: Path) -> frozenset[str]:
+        """Earlier generations holding ZIMs this generation reads (``GenerationDependencies``)."""
+        holders = {holder_of(p) for p in self.content(ctx, generation_dir).values()}
+        return frozenset(holders - {generation_dir.name})
+
     def entries(self, ctx: Ctx, generation_dir: Path) -> Iterator[Entry]:
         spec = ctx.source
-        prefix_books = not Selector.from_spec(spec).single_book
-        workers = int_option(spec, "workers", default_workers())
-        for zim in sorted(upstream_dir(generation_dir).glob("*.zim")):
-            tasks = _zim_tasks(zim, spec.id, spec.license, prefix_books)
-            for chunk in ordered_parallel_map(_read_zim_chunk, tasks, workers):
-                yield from chunk
+        prefix = prefix_books(spec)
+        zims = self.content(ctx, generation_dir)
+        if not prefix and len(zims) > 1:
+            raise ValueError(
+                f"{spec.id}: access.prefix_books is false but the generation holds {len(zims)} books "
+                "(their ids would collide); pin prefix_books: true for a bundle"
+            )
+        with WorkerPool(workers_for(spec)) as pool:
+            for _, zim in sorted(zims.items()):
+                params = zim_params(zim, spec.id, spec.license, prefix, skip_pattern(spec))
+                yield from read_zim(zim, params, workdir=ctx.workdir, pool=pool)
 
 
 @dataclass(frozen=True, slots=True)
-class _ZimTask:
-    path: Path
-    start: int
-    stop: int
+class ZimParams:
+    """What every document of one ZIM shares."""
+
     source_id: str
     license: str
     prefix: str  # "" or "<book>/"
     lang: str
     revision: str
     timestamp: datetime | None
+    skip: str = ""  # regex of entry paths that are not documents (listing pages)
+
+
+# Listing pages of Stack Exchange ZIMs ("questions_page=10", "users_page=3"): an index of other
+# pages, never content (audit 2026-10-11 M6). ``access.skip_paths`` replaces it per source.
+DEFAULT_SKIP_PATHS = (r"(?:questions|users|tags|badges|unanswered)_page=\d+",)
+
+
+def skip_pattern(spec: SourceSpec) -> str:
+    """One regex (full match) of the entry paths a source's refine leaves out."""
+    raw = access(spec).get("skip_paths")
+    patterns = DEFAULT_SKIP_PATHS if raw is None else str_list(raw)
+    for p in patterns:
+        re.compile(p)  # fail at configuration time, not in a worker
+    return "|".join(f"(?:{p})" for p in patterns)
 
 
 def book_name(archive: Archive, path: Path) -> str:
@@ -426,7 +583,7 @@ def book_name(archive: Archive, path: Path) -> str:
         name = archive.get_metadata("Name").decode("utf-8", errors="replace").strip()
         if name:
             return name
-    return _ZIM_DATE_RE.sub("", path.name).removesuffix(".zim")
+    return book_key(path.name)
 
 
 def _metadata(archive: Archive, key: str) -> str:
@@ -435,68 +592,82 @@ def _metadata(archive: Archive, key: str) -> str:
     return archive.get_metadata(key).decode("utf-8", errors="replace").strip()
 
 
-def _zim_tasks(path: Path, source_id: str, license_: str, prefix_books: bool) -> Iterator[_ZimTask]:
-    archive = Archive(path)
+def zim_params(path: Path, source_id: str, license_: str, prefix_books: bool, skip: str = "") -> ZimParams:
+    archive = Archive(path)  # metadata only; entries are read by wsp_adapters.zimscan
     lang3 = _metadata(archive, "Language").split(",")[0]
-    date = _metadata(archive, "Date")
-    prefix = f"{book_name(archive, path)}/" if prefix_books else ""
-    count = archive.entry_count
-    for start in range(0, count, _ZIM_CHUNK):
-        yield _ZimTask(
-            path=path,
-            start=start,
-            stop=min(start + _ZIM_CHUNK, count),
-            source_id=source_id,
-            license=license_,
-            prefix=prefix,
-            lang=_LANG3TO1.get(lang3, lang3 or "und"),
-            revision=path.stem,
-            timestamp=_parse_dt(date),
-        )
+    return ZimParams(
+        source_id=source_id,
+        license=license_,
+        prefix=f"{book_name(archive, path)}/" if prefix_books else "",
+        lang=_LANG3TO1.get(lang3, lang3 or "und"),
+        revision=path.stem,
+        timestamp=_parse_dt(_metadata(archive, "Date")),
+        skip=skip,
+    )
 
 
-_archives: dict[Path, Archive] = {}
-_archives_lock = threading.Lock()
+def _stable(path: str) -> bool:
+    """Representable as a stable id (PLAN §9.2): non-empty, no leading or trailing whitespace."""
+    return bool(path) and path == path.strip()
 
 
-def _open(path: Path) -> Archive:
-    with _archives_lock:
-        archive = _archives.get(path)
-        if archive is None:
-            archive = _archives[path] = Archive(path)
-        return archive
+@dataclass(frozen=True, slots=True)
+class _HtmlTask:
+    clusters: zimscan.ClusterTask
+    params: ZimParams
 
 
-def _read_zim_chunk(task: _ZimTask) -> list[Entry]:
-    """Worker: decode one slice of a ZIM's user entries (runs in a separate process)."""
-    archive = _open(task.path)
-    out: list[Entry] = []
-    for i in range(task.start, task.stop):
-        entry = archive._get_entry_by_id(i)  # pyright: ignore[reportPrivateUsage] - only id-ordered API
-        native_id = task.prefix + entry.path
-        if not entry.path or entry.path != entry.path.strip():
-            continue  # not representable as a stable id (PLAN §9.2)
-        if entry.is_redirect:
-            target = entry.get_redirect_entry()
-            out.append(Redirect(native_id, task.prefix + target.path))
+def _read_html(task: _HtmlTask) -> list[DocRow]:
+    """Worker: the documents of one run of clusters, as :func:`doc_row` tuples (separate process)."""
+    p = task.params
+    skip = re.compile(p.skip) if p.skip else None
+    out: list[DocRow] = []
+    for blob in zimscan.read_clusters(task.clusters):
+        if not _stable(blob.path) or (skip is not None and skip.fullmatch(blob.path)):
             continue
-        item = entry.get_item()
-        if not item.mimetype.startswith("text/html"):
-            continue
-        text = html_to_text(bytes(item.content))
+        native_id = p.prefix + blob.path
+        text = html_to_text(blob.content)
         out.append(
-            DocRecord(
-                doc_id=make_doc_id(task.source_id, native_id),
-                source_id=task.source_id,
-                native_id=native_id,
-                title=entry.title or entry.path,
-                lang=task.lang,
-                license=task.license,
-                text=text,
-                revision=task.revision,
-                timestamp=task.timestamp,
-                html_ref=f"zim:{native_id}",
-                content_hash=content_hash(text),
+            doc_row(
+                DocRecord(
+                    doc_id=make_doc_id(p.source_id, native_id),
+                    source_id=p.source_id,
+                    native_id=native_id,
+                    title=blob.title,
+                    lang=p.lang,
+                    license=p.license,
+                    text=text,
+                    revision=p.revision,
+                    timestamp=p.timestamp,
+                    html_ref=f"zim:{native_id}",
+                    content_hash=content_hash(text),
+                )
             )
         )
     return out
+
+
+def read_zim(path: Path, params: ZimParams, *, workdir: Path, pool: WorkerPool) -> Iterator[Entry]:
+    """Every HTML document of a ZIM (cluster order), then every redirect (entry order).
+
+    The directory is scanned once into ``workdir`` (local disk; removed afterwards), then clusters
+    are decoded in runs of up to ``zimscan.TASK_BYTES`` compressed bytes, each once.
+    """
+    workdir.mkdir(parents=True, exist_ok=True)
+    root = Path(tempfile.mkdtemp(prefix=f"zimscan-{path.stem[:40]}-", dir=workdir))
+    try:
+        scan, tasks = zimscan.scan_tasks(path, root)
+        for _ in pool.map(zimscan.scan_window, tasks):
+            pass
+        with path.open("rb") as fh:
+            offsets = zimscan.cluster_offsets(fh, scan.header, dirents_at=scan.dirents_at())
+        html = (_HtmlTask(t, params) for t in zimscan.content_tasks(scan, offsets))
+        # window: results in flight; each is at most zimscan.TASK_BYTES of compressed HTML as text
+        for rows in pool.map(_read_html, html, window=pool.workers + 1):
+            yield from map(doc_from_row, rows)
+        for pairs in pool.map(zimscan.read_redirects, zimscan.redirect_tasks(scan)):
+            for source, target in pairs:
+                if _stable(source):
+                    yield Redirect(params.prefix + source, params.prefix + target)
+    finally:
+        zimscan.remove_scan(root)

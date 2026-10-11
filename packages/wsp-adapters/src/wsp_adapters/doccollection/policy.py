@@ -27,8 +27,10 @@ defensive or civil document is not caught by a bare noun. Bare nouns (``explosiv
 
 from __future__ import annotations
 
+import functools
 import re
-from collections.abc import Iterable, Mapping, Sequence
+import unicodedata
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
@@ -212,43 +214,133 @@ NEUTRAL_PHRASES: tuple[str, ...] = (
 )
 
 
-def _phrase_re(phrases: Iterable[str]) -> re.Pattern[str] | None:
-    items = sorted({p.casefold().strip() for p in phrases if p.strip()}, key=len, reverse=True)
+# --- text normalization (every stage matches on normalized text) ---------------------------------
+#
+# PDF text layers and index pages spell the same words many ways: ligatures (``ﬁ``), fullwidth
+# letters, non-breaking or soft hyphens, zero-width joiners, words hyphenated across a line break
+# and letter-spaced headings (``F I R E  C O N T R O L``). Each of these used to slip past the
+# phrase lists (2026-10-11 audit, adapters C3), so the screens match on :func:`normalize_text` and,
+# in addition, on the joined and de-spaced copies :func:`screen_variants` derives from it.
+
+# Unicode 15 general category Pd (dash punctuation), plus the minus sign and the hyphen bullet.
+# ``test_dash_table_covers_unicode_pd`` checks this list against ``unicodedata``.
+DASHES = (
+    "-\u058a\u05be\u1400\u1806\u2010\u2011\u2012\u2013\u2014\u2015\u2e17\u2e1a\u2e3a\u2e3b"
+    "\u2e40\u2e5d\u301c\u3030\u30a0\ufe31\ufe32\ufe58\ufe63\uff0d\U00010ead\u2212\u2043"
+)
+# Format characters that render as nothing: soft hyphen, zero-width space/joiners, word joiner, BOM.
+INVISIBLE = "\u00ad\u200b\u200c\u200d\u2060\ufeff"
+_TRANSLATE = {**dict.fromkeys(map(ord, INVISIBLE)), **{ord(d): "-" for d in DASHES}}
+_HYPHEN_BREAK_RE = re.compile(r"(\w)-[ \t]*\r?\n\s*(\w)")
+# Three or more single letters/digits separated by runs of 1-3 spaces: a letter-spaced heading.
+_SPACED_RUN_RE = re.compile(r"(?<!\w)(?:\w[ \t]{1,3}){2,}\w(?!\w)")
+_WIDE_GAP_RE = re.compile(r"[ \t]{2,}")
+
+
+def normalize_text(text: str) -> str:
+    """NFKC, invisible format characters removed, every Unicode dash mapped to ``-``."""
+    return unicodedata.normalize("NFKC", text).translate(_TRANSLATE)
+
+
+def screen_variants(text: str) -> tuple[str, str]:
+    """``(words, squeezed)`` for already-normalized ``text``.
+
+    ``words`` is the text followed by a copy with hyphenated line breaks joined
+    (``weapon-\\nization`` -> ``weaponization``) and a copy of every letter-spaced run with the
+    single spaces removed (``F I R E  C O N T R O L`` -> ``FIRE CONTROL``); the phrase lists match
+    on it with their usual word boundaries. ``squeezed`` holds each letter-spaced run with all
+    whitespace removed (``FIRECONTROL``), for the boundary-free pattern of :func:`_loose_re`:
+    uniformly letter-spaced text has no word gaps left to match on.
+    """
+    parts = [text]
+    joined = _HYPHEN_BREAK_RE.sub(r"\1\2", text)
+    if joined != text:
+        parts.append(joined)
+    runs = [m.group(0) for m in _SPACED_RUN_RE.finditer(text)]
+    if runs:
+        parts.append(
+            "\n".join(
+                " ".join(w.replace(" ", "").replace("\t", "") for w in _WIDE_GAP_RE.split(r)) for r in runs
+            )
+        )
+    squeezed = "\n".join(re.sub(r"\s+", "", r) for r in runs)
+    return "\n\n".join(parts), squeezed
+
+
+def _squeeze(phrase: str) -> str:
+    return re.sub(r"[\s\-]+", "", phrase)
+
+
+@dataclass(frozen=True, slots=True)
+class PhraseList:
+    """A phrase list compiled for matching: word-bounded on text, boundary-free on squeezed runs."""
+
+    words: re.Pattern[str] | None
+    loose: re.Pattern[str] | None
+    names: Mapping[str, str]  # squeezed phrase -> phrase (to report a squeezed hit by its name)
+
+    def hits(self, text: Screened) -> list[str]:
+        """Distinct phrases found (casefolded, single-spaced), in order of first appearance."""
+        seen: dict[str, None] = {}
+        if self.words is not None:
+            for m in self.words.finditer(text.words):
+                seen.setdefault(re.sub(r"[\s\-]+", " ", m.group(0).casefold()))
+        if self.loose is not None and text.squeezed:
+            for m in self.loose.finditer(text.squeezed):
+                seen.setdefault(self.names[m.group(0).casefold()])
+        return list(seen)
+
+
+@functools.lru_cache(maxsize=512)
+def phrase_list(phrases: tuple[str, ...]) -> PhraseList:
+    items = sorted(
+        {normalize_text(p).casefold().strip() for p in phrases if p.strip()}, key=len, reverse=True
+    )
     if not items:
-        return None
+        return PhraseList(None, None, {})
     body = "|".join(re.escape(p).replace(r"\ ", r"[\s\-]+") for p in items)
-    return re.compile(rf"(?<![\w-])(?:{body})(?![\w-])", re.IGNORECASE)
+    words = re.compile(rf"(?<![\w-])(?:{body})(?![\w-])", re.IGNORECASE)
+    names = {_squeeze(p): re.sub(r"[\s\-]+", " ", p) for p in items}
+    loose = re.compile("|".join(re.escape(k) for k in sorted(names, key=len, reverse=True)), re.IGNORECASE)
+    return PhraseList(words, loose, names)
 
 
-_NEUTRAL_RE = _phrase_re(NEUTRAL_PHRASES)
-
-
-def _neutralize(text: str, extra: re.Pattern[str] | None) -> str:
+def _neutralize(text: str, extra: tuple[str, ...]) -> str:
     out = text
-    for pattern in (_NEUTRAL_RE, extra):
+    for phrases in (NEUTRAL_PHRASES, extra):
+        pattern = phrase_list(phrases).words
         if pattern is not None:
             out = pattern.sub(" ", out)
     return out
 
 
-def _hits(pattern: re.Pattern[str] | None, text: str) -> list[str]:
-    if pattern is None:
-        return []
-    seen: list[str] = []
-    for m in pattern.finditer(text):
-        word = re.sub(r"[\s\-]+", " ", m.group(0).casefold())
-        if word not in seen:
-            seen.append(word)
-    return seen
+@dataclass(frozen=True, slots=True)
+class Screened:
+    """Text prepared for phrase matching: normalized words (with variants) and squeezed runs."""
+
+    words: str
+    squeezed: str
+
+    @staticmethod
+    def of(text: str, neutral: tuple[str, ...] = ()) -> Screened:
+        words, squeezed = screen_variants(normalize_text(text))
+        # Neutral phrases are blanked in the word copy only: a squeezed run has no word boundaries
+        # left, so blanking there could hide a deny phrase that shares letters with a neutral one.
+        return Screened(_neutralize(words, neutral), squeezed)
 
 
 # --- rules -----------------------------------------------------------------------------------------
 
 
 def normalize_pub_number(value: str) -> str:
-    """``fm 5-0`` / ``FM5-0`` / ``FM  5-0`` -> ``FM 5-0`` (series letters, one space, the number)."""
-    text = re.sub(r"\s+", " ", value.strip()).upper()
-    return re.sub(r"^([A-Z][A-Z/&.]*)\s*(?=\d)", r"\1 ", text)
+    """``fm 5-0`` / ``FM5-0`` / ``FM-5-0`` / ``FM\u00a05\u20110`` -> ``FM 5-0``.
+
+    Series letters, one space, the number; NFKC, every Unicode dash as ``-`` and no spaces around
+    a dash inside the number (``FM 3 - 22.9``), so a deny-series rule cannot be dodged by spelling.
+    """
+    text = re.sub(r"\s+", " ", normalize_text(value).strip()).upper()
+    text = re.sub(r"^([A-Z][A-Z/&.]*)[\s\-_]*(?=\d)", r"\1 ", text)
+    return re.sub(r"(?<=\w) ?- ?(?=\w)", "-", text)
 
 
 @dataclass(frozen=True, slots=True)
@@ -272,10 +364,14 @@ class Rules:
     # room, FRUS) turn it off; the built-in deny list and the front-matter screens always apply.
     builtin_review: bool = True
     safety: bool = True  # built-in §13 lists; never disabled in the registry (tests only)
+    # A fetched file with no text to screen (a scanned PDF without a text layer) is held for review
+    # unless the source is known to publish image-only scans and says so here. Unsupported formats
+    # and extraction errors are held regardless.
+    allow_image_only: bool = False
 
     @property
-    def deny_pattern(self) -> re.Pattern[str] | None:
-        return _phrase_re((*SAFETY_DENY,) if self.safety else ())
+    def deny_phrases(self) -> PhraseList:
+        return phrase_list(SAFETY_DENY if self.safety else ())
 
     def merged(self, other: Mapping[str, Any]) -> Rules:
         """These rules plus a mapping (registry filter block or rules file); lists are unioned."""
@@ -292,6 +388,13 @@ def _strs(value: object) -> tuple[str, ...]:
     raise ValueError(f"expected a string or a list, got {value!r}")
 
 
+def _normalize_prefix(value: str) -> str:
+    """A series prefix spelled as :func:`normalize_pub_number` spells numbers (trailing space kept)."""
+    text = re.sub(r"\s+", " ", normalize_text(value)).upper().lstrip()
+    text = re.sub(r"^([A-Z][A-Z/&.]*)[\s\-_]*(?=\d)", r"\1 ", text)
+    return re.sub(r"(?<=\w) ?- ?(?=\w)", "-", text)
+
+
 def _rules_kwargs(data: Mapping[str, Any], *, base: Rules) -> dict[str, Any]:
     out: dict[str, Any] = {}
     sets = ("allow_series", "deny_series", "allow_documents", "deny_documents")
@@ -301,7 +404,8 @@ def _rules_kwargs(data: Mapping[str, Any], *, base: Rules) -> dict[str, Any]:
             out[key] = frozenset(getattr(base, key) | norm)
     for key in ("allow_series_prefix", "deny_series_prefix"):
         if key in data:
-            out[key] = tuple(dict.fromkeys([*getattr(base, key), *(s.upper() for s in _strs(data[key]))]))
+            prefixes = (_normalize_prefix(s) for s in _strs(data[key]))
+            out[key] = tuple(dict.fromkeys([*getattr(base, key), *prefixes]))
     for key in ("deny_keywords", "review_keywords", "neutral_phrases"):
         if key in data:
             out[key] = tuple(dict.fromkeys([*getattr(base, key), *_strs(data[key])]))
@@ -311,6 +415,8 @@ def _rules_kwargs(data: Mapping[str, Any], *, base: Rules) -> dict[str, Any]:
         out["declassified_ok"] = bool(data["declassified_ok"])
     if "builtin_review" in data:
         out["builtin_review"] = bool(data["builtin_review"])
+    if "allow_image_only" in data:
+        out["allow_image_only"] = bool(data["allow_image_only"])
     if "default" in data:
         out["default"] = Verdict(str(data["default"]))
     dist = data.get("distribution")
@@ -349,7 +455,7 @@ def _series_matches(pub: str, series: frozenset[str], prefixes: Sequence[str]) -
     base = pub.split(" C")[0] if re.search(r" C\d+$", pub) else pub
     if base in series:
         return base
-    return next((p for p in prefixes if pub.startswith(p.upper())), None)
+    return next((p for p in prefixes if pub.startswith(p)), None)
 
 
 @dataclass(frozen=True, slots=True)
@@ -391,22 +497,21 @@ def classify_metadata(doc: DocFacts, rules: Rules) -> Decision:
         if gate.verdict is Verdict.DENY:
             return replace(gate, stage=Stage.METADATA)
     owner_allowed = bool(keys & rules.allow_documents)
-    neutral = _phrase_re(rules.neutral_phrases)
-    heading = _neutralize(doc.heading, neutral)
-    text = _neutralize(doc.text, neutral)
-    if not owner_allowed and (hits := _hits(rules.deny_pattern, heading)):
+    heading = Screened.of(doc.heading, rules.neutral_phrases)
+    text = Screened.of(doc.text, rules.neutral_phrases)
+    if not owner_allowed and (hits := rules.deny_phrases.hits(heading)):
         return Decision(Verdict.DENY, f"safety={hits[0]}")
-    if not owner_allowed and (hits := _hits(rules.deny_pattern, text)):
+    if not owner_allowed and (hits := rules.deny_phrases.hits(text)):
         return Decision(Verdict.REVIEW, f"safety-abstract={hits[0]}")
     if hit := _series_matches(pub, rules.deny_series, rules.deny_series_prefix):
         return Decision(Verdict.DENY, f"deny-series={hit.strip()}")
-    if not owner_allowed and (hits := _hits(_phrase_re(rules.deny_keywords), text)):
+    if not owner_allowed and (hits := phrase_list(rules.deny_keywords).hits(text)):
         return Decision(Verdict.DENY, f"keyword={hits[0]}")
     if owner_allowed:
         return Decision(Verdict.ALLOW, "owner=allow")
     builtin = rules.safety and rules.builtin_review
     review = (*SAFETY_REVIEW, *rules.review_keywords) if builtin else rules.review_keywords
-    if hits := _hits(_phrase_re(review), text):
+    if hits := phrase_list(review).hits(text):
         return Decision(Verdict.REVIEW, f"keyword={hits[0]}")
     if hit := _series_matches(pub, rules.allow_series, rules.allow_series_prefix):
         return Decision(Verdict.ALLOW, f"series={hit.strip()}")
@@ -422,18 +527,27 @@ def classify_metadata(doc: DocFacts, rules: Rules) -> Decision:
 class Marking:
     """Distribution and handling markings found in a document's front matter or rights field."""
 
-    statement: str | None = None  # "A".."F" from "DISTRIBUTION STATEMENT X"
+    statement: str | None = None  # the most restrictive "A".."F" of every "DISTRIBUTION STATEMENT X"
     public_release: bool = False  # "approved for public release" (distribution unlimited)
     restricted: tuple[str, ...] = ()  # FOUO, CUI, classification banners, limited distribution ...
     export_control: tuple[str, ...] = ()  # ITAR, EAR, export warnings
     released: bool = False  # declassification / FOIA release stamp
     text: str = ""  # the verbatim distribution sentence, for audit
+    public_domain: bool = False  # "public domain" / "not subject to copyright" (not negated)
+    # The normalized text the marking was read from, kept to test ``license:<SPDX>`` requirements.
+    screened: str = field(default="", repr=False, compare=False)
 
     @property
     def distribution(self) -> str:
         if self.statement:
             return self.statement
-        return "public-release" if self.public_release else ""
+        if self.public_release:
+            return "public-release"
+        return "PD" if self.public_domain else ""
+
+    def has_license(self, spdx: str) -> bool:
+        """The front matter states licence ``spdx`` (see :func:`license_pattern`)."""
+        return license_pattern(spdx).search(self.screened) is not None
 
 
 _I = re.IGNORECASE
@@ -475,18 +589,64 @@ _RELEASE_RE = re.compile(
 )
 
 
+_PD_RE = re.compile(
+    r"\bpublic\s+domain\b|\bnot\s+subject\s+to\s+(?:u\.?\s?s\.?\s+)?copyright\b|"
+    r"\bno\s+copyright\s+(?:is\s+)?claimed\b",
+    _I,
+)
+_NEGATION_RE = re.compile(r"\b(?:not|never|no\s+longer)\b(?:\s+\w+){0,3}\s*$", _I)
+_CC_PARTS = {"BY": "attribution", "NC": "non-?commercial", "SA": "share-?alike", "ND": "no-?deriv\\w*"}
+_LICENSE_NAMES: dict[str, str] = {
+    "OGL-UK-3.0": r"open\s+government\s+licen[cs]e(?:\s+for\s+public\s+sector\s+information)?[\s,]*"
+    r"v(?:ersion)?\.?\s*3(?:\.0)?\b|open-government-licen[cs]e/version/3\b",
+}
+
+
+@functools.lru_cache(maxsize=64)
+def license_pattern(spdx: str) -> re.Pattern[str]:
+    """How front matter states licence ``spdx``: its SPDX id with any separators, a Creative Commons
+    deed URL or long name, or a known name (``Open Government Licence v3.0``)."""
+    tokens = [t for t in re.split(r"[\s\-_]+", spdx.strip()) if t]
+    sep = r"[\s\-_/]*"
+    alts = [r"(?<![\w.])" + sep.join(re.escape(t) for t in tokens) + r"(?!\w|\.\d)"]
+    if tokens and tokens[0].upper() == "CC" and len(tokens) > 1:
+        rest = tokens[1:]
+        alts.append(
+            r"creativecommons\.org/licenses/" + "[-/]".join(re.escape(t.lower()) for t in rest) + r"\b"
+        )
+        long = [_CC_PARTS.get(t.upper(), re.escape(t)) for t in rest]
+        alts.append(r"creative\s+commons\s+" + r"[\s\-]*".join(long) + r"\b")
+    if spdx in _LICENSE_NAMES:
+        alts.append(_LICENSE_NAMES[spdx])
+    return re.compile("|".join(f"(?:{a})" for a in alts), _I)
+
+
+def _public_domain(text: str) -> bool:
+    """A public-domain statement that is not negated ("is not in the public domain")."""
+    return any(
+        not _NEGATION_RE.search(text[max(0, m.start() - 40) : m.start()]) for m in _PD_RE.finditer(text)
+    )
+
+
 def parse_markings(text: str) -> Marking:
-    """Find distribution, handling and export markings in front-matter text (deterministic)."""
-    statement = None
+    """Find distribution, handling and export markings in front-matter text (deterministic).
+
+    The text is normalized first, and its joined and de-spaced copies are read as well
+    (:func:`screen_variants`). Every ``DISTRIBUTION STATEMENT`` is read and the most restrictive
+    one wins: a page that says "A" and later "D" is a "D" document.
+    """
+    words, _squeezed = screen_variants(normalize_text(text))
+    statements = sorted({m.group(1).upper() for m in _STATEMENT_RE.finditer(words)})
+    statement = statements[-1] if statements else None  # "A" < "B" < ... < "F" (most restrictive)
     excerpt = ""
-    if m := _STATEMENT_RE.search(text):
-        statement = m.group(1).upper()
-        excerpt = _sentence(text, m.start())
-    public = _PUBLIC_RE.search(text)
+    if statement is not None:
+        first = next(m for m in _STATEMENT_RE.finditer(words) if m.group(1).upper() == statement)
+        excerpt = _sentence(words, first.start())
+    public = _PUBLIC_RE.search(words)
     if public and not excerpt:
-        excerpt = _sentence(text, public.start())
-    restricted = tuple(name for name, rx in _RESTRICTED if rx.search(text))
-    export = tuple(name for name, rx in _EXPORT if rx.search(text))
+        excerpt = _sentence(words, public.start())
+    restricted = tuple(name for name, rx in _RESTRICTED if rx.search(words))
+    export = tuple(name for name, rx in _EXPORT if rx.search(words))
     if statement is None and public is not None and "distribution-limited" not in restricted:
         statement = "A" if re.search(r"unlimited", public.group(0), _I) else None
     return Marking(
@@ -494,8 +654,10 @@ def parse_markings(text: str) -> Marking:
         public_release=public is not None,
         restricted=restricted,
         export_control=export,
-        released=_RELEASE_RE.search(text) is not None,
+        released=_RELEASE_RE.search(words) is not None,
         text=excerpt,
+        public_domain=_public_domain(words),
+        screened=words,
     )
 
 
@@ -509,7 +671,14 @@ def _sentence(text: str, at: int) -> str:
 def check_distribution(
     marking: Marking, require: Sequence[str], *, declassified_ok: bool = False
 ) -> Decision:
-    """The distribution gate (research doc §3.1, §5.2 ``verify`` step 2)."""
+    """The distribution gate (research doc §3.1, §5.2 ``verify`` step 2).
+
+    Restrictive markings deny. Otherwise every configured requirement is a marking the front
+    matter must actually carry (any one of them suffices): ``A`` a Distribution Statement A,
+    ``public-release`` an "approved for public release" statement, ``PD`` a public-domain
+    statement, ``license:<SPDX>`` that licence named, ``declassified`` a release stamp. A
+    requirement that is not met holds the document for review; nothing is allowed on trust.
+    """
     st = Stage.DISTRIBUTION
     if marking.export_control:
         return Decision(Verdict.DENY, f"marking=export-control:{marking.export_control[0]}", st, alert=True)
@@ -523,9 +692,11 @@ def check_distribution(
     for req in require:
         if req.upper() == "A" and marking.statement == "A":
             return Decision(Verdict.ALLOW, "marking=distribution-A", st)
-        if req == "public-release":
+        if req == "public-release" and marking.public_release:
             return Decision(Verdict.ALLOW, "marking=public-release", st)
-        if req.startswith("license:") or req == "PD":
+        if req == "PD" and marking.public_domain:
+            return Decision(Verdict.ALLOW, "marking=PD", st)
+        if req.startswith("license:") and marking.has_license(req.removeprefix("license:")):
             return Decision(Verdict.ALLOW, f"marking={req}", st)
         if req == "declassified" and marking.released:
             return Decision(Verdict.ALLOW, "marking=declassified", st)
@@ -538,17 +709,18 @@ def classify_content(front_matter: str, rules: Rules, *, title_page_chars: int =
     A safety phrase on the title page, or three or more distinct safety phrases anywhere in the
     front matter, mean the document's primary content is out of scope: deny. Fewer hits: review.
     """
-    neutral = _phrase_re(rules.neutral_phrases)
-    text = _neutralize(front_matter, neutral)
     st = Stage.CONTENT
-    deny_re = rules.deny_pattern
-    title_hits = _hits(deny_re, text[:title_page_chars])
-    all_hits = _hits(deny_re, text)
+    normalized = normalize_text(front_matter)
+    title = Screened.of(normalized[:title_page_chars], rules.neutral_phrases)
+    full = Screened.of(normalized, rules.neutral_phrases)
+    deny = rules.deny_phrases
+    title_hits = deny.hits(title)
+    all_hits = deny.hits(full)
     if title_hits:
         return Decision(Verdict.DENY, f"safety={title_hits[0]}", st)
     if len(all_hits) >= 3:
         return Decision(Verdict.DENY, f"safety={'+'.join(all_hits[:3])}", st)
-    source_deny = _hits(_phrase_re(rules.deny_keywords), text[:title_page_chars])
+    source_deny = phrase_list(rules.deny_keywords).hits(title)
     if source_deny:
         return Decision(Verdict.DENY, f"keyword={source_deny[0]}", st)
     if all_hits:

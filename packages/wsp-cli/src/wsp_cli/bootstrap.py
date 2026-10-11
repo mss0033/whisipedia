@@ -12,7 +12,8 @@ Real backends (selected when ``[api] backend = "real"``, or ``"auto"`` and ``vau
 * ``HttpFetcher`` (or ``Aria2Fetcher`` with ``acquirer.fetcher = "aria2"``) and the adapters registered
   under the ``whisipedia.adapters`` entry points;
 * the manifest/ledger signer from ``vault.signing_key``. Without one, an Ed25519 key is generated on
-  first use under ``$XDG_CONFIG_HOME/whisipedia/`` (``~/.config/whisipedia/``), never inside the repo.
+  first use under ``$XDG_CONFIG_HOME/whisipedia/`` (``~/.config/whisipedia/``), never inside the repo,
+  and only while the vault holds no signed content (see :func:`load_signer`).
 
 Otherwise the in-memory sample library from :mod:`wsp_api.testing.fakes` backs the API.
 """
@@ -293,9 +294,18 @@ def load_signer(
     """The vault's manifest/ledger signer (``[vault] signer`` = ``ed25519`` | ``ssh``).
 
     ``ed25519`` reads a PKCS#8 PEM from ``vault.signing_key`` (default
-    ``<config home>/vault-signing-ed25519.pem``) and generates it on first use when ``create`` is set.
-    With ``create=False`` and no key, an ephemeral in-memory key is used (dry runs only: it can sign
-    nothing that is kept). Keys inside the repository checkout are refused.
+    ``<config home>/vault-signing-ed25519.pem``). Keys inside the repository checkout are refused.
+
+    When that file is missing (vault-fetch audit #1):
+
+    * ``create=True`` generates a key **only if the vault has no signed content yet** (no published
+      key under ``keys/`` and no signed manifest). Otherwise :class:`ConfigError` explains how to
+      restore the key: a new key would make every existing manifest look forged.
+    * ``create=False`` (readers, dry runs) returns a verify-only keyring of the vault's published
+      keys, or, for a vault without any, an ephemeral key that can sign nothing that is kept.
+
+    Whatever key is loaded, :class:`~wsp_vault.vault.FileVault` refuses to write with one that is
+    not pinned under ``keys/``.
     """
     from wsp_vault.signing import Ed25519Signer, SshSigner
 
@@ -311,8 +321,24 @@ def load_signer(
         raise ConfigError(f"unknown vault.signer {kind!r} (ed25519 | ssh)")
     if key.is_file():
         return Ed25519Signer.from_private_pem(key.read_bytes())
+    from wsp_vault.signing import KeyringVerifier
+    from wsp_vault.vault import first_signed_manifest, pinned_keys
+
+    root = paths(cfg).vault_root
+    pinned = pinned_keys(root) if root is not None and root.is_dir() else []
     if not create:
+        if pinned:
+            return KeyringVerifier.from_public_texts([text for _, text in pinned])
         return Ed25519Signer.generate()
+    signed = first_signed_manifest(root) if root is not None and root.is_dir() else None
+    if pinned or signed is not None:
+        labels = ", ".join(label for label, _ in pinned) or "none published"
+        raise ConfigError(
+            f"no signing key at {key}, but the vault at {root} already holds signed content (pinned "
+            f"keys: {labels}). Refusing to create a new key: it would make every existing manifest "
+            "look forged. Restore the original private key from your backup to that path, or point "
+            "vault.signing_key (WSP__VAULT__SIGNING_KEY) at it."
+        )
     signer = Ed25519Signer.generate()
     key.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     fd = os.open(key, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -332,12 +358,17 @@ def build_vault(
     cfg: Mapping[str, Any], specs: Sequence[SourceSpec], signer: Signer, *, ledger: bool = True
 ) -> FileVault:
     """``FileVault`` at ``vault.root`` with registry domains and (optionally) the ledger attached."""
+    from wsp_cli.locks import lock_dir_for
     from wsp_vault.parity import Par2Parity
     from wsp_vault.vault import FileVault, domains_from_specs, partitioned_from_specs
 
     p = paths(cfg)
     root = p.require_vault()
     parity = Par2Parity() if section(cfg, "vault").get("parity", True) and _has_par2() else None
+    # Vault mutation locks: their own sub-directory (own namespace) of the machine's local lock dir.
+    # They are taken inside FileVault calls only, so any wsp_cli lock (SCRUB, INGEST, ...) a caller
+    # holds is always taken first: one order, no deadlock.
+    lock_dir = None if p.index_root is None else lock_dir_for(p.index_root) / "vault"
     return FileVault(
         root,
         signer,
@@ -345,6 +376,7 @@ def build_vault(
         partitioned=partitioned_from_specs(specs),
         ledger=build_ledger(cfg, signer) if ledger else None,
         parity=parity,
+        lock_dir=lock_dir,
     )
 
 

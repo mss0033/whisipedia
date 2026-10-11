@@ -75,7 +75,9 @@ from wsp_orchestrator.versions import version_key
 
 log = logging.getLogger("wsp.orchestrator")
 
-ScrubHook = Callable[[int, int], None]  # (slice_index, slice_count) - Warden rolling scrub (PLAN §8.2)
+ScrubHook = Callable[[int, int], "Mapping[str, object] | None"]
+"""(slice_index, slice_count) - Warden rolling scrub (PLAN §8.2). May return ``{"critical": why}``
+(the repair circuit opened or the signing key is foreign: nothing was touched, the owner must look)."""
 DrillHook = Callable[[], Mapping[str, object]]  # monthly chaos drill; must return {"ok": bool, ...}
 DiscoveryHook = Callable[[], Iterable[Candidate]]  # Curator discovery bots (PLAN §5.3)
 PrunerHook = Callable[[str, str], None]  # retire one generation (source_id, generation_id): moved aside
@@ -826,7 +828,19 @@ class Orchestrator:
     def _scrub_slice(self, job: Job) -> JobResult:
         index, count = int(job.payload["slice"]), int(job.payload["slices"])
         if self.wiring.scrub is not None:
-            self.wiring.scrub(index, count)
+            result = self.wiring.scrub(index, count) or {}
+            critical = result.get("critical")
+            if critical:
+                self.alerter.raise_(
+                    Alert(
+                        "vault-integrity",
+                        Severity.CRITICAL,
+                        f"scrub stopped without repairing anything: {critical}",
+                        {"slice": index},
+                    )
+                )
+            else:
+                self.alerter.resolve("vault-integrity")
         self.scheduler.scrub_slice_done(index)
         return JobResult()
 

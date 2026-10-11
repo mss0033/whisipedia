@@ -35,14 +35,28 @@ class PartialState:
     validator: str | None = None  # ETag or Last-Modified of the primary URL
     done: dict[int, str] = field(default_factory=dict[int, str])  # piece index -> piece digest
 
-    def same_target(self, other: PartialState) -> bool:
+    def same_target(self, other: PartialState, *, require_validator: bool = True) -> bool:
+        """Whether a partial file left by ``self`` may be resumed for ``other``.
+
+        ``require_validator`` (the default): both runs must have seen the same ETag/Last-Modified of
+        the primary URL. A missing validator on either side means the upstream file may have changed
+        in between, and splicing old and new bytes would make a file nobody published (vault-fetch
+        audit #8). Only when every resumed piece is checked against upstream (Metalink) piece hashes
+        may a validator be missing.
+        """
+        if require_validator:
+            validators = self.validator is not None and self.validator == other.validator
+        else:
+            validators = (
+                self.validator is None or other.validator is None or self.validator == other.validator
+            )
         return (
             self.url == other.url
             and self.size == other.size
             and self.piece_size == other.piece_size
             and self.piece_algorithm == other.piece_algorithm
             and self.checksums == other.checksums
-            and (self.validator is None or other.validator is None or self.validator == other.validator)
+            and validators
         )
 
     def to_json(self) -> str:

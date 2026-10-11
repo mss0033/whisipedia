@@ -39,7 +39,6 @@ from xml.etree import ElementTree as ET
 
 from wsp_adapters._common import (
     access,
-    default_workers,
     fetch_all,
     int_option,
     ordered_parallel_map,
@@ -47,6 +46,7 @@ from wsp_adapters._common import (
     str_list,
     upstream_dir,
     verify_file,
+    workers_for,
 )
 from wsp_adapters._streams import Bitset, open_bz2, text_lines
 from wsp_adapters.html_text import html_to_text
@@ -185,7 +185,7 @@ class CourtListenerAdapter:
 
     def documents(self, ctx: Ctx, generation_dir: Path) -> Iterator[DocRecord]:
         spec = ctx.source
-        workers = int_option(spec, "workers", default_workers())
+        workers = workers_for(spec)
         files: dict[str, Path] = {}
         for path in upstream_dir(generation_dir).iterdir():
             if path.name.endswith(".csv.bz2") and (table := table_of(path.name)):

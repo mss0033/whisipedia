@@ -99,6 +99,8 @@ def classify(exc: BaseException, *, storage_available: Callable[[], bool] | None
         return FailureKind.BUSY
     if "lockbusy" in text or "failed to acquire lockfile" in text:  # tantivy's IndexWriter lock
         return FailureKind.BUSY
+    if type(exc).__name__ == "FetchLockedError":  # another process downloads the same file (wsp_fetch)
+        return FailureKind.BUSY
     if isinstance(exc, OSError):
         if exc.errno in _RESOURCE_ERRNOS:
             return FailureKind.RESOURCE

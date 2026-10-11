@@ -446,18 +446,16 @@ class ArxivAdapter:
 
     # --- documents -------------------------------------------------------------------------------
 
+    def depends_on(self, ctx: Ctx, generation_dir: Path) -> frozenset[str]:
+        """Every earlier metadata generation (their harvests are unioned) and every PDF part
+        generation (``html_ref`` points into them): retention must keep them (``GenerationDependencies``)."""
+        parts = {p.name for p in generation_dir.parent.iterdir() if p.is_dir() and PART_RE.match(p.name)}
+        return frozenset({g for g, _ in harvests_upto(generation_dir)} | parts) - {generation_dir.name}
+
     def documents(self, ctx: Ctx, generation_dir: Path) -> Iterator[DocRecord]:
         spec = ctx.source
         source_dir = generation_dir.parent
-        me = generation_dir.name
-        harvests: list[tuple[str, Path]] = []
-        gens = sorted(p for p in source_dir.iterdir() if p.is_dir() and not PART_RE.match(p.name))
-        for gen in gens:
-            if gen.name > me and gen != generation_dir:
-                continue
-            up = upstream_dir(gen)
-            harvests += [(gen.name, p) for p in up.glob("oai-arXiv-*.jsonl.zst") if HARVEST_RE.match(p.name)]
-        harvests.sort(key=lambda gp: (gp[0], gp[1].name), reverse=True)
+        harvests = harvests_upto(generation_dir)
         want_text = bool(access(spec).get("pdf_text", False))
         max_pages = int_option(spec, "pdf_max_pages", 30)
         ctx.workdir.mkdir(parents=True, exist_ok=True)
@@ -481,6 +479,20 @@ class ArxivAdapter:
                     yield paper_record(paper, spec.id, spec.license, pdf, full)
         finally:
             pdfs.close()
+
+
+def harvests_upto(generation_dir: Path) -> list[tuple[str, Path]]:
+    """``(generation, harvest file)`` of every metadata generation up to this one, newest first."""
+    me = generation_dir.name
+    harvests: list[tuple[str, Path]] = []
+    gens = sorted(p for p in generation_dir.parent.iterdir() if p.is_dir() and not PART_RE.match(p.name))
+    for gen in gens:
+        if gen.name > me and gen != generation_dir:
+            continue
+        up = upstream_dir(gen)
+        harvests += [(gen.name, p) for p in up.glob("oai-arXiv-*.jsonl.zst") if HARVEST_RE.match(p.name)]
+    harvests.sort(key=lambda gp: (gp[0], gp[1].name), reverse=True)
+    return harvests
 
 
 def paper_record(
