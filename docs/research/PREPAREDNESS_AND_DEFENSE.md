@@ -405,6 +405,29 @@ Most `.mil` sites (and `fema.gov`, `cdc.gov`, `gao.gov`, `congress.gov`) answere
 3. owner-run fetches from a normal browser session into `_incoming/<source>/<cycle>/`, followed by `wsp ingest` (as already done for bulk first downloads in the add-a-source runbook);
 4. **not** User-Agent spoofing or WAF evasion: the adapter identifies itself honestly.
 
+**Owner decision D11 (2026-10-10)** keeps options 1–2 and rules out 4. The channels found on
+2026-10-10/11 (small GET/HEAD requests only, ≥ 1 s apart per host, ≥ 10 s on `www.cia.gov`, generic
+User-Agent) are recorded per source in `access.mirrors`:
+
+| Source | Blocked origin | Official channel found | Status |
+|---|---|---|---|
+| `nga-nautical-pubs` | msi.nga.mil PDF links | NGA's own publications API: `/api/publications/stored-pubs` (listing with sizes) + `/api/publications/download?key=…` | **verified** (200, `application/pdf`) |
+| `fema-preparedness-doctrine`, `fema-building-science` | www.fema.gov (403) | GovInfo `GOVPUB` collection, SuDoc class HS 5 (FEMA): 143 packages incl. the National Response Framework; `training.fema.gov` (EMI/NDEMU) answers 200 | **partial** (GPO deposits only; key needed) |
+| `crs-reports` (new) | www.congress.gov (403, incl. CRS PDFs) | `api.congress.gov/v3/crsreport` lists every report (official, api.data.gov key); GovInfo has no CRS collection | listing **verified**; bytes: **no official mirror found** |
+| `joint-publications` | www.jcs.mil (403) | none verified; GovInfo `GOVPUB` class D 5 to be counted with a key; archive.org JP copies are user uploads (rejected) | **no official mirror found** |
+| `usmc-mcpel` | www.marines.mil, www.usmcu.edu (403) | none verified; GovInfo class D 214 to be counted with a key | **no official mirror found** |
+| `army-cmh-histories` | history.army.mil (403) | GovInfo `GOVPUB` class D 101 (Army) verified with 3,090 packages; D 114 (CMH) to be counted with a key | **candidate** |
+| `neets` | apps.dtic.mil (403), netc.navy.mil (403) | none; www.dtic.mil needs the DoD PKI root; archive.org NEETS items are third-party uploads (rejected) | **no official mirror found** |
+| `nawcwd-tp8347` | apps.dtic.mil (403) | none found | **no official mirror found** |
+| `disa-stigs` | (was moved) | www.cyber.mil and dl.dod.cyber.mil answer 200 | **reachable** |
+| `cia-reading-room` (D14) | deep links on www.cia.gov redirect to the home page; `robots.txt` crawl delay 10 s | archive.org `ciareadingroom`: a one-to-one mirror of foia.cia.gov (984,230 items, creator "CIA Reading Room", ids = CIA document numbers) | **verified mirror of the official release** (provenance recorded) |
+| `usgs-historical-topo` (D14) | — | USGS's own `prd-tnm` S3 bucket (HistoricalTopo/{PDF,GeoTIFF}/), TNM Access API (186,061 GeoPDF products), `topomaps_all.zip` inventory | **verified** (agency bucket) |
+| `usda-farmers-bulletins` | — | NAL's own archive.org collection (31 bulletins); the IA Serials-in-Microfilm scans of the official series (`pub_farmers-bulletin`, ≈ 546 more) | NAL **verified**; microfilm scans need owner confirmation |
+| CDC (no registry entry yet) | www.cdc.gov, stacks.cdc.gov (403) | none verified (EID is in PMC, already planned under `pmc-oa`) | **no official mirror found** |
+
+GovInfo and Congress.gov need a free api.data.gov key in `config/local.toml` (`[curator.api_keys]`);
+`DEMO_KEY` was used only for the counts above and its hourly quota ran out after a few searches.
+
 ---
 
 ## 6. Recommended first ingestion (top 15)
@@ -439,3 +462,64 @@ FEMA doctrine and continuity directives, JEL and MCPEL are top-value too, but bl
 4. **Borderline technical references** such as NAWCWD TP 8347 (public release, but written for EW engineers): include as fundamentals after review, or keep out?
 5. **Budget for the large optional sets**: CIA reading room (≈ 5–10 TB), USGS historical topo maps (≈ 10–20 TB), full NPS Calhoun and DTIC selections.
 6. **Non-English civil-protection material** (Swedish, Swiss, Nordic): add languages beyond English for these collections?
+
+Questions 1, 3, 4 and 5 were answered by owner decisions D11, D13 and D14 (PLAN §16); question 2 was deferred (D12).
+
+---
+
+## 8. Implementation status and acquisition plans (2026-10-11)
+
+The `doc-collection` adapter, the filter (§3, §5.3) and `wsp collections dry-run|fetch` are in place
+([adapters doc](../components/adapters.md#doc-collection-curated-document-sets-plan-d11d13d14),
+[runbook](../runbooks/document-collections.md)). Differences from §5.2 as specified: the safety deny
+list decides on the heading (number, title, subjects) and only holds a document for review when a
+phrase appears in an abstract; portion markings in titles such as `(S/NF)` reject at the metadata
+stage; official-history sets (CIA reading room, WHO guidance, DOE handbooks) may turn off the
+noun-level review list, never the deny list.
+
+### 8.1 Dry run of the top picks (metadata only, live, 2026-10-10/11)
+
+`wsp collections dry-run --top --max-pages 3` (sampled listings, ≤ 1 request/s per host, 10 s on
+www.cia.gov); refined sources re-run after tuning. "est." extrapolates samples to upstream totals.
+
+| Source | Listed | Allow | Deny | Review | est. GB | Note |
+|---|---:|---:|---:|---:|---:|---|
+| nist-csrc | 146 | 146 | 0 | 0 | 0.4 | 150-page sample of SP 800/1800/FIPS/CSWP detail pages |
+| nist-oscal-content, frus (git) | 2 | 2 | 0 | 0 | 14.9 | one bundle each (GitHub sizes) |
+| nga-nautical-pubs | 399 | 399 | 0 | 0 | 5.3 | exact sizes from the NGA API |
+| jts-clinical-practice-guidelines | 112 | 108 | 0 | 4 | 0.07 | CBRN-injury CPGs held for review |
+| cia-csi | 49 | 47 | 0 | 2 | 0.14 | Studies archive crawl limited by the 10 s delay |
+| fema-independent-study | 8* | 2 | 0 | 0 | 0.03* | course-materials crawl sampled (128 pages) |
+| uk-resilience-guidance | 300 / 457 | 299 | 0 | 1 | 0.23* | GOV.UK API, OGL attachments |
+| noaa-nautical-charts | 15 | 15 | 0 | 0 | 0.12 | ENC zip + Coast Pilot |
+| faa-handbooks | 26 | 26 | 0 | 0 | 0.23 | |
+| usda-home-canning | 8 | 8 | 0 | 0 | 0.01 | USDA guide PDFs on nchfp.uga.edu |
+| usda-farmers-bulletins | 2,297 | 2,297 | 0 | 0 | 134 (item sizes, high) | all `historical` (banner) |
+| army-pubs-public | 589 | 86 | 182 | 321 | 0.34 | 15 denied for `(S/NF)`-style titles |
+| cisa-protective-security | 49 | 49 | 0 | 0 | 0.05 | |
+| who-iris | 1,627 / 6,150 | 1,625 | 0 | 2 | 32* | ten quoted DSpace queries |
+| ncvec-question-pools, cisa-safecom-field-guides | 11 | 11 | 0 | 0 | < 0.01 | |
+| doe-fundamentals-handbooks | 34 | (series rule) | 0 | — | 0.3 | OSTI title search |
+| neets | 0 | 0 | 0 | 0 | — | no official channel (§5.6) |
+
+### 8.2 CIA FOIA reading room (D14)
+
+* **Channel**: archive.org `ciareadingroom` (one-to-one mirror of foia.cia.gov, 894,393 items on
+  2026-10-11; www.cia.gov deep links redirect a plain client to the home page, crawl delay 10 s).
+* **Size**: a 100,000-item sample sums to 661 GB of item sizes (originals plus OCR/derivatives), so
+  ≈ **5.9 TB** for the set at the item level; the PDFs alone are smaller.
+* **Filter**: of 100,000 sampled titles 99,850 allow, 38 deny (11 classified portion markings, safety
+  phrases such as mine warfare), 112 review (abstract hits). Release stamps make old banners acceptable.
+* **Fetch**: one batch of 10,000 items per run (`--partition b0001` …, 90 batches), two requests per
+  document (file list + PDF) at ≤ 1 request/s: about **21 days** of wall time for the whole set,
+  each batch a part generation `<date>.bNNNN` sealed by `wsp ingest`.
+
+### 8.3 USGS Historical Topographic Map Collection (D14)
+
+* **Channel**: USGS's own public S3 bucket `prd-tnm` (`StagedProducts/Maps/HistoricalTopo/{PDF,GeoTIFF}/<ST>/`);
+  the TNM Access API and `topomaps_all.zip` are the catalogue cross-checks.
+* **Size (complete listing, 560 requests)**: **372,909 files, 3.96 TB** for GeoPDF + GeoTIFF together
+  (≈ 186k sheets each), well below the 10–20 TB estimate. ETags give MD5 for single-part objects.
+* **Filter**: all in scope (two "Explosive Rock" quadrangles go to review on the place name).
+* **Fetch**: one state per run (`--partition ca`; the listing is narrowed to that state's prefix), GeoPDF
+  and GeoTIFF together, at ≤ 1 request/s: ≈ 4.3 days per format; each state a part generation `<date>.<st>`.

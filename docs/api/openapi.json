@@ -2176,6 +2176,30 @@
             "title": "Has History",
             "description": "True if the history has more than one version.",
             "default": false
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency",
+            "description": "Edition status for document collections: current, superseded, historical, rescinded or withdrawn-from-index (PLAN D13). Absent for sources without editions."
+          },
+          "banner": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Banner",
+            "description": "Reader warning to show above the document, e.g. 'Historical document — methods may be outdated or unsafe.' (PLAN D13). Absent when there is nothing to warn about."
           }
         },
         "type": "object",
@@ -2201,7 +2225,9 @@
           "format",
           "html",
           "vault",
-          "has_history"
+          "has_history",
+          "currency",
+          "banner"
         ],
         "title": "Document"
       },

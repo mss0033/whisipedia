@@ -47,6 +47,12 @@ howto = 2.0
 # per GB, T1 first) until the per-language budget is spent. English is not limited by this table.
 languages = ["de", "fr", "es", "ru", "it", "pl", "ja", "zh", "pt", "ar"]
 budget_tb_per_language = 0.3
+# `wsp plan multilingual` writes registry/plans/multilingual.yaml from the live Kiwix catalog.
+
+[curator.api_keys]
+# Official APIs that need a free api.data.gov key (GovInfo, Congress.gov; PLAN D11). Never commit a
+# key: set it in config/local.toml as `govinfo_key = "..."` / `congress_key = "..."` (or the
+# WSP_API_KEY_GOVINFO / WSP_API_KEY_CONGRESS environment variables). `wsp config show` redacts them.
 
 [api]
 query_log = true                 # local-only search log (query + result count) for the gap miner; rotated

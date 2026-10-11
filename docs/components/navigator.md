@@ -63,7 +63,7 @@ inside that web. Code lives in [`navigator/`](../../navigator/).
 | `wsp://directory/<path>` | Yahoo-style categories with counts, `@` cross-links and listings |
 | `wsp://search` | WhizBang! home, results, instant answers, did you mean |
 | `wsp://<source>` | Site front page: stats, health, site search, random page, related sites |
-| `wsp://<source>/<id>` | Document in the period frame: site banner, webring bar, provenance footer, View Source Data, time machine (`?at=YYYY-MM-DD`, `&diff=1`) |
+| `wsp://<source>/<id>` | Document in the period frame: site banner, webring bar, a yellow "Notice" box when the API sends a `banner` (historical or superseded editions, PLAN D13), provenance footer, View Source Data, time machine (`?at=YYYY-MM-DD`, `&diff=1`) |
 | `wsp://whatsnew` | Change feed grouped by day, NEW! badges, paging by cursor |
 | `wsp://system` | System Monitor: generation, scrub, disk budget, freshness, degraded items, ledger tail; refreshes every 5 s |
 | `wsp://history`, `wsp://hotlist` | Local history (filter, remove, clear) and bookmarks (reorder, delete) |

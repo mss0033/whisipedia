@@ -48,6 +48,9 @@ export interface FixtureDoc {
   entities: string[];
   /** Extra search keywords (aliases). */
   aliases?: string[];
+  /** Edition status and reader warning (document collections, PLAN D13). */
+  currency?: string;
+  banner?: string;
 }
 
 const T = (d: string) => `${d}T00:00:00Z`;

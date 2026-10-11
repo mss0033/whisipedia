@@ -113,6 +113,24 @@ function webring(source: SourceInfo | undefined, all: SourceInfo[]): HTMLElement
   );
 }
 
+/**
+ * Reader warning for historical, superseded or rescinded editions (PLAN D13):
+ * shown above the text, never instead of it. The server decides the wording.
+ */
+export function documentWarning(
+  doc: Pick<DocumentResponse, 'banner' | 'currency'>,
+): HTMLElement | null {
+  if (!doc.banner) return null;
+  return h(
+    'div',
+    { class: `doc-warning doc-warning-${doc.currency ?? 'note'}`, role: 'note' },
+    h('span', { class: 'doc-warning-icon', 'aria-hidden': 'true' }, '⚠'),
+    ' ',
+    h('strong', null, 'Notice: '),
+    doc.banner,
+  );
+}
+
 function siteBanner(doc: DocumentResponse): HTMLElement {
   return h(
     'div',
@@ -352,6 +370,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
     siteBanner(doc),
     webring(source, sources),
     tmBanner,
+    documentWarning(doc),
     // Original pages (ZIM HTML) carry their own <h1>; don't print the title twice.
     content instanceof Element && content.querySelector('h1') ? null : pageHeading(doc.title),
     content,

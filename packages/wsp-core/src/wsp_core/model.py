@@ -262,6 +262,10 @@ class DocRecord:
     links: tuple[str, ...] = ()  # outbound doc ids or native urls
     content_hash: str = ""  # blake3 of normalized text; see wsp_core.ids.content_hash
     aliases: tuple[str, ...] = ()  # alternative titles (redirects, labels); feed suggest and search
+    # Per-document metadata strings (v0.3, additive; empty for every pre-existing adapter). Document
+    # collections carry issuer, publication number, edition, distribution, currency and the
+    # Navigator banner here (see wsp_core.banners); keys are lowercase snake_case.
+    meta: Mapping[str, str] = field(default_factory=dict[str, str])
 
 
 class ChangeKind(StrEnum):

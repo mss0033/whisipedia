@@ -23,3 +23,8 @@ languages = ["en", "de", "fr", "es", "it", "nl", "pl", "ru", "sv"]
 state_db = "/home/<user>/whisipedia/state/orchestrator.sqlite3"
 workdir = "/home/<user>/whisipedia/work"
 metrics_path = "/home/<user>/whisipedia/metrics/orchestrator.prom"
+
+[curator.api_keys]
+# Free api.data.gov key for GovInfo and Congress.gov (PLAN D11): https://api.data.gov/signup/
+# govinfo_key = "<api.data.gov key>"
+# congress_key = "<api.data.gov key>"

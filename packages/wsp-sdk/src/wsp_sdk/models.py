@@ -187,6 +187,13 @@ class Document(_Wire):
     )
     vault: VaultLocation | None = None
     has_history: bool = Field(default=False, description="True if the history has more than one version.")
+    currency: str | None = Field(
+        default=None,
+        description="Edition status for document collections (current, superseded, historical ...).",
+    )
+    banner: str | None = Field(
+        default=None, description="Reader warning to show above the document (PLAN D13)."
+    )
 
 
 class DocumentVersion(_Wire):

@@ -540,6 +540,23 @@
   color: inherit !important;
   text-decoration: none !important;
 }
+/* Historical / superseded edition notice (PLAN D13): a period "caution" box. */
+.doc-warning {
+  margin: 8px 0 10px;
+  padding: 6px 10px;
+  border: 2px solid #000;
+  background: #ffffcc;
+  color: #000;
+  font-family: var(--ui-font);
+  box-shadow: 2px 2px 0 #808080;
+}
+.doc-warning-historical,
+.doc-warning-rescinded {
+  background: repeating-linear-gradient(45deg, #ffff66 0 10px, #ffffcc 10px 20px);
+}
+.doc-warning-icon {
+  font-weight: bold;
+}
 .site-name {
   font-weight: bold;
 }

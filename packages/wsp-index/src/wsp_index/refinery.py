@@ -66,9 +66,13 @@ SCHEMA = pa.schema(
         pa.field("links", pa.list_(pa.string()), nullable=False),
         pa.field("content_hash", pa.string(), nullable=False),
         pa.field("aliases", pa.list_(pa.string()), nullable=False),
+        # Optional (v0.3, additive): DocRecord.meta as a JSON object string, null when empty. Files
+        # written before it existed lack the column; readers treat it as absent (no format bump).
+        pa.field("meta", pa.string()),
     ]
 )
 COLUMNS: tuple[str, ...] = tuple(SCHEMA.names)
+OPTIONAL_COLUMNS = frozenset({"meta"})
 
 _IDS_SCHEMA = pa.schema(
     [("h", pa.uint64()), ("part", pa.uint32()), ("rg", pa.uint32()), ("row", pa.uint32())]
@@ -141,6 +145,7 @@ def _to_row(rec: DocRecord) -> dict[str, object]:
         "links": list(rec.links),
         "content_hash": rec.content_hash,
         "aliases": list(rec.aliases),
+        "meta": json.dumps(dict(rec.meta), sort_keys=True) if rec.meta else None,
     }
 
 
@@ -162,6 +167,16 @@ def record_from_row(row: Mapping[str, Any]) -> DocRecord:
         links=tuple(row["links"] or ()),
         content_hash=row["content_hash"],
         aliases=tuple(row.get("aliases") or ()),
+        meta=_meta(row.get("meta")),
+    )
+
+
+def _meta(raw: object) -> dict[str, str]:
+    if not isinstance(raw, str) or not raw:
+        return {}
+    data = json.loads(raw)
+    return (
+        {str(k): str(v) for k, v in cast(dict[str, object], data).items()} if isinstance(data, dict) else {}
     )
 
 
@@ -415,6 +430,11 @@ class RefineryReader:
                 self._files[part] = pf
             return pf
 
+    def _present(self, pf: pq.ParquetFile, columns: Sequence[str]) -> list[str]:
+        """``columns`` minus optional ones this (older) file was written without."""
+        names = set(pf.schema_arrow.names)
+        return [c for c in columns if c in names or c not in OPTIONAL_COLUMNS]
+
     def _row_group(self, part: int, rg: int, columns: tuple[str, ...]) -> pa.Table:
         key = (part, rg, columns)
         with self._lock:
@@ -422,7 +442,8 @@ class RefineryReader:
             if hit is not None:
                 self._cache.move_to_end(key)
                 return hit
-        table = self._file(part).read_row_group(rg, columns=list(columns))  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
+        pf = self._file(part)
+        table = pf.read_row_group(rg, columns=self._present(pf, columns))  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
         with self._lock:
             self._cache[key] = table
             while len(self._cache) > self._cache_size:
@@ -438,7 +459,7 @@ class RefineryReader:
             table = self._row_group(int(self._part[i]), int(self._rg[i]), cols)
             row = int(self._row[i])
             if table.column(0)[row].as_py() == doc_id:
-                return {name: table.column(name)[row].as_py() for name in cols}
+                return {name: table.column(name)[row].as_py() for name in table.column_names}
             i += 1
         return None
 
@@ -457,12 +478,13 @@ class RefineryReader:
         """All live rows (shadowed duplicates skipped)."""
         for part, path in enumerate(self.parts):
             pf = pq.ParquetFile(path)
+            present = self._present(pf, columns)
             shadowed = self._shadow.get(part)
             if not shadowed:
-                yield from pf.iter_batches(batch_size=batch_size, columns=list(columns))  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
+                yield from pf.iter_batches(batch_size=batch_size, columns=present)  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
                 continue
             for rg in range(pf.num_row_groups):
-                table = pf.read_row_group(rg, columns=list(columns))  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
+                table = pf.read_row_group(rg, columns=present)  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
                 mask = pa.array([(rg, r) not in shadowed for r in range(table.num_rows)])
                 yield from table.filter(mask).to_batches(max_chunksize=batch_size)
 
@@ -477,7 +499,10 @@ class RefineryReader:
             if not batches:
                 return SCHEMA.empty_table().select(list(columns))
             return pa.Table.from_batches(batches)
-        parts = [pq.read_table(p, columns=list(columns)) for p in self.parts]  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
+        parts = [
+            pq.read_table(p, columns=self._present(pq.ParquetFile(p), columns))  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
+            for p in self.parts
+        ]
         if not parts:
             return SCHEMA.empty_table().select(list(columns))
         return pa.concat_tables(parts)

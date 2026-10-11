@@ -191,6 +191,16 @@ class Document(_Wire):
     )
     vault: VaultLocation | None = None
     has_history: bool = Field(default=False, description="True if the history has more than one version.")
+    currency: str | None = Field(
+        default=None,
+        description="Edition status for document collections: current, superseded, historical, rescinded or "
+        "withdrawn-from-index (PLAN D13). Absent for sources without editions.",
+    )
+    banner: str | None = Field(
+        default=None,
+        description="Reader warning to show above the document, e.g. 'Historical document — methods may be "
+        "outdated or unsafe.' (PLAN D13). Absent when there is nothing to warn about.",
+    )
 
 
 class DocumentVersion(_Wire):

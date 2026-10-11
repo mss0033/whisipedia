@@ -29,7 +29,7 @@ from pydantic import BaseModel
 from wsp_api import create_app
 from wsp_api.inprocess import InProcessTransport
 from wsp_api.services import DEFAULT_HOST, DEFAULT_PORT
-from wsp_cli import bootstrap, ops
+from wsp_cli import bootstrap, doccollections, multilingual, ops
 from wsp_core.registry import RegistryError, load_registry
 from wsp_sdk import WspApiError, WspClient
 from wsp_vault.drill import DrillKind
@@ -306,6 +306,9 @@ def build_parser() -> argparse.ArgumentParser:
         s.set_defaults(decision=name)
         s.add_argument("id", type=int)
         s.add_argument("--note", default=None)
+
+    doccollections.register(sub, add)
+    multilingual.register(sub, add)
 
     pa = add("parity", _usage, "par2 parity (Warden).")
     pa_sub = pa.add_subparsers(dest="parity_command", required=True, metavar="COMMAND")

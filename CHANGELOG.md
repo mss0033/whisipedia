@@ -25,6 +25,30 @@ All notable changes are documented here. The format follows [Keep a Changelog](h
 - `SearchResults.scope` (API 1.3.0): a query naming a site reports where it was searched; the
   Navigator says quietly when it fell back to the whole library.
 - Eval harness: `--rank-weights` and `--typos` ablations.
+- Document collections (PLAN D11, D13, D14; research doc §5): the `doc-collection` adapter with
+  discoverers for index pages (follow, table rows, detail pages), official APIs (NGA MSI, GovInfo,
+  Congress.gov, NTRS, OSTI, USGS Publications Warehouse, GOV.UK, DSpace 7, TNM), OAI-PMH,
+  archive.org (provenance recorded), S3 listings and git repositories; a deterministic document
+  filter (series allow/deny lists, front-matter marking parse for Distribution B–F, FOUO/CUI,
+  classification and export-control warnings, built-in §13 safety lists, keyword screen; unknowns go
+  to owner review) with rules files in `registry/filters/`; edition currency (superseded chains,
+  historical collections and cut-off dates) in a per-generation `meta/documents.jsonl`.
+- `wsp collections dry-run` (metadata-only survey with filter counts and size estimates) and
+  `wsp collections fetch` (≤ 1 request/s per host, restricted files deleted with an alert, held files
+  quarantined with one review proposal per batch, `_incoming/_plans/targets.d/` ingest plans);
+  `wsp ingest` reads `targets.d/*.json` and honours `meta.relpath`; accepting or rejecting a review
+  proposal records the decision in the source's rules file.
+- Historical banner (D13): `DocRecord.meta` (additive, stored as an optional Refinery column that
+  older generations simply lack), `wsp_core.banners`, `Document.currency` and `Document.banner` in the
+  API and SDK, and a period "Notice" box on Navigator document pages.
+- `wsp plan multilingual` (D15): per-language selection of the best value-per-GB Kiwix ZIMs and
+  Wikipedia text dumps within `[curator.multilingual] budget_tb_per_language`, written to
+  `registry/plans/multilingual.yaml`; Kiwix selectors accept `name@flavour`.
+- Registry: official access channels for the WAF-blocked sources (`access.mirrors`), discovery
+  configurations for the top picks, D14 plans for `cia-reading-room` and `usgs-historical-topo`,
+  `doe-fundamentals-handbooks`, `crs-reports`, ten `kiwix-multilingual-<lang>` bundles and
+  `wikipedia-text-extra`; `[curator.api_keys]` for api.data.gov keys (local config only);
+  runbook `docs/runbooks/document-collections.md`.
 - `wsp-oracle` (Phase 3, ADR-0007): section-aware passages, a multilingual embedder on the GPU,
   a binary-HNSW + int8 vector store, a deterministic query router, hybrid retrieval with
   cross-encoder reranking, a resumable embedding job
