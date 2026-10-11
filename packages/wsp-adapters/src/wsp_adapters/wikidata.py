@@ -20,9 +20,12 @@ published checksum files). This adapter differs in what it reads out of the dump
 **Throughput.** The JSON dump is a *single* bz2 stream (checked on the 2026-10-05 dump: no stream
 boundary in the first 200 MB), so the multistream trick of ``wikimedia-dumps`` does not apply.
 :func:`wsp_adapters._streams.open_bz2` decodes it with ``lbzip2`` when installed, else with
-``indexed_bzip2``'s block-parallel decoder (about 8x the speed of ``bz2`` on 15 threads), and JSON
-decoding runs in ``access.workers`` processes in batches of lines. Memory stays bounded: at most
-``2 x workers`` batches in flight and SQLite's page cache.
+``indexed_bzip2``'s block-parallel decoder (about 8x the speed of ``bz2`` on 15 threads). The
+parent cuts each entity's ``claims`` (about three quarters of the bytes, never read) with one
+structural scan (:func:`wsp_adapters.wikimedia.strip_claims`), and JSON decoding runs in
+``access.workers`` processes in batches of at most ``ENTITY_BATCH_BYTES`` (8 MiB). On 5,000 real
+entities: 414 -> 140 us of worker time per entity, 37 us in the parent, a quarter of the bytes
+sent. Memory stays bounded: at most ``2 x workers`` batches in flight and SQLite's page cache.
 """
 
 from __future__ import annotations
@@ -37,22 +40,23 @@ from typing import Any, cast
 from urllib.parse import quote
 
 from wsp_adapters._common import (
+    DocRow,
     IncompleteGenerationError,
     access,
     default_workers,
+    doc_from_row,
+    doc_row,
     int_option,
     ordered_parallel_map,
     str_list,
     upstream_dir,
 )
-from wsp_adapters._streams import open_bz2
-from wsp_adapters.wikimedia import WikimediaDumpsAdapter
+from wsp_adapters.wikimedia import WikimediaDumpsAdapter, entity_lines, parse_entity
 from wsp_core.ids import content_hash, make_doc_id
 from wsp_core.model import DocRecord, SourceSpec
 from wsp_core.ports import Ctx
 
 LOOKUP_NAME = "wikidata-entities.sqlite"
-_BATCH = 1_000
 _DUMP_SUFFIX = "-all.json.bz2"
 
 
@@ -164,17 +168,13 @@ def entity_doc(
     return doc, row
 
 
-def decode_batch(batch: _Batch) -> list[tuple[DocRecord, LookupRow | None]]:
-    """Worker: dump lines (``[``, ``]`` and trailing commas included) -> documents and lookup rows."""
-    out: list[tuple[DocRecord, LookupRow | None]] = []
-    for raw in batch.lines:
-        line = raw.strip().rstrip(b",")
-        if not line or line in (b"[", b"]"):
-            continue
-        entity = cast(Mapping[str, Any], json.loads(line))
-        result = entity_doc(entity, batch.source_id, batch.license, batch.languages)
+def decode_batch(batch: _Batch) -> list[tuple[DocRow, LookupRow | None]]:
+    """Worker: claims-stripped entity lines (:func:`entity_lines`) -> document rows and lookup rows."""
+    out: list[tuple[DocRow, LookupRow | None]] = []
+    for line in batch.lines:
+        result = entity_doc(parse_entity(line), batch.source_id, batch.license, batch.languages)
         if result is not None:
-            out.append(result)
+            out.append((doc_row(result[0]), result[1]))
     return out
 
 
@@ -279,7 +279,7 @@ class WikidataAdapter(WikimediaDumpsAdapter):
                     for doc, row in results:
                         if writer is not None and row is not None:
                             writer.add(row)
-                        yield doc
+                        yield doc_from_row(doc)
         except BaseException:
             if writer is not None:
                 writer.abort()
@@ -289,12 +289,5 @@ class WikidataAdapter(WikimediaDumpsAdapter):
 
 
 def _batches(path: Path, spec: SourceSpec, languages: tuple[str, ...], workers: int) -> Iterator[_Batch]:
-    with open_bz2(path, workers) as fh:
-        batch: list[bytes] = []
-        for line in fh:
-            batch.append(line)
-            if len(batch) >= _BATCH:
-                yield _Batch(tuple(batch), spec.id, spec.license, languages)
-                batch = []
-        if batch:
-            yield _Batch(tuple(batch), spec.id, spec.license, languages)
+    for lines in entity_lines(path, workers):
+        yield _Batch(lines, spec.id, spec.license, languages)

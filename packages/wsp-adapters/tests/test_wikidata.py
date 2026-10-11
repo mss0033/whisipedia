@@ -9,10 +9,10 @@ from typing import Any
 import pytest
 from adapters_testkit import dumps_listing, make_ctx, make_spec
 
-from wsp_adapters import available_adapters
+from wsp_adapters import available_adapters, wikimedia
 from wsp_adapters._common import IncompleteGenerationError
 from wsp_adapters.wikidata import LOOKUP_NAME, EntityLookup, WikidataAdapter, entity_doc
-from wsp_adapters.wikimedia import DUMPS_BASE
+from wsp_adapters.wikimedia import DUMPS_BASE, EntityFormatError, entity_lines, parse_entity, strip_claims
 from wsp_core.ports import Ctx, SourceAdapter
 from wsp_core.testing.adapter_contract import FakeFetcher, SourceAdapterContract
 
@@ -130,6 +130,65 @@ def test_lookup_is_published_only_after_a_full_pass(generation_dir: Path, tmp_pa
 
 def test_entity_without_id_is_skipped() -> None:
     assert entity_doc({"labels": {}}, "wikidata", "CC0-1.0", ("en",)) is None
+
+
+def _line(**members: object) -> bytes:
+    return json.dumps(members, ensure_ascii=False, separators=(",", ":")).encode()
+
+
+FULL = {
+    "type": "item",
+    "id": "Q1",
+    "labels": _labels(en="Universe"),
+    "descriptions": _labels(en="totality of space"),
+    "aliases": {},
+    "claims": {
+        "P31": [{"mainsnak": {"datavalue": {"value": 'a "claims": trap,"sitelinks":x'}}, "id": "Q1$1"}]
+    },
+    "sitelinks": {"enwiki": {"site": "enwiki", "title": "Universe"}},
+    "lastrevid": 7,
+    "modified": "2026-10-01T00:00:00Z",
+}
+
+
+def test_claims_are_cut_structurally_and_documents_are_unchanged() -> None:
+    line = _line(**FULL)
+    cut = strip_claims(line)
+    assert b'"claims"' not in cut
+    assert len(cut) < len(line)
+    full = entity_doc(json.loads(line), "w", "CC0-1.0", ("en",))
+    assert entity_doc(parse_entity(cut), "w", "CC0-1.0", ("en",)) == full
+
+
+@pytest.mark.parametrize(
+    "order",
+    [
+        ("type", "id", "claims", "labels", "descriptions", "aliases", "sitelinks", "lastrevid", "modified"),
+        ("type", "id", "labels", "descriptions", "aliases", "claims", "lastrevid", "sitelinks", "modified"),
+        ("type", "id", "labels", "descriptions", "aliases", "claims", "lastrevid", "modified"),
+    ],
+)
+def test_other_layouts_are_left_whole(order: tuple[str, ...]) -> None:
+    line = _line(**{k: FULL[k] for k in order})
+    assert strip_claims(line) == line  # never cut a key that is read
+
+
+def test_a_cut_that_does_not_parse_fails_loudly() -> None:
+    # A ',"sitelinks":' key nested in claims (not in the schema) makes an unbalanced cut.
+    line = _line(**{**FULL, "claims": {"P1": {"a": 0, "sitelinks": 1}}})
+    with pytest.raises(EntityFormatError):
+        parse_entity(strip_claims(line))
+
+
+def test_entity_batches_are_bounded_by_bytes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(wikimedia, "ENTITY_BATCH_BYTES", 600)
+    entities = [{**FULL, "id": f"Q{i}"} for i in range(1, 9)]
+    dump = tmp_path / "wikidata-x-all.json.bz2"
+    dump.write_bytes(bz2.compress(b"[\n" + b",\n".join(_line(**e) for e in entities) + b"\n]\n"))
+    batches = list(entity_lines(dump, 1))
+    assert len(batches) > 1
+    assert all(sum(map(len, b)) < 600 + max(map(len, b)) for b in batches)
+    assert [parse_entity(x)["id"] for b in batches for x in b] == [f"Q{i}" for i in range(1, 9)]
 
 
 def test_a_generation_without_the_json_dump_raises_and_publishes_no_lookup(tmp_path: Path) -> None:
