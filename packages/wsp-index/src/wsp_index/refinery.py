@@ -602,7 +602,7 @@ class RefineryReader:
                 if len(chunk_part):
                     self._shadow[int(chunk_part[0])] = np.stack([chunk_rg, chunk_row], axis=1)
         self._files: OrderedDict[int, tuple[pq.ParquetFile, threading.Lock]] = OrderedDict()
-        self._max_files = 64
+        self._max_files = 16  # each open ParquetFile keeps its footer (~2.5 MB with 256-row groups)
         self._cache: OrderedDict[tuple[int, int, tuple[str, ...]], pa.Table] = OrderedDict()
         self._cache_size = cache_row_groups
         self._lock = threading.Lock()
@@ -707,6 +707,14 @@ class RefineryReader:
     @property
     def n_parts(self) -> int:
         return self._n_parts
+
+    @property
+    def max_open_files(self) -> int:
+        return self._max_files
+
+    @property
+    def cache_row_groups(self) -> int:
+        return self._cache_size
 
     def _live(self, part: int, pf: pq.ParquetFile) -> npt.NDArray[np.bool_] | None:
         """Mask of the part's rows that are not shadowed, or ``None`` when every row is live."""

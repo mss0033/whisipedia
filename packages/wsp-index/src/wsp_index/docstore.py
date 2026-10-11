@@ -20,6 +20,14 @@ from wsp_index.refinery import (
 )
 
 
+def _reader_cost(reader: RefineryReader) -> int:
+    """Upper estimate of a reader's resident memory: id index (20 B/doc once a lookup loaded it), open
+    file footers (~2.5 MB each) and the row-group cache (~4 MB of text each, by the writer's sizing)."""
+    return (
+        20 * len(reader) + 3 * 1024 * 1024 * reader.max_open_files + 4 * 1024 * 1024 * reader.cache_row_groups
+    )
+
+
 class ParquetDocumentStore:
     """Reads documents from ``<root>/<source_id>/<generation_id>/`` Refinery generations.
 
@@ -29,13 +37,19 @@ class ParquetDocumentStore:
     * ``history(doc_id)`` lists content versions oldest first: one entry per generation in which the
       content hash differs from the previous generation (a re-appearance after removal counts).
 
-    Readers are cached (LRU) because loading a generation's id index costs ~16 bytes per document.
+    Readers are cached (LRU) because loading a generation's id index costs ~20 bytes per document.
+    The cache is bounded by an estimate of their memory (``memory_budget`` bytes: id index, open file
+    footers, cached row groups), not just by count: one wikipedia-top10 reader is ~0.8 GB, a small
+    source's a few MB, so a count bound alone let the API reach 5 GB (audit api-cli #3).
     """
 
-    def __init__(self, root: Path, *, max_open_generations: int = 16) -> None:
+    def __init__(
+        self, root: Path, *, max_open_generations: int = 16, memory_budget: int = 1536 * 1024 * 1024
+    ) -> None:
         self.root = root
         self._readers: OrderedDict[tuple[str, str], RefineryReader] = OrderedDict()
         self._max = max_open_generations
+        self._budget = memory_budget
         self._lock = threading.Lock()
 
     def reader(self, source_id: str, generation_id: str) -> RefineryReader | None:
@@ -51,7 +65,10 @@ class ParquetDocumentStore:
         reader = RefineryReader(gen_dir)
         with self._lock:
             self._readers[key] = reader
-            while len(self._readers) > self._max:
+            while len(self._readers) > 1 and (
+                len(self._readers) > self._max
+                or sum(map(_reader_cost, self._readers.values())) > self._budget
+            ):
                 self._readers.popitem(last=False)
         return reader
 

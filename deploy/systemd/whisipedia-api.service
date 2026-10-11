@@ -26,8 +26,8 @@ IPAddressAllow=localhost
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 # Interactive: outside the background slice, with its own ceiling (caches are bounded; a leak
 # must restart the API, not stall the desktop).
-MemoryHigh=3G
-MemoryMax=4G
+MemoryHigh=4G
+MemoryMax=5G
 MemorySwapMax=512M
 NoNewPrivileges=yes
 PrivateTmp=yes

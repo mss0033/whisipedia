@@ -165,3 +165,14 @@ def test_scans_never_load_the_id_index(tmp_path: Path) -> None:
     assert reader._ids is None  # pyright: ignore[reportPrivateUsage]
     assert reader.get(make_doc_id("enc", "d05")) is not None
     assert reader._ids is not None  # pyright: ignore[reportPrivateUsage]
+
+
+def test_document_store_evicts_by_memory_not_just_count(tmp_path: Path) -> None:
+    from wsp_index.docstore import ParquetDocumentStore
+
+    for gid in ("g1", "g2", "g3"):
+        gen(tmp_path, gid, docs_v1())
+    store = ParquetDocumentStore(tmp_path, max_open_generations=16, memory_budget=1)
+    for gid in ("g1", "g2", "g3"):
+        assert store.reader("enc", gid) is not None
+    assert len(store._readers) == 1  # pyright: ignore[reportPrivateUsage]  # the newest stays usable
