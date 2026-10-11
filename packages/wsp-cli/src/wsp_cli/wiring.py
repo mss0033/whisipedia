@@ -14,14 +14,31 @@ Source integrity (ADR-0009) adds the guard's hooks (``wsp_cli.integrity``): sign
 promotion reports, content profiles, scrub-verified settling. Scrub and parity stop on shutdown
 (``Wiring.on_shutdown``) and pause while the API marks interactive use
 (``vault.yield_to_interactive_seconds``).
+
+Heavy work never runs in the daemon (audit 2026-10-11, C2/C3/H7): refine, index and the content
+profile run as child units (:class:`wsp_orchestrator.isolation.IsolatedRunner`; ``systemd-run`` in
+``whisipedia-background.slice`` with ``[orchestrator.heavy]`` limits, a plain child process without
+systemd). The child functions below take the machine-wide ``HEAVY`` lock and, when they write the
+Refinery or the index, the ``INDEX`` lock (``wsp_cli.locks``); a busy lock comes back as
+``ResourceBusyError`` and the step is deferred without counting an attempt. Refining never opens the
+Tantivy index. Scrub slices take the ``SCRUB`` lock and drills the ``DRILL`` lock, shared with
+``wsp scrub`` / ``wsp drill``.
+
+Document policy (audit H3): :func:`document_screen` is the pipeline's policy screen for adapters
+whose ``verify`` mixes checksums and policy (``doc-collection``); checksum-only adapters are listed in
+:data:`CHECKSUM_ONLY_ADAPTERS`; for any other adapter it returns ``None`` and the pipeline always runs
+the adapter's own ``verify`` (fail closed).
 """
 
 from __future__ import annotations
 
+import contextlib
+import os
 import random
 import shutil
 import threading
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Generator, Mapping, Sequence
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
@@ -29,8 +46,10 @@ from typing import Any, cast
 from wsp_cli import bootstrap, doccollections
 from wsp_cli.indexer import Indexer
 from wsp_cli.integrity import integrity_hooks
+from wsp_cli.locks import DRILL, HEAVY, INDEX, SCRUB, exclusive, lock_dir_for
 from wsp_core.activity import recently_active
-from wsp_core.model import Generation, GenerationStatus, SourceSpec
+from wsp_core.model import Generation, GenerationStatus, RemoteFile, SourceSpec, Verdict, VerdictStatus
+from wsp_core.ports import Ctx, SourceAdapter
 from wsp_orchestrator.bots import Bot
 from wsp_orchestrator.curator import (
     AdapterSmokeBot,
@@ -41,6 +60,8 @@ from wsp_orchestrator.curator import (
     WikimediaRankingBot,
 )
 from wsp_orchestrator.curator.registry_edit import upsert_overlay
+from wsp_orchestrator.durations import IsoDuration
+from wsp_orchestrator.isolation import IsolatedRunner, Launcher, UnitLimits
 from wsp_orchestrator.orchestrator import LastCopyHook, Wiring
 from wsp_orchestrator.pipeline import RefineResult, Withheld
 from wsp_orchestrator.policy import GateConfig, Proposal
@@ -307,45 +328,261 @@ def split_parity_findings(
     return data, sorted(parity)
 
 
-class IndexHooks:
-    """The pipeline's REFINED/INDEXED hooks, opening the local stores per call."""
+# --- heavy steps in child units -------------------------------------------------------------------
 
-    def __init__(self, cfg: Mapping[str, Any], vault: FileVault, specs: Sequence[SourceSpec]) -> None:
+
+@dataclass(frozen=True, slots=True)
+class HeavySettings:
+    """``[orchestrator.heavy]``: limits and time budgets of the refine/index/profile child units."""
+
+    limits: UnitLimits = field(default_factory=UnitLimits)
+    refine_timeout: float | None = 24 * 3600.0
+    index_timeout: float | None = 24 * 3600.0
+    profile_timeout: float | None = 6 * 3600.0
+
+    @classmethod
+    def from_config(cls, cfg: Mapping[str, Any]) -> HeavySettings:
+        sec = bootstrap.section(bootstrap.section(cfg, "orchestrator"), "heavy")
+        base = UnitLimits()
+
+        def budget(key: str, default: str) -> float | None:
+            raw = str(sec.get(key, default))
+            return None if raw in ("", "none", "0") else IsoDuration.parse(raw).approx().total_seconds()
+
+        return cls(
+            limits=UnitLimits(
+                memory_high=str(sec.get("memory_high", base.memory_high)),
+                memory_max=str(sec.get("memory_max", base.memory_max)),
+                memory_swap_max=str(sec.get("memory_swap_max", base.memory_swap_max)),
+                timeout_stop_sec=int(sec.get("timeout_stop_sec", base.timeout_stop_sec)),
+            ),
+            refine_timeout=budget("refine_timeout", "PT24H"),
+            index_timeout=budget("index_timeout", "PT24H"),
+            profile_timeout=budget("profile_timeout", "PT6H"),
+        )
+
+
+def heavy_runner(
+    cfg: Mapping[str, Any], *, should_stop: Callable[[], bool], launcher: Launcher | None = None
+) -> IsolatedRunner:
+    """The runner for heavy steps: child units under ``<orchestrator.workdir>/_steps``."""
+    p = bootstrap.paths(cfg)
+    work = p.workdir or p.require_state()
+    env = {"WSP_MAX_WORKERS": os.environ.get("WSP_MAX_WORKERS", "4")}
+    return IsolatedRunner(
+        work,
+        launcher=launcher,
+        limits=HeavySettings.from_config(cfg).limits,
+        should_stop=should_stop,
+        env=env,
+        cwd=bootstrap.layout().root or Path.cwd(),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class ChildContext:
+    """What a heavy child rebuilds from its request: config, registry, a read-only vault."""
+
+    cfg: Mapping[str, Any]
+    specs: tuple[SourceSpec, ...]
+    vault: FileVault
+    spec: SourceSpec
+    generation: Generation | None
+
+    @property
+    def lock_dir(self) -> Path:
+        return lock_dir_for(bootstrap.paths(self.cfg).require_index())
+
+    def indexer(self) -> Indexer:
+        """An Indexer whose Tantivy index and change feed are opened only on first use."""
+        p = bootstrap.paths(self.cfg)
+        cfg, specs = self.cfg, self.specs
+        return Indexer(
+            self.vault,
+            specs,
+            bootstrap.load_adapters(),
+            p.require_index(),
+            lambda: bootstrap.open_index(cfg, specs),
+            lambda: bootstrap.open_changes(cfg),
+            user_agent=bootstrap.user_agent(cfg),
+        )
+
+
+def child_context(payload: Mapping[str, Any]) -> ChildContext:
+    cfg = cast(Mapping[str, Any], payload["config"])
+    lay = bootstrap.layout()
+    specs = tuple(bootstrap.load_sources(cfg, lay))
+    vault = bootstrap.build_vault(cfg, specs, bootstrap.load_signer(cfg, lay, create=False), ledger=False)
+    source_id = str(payload["source_id"])
+    spec = next((s for s in specs if s.id == source_id), None)
+    if spec is None:
+        raise LookupError(f"source {source_id!r} is not in the registry")
+    gid = payload.get("generation_id")
+    gen = None
+    if gid is not None:
+        gen = next(
+            (
+                g
+                for g in vault.generations(source_id)
+                if g.generation_id == gid and g.status is GenerationStatus.SEALED
+            ),
+            None,
+        )
+        if gen is None:
+            raise LookupError(f"{source_id}/{gid} is not a sealed generation")
+    return ChildContext(cfg, specs, vault, spec, gen)
+
+
+@contextlib.contextmanager
+def _locks(lock_dir: Path, *names: str) -> Generator[None]:
+    """Take ``names`` in order (HEAVY before INDEX); a held one raises ``LockHeldError`` at once."""
+    with contextlib.ExitStack() as stack:
+        for name in names:
+            stack.enter_context(exclusive(lock_dir, name))
+        yield
+
+
+def refine_child(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Child unit: refine one sealed generation into Refinery Parquet (never opens Tantivy)."""
+    ctx = child_context(payload)
+    assert ctx.generation is not None
+    with _locks(ctx.lock_dir, HEAVY, INDEX):
+        ix = ctx.indexer()
+        try:
+            result = ix.refine(
+                ctx.spec, ctx.generation, ctx.vault.generation_path(ctx.spec.id, ctx.generation.generation_id)
+            )
+        finally:
+            ix.close()
+    return {"doc_count": result.doc_count}
+
+
+def index_child(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Child unit: bring the search index to one generation (the union of partitions, ADR-0010)."""
+    ctx = child_context(payload)
+    assert ctx.generation is not None
+    with _locks(ctx.lock_dir, HEAVY, INDEX):
+        ix = ctx.indexer()
+        try:
+            if ctx.spec.partitioned:
+                report = ix.index_partitioned(ctx.spec, include=ctx.generation.generation_id)
+            else:
+                report = ix.index_generation(ctx.spec, ctx.generation.generation_id)
+            ix.finish()  # one suggest rebuild, after the step's commits
+        finally:
+            ix.close()
+    return {"indexed": report.indexed, "upserted": report.upserted, "deleted": report.deleted}
+
+
+class IndexHooks:
+    """The pipeline's refine/index hooks: each call runs in a child unit (module docstring)."""
+
+    def __init__(
+        self,
+        cfg: Mapping[str, Any],
+        vault: FileVault,
+        specs: Sequence[SourceSpec],
+        runner: IsolatedRunner,
+        heavy: HeavySettings | None = None,
+    ) -> None:
         self.cfg = cfg
         self.vault = vault
         self.specs = specs
-        self.adapters = bootstrap.load_adapters()
+        self.runner = runner
+        self.heavy = heavy or HeavySettings.from_config(cfg)
+        self.adapters: dict[str, SourceAdapter] = bootstrap.load_adapters()
 
-    def _indexer(self) -> Indexer:
-        p = bootstrap.paths(self.cfg)
-        return Indexer(
-            self.vault,
-            self.specs,
-            self.adapters,
-            p.require_index(),
-            bootstrap.open_index(self.cfg, self.specs),
-            bootstrap.open_changes(self.cfg),
-            user_agent=bootstrap.user_agent(self.cfg),
-        )
+    def _payload(self, source: SourceSpec, generation: Generation) -> dict[str, Any]:
+        return {"config": dict(self.cfg), "source_id": source.id, "generation_id": generation.generation_id}
 
     def refine(self, source: SourceSpec, generation: Generation, generation_dir: Path) -> RefineResult:
-        ix = self._indexer()
-        try:
-            return ix.refine(source, generation, generation_dir)
-        finally:
-            ix.index.close()
-            ix.feed.close()
+        value = self.runner.call(
+            "refine",
+            "wsp_cli.wiring:refine_child",
+            self._payload(source, generation),
+            key=f"{source.id}/{generation.generation_id}",
+            timeout=self.heavy.refine_timeout,
+        )
+        count = cast(Mapping[str, Any], value).get("doc_count")
+        return RefineResult(int(count) if count is not None else None)
 
     def index(self, source: SourceSpec, generation: Generation) -> None:
-        ix = self._indexer()
+        self.runner.call(
+            "index",
+            "wsp_cli.wiring:index_child",
+            self._payload(source, generation),
+            key=f"{source.id}/{generation.generation_id}",
+            timeout=self.heavy.index_timeout,
+        )
+
+
+# --- document policy screen (audit H3) ------------------------------------------------------------
+
+# Adapters whose ``verify`` is a pure checksum comparison (``verify_file``): no document policy to run.
+CHECKSUM_ONLY_ADAPTERS = frozenset(
+    {
+        "kiwix-opds",
+        "wikimedia-dumps",
+        "wikidata",
+        "arxiv",
+        "pubmed",
+        "courtlistener",
+        "open-library",
+        "gutenberg",
+        "osm-planet",
+    }
+)
+SCREENED_ADAPTERS = frozenset({"doc-collection"})  # policy screened by document_screen()
+
+
+def document_screen(
+    adapters: Mapping[str, SourceAdapter],
+) -> Callable[[SourceSpec, Ctx, RemoteFile, Path], Verdict | None]:
+    """The pipeline's policy screen (``Wiring.document_screen``).
+
+    ``doc-collection``: the well-formedness check and the distribution/content screen its ``verify``
+    runs, without the checksum part. A checksum-only adapter: ``ok``. Anything else: ``None``, so
+    the pipeline runs the adapter's ``verify`` every time (a new adapter fails closed).
+    """
+    from wsp_adapters.doccollection import DocCollectionAdapter
+    from wsp_adapters.doccollection.adapter import screen_file, well_formed
+    from wsp_adapters.doccollection.policy import Verdict as PolicyVerdict
+
+    def screen(spec: SourceSpec, ctx: Ctx, remote: RemoteFile, local: Path) -> Verdict | None:
+        name = spec.adapter or spec.id
+        adapter = adapters.get(name)
+        if isinstance(adapter, DocCollectionAdapter):
+            problem = well_formed(local)
+            if problem:
+                return Verdict(VerdictStatus.MISMATCH, problem)
+            decision = screen_file(local, adapter.config(spec).rules).decision
+            if decision.verdict is PolicyVerdict.DENY:
+                return Verdict(VerdictStatus.REJECTED, f"policy {decision}")
+            if decision.verdict is PolicyVerdict.REVIEW:
+                return Verdict(VerdictStatus.HELD, f"policy {decision}")
+            return Verdict(VerdictStatus.OK, "policy allow")
+        if name in CHECKSUM_ONLY_ADAPTERS and adapter is not None:
+            return Verdict(VerdictStatus.OK, "no document policy")
+        return None
+
+    return screen
+
+
+def storage_probe(root: Path | None) -> Callable[[], bool]:
+    """True while the vault mount answers (a dead SMB soft mount raises or is empty)."""
+
+    def probe() -> bool:
+        if root is None:
+            return True
         try:
-            if source.partitioned:  # ADR-0010: index the union of the partitions, this one included
-                ix.index_partitioned(source, include=generation.generation_id)
-            else:
-                ix.index_generation(source, generation.generation_id)
-        finally:
-            ix.index.close()
-            ix.feed.close()
+            if not root.is_dir():
+                return False
+            with os.scandir(root) as entries:  # an unmounted mount point is an empty directory
+                return any(True for _ in entries)
+        except OSError:
+            return False
+
+    return probe
 
 
 def build_wiring(config: Mapping[str, Any]) -> Wiring:
@@ -354,9 +591,11 @@ def build_wiring(config: Mapping[str, Any]) -> Wiring:
     signer = bootstrap.load_signer(config, lay)
     vault = bootstrap.build_vault(config, specs, signer)
     assert vault.ledger is not None
-    hooks = IndexHooks(config, vault, specs)
+    stopping = threading.Event()  # set on SIGTERM: scrub, parity, par2 and heavy units stop promptly
+    runner = heavy_runner(config, should_stop=stopping.is_set)
+    hooks = IndexHooks(config, vault, specs, runner)
+    locks = lock_dir_for(bootstrap.paths(config).require_index())
     vcfg = bootstrap.section(config, "vault")
-    stopping = threading.Event()  # set on SIGTERM: scrub, parity and par2 stop within a second
     marker = bootstrap.activity_marker(config)
     window = float(vcfg.get("yield_to_interactive_seconds", 300))
 
@@ -372,14 +611,19 @@ def build_wiring(config: Mapping[str, Any]) -> Wiring:
     per_run = int(float(vcfg.get("parity_bytes_per_run", 200e9)))
 
     def scrub_slice(index: int, count: int) -> None:
-        budget = max(1, sealed_bytes(vault) // max(count, slices, 1))
-        report = scrub.run(max_bytes=budget)
-        data, parity_damage = split_parity_findings(vault, report.findings)
-        if data:
-            ladder.repair_findings(data)
-        if keeper is not None:
-            for sid, gid in parity_damage:  # derived data: set aside, the backfill makes it again
-                keeper.invalidate(sid, gid, "scrub found damaged parity")
+        with exclusive(locks, SCRUB):  # `wsp scrub` holds it: the slice is deferred (no attempt)
+            budget = max(1, sealed_bytes(vault) // max(count, slices, 1))
+            report = scrub.run(max_bytes=budget)
+            data, parity_damage = split_parity_findings(vault, report.findings)
+            if data:
+                ladder.repair_findings(data)
+            if keeper is not None:
+                for sid, gid in parity_damage:  # derived data: set aside, the backfill makes it again
+                    keeper.invalidate(sid, gid, "scrub found damaged parity")
+
+    def drill() -> Mapping[str, object]:
+        with exclusive(locks, DRILL):
+            return drill_once(config, vault)
 
     def prune(source_id: str, generation_id: str) -> None:
         vault.prune(source_id, generation_id)  # moves aside under pruned/, never deletes
@@ -414,7 +658,7 @@ def build_wiring(config: Mapping[str, Any]) -> Wiring:
         refine=hooks.refine,
         index=hooks.index,
         scrub=scrub_slice,
-        drill=lambda: drill_once(config, vault),
+        drill=drill,
         pruner=prune,
         last_copy=None,  # the orchestrator's cached upstream offers decide (PLAN §6.4)
         bots=build_bots(config),
@@ -423,7 +667,11 @@ def build_wiring(config: Mapping[str, Any]) -> Wiring:
         promoter=promote,
         proposal_recorder=files.write,
         parity=parity,
-        integrity=integrity_hooks(config, vault, scrub),
+        integrity=integrity_hooks(
+            config, vault, scrub, runner=runner, profile_timeout=hooks.heavy.profile_timeout
+        ),
         on_withheld=on_withheld,
         on_shutdown=[stopping.set],
+        document_screen=document_screen(hooks.adapters),
+        storage_available=storage_probe(bootstrap.paths(config).vault_root),
     )

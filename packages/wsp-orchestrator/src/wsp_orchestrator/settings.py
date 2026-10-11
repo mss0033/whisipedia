@@ -18,7 +18,7 @@ Keys (all optional except the paths in production)::
     anchor_day = 15                    # day of month the calendar cycle is due
     scrub_slices = 720                 # slices per scrub cycle (hourly at 30 days)
     drill_interval = "P1M"
-    max_workers = 4
+    max_workers = 4                    # capped by $WSP_MAX_WORKERS when that is set
     max_jobs_per_host = 1
     poll_interval_seconds = 30
     shutdown_grace_seconds = 10       # running work is cancelled first; must stay well under
@@ -29,6 +29,12 @@ Keys (all optional except the paths in production)::
     offer_max_age = "P14D"             # upstream observations older than this cannot prove redundancy
     parity_interval = "PT6H"           # how often the parity backfill wakes up
     parity_continue = "PT2M"           # pause between bounded parity runs while work remains
+    defer_delay = "PT10M"              # a step that found a lock busy or the NAS away retries after this
+    crashes_to_fail = 2                # crashes (or OOM kills) in one state before FAILED + alert
+    stuck_after = "P2D"                # alert when a release has not left its state for this long
+    job_stuck_after = "P1D"            # alert when a job has been running this long
+    metrics_interval_seconds = 15      # the metrics file is rewritten at most this often
+    rss_alert_mb = 1024                # alert when the daemon's own RSS exceeds this
     wiring = "package.module:factory"  # builds the Wiring (adapters, vault, ledger...)
     [orchestrator.job_limits]          # per job type concurrency
     fetch_release = 2
@@ -42,6 +48,7 @@ Keys (all optional except the paths in production)::
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import timedelta
@@ -111,6 +118,12 @@ class OrchestratorSettings:
     offer_max_age: timedelta = timedelta(days=14)  # older upstream observations prove nothing
     parity_interval: IsoDuration = field(default_factory=lambda: IsoDuration.parse("PT6H"))
     parity_continue: timedelta = timedelta(minutes=2)  # pause between bounded parity runs
+    defer_delay: timedelta = timedelta(minutes=10)  # busy lock / NAS away: retry the step after this
+    crashes_to_fail: int = 2  # crashes in one state before the release backs off (FAILED) and alerts
+    stuck_after: timedelta = timedelta(days=2)  # a release in one state this long raises an alert
+    job_stuck_after: timedelta = timedelta(days=1)  # a job running this long raises an alert
+    metrics_interval_seconds: float = 15.0
+    rss_alert_mb: int = 1024  # the control plane should stay well under this (audit design target)
 
     def __post_init__(self) -> None:
         cadence_for_cycle(self.cycle, anchor_day=self.anchor_day)  # validates both
@@ -158,7 +171,7 @@ class OrchestratorSettings:
             scrub_cycle_days=int(vault.get("scrub_cycle_days", 30)),
             scrub_slices=int(orch.get("scrub_slices", 720)),
             drill_interval=IsoDuration.parse(str(orch.get("drill_interval", "P1M"))),
-            max_workers=int(orch.get("max_workers", 4)),
+            max_workers=capped_workers(int(orch.get("max_workers", 4))),
             job_limits=limits,
             max_jobs_per_host=int(orch.get("max_jobs_per_host", 1)),
             poll_interval_seconds=float(orch.get("poll_interval_seconds", 30)),
@@ -172,4 +185,21 @@ class OrchestratorSettings:
             offer_max_age=IsoDuration.parse(str(orch.get("offer_max_age", "P14D"))).approx(),
             parity_interval=IsoDuration.parse(str(orch.get("parity_interval", "PT6H"))),
             parity_continue=IsoDuration.parse(str(orch.get("parity_continue", "PT2M"))).approx(),
+            defer_delay=IsoDuration.parse(str(orch.get("defer_delay", "PT10M"))).approx(),
+            crashes_to_fail=int(orch.get("crashes_to_fail", 2)),
+            stuck_after=IsoDuration.parse(str(orch.get("stuck_after", "P2D"))).approx(),
+            job_stuck_after=IsoDuration.parse(str(orch.get("job_stuck_after", "P1D"))).approx(),
+            metrics_interval_seconds=float(orch.get("metrics_interval_seconds", 15)),
+            rss_alert_mb=int(orch.get("rss_alert_mb", 1024)),
         )
+
+
+def capped_workers(configured: int, environ: Mapping[str, str] | None = None) -> int:
+    """``configured``, capped by ``$WSP_MAX_WORKERS`` (the systemd units set it; audit LOW)."""
+    env = os.environ if environ is None else environ
+    raw = env.get("WSP_MAX_WORKERS", "").strip()
+    try:
+        cap = int(raw)
+    except ValueError:
+        return configured
+    return max(1, min(configured, cap)) if cap > 0 else configured

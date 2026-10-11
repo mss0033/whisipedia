@@ -10,7 +10,7 @@ from wsp_orchestrator.clock import ManualClock
 from wsp_orchestrator.jobs import JobKind, JobStatus
 from wsp_orchestrator.orchestrator import Orchestrator
 from wsp_orchestrator.policy import Candidate, CandidateKind, Decision, GateConfig, Proposal
-from wsp_orchestrator.testing import FakeWorld, SimulatedCrash, make_settings, make_spec
+from wsp_orchestrator.testing import FakeWorld, SimulatedCrash, make_settings, make_spec, record_promotions
 
 T0 = datetime(2026, 10, 15, 6, tzinfo=UTC)
 FILES = {"a.zim": b"a" * 1000}
@@ -155,7 +155,8 @@ def test_held_release_and_owner_approval(tmp_path: Path) -> None:
     orch.run_pending()
     rec = orch.store.get_release("src", "2026-11-01")
     assert rec is not None
-    assert rec.state is ReleaseState.INDEXED
+    assert rec.state is ReleaseState.REFINED  # held before indexing (audit H2)
+    assert ("src", "2026-11-01") not in world.refinery.indexed
     assert rec.hold_reason is not None
     assert "held:src/2026-11-01" in world.sink.alert_keys()
 
@@ -285,6 +286,7 @@ def test_prune_with_pruner_and_last_copy_oracle(tmp_path: Path) -> None:
         world=world,
         wiring_extra={"last_copy": last_copy, "pruner": world.vault.prune},
     )
+    record_promotions(orch.store, "src", ["2026-09-01"], T0)
     orch.queue.enqueue(JobKind.PRUNE, "src", now=T0, payload={"source_id": "src"})
     orch.run_pending()
     assert sorted(world.vault.pruned) == [("src", "2025-06-01"), ("src", "2026-01-01")]

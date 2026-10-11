@@ -27,7 +27,7 @@ from wsp_orchestrator.curator.registry_edit import (
 from wsp_orchestrator.jobs import JobKind, JobStatus
 from wsp_orchestrator.orchestrator import LastCopyHook, Orchestrator
 from wsp_orchestrator.policy import Candidate, CandidateKind, Decision, GateConfig, Proposal
-from wsp_orchestrator.testing import FakeFetcher, FakeWorld, make_settings, make_spec
+from wsp_orchestrator.testing import FakeFetcher, FakeWorld, make_settings, make_spec, record_promotions
 
 T0 = datetime(2026, 10, 15, 6, tzinfo=UTC)
 FILES = {"a.zim": b"a" * 1000}
@@ -144,6 +144,7 @@ def test_prune_keeps_generations_upstream_no_longer_serves(tmp_path: Path) -> No
     for gid in ("2026-07-01", "2026-08-01", "2026-09-01"):
         world.vault.add_sealed("src", gid)
     world.vault.add_sealed("src", "2026-10-01", current=True)
+    record_promotions(orch.store, "src", ["2026-10-01"], T0)
     # upstream still serves 2026-08-01 and 2026-10-01; 07 and 09 are gone (last copies)
     world.adapters["src"].add_release("2026-08-01", FILES)
     world.adapters["src"].add_release("2026-10-01", FILES)
@@ -181,6 +182,7 @@ def test_prune_dry_run_flag(tmp_path: Path) -> None:
     )
     world.vault.add_sealed("src", "2026-09-01")
     world.vault.add_sealed("src", "2026-10-01", current=True)
+    record_promotions(orch.store, "src", ["2026-10-01"], T0)
     orch.queue.enqueue(JobKind.PRUNE, "src", now=T0, payload={"source_id": "src"})
     for job in orch.claim_ready():
         orch.execute(job)
