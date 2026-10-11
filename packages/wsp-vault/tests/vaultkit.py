@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -66,3 +66,7 @@ def corrupt(path: Path, offset: int = 10) -> None:
     raw = bytearray(path.read_bytes())
     raw[offset] ^= 0x01
     path.write_bytes(bytes(raw))
+
+
+SealFn = Callable[..., Path]
+"""Signature of the ``seal`` fixture: seals a generation built from in-memory files."""

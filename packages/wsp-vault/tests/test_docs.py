@@ -4,8 +4,7 @@ import re
 from datetime import UTC, datetime
 from pathlib import Path
 
-from conftest import SealFn
-from vaultkit import GEN, SOURCE
+from vaultkit import GEN, SOURCE, SealFn
 
 from wsp_core.model import SourceSpec, SourceStatus, Tier, UpdateStrategy
 from wsp_vault.docs import CSV_COLUMNS, human_size, write_library_docs

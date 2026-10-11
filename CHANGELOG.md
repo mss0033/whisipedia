@@ -10,6 +10,18 @@ All notable changes are documented here. The format follows [Keep a Changelog](h
   citation checks and a low-confidence refusal, a resumable embedding job
   (`scripts/embed_sources.py`), an evaluation harness with a 125-query gold set, `build_oracle()`
   for the composition root, and `VectorIndex`/`Embedder` contract suites.
+- The remaining T1 source adapters (`docs/components/adapters.md`):
+  - `arxiv`: OAI-PMH metadata from `oaipmh.arxiv.org` (≤ 1 request / 3 s, resumption tokens,
+    incremental `from=`) plus the newest PDF months from the public GCS mirror; `html_ref` points at the
+    newest PDF version; optional PDF text with `pypdfium2`.
+  - `wsp ingest` seals the arXiv bulk pull chunk by chunk as part generations `<snapshot>.pdf.<chunk>`,
+    only for chunks the pull has finished, by rename after the MD5 check (`FileVault.adopt_many`).
+  - `pubmed` (baseline + updates, newest version wins, `DeleteCitation` honoured), `courtlistener`
+    (opinions joined with clusters, dockets and courts through a local SQLite lookup), `open-library`
+    (explicit catalog records), `gutenberg` (catalog, RDF and plain-text feeds streamed from the ZIP,
+    linked to the Kiwix ZIM), `wikidata` (multilingual entity documents plus a local QID lookup for
+    entity linking), `osm-planet` (named places with Wikidata QIDs via pyosmium).
+  - Parallel bz2 decoding for single-stream dumps (`indexed_bzip2`), about 8× faster on 15 threads.
 - Phase 5 "Autonomy": a Refinery-backed catalog (featured article, On this day, directory categories,
   uniform random pages; precomputed at index time); par2 parity for all sealed generations
   (`vault.parity_scope`), created and backfilled after sealing with a signed `PARITY.json` sidecar,

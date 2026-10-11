@@ -2,12 +2,11 @@ import hashlib
 import json
 import os
 import stat
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 import pytest
-from conftest import SealFn
-from vaultkit import FILES, GEN, SOURCE, corrupt
+from vaultkit import FILES, GEN, SOURCE, SealFn, corrupt
 
 from wsp_core.model import Checksum, GenerationStatus
 from wsp_core.ports import Vault
@@ -102,6 +101,30 @@ def test_adopt_renames_after_verifying(vault: FileVault, tmp_path: Path) -> None
     assert vault.adopt(SOURCE, GEN, incoming, "upstream/big.zim") == art
     gen = vault.seal(SOURCE, GEN)
     assert [str(a.relpath) for a in gen.artifacts] == ["upstream/big.zim"]
+
+
+def test_adopt_many_batches_records_and_resumes(vault: FileVault, tmp_path: Path) -> None:
+    incoming = tmp_path / "vault" / "_incoming" / "tree"
+    items: list[tuple[Path, str, Sequence[Checksum]]] = []
+    for i in range(7):
+        path = incoming / f"d{i % 2}" / f"f{i}.pdf"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        data = f"pdf {i}".encode()
+        path.write_bytes(data)
+        items.append((path, f"upstream/d{i % 2}/f{i}.pdf", [Checksum("md5", hashlib.md5(data).hexdigest())]))
+    # a bad checksum stops the batch; files adopted before it stay recorded
+    bad = incoming / "bad.pdf"
+    bad.write_bytes(b"bad")
+    with pytest.raises(IntegrityError):
+        vault.adopt_many(SOURCE, GEN, [*items[:3], (bad, "upstream/bad.pdf", [Checksum("md5", "0" * 32)])],
+                         workers=1, flush_every=2)  # fmt: skip
+    assert bad.exists()
+    assert not items[0][0].exists()
+    # re-run over everything: already staged files are re-hashed, the rest are renamed
+    assert vault.adopt_many(SOURCE, GEN, items, workers=3, flush_every=2) == 7
+    gen = vault.seal(SOURCE, GEN)
+    assert sorted(str(a.relpath) for a in gen.artifacts) == sorted(rel for _, rel, _ in items)
+    assert all(a.upstream for a in gen.artifacts)
 
 
 def test_adopt_with_wrong_hash_leaves_file_in_place(vault: FileVault, tmp_path: Path) -> None:

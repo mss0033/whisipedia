@@ -2,8 +2,7 @@ import shutil
 from pathlib import Path
 
 import pytest
-from conftest import SealFn
-from vaultkit import FILES, GEN, SOURCE, Clock, FakeParity, corrupt
+from vaultkit import FILES, GEN, SOURCE, Clock, FakeParity, SealFn, corrupt
 
 from wsp_core.model import GenerationStatus
 from wsp_core.ports import ParityProvider

@@ -5,13 +5,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from vaultkit import FILES, GEN, SOURCE, Clock, FakeParity
+from vaultkit import FILES, GEN, SOURCE, Clock, FakeParity, SealFn
 
 from wsp_vault.ledger import JsonlLedger
 from wsp_vault.signing import Ed25519Signer
 from wsp_vault.vault import FileVault
-
-SealFn = Callable[..., Path]
 
 
 @pytest.fixture

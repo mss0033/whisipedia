@@ -17,6 +17,8 @@ sources:
       adapter: wikimedia-dumps
       endpoints: ["https://dumps.wikimedia.org/", "https://dumps.wikimedia.org/other/incr/"]
       checksums: md5+sha1 (upstream)
+      # English pages render with the Kiwix ZIM's HTML (matched by title); text is indexed from the dump.
+      rendition: [{lang: en, source: wikipedia-en-zim}]
     update: {strategy: base-plus-incremental}
     size: {current_bytes: 68.4e9, history_7z_bytes: 456.5e9, weekly_incr_bytes: 11.0e9, measured: true, as_of: 2026-10-09}
     retention: {base: yearly, segments: P2Y}
@@ -59,7 +61,7 @@ sources:
     status: active
     license: CC0-1.0
     legal_basis: open-license
-    access: {adapter: wikimedia-dumps, endpoints: ["https://dumps.wikimedia.org/wikidatawiki/entities/"]}
+    access: {adapter: wikidata, endpoints: ["https://dumps.wikimedia.org/wikidatawiki/entities/"], languages: [en, de, fr, es, ru, it, nl, pl, sv]}
     update: {strategy: snapshot-retention}
     size: {json_bz2_bytes: 103.3e9, truthy_nt_bz2_bytes: 43.5e9, measured: true, as_of: 2026-10-09}
     retention: {gfs: {last: 2, monthly: 12, yearly: forever}}
@@ -96,7 +98,7 @@ sources:
     status: active
     license: LicenseRef-PD-US+PG-terms
     legal_basis: public-domain
-    access: {adapter: rsync-mirror, catalog: "https://www.gutenberg.org/cache/epub/feeds/"}
+    access: {adapter: gutenberg, catalog: "https://www.gutenberg.org/cache/epub/feeds/", reading_copy: gutenberg-zim}
     update: {strategy: mirror}
     size: {txt_zip_bytes: 11e9, full_mirror_bytes: 1.0e12, measured: false, as_of: 2026-10-09}
 
@@ -133,7 +135,7 @@ sources:
     status: active
     license: CC0-1.0
     legal_basis: open-license
-    access: {adapter: http-files, endpoints: ["https://openlibrary.org/data/"]}
+    access: {adapter: open-library, endpoints: ["https://openlibrary.org/data/"]}
     update: {strategy: snapshot-retention}
     size: {bytes: 16.7e9, measured: true, as_of: 2026-10-09}
 
@@ -157,10 +159,10 @@ sources:
     status: candidate
     license: LicenseRef-per-item
     legal_basis: bulk-access-terms
-    access: {adapter: s3-bucket, requester_pays: true, metadata_adapter: oai-pmh}
+    access: {adapter: arxiv, oai_endpoint: "https://oaipmh.arxiv.org/oai", oai_interval: 3, pdf_months: 2, pdf_text: false}
     update: {strategy: base-plus-incremental}
     size: {bytes: 10e12, measured: false, as_of: 2026-10-09}
-    notes: Metadata first. PDFs pending owner decision D4 (egress cost).
+    notes: Metadata by OAI-PMH (oaipmh.arxiv.org since 2025, <= 1 request / 3 s). PDFs from the free public arxiv-dataset GCS mirror (D4); the bulk pull is ingested chunk by chunk as part generations <snapshot>.pdf.<archive>-<yymm>.
 
   - id: pubmed
     name: PubMed baseline + updates
@@ -170,7 +172,7 @@ sources:
     status: active
     license: LicenseRef-NLM-terms
     legal_basis: bulk-access-terms
-    access: {adapter: http-files, endpoints: ["https://ftp.ncbi.nlm.nih.gov/pubmed/baseline/", "https://ftp.ncbi.nlm.nih.gov/pubmed/updatefiles/"]}
+    access: {adapter: pubmed, endpoints: ["https://ftp.ncbi.nlm.nih.gov/pubmed/baseline/", "https://ftp.ncbi.nlm.nih.gov/pubmed/updatefiles/"]}
     update: {strategy: base-plus-incremental}
     size: {files: 1334, bytes: 50e9, measured: false, as_of: 2026-10-09}
 
@@ -245,7 +247,8 @@ sources:
     status: active
     license: ODbL-1.0
     legal_basis: open-license
-    access: {adapter: osm-replication, endpoints: ["https://planet.openstreetmap.org/"]}
+    access: {adapter: osm-planet, endpoints: ["https://planet.openstreetmap.org/pbf/"]}
+    notes: The osm-planet adapter takes the weekly planet PBF and emits named places; replication diffs are not applied yet.
     update: {strategy: base-plus-incremental}
     size: {planet_pbf_bytes: 95.2e9, measured: true, as_of: 2026-10-09}
 
@@ -293,7 +296,7 @@ sources:
     status: active
     license: LicenseRef-PD-court-opinions
     legal_basis: public-domain
-    access: {adapter: http-files, endpoints: ["https://com-courtlistener-storage.s3-us-west-2.amazonaws.com/bulk-data/"]}
+    access: {adapter: courtlistener, endpoints: ["https://com-courtlistener-storage.s3-us-west-2.amazonaws.com/bulk-data/"]}
     update: {cadence: P3M, strategy: snapshot-retention}
     size: {opinions_bytes: 55.3e9, measured: true, as_of: 2026-10-09}
 

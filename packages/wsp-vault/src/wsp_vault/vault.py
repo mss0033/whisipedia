@@ -31,7 +31,9 @@ import json
 import os
 import re
 import stat
+from collections import deque
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
@@ -276,8 +278,20 @@ class FileVault:
         The file is hashed in place and checked against ``expected`` and ``upstream``; only then is
         it renamed, so no bytes are copied. Resumes cleanly if a crash happened after the rename.
         """
-        rel = check_relpath(relpath)
         staging = self.stage(source_id, generation_id)
+        rel, digests = self._adopt_file(staging, path, relpath, upstream, expected)
+        return self._record(source_id, generation_id, staging, rel, digests, upstream, "adopt")
+
+    def _adopt_file(
+        self,
+        staging: Path,
+        path: Path,
+        relpath: str,
+        upstream: Sequence[Checksum],
+        expected: Digests | None = None,
+    ) -> tuple[str, Digests]:
+        """Hash ``path`` in place, check it, rename it to ``staging/relpath``. No staging record."""
+        rel = check_relpath(relpath)
         dest = staging / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
         extra = supported_extra(c.algorithm for c in upstream)
@@ -303,7 +317,75 @@ class FileVault:
             fsync_dir(path.parent)
             if dest.stat().st_size != digests.size:
                 raise VaultError(f"{dest}: size changed during adoption")
-        return self._record(source_id, generation_id, staging, rel.as_posix(), digests, upstream, "adopt")
+        return rel.as_posix(), digests
+
+    def adopt_many(
+        self,
+        source_id: str,
+        generation_id: str,
+        items: Iterable[tuple[Path, str, Sequence[Checksum]]],
+        *,
+        workers: int = 4,
+        flush_every: int = 1000,
+    ) -> int:
+        """:meth:`adopt` for many files (mirror trees with thousands of files per generation).
+
+        Same checks and the same crash recovery per file, but files are hashed on ``workers``
+        threads and the staging record is rewritten once per ``flush_every`` files (not once per
+        file, which is quadratic), with one ``vault.adopt_batch`` ledger event per flush. A crash
+        between a rename and the next flush is recovered on re-run: the staged file is re-hashed.
+        Returns the number of files adopted. Stops at the first failing file (already adopted
+        files stay recorded).
+        """
+        staging = self.stage(source_id, generation_id)
+        records = _read_staging(staging)
+        pending: list[tuple[str, Digests, Sequence[Checksum]]] = []
+        count = 0
+
+        def flush() -> None:
+            if not pending:
+                return
+            for rel, digests, upstream in pending:
+                records[rel] = ManifestEntry.from_digests(rel, digests, upstream=upstream)
+            payload = {p: e.to_json() for p, e in sorted(records.items())}
+            atomic_write_bytes(
+                staging / STAGING_RECORD,
+                json.dumps(payload, sort_keys=True, indent=1).encode(),
+                overwrite=True,
+                retry=self._retry,
+            )
+            self._log(
+                "vault.adopt_batch",
+                f"{source_id}/{generation_id}",
+                {"files": len(pending), "bytes": sum(d.size for _, d, _ in pending)},
+            )
+            pending.clear()
+
+        def one(item: tuple[Path, str, Sequence[Checksum]]) -> tuple[str, Digests, Sequence[Checksum]]:
+            path, relpath, upstream = item
+            rel, digests = self._adopt_file(staging, path, relpath, upstream)
+            return rel, digests, upstream
+
+        with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+            window: deque[Future[tuple[str, Digests, Sequence[Checksum]]]] = deque()
+            try:
+                for item in items:
+                    window.append(pool.submit(one, item))
+                    if len(window) >= 2 * max(1, workers):
+                        pending.append(window.popleft().result())
+                        count += 1
+                        if len(pending) >= flush_every:
+                            flush()
+                while window:
+                    pending.append(window.popleft().result())
+                    count += 1
+            finally:
+                for fut in window:  # record whatever finished before a failure
+                    if not fut.cancel() and fut.exception() is None:
+                        pending.append(fut.result())
+                        count += 1
+                flush()
+        return count
 
     def _record(
         self,
@@ -353,7 +435,7 @@ class FileVault:
             lib.parent.mkdir(parents=True, exist_ok=True)
             if lib.exists():
                 raise VaultError(f"{lib} exists without a manifest; inspect it by hand")
-            os.rename(stg, lib)
+            _rename_with_retry(stg, lib)
             fsync_dir(lib.parent)
             for parent in (stg.parent, stg.parent.parent):
                 with suppress(OSError):
@@ -635,3 +717,25 @@ def _read_staging(staging: Path) -> dict[str, ManifestEntry]:
         return {}
     raw = cast(dict[str, Any], json.loads(path.read_bytes()))
     return {rel: ManifestEntry.from_json(cast(dict[str, Any], obj)) for rel, obj in raw.items()}
+
+
+def _rename_with_retry(src: Path, dst: Path, *, attempts: int = 6, first_delay: float = 2.0) -> None:
+    """``os.rename`` that waits out transient sharing locks.
+
+    On SMB a directory cannot be renamed while any client holds a file inside it open (another
+    reader, an indexer or virus scanner on the NAS). Such locks are usually short, so retry with
+    exponential backoff (about two minutes in total) before giving up; the seal is idempotent and
+    the next run retries anyway.
+    """
+    import time
+
+    delay = first_delay
+    for attempt in range(attempts):
+        try:
+            os.rename(src, dst)
+            return
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(delay)
+            delay *= 2

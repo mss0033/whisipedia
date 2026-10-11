@@ -3,8 +3,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
-from conftest import SealFn
-from vaultkit import GEN, SOURCE, Clock, corrupt
+from vaultkit import GEN, SOURCE, Clock, SealFn, corrupt
 
 from wsp_core.model import VerdictStatus
 from wsp_vault.ledger import JsonlLedger

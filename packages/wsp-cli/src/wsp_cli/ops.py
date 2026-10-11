@@ -19,6 +19,7 @@ from wsp_cli.doctor import exit_code as doctor_exit
 from wsp_cli.doctor import render as render_doctor
 from wsp_cli.indexer import Indexer
 from wsp_cli.ingest import Ingestor, VersionStatus, render
+from wsp_cli.locks import LockHeldError, exclusive
 from wsp_cli.service import ServiceManager, unit_dir
 from wsp_cli.wiring import drill_once, parity_targets, repair_ladder, scrubber
 from wsp_core.model import GenerationStatus, SourceSpec
@@ -39,6 +40,11 @@ def _context(args: argparse.Namespace) -> tuple[bootstrap.Layout, dict[str, Any]
     return lay, cfg, tuple(bootstrap.load_sources(cfg, lay))
 
 
+def _lock_dir(cfg: Mapping[str, Any]) -> Path:
+    """Local-disk lock directory, next to the index root."""
+    return bootstrap.paths(cfg).require_index().parent / "locks"
+
+
 def _vault(
     cfg: Mapping[str, Any], lay: bootstrap.Layout, specs: Sequence[SourceSpec], *, writable: bool
 ) -> FileVault:
@@ -54,6 +60,23 @@ def _vault(
 
 def cmd_ingest(args: argparse.Namespace, out: TextIO) -> int:
     lay, cfg, specs = _context(args)
+    if args.dry_run:
+        return _ingest(args, out, lay, cfg, specs)
+    try:
+        with exclusive(_lock_dir(cfg), "ingest"):
+            return _ingest(args, out, lay, cfg, specs)
+    except LockHeldError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 3
+
+
+def _ingest(
+    args: argparse.Namespace,
+    out: TextIO,
+    lay: bootstrap.Layout,
+    cfg: dict[str, Any],
+    specs: tuple[SourceSpec, ...],
+) -> int:
     dry: bool = args.dry_run
     vault = _vault(cfg, lay, specs, writable=not dry)
     fetcher: Fetcher | None = None if args.offline else bootstrap.build_fetcher(cfg)
@@ -115,8 +138,12 @@ def open_indexer(
 
 def cmd_index_build(args: argparse.Namespace, out: TextIO) -> int:
     lay, cfg, specs = _context(args)
-    with open_indexer(cfg, lay, specs, out) as ix:
-        reports = ix.build([args.source] if args.source else None)
+    try:
+        with exclusive(_lock_dir(cfg), "index"), open_indexer(cfg, lay, specs, out) as ix:
+            reports = ix.build([args.source] if args.source else None)
+    except LockHeldError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 3
     for r in reports:
         if r.skipped:
             out.write(f"{r.source_id}: skipped ({r.skipped})\n")

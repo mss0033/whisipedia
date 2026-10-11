@@ -7,9 +7,11 @@ for a bundle of books it is prefixed with the book name (``ifixit_en_all/A/Foo``
 
 from __future__ import annotations
 
+import html
 import re
 import threading
 from collections import OrderedDict
+from contextlib import suppress
 from pathlib import Path
 
 from libzim.reader import Archive, Entry
@@ -19,6 +21,7 @@ from wsp_core.ports import Vault
 
 _ZIM_DATE_RE = re.compile(r"_(\d{4}-\d{2})\.zim$")
 _MAX_REDIRECTS = 5
+BOOKS_PAGE = "_books"  # native id of the generated book list of a bundle source
 
 
 def _book_name(archive: Archive, path: Path) -> str:
@@ -35,6 +38,8 @@ class ZimAssetStore:
         self._vault = vault
         self._max_open = max_open
         self._open: OrderedDict[tuple[str, str], dict[str, Archive]] = OrderedDict()
+        self._books: dict[tuple[str, str], dict[str, Path]] = {}
+        self.names: dict[str, str] = {}  # source id -> display name, for generated pages
         self._lock = threading.Lock()
 
     def _zim_files(self, source_id: str, generation_id: str) -> list[Path]:
@@ -58,9 +63,10 @@ class ZimAssetStore:
         if len(files) == 1:
             archives[""] = Archive(files[0])
         else:
-            for f in files:
-                archive = Archive(f)
-                archives[_book_name(archive, f)] = archive
+            # Bundles (e.g. 181 Stack Exchange sites): open books lazily, located by file name, because
+            # opening every archive over SMB takes minutes. See ``_book``.
+            with self._lock:
+                self._books[key] = {_ZIM_DATE_RE.sub("", f.name).removesuffix(".zim"): f for f in files}
         with self._lock:
             self._open[key] = archives
             while len(self._open) > self._max_open:
@@ -73,21 +79,93 @@ class ZimAssetStore:
             archive, entry_path = archives[""], path
         else:
             book, _, entry_path = path.partition("/")
-            archive = archives.get(book)
+            archive = archives.get(book) or self._book(source_id, generation_id, archives, book)
             if archive is None:
                 return None
-        if not entry_path or not archive.has_entry_by_path(entry_path):
+        if not entry_path:  # "<book>/" or "": the book's front page
+            if not archive.has_main_entry:
+                return None
+            entry = archive.main_entry
+        elif not archive.has_entry_by_path(entry_path):
             return None
-        entry = archive.get_entry_by_path(entry_path)
+        else:
+            entry = archive.get_entry_by_path(entry_path)
         for _ in range(_MAX_REDIRECTS):
             if not entry.is_redirect:
                 return entry
             entry = entry.get_redirect_entry()
         return None
 
+    def _book(
+        self, source_id: str, generation_id: str, archives: dict[str, Archive], book: str
+    ) -> Archive | None:
+        """Open one book of a bundle on first use. File names normally match the ``Name`` metadata the
+        adapter uses for native ids; if not, fall back to opening every book once to read it."""
+        key = (source_id, generation_id)
+        with self._lock:
+            books = self._books.get(key, {})
+        path = books.get(book)
+        if path is not None:
+            archive = Archive(path)
+            if _book_name(archive, path) == book:
+                with self._lock:
+                    archives[book] = archive
+                return archive
+        for name, f in books.items():
+            if name in archives:
+                continue
+            archive = Archive(f)
+            with self._lock:
+                archives[_book_name(archive, f)] = archive
+        return archives.get(book)
+
+    def home(self, source_id: str, generation_id: str) -> str | None:
+        """Native id of the landing page: the ZIM's main entry for a single book, or
+        :data:`BOOKS_PAGE` (a generated list of books) for a bundle."""
+        archives = self._archives(source_id, generation_id)
+        if "" not in archives:
+            return BOOKS_PAGE if self.books(source_id, generation_id) else None
+        archive = archives[""]
+        if not archive.has_main_entry:
+            return None
+        entry = archive.main_entry
+        for _ in range(_MAX_REDIRECTS):
+            if not entry.is_redirect:
+                return entry.path
+            entry = entry.get_redirect_entry()
+        return None
+
+    def books(self, source_id: str, generation_id: str) -> list[str]:
+        """Book names of a bundle (from file names; no archive is opened)."""
+        self._archives(source_id, generation_id)
+        with self._lock:
+            return sorted(self._books.get((source_id, generation_id), {}))
+
+    def _books_page(self, source_id: str, generation_id: str) -> str | None:
+        """Generated index of a bundle: one link per book (``<book>/`` resolves to its front page)."""
+        books = [] if "" in self._archives(source_id, generation_id) else self.books(source_id, generation_id)
+        if not books:
+            return None
+        name = html.escape(self.names.get(source_id, source_id))
+        items = "".join(
+            f'<li><a href="{html.escape(b)}/">{html.escape(b.replace("_", " "))}</a></li>' for b in books
+        )
+        return f"<html><head><title>{name}</title></head><body><h1>{name}</h1><ul>{items}</ul></body></html>"
+
+    def warm(self, source_ids: list[str]) -> None:
+        """Open the current archives of single-book sources (first open of a large ZIM over SMB takes
+        seconds); bundle books still open lazily."""
+        for source_id in source_ids:
+            with suppress(Exception):
+                gen = self._vault.current(source_id)
+                if gen is not None:
+                    self._archives(source_id, gen.generation_id)
+
     def html(self, source_id: str, generation_id: str, html_ref: str) -> str | None:
         if not html_ref.startswith("zim:"):
             return None
+        if html_ref == f"zim:{BOOKS_PAGE}":
+            return self._books_page(source_id, generation_id)
         entry = self._entry(source_id, generation_id, html_ref.removeprefix("zim:"))
         if entry is None:
             return None

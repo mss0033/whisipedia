@@ -1,18 +1,28 @@
 [project]
 name = "wsp-adapters"
 version = "0.1.0"
-description = "Whisipedia source adapters (Kiwix OPDS, Wikimedia dumps) and snapshot diffing"
+description = "Whisipedia source adapters (Kiwix, Wikimedia, Wikidata, arXiv, PubMed, CourtListener, Open Library, Gutenberg, OSM) and snapshot diffing"
 requires-python = ">=3.12"
 dependencies = [
   "wsp-core",
   "libzim>=3.6",
   "selectolax>=0.3.27",
   "zstandard>=0.23",
+  "indexed-bzip2>=1.6",
+  "osmium>=4.0",
+  "pypdfium2>=4.30",
 ]
 
 [project.entry-points."whisipedia.adapters"]
 kiwix-opds = "wsp_adapters.kiwix:KiwixOpdsAdapter"
 wikimedia-dumps = "wsp_adapters.wikimedia:WikimediaDumpsAdapter"
+wikidata = "wsp_adapters.wikidata:WikidataAdapter"
+arxiv = "wsp_adapters.arxiv:ArxivAdapter"
+pubmed = "wsp_adapters.pubmed:PubmedAdapter"
+courtlistener = "wsp_adapters.courtlistener:CourtListenerAdapter"
+open-library = "wsp_adapters.openlibrary:OpenLibraryAdapter"
+gutenberg = "wsp_adapters.gutenberg:GutenbergAdapter"
+osm-planet = "wsp_adapters.osm:OsmPlanetAdapter"
 
 [dependency-groups]
 dev = ["wsp-core[testing]"]

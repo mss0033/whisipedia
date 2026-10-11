@@ -2,8 +2,7 @@ import random
 from pathlib import Path
 
 import pytest
-from conftest import SealFn
-from vaultkit import GEN, SOURCE, FakeParity
+from vaultkit import GEN, SOURCE, FakeParity, SealFn
 
 from wsp_vault.drill import DrillKind, run_drill
 from wsp_vault.ledger import JsonlLedger

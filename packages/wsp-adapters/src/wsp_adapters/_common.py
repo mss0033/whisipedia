@@ -147,7 +147,10 @@ def upstream_dir(generation_dir: Path) -> Path:
 
 
 def default_workers() -> int:
-    return max(1, (os.cpu_count() or 2) - 1)
+    """All cores but one, capped by ``WSP_MAX_WORKERS`` so background jobs leave the machine usable."""
+    workers = max(1, (os.cpu_count() or 2) - 1)
+    cap = os.environ.get("WSP_MAX_WORKERS", "")
+    return min(workers, int(cap)) if cap.isdigit() and int(cap) > 0 else workers
 
 
 def ordered_parallel_map[T, R](
