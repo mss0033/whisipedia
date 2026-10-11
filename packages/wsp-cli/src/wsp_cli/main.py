@@ -278,6 +278,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
     s.add_argument("--budget-gb", type=float, default=None, help="stop after hashing this many GB")
 
+    s = add(
+        "undegrade",
+        ops.cmd_undegrade,
+        "Fully re-verify a DEGRADED generation and clear the flag only if every file is intact.",
+    )
+    s.add_argument("source")
+    s.add_argument("generation")
+
+    led = add("ledger", _usage, "Ledger maintenance.")
+    led_sub = led.add_subparsers(dest="ledger_command", required=True, metavar="COMMAND")
+    s = add(
+        "recover",
+        ops.cmd_ledger_recover,
+        "Cut a torn ledger day back to its last valid line (the cut bytes are kept as .torn).",
+        led_sub,
+    )
+    s.add_argument("--note", default=None, help="reason recorded in the ledger")
+
     s = add("drill", ops.cmd_drill, "Break a sandboxed copy of a sealed generation; expect detect + repair.")
     s.add_argument("--kind", choices=[k.value for k in DrillKind], default=None)
     s.add_argument("--source", default=None, help="drill this source (default: smallest generation)")

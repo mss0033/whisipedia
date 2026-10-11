@@ -19,7 +19,17 @@ from wsp_cli.doctor import exit_code as doctor_exit
 from wsp_cli.doctor import render as render_doctor
 from wsp_cli.indexer import Indexer
 from wsp_cli.ingest import Ingestor, VersionStatus, render
-from wsp_cli.locks import DRILL, EXIT_BUSY, HEAVY, INDEX, SCRUB, LockHeldError, exclusive, lock_dir_for
+from wsp_cli.locks import (
+    DRILL,
+    EXIT_BUSY,
+    HEAVY,
+    INDEX,
+    INGEST,
+    SCRUB,
+    LockHeldError,
+    exclusive,
+    lock_dir_for,
+)
 from wsp_cli.service import ServiceManager, unit_dir
 from wsp_cli.wiring import drill_once, parity_targets, repair_ladder, scrubber
 from wsp_core.model import GenerationStatus, SourceSpec
@@ -37,6 +47,7 @@ from wsp_vault.drill import DrillKind
 from wsp_vault.vault import FileVault
 
 EXIT_INCOMPLETE = 4  # `wsp ingest`: some version still has files missing or downloading
+EXIT_UNAVAILABLE = 5  # the vault share is unreachable (scrub stopped without recording anything)
 
 
 def _context(args: argparse.Namespace) -> tuple[bootstrap.Layout, dict[str, Any], tuple[SourceSpec, ...]]:
@@ -251,9 +262,15 @@ def _scrub(
     args: argparse.Namespace,
     out: TextIO,
 ) -> int:
+    from wsp_vault.repair import RepairCircuitOpenError
+    from wsp_vault.vault import KeyPinError
+
     vault = _vault(cfg, lay, specs, writable=True)
     budget = int(float(args.budget_gb) * 1e9) if args.budget_gb is not None else None
     report = scrubber(cfg, vault).run(max_bytes=budget)
+    if report.aborted is not None:
+        print(f"error: scrub stopped, the vault is unavailable: {report.aborted}", file=sys.stderr)
+        return EXIT_UNAVAILABLE
     out.write(
         f"scrub: {report.files_checked} file(s), {report.bytes_hashed / 1e9:.2f} GB hashed, "
         f"{len(report.findings)} finding(s), {'pass complete' if report.complete else 'budget reached'}\n"
@@ -262,13 +279,55 @@ def _scrub(
         out.write(
             f"  {f.source_id}/{f.generation_id} {f.relpath or '(manifest)'}: {f.status.value} {f.detail}\n"
         )
-    if report.findings:
-        for res in repair_ladder(cfg, vault).repair_findings(report.findings):
+    repairable = [f for f in report.findings if not f.unreadable]  # I/O errors are never "repaired"
+    if repairable:
+        try:
+            results = repair_ladder(cfg, vault).repair_findings(repairable)
+        except (RepairCircuitOpenError, KeyPinError) as exc:
+            print(f"CRITICAL: repair stopped, nothing was changed: {exc}", file=sys.stderr)
+            return 2
+        for res in results:
             state = "DEGRADED" if res.degraded else "repaired"
             out.write(f"  repair {res.source_id}/{res.generation_id}: {state} {dict(res.repaired)}\n")
             if res.rolled_back_to:
                 out.write(f"    CURRENT rolled back to {res.rolled_back_to}\n")
     return 1 if report.findings else 0
+
+
+def cmd_undegrade(args: argparse.Namespace, out: TextIO) -> int:
+    """Fully re-verify a DEGRADED generation; clear the flag only if every file is intact."""
+    from wsp_vault.undegrade import reverify_and_clear
+
+    lay, cfg, specs = _context(args)
+    try:
+        with exclusive(_lock_dir(cfg), SCRUB):
+            vault = _vault(cfg, lay, specs, writable=True)
+            res = reverify_and_clear(vault, scrubber(cfg, vault), args.source, args.generation)
+    except LockHeldError as exc:
+        return _busy(exc)
+    out.write(
+        f"{args.source}/{args.generation}: {'cleared' if res.cleared else 'not cleared'} ({res.detail})\n"
+    )
+    return 0 if res.cleared else 1
+
+
+def cmd_ledger_recover(args: argparse.Namespace, out: TextIO) -> int:
+    """Cut a torn ledger day back to its last valid hash-chained line (cut bytes are kept as .torn)."""
+    from wsp_vault.ledger import JsonlLedger
+
+    lay, cfg, specs = _context(args)
+    try:
+        with exclusive(_lock_dir(cfg), INGEST):  # no ingest appends while the owner repairs the ledger
+            vault = _vault(cfg, lay, specs, writable=True)
+            ledger = vault.ledger
+            if not isinstance(ledger, JsonlLedger):
+                print("error: this vault has no recoverable ledger", file=sys.stderr)
+                return 2
+            event = ledger.recover(reason=args.note or "owner-requested recovery")
+    except LockHeldError as exc:
+        return _busy(exc)
+    out.write("ledger: nothing to cut\n" if event is None else f"ledger: recovered ({event.data})\n")
+    return 0
 
 
 def cmd_drill(args: argparse.Namespace, out: TextIO) -> int:

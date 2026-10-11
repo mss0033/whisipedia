@@ -11,7 +11,7 @@ root = "/mnt/<nas-share>/whisipedia"
 # mirror_root = "/mnt/<backup-drive>/whisipedia"
 
 [acquirer]
-user_agent = "Whisipedia/0.1 (personal offline archive; contact: <project-contact-address>)"
+user_agent = "Whisipedia/0.1 (personal offline archive)"  # generic; an address (@) is refused
 # fetcher = "aria2"
 
 [index]

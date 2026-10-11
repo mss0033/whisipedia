@@ -556,3 +556,10 @@ def test_a_release_with_nothing_new_is_superseded_without_an_attempt_or_alert(tm
     assert "superseded" in (result.record.last_error or "")
     assert result.record.attempts == 0
     assert not [k for k in h.alerter.open_keys() if "src/2026-10-01" in k]
+
+
+def test_a_destination_locked_by_another_download_is_busy_not_a_failure() -> None:
+    from wsp_fetch.errors import FetchLockedError
+    from wsp_orchestrator.errors import FailureKind, classify
+
+    assert classify(FetchLockedError("another process is fetching x")) is FailureKind.BUSY
