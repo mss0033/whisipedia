@@ -99,6 +99,13 @@ The full research, scoring rubric and per-source notes are in [`research/SOURCES
 | **T3 Candidate** | Tracked. Needs a policy or budget decision. | Wikimedia Commons subsets, TED / CrashCourse video, arXiv source tarballs, Chronicling America page images, legislation from other countries |
 | **X Excluded** | Never ingested. | Shadow libraries, full Common Crawl / CC-NEWS (copyrighted, uncurated), paywalled news, content whose terms forbid bulk copying (unless permission is obtained) |
 
+**Preparedness and defensive collections.** Two curated collections are tracked separately in [`research/PREPAREDNESS_AND_DEFENSE.md`](research/PREPAREDNESS_AND_DEFENSE.md):
+
+- **Preparedness & resilience** (shelf `preparedness`): food, water, austere medicine, shelter and engineering, navigation and communications, emergency management and continuity of government, from authoritative issuers (USDA, FAO, WHO, FEMA, CISA, NOAA, NGA, FAA, USGS, UK Cabinet Office).
+- **Defensive & security literature** (shelf `defense`): electronics and radar fundamentals, publicly released doctrine, intelligence analysis and counterintelligence history, protective security, cybersecurity standards.
+
+Issuer authority is a hard gate next to the license gate. Only lawfully public material is admitted (public domain, open license or Distribution Statement A); weapons, CBRN-production, targeting and offensive-tooling content is excluded whatever its release status. Mixed collections are filtered per document by the `doc-collection` adapter (§6.2), with owner review through `wsp proposals`. Year-one cost ≈ 0.25–0.4 TB.
+
 **Storage budget for year one** (measured where marked ✓, otherwise estimated):
 
 | Block | Size |
@@ -195,6 +202,7 @@ Adapters are Python packages registered through entry points (`whisipedia.adapte
 | `s3-bucket` | arXiv (requester pays), OpenAlex |
 | `git-mirror` | Standard Ebooks, OEIS data, Our World in Data, PlanetMath |
 | `oai-pmh` | arXiv metadata, institutional repositories |
+| `doc-collection` | Curated document sets published as index pages or APIs (FEMA, NIST CSRC, Army/Joint doctrine, CIA CSI…): per-document issuer, publication number, edition, distribution statement, supersession and checksum; document-level allow/deny filtering with owner review; superseded editions kept as history. Spec: [`research/PREPAREDNESS_AND_DEFENSE.md` §5](research/PREPAREDNESS_AND_DEFENSE.md#5-tracking-design) |
 | `osm-replication` | Planet PBF plus replication diffs |
 
 ### 6.3 Release state machine
