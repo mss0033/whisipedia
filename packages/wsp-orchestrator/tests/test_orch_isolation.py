@@ -47,6 +47,7 @@ def test_value_comes_back_from_the_child(tmp_path: Path) -> None:
     assert unit == unit_name("refine", "s/1")
     assert argv[:3] == [sys.executable, "-m", "wsp_orchestrator.child"]
     assert env["PYTHONUNBUFFERED"] == "1"
+    assert fake.request_modes == [0o600], "the request (the whole config) is owner-only"
     assert not (tmp_path / "work" / "_steps" / unit).exists(), "the request/result box is removed"
 
 

@@ -356,12 +356,14 @@ class FakeLauncher:
         default_factory=list[tuple[str, list[str], dict[str, str]]]
     )
     children: list[_HangingChild | _EndedChild] = field(default_factory=list[_HangingChild | _EndedChild])
+    request_modes: list[int] = field(default_factory=list[int])  # permissions of each request file
     running: threading.Event = field(default_factory=threading.Event)
 
     def start(
         self, unit: str, argv: Sequence[str], *, env: Mapping[str, str], cwd: Path, limits: UnitLimits
     ) -> _HangingChild | _EndedChild:
         self.started.append((unit, list(argv), dict(env)))
+        self.request_modes.append(Path(argv[-2]).stat().st_mode & 0o777)
         child: _HangingChild | _EndedChild
         if self.hang:
             child = _HangingChild(self.running)

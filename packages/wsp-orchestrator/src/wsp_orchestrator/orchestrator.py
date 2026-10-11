@@ -276,6 +276,7 @@ class Orchestrator:
         self._active: dict[int, tuple[Job, float]] = {}  # job id -> (job, monotonic start)
         self._daemon_lock: int | None = None
         self._metrics_at: float | None = None  # monotonic time of the last metrics write
+        self._watchdog_at: float | None = None
 
     # --- lifecycle -----------------------------------------------------------------------------
 
@@ -988,6 +989,13 @@ class Orchestrator:
 
     # --- watchdog and health alerts -------------------------------------------------------------
 
+    def maybe_watchdog(self) -> None:
+        """:meth:`watchdog` at most every ``WATCHDOG_INTERVAL`` seconds (monotonic clock)."""
+        mono = time.monotonic()
+        if self._watchdog_at is None or mono - self._watchdog_at >= WATCHDOG_INTERVAL:
+            self._watchdog_at = mono
+            self.watchdog()
+
     def watchdog(self) -> None:
         """Requeue orphaned jobs, extend live leases, alert on stuck jobs and releases (M2, M9).
 
@@ -1111,6 +1119,7 @@ _RUNNING_MARK = "daemon:running"  # set while a daemon runs; still set at start 
 _UNCLEAN_STARTS = "daemon:unclean_starts"
 CRASH_LOOP_STARTS = 3
 CRASH_LOOP_WINDOW = timedelta(hours=1)
+WATCHDOG_INTERVAL = 60.0  # seconds between watchdog passes in the daemon loop
 
 
 def _rss_bytes() -> int | None:

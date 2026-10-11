@@ -91,7 +91,7 @@ def test_main_loop_sleeps_while_a_due_job_waits_for_capacity(tmp_path: Path) -> 
             n += 1
             orch.scheduler.tick()
             orch.dispatch()
-            orch.watchdog()
+            orch.maybe_watchdog()
             orch.maybe_refresh_metrics()
             orch.waker.wait(min(orch.sleep_seconds(), max(stop - time.monotonic(), 0)))
         return n

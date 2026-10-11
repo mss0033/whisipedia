@@ -98,7 +98,7 @@ def run(
         while not stop.is_set() and not orch.stopping.is_set():
             orch.scheduler.tick()
             orch.dispatch()
-            orch.watchdog()
+            orch.maybe_watchdog()
             orch.maybe_refresh_metrics()
             orch.waker.wait(orch.sleep_seconds())
     finally:

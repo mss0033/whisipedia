@@ -386,7 +386,10 @@ class IsolatedRunner:
         box.mkdir(parents=True)
         try:
             request, result = box / REQUEST, box / RESULT
-            request.write_text(json.dumps(dict(payload), default=str), encoding="utf-8")
+            # the request carries the whole config (it may hold credentials): owner-only, removed below
+            fd = os.open(request, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump(dict(payload), fh, default=str)
             argv = [self.python, "-m", "wsp_orchestrator.child", target, str(request), str(result)]
             started = time.monotonic()
             log.info("heavy step started", extra={"fields": {"step": step, "unit": unit, "key": key}})
