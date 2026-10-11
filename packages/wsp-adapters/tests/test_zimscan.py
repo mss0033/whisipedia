@@ -132,7 +132,7 @@ def test_content_tasks_are_bounded_runs_of_clusters(zim: Path, tmp_path: Path) -
     for t in tasks:
         zimscan.scan_window(t)
     with zim.open("rb") as fh:
-        offsets = zimscan.cluster_offsets(fh, scan.header)
+        offsets = zimscan.cluster_offsets(fh, scan.header, dirents_at=scan.dirents_at())
     ctasks = zimscan.content_tasks(scan, offsets, task_bytes=2048, task_entries=40)
     assert len(ctasks) > 3
     for a, b in itertools.pairwise(ctasks):

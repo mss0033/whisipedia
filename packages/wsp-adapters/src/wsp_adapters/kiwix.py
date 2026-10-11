@@ -37,10 +37,13 @@ from libzim.reader import Archive
 
 from wsp_adapters import zimscan
 from wsp_adapters._common import (
+    DocRow,
     IncompleteGenerationError,
     WorkerPool,
     access,
     default_workers,
+    doc_from_row,
+    doc_row,
     fetch_all,
     int_option,
     normalize_algorithm,
@@ -352,9 +355,9 @@ def bundle_content(generation_dir: Path, *, single_book: bool = False) -> dict[s
 
     ``plan`` downloads only books the previous generation does not hold, so a bundle generation
     stores the new and changed books and reads the rest from earlier generations. The content set
-    is built along the chain of the source's generations up to this one (in release order, see
-    :func:`_order_key`): each
-    generation's own files, plus its predecessor's content set for books it does not hold itself.
+    is built along the chain of the source's generations (directories with ``upstream/``) up to this
+    one, in release order (:func:`_order_key`): each generation's own files, plus its predecessor's
+    content set for books it does not hold itself.
     When a generation id carries the bundle digest (:func:`release_version`), the set must
     reproduce it; books dropped from the bundle since the predecessor (at most
     :data:`MAX_DROPPED_BOOKS`) are found by search. A set that cannot be reproduced raises
@@ -364,7 +367,7 @@ def bundle_content(generation_dir: Path, *, single_book: bool = False) -> dict[s
     """
     me = _order_key(generation_dir)
     chain = sorted(
-        (p for p in generation_dir.parent.iterdir() if p.is_dir() and p != generation_dir),
+        (p for p in generation_dir.parent.iterdir() if p != generation_dir and (p / "upstream").is_dir()),
         key=_order_key,
     )
     chain = [p for p in chain if _order_key(p) < me]
@@ -629,28 +632,30 @@ class _HtmlTask:
     params: ZimParams
 
 
-def _read_html(task: _HtmlTask) -> list[DocRecord]:
-    """Worker: the documents of one run of clusters (runs in a separate process)."""
+def _read_html(task: _HtmlTask) -> list[DocRow]:
+    """Worker: the documents of one run of clusters, as :func:`doc_row` tuples (separate process)."""
     p = task.params
-    out: list[DocRecord] = []
+    out: list[DocRow] = []
     for blob in zimscan.read_clusters(task.clusters):
         if not _stable(blob.path):
             continue
         native_id = p.prefix + blob.path
         text = html_to_text(blob.content)
         out.append(
-            DocRecord(
-                doc_id=make_doc_id(p.source_id, native_id),
-                source_id=p.source_id,
-                native_id=native_id,
-                title=blob.title,
-                lang=p.lang,
-                license=p.license,
-                text=text,
-                revision=p.revision,
-                timestamp=p.timestamp,
-                html_ref=f"zim:{native_id}",
-                content_hash=content_hash(text),
+            doc_row(
+                DocRecord(
+                    doc_id=make_doc_id(p.source_id, native_id),
+                    source_id=p.source_id,
+                    native_id=native_id,
+                    title=blob.title,
+                    lang=p.lang,
+                    license=p.license,
+                    text=text,
+                    revision=p.revision,
+                    timestamp=p.timestamp,
+                    html_ref=f"zim:{native_id}",
+                    content_hash=content_hash(text),
+                )
             )
         )
     return out
@@ -669,10 +674,11 @@ def read_zim(path: Path, params: ZimParams, *, workdir: Path, pool: WorkerPool) 
         for _ in pool.map(zimscan.scan_window, tasks):
             pass
         with path.open("rb") as fh:
-            offsets = zimscan.cluster_offsets(fh, scan.header)
+            offsets = zimscan.cluster_offsets(fh, scan.header, dirents_at=scan.dirents_at())
         html = (_HtmlTask(t, params) for t in zimscan.content_tasks(scan, offsets))
-        for docs in pool.map(_read_html, html):
-            yield from docs
+        # window: results in flight; each is at most zimscan.TASK_BYTES of compressed HTML as text
+        for rows in pool.map(_read_html, html, window=pool.workers + 1):
+            yield from map(doc_from_row, rows)
         for pairs in pool.map(zimscan.read_redirects, zimscan.redirect_tasks(scan)):
             for source, target in pairs:
                 if _stable(source):

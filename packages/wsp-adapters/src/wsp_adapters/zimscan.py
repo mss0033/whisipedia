@@ -42,6 +42,7 @@ import os
 import shutil
 import struct
 import zlib
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, BinaryIO
@@ -58,7 +59,10 @@ DELETED_MIME = 0xFFFD
 KIND_CONTENT, KIND_REDIRECT, KIND_OTHER = 0, 1, 2
 
 WINDOW_ENTRIES = 1 << 19  # directory entries per scan task (~25-60 MB of dirents)
-TASK_BYTES = 64 << 20  # compressed cluster bytes per content task
+# Compressed cluster bytes per content task. 64 MiB tasks returned ~150 MB of text each on
+# Wikibooks, and with 2 x workers results in flight the parent peaked at 1.5 GB; 16 MiB still
+# amortizes reads (clusters are ~1 MiB) and keeps a result in the tens of MB.
+TASK_BYTES = 16 << 20
 TASK_ENTRIES = 20_000  # HTML entries per content task (bounds the result a worker sends back)
 REDIRECT_TASK = 100_000  # redirects per redirect task
 _SEGMENT_GAP = 4 << 20  # dirent offsets further apart than this are read separately
@@ -153,8 +157,13 @@ def user_range(fh: BinaryIO, header: ZimHeader) -> tuple[int, int]:
     return lower_bound(ord("C")), lower_bound(ord("C") + 1)
 
 
-def cluster_offsets(fh: BinaryIO, header: ZimHeader) -> npt.NDArray[np.uint64]:
-    """``cluster_count + 1`` offsets: cluster ``c`` occupies ``[off[c], off[c + 1])``."""
+def cluster_offsets(fh: BinaryIO, header: ZimHeader, *, dirents_at: int = 0) -> npt.NDArray[np.uint64]:
+    """``cluster_count + 1`` offsets: cluster ``c`` occupies ``[off[c], off[c + 1])``.
+
+    The last cluster ends at the next section: whichever of the header's sections, or the first
+    directory entry (``dirents_at``; libzim writes the directory right after the clusters), comes
+    first after it.
+    """
     fh.seek(header.cluster_ptr_pos)
     raw = fh.read(8 * header.cluster_count)
     if len(raw) != 8 * header.cluster_count:
@@ -170,6 +179,7 @@ def cluster_offsets(fh: BinaryIO, header: ZimHeader) -> npt.NDArray[np.uint64]:
         header.cluster_ptr_pos,
         header.mime_list_pos,
         header.file_size,
+        dirents_at,
     )
     end = min(s for s in sections if s > last)
     return np.append(offs, np.uint64(end))
@@ -198,18 +208,6 @@ def _u32(buf: U8, at: I64) -> U32:
     return out
 
 
-def _gather(buf: U8, starts: I64, ends: I64) -> tuple[U8, I64]:
-    """Concatenated ``buf[starts[i]:ends[i]]`` and the ``n + 1`` offsets into it (vectorized)."""
-    lens = ends - starts
-    offs = np.zeros(len(lens) + 1, dtype=np.int64)
-    np.cumsum(lens, out=offs[1:])
-    total = int(offs[-1])
-    if total == 0:
-        return np.zeros(0, dtype=np.uint8), offs
-    index = np.repeat(starts - offs[:-1], lens) + np.arange(total, dtype=np.int64)
-    return buf[index], offs
-
-
 def _parse_segment(buf: U8, at: I64) -> tuple[npt.NDArray[np.uint16], U32, U32, I64, I64, I64] | None:
     """Fixed fields and string bounds of the dirents starting at ``at`` (``None``: buffer too short)."""
     if int(at.max()) + 16 > buf.size:
@@ -230,11 +228,26 @@ def _parse_segment(buf: U8, at: I64) -> tuple[npt.NDArray[np.uint16], U32, U32, 
 
 
 def scan_window(task: ScanTask) -> int:
-    """Worker: parse ``task.count`` directory entries from ``task.first`` into ``task.out``."""
-    with task.zim.open("rb") as fh:
+    """Worker: parse ``task.count`` directory entries from ``task.first`` into ``task.out``.
+
+    The raw dirent bytes are kept (``dirents.bin``, about the window's share of the directory)
+    with each entry's path and title bounds, so no string is copied out entry by entry. Peak
+    memory is one segment (at most ``_SEGMENT_SPAN`` plus a tail) and its NUL positions.
+    """
+    out = task.out
+    out.mkdir(parents=True, exist_ok=True)
+    n = task.count
+    mime = np.zeros(n, np.uint16)
+    a = np.zeros(n, np.uint32)
+    b = np.zeros(n, np.uint32)
+    path_start = np.zeros(n, np.int64)
+    path_end = np.zeros(n, np.int64)
+    title_end = np.zeros(n, np.int64)
+    with task.zim.open("rb") as fh, (out / "dirents.bin").open("wb") as raw_out:
+        file_end = fh.seek(0, os.SEEK_END)
         fh.seek(task.path_ptr_pos + 8 * task.first)
-        ptrs = np.frombuffer(fh.read(8 * task.count), dtype="<u8").astype(np.int64)
-        if ptrs.size != task.count:
+        ptrs = np.frombuffer(fh.read(8 * n), dtype="<u8").astype(np.int64)
+        if ptrs.size != n:
             raise ZimFormatError("short path pointer list")
         order = np.argsort(ptrs, kind="stable")
         sorted_ptrs = ptrs[order]
@@ -242,14 +255,8 @@ def scan_window(task: ScanTask) -> int:
         seg_id = np.concatenate(([0], np.cumsum(np.diff(sorted_ptrs) > _SEGMENT_GAP)))
         seg_base = sorted_ptrs[np.concatenate(([0], np.flatnonzero(np.diff(seg_id)) + 1))][seg_id]
         key = seg_id * (1 << 40) + (sorted_ptrs - seg_base) // _SEGMENT_SPAN
-        cuts = np.flatnonzero(np.diff(key)) + 1
-        n = task.count
-        mime = np.zeros(n, np.uint16)
-        a = np.zeros(n, np.uint32)
-        b = np.zeros(n, np.uint32)
-        paths: list[tuple[npt.NDArray[np.int64], U8, I64]] = []
-        titles: list[tuple[npt.NDArray[np.int64], U8, I64]] = []
-        for seg in np.split(np.arange(n), cuts):
+        written = 0
+        for seg in np.split(np.arange(n), np.flatnonzero(np.diff(key)) + 1):
             pos = sorted_ptrs[seg]
             base = int(pos[0])
             tail = _TAIL
@@ -259,23 +266,19 @@ def scan_window(task: ScanTask) -> int:
                 parsed = _parse_segment(buf, pos - base)
                 if parsed is not None:
                     break
-                if base + buf.size >= _file_end(fh):
+                if base + buf.size >= file_end:
                     raise ZimFormatError("directory entry runs past the end of the file")
                 tail *= 4
             m, fa, fb, ps, pe, te = parsed
             idx = order[seg]
             mime[idx], a[idx], b[idx] = m, fa, fb
-            pbytes, poffs = _gather(buf, ps, pe)
-            tbytes, toffs = _gather(buf, pe + 1, te)
-            paths.append((idx, pbytes, poffs))
-            titles.append((idx, tbytes, toffs))
+            path_start[idx], path_end[idx], title_end[idx] = ps + written, pe + written, te + written
+            used = int(te.max()) + 1  # keep the segment up to its last title's NUL
+            raw_out.write(buf[:used].tobytes())
+            written += used
     kind = np.where(
         mime == REDIRECT_MIME, KIND_REDIRECT, np.where(mime >= DELETED_MIME, KIND_OTHER, KIND_CONTENT)
     )
-    out = task.out
-    out.mkdir(parents=True, exist_ok=True)
-    path_bytes, path_offs = _reorder(paths, n)
-    title_bytes, title_offs = _reorder(titles, n)
     content = np.flatnonzero(kind == KIND_CONTENT)
     by_cluster = content[np.lexsort((content, b[content], a[content]))]
     arrays: dict[str, npt.NDArray[np.generic]] = {
@@ -283,41 +286,17 @@ def scan_window(task: ScanTask) -> int:
         "mime": mime,
         "a": a,
         "b": b,
-        "path_bytes": path_bytes,
-        "path_offs": path_offs,
-        "title_bytes": title_bytes,
-        "title_offs": title_offs,
+        "path_start": path_start,
+        "path_end": path_end,
+        "title_end": title_end,
         "content": by_cluster.astype(np.uint32),  # local indexes sorted by (cluster, blob, index)
         "content_cluster": a[by_cluster],
         "redirects": np.flatnonzero(kind == KIND_REDIRECT).astype(np.uint32),
+        "ptr_min": np.array([int(sorted_ptrs[0])], dtype=np.int64),
     }
     for name, arr in arrays.items():
         np.save(out / f"{name}.npy", arr)
     return n
-
-
-def _file_end(fh: BinaryIO) -> int:
-    here = fh.tell()
-    end = fh.seek(0, os.SEEK_END)
-    fh.seek(here)
-    return end
-
-
-def _reorder(parts: list[tuple[npt.NDArray[np.int64], U8, I64]], n: int) -> tuple[U8, I64]:
-    """Per-segment strings (in pointer order) -> one buffer in entry-index order."""
-    lens = np.zeros(n, dtype=np.int64)
-    for idx, _bytes, offs in parts:
-        lens[idx] = np.diff(offs)
-    offs_out = np.zeros(n + 1, dtype=np.int64)
-    np.cumsum(lens, out=offs_out[1:])
-    out = np.zeros(int(offs_out[-1]), dtype=np.uint8)
-    for idx, data, offs in parts:
-        if data.size == 0:
-            continue
-        seg_lens = np.diff(offs)
-        dest = np.repeat(offs_out[idx] - offs[:-1], seg_lens) + np.arange(data.size, dtype=np.int64)
-        out[dest] = data
-    return out, offs_out
 
 
 # --- the scanned archive ----------------------------------------------------------------------------
@@ -344,6 +323,10 @@ class Scan:
 
     def load(self, w: int, name: str) -> npt.NDArray[Any]:
         return np.load(self.window_dir(w) / f"{name}.npy", mmap_mode="r")
+
+    def dirents_at(self) -> int:
+        """Offset of the first directory entry (after the windows are scanned)."""
+        return min((int(self.load(w, "ptr_min")[0]) for w in self.windows), default=0)
 
 
 def scan_tasks(zim: Path, root: Path, *, window: int | None = None) -> tuple[Scan, list[ScanTask]]:
@@ -451,7 +434,7 @@ def _blob_offsets(data: bytes, extended: bool) -> npt.NDArray[np.uint64]:
     return np.frombuffer(data[:first], dtype="<u8" if extended else "<u4").astype(np.uint64)
 
 
-def read_clusters(task: ClusterTask) -> list[Blob]:
+def read_clusters(task: ClusterTask) -> Iterator[Blob]:
     """Worker: every HTML blob of the task's clusters, in ``(cluster, blob, index)`` order.
 
     Each run of consecutive cluster numbers is read with one ``read`` and every cluster is
@@ -475,7 +458,7 @@ def read_clusters(task: ClusterTask) -> list[Blob]:
         bls.append(np.asarray(scan.load(w, "b"))[local])
         gls.append(local + scan.first + w * scan.window)
     if not cls:
-        return []
+        return
     cl, bl, gi = np.concatenate(cls), np.concatenate(bls), np.concatenate(gls)
     order = np.lexsort((gi, bl, cl))
     cl, bl, gi = cl[order], bl[order], gi[order]
@@ -483,7 +466,6 @@ def read_clusters(task: ClusterTask) -> list[Blob]:
     bounds = np.append(first_pos, cl.size)
     runs = np.split(np.arange(uniq.size), np.flatnonzero(np.diff(uniq.astype(np.int64)) != 1) + 1)
     strings: dict[int, _Strings] = {}
-    out: list[Blob] = []
     with scan.zim.open("rb") as fh:
         for run in runs:
             base = task.offsets[int(uniq[run[0]]) - task.first_cluster]
@@ -506,25 +488,26 @@ def read_clusters(task: ClusterTask) -> list[Blob]:
                     if w not in strings:
                         strings[w] = _Strings(scan, w)
                     path, title = strings[w].path_title(local)
-                    out.append(Blob(g, path, title, data[int(table[blob_no]) : int(table[blob_no + 1])]))
-    return out
+                    yield Blob(g, path, title, data[int(table[blob_no]) : int(table[blob_no + 1])])
 
 
 class _Strings:
-    """Paths and titles of one scanned window (memory-mapped)."""
+    """Paths and titles of one scanned window (memory-mapped raw dirents)."""
 
     def __init__(self, scan: Scan, w: int) -> None:
-        self.pb = scan.load(w, "path_bytes")
-        self.po = scan.load(w, "path_offs")
-        self.tb = scan.load(w, "title_bytes")
-        self.to = scan.load(w, "title_offs")
+        raw = scan.window_dir(w) / "dirents.bin"
+        self.raw = np.memmap(raw, dtype=np.uint8, mode="r") if raw.stat().st_size else np.zeros(0, np.uint8)
+        self.ps = scan.load(w, "path_start")
+        self.pe = scan.load(w, "path_end")
+        self.te = scan.load(w, "title_end")
 
     def path(self, local: int) -> str:
-        return bytes(self.pb[int(self.po[local]) : int(self.po[local + 1])]).decode("utf-8", "replace")
+        return self.raw[int(self.ps[local]) : int(self.pe[local])].tobytes().decode("utf-8", "replace")
 
     def path_title(self, local: int) -> tuple[str, str]:
         path = self.path(local)
-        title = bytes(self.tb[int(self.to[local]) : int(self.to[local + 1])]).decode("utf-8", "replace")
+        start, end = int(self.pe[local]) + 1, int(self.te[local])
+        title = self.raw[start:end].tobytes().decode("utf-8", "replace")
         return path, title or path
 
 
