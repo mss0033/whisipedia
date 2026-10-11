@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, cast
 
 import pyarrow.compute as pc
@@ -153,20 +154,114 @@ STOPWORDS_EN = _words(
 )
 
 
-def drop_stopwords(query: str, stopwords: frozenset[str] | None = None) -> str:
-    """The query for BM25; function words are only removed when ``stopwords`` is given.
+# --- function words, per language ---------------------------------------------------------------------
 
-    Default: every word is kept. Dropping English function words broke titles and phrases ("Doctor
-    Who" -> "Doctor", "To Be or Not to Be" -> "Not", "history of the internet"), and IDF already
-    discounts them. On 40 title and question queries over 0.95M English Wikipedia articles
-    (2026-10-11) keeping them raised MRR@10 from 0.483 to 0.761 and success@1 from 0.400 to 0.650
-    (the cost: 13 -> 23 ms per snippet-free query at that size; see the rank-oracle audit).
 
-    With ``stopwords``: those words are removed unless the query has a quoted phrase or nothing else
-    would remain.
+STOPWORDS: Mapping[str, frozenset[str]] = {
+    "en": _words(
+        """
+        a an and are as at be been by can could did do does for from had has have how i in into is
+        it its me my of on or our should that the their them then there these this those to was we
+        were what when where which who whom whose why will with would you your about tell explain
+        please
+        """
+    ),
+    "de": _words(
+        """
+        der die das ein eine einen und ist sind war wie was wer wo warum wann welche welcher des dem
+        den im in zu von mit auf für
+        """
+    ),
+    "fr": _words(
+        """
+        le la les un une des et est sont qui que quoi où comment pourquoi quand quel quelle du de au
+        aux
+        """
+    ),
+    "es": _words("el los las uno una y es son quién qué dónde cómo por cuál cuándo del al lo"),
+    "it": _words("il gli uno e è sono chi che cosa dove come perché quando quale della di"),
+    "nl": _words("het een en is zijn wie wat waar hoe waarom wanneer welke van"),
+    "pl": _words("jest są kto co gdzie jak dlaczego kiedy który była był"),
+    "ru": _words("это что кто где как почему когда какой"),
+    "sv": _words("är och en ett vad vem var hur varför när vilken"),
+}
+"""Question scaffolding and function words by language (:func:`content_terms`)."""
+
+ALL_STOPWORDS: frozenset[str] = frozenset[str]().union(*STOPWORDS.values())
+
+HOW_TO = re.compile(
+    r"^(?:how (?:to|do|does|can|is|are|did|should)|wie (?:funktioniert|macht|kann)|comment\b|cómo\b|come\b"
+    r"|hoe\b|jak\b|как\b|hur\b)",
+    re.I,
+)
+QUESTION = re.compile(
+    r"^(?:what|who|whom|whose|why|when|where|which|is|are|was|were|do|does|did|can|could|should|would"
+    r"|tell me|explain|list)\b|\?$"
+    r"|^(?:was|wer|warum|wann|welche|qui|que|quoi|pourquoi|quand|quel|quelle|quién|qué|por qué|cuál"
+    r"|chi|che|perché|quale|wat|wie|waarom|kim|kto|co|почему|кто|что|vad|vem|varför)\b",
+    re.I,
+)
+_EDGE_PUNCT = "\"'\u2019\u201c\u201d?!.,;:()[]{}-"
+_CYRILLIC = re.compile(r"[\u0400-\u04ff]")
+
+
+def query_language(words: Sequence[str]) -> str | None:
+    """The language whose function words the query uses most, if that is clear.
+
+    At least two function-word hits are needed (one is too weak: "el nino" is not Spanish scaffolding
+    and "vitamin e" is not Italian), and a tie is no answer, except that English wins a tie it is
+    part of (the library's interface language).
     """
-    if stopwords is None or '"' in query:
+    folded = [w.casefold() for w in words]
+    if any(_CYRILLIC.search(w) for w in folded):
+        return "ru"
+    hits = {lang: sum(w in stop for w in folded) for lang, stop in STOPWORDS.items()}
+    best = max(hits.values(), default=0)
+    if best < 2:
+        return None
+    top = [lang for lang, n in hits.items() if n == best]
+    if len(top) == 1:
+        return top[0]
+    return "en" if "en" in top else None
+
+
+def content_terms(text: str) -> list[str]:
+    """The query's words without the function words of its own language, in order.
+
+    A keyword form for callers that want one (the lexical route keeps every word). Drops only the
+    function words of the query's language (:func:`query_language`), and, unless the query is a
+    question, only when they are under half of it: "causes of the cold war" loses "of" and "the",
+    while "to be or not to be" and "the who" are titles and keep every word. In a title-cased query
+    ("Doctor Who") capitalized words are kept too.
+    """
+    # whitespace words, punctuation trimmed: a regex \w would split Devanagari at its marks
+    raw = [w.strip(_EDGE_PUNCT) for w in text.split()]
+    raw = [w for w in raw if w]
+    lang = query_language(raw)
+    stop = STOPWORDS.get(lang, frozenset[str]()) if lang else frozenset[str]()
+    question = bool(QUESTION.search(text) or HOW_TO.match(text))
+    if not question and 2 * sum(w.casefold() in stop for w in raw) >= len(raw):
+        return raw
+    titled = any(w[:1].isupper() for w in raw[1:])
+    return [w for w in raw if w.casefold() not in stop or (titled and w[:1].isupper())]
+
+
+def drop_stopwords(query: str, stopwords: frozenset[str] | None = None) -> str:
+    """The query for BM25 without the function words of its own language (:func:`content_terms`).
+
+    The old rule, every English stopword out of every query, broke titles and phrases ("Doctor Who"
+    -> "Doctor", "To Be or Not to Be" -> "Not") and content words ("el nino", "vitamin e"). Measured
+    on 40 title and question queries over all 7.25M English Wikipedia articles (2026-10-11): MRR@10
+    0.408 with the old router + lexical lists, 0.756 keeping every word, 0.785 with this rule, which
+    also keeps BM25 off the longest posting lists of question scaffolding ("what is the ...").
+
+    With ``stopwords``: exactly those words are removed (unless nothing else would remain). A query
+    with a quoted phrase is never changed.
+    """
+    if '"' in query:
         return query
+    if stopwords is None:
+        return " ".join(content_terms(query)) or query
     words = query.split()
     kept = [w for w in words if w.casefold() not in stopwords]
     return " ".join(kept) if kept else query

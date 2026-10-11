@@ -18,10 +18,12 @@ from wsp_index.text import (
 from wsp_index_helpers import doc
 
 
-def test_function_words_are_kept_by_default() -> None:
-    # dropping them broke titles: "Doctor Who" -> "Doctor", "To Be or Not to Be" -> "Not"
-    for q in ("Doctor Who", "To Be or Not to Be", "the who", "how do vaccines work", "el nino"):
+def test_only_the_query_language_function_words_go() -> None:
+    # the old list broke titles: "Doctor Who" -> "Doctor", "To Be or Not to Be" -> "Not"
+    for q in ("Doctor Who", "To Be or Not to Be", "the who", "el nino", "vitamin e deficiency", "नमस्ते दुनिया"):
         assert drop_stopwords(q) == q
+    assert drop_stopwords("how do vaccines work") == "vaccines work"
+    assert drop_stopwords("causes of the cold war") == "causes cold war"
 
 
 def test_explicit_stopwords_still_drop() -> None:
