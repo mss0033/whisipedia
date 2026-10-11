@@ -244,9 +244,15 @@ _FORWARD: tuple[ReleaseState, ...] = (
 
 
 def allowed_transitions(state: ReleaseState) -> frozenset[ReleaseState]:
-    """Legal next states. Any non-terminal state may fail; failed may retry from PLANNED or quarantine."""
-    if state is ReleaseState.PROMOTED or state is ReleaseState.QUARANTINED:
+    """Legal next states. Any non-terminal state may fail; failed may retry from PLANNED or quarantine.
+
+    QUARANTINED is not a final judgement on the data: the owner's retry (``wsp retry``) returns it
+    to FAILED, from where the normal retry path applies. PROMOTED is the only terminal state.
+    """
+    if state is ReleaseState.PROMOTED:
         return frozenset()
+    if state is ReleaseState.QUARANTINED:
+        return frozenset({ReleaseState.FAILED})
     if state is ReleaseState.FAILED:
         return frozenset({ReleaseState.PLANNED, ReleaseState.QUARANTINED})
     nxt = _FORWARD[_FORWARD.index(state) + 1]
