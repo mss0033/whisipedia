@@ -10,6 +10,7 @@ import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from wsp_core.model import Checksum, FetchResult
 from wsp_fetch.errors import ChecksumMismatchError, SizeMismatchError
@@ -25,6 +26,8 @@ class FetchReport(FetchResult):
     bytes_resumed: int = 0
     seconds: float = 0.0
     per_mirror_bytes: Mapping[str, int] = field(default_factory=dict[str, int])
+    # Where the bytes and digests came from (JSON-safe; see wsp_fetch.provenance, ADR-0009).
+    provenance: Mapping[str, Any] = field(default_factory=dict[str, Any])
 
 
 def make_report(
@@ -36,6 +39,7 @@ def make_report(
     bytes_resumed: int = 0,
     seconds: float = 0.0,
     per_mirror_bytes: Mapping[str, int] | None = None,
+    provenance: Mapping[str, Any] | None = None,
 ) -> FetchReport:
     """``digests`` must hold ``sha256`` and ``blake3`` (always computed, PLAN §8.1)."""
     return FetchReport(
@@ -49,6 +53,7 @@ def make_report(
         bytes_resumed=bytes_resumed,
         seconds=seconds,
         per_mirror_bytes=dict(per_mirror_bytes or {}),
+        provenance=dict(provenance or {}),
     )
 
 

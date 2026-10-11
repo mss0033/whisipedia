@@ -12,6 +12,7 @@ __all__ = [
     "Aria2Error",
     "ChecksumMismatchError",
     "ConflictingChecksumsError",
+    "FetchCancelledError",
     "FetchError",
     "MirrorsExhaustedError",
     "NotFoundError",
@@ -35,6 +36,10 @@ class UnsupportedChecksumError(FetchError):
 
 class MirrorsExhaustedError(FetchError):
     """Every mirror failed or was excluded for at least one piece."""
+
+
+class FetchCancelledError(FetchError):
+    """``HttpFetcher.cancel()`` was called (daemon shutdown). Resume state is kept on disk."""
 
 
 class ResponseTooLargeError(FetchError):

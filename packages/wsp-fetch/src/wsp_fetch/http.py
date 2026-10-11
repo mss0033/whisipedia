@@ -34,12 +34,15 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import httpx
 
 from wsp_core.model import RemoteFile, RemoteHead
+from wsp_fetch import provenance as prov
 from wsp_fetch.config import FetchConfig, host_key
 from wsp_fetch.errors import (
+    FetchCancelledError,
     FetchError,
     MirrorsExhaustedError,
     NotFoundError,
@@ -118,6 +121,7 @@ class _Probe:
     size: int | None
     ranges: bool
     validator: str | None
+    observation: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 @dataclass(slots=True)
@@ -134,6 +138,9 @@ class _Mirror:
     bytes: int = 0
     rate: float = 0.0  # EWMA bytes/s per connection
     samples: int = 0
+    pieces: list[int] = field(default_factory=list[int])  # pieces this mirror served (provenance)
+    observation: dict[str, Any] = field(default_factory=dict[str, Any])
+    spot_check: str = "skipped"
 
     def record(self, nbytes: int, seconds: float) -> None:
         r = nbytes / max(seconds, 1e-6)
@@ -150,6 +157,7 @@ class _Plan:
     piece_algorithm: str
     mirrors: list[_Mirror]
     validator: str | None
+    rejected: list[dict[str, Any]] = field(default_factory=list[dict[str, Any]])
 
 
 @dataclass(slots=True)
@@ -179,6 +187,45 @@ class HttpFetcher:
         self._bucket = TokenBucket(c.bandwidth_limit) if c.bandwidth_limit else None
         self._hosts: dict[str, threading.BoundedSemaphore] = {}
         self._hosts_lock = threading.Lock()
+        self._cancel = threading.Event()
+        self._observed: dict[str, dict[str, Any]] = {}
+        self._observed_lock = threading.Lock()
+
+    # --- cancellation and provenance -----------------------------------------------------------
+
+    def cancel(self) -> None:
+        """Abort running and future transfers promptly (daemon shutdown): they raise
+        :class:`FetchCancelledError`; resume state stays on disk. :meth:`reset` re-enables."""
+        self._cancel.set()
+
+    def reset(self) -> None:
+        self._cancel.clear()
+
+    @property
+    def cancelled(self) -> bool:
+        return self._cancel.is_set()
+
+    def wait_cancelled(self, seconds: float) -> bool:
+        """Sleep up to ``seconds``; True (early) if the fetcher was cancelled meanwhile."""
+        return self._cancel.wait(seconds)
+
+    def check_cancelled(self) -> None:
+        if self._cancel.is_set():
+            raise FetchCancelledError("fetch cancelled (shutdown)")
+
+    def observation(self, url: str) -> dict[str, Any] | None:
+        """What the last request for ``url`` saw (final URL, redirects, TLS peer, validators)."""
+        with self._observed_lock:
+            seen = self._observed.get(url)
+            return dict(seen) if seen is not None else None
+
+    def _observe(self, url: str, response: httpx.Response) -> dict[str, Any]:
+        seen = prov.observe(response, url)
+        with self._observed_lock:
+            if len(self._observed) > 4096:  # bounded: keep the newest observations
+                self._observed.pop(next(iter(self._observed)))
+            self._observed[url] = seen
+        return seen
 
     @property
     def client(self) -> httpx.Client:
@@ -218,6 +265,7 @@ class HttpFetcher:
         attempt = 0
         while True:
             attempt += 1
+            self.check_cancelled()
             try:
                 return fn()
             except _RetryableError as exc:
@@ -231,18 +279,21 @@ class HttpFetcher:
                         raise FetchError(f"{label}: Retry-After {exc.retry_after:.0f}s too long") from exc
                     delay = max(delay, exc.retry_after)
                 log.info("%s: %s; retrying in %.1fs", label, exc, delay)
-                time.sleep(delay)
+                if self._cancel.wait(delay):
+                    raise FetchCancelledError(f"{label}: cancelled (shutdown)") from exc
 
     def _get_once(self, url: str, max_bytes: int) -> bytes:
         with self.host_slot(url):
             try:
                 with self._client.stream("GET", url) as r:
+                    self._observe(url, r)
                     _raise_for_status(r)
                     declared = r.headers.get("Content-Length")
                     if declared is not None and declared.isdigit() and int(declared) > max_bytes:
                         raise ResponseTooLargeError(f"{url}: {declared} bytes > max {max_bytes}")
                     out = bytearray()
                     for chunk in r.iter_raw():
+                        self.check_cancelled()
                         out += chunk
                         self.throttle(len(chunk))
                         if len(out) > max_bytes:
@@ -287,22 +338,30 @@ class HttpFetcher:
     def fetch(self, remote: RemoteFile, dest: Path) -> FetchReport:
         """Download and verify ``remote`` into ``dest``; returns digests and transfer statistics."""
         t0 = time.monotonic()
+        self.check_cancelled()
         target = resolve_target(remote, lambda u, n: self.get_bytes(u, max_bytes=n), self.config)
         dest.parent.mkdir(parents=True, exist_ok=True)
         if dest.exists() and target.checksums:
             existing = _already_complete(dest, target)
             if existing is not None:
                 return existing
-        probes = self._probe_all(target)
+        probes, rejected = self._probe_all(target)
         ranged = [p for p in probes if p.ranges and p.size is not None]
         if not ranged:
-            return self._single_stream(target, probes, dest, t0)
+            return self._single_stream(target, probes, dest, t0, rejected)
         size = ranged[0].size
         assert size is not None
         validator = next((p.validator for p in probes if p.url == target.urls[0]), None)
         mirrors = [
-            _Mirror(i, p.url, p.final_url, self.config.connections_for(p.final_url))
+            _Mirror(
+                i, p.url, p.final_url, self.config.connections_for(p.final_url), observation=p.observation
+            )
             for i, p in enumerate(ranged)
+        ]
+        rejected += [
+            {"url": p.url, "reason": "no Range support", "observation": p.observation}
+            for p in probes
+            if p not in ranged
         ]
         for m in mirrors:
             m.allowed = m.workers
@@ -310,12 +369,14 @@ class HttpFetcher:
             piece_size, algo = target.pieces.length, target.pieces.algorithm
         else:
             piece_size, algo = choose_piece_size(size, self.config), "blake3"
-        plan = _Plan(target, dest, size, piece_size, algo, mirrors, validator)
+        plan = _Plan(target, dest, size, piece_size, algo, mirrors, validator, rejected)
         return _SegmentedDownload(self, plan, t0).run()
 
-    def _probe_all(self, target: Target) -> list[_Probe]:
+    def _probe_all(self, target: Target) -> tuple[list[_Probe], list[dict[str, Any]]]:
+        """Usable probes, and the mirrors rejected with the reason (kept for provenance)."""
         results: list[_Probe | None] = [None] * len(target.urls)
         errors: list[str] = []
+        rejected: list[dict[str, Any]] = []
         # A lone source gets the full retry budget; with alternatives, don't stall on a dead mirror.
         attempts = self.config.max_attempts if len(target.urls) == 1 else min(2, self.config.max_attempts)
 
@@ -324,6 +385,7 @@ class HttpFetcher:
                 results[i] = self._probe(url, attempts)
             except (FetchError, httpx.HTTPError) as exc:
                 errors.append(f"{url}: {exc}")
+                rejected.append({"url": url, "reason": f"unreachable: {exc}"})
                 log.info("mirror %s unusable: %s", url, exc)
 
         threads = [threading.Thread(target=run, args=(i, u), daemon=True) for i, u in enumerate(target.urls)]
@@ -341,13 +403,23 @@ class HttpFetcher:
             if expected is not None and p.size is not None and p.size != expected:
                 log.warning("mirror %s advertises %d bytes, expected %d; skipping", p.url, p.size, expected)
                 errors.append(f"{p.url}: size {p.size} != {expected}")
+                rejected.append(
+                    {
+                        "url": p.url,
+                        "reason": "size-disagreement",
+                        "size": p.size,
+                        "expected": expected,
+                        "observation": p.observation,
+                    }
+                )
                 continue
             if p.size is None:
                 p.size = expected
             good.append(p)
+        self.check_cancelled()
         if not good:
             raise MirrorsExhaustedError(f"no usable source for {target.url}: {'; '.join(errors)}")
-        return good
+        return good, rejected
 
     def _probe(self, url: str, attempts: int) -> _Probe:
         return self._retrying(f"probe {url}", lambda: self._probe_once(url), attempts)
@@ -358,26 +430,29 @@ class HttpFetcher:
                 self.host_slot(url),
                 self._client.stream("GET", url, headers={"Range": "bytes=0-0"}) as r,
             ):
+                seen = self._observe(url, r)
                 validator = r.headers.get("ETag") or r.headers.get("Last-Modified")
                 final = str(r.url)
                 if r.status_code == 206:
                     m = _CONTENT_RANGE.match(r.headers.get("Content-Range", ""))
                     size = int(m.group(3)) if m and m.group(3) != "*" else None
-                    return _Probe(url, final, size, size is not None, validator)
+                    return _Probe(url, final, size, size is not None, validator, seen)
                 if r.status_code == 416:
                     m = _CONTENT_RANGE_EMPTY.match(r.headers.get("Content-Range", ""))
                     if m:
-                        return _Probe(url, final, int(m.group(1)), True, validator)
+                        return _Probe(url, final, int(m.group(1)), True, validator, seen)
                 if r.status_code == 200:
                     cl = r.headers.get("Content-Length")
                     size = int(cl) if cl and cl.isdigit() else None
-                    return _Probe(url, final, size, False, validator)
+                    return _Probe(url, final, size, False, validator, seen)
                 _raise_for_status(r)
                 raise _RetryableError(f"unexpected status {r.status_code}", fatal_for_mirror=True)
         except httpx.TransportError as exc:
             raise _RetryableError(f"{type(exc).__name__}: {exc}") from exc
 
-    def _single_stream(self, target: Target, probes: list[_Probe], dest: Path, t0: float) -> FetchReport:
+    def _single_stream(
+        self, target: Target, probes: list[_Probe], dest: Path, t0: float, rejected: list[dict[str, Any]]
+    ) -> FetchReport:
         """Fallback when no source supports Range: sequential download with inline hashing."""
         partial = partial_path(dest)
         errors: list[str] = []
@@ -392,6 +467,8 @@ class HttpFetcher:
                 ):
                     _raise_for_status(r)
                     for chunk in r.iter_raw():
+                        if self._cancel.is_set():
+                            raise FetchCancelledError(f"{target.url}: cancelled (shutdown)")
                         fh.write(chunk)
                         hasher.update(chunk)
                         self.throttle(len(chunk))
@@ -402,6 +479,9 @@ class HttpFetcher:
                 errors.append(f"{p.url}: {exc}")
                 hasher.close()
                 continue
+            except FetchCancelledError:
+                hasher.close()
+                raise
             digests = hasher.hexdigests()
             finalize(
                 target.url,
@@ -413,8 +493,25 @@ class HttpFetcher:
                 readback=self.config.verify_readback,
             )
             state_path(dest).unlink(missing_ok=True)
+            sources = [
+                _source_json(
+                    q.url,
+                    q.observation,
+                    ranges=[[0, got - 1]] if q is p and got else [],
+                    nbytes=got if q is p else 0,
+                )
+                for q in probes
+            ]
             return make_report(
-                dest, got, digests, target.checksums, got, 0, time.monotonic() - t0, {p.url: got}
+                dest,
+                got,
+                digests,
+                target.checksums,
+                got,
+                0,
+                time.monotonic() - t0,
+                {p.url: got},
+                provenance=_file_provenance(target, got, sources, rejected, resumed=0),
             )
         raise MirrorsExhaustedError(f"all sources failed for {target.url}: {'; '.join(errors)}")
 
@@ -424,8 +521,50 @@ def _already_complete(dest: Path, target: Target) -> FetchReport | None:
         return None
     digests = hash_file(dest, [c.algorithm for c in target.checksums])
     if all(digests.get(c.algorithm) == c.hexdigest for c in target.checksums):
-        return make_report(dest, dest.stat().st_size, digests, target.checksums)
+        size = dest.stat().st_size
+        provenance = _file_provenance(target, size, [], [], resumed=size)
+        provenance["reused_local_file"] = True
+        return make_report(dest, size, digests, target.checksums, provenance=provenance)
     return None
+
+
+def _source_json(
+    url: str, observation: dict[str, Any], *, ranges: list[list[int]], nbytes: int, **extra: Any
+) -> dict[str, Any]:
+    return {
+        "url": url,
+        "final_url": observation.get("final_url", url),
+        "host": observation.get("host") or prov.host_of(url),
+        "redirects": observation.get("redirects", []),
+        "tls": observation.get("tls"),
+        "etag": observation.get("etag"),
+        "last_modified": observation.get("last_modified"),
+        "ranges": ranges,
+        "bytes": nbytes,
+        **extra,
+    }
+
+
+def _file_provenance(
+    target: Target, size: int, sources: list[dict[str, Any]], rejected: list[dict[str, Any]], *, resumed: int
+) -> dict[str, Any]:
+    """The per-file provenance record carried by :class:`FetchReport` (``wsp_fetch.provenance``)."""
+    ml = target.metalink
+    return {
+        "format": prov.FORMAT,
+        "url": target.url,
+        "size": size,
+        "metalink": target.metalink_url,
+        "checksums": {
+            "declared": prov.checksum_list(target.checksums),
+            "metalink": prov.checksum_list(ml.checksums) if ml is not None else [],
+            "piece_hashes": ml.pieces.algorithm if ml is not None and ml.pieces is not None else None,
+        },
+        "sources": sources,
+        "rejected": [dict(r) for r in rejected],
+        "resumed_bytes": resumed,
+        "fetched_at": datetime.now(UTC).isoformat(timespec="seconds"),
+    }
 
 
 def _raise_for_status(r: httpx.Response) -> None:
@@ -524,6 +663,8 @@ class _SegmentedDownload:
         try:
             while not self.inorder.done.wait(0.1):
                 with self.cond:
+                    if self.f.cancelled and self.error is None:
+                        self.error = FetchCancelledError(f"{self.plan.target.url}: cancelled (shutdown)")
                     if self.error is not None:
                         break
                     if self.live_workers == 0:
@@ -541,8 +682,8 @@ class _SegmentedDownload:
                 self.finished = True
                 self.cond.notify_all()
             self.inorder.abort()
-            for t in threads:
-                t.join(timeout=self.cfg.read_timeout + 5)
+            for t in threads:  # workers notice ``finished`` between reads; a cancel need not wait long
+                t.join(timeout=2.0 if self.f.cancelled else self.cfg.read_timeout + 5)
         if self.error is not None:
             hasher.close()
             self._checkpoint(force=True)
@@ -564,6 +705,19 @@ class _SegmentedDownload:
         finally:
             if not self.partial.exists():
                 self.state_file.unlink(missing_ok=True)
+        self._spot_check()
+        sources = [
+            _source_json(
+                m.url,
+                m.observation,
+                ranges=prov.byte_ranges(m.pieces, self.piece_size, self.size),
+                nbytes=m.bytes,
+                corrupt_pieces=m.corrupt,
+                disabled=m.disabled,
+                spot_check=m.spot_check,
+            )
+            for m in self.plan.mirrors
+        ]
         return make_report(
             self.plan.dest,
             self.size,
@@ -573,7 +727,62 @@ class _SegmentedDownload:
             self.bytes_resumed,
             time.monotonic() - self.t0,
             {m.url: m.bytes for m in self.plan.mirrors},
+            provenance=_file_provenance(
+                self.plan.target, self.size, sources, self.plan.rejected, resumed=self.bytes_resumed
+            ),
         )
+
+    def _spot_check(self) -> None:
+        """Re-read random ranges from every mirror and compare them with the verified file.
+
+        The file already matched every upstream digest; a mirror that serves *other* bytes for the
+        same name is a disagreement the integrity guard must see (ADR-0009). Errors are not
+        disagreements (a mirror may be busy); they are recorded as such.
+        """
+        k, n = self.cfg.spot_checks, min(self.cfg.spot_check_bytes, self.size)
+        if k <= 0 or n <= 0 or len(self.plan.mirrors) < 2:
+            return
+        rng = random.Random(self.plan.target.url)  # noqa: S311 - sampling, not cryptography
+        offsets = sorted({rng.randrange(0, self.size - n + 1) for _ in range(k)})
+        fd = os.open(self.plan.dest, os.O_RDONLY)
+        try:
+            expected = {off: os.pread(fd, n, off) for off in offsets}
+        finally:
+            os.close(fd)
+        for m in self.plan.mirrors:
+            if m.disabled:  # already known bad (corrupt pieces, fatal errors): see corrupt_pieces
+                m.spot_check = "skipped: mirror dropped"
+                continue
+            verdict = "ok"
+            for off in offsets:
+                if self.f.cancelled:
+                    return
+                try:
+                    got = self._read_range(m.final_url, off, off + n - 1)
+                except (_RetryableError, httpx.HTTPError, FetchError) as exc:
+                    verdict = f"error: {exc}"
+                    continue
+                if got != expected[off]:
+                    log.warning("mirror %s serves other bytes at %d of %s", m.url, off, self.plan.dest.name)
+                    verdict = "mismatch"
+                    break
+            m.spot_check = verdict
+
+    def _read_range(self, url: str, start: int, end: int) -> bytes:
+        with (
+            self.f.host_slot(url),
+            self.f.client.stream("GET", url, headers={"Range": f"bytes={start}-{end}"}) as r,
+        ):
+            _raise_for_status(r)
+            if r.status_code != 206:
+                raise _RetryableError(f"spot check: HTTP {r.status_code} without a range")
+            out = bytearray()
+            for chunk in r.iter_raw():
+                out += chunk
+                self.f.throttle(len(chunk))
+                if len(out) > end - start + 1:
+                    break
+            return bytes(out)
 
     def _open_partial(self) -> set[int]:
         """Open ``.partial``; returns pieces a previous run recorded (still to be re-verified)."""
@@ -625,8 +834,8 @@ class _SegmentedDownload:
                     continue
                 except (_RetryableError, httpx.HTTPError, SizeMismatchError) as exc:
                     delay = self._failed(m, i, exc)
-                    if delay:
-                        time.sleep(delay)
+                    if delay and self.f.wait_cancelled(delay):
+                        return
                     continue
                 self._completed(m, i, data, seconds)
         except BaseException as exc:
@@ -698,7 +907,7 @@ class _SegmentedDownload:
                         f"Content-Range {cr.group(0)} != {start}-{end}/{self.size}", fatal_for_mirror=True
                     )
                 for chunk in r.iter_raw():
-                    if i in self.claimed or self.finished:
+                    if i in self.claimed or self.finished or self.f.cancelled:
                         raise _CancelledError
                     n = len(chunk)
                     if pos + n > length:
@@ -776,6 +985,7 @@ class _SegmentedDownload:
             raise OSError(f"short write at {offset}")
         with self.cond:
             self.done.add(i)
+            m.pieces.append(i)
             self.state.done[i] = digest
             self.bytes_downloaded += len(data)
             m.consecutive_failures = 0
