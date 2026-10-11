@@ -582,15 +582,10 @@ sources:
           query: "collection:usdanationalagriculturallibrary AND title:(\"farmers bulletin\") AND mediatype:texts"
           pub_number: "(farmers'? bulletin\\s*(?:no\\.?|number)?\\s*\\d+)"
           provenance: "USDA National Agricultural Library's own archive.org collection (usdanationalagriculturallibrary): digitised and contributed by the issuing department's library"
-        - kind: archive-org
-          query: "collection:pub_farmers-bulletin AND mediatype:texts"
-          pub_number: "_(\\d{3,4})$"
-          pub_prefix: "Farmers Bulletin "
-          provenance: "Internet Archive Serials-in-Microfilm scan of the official USDA Farmers' Bulletin series, one item per numbered bulletin (a faithful copy of the official release; scanner is not the agency: owner to confirm, see notes)"
       filter: {allow_all: true}
       mirrors:
         - {channel: "archive.org collection usdanationalagriculturallibrary (contributor USDA NAL)", status: verified, verified: 2026-10-10, note: "agency collection, but only 31 Farmers' Bulletin items"}
-        - {channel: "archive.org pub_farmers-bulletin (IA microfilm scans of the official series)", status: verified-provenance-pending, verified: 2026-10-10, note: "≈546 more numbered bulletins; mirrors the official release one-to-one, uploader is IA, not USDA"}
+        - {channel: "archive.org pub_farmers-bulletin (IA microfilm scans of the official series)", status: rejected, verified: 2026-10-11, note: "owner decision 2026-10-11: scans made by the Internet Archive, not the agency, are not an official mirror (D11)"}
         - {channel: "NAL Digital Collections (search.nal.usda.gov)", status: unverified, verified: 2026-10-10, note: "Primo discovery UI; no bulk API found yet"}
     update: {cadence: P6M, strategy: snapshot-retention}
     size: {bytes: 30e9, measured: false, as_of: 2026-10-10}

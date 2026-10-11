@@ -33,6 +33,13 @@ StandardError=journal
 # Be a good neighbour to the browser and the NAS (scrub and parity are IO-heavy).
 Nice=19
 CPUWeight=20
+# Shared budget with every other background job (whisipedia-background.slice); the orchestrator's
+# own ceiling leaves room in the slice for an index build. OOMScoreAdjust: if the kernel must kill,
+# it kills background work before anything the owner is using.
+Slice=whisipedia-background.slice
+MemoryHigh=6G
+MemoryMax=8G
+OOMScoreAdjust=500
 Environment=WSP_MAX_WORKERS=4
 IOSchedulingClass=idle
 NoNewPrivileges=yes

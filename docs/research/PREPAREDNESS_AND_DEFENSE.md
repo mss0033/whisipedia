@@ -422,7 +422,7 @@ User-Agent) are recorded per source in `access.mirrors`:
 | `disa-stigs` | (was moved) | www.cyber.mil and dl.dod.cyber.mil answer 200 | **reachable** |
 | `cia-reading-room` (D14) | deep links on www.cia.gov redirect to the home page; `robots.txt` crawl delay 10 s | archive.org `ciareadingroom`: a one-to-one mirror of foia.cia.gov (984,230 items, creator "CIA Reading Room", ids = CIA document numbers) | **verified mirror of the official release** (provenance recorded) |
 | `usgs-historical-topo` (D14) | — | USGS's own `prd-tnm` S3 bucket (HistoricalTopo/{PDF,GeoTIFF}/), TNM Access API (186,061 GeoPDF products), `topomaps_all.zip` inventory | **verified** (agency bucket) |
-| `usda-farmers-bulletins` | — | NAL's own archive.org collection (31 bulletins); the IA Serials-in-Microfilm scans of the official series (`pub_farmers-bulletin`, ≈ 546 more) | NAL **verified**; microfilm scans need owner confirmation |
+| `usda-farmers-bulletins` | — | NAL's own archive.org collection (31 bulletins); the IA Serials-in-Microfilm scans of the official series (`pub_farmers-bulletin`, ≈ 546 more) | NAL **verified** (31 bulletins); microfilm scans **rejected** by the owner (2026-10-11: not an official mirror) |
 | CDC (no registry entry yet) | www.cdc.gov, stacks.cdc.gov (403) | none verified (EID is in PMC, already planned under `pmc-oa`) | **no official mirror found** |
 
 GovInfo and Congress.gov need a free api.data.gov key in `config/local.toml` (`[curator.api_keys]`);

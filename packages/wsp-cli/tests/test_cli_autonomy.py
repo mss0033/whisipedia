@@ -235,3 +235,16 @@ def test_build_wiring_wires_bots_parity_and_proposals(env: Path) -> None:
     assert wiring.promoter is not None
     assert wiring.gate_provider is not None
     assert "CC-BY-SA-4.0" in wiring.gate_provider().license_allowlist
+
+
+def test_background_units_share_a_capped_slice() -> None:
+    # 2026-10-11: an uncapped index build reached 21 GB RSS and 41 GB of swap on the 23 GiB desktop.
+    units = ROOT / "deploy" / "systemd"
+    budget = (units / "whisipedia-background.slice").read_text()
+    for key in ("MemoryHigh=", "MemoryMax=", "MemorySwapMax="):
+        assert key in budget
+    for name in ("whisipedia-orchestrator.service", "whisipedia-index.service"):
+        text = (units / name).read_text()
+        assert "Slice=whisipedia-background.slice" in text
+        assert "MemoryMax=" in text
+    assert "MemoryMax=" in (units / "whisipedia-api.service").read_text()

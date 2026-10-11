@@ -226,7 +226,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--registry", type=Path, default=None)
     s.add_argument("--schema", type=Path, default=None)
 
-    s = add("ingest", ops.cmd_ingest, "Adopt completed bulk downloads from <vault>/_incoming into the vault.")
+    s = add(
+        "ingest",
+        ops.cmd_ingest,
+        "Adopt completed bulk downloads from <vault>/_incoming into the vault "
+        "(exit 0 done, 1 a version failed, 3 another ingest runs, 4 files still missing or downloading).",
+    )
     s.add_argument("--source", default=None, help="only this source id")
     s.add_argument("--dry-run", action="store_true", help="report what would happen; change nothing")
     s.add_argument("--offline", action="store_true", help="do not fetch Kiwix .sha256 files")

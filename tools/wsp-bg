@@ -1,0 +1,32 @@
+#!/bin/sh
+# Run a Whisipedia job in the background budget: whisipedia-background.slice (shared memory, swap,
+# CPU and IO limits), lowest CPU and IO priority, its own memory ceiling, logs in the journal.
+#
+#   tools/wsp-bg NAME [MEMORY_MAX] -- COMMAND...
+#   tools/wsp-bg embed-en 6G -- .venv/bin/python packages/wsp-oracle/scripts/embed_sources.py ...
+#
+# The unit is whisipedia-job-NAME (journalctl --user -u whisipedia-job-NAME); a second start with the
+# same NAME is refused while the first runs. MEMORY_MAX defaults to 4G; MemoryHigh is set 1G lower so
+# the job is slowed down (reclaim) before it is killed.
+set -eu
+[ $# -ge 3 ] || { echo "usage: $0 NAME [MEMORY_MAX] -- COMMAND..." >&2; exit 2; }
+name=$1; shift
+max=4G
+if [ "$1" != "--" ]; then max=$1; shift; fi
+[ "$1" = "--" ] || { echo "usage: $0 NAME [MEMORY_MAX] -- COMMAND..." >&2; exit 2; }
+shift
+case $max in
+  *G) high="$(( ${max%G} - 1 ))G"; [ "${max%G}" -gt 1 ] || high=768M ;;
+  *) high=$max ;;
+esac
+repo=$(cd "$(dirname "$0")/.." && pwd)
+exec systemd-run --user --collect --quiet \
+  --unit="whisipedia-job-$name" \
+  --slice=whisipedia-background.slice \
+  --working-directory="$repo" \
+  -p MemoryHigh="$high" -p MemoryMax="$max" -p MemorySwapMax=1G \
+  -p OOMScoreAdjust=500 -p Nice=19 -p IOSchedulingClass=idle -p CPUWeight=20 \
+  -E WSP_MAX_WORKERS="${WSP_MAX_WORKERS:-4}" -E OMP_NUM_THREADS=4 -E MKL_NUM_THREADS=4 \
+  -E TOKENIZERS_PARALLELISM=false -E PYTHONUNBUFFERED=1 \
+  -E WSP_CONFIG_DIR="$repo/config" \
+  "$@"

@@ -88,6 +88,9 @@ class Library:
 
     def _fresh_info(self, spec: SourceSpec) -> SourceInfo:
         current = self.s.vault.current(spec.id)
+        # A partitioned source (ADR-0010) is one site made of every current partition, not only the
+        # partition promoted last.
+        members = self.s.vault.current_set(spec.id) if spec.partitioned else ()
         return convert.source_info(
             spec,
             current,
@@ -95,6 +98,7 @@ class Library:
             now=self.s.clock(),
             doc_count=self.catalog.doc_count(spec.id),
             home_doc_id=self.home_doc_id(spec, current),
+            members=members,
         )
 
     def home_doc_id(self, spec: SourceSpec, current: Generation | None) -> str | None:

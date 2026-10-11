@@ -177,3 +177,34 @@ def test_inlink_counts() -> None:
         [doc("src", "b", "B", links=(a, a)), doc("src", "c", "C", links=(a,)), doc("src", "a", "A")]
     )
     assert counts[a] == 2  # repeated links from one page count once
+
+
+def test_concurrent_lookups_on_one_reader_are_safe(tmp_path: Path) -> None:
+    # 2026-10-10/11: the API crashed (double free, SIGSEGV) when request threads read row groups of one
+    # shared ParquetFile at the same time. Unlocked, this test crashed pyarrow 26 within seconds.
+    import random
+    import threading
+
+    docs = [doc("src", f"n{i:04d}", f"Title {i}", "body " * 200 + str(i)) for i in range(3000)]
+    reader = RefineryReader(
+        write(tmp_path, "g1", docs, row_group_rows=8, docs_per_file=500).dir, cache_row_groups=2
+    )
+    errors: list[BaseException] = []
+
+    def hammer(seed: int) -> None:
+        rng = random.Random(seed)
+        try:
+            for _ in range(400):
+                d = docs[rng.randrange(len(docs))]
+                got = reader.get(d.doc_id)
+                assert got is not None
+                assert got.text == d.text
+        except BaseException as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=hammer, args=(s,)) for s in range(16)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert not errors

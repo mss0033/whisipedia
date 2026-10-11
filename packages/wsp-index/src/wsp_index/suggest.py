@@ -38,6 +38,7 @@ _LIST_SEP = "\x1e"
 TRIE_FILE = "titles.marisa"
 HEAVY_FILE = "heavy.marisa"
 DEFAULT_HEAVY_THRESHOLD = 512
+_MAX_SCAN = 4_096  # completions examined past a heavy prefix's precomputed top list
 DEFAULT_TOP_K = 32
 
 
@@ -49,6 +50,8 @@ class _RecordTrie(Protocol):
     def __len__(self) -> int: ...
 
     def save(self, path: str) -> None: ...
+
+    def iterkeys(self, prefix: str = ...) -> Iterator[str]: ...
 
 
 class _BytesTrie(Protocol):
@@ -175,11 +178,16 @@ class TitleTrie:
                 yield (self._score(key), *_split_key(key))
             # Rarely reached: consumer filtered out more than top_k (deletions, duplicates).
             seen = set(top)
-            rest = [(s[0], k) for k, s in self._trie.items(prefix) if k not in seen]
         else:
-            rest = [(s[0], k) for k, s in self._trie.items(prefix)]
-        rest.sort(key=lambda sk: (-sk[0], sk[1]))
-        for score, key in rest:
+            seen: set[str] = set()
+        # Bounded: a heavy prefix ("a") has millions of completions; enumerating them all on a keystroke
+        # took 2 s and 500 MB on 9.6M keys. Light prefixes have at most ``heavy_threshold`` anyway.
+        window = (
+            (self._score(k), k)
+            for k in itertools.islice(self._trie.iterkeys(prefix), _MAX_SCAN)
+            if k not in seen
+        )
+        for score, key in heapq.nsmallest(_MAX_SCAN, window, key=lambda sk: (-sk[0], sk[1])):
             yield (score, *_split_key(key))
 
 

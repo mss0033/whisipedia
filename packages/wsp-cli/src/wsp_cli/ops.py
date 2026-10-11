@@ -34,6 +34,8 @@ from wsp_orchestrator.store import StateStore
 from wsp_vault.drill import DrillKind
 from wsp_vault.vault import FileVault
 
+EXIT_INCOMPLETE = 4  # `wsp ingest`: some version still has files missing or downloading
+
 
 def _context(args: argparse.Namespace) -> tuple[bootstrap.Layout, dict[str, Any], tuple[SourceSpec, ...]]:
     lay = bootstrap.layout(args.config_dir)
@@ -108,7 +110,10 @@ def _ingest(
         out.write(json.dumps(report.to_json(), indent=2) + "\n")
     else:
         render(report, out)
-    return 1 if any(v.status is VersionStatus.FAILED for v in report.versions) else 0
+    if any(v.status is VersionStatus.FAILED for v in report.versions):
+        return 1
+    # Not an error, but not done either: scripts must not mistake it for success (exit 0).
+    return EXIT_INCOMPLETE if any(v.status is VersionStatus.INCOMPLETE for v in report.versions) else 0
 
 
 # --- index build -----------------------------------------------------------------------------------------

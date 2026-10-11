@@ -25,6 +25,7 @@ which Tantivy orders by opstamp, so repeated upserts of one id in a batch keep o
 
 from __future__ import annotations
 
+import contextlib
 import html
 import json
 import sqlite3
@@ -61,6 +62,7 @@ CREATE TABLE IF NOT EXISTS titles (
     lang TEXT NOT NULL,
     prior REAL NOT NULL DEFAULT 0
 ) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS titles_prior ON titles(prior);
 CREATE TABLE IF NOT EXISTS aliases (
     doc_id TEXT NOT NULL,
     alias TEXT NOT NULL,
@@ -74,8 +76,10 @@ class TantivyConfig:
     languages: tuple[str, ...] = ("en",)
     """Languages with their own analyzer (BCP-47 primary subtags); others use the fallback."""
     title_boost: float = 3.0
-    writer_heap_bytes: int = 256 * 1024 * 1024
-    writer_threads: int = 0  # 0 = Tantivy default (one per core, capped at 8)
+    writer_heap_bytes: int = 1024 * 1024 * 1024
+    writer_threads: int = 4
+    """4 threads with >= 256 MB each: measured 144k docs/s against 34k for Tantivy's default (8 threads
+    sharing 256 MB). The heap is the writer's whole budget, split between its threads."""
     commit_every: int | None = None
     """Commit automatically after this many buffered upserts/deletes (``None``: only explicit)."""
     snippet_chars: int = 200
@@ -83,6 +87,12 @@ class TantivyConfig:
     """Store body text in Tantivy (needed for highlighted snippets; costs roughly 40% of text size)."""
     suggest_rebuild_threshold: int = 2_000
     """Rebuild the suggest trie at commit when more than this many titles changed since the last build."""
+    suggest_max_keys: int = 3_000_000
+    """Completion keys in the suggest trie (titles and aliases of the best-ranked documents first):
+    bounds the rebuild's memory (~300 bytes a key while building) on a 40M-title library."""
+    suggest_open_rebuild_titles: int = 200_000
+    """Opening an index without a trie builds one only below this many titles; bigger libraries
+    leave it to the writer (``wsp index build``), never to a reader such as the API."""
     suggest_heavy_threshold: int = DEFAULT_HEAVY_THRESHOLD
     suggest_top_k: int = DEFAULT_TOP_K
     source_priors: Mapping[str, float] = field(default_factory=dict[str, float])
@@ -118,6 +128,9 @@ class TantivyIndex:
         self._db = sqlite3.connect(self.path / "meta.sqlite", check_same_thread=False)
         self._db.execute("PRAGMA journal_mode=WAL")
         self._db.execute("PRAGMA synchronous=NORMAL")
+        self._db.execute("PRAGMA busy_timeout=60000")  # another process's commit, not an error
+        self._db.execute("PRAGMA journal_size_limit=67108864")  # the WAL shrinks back after a bulk load
+        self._db.execute("PRAGMA cache_size=-131072")  # 128 MiB page cache (default: 2 MB)
         self._db.executescript(_META_SCHEMA)
         self._check_signature()
 
@@ -146,11 +159,17 @@ class TantivyIndex:
         self._suggest_stale = False
         self._trie_stamp: tuple[int, int, int] = (0, 0, 0)
         self._trie_checked = 0.0
-        if TitleTrie.exists(self._suggest_dir) and self._meta("suggest_dirty") != "1":
+        # Opening never rebuilds a big trie: a stale one is served until a writer's commit replaces it
+        # (2026-10-11: a refine step that merely opened the index rebuilt it and took 12.8 GB).
+        dirty = self._meta("suggest_dirty") == "1" or not TitleTrie.exists(self._suggest_dir)
+        if dirty and self._small():
+            self._rebuild_suggest()
+        elif TitleTrie.exists(self._suggest_dir):
             self._suggester.replace_base(TitleTrie.open(self._suggest_dir))
             self._trie_stamp = self._trie_file_stamp()
+            self._suggest_stale = dirty
         else:
-            self._rebuild_suggest()
+            self._suggest_stale = True
 
     # --- setup ---------------------------------------------------------------------------------
 
@@ -168,6 +187,41 @@ class TantivyIndex:
             )
             for bonus, ids in sorted(by_bonus.items())
         ]
+
+    def _small(self) -> bool:
+        """Few enough titles that a suggest rebuild costs milliseconds, not minutes and gigabytes."""
+        cap = self.config.suggest_open_rebuild_titles
+        return self._title_count(cap + 1) <= cap
+
+    def _title_count(self, cap: int) -> int:
+        """Number of titles, counting at most ``cap`` (cheap on a huge table)."""
+        row = self._db.execute("SELECT COUNT(*) FROM (SELECT 1 FROM titles LIMIT ?)", (cap,)).fetchone()
+        return int(row[0])
+
+    def has_source(self, source_id: str) -> bool:
+        """Whether any document of ``source_id`` is indexed (a primary-key range probe)."""
+        lo = f"wsp:{source_id}/"
+        hi = f"wsp:{source_id}0"  # "0" sorts right after "/"
+        with self._lock:
+            row = self._db.execute(
+                "SELECT 1 FROM titles WHERE doc_id >= ? AND doc_id < ? LIMIT 1", (lo, hi)
+            ).fetchone()
+        return row is not None
+
+    def source_doc_ids(self, source_id: str, *, batch: int = 50_000) -> Iterator[list[str]]:
+        """Indexed doc ids of ``source_id`` in batches (primary-key order, keyset-paged)."""
+        last, hi = f"wsp:{source_id}/", f"wsp:{source_id}0"
+        while True:
+            with self._lock:
+                rows = self._db.execute(
+                    "SELECT doc_id FROM titles WHERE doc_id > ? AND doc_id < ? ORDER BY doc_id LIMIT ?",
+                    (last, hi, batch),
+                ).fetchall()
+            if not rows:
+                return
+            ids = [str(r[0]) for r in rows]
+            yield ids
+            last = ids[-1]
 
     def _meta(self, key: str) -> str | None:
         row = self._db.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
@@ -204,11 +258,16 @@ class TantivyIndex:
             self._writer = self._index.writer(
                 heap_size=self.config.writer_heap_bytes, num_threads=self.config.writer_threads
             )
+            # Segment files of a crashed, never committed run are only collected on request (the
+            # 2026-10-11 kill left 80 GB of them).
+            self._writer.garbage_collect_files()
         return self._writer
 
     # --- LexicalIndex: writes ------------------------------------------------------------------
 
-    def upsert(self, docs: Iterable[DocRecord]) -> int:
+    def upsert(self, docs: Iterable[DocRecord], *, replace: bool = True) -> int:
+        """Add or replace documents. ``replace=False`` skips the delete-by-id: only for documents known
+        not to be in the index (a first load of a source), where it saves a delete term per document."""
         n = 0
         with self._lock:
             writer = self._get_writer()
@@ -222,7 +281,8 @@ class TantivyIndex:
                 tdoc.add_text("lang", doc.lang)
                 tdoc.add_text(f"title_{route}", doc.title)
                 tdoc.add_text(f"text_{route}", doc.text)
-                writer.delete_documents_by_term("doc_id", doc.doc_id)
+                if replace:
+                    writer.delete_documents_by_term("doc_id", doc.doc_id)
                 writer.add_document(tdoc)
                 rows.append((doc.doc_id, doc.source_id, doc.title, doc.lang))
                 aliases.extend((doc.doc_id, a) for a in doc.aliases if a.strip())
@@ -297,7 +357,9 @@ class TantivyIndex:
         if self.config.commit_every is not None and self._buffered >= self.config.commit_every:
             self.commit()
 
-    def commit(self) -> None:
+    def commit(self, *, rebuild_suggest: bool = True) -> None:
+        """Make writes visible. ``rebuild_suggest=False`` (bulk loads) leaves a stale suggest trie
+        marked dirty for one rebuild later instead of rebuilding it at every commit."""
         with self._lock:
             if self._writer is not None:
                 self._writer.commit()
@@ -308,7 +370,8 @@ class TantivyIndex:
             self._index.reload()
             self._buffered = 0
             if self._suggest_stale:
-                self._rebuild_suggest()
+                if rebuild_suggest:
+                    self._rebuild_suggest()
             else:
                 self._suggester.remove(self._pending_removed)
                 self._suggester.upsert(self._pending_suggest)
@@ -324,9 +387,7 @@ class TantivyIndex:
             self._pending_suggest.clear()
             self._pending_removed.clear()
             self._buffered = 0
-            if self._suggest_stale:
-                self._suggest_stale = False
-                self._rebuild_suggest()
+            # A stale trie stays marked dirty; rebuilding it here could take minutes.
 
     def close(self) -> None:
         """Release the writer lock and persist the suggest trie. Uncommitted writes are discarded.
@@ -342,7 +403,13 @@ class TantivyIndex:
                 self._writer = None
             self._db.rollback()
             if self._suggester.pending:
-                self._rebuild_suggest()
+                if self._small():
+                    self._rebuild_suggest()
+                else:  # never a full rebuild on close of a big library: the next writer's rebuild does it
+                    self._set_meta("suggest_dirty", "1")
+                    self._db.commit()
+            with contextlib.suppress(sqlite3.Error):
+                self._db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
             self._db.close()
 
     def __enter__(self) -> Self:
@@ -372,12 +439,24 @@ class TantivyIndex:
         return out
 
     def _all_entries(self) -> Iterable[SuggestEntry]:
-        cur = self._db.execute(
-            "SELECT t.doc_id, t.title, t.prior, group_concat(a.alias, char(30)) "
-            "FROM titles t LEFT JOIN aliases a ON a.doc_id = t.doc_id GROUP BY t.doc_id"
-        )
-        for d, title, prior, aliases in cur:
-            yield SuggestEntry(d, title, tuple(aliases.split("\x1e")) if aliases else (), float(prior))
+        """Titles with their aliases, best prior first, until ``suggest_max_keys`` keys (streamed:
+        the ``titles_prior`` index walks in order without sorting 40M rows)."""
+        budget = self.config.suggest_max_keys
+        cur = self._db.cursor()
+        cur.execute("SELECT doc_id, title, prior FROM titles ORDER BY prior DESC")
+        while budget > 0 and (rows := cur.fetchmany(2_000)):
+            ids = [r[0] for r in rows]
+            marks = ",".join("?" * len(ids))  # only placeholders are interpolated
+            aliases: dict[str, list[str]] = {}
+            for d, a in self._db.execute(f"SELECT doc_id, alias FROM aliases WHERE doc_id IN ({marks})", ids):  # noqa: S608
+                aliases.setdefault(d, []).append(a)
+            for d, title, prior in rows:
+                entry = SuggestEntry(d, title, tuple(aliases.get(d, ())), float(prior))
+                budget -= 1 + len(entry.aliases)
+                yield entry
+                if budget <= 0:
+                    break
+        cur.close()
 
     def _rebuild_suggest(self) -> None:
         trie = TitleTrie.build(

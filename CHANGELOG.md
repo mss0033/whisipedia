@@ -3,6 +3,36 @@
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Fixed (2026-10-11 resource and robustness pass)
+- The API could crash (double free, SIGSEGV) when request threads read the same Parquet part at once:
+  `RefineryReader` now serializes reads per open file (and bounds open files), with a 16-thread
+  regression test that crashed the old reader.
+- Index refresh no longer materializes a generation diff: `wsp_index.delta` keeps a 32-byte key per
+  old document and reads full rows only for changed row groups; `sync.refresh` commits and publishes
+  part by part, with a checkpoint stored atomically with the change-feed records, so a crash resumes
+  without losing or repeating a record. First loads add without delete terms (Tantivy held ~1.2 KB
+  per pending delete); without the old Refinery generation, stale documents are found from the index.
+- Tantivy writer: 4 threads and a 1 GiB heap (measured 4× faster than the default), orphaned segment
+  files from crashed runs are collected; meta SQLite gets a busy timeout, a WAL size limit and a
+  checkpoint on close.
+- Suggest: opening an index never rebuilds a large trie (a refine step that merely opened the index
+  took 12.8 GB), commits during bulk loads defer the rebuild, rebuilds are capped at
+  `suggest_max_keys` best-ranked keys, and the heavy-prefix fallback scans at most 4,096 keys.
+- Refinery writer flushes by text size as well as document count (50,000 Gutenberg books were ~77 GB
+  at flush) and sizes row groups by text; set-generation numbers never repeat after a set is deleted,
+  and a sealed set is never removed; duplicate resolution reads each row group once; renames are
+  followed by a directory fsync. Shadowed rows are kept in numpy.
+- `wsp ingest` no longer skips files that `wsp collections fetch` just wrote (the settle wait now only
+  applies to downloads that can still be growing) and exits 4 when a version is incomplete, so lanes
+  cannot mistake "nothing ingested" for success.
+- A partitioned source's Navigator site card now sums every current partition.
+### Added
+- `deploy/systemd/whisipedia-background.slice`: one memory, swap, CPU and IO budget for the
+  orchestrator, index refreshes and ad-hoc jobs (`tools/wsp-bg NAME [MAX] -- CMD`); the API has its
+  own memory ceiling.
+### Changed
+- usda-farmers-bulletins: the Internet Archive microfilm scans are rejected as a channel (owner
+  decision 2026-10-11: not an official mirror); the agency's own 31 bulletins remain.
 ### Added
 - Partitioned sources (ADR-0010, port revision v0.4): `access.partitioned: true` sources such as
   `usgs-historical-topo` (one state per run) and `cia-reading-room` (batches `b0001`…`b0090`) keep

@@ -110,7 +110,9 @@ def test_fetch_screens_quarantines_and_ingest_seals(vault: FileVault, tmp_path: 
     assert [m.distribution for m in catalog] == ["A"]
     assert "Approved for public release" in catalog[0].distribution_text
 
-    ingest = Ingestor(vault, [s], out=io.StringIO(), settle_seconds=0)
+    # Default settle time: ingesting right after fetching must work (fetch renames only whole files;
+    # a lane that ran ingest at once used to see "modified moments ago" and ingest nothing).
+    ingest = Ingestor(vault, [s], out=io.StringIO())
     result = ingest.run(source_id="test-pubs")
     (vp,) = result.versions
     assert vp.status is VersionStatus.INGESTED

@@ -18,6 +18,10 @@ ExecStartPre=@REPO@/.venv/bin/wsp --config-dir @CONFIG_DIR@ doctor --quiet --req
 ExecStart=@REPO@/.venv/bin/wsp --config-dir @CONFIG_DIR@ index build
 Nice=19
 CPUWeight=20
+Slice=whisipedia-background.slice
+MemoryHigh=7G
+MemoryMax=9G
+OOMScoreAdjust=500
 Environment=WSP_MAX_WORKERS=4
 IOSchedulingClass=idle
 StandardOutput=journal

@@ -9,7 +9,10 @@ fetch`` for document collections) are read too. A target whose ``meta.relpath`` 
 collection catalog ``meta/documents.jsonl``) is stored at that path instead of ``upstream/<name>``.
 
 A file is **complete** when no sibling ``<name>.aria2`` control file exists, its size matches the plan
-(when the plan knows it) and it has not been modified for ``settle_seconds``. A version is ingested
+(when the plan knows it) and it has not been modified for ``settle_seconds``. Files of the
+``collections`` lane skip the settle wait: ``wsp collections fetch`` hashes each file and renames it
+into place only when it is whole, so a file that exists is finished (a lane that ingested right after
+fetching used to see every file as "modified moments ago" and silently ingest nothing). A version is ingested
 only when every planned file is complete (or already staged by an earlier, interrupted run):
 
 1. expected checksums: the plan's; for Kiwix metalink items (``checksum: null``) the ``.zim.sha256``
@@ -90,6 +93,9 @@ class FileState(StrEnum):
 
 
 DONE_STATES = frozenset({FileState.COMPLETE, FileState.STAGED})
+
+
+ATOMIC_LANE = "collections"  # written by `wsp collections fetch`: renamed into place only when complete
 
 
 class VersionStatus(StrEnum):
@@ -395,7 +401,7 @@ class Ingestor:
             return FileState.DOWNLOADING, "aria2 control file present"
         if t.size is not None and st.st_size != t.size:
             return FileState.SIZE_MISMATCH, f"{st.st_size} of {t.size} bytes"
-        if self.now() - st.st_mtime < self.settle_seconds:
+        if t.lane != ATOMIC_LANE and self.now() - st.st_mtime < self.settle_seconds:
             return FileState.SETTLING, "modified moments ago"
         return FileState.COMPLETE, ""
 

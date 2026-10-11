@@ -34,6 +34,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import threading
 from collections import Counter, OrderedDict
 from collections.abc import Iterable, Iterator, Mapping, Sequence
@@ -45,11 +46,10 @@ from typing import Any, Self, cast
 import numpy as np
 import numpy.typing as npt
 import pyarrow as pa
-import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
 from wsp_core.ids import DocId, content_hash
-from wsp_core.model import ChangeKind, ChangeRecord, DocRecord
+from wsp_core.model import ChangeRecord, DocRecord
 
 FORMAT_VERSION = 2  # 2: ``aliases`` column (port revision v0.2); older generations are rebuilt
 SUCCESS_FILE = "_SUCCESS.json"
@@ -58,9 +58,15 @@ SHADOW_FILE = "_shadowed.parquet"  # rows superseded by a later row with the sam
 CURRENT_FILE = "CURRENT.txt"
 PARTS_DIR = "_parts"  # partitioned sources: refined vault generations, composed into set generations
 SET_MARK = ".set"  # set generation ids: <newest member id>.setNNNNN
+_SET_NUMBER = re.compile(r"\.set(\d+)$")
 
 DEFAULT_ROW_GROUP_ROWS = 256
 DEFAULT_DOCS_PER_FILE = 50_000
+DEFAULT_BUFFER_CHARS = 64_000_000
+"""Flush a part file once this much text is buffered, whatever the document count: 50,000 Gutenberg
+books are ~20 GB of text (~77 GB of Python objects at flush), 50,000 Wikipedia articles ~0.2 GB."""
+ROW_GROUP_TARGET_CHARS = 4_000_000  # long documents get fewer rows per row group (a point lookup
+# decodes a whole row group: 256 books would be ~100 MB)
 DEFAULT_ZSTD_LEVEL = 6
 
 SCHEMA = pa.schema(
@@ -203,6 +209,16 @@ def _atomic_replace(partial: Path, final: Path) -> None:
     with partial.open("rb") as fh:
         os.fsync(fh.fileno())
     os.replace(partial, final)
+    _fsync_dir(final.parent)
+
+
+def _fsync_dir(directory: Path) -> None:
+    """Make a rename in ``directory`` durable (local ext4; the Refinery never lives on SMB)."""
+    fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
 
 
 # --- writer ------------------------------------------------------------------------------------
@@ -232,6 +248,7 @@ class RefineryWriter:
         docs_per_file: int = DEFAULT_DOCS_PER_FILE,
         zstd_level: int = DEFAULT_ZSTD_LEVEL,
         directory: Path | None = None,
+        buffer_chars: int = DEFAULT_BUFFER_CHARS,
     ) -> None:
         """``directory`` overrides ``<root>/<source_id>/<generation_id>`` (partition generations)."""
         if row_group_rows < 1 or docs_per_file < 1:
@@ -248,6 +265,8 @@ class RefineryWriter:
         self._per_file = docs_per_file
         self._zstd = zstd_level
         self._buf: list[DocRecord] = []
+        self._buf_chars = 0
+        self._max_chars = buffer_chars
         self._parts = 0
         self._bytes = 0
         self._docs = 0
@@ -273,8 +292,9 @@ class RefineryWriter:
             if not rec.content_hash:
                 rec = replace(rec, content_hash=content_hash(rec.text))
             self._buf.append(rec)
+            self._buf_chars += len(rec.text)
             n += 1
-            if len(self._buf) >= self._per_file:
+            if len(self._buf) >= self._per_file or self._buf_chars >= self._max_chars:
                 self._flush()
         return n
 
@@ -290,13 +310,16 @@ class RefineryWriter:
         self._dropped += len(self._buf) - len(deduped)  # an id repeated within the file: last arrival wins
         self._buf = deduped
         table = pa.Table.from_pylist([_to_row(r) for r in self._buf], schema=SCHEMA)
+        per_doc = max(1, self._buf_chars // max(1, len(self._buf)))
+        rg_rows = max(1, min(self._rg_rows, ROW_GROUP_TARGET_CHARS // per_doc))
+        self._buf_chars = 0
         name = f"part-{self._parts:05d}.parquet"
         final = self.dir / name
         partial = self.dir / (name + ".partial")
         pq.write_table(  # pyright: ignore[reportUnknownMemberType]  # stubs: partially unknown params
             table,
             partial,
-            row_group_size=self._rg_rows,
+            row_group_size=rg_rows,
             compression="zstd",
             compression_level=self._zstd,
             # A list of columns is valid (pyarrow docs); the stubs only allow bool.
@@ -389,13 +412,24 @@ def _duplicates_mask(
     dup = np.nonzero(h[1:] == h[:-1])[0]
     if len(dup) == 0:
         return keep
-    files: dict[int, pq.ParquetFile] = {}
+    # Every row in a run of equal hashes, its doc_id read with one column read per (part, row group).
+    in_run = np.zeros(len(h), dtype=np.bool_)
+    in_run[dup] = True
+    in_run[dup + 1] = True
+    rows_needed = np.flatnonzero(in_run)
+    ids: dict[int, str] = {}
+    by_part: dict[int, dict[int, list[int]]] = {}
+    for i in rows_needed.tolist():
+        by_part.setdefault(int(loc[i, 0]), {}).setdefault(int(loc[i, 1]), []).append(i)
+    for part, groups_of_part in sorted(by_part.items()):
+        pf = pq.ParquetFile(directory / f"part-{part:05d}.parquet")
+        for rg, members in sorted(groups_of_part.items()):
+            column = pf.read_row_group(rg, columns=["doc_id"]).column(0)  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
+            for i in members:
+                ids[i] = cast(str, column[int(loc[i, 2])].as_py())
 
     def doc_id_at(i: int) -> str:
-        part, rg, row = (int(x) for x in loc[i])
-        pf = files.setdefault(part, pq.ParquetFile(directory / f"part-{part:05d}.parquet"))
-        table = pf.read_row_group(rg, columns=["doc_id"])  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
-        return cast(str, table.column(0)[row].as_py())
+        return ids[i]
 
     # Runs of equal hashes; within a run, rows with the same id: keep the max (part, rg, row).
     for i in sorted(set(dup.tolist())):
@@ -457,8 +491,17 @@ def compose_set(root: Path, source_id: str, members: Sequence[Path]) -> str:
     for gid in reversed(existing):
         if set_members(generation_dir(root, source_id, gid)) == names:
             return gid
-    set_id = f"{names[-1]}{SET_MARK}{len(existing) + 1:05d}"
+    # The running number is max+1 over every set ever made (sealed or not), never len(): after a set is
+    # deleted a len()-based number could repeat the newest set's id and remove it while it is served.
+    numbers = (
+        [int(m.group(1)) for d in (root / source_id).iterdir() if (m := _SET_NUMBER.search(d.name))]
+        if (root / source_id).is_dir()
+        else []
+    )
+    set_id = f"{names[-1]}{SET_MARK}{max(numbers, default=0) + 1:05d}"
     out = generation_dir(root, source_id, set_id)
+    if is_sealed(out):
+        raise RefineryError(f"set generation {out} already exists and is sealed")
     if out.exists():
         import shutil
 
@@ -537,15 +580,24 @@ class RefineryReader:
         self._part: npt.NDArray[np.uint32] = ids.column("part").to_numpy()
         self._rg: npt.NDArray[np.uint32] = ids.column("rg").to_numpy()
         self._row: npt.NDArray[np.uint32] = ids.column("row").to_numpy()
-        self._shadow: dict[int, set[tuple[int, int]]] = {}
+        # Shadowed rows per part as (rg, row) pairs in numpy (a set of tuples costs ~150 bytes a row;
+        # a pubmed set generation shadows millions).
+        self._shadow: dict[int, npt.NDArray[np.int64]] = {}
         if (gen_dir / SHADOW_FILE).is_file():
             sh = pq.read_table(gen_dir / SHADOW_FILE)  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
-            parts = cast(list[int], sh.column("part").to_pylist())
-            rgs = cast(list[int], sh.column("rg").to_pylist())
-            rows = cast(list[int], sh.column("row").to_pylist())
-            for part, rg, row in zip(parts, rgs, rows, strict=True):
-                self._shadow.setdefault(part, set()).add((rg, row))
-        self._files: dict[int, pq.ParquetFile] = {}
+            s_part = sh.column("part").to_numpy().astype(np.int64)
+            s_rg = sh.column("rg").to_numpy().astype(np.int64)
+            s_row = sh.column("row").to_numpy().astype(np.int64)
+            order = np.argsort(s_part, kind="stable")
+            s_part, s_rg, s_row = s_part[order], s_rg[order], s_row[order]
+            bounds = np.flatnonzero(np.diff(s_part)) + 1
+            for chunk_part, chunk_rg, chunk_row in zip(
+                np.split(s_part, bounds), np.split(s_rg, bounds), np.split(s_row, bounds), strict=True
+            ):
+                if len(chunk_part):
+                    self._shadow[int(chunk_part[0])] = np.stack([chunk_rg, chunk_row], axis=1)
+        self._files: OrderedDict[int, tuple[pq.ParquetFile, threading.Lock]] = OrderedDict()
+        self._max_files = 64
         self._cache: OrderedDict[tuple[int, int, tuple[str, ...]], pa.Table] = OrderedDict()
         self._cache_size = cache_row_groups
         self._lock = threading.Lock()
@@ -557,14 +609,24 @@ class RefineryReader:
     def parts(self) -> list[Path]:
         return [self.dir / f"part-{i:05d}.parquet" for i in range(self._n_parts)]
 
-    def _file(self, part: int) -> pq.ParquetFile:
+    def _file(self, part: int) -> tuple[pq.ParquetFile, threading.Lock]:
+        """The part's open file and the lock that serializes reads of it.
+
+        A ``ParquetFile`` is not safe for concurrent reads: two threads in ``read_row_group`` on one
+        file race in Arrow's pre-buffer cache (double free / SIGSEGV; the API crashed on it three
+        times on 2026-10-10/11). Open files are bounded (an LRU), each with its own lock.
+        """
         with self._lock:
-            pf = self._files.get(part)
-            if pf is None:
+            entry = self._files.get(part)
+            if entry is None:
                 # No memory_map: a page fault on a soft SMB mount would be a SIGBUS, not an OSError.
-                pf = pq.ParquetFile(self.dir / f"part-{part:05d}.parquet")
-                self._files[part] = pf
-            return pf
+                entry = (pq.ParquetFile(self.dir / f"part-{part:05d}.parquet"), threading.Lock())
+                self._files[part] = entry
+                while len(self._files) > self._max_files:
+                    self._files.popitem(last=False)
+            else:
+                self._files.move_to_end(part)
+            return entry
 
     def _present(self, pf: pq.ParquetFile, columns: Sequence[str]) -> list[str]:
         """``columns`` minus optional ones this (older) file was written without."""
@@ -578,8 +640,13 @@ class RefineryReader:
             if hit is not None:
                 self._cache.move_to_end(key)
                 return hit
-        pf = self._file(part)
-        table = pf.read_row_group(rg, columns=self._present(pf, columns))  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
+        pf, file_lock = self._file(part)
+        with file_lock:  # also single-flight: a second reader of this row group waits, then hits the cache
+            with self._lock:
+                hit = self._cache.get(key)
+            if hit is not None:
+                return hit
+            table = pf.read_row_group(rg, columns=self._present(pf, columns))  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
         with self._lock:
             self._cache[key] = table
             while len(self._cache) > self._cache_size:
@@ -610,19 +677,63 @@ class RefineryReader:
     def __contains__(self, doc_id: object) -> bool:
         return isinstance(doc_id, str) and self.lookup(doc_id, ()) is not None
 
+    @property
+    def n_parts(self) -> int:
+        return self._n_parts
+
+    def _live(self, part: int, pf: pq.ParquetFile) -> npt.NDArray[np.bool_] | None:
+        """Mask of the part's rows that are not shadowed, or ``None`` when every row is live."""
+        shadowed = self._shadow.get(part)
+        if shadowed is None or not len(shadowed):
+            return None
+        meta = pf.metadata
+        sizes = np.array([meta.row_group(i).num_rows for i in range(meta.num_row_groups)], dtype=np.int64)
+        starts = np.concatenate(([0], np.cumsum(sizes)[:-1]))
+        live = np.ones(int(sizes.sum()), dtype=np.bool_)
+        live[starts[shadowed[:, 0]] + shadowed[:, 1]] = False
+        return live
+
+    def part_table(self, part: int, columns: Sequence[str]) -> tuple[pa.Table, npt.NDArray[np.int64]]:
+        """Live rows of one part (``columns`` only) and each row's position within the part file."""
+        pf = pq.ParquetFile(self.dir / f"part-{part:05d}.parquet")
+        table = pf.read(columns=self._present(pf, columns))  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
+        live = self._live(part, pf)
+        if live is None:
+            return table, np.arange(table.num_rows, dtype=np.int64)
+        return table.filter(pa.array(live)), np.flatnonzero(live).astype(np.int64)
+
+    def part_rows(
+        self, part: int, positions: npt.NDArray[np.int64], columns: Sequence[str] = COLUMNS
+    ) -> pa.Table:
+        """Rows at ``positions`` (sorted positions within the part file), reading only their row groups."""
+        pf = pq.ParquetFile(self.dir / f"part-{part:05d}.parquet")
+        meta = pf.metadata
+        sizes = np.array([meta.row_group(i).num_rows for i in range(meta.num_row_groups)], dtype=np.int64)
+        ends = np.cumsum(sizes)
+        rgs = np.unique(np.searchsorted(ends, positions, side="right"))
+        table = pf.read_row_groups([int(r) for r in rgs], columns=self._present(pf, columns))  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
+        # Position in the concatenation of the chosen row groups.
+        starts = ends - sizes
+        local_start = np.concatenate(([0], np.cumsum(sizes[rgs])[:-1]))
+        which = np.searchsorted(rgs, np.searchsorted(ends, positions, side="right"))
+        local = local_start[which] + (positions - starts[rgs[which]])
+        return table.take(pa.array(local.astype(np.int64), type=pa.int64()))  # pyright: ignore[reportArgumentType]  # stubs: Int64Array is valid indices
+
     def scan(self, columns: Sequence[str] = COLUMNS, *, batch_size: int = 4096) -> Iterator[pa.RecordBatch]:
         """All live rows (shadowed duplicates skipped)."""
         for part, path in enumerate(self.parts):
             pf = pq.ParquetFile(path)
             present = self._present(pf, columns)
-            shadowed = self._shadow.get(part)
-            if not shadowed:
+            live = self._live(part, pf)
+            if live is None:
                 yield from pf.iter_batches(batch_size=batch_size, columns=present)  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
                 continue
+            offset = 0
             for rg in range(pf.num_row_groups):
                 table = pf.read_row_group(rg, columns=present)  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
-                mask = pa.array([(rg, r) not in shadowed for r in range(table.num_rows)])
-                yield from table.filter(mask).to_batches(max_chunksize=batch_size)
+                mask = live[offset : offset + table.num_rows]
+                offset += table.num_rows
+                yield from table.filter(pa.array(mask)).to_batches(max_chunksize=batch_size)
 
     def records(self, *, batch_size: int = 1024) -> Iterator[DocRecord]:
         for batch in self.scan(batch_size=batch_size):
@@ -648,33 +759,11 @@ class RefineryReader:
 
 
 def diff_generations(old: RefineryReader | None, new: RefineryReader) -> Iterator[ChangeRecord]:
-    """Change records turning ``old`` into ``new`` (sorted by doc_id). Renames are not detected here.
+    """Change records turning ``old`` into ``new``: streamed, ~32 bytes of memory per old document
+    (see :mod:`wsp_index.delta`). Renames are not detected here."""
+    from wsp_index.delta import diff
 
-    Uses an Arrow hash join over ``(doc_id, content_hash)``; memory is ~100 bytes per document.
-    """
-    new_t = new.read_columns(["doc_id", "content_hash"]).rename_columns(["doc_id", "new_hash"])
-    if old is None:
-        old_t = pa.schema([("doc_id", pa.string()), ("old_hash", pa.string())]).empty_table()
-    else:
-        old_t = old.read_columns(["doc_id", "content_hash"]).rename_columns(["doc_id", "old_hash"])
-    joined = new_t.join(old_t, keys="doc_id", join_type="full outer")
-    old_col, new_col = joined["old_hash"], joined["new_hash"]
-    differs = pc.or_kleene(
-        pc.or_kleene(pc.is_null(old_col), pc.is_null(new_col)),  # pyright: ignore[reportUnknownMemberType]  # stubs
-        pc.not_equal(old_col, new_col),  # pyright: ignore[reportUnknownMemberType]  # stubs
-    )
-    changed = joined.filter(differs).sort_by("doc_id")  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
-    gen = new.generation_id
-    for row in changed.to_pylist():
-        old_hash = cast(str | None, row["old_hash"])
-        new_hash = cast(str | None, row["new_hash"])
-        if old_hash is None:
-            kind = ChangeKind.ADDED
-        elif new_hash is None:
-            kind = ChangeKind.REMOVED
-        else:
-            kind = ChangeKind.MODIFIED
-        yield ChangeRecord(DocId(cast(str, row["doc_id"])), kind, gen, old_hash, new_hash)
+    return diff(old, new)
 
 
 def inlink_counts(records: Iterable[DocRecord]) -> Counter[str]:

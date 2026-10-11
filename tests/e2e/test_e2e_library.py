@@ -193,14 +193,14 @@ def test_ingest_index_and_serve(library: dict[str, Any]) -> None:
     # 1. A dry run changes nothing anywhere under the vault.
     before = _snapshot(vault)
     code, text = _cli("--config-dir", cfg_dir, "ingest", "--dry-run")
-    assert code == 0, text
+    assert code == 4, text  # 2026-11-01 is still downloading: "incomplete" is not success (EXIT_INCOMPLETE)
     assert "DRY RUN" in text
     assert _snapshot(vault) == before
     assert not (library["tmp"] / "xdg" / "whisipedia").exists(), "dry run must not create a signing key"
 
     # 2. Ingest adopts the complete versions and skips the one still downloading.
     code, raw = _cli("--config-dir", cfg_dir, "ingest", "--json")
-    assert code == 0, raw
+    assert code == 4, raw  # one version still downloading
     report = {(v["source_id"], v["generation_id"]): v for v in json.loads(raw)["versions"]}
     assert report[("wikipedia-en-zim", "2026-08")]["status"] == "ingested"
     assert report[("wikipedia-en-zim", "2026-08")]["verifiable"] == 1  # Kiwix .sha256 via the adapter
@@ -233,7 +233,7 @@ def test_ingest_index_and_serve(library: dict[str, Any]) -> None:
     # 3. Idempotent: a second run changes nothing.
     snap = _snapshot(vault)
     code, raw = _cli("--config-dir", cfg_dir, "ingest", "--json")
-    assert code == 0
+    assert code == 4  # 2026-11-01 is still incomplete
     statuses = {v["generation_id"]: v["status"] for v in json.loads(raw)["versions"]}
     assert statuses == {
         "2026-08": "already-sealed",

@@ -1,0 +1,22 @@
+# Whisipedia background work (orchestrator, index builds, ad-hoc jobs started with tools/wsp-bg):
+# one shared memory, swap, CPU and IO budget, so that however many jobs run at once, the desktop keeps
+# the rest of the machine. The API is not in this slice; it has its own small limits.
+#
+# Budget on the 23 GiB workstation (PLAN §2): MemoryHigh throttles (reclaims) the slice before
+# MemoryMax is reached; MemoryMax makes the kernel OOM-kill inside the slice only, never the desktop
+# or the API. MemorySwapMax keeps a runaway job from pushing the whole machine into swap (the
+# 2026-10-11 index build reached 21 GB RSS and 41 GB of swap). Override per machine with a drop-in:
+#   systemctl --user edit whisipedia-background.slice
+#
+# Template: `wsp service install` renders this file (docs/runbooks/install-services.md).
+
+[Unit]
+Description=Whisipedia background work (shared memory, CPU and IO budget)
+
+[Slice]
+MemoryHigh=9G
+MemoryMax=11G
+MemorySwapMax=2G
+CPUWeight=20
+IOWeight=20
+TasksMax=512

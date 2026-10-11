@@ -21,6 +21,7 @@ UNITS = (
     "whisipedia-api.service",
     "whisipedia-index.service",
     "whisipedia-index.timer",
+    "whisipedia-background.slice",  # shared memory/CPU/IO budget of the background units
 )
 ENABLE = ("whisipedia-orchestrator.service", "whisipedia-api.service", "whisipedia-index.timer")
 MARKER = "# Rendered by `wsp service install` from deploy/systemd/"

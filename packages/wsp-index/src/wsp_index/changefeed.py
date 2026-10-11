@@ -79,7 +79,9 @@ class SqliteChangeFeed:
             row = self._db.execute("SELECT COALESCE(MAX(seq), 0) FROM changes").fetchone()
         return self._cursor(int(row[0]))
 
-    def publish(self, changes: Iterable[ChangeRecord]) -> str:
+    def publish(self, changes: Iterable[ChangeRecord], *, checkpoint: tuple[str, str] | None = None) -> str:
+        """Append ``changes``; with ``checkpoint=(key, value)`` also store that progress marker in the
+        same transaction (a resumable writer then never loses or repeats a record across a crash)."""
         rows = [
             (c.doc_id, c.kind.value, c.generation_id, c.old_hash, c.new_hash, c.renamed_from) for c in changes
         ]
@@ -91,12 +93,23 @@ class SqliteChangeFeed:
                     "VALUES (?, ?, ?, ?, ?, ?)",
                     rows,
                 )
+                if checkpoint is not None:
+                    self._db.execute(
+                        "INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)",
+                        (f"checkpoint:{checkpoint[0]}", checkpoint[1]),
+                    )
                 self._db.execute("COMMIT")
             except BaseException:
                 self._db.execute("ROLLBACK")
                 raise
             row = self._db.execute("SELECT COALESCE(MAX(seq), 0) FROM changes").fetchone()
         return self._cursor(int(row[0]))
+
+    def checkpoint(self, key: str) -> str | None:
+        """The progress marker last stored with :meth:`publish` under ``key``."""
+        with self._lock:
+            row = self._db.execute("SELECT value FROM meta WHERE key=?", (f"checkpoint:{key}",)).fetchone()
+        return None if row is None else str(row[0])
 
     def tail(
         self, limit: int, *, sources: Sequence[str] | None = None, max_scan: int = 200_000
