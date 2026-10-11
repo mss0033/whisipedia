@@ -33,7 +33,7 @@ test('Tab reaches the skip link, the location bar, the search box and the result
   await nav.step('Tab from the search box reaches the first result, Enter opens it', async () => {
     const results = nav.main.getByRole('list', { name: 'Search results' });
     const first = results.getByRole('listitem').first().getByRole('link').first();
-    const title = (await first.innerText()).trim();
+    const title = ((await first.textContent()) ?? '').trim();
     await nav.main.getByRole('combobox', { name: 'Search for:' }).first().focus();
     await nav.tabTo(first, 40);
     await expect(first).toBeFocused();
@@ -45,7 +45,7 @@ test('Tab reaches the skip link, the location bar, the search box and the result
     expect(ring, 'focused link shows a focus ring').toBe(true);
     await page.keyboard.press('Enter');
     await nav.settled();
-    await expect(nav.heading).toContainText(title.slice(0, 20));
+    await expect(nav.heading).toContainText(title.slice(0, 20), { ignoreCase: true });
   });
 
   await nav.step('Alt+Left goes back to the results', async () => {

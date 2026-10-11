@@ -161,7 +161,10 @@ test("What's New lists recent changes with readable titles", async ({ nav }) => 
   }
 });
 
-test('the System Monitor loads and refreshes without errors', async ({ page, nav }) => {
+test('the System Monitor loads and refreshes without errors', async ({ page, nav, target }) => {
+  // E2E-2 (docs/testing/e2e-findings.md): live, GET /v1/system takes 30-120 s,
+  // so the page does not finish loading. Remove test.fail() once it is fast.
+  test.fail(target === 'live', 'E2E-2');
   await nav.open('wsp://home');
   await page
     .getByRole('menubar', { name: 'Main menu' })

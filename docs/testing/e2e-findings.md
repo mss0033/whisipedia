@@ -7,19 +7,23 @@ the run as "unexpectedly passing" and the marker should be removed.
 
 Found on 2026-10-10 against the mock (production bundle) and the live library
 at `http://127.0.0.1:8737` (API 1.2.0). Screenshots are in [img/](img/).
-Live timings were taken while other jobs (index builds, benchmarks) were
-loading the machine, so treat the latency numbers as "under load".
+Live timings were taken while other jobs (index builds, benchmarks; load
+average up to 200) were loading the machine, so treat the latency numbers as
+"under load". Under that load most live journey failures were E2E-2: pages
+that never finished loading within 30 s.
 
 | Id | Severity | Area | Summary | Pinned by |
 |---|---|---|---|---|
 | E2E-4 | High | API (HTML rewrite) | Stack Exchange book front pages link to `wsp://stackexchange/questions/…` without the book: every question, tag and image is 404 | `live-zim.spec.ts` › known bug E2E-4; `KNOWN_ISSUES` |
-| E2E-2 | High | API + Navigator | `/v1/sources`, `/v1/portal` and `/v1/system` can take 15–120 s; every page waits for `/v1/sources`, so the Navigator shows a blank page for that long | Live warm-up timings, live test timeouts |
+| E2E-2 | High | API + Navigator | `/v1/sources`, `/v1/portal` and `/v1/system` can take 15–120 s; every page waits for `/v1/sources`, so the Navigator shows a blank page for that long | `browsing.spec.ts` › System Monitor (live); live warm-up timings |
 | E2E-7 | Medium | API (search) | Navigational queries do not jump: `wikipedia Alan Turing` gives a results page | `search.spec.ts` › navigational query |
 | E2E-6 | Medium | API (search) | The top hit depends on the page size, so I'm Feeling Lucky lands on a different page than result #1 | `search.spec.ts` › Lucky opens the page that tops the results |
 | E2E-5 | Medium | API (search) | With a kind filter, `total` stays the unfiltered total; the pager offers pages that are empty | `search.spec.ts` › kind filter narrows |
 | E2E-3 | Medium | API (ZIM catalogue) | The first Stack Exchange book in the list (`3dprinting…_2026-07a`) is 404 | `live-zim.spec.ts` › known bug E2E-3 |
+| E2E-10 | Medium | API (search) | No "Did you mean" on live: `diabetis insulen` and `vacine` return `did_you_mean: null` | `search.spec.ts` › misspelled query |
 | E2E-8 | Low | Index coverage | A search for `alan turing` returns no Wikipedia article, only Wiktionary and MDWiki pages | (observation; not pinned) |
 | E2E-9 | Low | API (text extraction) | The `text` of ZIM HTML documents includes inline script source (`RLCONF = {…}`) | (observation; not pinned) |
+| E2E-11 | Low | Index (titles) | Result titles come from the URL slug: "MRNA vaccine" in results, "mRNA vaccine" on the page | (observation; tests compare titles case-insensitively) |
 | E2E-1 | Low | Navigator (sanitizer) | Opening any page with `style` attributes or `<style>` elements logs CSP violations | `documents.spec.ts` › known bug E2E-1; `KNOWN_ISSUES` |
 
 ---
@@ -74,7 +78,10 @@ While `/v1/sources` is pending the Navigator shows an empty page with
 `App.sources()` is awaited by the site, document (webring), search and directory
 renderers. There is no client timeout, so a hung request means a page that
 never appears (live tests failed on this before the suite gained a warm-up step).
-One run also saw `500` from `/v1/portal` while the daemon restarted.
+One run also saw `500` from `/v1/portal` while the daemon restarted. In the
+last runs even `GET /` (the static `index.html`) sometimes took 13–45 s while
+slow API calls were in flight, which suggests the slow handlers exhaust the
+server's worker threads; that is when most live journeys timed out.
 
 **Cause (likely):** `Views.source_info` calls `vault.current(source_id)` and
 `catalog.doc_count(source_id)` for each of the ~60 sources on every request,
@@ -151,6 +158,27 @@ The undated id `3dprinting.stackexchange.com_en_all` is 200. It is the only one 
 the 181 books whose id carries a date suffix.
 
 **Screenshot:** `img/e2e-3-stackexchange-dated-book-404.png`
+
+## E2E-10: no "Did you mean" on the live library (Medium)
+
+**Repro (live, API 1.3.0 after the spelling work merged):** Ctrl+L, type
+`diabetis insulen`, Enter. Or `curl 'http://127.0.0.1:8737/v1/search?q=diabetis+insulen&limit=3'`.
+
+**Expected:** "Did you mean: *diabetes insulin*?" above the results (the mock
+offers it for `vacine`, and the journey passes there).
+
+**Actual:** `did_you_mean: null`; six hits ("Insulitis", "Insulin degludec/insulin
+aspart", …). `diabetis` and `vacine` alone also return `null` (both are Wiktionary
+headwords, which may make them "known" words to the speller). If the live speller
+data has simply not been built yet, this is an operations gap rather than a code
+bug; the pinned test will start passing once it is offered.
+
+## E2E-11: result titles from URL slugs (Low, observation)
+
+`GET /v1/search?q=how+do+vaccines+train+the+immune+system` returns the hit title
+"MRNA vaccine" (`wsp:mdwiki/MRNA_vaccine`); the page itself is titled "mRNA vaccine".
+Titles in the index seem to be rebuilt from the native id with the first letter
+upper-cased, which mangles names such as mRNA, iPhone or eBay.
 
 ## E2E-8: Wikipedia articles are not in search results (Low, observation)
 

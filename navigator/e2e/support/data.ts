@@ -20,6 +20,8 @@ export interface TargetData {
   doc2Title: RegExp;
   /** Text that yields search-as-you-type suggestions. */
   suggest: string;
+  /** A misspelled query that earns a "Did you mean" line. */
+  misspelled: string;
 }
 
 export const DATA: Record<Target, TargetData> = {
@@ -33,6 +35,7 @@ export const DATA: Record<Target, TargetData> = {
     doc2: 'wsp://gutenberg/84',
     doc2Title: /Frankenstein/,
     suggest: 'turing',
+    misspelled: 'vacine immune',
   },
   live: {
     question: 'how do vaccines train the immune system',
@@ -44,5 +47,6 @@ export const DATA: Record<Target, TargetData> = {
     doc2: 'wsp://wikipedia-en-zim/Turing_machine',
     doc2Title: /Turing machine/,
     suggest: 'turing',
+    misspelled: 'diabetis insulen',
   },
 };

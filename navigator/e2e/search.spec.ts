@@ -141,7 +141,7 @@ test("I'm Feeling Lucky opens the page that tops the results", async ({ nav, tar
     .first()
     .getByRole('link')
     .first();
-  const title = (await first.innerText()).trim();
+  const title = ((await first.textContent()) ?? '').trim();
   await nav.main.getByRole('button', { name: "I'm Feeling Lucky" }).first().click();
   await nav.settled();
   await expect(nav.heading).toContainText(title);
@@ -208,4 +208,31 @@ test('a navigational query ("wikipedia Alan Turing") jumps straight to the artic
   await nav.go('wikipedia Alan Turing');
   await nav.expectAddress(/^wsp:\/\/wikipedia[^/]*\/Alan_Turing$/);
   await expect(nav.heading).toHaveText(/Alan Turing/);
+});
+
+test('a misspelled query offers "Did you mean", and following it searches the fix', async ({
+  page,
+  nav,
+  data,
+  target,
+}) => {
+  // E2E-10 (docs/testing/e2e-findings.md): live, `did_you_mean` is null for
+  // "diabetis insulen" (and "vacine"). Remove test.fail() once it is offered.
+  test.fail(target === 'live', 'E2E-10');
+  await nav.open('wsp://home');
+  await nav.go(data.misspelled);
+  const line = nav.main.locator('.did-you-mean');
+  await expect(line).toContainText('Did you mean:');
+  const fix = line.getByRole('link');
+  const corrected = (await fix.innerText()).trim();
+  expect(corrected).not.toBe(data.misspelled);
+  expect(corrected.length).toBeGreaterThan(2);
+  await fix.click();
+  await nav.settled();
+  await expect(page).toHaveTitle(`WhizBang! Search: ${corrected} - Whisipedia Navigator`);
+  await expect(
+    nav.main.getByRole('list', { name: 'Search results' }).getByRole('listitem').first(),
+  ).toBeVisible();
+  // The corrected query needs no further correction.
+  await expect(nav.main.locator('.did-you-mean')).toHaveCount(0);
 });

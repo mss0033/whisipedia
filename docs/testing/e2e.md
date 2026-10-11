@@ -83,7 +83,7 @@ suite goes red if a guard ever stops working.
 | File | Covers |
 |---|---|
 | `start-page.spec.ts` | Start page: title, WhizBang! box, sites by kind, What's New titles, Library Stats, chrome and status bar |
-| `search.spec.ts` | Ctrl+L, type a question, Enter; ten results; clean, highlighted snippets; kind filter; Next; Back/Forward; I'm Feeling Lucky; suggestions with arrow keys, Enter and Escape |
+| `search.spec.ts` | Ctrl+L, type a question, Enter; ten results; clean, highlighted snippets; kind filter; Next; Back/Forward; I'm Feeling Lucky; suggestions with arrow keys, Enter and Escape; location-bar shortcuts and navigational queries; "Did you mean" for a misspelled query |
 | `documents.spec.ts` | Open a result; one page `<h1>`; sanitized HTML; hover shows the link target in the status bar; follow a link; Back/Forward; broken links and remote images; View Source Data (Ctrl+U); time machine and diff; Not Found and the gap report |
 | `browsing.spec.ts` | Directory down to a listing and back; Hotlist (Ctrl+D, Bookmarks menu, Ctrl+B, Delete, survives reload); History (Ctrl+H, Find, Remove); What's New; System Monitor including a 5 s refresh |
 | `display.spec.ts` | Every theme from the View menu (a screenshot of each in the report), High Contrast, text size (Ctrl+], menu, Ctrl+0), reduced motion (OS setting and Options menu) |

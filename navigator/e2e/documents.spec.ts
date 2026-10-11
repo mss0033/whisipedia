@@ -18,7 +18,7 @@ test('open a search result, follow an internal link, then Back and Forward', asy
 
   await nav.step('click a result', async () => {
     const hit = results.getByRole('link', { name: data.result }).first();
-    title = (await hit.innerText()).trim();
+    title = ((await hit.textContent()) ?? '').trim();
     await hit.click();
     await nav.settled();
     await nav.expectAddress(data.docAddress);
