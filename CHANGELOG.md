@@ -3,7 +3,58 @@
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
-### Fixed (2026-10-11 resource and robustness pass)
+### Fixed: backend audit 2026-10-11 (docs/audits/2026-10-11/)
+- **Orchestrator.**
+  - Heavy steps (refine, index, profile) run in capped child units, one at a time machine-wide (`HEAVY`/`INDEX` locks).
+  - Crashes are counted per step (two in a state: backoff and a `crashed:` alert; never quarantine).
+  - Lock, busy and NAS failures defer without an attempt.
+  - The document-policy screen always runs, even when digests verified.
+  - The promotion gate runs before the index step, so held content is never searchable.
+  - Rows are version-checked; older releases never move CURRENT backwards (`wsp approve --force`).
+  - No busy loop; a watchdog; workdir cleanup; crash-loop, stuck and RSS alerts; `wsp retry`. Schema v5 migrates on open.
+  - A release with nothing new is superseded quietly.
+- **Vault and fetch.**
+  - Signing keys are pinned (never auto-created once the vault has signed content).
+  - The repair ladder has a circuit breaker; a verified `wsp undegrade` clears DEGRADED.
+  - I/O errors are UNREADABLE and never repaired; a mount canary runs before each scrub slice.
+  - Ledger torn-append recovery (`wsp ledger recover`).
+  - Unique temp files, with no-replace publish via `renameat2` or link (verified on the NAS share).
+  - Per-source and per-generation vault locks.
+  - Parity is bound to bytes verified in the same pass.
+  - Checksum-less files are corroborated by a second full fetch; resume validators are required.
+  - Expired signed redirects are re-resolved; HTTPS→HTTP is refused; a token-bucket scrub rate.
+  - An incremental scrub inventory; manifest signatures are checked on read and paths validated.
+- **Adapters.**
+  - The doc-collection gate fails closed: requirements are checked against markings, all distribution statements are read, a document with no text layer is held, and text is normalized against ligature, dash, soft-hyphen and spacing bypasses.
+  - Origins are enforced on every redirect hop; git sources are allow-listed and screened.
+  - Generations read their full content set across earlier generations (PubMed, Kiwix bundles, Gutenberg, Open Library, arXiv; `depends_on`). Wikidata never publishes an empty lookup.
+  - Cluster-ordered ZIM refine (about 10× faster).
+  - PubMed DOIs come from the article, not its references.
+  - Selective Wikidata parsing; byte-bounded batches; Kiwix re-release versions; boilerplate-free HTML text.
+- **API.**
+  - ZIM reads happen in worker processes (a SIGBUS kills a worker, not the API).
+  - A background library snapshot means requests never touch the NAS (`/v1/system` 5 s → 2 ms).
+  - Async health; bounded NAS pools with 503 + `Retry-After`.
+  - One-retrieval search with consistent facets (offset ≤ 200).
+  - Cached, gzip and ETag documents (text only with `fields=text`).
+  - `/go` finds ZIM pages; a read-only change feed; no signing key created. API contract 1.4.0.
+- **Rank, spelling, catalog, Oracle.**
+  - Explicit site words; language-aware stopwords (MRR@10 0.41 → 0.79 on real titles).
+  - Redirect aliases keep their language path.
+  - Rank uses 64-bit vectorised keys, a CSR and per-language PageRank (32M nodes in 13 min, 3.7 GB).
+  - `WSPSPEL2` per-language spelling with one shared normalizer.
+  - Per-language featured articles and directory.
+  - Centred binary codes (recall@10 0.81 → 0.96); MADV_RANDOM reads.
+  - A crash-safe vector store; the chunker keeps whole books; CJK/Indic tokenization.
+- **Index.**
+  - Streaming, resumable refresh; thread-safe Refinery reads; capped suggest builds.
+  - Refine flushes by size; set ids never repeat.
+  - Only current generations are refined.
+  - Safe visibility order (documents, then search, then feed).
+  - The id index loads lazily.
+  - Indexes built with older analyzers are refused: **rebuild the lexical index**, then rerun `wsp index rank` (`WSPRANK2`) and `wsp index spell` (`WSPSPEL2`).
+
+### Fixed (2026-10-11 resource and robustness pass, first round)
 - The API could crash (double free, SIGSEGV) when request threads read the same Parquet part at once:
   `RefineryReader` now serializes reads per open file (and bounds open files), with a 16-thread
   regression test that crashed the old reader.
