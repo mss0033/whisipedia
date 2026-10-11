@@ -6,7 +6,10 @@ suite is green while the bug is open; when the bug is fixed, that test fails
 the run as "unexpectedly passing" and the marker should be removed.
 
 Found on 2026-10-10 against the mock (production bundle) and the live library
-at `http://127.0.0.1:8737` (API 1.2.0). Screenshots are in [img/](img/).
+at `http://127.0.0.1:8737` (API 1.2.0, then 1.3.0). To get a screenshot, run the
+pinning test with `npm run e2e:live -- -g '<test title>'`: the HTML report
+(`npm run e2e:report`) shows the window at the failure, and
+`navigator/e2e-results/<test>/` holds the PNG and trace (gitignored).
 Live timings were taken while other jobs (index builds, benchmarks; load
 average up to 200) were loading the machine, so treat the latency numbers as
 "under load". Under that load most live journey failures were E2E-2: pages
@@ -52,7 +55,7 @@ be `askubuntu.com_en_all/`. The same applies to `href="./"` (Home), which
 resolves to nothing. Every multi-book source (Stack Exchange, the curated
 Kiwix bundle) is affected; beyond the front page, Stack Exchange is not browsable.
 
-**Screenshot:** `img/e2e-4-stackexchange-question-404.png`
+**Screenshot:** run the pinning test (see the table); the report shows the page.
 
 ## E2E-2: slow `/v1/sources`, `/v1/portal`, `/v1/system` leave the Navigator blank (High)
 
@@ -112,7 +115,7 @@ Or `curl 'http://127.0.0.1:8737/v1/search?q=wikipedia+Alan+Turing'`.
 ZIM archives (and the title fallback uses the search index, which holds no
 Wikipedia ZIM pages; see E2E-8).
 
-**Screenshot:** `img/e2e-7-wikipedia-alan-turing-no-jump.png`
+**Screenshot:** run the pinning test (see the table); the report shows the page.
 
 ## E2E-6: the top hit depends on the page size; Lucky goes elsewhere (Medium)
 
@@ -131,7 +134,7 @@ depend on how many results were asked for.
 **Actual:** Lucky (which asks for `page_size=1`) opens "Allan–Herndon–Dudley
 syndrome". The `limit=3` response also returns that page first, with an empty snippet.
 
-**Screenshot:** `img/e2e-6-lucky-alan-turing.png`
+**Screenshot:** run the pinning test (see the table); the report shows the page.
 
 ## E2E-5: a kind filter keeps the unfiltered total; the pager runs into empty pages (Medium)
 
@@ -144,7 +147,7 @@ read *Medicine (148)*, *Dictionary (52)*. Click **Dictionary (52)**.
 `GET /v1/search?…&kind=dictionary` returns `total: 200`, and pages 6 and later
 (`offset=50`, `offset=60`) return no hits ("No documents matched").
 
-**Screenshot:** `img/e2e-5-kind-filter-empty-page.png`
+**Screenshot:** run the pinning test (see the table); the report shows the page.
 
 ## E2E-3: a Stack Exchange book in the list is 404 (Medium)
 
@@ -157,7 +160,7 @@ book, **3dprinting.stackexchange.com en all 2026-07a**.
 The undated id `3dprinting.stackexchange.com_en_all` is 200. It is the only one of
 the 181 books whose id carries a date suffix.
 
-**Screenshot:** `img/e2e-3-stackexchange-dated-book-404.png`
+**Screenshot:** run the pinning test (see the table); the report shows the page.
 
 ## E2E-10: no "Did you mean" on the live library (Medium)
 
