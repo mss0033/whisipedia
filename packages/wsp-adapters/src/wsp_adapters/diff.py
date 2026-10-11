@@ -43,7 +43,7 @@ from typing import IO, Any, Literal, cast
 
 import zstandard
 
-from wsp_adapters._common import ordered_parallel_map
+from wsp_adapters._common import WorkerPool
 from wsp_adapters.entries import Entry, EntrySource, Redirect
 from wsp_core.ids import content_hash, make_doc_id, normalize_text
 from wsp_core.model import ChangeKind, ChangeRecord
@@ -308,9 +308,12 @@ class SnapshotDiff:
     workdir: Path | None = None
     workers: int = 1
     stats: DiffStats = field(default_factory=DiffStats)
+    # One process pool for the whole iteration (audit M9: a new spawn pool per flush cost ~0.5 s each).
+    _pool: WorkerPool | None = field(default=None, init=False, repr=False, compare=False)
 
     def __iter__(self) -> Iterator[ChangeRecord]:
         with ExitStack() as stack:
+            self._pool = stack.enter_context(WorkerPool(self.workers))
             tmp = Path(stack.enter_context(tempfile.TemporaryDirectory(prefix="wsp-diff-", dir=self.workdir)))
             db = stack.enter_context(closing(sqlite3.connect(tmp / "candidates.db")))
             db.executescript(
@@ -408,7 +411,8 @@ class SnapshotDiff:
         if seg is not None and pairs:
             triples = [(o.native_id, _need_text(o), _need_text(n)) for o, n in pairs]
             batches = [triples[i : i + _DIFF_BATCH] for i in range(0, len(triples), _DIFF_BATCH)]
-            diffs = [d for chunk in ordered_parallel_map(_diff_batch, batches, self.workers) for d in chunk]
+            pool = self._pool or WorkerPool(1)
+            diffs = [d for chunk in pool.map(_diff_batch, batches) for d in chunk]
         for i, (o, n) in enumerate(pairs):
             if seg is not None:
                 seg.write(
