@@ -31,7 +31,9 @@ RestartSec=60
 StandardOutput=journal
 StandardError=journal
 # Be a good neighbour to the browser and the NAS (scrub and parity are IO-heavy).
-Nice=10
+Nice=19
+CPUWeight=20
+Environment=WSP_MAX_WORKERS=4
 IOSchedulingClass=idle
 NoNewPrivileges=yes
 PrivateTmp=yes

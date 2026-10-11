@@ -16,7 +16,9 @@ Environment=PYTHONUNBUFFERED=1
 Environment=WSP_CONFIG_DIR=@CONFIG_DIR@
 ExecStartPre=@REPO@/.venv/bin/wsp --config-dir @CONFIG_DIR@ doctor --quiet --require vault
 ExecStart=@REPO@/.venv/bin/wsp --config-dir @CONFIG_DIR@ index build
-Nice=15
+Nice=19
+CPUWeight=20
+Environment=WSP_MAX_WORKERS=4
 IOSchedulingClass=idle
 StandardOutput=journal
 StandardError=journal
