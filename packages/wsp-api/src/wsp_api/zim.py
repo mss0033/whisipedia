@@ -278,11 +278,15 @@ class ZimAssetStore:
 
     def home(self, source_id: str, generation_id: str) -> str | None:
         """Native id of the landing page: the ZIM's main entry for a single book, or
-        :data:`BOOKS_PAGE` (a generated list of books) for a bundle."""
+        :data:`BOOKS_PAGE` (a generated list of books) for a bundle. The server calls this from its
+        snapshot refresher, so it also opens the archive / starts the bundle's book index there,
+        off the request path."""
         layout = self.layout(source_id, generation_id)
         if layout is None:
             return None
         if layout.single is None:
+            if not self.sync_books and self.book_index.get(source_id, generation_id) is None:
+                self.build_books_soon(source_id, generation_id)
             return BOOKS_PAGE
         data = self._read(layout.single, "", Want.NONE)
         return None if data is None else data.path

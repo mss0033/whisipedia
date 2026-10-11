@@ -163,6 +163,32 @@ def test_executor_threads_never_hold_up_process_exit() -> None:
     assert all(t.daemon for t in new)
 
 
+def test_a_landing_page_that_cannot_be_read_yet_is_retried() -> None:
+    """A cold open of a 100 GB ZIM over SMB outlasted the reader's timeout on the real library: the
+    failure must not be remembered as "no landing page"."""
+    from wsp_api.zimread import ZimUnavailable
+
+    services = sample_services()
+    lib = Library(services, ApiSettings(background=True))
+    answers: list[str | Exception] = [ZimUnavailable("timed out"), "A/Main"]
+
+    class Finder:
+        def home(self, source_id: str, generation_id: str) -> str | None:
+            answer = answers.pop(0)
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+
+    lib.state.home_finder = Finder()
+    snap = lib.state.core.refresh()
+    zim = next(s for s in services.sources if s.adapter == "kiwix-opds")
+    current = snap.source(zim.id).current
+    lib.state._find_homes(snap)  # pyright: ignore[reportPrivateUsage]
+    assert lib.state.home_doc_id(zim, current) is None
+    lib.state._find_homes(snap)  # pyright: ignore[reportPrivateUsage]
+    assert lib.state.home_doc_id(zim, current) == f"wsp:{zim.id}/A/Main"
+
+
 def test_warming_up_is_a_503_not_a_hang() -> None:
     services = sample_services()
     lib = Library(services, ApiSettings(background=True))

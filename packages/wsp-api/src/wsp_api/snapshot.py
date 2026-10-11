@@ -61,6 +61,13 @@ class SourceState:
 _EMPTY = SourceState()
 
 
+class _Failed:
+    """A landing page that could not be read this time."""
+
+
+_FAILED = _Failed()
+
+
 @dataclass(frozen=True, slots=True)
 class LibrarySnapshot:
     built_at: float  # time.monotonic()
@@ -311,17 +318,22 @@ class LibraryState:
             if key in self._homes or self.background:
                 return self._homes.get(key)
         native = self._home(spec.id, current.generation_id)
+        if isinstance(native, _Failed):
+            return None
         with self._homes_lock:
             self._homes[key] = native
         return native
 
-    def _home(self, source_id: str, generation_id: str) -> str | None:
+    def _home(self, source_id: str, generation_id: str) -> str | _Failed | None:
+        """The landing page's doc id, ``None`` when there is none, :data:`_FAILED` when it could not be
+        read (not remembered: the next refresh tries again; a cold open of a 100 GB ZIM over SMB can
+        outlast the reader's timeout, and the worker keeps the archive once it is open)."""
         assert self.home_finder is not None
         try:
             native = self.home_finder.home(source_id, generation_id)
-        except Exception:
-            log.warning("cannot read the landing page of %s/%s", source_id, generation_id, exc_info=True)
-            return None
+        except Exception as exc:
+            log.warning("cannot read the landing page of %s/%s yet: %s", source_id, generation_id, exc)
+            return _FAILED
         return None if native is None else make_doc_id(source_id, native)
 
     def _find_homes(self, snap: LibrarySnapshot) -> None:
@@ -338,6 +350,8 @@ class LibraryState:
                 if key in self._homes:
                     continue
             native = self._home(*key)
+            if isinstance(native, _Failed):
+                continue
             with self._homes_lock:
                 self._homes[key] = native
 
