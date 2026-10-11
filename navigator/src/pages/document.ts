@@ -352,7 +352,8 @@ export async function render(ctx: PageContext): Promise<PageResult> {
     siteBanner(doc),
     webring(source, sources),
     tmBanner,
-    pageHeading(doc.title),
+    // Original pages (ZIM HTML) carry their own <h1>; don't print the title twice.
+    content instanceof Element && content.querySelector('h1') ? null : pageHeading(doc.title),
     content,
     broken
       ? h(

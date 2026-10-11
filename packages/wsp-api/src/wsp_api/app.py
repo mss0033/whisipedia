@@ -13,6 +13,7 @@ import threading
 import time
 from collections import Counter
 from collections.abc import AsyncIterator, Sequence
+from dataclasses import replace
 from typing import Annotated, Any, Literal, cast
 from urllib.parse import unquote
 
@@ -40,6 +41,7 @@ from wsp_api.schemas import (
     GenerationPage,
     Health,
     HistoryPage,
+    Hit,
     KindFacet,
     ProposalPage,
     RecentChanges,
@@ -313,15 +315,17 @@ def _v1(lib: Library, settings: ApiSettings) -> APIRouter:
             kinds.get(h.source_id or h.doc_id[4:].partition("/")[0], DocKind.OTHER) for h in facet_hits
         )
         terms = search.terms(q)
-        hits = [
-            convert.hit(
-                h,
-                spec=s.source(h.source_id or h.doc_id[4:].partition("/")[0]),
-                doc=s.documents.get(h.doc_id),
-                highlights=search.highlights(h.snippet, terms),
+        hits: list[Hit] = []
+        for h in page:
+            plain = search.plain_snippet(h.snippet)  # index snippets are HTML (<b>…</b>); the API is plain
+            hits.append(
+                convert.hit(
+                    replace(h, snippet=plain),
+                    spec=s.source(h.source_id or h.doc_id[4:].partition("/")[0]),
+                    doc=s.documents.get(h.doc_id),
+                    highlights=search.highlights(plain, terms),
+                )
             )
-            for h in page
-        ]
         nav = search.navigate_to(s, q) if offset == 0 else None
         if s.queries is not None and offset == 0:
             s.queries.record(s.clock(), q, total, not window)
