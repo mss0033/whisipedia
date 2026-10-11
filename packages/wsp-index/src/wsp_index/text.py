@@ -87,3 +87,83 @@ def sanitize_query(query: str) -> str:
     # Bare boolean operators would be interpreted by the parser; lowercase them to plain words.
     words = [w.lower() if w in ("AND", "OR", "NOT", "IN") else w for w in _WS.split(cleaned.strip())]
     return " ".join(w for w in words if w)
+
+
+# Function words that dominate BM25 for natural-language questions ("how do vaccines work") without
+# telling documents apart. Dropped only when real terms remain and the query has no quoted phrase.
+STOPWORDS_EN = frozenset(
+    [
+        "a",
+        "an",
+        "and",
+        "are",
+        "as",
+        "at",
+        "be",
+        "but",
+        "by",
+        "can",
+        "could",
+        "did",
+        "do",
+        "does",
+        "for",
+        "from",
+        "had",
+        "has",
+        "have",
+        "how",
+        "i",
+        "if",
+        "in",
+        "into",
+        "is",
+        "it",
+        "its",
+        "me",
+        "my",
+        "of",
+        "on",
+        "or",
+        "our",
+        "should",
+        "so",
+        "than",
+        "that",
+        "the",
+        "their",
+        "them",
+        "then",
+        "there",
+        "these",
+        "they",
+        "this",
+        "those",
+        "to",
+        "was",
+        "we",
+        "were",
+        "what",
+        "when",
+        "where",
+        "which",
+        "who",
+        "whom",
+        "whose",
+        "why",
+        "will",
+        "with",
+        "would",
+        "you",
+        "your",
+    ]
+)
+
+
+def drop_stopwords(query: str, stopwords: frozenset[str] = STOPWORDS_EN) -> str:
+    """Remove stopwords from a sanitized query, keeping it unchanged if nothing else would remain."""
+    if '"' in query:
+        return query
+    words = query.split()
+    kept = [w for w in words if w.casefold() not in stopwords]
+    return " ".join(kept) if kept else query

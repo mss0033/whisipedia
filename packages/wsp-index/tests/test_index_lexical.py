@@ -205,3 +205,39 @@ def test_incremental_refresh_with_tombstones(tmp_path: Path) -> None:
     old = store.get(make_doc_id("enc", "b"), at_generation="2026-01")
     assert old is not None
     assert old.text == "yellow fruit"
+
+
+def test_stopwords_do_not_outrank_content_words(index: TantivyIndex) -> None:
+    index.upsert(
+        [
+            doc("s", "how", "How Doctors Think", "how how how doctors think about how things work"),
+            doc("s", "vax", "Vaccine", "a vaccine trains the immune system to recognise a pathogen"),
+        ]
+    )
+    index.commit()
+    assert ids(index.search("how do vaccines work"))[0] == make_doc_id("s", "vax")
+    assert ids(index.search("how"))  # an all-stopword query still searches
+
+
+def test_search_hits_matches_search_without_snippets(index: TantivyIndex) -> None:
+    index.upsert([doc("s", str(i), f"Zebra {i}", "zebra stripes " * (i + 1)) for i in range(5)])
+    index.commit()
+    full, bare = index.search("zebra", limit=5), index.search_hits("zebra", limit=5)
+    assert ids(full) == ids(bare)
+    assert all(h.snippet for h in full)
+    assert not any(h.snippet for h in bare)
+
+
+def test_reader_picks_up_trie_rebuilt_by_another_process(tmp_path: Path) -> None:
+    writer = TantivyIndex(tmp_path / "ix", SMALL)
+    writer.upsert([doc("s", "a", "Aardvark", "x")])
+    writer.commit()
+    writer.rebuild_suggest()
+    reader = TantivyIndex(tmp_path / "ix", SMALL)
+    assert reader.suggest("Zeb") == []
+    writer.upsert([doc("s", "z", "Zebra", "y")])
+    writer.rebuild_suggest()
+    reader._trie_checked = 0.0  # pyright: ignore[reportPrivateUsage]  # skip the 5 s throttle
+    assert reader.suggest("Zeb") == ["Zebra"]
+    reader.close()
+    writer.close()

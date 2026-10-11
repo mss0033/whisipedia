@@ -22,6 +22,7 @@ import html
 import json
 import sqlite3
 import threading
+import time
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -36,11 +37,12 @@ from wsp_index.localfs import ensure_local
 from wsp_index.suggest import (
     DEFAULT_HEAVY_THRESHOLD,
     DEFAULT_TOP_K,
+    TRIE_FILE,
     SuggestEntry,
     Suggester,
     TitleTrie,
 )
-from wsp_index.text import FALLBACK_LANG, build_analyzer, primary_lang, sanitize_query
+from wsp_index.text import FALLBACK_LANG, build_analyzer, drop_stopwords, primary_lang, sanitize_query
 
 _META_SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -118,8 +120,11 @@ class TantivyIndex:
         self._pending_suggest: list[SuggestEntry] = []
         self._pending_removed: list[str] = []
         self._suggest_stale = False
+        self._trie_mtime = 0.0
+        self._trie_checked = 0.0
         if TitleTrie.exists(self._suggest_dir) and self._meta("suggest_dirty") != "1":
             self._suggester.replace_base(TitleTrie.open(self._suggest_dir))
+            self._trie_mtime = self._trie_file_mtime()
         else:
             self._rebuild_suggest()
 
@@ -343,6 +348,7 @@ class TantivyIndex:
             top_k=self.config.suggest_top_k,
         )
         self._suggester.replace_base(trie)
+        self._trie_mtime = self._trie_file_mtime()
         self._suggest_stale = False
         self._pending_suggest.clear()
         self._pending_removed.clear()
@@ -357,7 +363,31 @@ class TantivyIndex:
                 self._rebuild_suggest()
 
     def suggest(self, prefix: str, *, limit: int = 10) -> Sequence[str]:
+        self._reload_trie_if_rebuilt()
         return self._suggester.suggest(prefix, limit=limit)
+
+    def _trie_file_mtime(self) -> float:
+        try:
+            return (self._suggest_dir / TRIE_FILE).stat().st_mtime
+        except OSError:
+            return 0.0
+
+    def _reload_trie_if_rebuilt(self, *, every: float = 5.0) -> None:
+        """Pick up a trie rebuilt by another process (e.g. ``wsp index build`` while ``wsp serve`` runs).
+
+        Tantivy readers reload on commit by themselves; the mmapped trie does not. Checked at most every
+        ``every`` seconds; a process with its own unsaved overlay keeps it.
+        """
+        now = time.monotonic()
+        if now - self._trie_checked < every:
+            return
+        self._trie_checked = now
+        mtime = self._trie_file_mtime()
+        if mtime <= self._trie_mtime or self._suggester.pending:
+            return
+        with self._lock:
+            self._suggester.replace_base(TitleTrie.open(self._suggest_dir))
+            self._trie_mtime = mtime
 
     # --- reads ---------------------------------------------------------------------------------
 
@@ -372,7 +402,7 @@ class TantivyIndex:
         return None if row is None else SearchHit(DocId(doc_id), 0.0, str(row[0]), "", str(row[1]))
 
     def parse(self, query: str) -> tantivy.Query | None:
-        text = sanitize_query(query)
+        text = drop_stopwords(sanitize_query(query))
         if not text:
             return None
         fields = [f"{kind}_{lang}" for lang in self._routes for kind in ("title", "text")]
@@ -382,6 +412,17 @@ class TantivyIndex:
 
     def search(
         self, query: str, *, limit: int = 10, offset: int = 0, sources: Sequence[str] | None = None
+    ) -> Sequence[SearchHit]:
+        return self._search(query, limit=limit, offset=offset, sources=sources, snippets=True)
+
+    def search_hits(
+        self, query: str, *, limit: int = 10, offset: int = 0, sources: Sequence[str] | None = None
+    ) -> Sequence[SearchHit]:
+        """Like :meth:`search` without snippets: much cheaper for wide windows (totals, facets)."""
+        return self._search(query, limit=limit, offset=offset, sources=sources, snippets=False)
+
+    def _search(
+        self, query: str, *, limit: int, offset: int, sources: Sequence[str] | None, snippets: bool
     ) -> Sequence[SearchHit]:
         if limit <= 0 or offset < 0:
             return []
@@ -405,7 +446,7 @@ class TantivyIndex:
             route = self.route(str(doc.get_first("lang") or ""))
             title = str(doc.get_first(f"title_{route}") or "")
             snippet = ""
-            if self.config.store_text:
+            if snippets and self.config.store_text:
                 gen = generators.get(route)
                 if gen is None:
                     gen = tantivy.SnippetGenerator.create(searcher, parsed, self._schema, f"text_{route}")
