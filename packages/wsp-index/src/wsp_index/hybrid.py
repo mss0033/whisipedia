@@ -46,8 +46,12 @@ class FusionConfig:
 class HybridSearcher:
     """Fuses a ``LexicalIndex`` with an optional ``VectorIndex`` + ``Embedder``.
 
-    Dense-only hits carry no title; ``resolve`` (e.g. ``TantivyIndex.lookup``) fills it in. Hits it
-    cannot resolve keep the doc id as title, so nothing is silently dropped.
+    Dense-only hits carry no title; ``resolve`` (e.g. ``TantivyIndex.lookup``) fills it in. A hit
+    the resolver does not know is a document removed since it was embedded and is dropped (it used
+    to be shown with its doc id as title); without a resolver hits keep the doc id as title.
+
+    The static-rank boost ``1 + w_s * static`` is capped: the feature is a percentile in ``[0, 1]``
+    (:mod:`wsp_index.linkrank`), so ``w_s = 0.1`` moves a document by at most 10%.
     """
 
     def __init__(
@@ -110,13 +114,19 @@ class HybridSearcher:
         scored.sort(key=lambda t: (-t[0], t[1]))
 
         out: list[SearchHit] = []
-        for score, doc_id in scored[offset : offset + limit]:
+        for score, doc_id in scored:
+            if len(out) >= offset + limit:
+                break
             hit = info.get(doc_id)
             if hit is None:
-                resolved = self.resolve(doc_id) if self.resolve is not None else None
-                hit = resolved or SearchHit(DocId(doc_id), 0.0, doc_id, "", _source_of(doc_id))
+                if self.resolve is not None:
+                    hit = self.resolve(doc_id)
+                    if hit is None:
+                        continue  # removed from the library since it was embedded: never shown
+                else:
+                    hit = SearchHit(DocId(doc_id), 0.0, doc_id, "", _source_of(doc_id))
             out.append(replace(hit, score=score))
-        return out
+        return out[offset:]
 
 
 def embed_documents(

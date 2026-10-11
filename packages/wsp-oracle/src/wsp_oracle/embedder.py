@@ -69,6 +69,15 @@ def preset_for(model: str, preset: str = "auto") -> Preset:
     return PRESETS["granite"]
 
 
+def half_dtype(torch: Any, device: str) -> str:
+    """``bfloat16`` on a GPU that supports it (fp16 overflows in Qwen3's activations), ``float16``
+    on older GPUs, ``float32`` on the CPU."""
+    if not device.startswith("cuda"):
+        return "float32"
+    supported = getattr(torch.cuda, "is_bf16_supported", None)
+    return "bfloat16" if callable(supported) and supported() else "float16"
+
+
 def normalize(mat: Matrix) -> Matrix:
     norms = np.linalg.norm(mat, axis=1, keepdims=True)
     norms[norms == 0] = 1.0
@@ -100,12 +109,14 @@ class TransformerEmbedder:
         self._tok: Any = tf.AutoTokenizer.from_pretrained(
             str(model_dir), local_files_only=True, padding_side=self.preset.padding_side
         )
-        dtype = torch.float16 if self.device.startswith("cuda") else torch.float32
+        self.dtype_name = half_dtype(torch, self.device)
+        dtype = getattr(torch, self.dtype_name)
         model: Any = tf.AutoModel.from_pretrained(str(model_dir), local_files_only=True, dtype=dtype)
         self._model: Any = model.to(self.device).eval()
         full = int(self._model.config.hidden_size)
         self.dimensions = dimensions if 0 < dimensions < full else full
         self._lock = threading.Lock()
+        self._pool = ThreadPoolExecutor(1, thread_name_prefix="tokenize")
 
     def _tokenize(self, texts: list[str]) -> Any:
         tok = self._tok
@@ -127,6 +138,8 @@ class TransformerEmbedder:
             pooled = pooled[:, : self.dimensions].float()
             pooled = torch.nn.functional.normalize(pooled, dim=-1)
         out: Matrix = pooled.cpu().numpy().astype(np.float32, copy=False)
+        if not np.isfinite(out).all():  # fp16 overflow (Qwen3) would quantize to garbage silently
+            raise FloatingPointError(f"non-finite embeddings from {self.model_dir.name} ({self.dtype_name})")
         return out
 
     def encode(self, texts: Sequence[str], *, prefix: str = "") -> Matrix:
@@ -136,8 +149,13 @@ class TransformerEmbedder:
         order = sorted(range(len(texts)), key=lambda i: len(texts[i]), reverse=True)
         out = np.empty((len(texts), self.dimensions), dtype=np.float32)
         batches = [order[s : s + self.batch_size] for s in range(0, len(order), self.batch_size)]
-        with self._lock, ThreadPoolExecutor(1, thread_name_prefix="tokenize") as pool:
-            # tokenize the next batch on the CPU while the GPU runs this one
+        if len(batches) == 1:  # a query: no tokenizer thread to start
+            with self._lock:
+                out[batches[0]] = self._forward(self._tokenize([prefix + texts[i] for i in batches[0]]))
+            return out
+        with self._lock:
+            # tokenize the next batch on the CPU while the GPU runs this one (one long-lived thread)
+            pool = self._pool
             pending = pool.submit(self._tokenize, [prefix + texts[i] for i in batches[0]])
             for n, idx in enumerate(batches):
                 batch = pending.result()

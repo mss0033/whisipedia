@@ -102,7 +102,7 @@ def test_embed_generation_is_resumable_and_incremental(tmp_path: Path) -> None:
         ),
     )
     r2 = write_generation(root, "g2", changed)
-    upd = embed_generation(r2, s, emb, source_id="encyclo", generation_id="g2", workers=0)
+    upd = embed_generation(r2, s, emb, source_id="encyclo", generation_id="g2")
     assert (upd.docs_embedded, upd.docs_unchanged, upd.docs_removed) == (1, 6, 1)
     assert s.doc_count("encyclo") == 7
     assert s.texts(["wsp:encyclo/Lisbon#0"]) == {}

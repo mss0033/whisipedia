@@ -593,6 +593,11 @@ def build_graph(
     _release()
     say(f"rank: {edges:,} edges ({intra:,} within a group), {unresolved:,} links outside the library")
 
+    # The id table is only needed again for the sidecar: keep it on disk from here on.
+    id_keys = _spill(workdir / "ids.keys.src", by_id.keys)
+    id_nodes = _spill(workdir / "ids.nodes.src", by_id.nodes)
+    del by_id
+
     # 4. CSR by destination --------------------------------------------------------------------
     indeg = {kind: np.zeros(n, dtype=np.int32) for kind in _KINDS}
     for kind in _KINDS:
@@ -611,10 +616,6 @@ def build_graph(
                 indeg[kind][lo:hi] = np.bincount(d - lo, minlength=hi - lo).astype(np.int32)
                 del pairs, s, d, order
     say("rank: edge lists sorted by destination")
-    # The id table is only needed again for the sidecar: keep it on disk during the iteration.
-    id_keys = _spill(workdir / "ids.keys.src", by_id.keys)
-    id_nodes = _spill(workdir / "ids.nodes.src", by_id.nodes)
-    del by_id
     groups = tuple((sources[si], lang) for si, lang in group_list)
     return LinkGraph(
         n=n,

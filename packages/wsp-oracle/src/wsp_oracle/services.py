@@ -180,7 +180,9 @@ def build_oracle(
     )
     return OracleServices(
         config=ocfg,
-        index=OracleIndex(searcher, cache_size=ocfg.cache_size),
+        index=OracleIndex(
+            searcher, cache_size=ocfg.cache_size, refresh=store.refresh if store is not None else None
+        ),
         searcher=searcher,
         router=router,
         embedder=embedder,

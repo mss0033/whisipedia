@@ -12,6 +12,7 @@ import threading
 import time
 from collections import OrderedDict
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from typing import cast
 
@@ -30,6 +31,7 @@ log = logging.getLogger("wsp_oracle")
 
 Resolver = Callable[[str], SearchHit | None]
 PREFER_BOOST = 1.5
+_POOL = ThreadPoolExecutor(4, thread_name_prefix="oracle-dense")  # dense retrieval beside BM25
 
 
 def source_of(doc_id: str) -> str:
@@ -69,10 +71,15 @@ class OracleResult:
 
 
 class _StaticDense:
-    """A ``VectorIndex`` answering with precomputed results (one query's dense retrieval)."""
+    """A ``VectorIndex`` answering with one query's dense retrieval, computed in parallel with the
+    lexical search (``results`` is a future, resolved when fusion asks for it)."""
 
-    def __init__(self, results: Sequence[tuple[str, float]]) -> None:
-        self._results = list(results)
+    def __init__(self, results: Future[tuple[list[tuple[str, float]], dict[str, str], float]]) -> None:
+        self._future = results
+
+    @property
+    def _results(self) -> list[tuple[str, float]]:
+        return self._future.result()[0]
 
     def upsert(self, ids: Sequence[str], vectors: Sequence[Sequence[float]]) -> None:
         raise NotImplementedError
@@ -130,12 +137,25 @@ class OracleSearcher:
     def _dense(
         self, route: Route, depth: int, sources: Sequence[str] | None
     ) -> tuple[list[tuple[str, float]], dict[str, str]]:
+        """Dense retrieval; a source filter is applied *in* the candidate search (which widens until
+        enough allowed passages are found), not after a fixed over-fetch."""
         if self.embedder is None or self.vectors is None or not route.dense:
             return [], {}
         q = encode_queries(self.embedder, [route.dense], self.vectors.dimensions)[0]
-        fetch = depth if sources is None else depth * 4
-        docs = self.vectors.search_docs(q, limit=fetch)
+        allowed = None if sources is None else frozenset(sources)
+
+        def allow(chunk_id: str) -> bool:
+            return allowed is not None and source_of(chunk_id) in allowed
+
+        docs = self.vectors.search_docs(q, limit=depth, allow=None if allowed is None else allow)
         return [(d, s) for d, s, _ in docs], {d: c for d, _, c in docs}
+
+    def _timed_dense(
+        self, route: Route, depth: int, sources: Sequence[str] | None
+    ) -> tuple[list[tuple[str, float]], dict[str, str], float]:
+        t = time.perf_counter()
+        dense, best = self._dense(route, depth, sources)
+        return dense, best, round((time.perf_counter() - t) * 1000, 3)
 
     def _exact_title(self, title: str, sources: Sequence[str] | None) -> SearchHit | None:
         key = _title_key(title)
@@ -178,15 +198,21 @@ class OracleSearcher:
         return sorted(boosted, key=lambda h: -h.score)
 
     def _passages(self, hits: Sequence[SearchHit], best_chunk: Mapping[str, str]) -> dict[str, str]:
+        """What the reranker scores per hit: the passage that matched. For a dense hit its best
+        chunk; for a lexical-only hit BM25's snippet (the matching region), and the document's lead
+        passage only when there is no snippet."""
         out: dict[str, str] = {}
+        for h in hits:
+            if h.doc_id not in best_chunk and h.snippet.strip():
+                out[h.doc_id] = plain(h.snippet)
         if self.passage_text is not None:
-            ids = [best_chunk[h.doc_id] for h in hits if h.doc_id in best_chunk]
-            leads = [h.doc_id for h in hits if h.doc_id not in best_chunk]
-            texts = self.passage_text([*ids, *(f"{d}#0" for d in leads)])
-            for h in hits:
-                chunk = best_chunk.get(h.doc_id, f"{h.doc_id}#0")
+            wanted = {
+                h.doc_id: best_chunk.get(h.doc_id, f"{h.doc_id}#0") for h in hits if h.doc_id not in out
+            }
+            texts = self.passage_text(list(wanted.values()))
+            for doc_id, chunk in wanted.items():
                 if chunk in texts:
-                    out[h.doc_id] = texts[chunk]
+                    out[doc_id] = texts[chunk]
         for h in hits:
             out.setdefault(h.doc_id, plain(h.snippet))
         return out
@@ -241,16 +267,16 @@ class OracleSearcher:
         # Never fewer candidates than the configured depth: the ranking of the first results must not
         # depend on the page size (I'm Feeling Lucky asks for one hit, the results page for ten; E2E-6).
         depth = self.depth_for(depth)
-        dense, best_chunk = self._dense(route, depth, sources)
-        t = lap("dense", t)
+        dense_future = _POOL.submit(self._timed_dense, route, depth, sources)  # runs beside BM25
         hybrid = HybridSearcher(
             self.lexical,
-            _StaticDense(dense) if self.vectors is not None else None,
+            _StaticDense(dense_future) if self.vectors is not None else None,
             _NoEmbed() if self.vectors is not None else None,
             config=replace(self.fusion, depth=depth),
             resolve=self.resolve,
         )
         fused = list(hybrid.search(route.lexical or route.dense, limit=depth, sources=sources))
+        _dense, best_chunk, timings["dense"] = dense_future.result()
         fused = self._boost(route, fused)
         t = lap("lexical+fusion", t)
         pins = self._pins(route, fused, sources)
@@ -292,27 +318,72 @@ class OracleIndex:
     Vectors are maintained by ``embed_generation`` (a batch job), never by the API process.
     """
 
-    def __init__(self, searcher: OracleSearcher, *, cache_size: int = 256) -> None:
+    def __init__(
+        self,
+        searcher: OracleSearcher,
+        *,
+        cache_size: int = 256,
+        refresh: Callable[[], bool] | None = None,
+        refresh_seconds: float = 5.0,
+        cache_seconds: float = 600.0,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        """``refresh`` (``ChunkVectorStore.refresh``) is polled every ``refresh_seconds``: a rebuilt
+        vector store is reopened and the cache cleared. Cached results expire after
+        ``cache_seconds`` (the lexical index may have changed under them)."""
         self.searcher = searcher
         self.lexical = searcher.lexical
-        # (result, the depth it was computed for): a result shorter than that depth is exhaustive.
-        self._cache: OrderedDict[tuple[str, tuple[str, ...] | None], tuple[OracleResult, int]] = OrderedDict()
+        # (result, the depth it was computed for, when): a result shorter than that depth is exhaustive.
+        self._cache: OrderedDict[tuple[str, tuple[str, ...] | None], tuple[OracleResult, int, float]] = (
+            OrderedDict()
+        )
         self._cache_size = cache_size
         self._lock = threading.Lock()
+        self._refresh = refresh
+        self._refresh_seconds = refresh_seconds
+        self._cache_seconds = cache_seconds
+        self._clock = clock
+        self._checked = clock()
+
+    def _maybe_refresh(self) -> None:
+        if self._refresh is None:
+            return
+        now = self._clock()
+        if now - self._checked < self._refresh_seconds:
+            return
+        self._checked = now
+        try:
+            changed = self._refresh()
+        except Exception:  # a store being rewritten: keep serving the old one, retry later
+            log.warning("oracle: vector store refresh failed", exc_info=True)
+            return
+        if changed:
+            log.info("oracle: vector store changed on disk; reopened, result cache cleared")
+            self._invalidate()
 
     def result(self, query: str, *, sources: Sequence[str] | None = None, depth: int = 0) -> OracleResult:
+        """The pipeline's result for a query, cached. A deeper request than the cached one re-runs
+        the pipeline but keeps the hits already shown in their order (pages never disagree)."""
+        self._maybe_refresh()
         key = (" ".join(query.split()), None if sources is None else tuple(sorted(sources)))
         searched = self.searcher.depth_for(depth)
+        now = self._clock()
+        shown: OracleResult | None = None
         with self._lock:
             cached = self._cache.get(key)
             if cached is not None:
-                hit, deep = cached
-                if depth <= deep or len(hit.hits) < deep:  # deep enough, or every match already found
+                hit, deep, at = cached
+                fresh = now - at < self._cache_seconds
+                if fresh and (depth <= deep or len(hit.hits) < deep):  # deep enough, or exhaustive
                     self._cache.move_to_end(key)
                     return hit
+                shown = hit if fresh else None
         res = self.searcher.run(query, sources=sources, depth=depth or None)
+        if shown is not None:
+            kept = {h.doc_id for h in shown.hits}
+            res = replace(res, hits=(*shown.hits, *(h for h in res.hits if h.doc_id not in kept)))
         with self._lock:
-            self._cache[key] = (res, searched)
+            self._cache[key] = (res, searched, now)
             while len(self._cache) > self._cache_size:
                 self._cache.popitem(last=False)
         return res
