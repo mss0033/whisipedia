@@ -2752,6 +2752,41 @@
         ],
         "title": "Health"
       },
+      "HeldRelease": {
+        "properties": {
+          "source_id": {
+            "type": "string",
+            "title": "Source Id"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_id",
+          "version",
+          "state",
+          "reason"
+        ],
+        "title": "HeldRelease"
+      },
       "HistoryPage": {
         "properties": {
           "doc_id": {
@@ -2905,6 +2940,81 @@
           "highlights"
         ],
         "title": "Hit"
+      },
+      "IntegrityStatus": {
+        "properties": {
+          "provenance_generations": {
+            "type": "integer",
+            "title": "Provenance Generations",
+            "description": "Sealed generations checked for PROVENANCE.json."
+          },
+          "provenance_covered": {
+            "type": "integer",
+            "title": "Provenance Covered"
+          },
+          "provenance_fraction": {
+            "type": "number",
+            "title": "Provenance Fraction"
+          },
+          "provenance_invalid": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Provenance Invalid",
+            "description": "Generations whose PROVENANCE.json fails its signature."
+          },
+          "channels": {
+            "items": {
+              "$ref": "#/components/schemas/SourceIntegrity"
+            },
+            "type": "array",
+            "title": "Channels"
+          },
+          "held": {
+            "items": {
+              "$ref": "#/components/schemas/HeldRelease"
+            },
+            "type": "array",
+            "title": "Held",
+            "description": "Releases held for `wsp approve` / `wsp reject`."
+          },
+          "quarantined": {
+            "items": {
+              "$ref": "#/components/schemas/HeldRelease"
+            },
+            "type": "array",
+            "title": "Quarantined",
+            "description": "Releases quarantined as possibly compromised."
+          },
+          "drift_alerts": {
+            "items": {
+              "$ref": "#/components/schemas/AlertInfo"
+            },
+            "type": "array",
+            "title": "Drift Alerts",
+            "description": "Open origin-drift and integrity alerts."
+          },
+          "pinned_hosts": {
+            "type": "integer",
+            "title": "Pinned Hosts",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "provenance_generations",
+          "provenance_covered",
+          "provenance_fraction",
+          "provenance_invalid",
+          "channels",
+          "held",
+          "quarantined",
+          "drift_alerts",
+          "pinned_hosts"
+        ],
+        "title": "IntegrityStatus",
+        "description": "Source integrity (ADR-0009): provenance, verification channels, holds and origin drift."
       },
       "JsonValue": {},
       "KindFacet": {
@@ -3131,6 +3241,17 @@
             "type": "boolean",
             "title": "Orchestrator State",
             "description": "False until the orchestrator has created its state DB."
+          },
+          "integrity": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IntegrityStatus"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Source integrity (ADR-0009)."
           }
         },
         "type": "object",
@@ -3145,7 +3266,8 @@
           "alerts",
           "bots",
           "proposals",
-          "orchestrator_state"
+          "orchestrator_state",
+          "integrity"
         ],
         "title": "OpsStatus",
         "description": "Operations data for the System Monitor (PLAN §12.6); every part tolerates missing state."
@@ -4082,6 +4204,63 @@
           "related"
         ],
         "title": "SourceInfo"
+      },
+      "SourceIntegrity": {
+        "properties": {
+          "source_id": {
+            "type": "string",
+            "title": "Source Id"
+          },
+          "channel": {
+            "type": "string",
+            "title": "Channel",
+            "description": "Weakest checksum-channel status of the last checked release: `independent`, `same-origin`, `unavailable`, `mismatch` or `never checked` (ADR-0009)."
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          },
+          "verdict": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verdict",
+            "description": "Strongest integrity action: info, alert, hold, quarantine."
+          },
+          "checked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checked At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_id",
+          "channel",
+          "version",
+          "verdict",
+          "checked_at"
+        ],
+        "title": "SourceIntegrity"
       },
       "SourcePage": {
         "properties": {

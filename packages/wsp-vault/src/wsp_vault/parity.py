@@ -10,17 +10,54 @@ from __future__ import annotations
 
 import os
 import shutil
+import signal
 import subprocess
+import time
 from collections.abc import Callable, Sequence
+from contextlib import suppress
 from pathlib import Path
 
+from wsp_vault.cancel import Interrupted, never
+
 INDEX_NAME = "recovery.par2"
+DEFAULT_THREADS = 2  # par2cmdline >= 0.8 "-t": keep the machine responsive (owner's browser first)
 
 Runner = Callable[[Sequence[str]], int]
 
 
-def _subprocess_runner(args: Sequence[str]) -> int:
-    return subprocess.run(list(args), capture_output=True, check=False).returncode  # noqa: S603
+def stoppable_runner(should_stop: Callable[[], bool] = never, *, poll: float = 0.2) -> Runner:
+    """Run a command in its own process group; kill the group and raise :class:`Interrupted` on stop."""
+
+    def run(args: Sequence[str]) -> int:
+        proc = subprocess.Popen(  # noqa: S603 - fixed argv, no shell
+            list(args), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True
+        )
+        try:
+            while True:
+                try:
+                    return proc.wait(timeout=poll)
+                except subprocess.TimeoutExpired:
+                    if should_stop():
+                        raise Interrupted(f"stop requested while running {args[0]}") from None
+        finally:
+            if proc.poll() is None:
+                _kill_group(proc)
+
+    return run
+
+
+def _kill_group(proc: subprocess.Popen[bytes]) -> None:
+    for sig, grace in ((signal.SIGTERM, 2.0), (signal.SIGKILL, 2.0)):
+        with suppress(ProcessLookupError, PermissionError):
+            os.killpg(proc.pid, sig)
+        deadline = time.monotonic() + grace
+        while proc.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.05)
+        if proc.poll() is not None:
+            return
+
+
+_subprocess_runner = stoppable_runner()
 
 
 class ParityError(Exception):
@@ -39,7 +76,9 @@ def low_priority_prefix() -> tuple[str, ...]:
 
 
 class Par2Parity:
-    """``low_priority`` runs par2 under ``nice -n 19 ionice -c 3``; ``threads`` caps par2's threads."""
+    """``low_priority`` runs par2 under ``nice -n 19 ionice -c 3``; ``threads`` caps par2's threads
+    (``-t``, default 2; ``None`` leaves par2's default of one per core) and ``memory_mb`` its memory
+    (``-m``). ``should_stop`` kills a running par2 (and raises :class:`Interrupted`) on shutdown."""
 
     def __init__(
         self,
@@ -47,20 +86,25 @@ class Par2Parity:
         par2: str | None = None,
         runner: Runner | None = None,
         low_priority: bool = False,
-        threads: int | None = None,
+        threads: int | None = DEFAULT_THREADS,
+        memory_mb: int | None = None,
+        should_stop: Callable[[], bool] | None = None,
     ) -> None:
         exe = par2 or shutil.which("par2")
         if exe is None and runner is None:
             raise ParityError("par2 not found; install par2cmdline")
         self._exe = exe or "par2"
-        self._run = runner or _subprocess_runner
+        self._run = runner or (stoppable_runner(should_stop) if should_stop else _subprocess_runner)
         self._prefix = low_priority_prefix() if low_priority else ()
         self._threads = threads
+        self._memory = memory_mb
 
     def _cmd(self, verb: str) -> list[str]:
         cmd = [*self._prefix, self._exe, verb, "-q"]
         if self._threads:
             cmd.append(f"-t{self._threads}")
+        if self._memory:
+            cmd.append(f"-m{self._memory}")
         return cmd
 
     @staticmethod

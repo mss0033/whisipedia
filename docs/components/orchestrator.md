@@ -21,6 +21,7 @@ adapters, refinery and index plug in without changes here.
 | `metrics.py`, `jsonlog.py` | Prometheus text file, JSON log lines |
 | `bots.py` | `Bot` protocol, `BotContext`, `BotResult` |
 | `curator/` | Bots (`KiwixWatcher`, `WikimediaRankingBot`, `RegistryHealthBot`, `AdapterSmokeBot`, `GapMiner`), `ProposalFiles`, `registry_edit` (overlay, registry text edits) |
+| `integrity/` | Source integrity (ADR-0009): `IntegrityGuard` (provenance, checksum channels, mirror agreement, origin pins, promotion report), `channels`, `origins`, `anomaly` (content profiles), `findings` |
 | `testing.py` | In-memory fakes of the ports, crash injector, harnesses, `demo_wiring` |
 
 ## Release pipeline
@@ -54,6 +55,12 @@ DISCOVERED → PLANNED → FETCHING → FETCHED → VERIFIED → SEALED → REFI
   generation, or the total size is outside ±10 % of the least-squares trend of up to 6 previous
   generations, the release stays INDEXED with `hold_reason`, an alert is raised and the previous
   generation keeps serving. `Orchestrator.approve_release()` / `reject_release()` resolve it.
+* **Integrity guard** (with `Wiring.integrity`, see below): FETCHED → VERIFIED also runs the
+  independent checksum channel, the mirror cross-checks and the origin pins (quarantine, or a hold
+  in FETCHED); after sealing the signed `PROVENANCE.json` is written; INDEXED → PROMOTED profiles
+  the content and writes the signed `PROMOTION.json` (out-of-range checks hold the release).
+* An exception raised while shutdown is in progress (a cancelled download or hash) is not a failure:
+  the step is repeated on the next start.
 
 ## Scheduling (PLAN §6.5, §6.7, §8.2, §8.5)
 
@@ -115,6 +122,29 @@ the committed registry changes only through `wsp proposals accept`, which edits
 `/v1/proposals` and the `ops.proposals` block of `/v1/system` show them; the last summary of each bot
 is in the state DB (`meta bot:<name>`), its notes are handed to its next run (`BotContext.previous`).
 
+## Source integrity (ADR-0009)
+
+The owner's requirement: sources must be healthy, current and unlikely to have been compromised; no
+model ever edits content. `IntegrityGuard` (built when `Wiring.integrity` is set and
+`integrity.enabled`) adds, per release:
+
+| When | Check | Default action |
+|---|---|---|
+| after download | **Provenance**: the fetcher's record (final URLs, redirect chains, TLS peer certificate SHA-256/issuer/validity, `ETag`/`Last-Modified`, which mirror served which byte ranges, rejected mirrors, spot checks) plus the checksum channels and origin verdicts; stored in the state DB (`provenance`) | recorded |
+| after download | **Independent channel**: the digest fetched again apart from the bytes (Wikimedia `*-sha1sums.txt`/`*-md5sums.txt` from `dumps.wikimedia.org`; Kiwix `<file>.sha256` from `download.kiwix.org`; others `<url>.<algo>` from a mirror that served no bytes, then the origin) | `mismatch` → quarantine; `unavailable` → recorded (alert if nothing is verifiable) |
+| after download | **Mirror agreement**: a mirror advertising another size, serving pieces that fail their Metalink hash, or failing a spot check | quarantine (`integrity.mirror_disagreement`) |
+| after download | **Origin pins** (TOFU, `origin_pins`): origin/checksum host on an unknown registrable domain | hold in FETCHED (`integrity.unknown_origin`) |
+| after download | new host on a known domain; certificate issuer family changed; unverified new mirror | alert `origin-drift:<source>:...` |
+| after sealing | signed `PROVENANCE.json` next to the manifest (`Wiring.integrity.attest`) | |
+| before promotion | **Content profile** vs the last promoted generation (`integrity.anomaly`): namespaces, size-histogram distance, changed/deleted fractions of a hash-chosen sample, new MIME types, `<script>` density, binary/executable content, plus the PLAN §6.4 checks; signed `PROMOTION.json` | out of range → hold in INDEXED |
+
+A quarantine pauses the source (reason `integrity: ...`), raises the critical alert
+`integrity:<source>/<version>` and keeps the downloaded files in the work directory as evidence;
+`resume_source` clears the integrity alerts of that source. `approve_release` on an origin hold pins
+the new hosts and continues; on a content hold it promotes and the report records the decision.
+Profiles live on local disk (`<state_db dir>/profiles/`). Channel status per source is in
+`meta channel:<source>`. Runbook: [Investigating a held release](../runbooks/held-release.md).
+
 ## Parity (PLAN §8.1)
 
 `Wiring.parity` runs one bounded slice of `wsp_vault.paritykeeper.ParityKeeper` over the sealed
@@ -131,6 +161,11 @@ last N, the newest generation of each of the M most recent months *that have gen
 newest of each year. Never pruned: the newest sealed generation, the current generation, anything
 whose `holds_last_copy` is true, and anything not `SEALED`. Non-GFS policies (base + segments) are
 not pruned. Property tests (hypothesis) check the invariants and idempotence.
+
+**Known-good anchoring** (ADR-0009): the newest generation that passed every pre-promotion check
+(it was promoted) is never pruned, and neither is the newest one that has also *settled*: promoted
+at least `integrity.settle_days` (14) ago and fully verified by the scrub since
+(`IntegrityHooks.scrubbed`). Until a new generation settles, the previous known-good one stays.
 
 **Last copy.** `discover` and `health_probe` store what upstream currently serves (state schema v3,
 `upstream_offers`). `Orchestrator.holds_last_copy` says a generation is the last copy unless upstream
@@ -158,8 +193,12 @@ parity backfill.
   (`deploy/systemd/`, see [the runbook](../runbooks/install-services.md)); container sketch:
   `deploy/compose.yaml`, where only the orchestrator has a network.
 * `wsp doctor` checks readiness; `wsp status`, `wsp parity status` and `/v1/system` show state.
-* SIGTERM/SIGINT: stop claiming, pipelines stop between steps, wait `shutdown_grace_seconds`;
-  unfinished jobs return to the queue on next start.
+* SIGTERM/SIGINT: stop claiming, cancel running work (`Wiring.on_shutdown` stops scrub, parity and
+  par2; the fetcher's `cancel()` aborts transfers within about a second, keeping resume state),
+  pipelines stop between steps, wait at most `shutdown_grace_seconds` (10), exit. Job threads are
+  daemon threads and `main` leaves with `os._exit` if a library left a non-daemon thread, so a job
+  that ignores cancellation cannot hold the service past systemd's `TimeoutStopSec`. Unfinished jobs
+  return to the queue on next start. A second signal exits immediately.
 * Logs: JSON lines on stderr (`ts, level, logger, msg` + structured fields).
 * Metrics: `orchestrator.metrics_path` (Prometheus text, written atomically): `jobs`, `jobs_total`,
   `job_seconds_total`, `releases{state}`, `alerts_open`, `sources_paused`, `last_refresh_timestamp_seconds`.

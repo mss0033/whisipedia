@@ -20,7 +20,8 @@ from typing import Any, cast
 from wsp_core.model import ReleaseState
 from wsp_orchestrator.clock import ensure_utc
 
-SCHEMA_VERSION = 3  # 2: releases.fetched_json (port revision v0.2); 3: upstream_offers, proposal ids
+SCHEMA_VERSION = 4  # 2: releases.fetched_json (v0.2); 3: upstream_offers, proposal ids;
+# 4: origin_pins, provenance (source integrity, ADR-0009)
 
 # Filesystems on which SQLite WAL locking/shared memory is unsafe or unsupported.
 UNSAFE_FS_TYPES = frozenset(
@@ -177,6 +178,12 @@ CREATE TABLE IF NOT EXISTS upstream_offers (
 CREATE TABLE IF NOT EXISTS proposals (
   id INTEGER PRIMARY KEY AUTOINCREMENT, candidate_key TEXT NOT NULL, decision TEXT NOT NULL,
   proposal_json TEXT NOT NULL, created_at TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'open');
+CREATE TABLE IF NOT EXISTS origin_pins (
+  source_id TEXT NOT NULL, host TEXT NOT NULL, role TEXT NOT NULL, issuer_family TEXT, cert_sha256 TEXT,
+  first_seen TEXT NOT NULL, last_seen TEXT NOT NULL, PRIMARY KEY (source_id, host));
+CREATE TABLE IF NOT EXISTS provenance (
+  source_id TEXT NOT NULL, version TEXT NOT NULL, verdict TEXT NOT NULL, provenance_json TEXT NOT NULL,
+  checked_at TEXT NOT NULL, PRIMARY KEY (source_id, version));
 """
 
 
@@ -222,7 +229,7 @@ class StateStore:
                     raise StoreError(f"state store schema {version} != supported {SCHEMA_VERSION}")
                 if version == 1:  # v1 -> v2: add the fetch digests column
                     c.execute("ALTER TABLE releases ADD COLUMN fetched_json TEXT NOT NULL DEFAULT '{}'")
-                # v2 -> v3: new tables only (created above)
+                # v2 -> v3 and v3 -> v4: new tables only (created above)
                 c.execute("UPDATE meta SET value=? WHERE key='schema_version'", (str(SCHEMA_VERSION),))
 
     def close(self) -> None:
@@ -534,6 +541,53 @@ class StateStore:
                 " observed_at=excluded.observed_at",
                 (source_id, _dumps(list(offers)), ts(now)),
             )
+
+    # --- source integrity (ADR-0009) ------------------------------------------------------------
+
+    def origin_pins(self, source_id: str | None = None) -> list[sqlite3.Row]:
+        if source_id is None:
+            return self.query("SELECT * FROM origin_pins ORDER BY source_id, host")
+        return self.query("SELECT * FROM origin_pins WHERE source_id=? ORDER BY host", (source_id,))
+
+    def put_origin_pin(
+        self,
+        source_id: str,
+        host: str,
+        role: str,
+        issuer_family: str | None,
+        cert_sha256: str | None,
+        first_seen: datetime,
+        last_seen: datetime,
+    ) -> None:
+        with self.tx() as c:
+            c.execute(
+                "INSERT INTO origin_pins(source_id, host, role, issuer_family, cert_sha256, first_seen,"
+                " last_seen) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(source_id, host) DO UPDATE SET"
+                " role=excluded.role, issuer_family=excluded.issuer_family,"
+                " cert_sha256=excluded.cert_sha256, last_seen=excluded.last_seen",
+                (source_id, host, role, issuer_family, cert_sha256, ts(first_seen), ts(last_seen)),
+            )
+
+    def put_provenance(
+        self, source_id: str, version: str, verdict: str, provenance: Mapping[str, Any], now: datetime
+    ) -> None:
+        with self.tx() as c:
+            c.execute(
+                "INSERT INTO provenance(source_id, version, verdict, provenance_json, checked_at)"
+                " VALUES (?, ?, ?, ?, ?) ON CONFLICT(source_id, version) DO UPDATE SET"
+                " verdict=excluded.verdict, provenance_json=excluded.provenance_json,"
+                " checked_at=excluded.checked_at",
+                (source_id, version, verdict, _dumps(dict(provenance)), ts(now)),
+            )
+
+    def provenance(self, source_id: str, version: str) -> tuple[str, dict[str, Any]] | None:
+        rows = self.query(
+            "SELECT verdict, provenance_json FROM provenance WHERE source_id=? AND version=?",
+            (source_id, version),
+        )
+        if not rows:
+            return None
+        return str(rows[0]["verdict"]), cast(dict[str, Any], json.loads(rows[0]["provenance_json"]))
 
     def offers(self, source_id: str) -> tuple[list[dict[str, Any]], datetime] | None:
         rows = self.query("SELECT * FROM upstream_offers WHERE source_id=?", (source_id,))

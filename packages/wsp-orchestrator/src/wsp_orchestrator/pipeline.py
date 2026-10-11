@@ -16,6 +16,12 @@ Guarantees:
   QUARANTINED and an alert is raised.
 * Promotion is gated by sanity checks (PLAN §6.4); a suspicious generation is *held* in INDEXED
   until :meth:`ReleasePipeline.approve` or :meth:`ReleasePipeline.reject`.
+* With an :class:`~wsp_orchestrator.integrity.IntegrityGuard` (ADR-0009): after the download the
+  provenance is recorded, mirrors and an independent checksum channel are cross-checked and hosts
+  are compared with the source's pins (a disagreement quarantines the release and pauses the
+  source; an unknown origin domain holds it in FETCHED); the signed ``PROVENANCE.json`` is written
+  after sealing; before promotion a content profile is compared with the last promoted generation
+  and the signed ``PROMOTION.json`` is written (out-of-range checks hold the release).
 """
 
 from __future__ import annotations
@@ -52,6 +58,8 @@ from wsp_orchestrator.codec import (
     release_from_json,
     release_to_json,
 )
+from wsp_orchestrator.integrity.findings import Action
+from wsp_orchestrator.integrity.guard import IntegrityGuard, sanity_checks
 from wsp_orchestrator.policy import SanityThresholds, check_promotion
 from wsp_orchestrator.store import GenerationStats, ReleaseRecord, SourceHealth, StateStore
 
@@ -169,6 +177,7 @@ class ReleasePipeline:
         sanity: SanityThresholds = SanityThresholds(),  # noqa: B008 - immutable
         checksum_failures_to_pause: int = 2,
         checkpoint: Callable[[str], None] = _noop,
+        integrity: IntegrityGuard | None = None,
     ) -> None:
         self.store = store
         self.sources = {s.id: s for s in sources}
@@ -186,6 +195,7 @@ class ReleasePipeline:
         self.sanity = sanity
         self.checksum_failures_to_pause = checksum_failures_to_pause
         self.checkpoint = checkpoint  # test hook: called at every crash-relevant point
+        self.integrity = integrity
 
     # --- public API ---------------------------------------------------------------------------
 
@@ -231,10 +241,16 @@ class ReleasePipeline:
                 return RunResult(rec, outcome)
             if cancel():
                 return RunResult(rec, Outcome.CANCELLED)
-            self.step(source_id, version)
+            self.step(source_id, version, cancel=cancel)
 
-    def step(self, source_id: str, version: str) -> ReleaseRecord:
-        """Perform at most one transition (or record a failure)."""
+    def step(
+        self, source_id: str, version: str, *, cancel: Callable[[], bool] = lambda: False
+    ) -> ReleaseRecord:
+        """Perform at most one transition (or record a failure).
+
+        An exception raised while ``cancel()`` is true (a download or hash interrupted by shutdown)
+        is not a failure: the step is simply repeated on the next start.
+        """
         rec = self._get(source_id, version)
         if self._stop_reason(rec) is not None:
             return rec
@@ -244,6 +260,12 @@ class ReleasePipeline:
         except Exception as exc:
             if rec.state in (ReleaseState.FAILED, ReleaseState.QUARANTINED, ReleaseState.PROMOTED):
                 raise
+            if cancel():
+                log.info(
+                    "release step interrupted by shutdown",
+                    extra={"fields": {"release": rec.subject, "state": rec.state.value, "error": repr(exc)}},
+                )
+                return rec
             log.warning(
                 "release step failed",
                 extra={"fields": {"release": rec.subject, "state": rec.state.value, "error": repr(exc)}},
@@ -251,12 +273,28 @@ class ReleasePipeline:
             return self._fail(rec, exc)
 
     def approve(self, source_id: str, version: str, *, note: str = "") -> ReleaseRecord:
-        """Owner override: promote a held release despite the sanity check."""
+        """Owner override: promote a held release despite the sanity check.
+
+        A release held earlier (an unknown origin domain, held in FETCHED) is released by trusting
+        the new hosts (they are pinned); it then continues through every other check.
+        """
         rec = self._get(source_id, version)
         if rec.state is not ReleaseState.INDEXED:
-            raise IllegalTransitionError(
-                f"{rec.subject} is {rec.state.value}, only INDEXED releases can be approved"
+            if rec.hold_reason is None:
+                raise IllegalTransitionError(
+                    f"{rec.subject} is {rec.state.value} and not held; nothing to approve"
+                )
+            trusted = self.integrity.trust(source_id, version) if self.integrity is not None else []
+            self._persist(
+                replace(rec, hold_reason=None),
+                event=(
+                    LEDGER_KIND_HOLD,
+                    {"action": "approved", "note": note, "reason": rec.hold_reason, "trusted_hosts": trusted},
+                ),
             )
+            if self.alerter is not None:
+                self.alerter.resolve(f"held:{rec.subject}")
+            return self._get(source_id, version)
         self._persist(
             replace(rec, hold_reason=None, approved=True),
             event=(LEDGER_KIND_HOLD, {"action": "approved", "note": note, "reason": rec.hold_reason}),
@@ -300,7 +338,7 @@ class ReleasePipeline:
         retry_at = rec.next_attempt_at
         if rec.state is ReleaseState.FAILED and retry_at is not None and retry_at > self.clock.now():
             return Outcome.BACKOFF
-        if rec.state is ReleaseState.INDEXED and rec.hold_reason is not None:
+        if rec.hold_reason is not None and rec.state is not ReleaseState.FAILED:
             return Outcome.HELD
         return None
 
@@ -331,9 +369,21 @@ class ReleasePipeline:
                 )
             case ReleaseState.FETCHED:
                 self._verify(spec, rec)
+                if self.integrity is not None and self._sealed_generation(rec) is None:
+                    verdict = self.integrity.check_fetch(
+                        spec, rec.version, self._plan(rec).files, rec.fetched
+                    )
+                    self.checkpoint("integrity:checked")
+                    if verdict.action is Action.QUARANTINE:
+                        return self._quarantine_integrity(rec, verdict.reason)
+                    if verdict.action is Action.HOLD:
+                        return self._hold(rec, f"integrity: {verdict.reason}")
                 return self._transition(rec, ReleaseState.VERIFIED, health=self._reset_checksum_failures(rec))
             case ReleaseState.VERIFIED:
                 gen = self._seal(rec)
+                if self.integrity is not None:
+                    self.integrity.attest_provenance(rec.source_id, rec.version, rec.generation_id)
+                    self.checkpoint("integrity:provenance")
                 size = sum(a.size for a in gen.artifacts)
                 return self._transition(rec, ReleaseState.SEALED, size_bytes=size)
             case ReleaseState.SEALED:
@@ -446,18 +496,33 @@ class ReleasePipeline:
         return gen
 
     def _promote(self, spec: SourceSpec, rec: ReleaseRecord) -> ReleaseRecord:
-        if not rec.approved:
-            history = self.store.generation_stats(spec.id, limit=max(self.sanity.trend_window, 1))
-            history = [h for h in history if h.generation_id != rec.generation_id]
-            result = check_promotion(
-                [h.doc_count for h in history if h.doc_count is not None],
-                [h.size_bytes for h in history if h.size_bytes is not None],
-                doc_count=rec.doc_count,
-                size_bytes=rec.size_bytes,
-                thresholds=self.sanity,
+        history = self.store.generation_stats(spec.id, limit=max(self.sanity.trend_window, 1))
+        history = [h for h in history if h.generation_id != rec.generation_id]
+        result = check_promotion(
+            [h.doc_count for h in history if h.doc_count is not None],
+            [h.size_bytes for h in history if h.size_bytes is not None],
+            doc_count=rec.doc_count,
+            size_bytes=rec.size_bytes,
+            thresholds=self.sanity,
+        )
+        if self.integrity is not None:
+            gen = self._require_sealed(rec)
+            promoted = [h.generation_id for h in self.store.generation_stats(spec.id, limit=50)]
+            report = self.integrity.promotion_report(
+                spec,
+                gen,
+                self.vault.generation_path(rec.source_id, rec.generation_id),
+                sanity=sanity_checks(result.reasons, result.ok),
+                promoted=promoted,
             )
-            if not result.ok:
-                return self._hold(rec, "; ".join(result.reasons))
+            if not report.ok and rec.approved:
+                report = replace(report, decision="approved by the owner")
+            self.integrity.write_report(report, rec.version)
+            self.checkpoint("integrity:report")
+            if not report.ok and not rec.approved:
+                return self._hold(rec, report.reasons())
+        elif not rec.approved and not result.ok:
+            return self._hold(rec, "; ".join(result.reasons))
         self.vault.promote(rec.source_id, rec.generation_id)
         self.checkpoint("vault:promoted")
         now = self.clock.now()
@@ -485,6 +550,32 @@ class ReleasePipeline:
                 )
             )
         return self._get(rec.source_id, rec.version)
+
+    def _quarantine_integrity(self, rec: ReleaseRecord, reason: str) -> ReleaseRecord:
+        """A possible compromise: never promote, pause the source, alert. The downloaded files stay
+        in the work directory as evidence (see the runbook "Investigating a held release")."""
+        failed = self._transition(
+            rec,
+            ReleaseState.FAILED,
+            attempts=rec.attempts + 1,
+            last_error=f"integrity: {reason}",
+            next_attempt_at=None,
+            extra={"error": f"integrity: {reason}", "failed_in": rec.state.value, "integrity": True},
+        )
+        quarantined = self._transition(
+            failed, ReleaseState.QUARANTINED, extra={"reason": f"integrity: {reason}"}
+        )
+        self._pause_source(rec.source_id, f"integrity: {rec.version}: {reason[:300]}")
+        if self.alerter is not None:
+            self.alerter.raise_(
+                Alert(
+                    key=f"integrity:{rec.subject}",
+                    severity=Severity.CRITICAL,
+                    message=f"{rec.subject} quarantined, possible upstream compromise: {reason}",
+                    data={"source_id": rec.source_id, "version": rec.version, "reason": reason},
+                )
+            )
+        return quarantined
 
     def _cleanup_workdir(self, rec: ReleaseRecord) -> None:
         root = (self.workdir / rec.source_id).resolve()

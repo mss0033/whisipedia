@@ -33,6 +33,7 @@ class Target:
     checksums: tuple[Checksum, ...]
     pieces: Pieces | None = None
     metalink: MetalinkFile | None = None
+    metalink_url: str | None = None  # where the Metalink came from (provenance)
 
 
 def is_metalink_url(url: str) -> bool:
@@ -50,16 +51,20 @@ def _pick_file(files: tuple[MetalinkFile, ...], name: str) -> MetalinkFile:
 
 def resolve_target(remote: RemoteFile, get_bytes: Callable[[str, int], bytes], config: FetchConfig) -> Target:
     ml: MetalinkFile | None = None
+    ml_url: str | None = None
     if is_metalink_url(remote.url):
         ml = _pick_file(parse_metalink(get_bytes(remote.url, METALINK_MAX_BYTES)), remote.name)
+        ml_url = remote.url
     elif remote.metalink:
         try:
             ml = _pick_file(parse_metalink(get_bytes(remote.metalink, METALINK_MAX_BYTES)), remote.name)
+            ml_url = remote.metalink
         except FetchError as exc:  # optional: fall back to plain HTTP + mirrors
             log.info("no usable metalink at %s: %s", remote.metalink, exc)
     elif host_key(remote.url) in config.metalink_hosts:
         try:
             ml = _pick_file(parse_metalink(get_bytes(remote.url + ".meta4", METALINK_MAX_BYTES)), remote.name)
+            ml_url = remote.url + ".meta4"
         except FetchError as exc:  # optional: fall back to plain HTTP + mirrors
             log.info("no usable metalink for %s: %s", remote.url, exc)
 
@@ -82,4 +87,4 @@ def resolve_target(remote: RemoteFile, get_bytes: Callable[[str, int], bytes], c
     pieces = ml.pieces if ml else None
     if pieces is not None:
         new_hasher(pieces.algorithm)
-    return Target(remote.url, tuple(urls), size, checksums, pieces, ml)
+    return Target(remote.url, tuple(urls), size, checksums, pieces, ml, ml_url)

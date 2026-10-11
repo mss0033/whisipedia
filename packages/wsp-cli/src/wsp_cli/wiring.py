@@ -9,19 +9,27 @@ Phase 5 ("Autonomy") adds: the Curator bots and their proposal files plus the lo
 for auto-promotions (PLAN §5.3-5.5), the parity backfill (``vault.parity_scope``), and real retention:
 the orchestrator's cached upstream offers are the last-copy oracle, pruned generations are moved
 under ``pruned/`` (``orchestrator.prune_dry_run`` only records the plan).
+
+Source integrity (ADR-0009) adds the guard's hooks (``wsp_cli.integrity``): signed provenance and
+promotion reports, content profiles, scrub-verified settling. Scrub and parity stop on shutdown
+(``Wiring.on_shutdown``) and pause while the API marks interactive use
+(``vault.yield_to_interactive_seconds``).
 """
 
 from __future__ import annotations
 
 import random
 import shutil
-from collections.abc import Mapping, Sequence
+import threading
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
 from wsp_cli import bootstrap
 from wsp_cli.indexer import Indexer
+from wsp_cli.integrity import integrity_hooks
+from wsp_core.activity import recently_active
 from wsp_core.model import Generation, GenerationStatus, SourceSpec
 from wsp_orchestrator.bots import Bot
 from wsp_orchestrator.curator import (
@@ -36,6 +44,7 @@ from wsp_orchestrator.curator.registry_edit import upsert_overlay
 from wsp_orchestrator.orchestrator import LastCopyHook, Wiring
 from wsp_orchestrator.pipeline import RefineResult
 from wsp_orchestrator.policy import GateConfig, Proposal
+from wsp_vault.attest import is_attestation_path
 from wsp_vault.drill import DrillKind, run_drill
 from wsp_vault.parity import Par2Parity
 from wsp_vault.paritykeeper import GIB, ParityKeeper
@@ -45,11 +54,24 @@ from wsp_vault.scrub import Scrubber, ScrubFinding
 from wsp_vault.vault import FileVault
 
 
-def scrubber(cfg: Mapping[str, Any], vault: FileVault) -> Scrubber:
+def scrubber(
+    cfg: Mapping[str, Any],
+    vault: FileVault,
+    *,
+    should_stop: Callable[[], bool] | None = None,
+    should_pause: Callable[[], bool] | None = None,
+) -> Scrubber:
     vault_cfg = bootstrap.section(cfg, "vault")
     state = bootstrap.paths(cfg).require_state() / "scrub.sqlite"
     rate = vault_cfg.get("scrub_bytes_per_sec")
-    return Scrubber(vault, state, ledger=vault.ledger, bytes_per_sec=float(rate) if rate else None)
+    return Scrubber(
+        vault,
+        state,
+        ledger=vault.ledger,
+        bytes_per_sec=float(rate) if rate else None,
+        should_stop=should_stop,
+        should_pause=should_pause,
+    )
 
 
 def repair_ladder(cfg: Mapping[str, Any], vault: FileVault) -> RepairLadder:
@@ -208,23 +230,41 @@ def gate_config(cfg: Mapping[str, Any], vault: FileVault | None = None) -> GateC
 
 
 def parity_keeper(
-    cfg: Mapping[str, Any], vault: FileVault, scrub: Scrubber | None = None
+    cfg: Mapping[str, Any],
+    vault: FileVault,
+    scrub: Scrubber | None = None,
+    *,
+    should_stop: Callable[[], bool] | None = None,
+    should_pause: Callable[[], bool] | None = None,
 ) -> ParityKeeper | None:
-    """The Warden's parity keeper, or None when parity is off or par2 is not installed."""
+    """The Warden's parity keeper, or None when parity is off or par2 is not installed.
+
+    par2 runs at nice 19 / idle IO with ``vault.parity_threads`` threads (default 2; 0 = par2's
+    default of one per core) and ``vault.parity_memory_mb`` (``-m``; default 256, 0 = par2's own).
+    """
     v = bootstrap.section(cfg, "vault")
     if not v.get("parity", True) or shutil.which("par2") is None:
         return None
     p = bootstrap.paths(cfg)
     rate = v.get("parity_bytes_per_sec")
+    threads = int(v.get("parity_threads", 2))
+    memory = int(v.get("parity_memory_mb", 256))
     return ParityKeeper(
         vault,
-        Par2Parity(low_priority=True, threads=int(v["parity_threads"]) if v.get("parity_threads") else None),
+        Par2Parity(
+            low_priority=True,
+            threads=threads or None,
+            memory_mb=memory or None,
+            should_stop=should_stop,
+        ),
         state_dir=p.require_state(),
         scratch=p.workdir or p.require_state(),
         percent=int(v.get("parity_percent", 10)),
         max_set_bytes=int(float(v.get("parity_max_set_gb", 64)) * GIB),
         bytes_per_sec=float(rate) if rate else None,
         verified=scrub.verified_ok if scrub is not None else None,
+        should_stop=should_stop,
+        should_pause=should_pause,
     )
 
 
@@ -256,6 +296,8 @@ def split_parity_findings(
     data: list[ScrubFinding] = []
     parity: set[tuple[str, str]] = set()
     for f in findings:
+        if is_attestation_path(f.relpath):
+            continue  # a bad PROVENANCE/PROMOTION signature is evidence: reported, never "repaired"
         if is_parity_path(f.relpath) and not vault.manifest(f.source_id, f.generation_id).entry(
             f.relpath or ""
         ):
@@ -310,12 +352,19 @@ def build_wiring(config: Mapping[str, Any]) -> Wiring:
     vault = bootstrap.build_vault(config, specs, signer)
     assert vault.ledger is not None
     hooks = IndexHooks(config, vault, specs)
-    scrub = scrubber(config, vault)
+    vcfg = bootstrap.section(config, "vault")
+    stopping = threading.Event()  # set on SIGTERM: scrub, parity and par2 stop within a second
+    marker = bootstrap.activity_marker(config)
+    window = float(vcfg.get("yield_to_interactive_seconds", 300))
+
+    def busy() -> bool:  # the owner used the library recently: background integrity work waits
+        return window > 0 and recently_active(marker, window)
+
+    scrub = scrubber(config, vault, should_stop=stopping.is_set, should_pause=busy)
     ladder = repair_ladder(config, vault)
     slices = int(bootstrap.section(config, "orchestrator").get("scrub_slices", 720))
 
-    keeper = parity_keeper(config, vault, scrub)
-    vcfg = bootstrap.section(config, "vault")
+    keeper = parity_keeper(config, vault, scrub, should_stop=stopping.is_set, should_pause=busy)
     scope = str(vcfg.get("parity_scope", "all"))
     per_run = int(float(vcfg.get("parity_bytes_per_run", 200e9)))
 
@@ -364,4 +413,6 @@ def build_wiring(config: Mapping[str, Any]) -> Wiring:
         promoter=promote,
         proposal_recorder=files.write,
         parity=parity,
+        integrity=integrity_hooks(config, vault, scrub),
+        on_shutdown=[stopping.set],
     )

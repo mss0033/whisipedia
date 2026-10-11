@@ -22,7 +22,7 @@ from __future__ import annotations
 import dataclasses
 import os
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -131,7 +131,15 @@ def api_settings(cfg: Mapping[str, Any], lay: Layout, *, static_dir: Path | None
     api = section(cfg, "api")
     static = static_dir or (Path(api["static_dir"]) if api.get("static_dir") else lay.navigator_dist)
     extra = tuple(str(h) for h in api.get("allowed_hosts", ()))
-    return ApiSettings(static_dir=static, allowed_hosts=(*LOOPBACK_HOSTS, *extra))
+    marker = activity_marker(cfg)
+    return ApiSettings(static_dir=static, allowed_hosts=(*LOOPBACK_HOSTS, *extra), activity_marker=marker)
+
+
+def activity_marker(cfg: Mapping[str, Any]) -> Path | None:
+    """``<state_dir>/last-interactive``: the API marks interactive use, the Warden yields to it."""
+    from wsp_core.activity import default_marker
+
+    return default_marker(paths(cfg).state_dir)
 
 
 # --- paths ------------------------------------------------------------------------------------------
@@ -468,7 +476,16 @@ def build_monitor(cfg: Mapping[str, Any], specs: Sequence[SourceSpec], vault: Fi
         coverage=coverage,
         domain_usage=lambda: domain_usage(vault),
         budgets={str(k): int(float(str(x)) * TB) for k, x in budgets.items()},
+        provenance_coverage=_provenance_coverage(vault, specs),
     )
+
+
+def _provenance_coverage(vault: FileVault, specs: Sequence[SourceSpec]) -> Callable[[], Any]:
+    """Signed PROVENANCE.json coverage of the sealed generations (slow: reads the vault)."""
+    from wsp_cli.integrity import provenance_coverage
+
+    ids = [s.id for s in specs]
+    return lambda: provenance_coverage(vault, ids)
 
 
 def backend_note(cfg: Mapping[str, Any]) -> str | None:

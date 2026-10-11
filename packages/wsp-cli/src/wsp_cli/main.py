@@ -263,7 +263,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--source", default=None, help="drill this source (default: smallest generation)")
 
     for name, help_ in (
-        ("approve", "Promote a release held by the sanity check."),
+        ("approve", "Continue a release held by the integrity or sanity checks."),
         ("reject", "Reject a held release (it is quarantined)."),
         ("resume", "Resume an auto-paused source."),
     ):

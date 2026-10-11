@@ -66,6 +66,7 @@ from wsp_api.sse import change_events, format_event
 from wsp_api.summaries import CitationSplitter
 from wsp_api.views import Library, parse_doc
 from wsp_api.zim import ZimAssetStore
+from wsp_core.activity import ActivityMiddleware
 from wsp_core.ids import parse_doc_id
 from wsp_core.model import GenerationStatus, SearchHit
 
@@ -142,6 +143,7 @@ def create_app(services: Services, settings: ApiSettings | None = None) -> FastA
     install_error_handlers(app)
     app.add_middleware(RawSegmentRouting)
     app.add_middleware(SecurityMiddleware, settings=settings)
+    app.add_middleware(ActivityMiddleware, path=settings.activity_marker)  # Warden yields (ADR-0009)
     app.include_router(_v1(lib, settings))
     app.include_router(browse_router(lib))
     app.include_router(_go(services))

@@ -20,9 +20,14 @@ from pathlib import Path
 from wsp_core.model import GenerationStatus, VerdictStatus
 from wsp_core.ports import Ledger
 from wsp_vault.atomic import DEFAULT_RETRY, RetryPolicy, readback
+from wsp_vault.attest import FORMATS as ATTESTATION_DOCS
+from wsp_vault.attest import SIG_SUFFIX, read_attestation
+from wsp_vault.cancel import Interrupted, never
 from wsp_vault.manifest import DEGRADED_NAME, MANIFEST_NAME, SIGNATURE_NAME, ManifestEntry
 from wsp_vault.paritymeta import SIDECAR_PATH, is_parity_path, read_sidecar
 from wsp_vault.vault import FileVault, SignatureError
+
+__all__ = ["Interrupted", "RateLimiter", "ScrubFinding", "ScrubProgress", "ScrubReport", "Scrubber"]
 
 DEFAULT_CYCLE = timedelta(days=30)
 
@@ -60,7 +65,11 @@ class ScrubReport:
 
 
 class RateLimiter:
-    """Paces byte consumption to ``bytes_per_sec`` by sleeping. ``None`` disables limiting."""
+    """Paces byte consumption to ``bytes_per_sec`` by sleeping. ``None`` disables limiting.
+
+    With ``should_stop``, every call checks it and sleeps are cut into short slices, so a paced read
+    of a huge file can be abandoned within a fraction of a second (:class:`Interrupted`).
+    """
 
     def __init__(
         self,
@@ -68,6 +77,7 @@ class RateLimiter:
         *,
         monotonic: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
+        should_stop: Callable[[], bool] = never,
     ) -> None:
         if bytes_per_sec is not None and bytes_per_sec <= 0:
             raise ValueError("bytes_per_sec must be positive")
@@ -76,16 +86,24 @@ class RateLimiter:
         self._sleep = sleep
         self._start: float | None = None
         self._consumed = 0
+        self.should_stop = should_stop
 
     def consume(self, n: int) -> None:
+        if self.should_stop():
+            raise Interrupted("stop requested")
         if self._rate is None:
             return
         if self._start is None:
             self._start = self._monotonic()
         self._consumed += n
         ahead = self._consumed / self._rate - (self._monotonic() - self._start)
-        if ahead > 0:
-            self._sleep(ahead)
+        slice_ = ahead if self.should_stop is never else 0.25  # interruptible only when it matters
+        while ahead > 0:
+            step = min(ahead, slice_)
+            self._sleep(step)
+            ahead -= step
+            if self.should_stop():
+                raise Interrupted("stop requested")
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,6 +125,7 @@ class Scrubber:
         bytes_per_sec: float | None = None,
         ledger: Ledger | None = None,
         should_pause: Callable[[], bool] | None = None,
+        should_stop: Callable[[], bool] | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         monotonic: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
@@ -118,9 +137,12 @@ class Scrubber:
         self._state_path = state_path
         self._cycle = cycle
         self._ledger = ledger
-        self._should_pause = should_pause or (lambda: False)
+        self._should_pause = should_pause or never
+        self._should_stop = should_stop or never
         self._clock = clock
-        self._limiter = RateLimiter(bytes_per_sec, monotonic=monotonic, sleep=sleep)
+        self._limiter = RateLimiter(
+            bytes_per_sec, monotonic=monotonic, sleep=sleep, should_stop=self._should_stop
+        )
         self._retry = retry
 
     def _connect(self) -> sqlite3.Connection:
@@ -169,10 +191,14 @@ class Scrubber:
                 over_budget = (max_files is not None and checked >= max_files) or (
                     max_bytes is not None and hashed >= max_bytes
                 )
-                if over_budget or self._should_pause():
+                if over_budget or self._should_stop() or self._should_pause():
                     complete = False
                     break
-                finding, nbytes = self.check(item.source_id, item.generation_id, item.path, item.entry)
+                try:
+                    finding, nbytes = self.check(item.source_id, item.generation_id, item.path, item.entry)
+                except Interrupted:  # shutdown: the file stays due, nothing is recorded for it
+                    complete = False
+                    break
                 checked += 1
                 hashed += nbytes
                 db.execute(
@@ -217,6 +243,15 @@ class Scrubber:
             if sidecar is not None:
                 known |= sidecar.paths
                 entries += sidecar.entries
+        for name in ATTESTATION_DOCS:
+            if (lib / name).exists() or (lib / (name + SIG_SUFFIX)).exists():
+                known |= {name, name + SIG_SUFFIX}
+                try:
+                    read_attestation(self._vault, source_id, generation_id, name)
+                except SignatureError as exc:  # reported, never re-signed (ADR-0009)
+                    findings.append(
+                        ScrubFinding(source_id, generation_id, name, VerdictStatus.MISMATCH, str(exc))
+                    )
         findings += [
             ScrubFinding(source_id, generation_id, rel, VerdictStatus.MISMATCH, "unexpected file")
             for rel in on_disk

@@ -29,12 +29,15 @@ from wsp_api.schemas import (
     DiskUsage,
     DomainBudget,
     DownloadLane,
+    HeldRelease,
+    IntegrityStatus,
     OpsStatus,
     ParityStatus,
     ProposalInfo,
     ProposalSummary,
     QueueDepth,
     ScrubStatus,
+    SourceIntegrity,
     SourceSlo,
 )
 from wsp_core.model import GenerationStatus, SourceSpec, SourceStatus
@@ -222,6 +225,7 @@ def proposal_info(doc: Mapping[str, Any]) -> ProposalInfo | None:
 class _Slow:
     parity: ParityStatus | None = None
     budgets: list[DomainBudget] = field(default_factory=list[DomainBudget])
+    provenance: Any = None  # wsp_cli.integrity.Coverage
     at: float = 0.0
 
 
@@ -245,6 +249,7 @@ class LibraryMonitor:
         coverage: Callable[[Sequence[tuple[str, str]]], Any] | None = None,
         domain_usage: Callable[[], Mapping[str, int]] | None = None,
         budgets: Mapping[str, int] | None = None,
+        provenance_coverage: Callable[[], Any] | None = None,
         refresh_seconds: float = 600.0,
         background: bool = True,
     ) -> None:
@@ -262,6 +267,7 @@ class LibraryMonitor:
         self.coverage = coverage
         self.domain_usage = domain_usage
         self.budgets = dict(budgets or {})
+        self.provenance_coverage = provenance_coverage
         self.refresh_seconds = refresh_seconds
         self.background = background
         self._slow = _Slow()
@@ -325,8 +331,9 @@ class LibraryMonitor:
                 DomainBudget(domain=d, used_bytes=used.get(d, 0), budget_bytes=self.budgets.get(d))
                 for d in sorted(set(used) | set(self.budgets))
             ]
+            provenance = self.provenance_coverage() if self.provenance_coverage is not None else None
             with self._lock:
-                self._slow = _Slow(parity, budgets, time.monotonic())
+                self._slow = _Slow(parity, budgets, provenance, time.monotonic())
         finally:
             self._refreshing = False
 
@@ -438,7 +445,61 @@ class LibraryMonitor:
             bots=bots,
             proposals=ProposalSummary(**counts, latest=latest),
             orchestrator_state=self.state_db is not None and self.state_db.is_file(),
+            integrity=self._integrity(slow, now),
         )
+
+    def _integrity(self, slow: _Slow, now: datetime) -> IntegrityStatus | None:
+        """Source integrity (ADR-0009) from the state DB and the cached provenance coverage."""
+        from wsp_cli.integrity import channel_summary, read_integrity_state
+
+        if self.state_db is None or not self.state_db.is_file():
+            return None
+        state = read_integrity_state(self.state_db)
+        active = sorted(s.id for s in self.sources if s.status is SourceStatus.ACTIVE)
+        summary = channel_summary(state, active)
+        channels = [
+            SourceIntegrity(
+                source_id=sid,
+                channel=summary[sid],
+                version=str(state.channels.get(sid, {}).get("version") or "") or None,
+                verdict=str(state.channels.get(sid, {}).get("verdict") or "") or None,
+                checked_at=_dt(state.channels.get(sid, {}).get("at")),
+            )
+            for sid in active
+        ]
+        cov = slow.provenance
+        held = [_held(h) for h in state.held]
+        quarantined = [_held(q) for q in state.quarantined]
+        alerts = [
+            AlertInfo(
+                key=str(a["key"]),
+                severity=str(a["severity"]),
+                message=str(a["message"]),
+                raised_at=_dt(str(a["raised_at"]).replace("Z", "+00:00")) or now,
+            )
+            for a in state.drift_alerts
+        ]
+        return IntegrityStatus(
+            provenance_generations=int(cov.generations) if cov is not None else 0,
+            provenance_covered=int(cov.with_provenance) if cov is not None else 0,
+            provenance_fraction=round(float(cov.fraction), 4) if cov is not None else 0.0,
+            provenance_invalid=list(cov.invalid) if cov is not None else [],
+            channels=channels,
+            held=held,
+            quarantined=quarantined,
+            drift_alerts=alerts,
+            pinned_hosts=state.pinned_hosts,
+        )
+
+
+def _held(row: Mapping[str, Any]) -> HeldRelease:
+    reason = row.get("reason")
+    return HeldRelease(
+        source_id=str(row["source_id"]),
+        version=str(row["version"]),
+        state=str(row["state"]),
+        reason=str(reason) if reason else None,
+    )
 
 
 def _bot_run(name: str, raw: object) -> BotRun:
