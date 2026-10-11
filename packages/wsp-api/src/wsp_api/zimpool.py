@@ -42,6 +42,7 @@ STRIKE_WINDOW = 600.0
 RESTART_BURST = 5  # restarts within RESTART_WINDOW before backing off
 RESTART_WINDOW = 60.0
 RESTART_BACKOFF = 10.0
+BOOK_TIMEOUT = 300.0  # seconds a book-name read (background index build) may take
 
 Key = tuple[str, tuple[str, ...]]
 
@@ -240,7 +241,9 @@ class ZimProcessPool:
         return cast(EntryData | None, self.call("read", (file, path, want.value), file))
 
     def book_name(self, file: str) -> str:
-        return cast(str, self.call("book", (file,), file))
+        """Only used to build a bundle's book index, off the request path: a cold open of an archive
+        over SMB may take longer than a page view may wait (seen on the real library)."""
+        return cast(str, self.call("book", (file,), file, timeout=max(self.timeout, BOOK_TIMEOUT)))
 
     def close(self) -> None:
         with self._lock:
