@@ -97,6 +97,20 @@ def listing_links(html: bytes, base: str) -> list[str]:
     return sorted(set(out))
 
 
+_ROW_RE = re.compile(r'<a\s[^>]*href="([^"?#]+)"[^>]*>.*?</a>([^<\n]*)', re.IGNORECASE)
+
+
+def listing_rows(html: bytes, base: str) -> dict[str, str]:
+    """``{absolute URL: the row text after its link}`` of a directory listing (date and size as
+    the server prints them, whitespace collapsed); used to tell when a listed file changed."""
+    out: dict[str, str] = {}
+    for href, rest in _ROW_RE.findall(html.decode("utf-8", "replace")):
+        url = urljoin(base, unescape(href))
+        if url.startswith(base) and url != base:
+            out[url] = " ".join(rest.split())
+    return out
+
+
 class Bitset:
     """A growable set of non-negative integers, one bit each (PMIDs, docket ids: ~10 MB for 80M ids)."""
 

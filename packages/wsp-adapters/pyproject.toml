@@ -11,6 +11,7 @@ dependencies = [
   "indexed-bzip2>=1.6",
   "osmium>=4.0",
   "pypdfium2>=4.30",
+  "numpy>=2.0",
 ]
 
 [project.entry-points."whisipedia.adapters"]

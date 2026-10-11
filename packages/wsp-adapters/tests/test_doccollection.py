@@ -28,7 +28,7 @@ from wsp_adapters.doccollection.model import Candidate, DocumentMeta
 from wsp_adapters.doccollection.policy import CurrencyRules, Rules, Verdict
 from wsp_core.banners import HISTORICAL_BANNER, banner_for
 from wsp_core.ids import make_doc_id
-from wsp_core.model import Generation, GenerationStatus, VerdictStatus
+from wsp_core.model import Checksum, Generation, GenerationStatus, VerdictStatus
 from wsp_core.ports import Ctx, GenerationDependencies, SourceAdapter
 from wsp_core.testing.adapter_contract import FakeFetcher, SourceAdapterContract
 
@@ -186,6 +186,25 @@ def test_verify_holds_documents_that_need_review(tmp_path: Path) -> None:
     assert verdict.status is VerdictStatus.HELD
     assert verdict.withheld
     assert verdict.detail == "policy review:marking=missing-A"
+
+
+def test_screen_is_the_policy_alone_without_checksums(tmp_path: Path) -> None:
+    """``DocumentScreen``: the orchestrator calls ``screen`` even when the fetcher verified digests."""
+    objects = [("a.pdf", make_pdf([PUBLIC_A])), ("c.pdf", make_pdf([RESTRICTED_C])), ("x.pdf", b"<html>")]
+    ctx = make_ctx(s3_spec(), FakeFetcher(s3_routes(objects)), tmp_path / "work")
+    adapter = unthrottled()
+    (release,) = adapter.discover(ctx)
+    results = {r.path.name: r.path for r in adapter.fetch(ctx, adapter.plan(ctx, None, release))}
+    by_name = {f.name: f for f in release.files}
+    statuses: dict[str, VerdictStatus] = {}
+    for name, path in results.items():
+        wrong = replace(by_name[name], checksums=(Checksum("md5", "0" * 32),))  # screen ignores digests
+        statuses[name.rsplit("-", 1)[0].removeprefix("test__")] = adapter.screen(ctx, wrong, path).status
+    assert statuses == {
+        "a.pdf": VerdictStatus.OK,
+        "c.pdf": VerdictStatus.REJECTED,
+        "x.pdf": VerdictStatus.MISMATCH,
+    }
 
 
 def test_a_file_that_is_not_a_pdf_is_still_a_mismatch(tmp_path: Path) -> None:
