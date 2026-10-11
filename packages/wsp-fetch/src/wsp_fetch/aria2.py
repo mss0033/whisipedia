@@ -5,6 +5,18 @@ mirror URLs in priority order, size, upstream digests and, when Kiwix publishes 
 so aria2 does segmented multi-mirror transfer, real-time piece checks and resume (``.aria2`` control
 file) natively. We never trust its verdict alone: after it exits the file is fsynced and re-hashed
 by us (SHA-256 + BLAKE3 + upstream algorithms) and only then renamed into place.
+
+aria2 is used only when upstream publishes **piece hashes** (vault-fetch audit #8). aria2 never
+fsyncs data before it records a piece as done in its ``.aria2`` control file, so after a VM kill a
+resumed download can contain holes it believes are complete; with piece hashes ``--check-integrity``
+re-verifies every piece on resume, without them nothing would. Files without piece hashes go to the
+HTTP engine (durable, validator-checked resume; corroboration for sources without checksums).
+
+The aria2c process runs in its own process group: :meth:`Aria2Fetcher.cancel` kills it, and so does
+a stall (the output file has not grown for ``FetchConfig.stall_timeout`` seconds); the stage is kept
+for resume. When aria2 reports a checksum failure (exit 32) the stage is not deleted: it is renamed
+to ``<name>.rejected-<UTC stamp>.d`` as evidence (only the newest such directory per destination is
+kept, so a repeatedly failing 250 GB file cannot fill the disk).
 """
 
 from __future__ import annotations
@@ -13,13 +25,17 @@ import logging
 import os
 import re
 import shutil
+import signal
 import subprocess
+import threading
 import time
+from contextlib import suppress
+from datetime import UTC, datetime
 from pathlib import Path
 
 from wsp_core.model import RemoteFile
 from wsp_fetch.config import FetchConfig, host_key
-from wsp_fetch.errors import Aria2Error, ChecksumMismatchError, FetchError
+from wsp_fetch.errors import Aria2Error, ChecksumMismatchError, FetchCancelledError, FetchError
 from wsp_fetch.finish import FetchReport, finalize, make_report
 from wsp_fetch.hashing import hash_file
 from wsp_fetch.http import HttpFetcher
@@ -49,7 +65,17 @@ class Aria2Fetcher:
         if exe is None:
             raise FetchError("aria2c not found on PATH")
         self.executable = exe
-        self._http = HttpFetcher(self.config)  # small documents and Metalink discovery
+        self._http = HttpFetcher(self.config)  # small documents, Metalink discovery, unhashed files
+        self._cancel = threading.Event()
+
+    def cancel(self) -> None:
+        """Kill a running aria2c (its stage stays for resume) and stop future transfers."""
+        self._cancel.set()
+        self._http.cancel()
+
+    def reset(self) -> None:
+        self._cancel.clear()
+        self._http.reset()
 
     def close(self) -> None:
         self._http.close()
@@ -60,9 +86,7 @@ class Aria2Fetcher:
     def __exit__(self, *exc: object) -> None:
         self.close()
 
-    def _run(
-        self, target: Target, urls: list[str], stage: Path, name: str
-    ) -> subprocess.CompletedProcess[str]:
+    def _run(self, target: Target, urls: list[str], stage: Path, name: str) -> tuple[int, str]:
         meta = MetalinkFile(
             name=name,
             size=target.size,
@@ -105,7 +129,32 @@ class Aria2Fetcher:
         if self.config.bandwidth_limit:
             cmd.append(f"--max-overall-download-limit={self.config.bandwidth_limit}")
         log.info("aria2c: %s from %d source(s)", name, len(urls))
-        return subprocess.run(cmd, capture_output=True, text=True, check=False)  # noqa: S603 - no shell
+        return self._supervise(cmd, stage / name, stage / "aria2c.log")
+
+    def _supervise(self, cmd: list[str], out: Path, log_path: Path) -> tuple[int, str]:
+        """Run aria2c; kill its process group on cancel or when ``out`` stops growing."""
+        with log_path.open("w+b") as logf:
+            proc = subprocess.Popen(  # noqa: S603 - fixed argv, no shell
+                cmd, stdout=logf, stderr=subprocess.STDOUT, start_new_session=True
+            )
+            last_size, last_change = -1, time.monotonic()
+            try:
+                while proc.poll() is None:
+                    if self._cancel.wait(0.5):
+                        raise FetchCancelledError(f"{out.name}: cancelled (shutdown); stage kept for resume")
+                    size = out.stat().st_size if out.exists() else 0
+                    now = time.monotonic()
+                    if size != last_size:
+                        last_size, last_change = size, now
+                    elif now - last_change > self.config.stall_timeout:
+                        raise Aria2Error(
+                            -1, f"no progress for {self.config.stall_timeout:.0f}s; stage kept for resume"
+                        )
+            finally:
+                if proc.poll() is None:
+                    _kill_group(proc)
+            logf.seek(0)
+            return proc.returncode, logf.read().decode(errors="replace")
 
     def get_bytes(self, url: str, *, max_bytes: int = 64 * 1024 * 1024) -> bytes:
         return self._http.get_bytes(url, max_bytes=max_bytes)
@@ -115,24 +164,33 @@ class Aria2Fetcher:
 
     def fetch(self, remote: RemoteFile, dest: Path) -> FetchReport:
         t0 = time.monotonic()
+        if self._cancel.is_set():
+            raise FetchCancelledError("fetch cancelled (shutdown)")
         target = resolve_target(remote, lambda u, n: self._http.get_bytes(u, max_bytes=n), self.config)
+        if target.pieces is None:  # no way to re-verify a resumed aria2 file: use the HTTP engine
+            return self._http.fetch_target(target, dest, t0=t0)
+        with self._http.destination_lock(dest):
+            return self._fetch_aria2(target, dest, t0)
+
+    def _fetch_aria2(self, target: Target, dest: Path, t0: float) -> FetchReport:
         stage = staging_dir(dest)
         stage.mkdir(parents=True, exist_ok=True)
         urls = list(target.urls)
         out = stage / dest.name
         for run in range(1, self.config.max_attempts + 1):
-            proc = self._run(target, urls, stage, dest.name)
-            if proc.returncode == 0 and out.is_file():
+            returncode, log_text = self._run(target, urls, stage, dest.name)
+            if returncode == 0 and out.is_file():
                 break
-            if proc.returncode == _EXIT_CHECKSUM:
-                shutil.rmtree(stage, ignore_errors=True)
+            if returncode == _EXIT_CHECKSUM:
+                kept = _keep_evidence(stage, dest)
                 algo = target.checksums[0].algorithm if target.checksums else "piece"
                 want = target.checksums[0].hexdigest if target.checksums else ""
-                raise ChecksumMismatchError(target.url, algo, want, "aria2c: checksum validation failed")
-            log_text = proc.stderr or proc.stdout
+                raise ChecksumMismatchError(
+                    target.url, algo, want, f"aria2c: checksum validation failed; stage kept as {kept.name}"
+                )
             bad: set[str] = set(_BAD_PIECE_URI.findall(log_text)) if "checksum" in log_text.lower() else set()
             if not bad or run == self.config.max_attempts:
-                raise Aria2Error(proc.returncode, log_text.strip()[-2000:])
+                raise Aria2Error(returncode, log_text.strip()[-2000:])
             # aria2 aborts on a bad piece instead of switching mirror; resume without the culprit(s).
             log.warning("aria2c: bad piece from %s; resuming without it", ", ".join(sorted(bad)))
             urls = [u for u in urls if u not in bad] or urls
@@ -151,3 +209,25 @@ class Aria2Fetcher:
         shutil.rmtree(stage, ignore_errors=True)
         size = dest.stat().st_size
         return make_report(dest, size, digests, target.checksums, size, 0, time.monotonic() - t0)
+
+
+def _kill_group(proc: subprocess.Popen[bytes]) -> None:
+    for sig, grace in ((signal.SIGTERM, 3.0), (signal.SIGKILL, 3.0)):
+        with suppress(ProcessLookupError, PermissionError):
+            os.killpg(proc.pid, sig)
+        deadline = time.monotonic() + grace
+        while proc.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.05)
+        if proc.poll() is not None:
+            return
+
+
+def _keep_evidence(stage: Path, dest: Path) -> Path:
+    """Rename a rejected stage to ``<name>.rejected-<stamp>.d``, dropping older rejected stages of
+    the same destination (our own evidence directories; one is enough to investigate)."""
+    for old in dest.parent.glob(f"{dest.name}.rejected-*.d"):
+        shutil.rmtree(old, ignore_errors=True)
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    kept = dest.with_name(f"{dest.name}.rejected-{stamp}.d")
+    os.rename(stage, kept)
+    return kept

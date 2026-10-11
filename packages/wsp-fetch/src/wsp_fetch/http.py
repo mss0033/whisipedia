@@ -16,6 +16,24 @@ Pipeline for one file::
 Failing mirrors are dropped after consecutive errors, slow ones are demoted to one connection, a
 piece that fails its Metalink hash is never retried on the mirror that served it, and when the
 queue drains idle connections duplicate straggling pieces (endgame) — first verified copy wins.
+
+Safety rules (vault-fetch audit #8, #15, #16, LOW):
+
+* Without upstream digests *and* piece hashes, bytes are never spliced from several mirrors (two
+  mirrors of the same size may hold different files); one source serves the whole file, and the
+  ``unverified_policy`` (see :class:`FetchConfig`) decides: corroborate with a second full
+  download, accept visibly, or refuse.
+* Resuming requires the same validator (ETag/Last-Modified) as the interrupted run, unless every
+  resumed piece is checked against upstream piece hashes.
+* A body without a checksum must have the size the probe saw (Content-Length or Content-Range); a
+  short, close-delimited body is retried, also when it is the only source.
+* A signed redirect URL that expires mid-download (401/403/410) is re-resolved from the original
+  URL instead of dropping the mirror.
+* HTTPS is never downgraded: a redirect from ``https`` to ``http`` fails the request.
+* Politeness caps count against the host we were asked to fetch from, not the host a redirect
+  lands on; one destination is fetched by one process at a time (a local ``flock``).
+* Spot checks pick their ranges at random (unpredictable to a mirror) and run before the file is
+  published.
 """
 
 from __future__ import annotations
@@ -23,10 +41,13 @@ from __future__ import annotations
 import bisect
 import dataclasses
 import email.utils
+import fcntl
+import hashlib
 import logging
 import os
 import random
 import re
+import tempfile
 import threading
 import time
 from collections.abc import Callable, Generator
@@ -42,15 +63,18 @@ from wsp_core.model import RemoteFile, RemoteHead
 from wsp_fetch import provenance as prov
 from wsp_fetch.config import FetchConfig, host_key
 from wsp_fetch.errors import (
+    ChecksumMismatchError,
     FetchCancelledError,
     FetchError,
+    FetchLockedError,
     MirrorsExhaustedError,
     NotFoundError,
     ResponseTooLargeError,
     SizeMismatchError,
+    UnverifiableError,
 )
 from wsp_fetch.finish import FetchReport, finalize, fsync_dir, make_report
-from wsp_fetch.hashing import InOrderHasher, MultiHasher, hash_file, new_hasher
+from wsp_fetch.hashing import InOrderHasher, MultiHasher, hash_file, new_hasher, pread_exact
 from wsp_fetch.ratelimit import TokenBucket
 from wsp_fetch.state import PartialState, load_state, partial_path, save_state, state_path
 from wsp_fetch.target import Target, resolve_target
@@ -61,6 +85,24 @@ _CONTENT_RANGE = re.compile(r"bytes\s+(\d+)-(\d+)/(\d+|\*)")
 _CONTENT_RANGE_EMPTY = re.compile(r"bytes\s+\*/(\d+)")
 _RETRY_STATUSES = {408, 425, 429, 500, 502, 503, 504}
 _NOT_FOUND = {404, 410}
+_EXPIRED = {401, 403, 410}  # what a signed redirect URL answers once it has expired
+
+
+def _spot_rng() -> random.Random:
+    """Where spot-check offsets come from: unpredictable, so a mirror cannot serve the right bytes
+    only where it expects to be checked."""
+    return random.SystemRandom()
+
+
+def _refuse_downgrade(response: httpx.Response) -> None:
+    """Response hook: an ``https`` request may not be redirected to plain ``http``."""
+    if not response.has_redirect_location or response.request.url.scheme != "https":
+        return
+    target = response.request.url.join(response.headers["Location"])
+    if target.scheme != "https":
+        raise _RetryableError(
+            f"refusing redirect from {response.request.url} to insecure {target}", fatal_for_mirror=True
+        )
 
 
 # --- helpers ------------------------------------------------------------------------------------
@@ -141,6 +183,7 @@ class _Mirror:
     pieces: list[int] = field(default_factory=list[int])  # pieces this mirror served (provenance)
     observation: dict[str, Any] = field(default_factory=dict[str, Any])
     spot_check: str = "skipped"
+    reresolved: int = 0  # times final_url was re-resolved after it expired
 
     def record(self, nbytes: int, seconds: float) -> None:
         r = nbytes / max(seconds, 1e-6)
@@ -183,6 +226,7 @@ class HttpFetcher:
             follow_redirects=True,
             limits=httpx.Limits(max_connections=None, max_keepalive_connections=64),
             transport=transport,
+            event_hooks={"response": [_refuse_downgrade]},
         )
         self._bucket = TokenBucket(c.bandwidth_limit) if c.bandwidth_limit else None
         self._hosts: dict[str, threading.BoundedSemaphore] = {}
@@ -340,22 +384,67 @@ class HttpFetcher:
         t0 = time.monotonic()
         self.check_cancelled()
         target = resolve_target(remote, lambda u, n: self.get_bytes(u, max_bytes=n), self.config)
+        return self.fetch_target(target, dest, t0=t0)
+
+    @contextmanager
+    def destination_lock(self, dest: Path) -> Generator[None]:
+        """Hold the local lock of ``dest``; :class:`FetchLockedError` if another fetch holds it."""
+        directory = (
+            Path(self.config.lock_dir)
+            if self.config.lock_dir
+            else Path(tempfile.gettempdir()) / f"whisipedia-fetch-locks-{os.getuid()}"
+        )
+        directory.mkdir(parents=True, exist_ok=True)
+        name = hashlib.sha256(str(dest.resolve()).encode()).hexdigest()[:32]
+        fd = os.open(directory / f"{name}.lock", os.O_RDWR | os.O_CREAT | os.O_CLOEXEC, 0o644)
+        try:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise FetchLockedError(f"{dest} is already being downloaded by another fetch") from None
+            yield
+        finally:
+            os.close(fd)
+
+    def fetch_target(self, target: Target, dest: Path, *, t0: float | None = None) -> FetchReport:
+        """:meth:`fetch` for an already resolved target (used by :class:`~wsp_fetch.aria2.Aria2Fetcher`)."""
+        t0 = time.monotonic() if t0 is None else t0
         dest.parent.mkdir(parents=True, exist_ok=True)
-        if dest.exists() and target.checksums:
-            existing = _already_complete(dest, target)
-            if existing is not None:
-                return existing
+        with self.destination_lock(dest):
+            upstream_verified = bool(target.checksums) or target.pieces is not None
+            if not upstream_verified and self.config.unverified_policy == "refuse":
+                raise UnverifiableError(
+                    f"{target.url}: upstream publishes no checksum and acquirer.unverified_policy = 'refuse'"
+                )
+            if dest.exists() and target.checksums:
+                existing = _already_complete(dest, target)
+                if existing is not None:
+                    return existing
+            report = self._download(target, dest, t0, single_source=not upstream_verified)
+            if upstream_verified:
+                return report
+            if self.config.unverified_policy == "allow":
+                return dataclasses.replace(report, integrity="unverified")
+            return self._corroborate(target, dest, report)
+
+    def _download(self, target: Target, dest: Path, t0: float, *, single_source: bool) -> FetchReport:
         probes, rejected = self._probe_all(target)
         ranged = [p for p in probes if p.ranges and p.size is not None]
+        if single_source and len(ranged) > 1:  # never splice unverifiable bytes from several mirrors
+            primary = next((p for p in ranged if p.url == target.urls[0]), ranged[0])
+            rejected += [
+                {"url": p.url, "reason": "not used: no upstream digest to check spliced pieces"}
+                for p in ranged
+                if p is not primary
+            ]
+            ranged = [primary]
         if not ranged:
             return self._single_stream(target, probes, dest, t0, rejected)
         size = ranged[0].size
         assert size is not None
         validator = next((p.validator for p in probes if p.url == target.urls[0]), None)
         mirrors = [
-            _Mirror(
-                i, p.url, p.final_url, self.config.connections_for(p.final_url), observation=p.observation
-            )
+            _Mirror(i, p.url, p.final_url, self.config.connections_for(p.url), observation=p.observation)
             for i, p in enumerate(ranged)
         ]
         rejected += [
@@ -453,67 +542,177 @@ class HttpFetcher:
     def _single_stream(
         self, target: Target, probes: list[_Probe], dest: Path, t0: float, rejected: list[dict[str, Any]]
     ) -> FetchReport:
-        """Fallback when no source supports Range: sequential download with inline hashing."""
+        """Fallback when no source supports Range: sequential download with inline hashing.
+
+        Each source gets the full retry budget (a lone source is retried, not given up after one
+        dropped connection). The request goes to the URL we were given, so an expired signed
+        redirect is resolved afresh on every attempt. The body must have the size the probe saw:
+        a close-delimited response that ends early is a failed attempt, not a smaller file.
+        """
         partial = partial_path(dest)
         errors: list[str] = []
         for p in probes:
-            hasher = MultiHasher(c.algorithm for c in target.checksums)
-            got = 0
-            try:
-                with (
-                    self.host_slot(p.final_url),
-                    self._client.stream("GET", p.final_url) as r,
-                    partial.open("wb") as fh,
-                ):
-                    _raise_for_status(r)
-                    for chunk in r.iter_raw():
-                        if self._cancel.is_set():
-                            raise FetchCancelledError(f"{target.url}: cancelled (shutdown)")
-                        fh.write(chunk)
-                        hasher.update(chunk)
-                        self.throttle(len(chunk))
-                        got += len(chunk)
-                    fh.flush()
-                    os.fsync(fh.fileno())
-            except (httpx.TransportError, _RetryableError, OSError) as exc:
-                errors.append(f"{p.url}: {exc}")
-                hasher.close()
-                continue
-            except FetchCancelledError:
-                hasher.close()
-                raise
-            digests = hasher.hexdigests()
-            finalize(
-                target.url,
-                partial,
-                dest,
-                expected_size=target.size,
-                checksums=target.checksums,
-                digests=digests,
-                readback=self.config.verify_readback,
-            )
-            state_path(dest).unlink(missing_ok=True)
-            sources = [
-                _source_json(
-                    q.url,
-                    q.observation,
-                    ranges=[[0, got - 1]] if q is p and got else [],
-                    nbytes=got if q is p else 0,
-                )
-                for q in probes
-            ]
-            return make_report(
-                dest,
-                got,
-                digests,
-                target.checksums,
-                got,
-                0,
-                time.monotonic() - t0,
-                {p.url: got},
-                provenance=_file_provenance(target, got, sources, rejected, resumed=0),
-            )
+            expected = target.size if target.size is not None else p.size
+            for attempt in range(1, self.config.max_attempts + 1):
+                try:
+                    got, digests = self._stream_once(target, p.url, partial, expected)
+                except FetchCancelledError:
+                    raise
+                except (httpx.TransportError, _RetryableError, OSError) as exc:
+                    errors.append(f"{p.url} (attempt {attempt}): {exc}")
+                    if getattr(exc, "fatal_for_mirror", False) or attempt == self.config.max_attempts:
+                        break
+                    delay = backoff_delay(attempt, self.config.backoff_base, self.config.backoff_max)
+                    if self._cancel.wait(delay):
+                        raise FetchCancelledError(f"{target.url}: cancelled (shutdown)") from exc
+                    continue
+                return self._single_report(target, probes, p, dest, partial, got, digests, t0, rejected)
+        partial.unlink(missing_ok=True)
         raise MirrorsExhaustedError(f"all sources failed for {target.url}: {'; '.join(errors)}")
+
+    def _stream_once(
+        self, target: Target, url: str, partial: Path, expected: int | None
+    ) -> tuple[int, dict[str, str]]:
+        hasher = MultiHasher(c.algorithm for c in target.checksums)
+        got = 0
+        try:
+            with (
+                self.host_slot(url),
+                self._client.stream("GET", url) as r,
+                partial.open("wb") as fh,
+            ):
+                _raise_for_status(r)
+                for chunk in r.iter_raw():
+                    if self._cancel.is_set():
+                        raise FetchCancelledError(f"{target.url}: cancelled (shutdown)")
+                    fh.write(chunk)
+                    hasher.update(chunk)
+                    self.throttle(len(chunk))
+                    got += len(chunk)
+                fh.flush()
+                os.fsync(fh.fileno())
+            if expected is not None and got != expected:
+                raise _RetryableError(f"body ended after {got} of {expected} bytes")
+            return got, hasher.hexdigests()
+        finally:
+            hasher.close()
+
+    def _single_report(
+        self,
+        target: Target,
+        probes: list[_Probe],
+        p: _Probe,
+        dest: Path,
+        partial: Path,
+        got: int,
+        digests: dict[str, str],
+        t0: float,
+        rejected: list[dict[str, Any]],
+    ) -> FetchReport:
+        finalize(
+            target.url,
+            partial,
+            dest,
+            expected_size=target.size,
+            checksums=target.checksums,
+            digests=digests,
+            readback=self.config.verify_readback,
+        )
+        state_path(dest).unlink(missing_ok=True)
+        sources = [
+            _source_json(
+                q.url,
+                q.observation,
+                ranges=[[0, got - 1]] if q is p and got else [],
+                nbytes=got if q is p else 0,
+            )
+            for q in probes
+        ]
+        return make_report(
+            dest,
+            got,
+            digests,
+            target.checksums,
+            got,
+            0,
+            time.monotonic() - t0,
+            {p.url: got},
+            provenance=_file_provenance(target, got, sources, rejected, resumed=0),
+        )
+
+    # --- corroboration (sources without upstream digests) -------------------------------------
+
+    def _corroborate(self, target: Target, dest: Path, report: FetchReport) -> FetchReport:
+        """Download the file a second time, in full, and require identical size and digests.
+
+        The second download prefers a source that did not serve the first; with a single source it
+        repeats that source (which still catches truncation and transport corruption, not a
+        malicious origin). Disagreement keeps the first copy as ``<name>.disputed`` and raises
+        :class:`ChecksumMismatchError`; failing to make a second download keeps it as
+        ``<name>.uncorroborated`` and raises :class:`UnverifiableError`.
+        """
+        served = max(report.per_mirror_bytes.items(), key=lambda kv: kv[1], default=(target.url, 0))[0]
+        order = [u for u in target.urls if u != served] + [served]
+        errors: list[str] = []
+        for url in order:
+            try:
+                size, digests = self._retrying(
+                    f"corroborate {url}", lambda u=url: self._hash_remote(u), self.config.max_attempts
+                )
+            except FetchCancelledError:
+                raise
+            except (FetchError, httpx.HTTPError) as exc:
+                errors.append(f"{url}: {exc}")
+                continue
+            if (
+                size != report.size
+                or digests["sha256"] != report.sha256
+                or digests["blake3"] != report.blake3
+            ):
+                disputed = dest.with_name(dest.name + ".disputed")
+                os.replace(dest, disputed)
+                raise ChecksumMismatchError(
+                    target.url,
+                    "sha256 (independent second download)",
+                    report.sha256,
+                    f"{digests['sha256']} ({size} bytes from {url}); first copy kept as {disputed.name}",
+                )
+            provenance = {
+                **report.provenance,
+                "corroboration": {"url": url, "independent_source": url != served, "bytes": size},
+            }
+            return dataclasses.replace(
+                report, corroborated=True, integrity="corroborated", provenance=provenance
+            )
+        kept = dest.with_name(dest.name + ".uncorroborated")
+        os.replace(dest, kept)
+        raise UnverifiableError(
+            f"{target.url}: upstream publishes no checksum and no second download succeeded "
+            f"({'; '.join(errors)}); first copy kept as {kept.name}"
+        )
+
+    def _hash_remote(self, url: str) -> tuple[int, dict[str, str]]:
+        """Stream ``url`` completely, hashing only (nothing written); size and digests."""
+        hasher = MultiHasher(())
+        got = 0
+        try:
+            with self.host_slot(url):
+                try:
+                    with self._client.stream("GET", url) as r:
+                        _raise_for_status(r)
+                        declared = r.headers.get("Content-Length")
+                        for chunk in r.iter_raw():
+                            self.check_cancelled()
+                            hasher.update(chunk)
+                            self.throttle(len(chunk))
+                            got += len(chunk)
+                except httpx.TransportError as exc:
+                    raise _RetryableError(f"{type(exc).__name__}: {exc}") from exc
+            if declared is not None and declared.isdigit() and int(declared) != got:
+                raise _RetryableError(f"body ended after {got} of {declared} bytes")
+            return got, hasher.hexdigests()
+        finally:
+            hasher.close()
 
 
 def _already_complete(dest: Path, target: Target) -> FetchReport | None:
@@ -690,7 +889,10 @@ class _SegmentedDownload:
             os.close(self.fd)
             raise self.error
         os.fsync(self.fd)
-        os.close(self.fd)
+        try:
+            self._spot_check()  # before publishing, from the fsynced partial, at random offsets
+        finally:
+            os.close(self.fd)
         digests = hasher.hexdigests()
         try:
             finalize(
@@ -705,7 +907,6 @@ class _SegmentedDownload:
         finally:
             if not self.partial.exists():
                 self.state_file.unlink(missing_ok=True)
-        self._spot_check()
         sources = [
             _source_json(
                 m.url,
@@ -742,13 +943,9 @@ class _SegmentedDownload:
         k, n = self.cfg.spot_checks, min(self.cfg.spot_check_bytes, self.size)
         if k <= 0 or n <= 0 or len(self.plan.mirrors) < 2:
             return
-        rng = random.Random(self.plan.target.url)  # noqa: S311 - sampling, not cryptography
+        rng = _spot_rng()
         offsets = sorted({rng.randrange(0, self.size - n + 1) for _ in range(k)})
-        fd = os.open(self.plan.dest, os.O_RDONLY)
-        try:
-            expected = {off: os.pread(fd, n, off) for off in offsets}
-        finally:
-            os.close(fd)
+        expected = {off: pread_exact(self.fd, n, off) for off in offsets}
         for m in self.plan.mirrors:
             if m.disabled:  # already known bad (corrupt pieces, fatal errors): see corrupt_pieces
                 m.spot_check = "skipped: mirror dropped"
@@ -758,7 +955,7 @@ class _SegmentedDownload:
                 if self.f.cancelled:
                     return
                 try:
-                    got = self._read_range(m.final_url, off, off + n - 1)
+                    got = self._read_range(m, off, off + n - 1)
                 except (_RetryableError, httpx.HTTPError, FetchError) as exc:
                     verdict = f"error: {exc}"
                     continue
@@ -768,10 +965,10 @@ class _SegmentedDownload:
                     break
             m.spot_check = verdict
 
-    def _read_range(self, url: str, start: int, end: int) -> bytes:
+    def _read_range(self, m: _Mirror, start: int, end: int) -> bytes:
         with (
-            self.f.host_slot(url),
-            self.f.client.stream("GET", url, headers={"Range": f"bytes={start}-{end}"}) as r,
+            self.f.host_slot(m.url),
+            self.f.client.stream("GET", m.final_url, headers={"Range": f"bytes={start}-{end}"}) as r,
         ):
             _raise_for_status(r)
             if r.status_code != 206:
@@ -787,9 +984,10 @@ class _SegmentedDownload:
     def _open_partial(self) -> set[int]:
         """Open ``.partial``; returns pieces a previous run recorded (still to be re-verified)."""
         old = load_state(self.state_file)
+        hashed_pieces = self.plan.target.pieces is not None  # resumed pieces are checked upstream
         resumable = (
             old is not None
-            and old.same_target(self.state)
+            and old.same_target(self.state, require_validator=not hashed_pieces)
             and self.partial.exists()
             and self.partial.stat().st_size == self.size
         )
@@ -827,12 +1025,21 @@ class _SegmentedDownload:
                 i = self._next_piece(m, slot)
                 if i is None:
                     return
+                url = m.final_url
                 try:
-                    data, seconds = self._download_piece(m, i)
+                    data, seconds = self._download_piece(m, i, url)
                 except _CancelledError:
                     self._release(m, i)
                     continue
                 except (_RetryableError, httpx.HTTPError, SizeMismatchError) as exc:
+                    if (
+                        isinstance(exc, _RetryableError)
+                        and exc.status in _EXPIRED
+                        and m.url != url
+                        and self._reresolve(m, url)
+                    ):
+                        self._requeue(m, i)
+                        continue
                     delay = self._failed(m, i, exc)
                     if delay and self.f.wait_cancelled(delay):
                         return
@@ -884,15 +1091,15 @@ class _SegmentedDownload:
                 break
         return best
 
-    def _download_piece(self, m: _Mirror, i: int) -> tuple[bytearray, float]:
+    def _download_piece(self, m: _Mirror, i: int, url: str) -> tuple[bytearray, float]:
         start, length = self.span(i)
         end = start + length - 1
         buf = bytearray(length)
         view = memoryview(buf)
         pos = 0
-        with self.f.host_slot(m.final_url):
+        with self.f.host_slot(m.url):  # politeness: the host we were asked to use, not a redirect's
             t = time.monotonic()
-            with self.f.client.stream("GET", m.final_url, headers={"Range": f"bytes={start}-{end}"}) as r:
+            with self.f.client.stream("GET", url, headers={"Range": f"bytes={start}-{end}"}) as r:
                 if r.status_code == 200:
                     raise _RetryableError("server ignored Range", fatal_for_mirror=True)
                 _raise_for_status(r)
@@ -925,6 +1132,40 @@ class _SegmentedDownload:
         with self.cond:
             self.pieces[i].active.pop(m.id, None)
             self.cond.notify_all()
+
+    def _requeue(self, m: _Mirror, i: int) -> None:
+        """Give a piece back without counting a failure (its URL expired and was re-resolved)."""
+        with self.cond:
+            piece = self.pieces[i]
+            piece.active.pop(m.id, None)
+            if i not in self.claimed and not piece.active and i not in self.pending:
+                bisect.insort(self.pending, i)
+            self.cond.notify_all()
+
+    def _reresolve(self, m: _Mirror, failed_url: str) -> bool:
+        """Probe ``m.url`` again for a fresh redirect target after ``failed_url`` expired (audit #15).
+
+        True when ``m.final_url`` is usable again (another worker may already have refreshed it).
+        Limited to ``max_reresolve`` per mirror; the new target must still have the same size.
+        """
+        with self.cond:
+            if m.final_url != failed_url:
+                return True
+            if m.reresolved >= self.cfg.max_reresolve or m.disabled:
+                return False
+            m.reresolved += 1
+        try:
+            probe = self.f._probe(m.url, 2)  # pyright: ignore[reportPrivateUsage]
+        except (FetchError, httpx.HTTPError) as exc:
+            log.info("re-resolving %s failed: %s", m.url, exc)
+            return False
+        if probe.size is not None and probe.size != self.size:
+            log.warning("mirror %s now advertises %s bytes, not %d", m.url, probe.size, self.size)
+            return False
+        with self.cond:
+            m.final_url = probe.final_url
+            log.info("mirror %s: expired redirect re-resolved to %s", m.url, probe.final_url)
+        return True
 
     def _failed(self, m: _Mirror, i: int, exc: BaseException, *, corrupt: bool = False) -> float:
         """Requeue a failed piece; returns how long this worker should back off."""
