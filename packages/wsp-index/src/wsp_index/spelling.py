@@ -1,38 +1,55 @@
-"""'Did you mean': classic noisy-channel spelling correction over the library's own vocabulary.
+"""'Did you mean': noisy-channel spelling correction over the library's own vocabularies, per language.
 
-Language model: word counts from the indexed text itself (titles count extra), built offline by
-``wsp index spell`` (also the last step of ``wsp index build``). Error model: each edit (insertion,
-deletion, substitution, adjacent transposition) costs a factor ``epsilon``, so the correction of a
-word ``w`` is ``argmax_c count(c) * epsilon ** dist(w, c)`` over known words within two edits,
-the word itself included (Norvig, "How to Write a Spelling Corrector", 2007). A word is only
-replaced when that wins by the error model's margin, so real words are never "corrected" into
-more frequent neighbours unless they are far rarer.
+Language model: word counts from the indexed text itself (titles count extra), one vocabulary per
+language, built offline by ``wsp index spell`` (also the last step of ``wsp index build``) from a
+*stratified* sample: row groups spread evenly over every part that holds the language, so a source
+stored in language blocks (Cebuano first) no longer fills the vocabulary with its first language.
 
-Candidates come from a symmetric-delete index (SymSpell, Garbe 2012): every vocabulary word
-stores the hashes of its variants with up to two characters deleted from its first ``prefix``
-characters; a query word's own delete variants are looked up by binary search, and candidates are
-verified with the exact optimal-string-alignment distance. Lookups touch a few dozen hashes, so a
-correction takes well under a millisecond, and nothing is held in Python objects: the file is
-memory-mapped.
+Error model: each edit (insertion, deletion, substitution, adjacent transposition) costs a factor
+``epsilon``, so the correction of a word ``w`` is ``argmax_c count(c) * epsilon ** dist(w, c)`` over
+known words within two edits, the word itself included (Norvig 2007). A word that is not in the
+vocabulary counts as if it had the vocabulary's minimum count (``floor``): it is replaced only by a
+word at least ``1 / epsilon`` times more frequent per edit (100x for one edit, 10,000x for two with
+the default epsilon), so rare junk ("zzq") is left alone instead of becoming whatever is nearest.
+
+The query picks its vocabulary: the words' script narrows the candidates (Latin, Cyrillic, Greek,
+Devanagari, ...), and among those the language under which the query is most probable wins (known
+words by frequency, unknown words by their best correction).
+
+Build and query share one tokenizer, :func:`spell_tokens` (Arrow's Unicode case mapping, final sigma
+folded, letters and combining marks, inner apostrophes kept), so "Straße", "λόγος", "नमस्ते" and
+"don't" are the same words on both sides.
+
+Candidates come from a symmetric-delete index (SymSpell, Garbe 2012); lookups touch a few dozen
+hashes, so a correction takes well under a millisecond, and the file is memory-mapped
+(``MADV_RANDOM``).
 
 File format (``<index>/lexical/spelling.bin``, little endian, replaced atomically)::
 
-    b"WSPSPEL1" | u64 words | u64 blob bytes | u64 deletes
-    | u64 word_hash[words] (sorted) | u32 count[words] | u64 offset[words + 1] | blob (UTF-8)
-    | u64 delete_hash[deletes] (sorted) | u32 delete_word[deletes]
+    b"WSPSPEL2" | u64 sections | sections x (8-byte lang, 8-byte script, u64 offset, u64 length)
+    section (8-aligned): u64 words, u64 deletes, u64 blob bytes, u64 floor, u64 total
+        | u64 word_hash[words] (sorted) | u64 offset[words + 1] | u64 delete_hash[deletes] (sorted)
+        | u32 count[words] | u32 delete_word[deletes] | blob (UTF-8)
 
-Hashes are ``crc32 << 32 | adler32``; a collision can only add a candidate, which the exact
-distance check then rejects.
+Every array is naturally aligned (``WSPSPEL1`` put the blob first, so 7 of 8 files gave numpy
+misaligned views and every ``searchsorted`` copied 93 MB: 17.5 ms against 0.15 ms). ``WSPSPEL1``
+files stay readable, as one vocabulary for every script.
+
+Hashes are ``crc32 << 32 | adler32``; a collision can only add a candidate, which the exact distance
+check then rejects.
 """
 
 from __future__ import annotations
 
+import math
+import mmap
 import os
-import re
 import time
+import unicodedata
 import zlib
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from functools import cache
 from itertools import combinations
 from pathlib import Path
 from typing import Any, cast
@@ -41,18 +58,76 @@ import numpy as np
 import numpy.typing as npt
 import pyarrow as pa
 import pyarrow.compute as _pc
+import pyarrow.parquet as pq
 
 from wsp_index.refinery import RefineryReader
+from wsp_index.text import language_parts, primary_lang
 
 SPELL_FILE = "spelling.bin"
-MAGIC = b"WSPSPEL1"
-_HEADER = len(MAGIC) + 24
-_WORD = re.compile(r"[^\W\d_]+(?:['" "\u2019" r"][^\W\d_]+)*", re.UNICODE)
+MAGIC = b"WSPSPEL2"
+MAGIC_V1 = b"WSPSPEL1"
+ANY = "any"
 
 pc: Any = _pc  # the compute stubs are too partial for strict checking; results are cast at use
 
 U64 = npt.NDArray[np.uint64]
 U32 = npt.NDArray[np.uint32]
+
+# --- the shared tokenizer ----------------------------------------------------------------------------
+
+_SPLIT = r"[^\pL\pM'\x{2019}]+"
+_APOSTROPHES = "'\u2019"
+_NO_SPACE = r"^[\p{Han}\p{Hiragana}\p{Katakana}\p{Thai}\p{Lao}\p{Khmer}\p{Myanmar}\p{Tibetan}]"
+
+
+def normalize_words(words: pa.Array[Any]) -> pa.Array[Any]:
+    """Arrow's per-character lower case, final sigma folded to sigma, the right single quote as ``'``.
+
+    Not ``str.casefold`` (which turns "ß" into "ss") and not ``str.lower`` (context-dependent final
+    sigma): the query runs through this same function, so both sides always agree.
+    """
+    low = pc.utf8_lower(words)
+    low = pc.replace_substring(low, pattern="\u03c2", replacement="\u03c3")
+    return cast("pa.Array[Any]", pc.replace_substring(low, pattern="\u2019", replacement="'"))
+
+
+def spell_tokens(texts: pa.Array[Any]) -> pa.Array[Any]:
+    """Raw word tokens of ``texts`` (case kept): runs of letters, combining marks and apostrophes,
+    apostrophes trimmed from both ends ("'hello'" -> "hello", "don't" stays one word)."""
+    parts = pc.split_pattern_regex(texts, pattern=_SPLIT)
+    flat = pc.list_flatten(parts)
+    flat = pc.utf8_trim(flat, characters=_APOSTROPHES)
+    return cast("pa.Array[Any]", flat.filter(pc.greater(pc.utf8_length(flat), 0)))
+
+
+def query_words(query: str) -> list[tuple[str, str]]:
+    """``(raw token, normalized word)`` of a query, in order (the query side of :func:`spell_tokens`)."""
+    raw = spell_tokens(pa.array([query], type=pa.string()))
+    if not len(raw):
+        return []
+    norm = normalize_words(raw)
+    return list(zip(cast(list[str], raw.to_pylist()), cast(list[str], norm.to_pylist()), strict=True))
+
+
+def iter_words(text: str) -> Iterator[str]:
+    """Normalized words of ``text`` (any length)."""
+    for _, w in query_words(text):
+        yield w
+
+
+@cache
+def script_of(ch: str) -> str:
+    """Coarse Unicode script of a letter: the first word of its name (LATIN, CYRILLIC, CJK, ...)."""
+    name = unicodedata.name(ch, "")
+    head = name.split(" ", 1)[0] if name else ""
+    return {"HIRAGANA": "KANA", "KATAKANA": "KANA"}.get(head, head)[:8] or "OTHER"
+
+
+def word_script(word: str) -> str:
+    for ch in word:
+        if ch.isalpha():
+            return script_of(ch)
+    return "OTHER"
 
 
 def word_hash(word: str) -> int:
@@ -92,6 +167,9 @@ def osa_distance(a: str, b: str, limit: int) -> int:
     return prev[len(b)]
 
 
+# --- configuration -----------------------------------------------------------------------------------
+
+
 @dataclass(frozen=True, slots=True)
 class SpellConfig:
     max_distance: int = 2
@@ -100,16 +178,21 @@ class SpellConfig:
     min_count: int = 3
     """Words seen fewer times are not in the vocabulary (typos in the corpus itself)."""
     min_count_docs: int = 100_000
-    """``min_count`` applies from this many documents on; a smaller library keeps every word."""
-    max_words: int = 500_000
+    """``min_count`` applies from this many documents of a language on; fewer keep every word."""
+    max_words: int = 300_000
+    """Words kept per language (the most frequent)."""
     min_length: int = 3
     max_length: int = 24
     title_weight: int = 5
     """A word in a title counts this many times (titles name the things people look for)."""
     max_chars: int = 3_000
     """Text characters read per document (the lead carries most of the vocabulary)."""
-    max_docs: int = 2_000_000
-    """Documents read per source."""
+    max_docs: int = 400_000
+    """Documents sampled per language (row groups spread evenly over the language's parts)."""
+    min_language_docs: int = 50
+    """Languages with fewer documents share one ``any`` vocabulary instead of getting their own."""
+    languages: tuple[str, ...] = ()
+    """Only these languages (primary subtags); empty: every language with enough documents."""
     batch_size: int = 4096
 
 
@@ -120,31 +203,30 @@ class VocabStats:
     words: int
     deletes: int
     seconds: float
+    languages: Mapping[str, int] = field(default_factory=dict[str, int])
+    """Words per language vocabulary."""
 
     def line(self) -> str:
+        langs = ", ".join(f"{k} {v:,}" for k, v in sorted(self.languages.items(), key=lambda kv: -kv[1])[:12])
         return (
             f"{self.words:,} words from {self.documents:,} documents ({self.distinct_tokens:,} distinct "
-            f"tokens), {self.deletes:,} delete keys in {self.seconds:.1f}s"
+            f"tokens), {self.deletes:,} delete keys in {self.seconds:.1f}s" + (f" [{langs}]" if langs else "")
         )
 
 
-# --- building --------------------------------------------------------------------------------------
+# --- counting -----------------------------------------------------------------------------------------
 
 
-def _tokens(texts: pa.Array[Any], cfg: SpellConfig) -> pa.Table:
-    """``(w, c)`` counts of letter-only tokens of the right length in ``texts``."""
-    low = pc.utf8_lower(texts)
-    parts = pc.split_pattern_regex(low, pattern=r"[^\pL\pM]+")
-    flat = cast("pa.Array[Any]", pc.list_flatten(parts))
+def _counts(texts: pa.Array[Any], cfg: SpellConfig) -> pa.Table:
+    """``(w, c)`` counts of the normalized words of the right length in ``texts``."""
+    flat = spell_tokens(texts)
     lengths = pc.utf8_length(flat)
-    ok = pc.and_(
-        pc.greater_equal(lengths, cfg.min_length),
-        pc.less_equal(lengths, cfg.max_length),
-    )
+    ok = pc.and_(pc.greater_equal(lengths, cfg.min_length), pc.less_equal(lengths, cfg.max_length))
     flat = flat.filter(ok)
+    flat = flat.filter(pc.invert(pc.match_substring_regex(flat, pattern=_NO_SPACE)))
     if not len(flat):
         return pa.Table.from_arrays([pa.array([], pa.string()), pa.array([], pa.int64())], names=["w", "c"])
-    vc = pc.value_counts(flat)
+    vc = pc.value_counts(normalize_words(flat))
     counts = pc.cast(vc.field("counts"), pa.int64())
     return pa.Table.from_arrays([vc.field("values"), counts], names=["w", "c"])
 
@@ -178,79 +260,191 @@ class _Counter:
         self.pending, self.rows = [], 0
 
 
+def _even(n: int, k: int) -> list[int]:
+    """``k`` indexes spread evenly over ``range(n)`` (all of them when ``k >= n``)."""
+    if k >= n:
+        return list(range(n))
+    return sorted({int(i * n / k) for i in range(k)})
+
+
+def sample_language(
+    reader: RefineryReader, parts: Sequence[tuple[int, int]], lang: str, max_docs: int, columns: Sequence[str]
+) -> Iterator[pa.Table]:
+    """Rows whose ``lang`` column is ``lang``, about ``max_docs`` of them, from row groups spread
+    evenly over ``parts`` (``(part, rows of lang in it)``, :func:`wsp_index.text.language_parts`).
+    Never the first N rows in storage order."""
+    total = sum(r for _, r in parts)
+    if total == 0:
+        return
+    share = min(1.0, max_docs / total)
+    for part, rows in parts:
+        pf = pq.ParquetFile(reader.dir / f"part-{part:05d}.parquet")
+        n_rg = pf.metadata.num_row_groups
+        want_rows = max(1, round(rows * share))
+        per_rg = max(1, pf.metadata.num_rows // max(1, n_rg))
+        pick = _even(n_rg, max(1, math.ceil(want_rows / per_rg * pf.metadata.num_rows / max(1, rows))))
+        for rg in pick:
+            table = pf.read_row_group(rg, columns=[*columns, "lang"])  # pyright: ignore[reportUnknownMemberType]
+            yield table.filter(pc.equal(table.column("lang"), lang)).select(list(columns))
+
+
 def count_words(
     readers: Sequence[tuple[str, RefineryReader]],
     cfg: SpellConfig = SpellConfig(),  # noqa: B008 - immutable
     progress: Callable[[str], None] | None = None,
-) -> tuple[dict[str, int], int, int]:
-    """``({word: count}, documents read, distinct tokens)`` over titles and text leads."""
-    counter = _Counter()
-    docs = 0
-    for source, reader in readers:
-        seen = 0
-        for batch in reader.scan(["title", "text"], batch_size=cfg.batch_size):
-            titles = cast("pa.Array[Any]", batch.column(0))
-            texts = cast("pa.Array[Any]", batch.column(1))
-            lead = pc.utf8_slice_codeunits(texts, 0, cfg.max_chars)
-            counter.add(_tokens(titles, cfg), cfg.title_weight)
-            counter.add(_tokens(cast("pa.Array[Any]", lead), cfg))
-            seen += batch.num_rows
-            if seen >= cfg.max_docs:
-                break
-        docs += seen
+) -> tuple[dict[str, dict[str, int]], dict[str, int], int]:
+    """``({lang: {word: count}}, {lang: documents read}, distinct tokens)`` over titles and leads.
+
+    One vocabulary per language with at least ``min_language_docs`` documents; the rest share the
+    ``any`` vocabulary. Each language is sampled from row groups spread over its own parts.
+    """
+    plan: dict[str, list[tuple[RefineryReader, str, list[tuple[int, int]]]]] = {}
+    for _source, reader in readers:
+        for raw, parts in language_parts(reader).items():
+            plan.setdefault(primary_lang(raw), []).append((reader, raw, parts))
+    wanted = {primary_lang(x) for x in cfg.languages}
+    sizes = {lang: sum(r for _, _, parts in srcs for _, r in parts) for lang, srcs in plan.items()}
+    groups: dict[str, list[str]] = {}
+    for lang in sorted(plan):
+        if wanted and lang not in wanted:
+            continue
+        groups.setdefault(lang if sizes[lang] >= cfg.min_language_docs and lang != ANY else ANY, []).append(
+            lang
+        )
+    out: dict[str, dict[str, int]] = {}
+    docs_by_lang: dict[str, int] = {}
+    distinct = 0
+    for vocab, langs in sorted(groups.items()):
+        counter = _Counter()
+        docs = 0
+        available = sum(sizes[lang] for lang in langs)
+        for lang in langs:
+            for reader, raw, parts in plan[lang]:
+                share = sum(r for _, r in parts) / available
+                budget = max(1, round(cfg.max_docs * share))
+                for table in sample_language(reader, parts, raw, budget, ("title", "text")):
+                    titles = table.column(0).combine_chunks()
+                    texts = table.column(1).combine_chunks()
+                    lead = pc.utf8_slice_codeunits(texts, 0, cfg.max_chars)
+                    counter.add(_counts(titles, cfg), cfg.title_weight)
+                    counter.add(_counts(cast("pa.Array[Any]", lead), cfg))
+                    docs += table.num_rows
+        counter.compact()
+        acc = counter.acc
+        if acc is None or acc.num_rows == 0:
+            continue
+        distinct += acc.num_rows
+        floor = cfg.min_count if docs >= cfg.min_count_docs else 1
+        acc = acc.filter(pc.greater_equal(acc.column("c"), floor))
+        counts = cast("npt.NDArray[np.int64]", acc.column("c").to_numpy())
+        if len(counts) > cfg.max_words:
+            keep = np.argpartition(-counts, cfg.max_words - 1)[: cfg.max_words]
+            acc = acc.take(pa.array(np.sort(keep).astype(np.int64), type=pa.int64()))  # pyright: ignore[reportArgumentType]
+        words = cast(list[str], acc.column("w").to_pylist())
+        values = cast(list[int], acc.column("c").to_pylist())
+        out[vocab] = dict(zip(words, values, strict=True))
+        docs_by_lang[vocab] = docs
         if progress:
-            progress(f"spell: {source}: {seen:,} documents read")
-    counter.compact()
-    acc = counter.acc
-    if acc is None or acc.num_rows == 0:
-        return {}, docs, 0
-    distinct = acc.num_rows
-    floor = cfg.min_count if docs >= cfg.min_count_docs else 1
-    acc = acc.filter(pc.greater_equal(acc.column("c"), floor))
-    counts = cast("npt.NDArray[np.int64]", acc.column("c").to_numpy())
-    if len(counts) > cfg.max_words:
-        keep = np.argpartition(-counts, cfg.max_words - 1)[: cfg.max_words]
-        acc = acc.take(keep.tolist())
-    words = cast(list[str], acc.column("w").to_pylist())
-    values = cast(list[int], acc.column("c").to_pylist())
-    return dict(zip(words, values, strict=True)), docs, distinct
+            progress(f"spell: {vocab}: {docs:,} of {available:,} documents sampled, {len(words):,} words")
+    return out, docs_by_lang, distinct
+
+
+# --- the file -----------------------------------------------------------------------------------------
+
+
+def _section(counts: Mapping[str, int], cfg: SpellConfig, floor: int) -> tuple[bytes, int]:
+    words = sorted(counts, key=word_hash)
+    n = len(words)
+    hashes = np.fromiter((word_hash(w) for w in words), dtype=np.uint64, count=n)
+    freq = np.fromiter((min(counts[w], 2**32 - 1) for w in words), dtype=np.uint32, count=n)
+    blobs = [w.encode("utf-8") for w in words]
+    offsets = np.zeros(n + 1, dtype=np.uint64)
+    if blobs:
+        offsets[1:] = np.cumsum(np.fromiter((len(b) for b in blobs), dtype=np.uint64, count=n))
+    blob = b"".join(blobs)
+    del blobs
+    # the delete index, straight into numpy (no Python lists of tens of millions of ints)
+    per_word = [deletes(w, cfg.max_distance, cfg.prefix) for w in words]
+    sizes = np.fromiter((len(v) for v in per_word), dtype=np.int64, count=n)
+    m = int(sizes.sum())
+    dh = np.fromiter((word_hash(v) for vs in per_word for v in vs), dtype=np.uint64, count=m)
+    del per_word
+    dw = np.repeat(np.arange(n, dtype=np.uint32), sizes)
+    order = np.argsort(dh, kind="stable")
+    dh, dw = dh[order], dw[order]
+    total = int(freq.sum(dtype=np.uint64))
+    head = np.array([n, m, len(blob), floor, total], dtype=np.uint64)
+    body = b"".join(
+        [
+            head.tobytes(),
+            hashes.tobytes(),
+            offsets.tobytes(),
+            dh.tobytes(),
+            freq.tobytes(),
+            dw.tobytes(),
+            blob,
+        ]
+    )
+    return body, m
+
+
+def _pad(n: int) -> int:
+    return (-n) % 8
+
+
+def _vocab_script(counts: Mapping[str, int]) -> str:
+    """The script most of a vocabulary's frequent words are written in."""
+    top = sorted(counts.items(), key=lambda kv: -kv[1])[:500]
+    tally: dict[str, int] = {}
+    for w, _ in top:
+        s = word_script(w)
+        tally[s] = tally.get(s, 0) + 1
+    return max(tally.items(), key=lambda kv: kv[1])[0] if tally else "OTHER"
+
+
+def encode_vocabularies(
+    vocabs: Mapping[str, Mapping[str, int]],
+    cfg: SpellConfig = SpellConfig(),  # noqa: B008 - immutable
+    floors: Mapping[str, int] | None = None,
+) -> tuple[bytes, int]:
+    """The ``WSPSPEL2`` file's bytes and its number of delete keys."""
+    langs = sorted(vocabs)
+    sections: list[tuple[str, str, bytes]] = []
+    n_del = 0
+    for lang in langs:
+        floor = (floors or {}).get(lang, cfg.min_count)
+        body, m = _section(vocabs[lang], cfg, max(1, floor))
+        sections.append((lang, _vocab_script(vocabs[lang]), body))
+        n_del += m
+    table_size = 8 + 8 + 32 * len(sections)
+    offset = table_size + _pad(table_size)
+    entries: list[bytes] = []
+    for lang, script, body in sections:
+        entries.append(
+            lang.encode("ascii", "replace")[:8].ljust(8, b"\0")
+            + script.encode("ascii", "replace")[:8].ljust(8, b"\0")
+            + np.array([offset, len(body)], dtype=np.uint64).tobytes()
+        )
+        offset += len(body) + _pad(len(body))
+    out = [MAGIC, np.uint64(len(sections)).tobytes(), *entries, b"\0" * _pad(table_size)]
+    for _, _, body in sections:
+        out += [body, b"\0" * _pad(len(body))]
+    return b"".join(out), n_del
 
 
 def encode_vocabulary(counts: Mapping[str, int], cfg: SpellConfig = SpellConfig()) -> tuple[bytes, int]:  # noqa: B008
-    """The vocabulary file's bytes and its number of delete keys."""
-    words = sorted(counts, key=word_hash)
-    hashes = np.fromiter((word_hash(w) for w in words), dtype=np.uint64, count=len(words))
-    freq = np.fromiter((min(counts[w], 2**32 - 1) for w in words), dtype=np.uint32, count=len(words))
-    blobs = [w.encode("utf-8") for w in words]
-    offsets = np.zeros(len(words) + 1, dtype=np.uint64)
-    if blobs:
-        offsets[1:] = np.cumsum([len(b) for b in blobs], dtype=np.uint64)
-    blob = b"".join(blobs)
-    del_h: list[int] = []
-    del_w: list[int] = []
-    for i, w in enumerate(words):
-        for v in deletes(w, cfg.max_distance, cfg.prefix):
-            del_h.append(word_hash(v))
-            del_w.append(i)
-    dh = np.array(del_h, dtype=np.uint64)
-    dw = np.array(del_w, dtype=np.uint32)
-    order = np.argsort(dh, kind="stable")
-    parts = [
-        MAGIC,
-        np.array([len(words), len(blob), len(dh)], dtype=np.uint64).tobytes(),
-        hashes.tobytes(),
-        freq.tobytes(),
-        offsets.tobytes(),
-        blob,
-        dh[order].tobytes(),
-        dw[order].tobytes(),
-    ]
-    return b"".join(parts), len(dh)
+    """A single-vocabulary file (``any`` language, every script), as for tests and samples."""
+    return encode_vocabularies({ANY: counts}, cfg, {ANY: cfg.min_count})
 
 
-def write_vocabulary(path: Path, counts: Mapping[str, int], cfg: SpellConfig = SpellConfig()) -> int:  # noqa: B008
-    """Write the vocabulary and its delete index atomically; returns the number of delete keys."""
-    data, n_del = encode_vocabulary(counts, cfg)
+def write_vocabularies(
+    path: Path,
+    vocabs: Mapping[str, Mapping[str, int]],
+    cfg: SpellConfig = SpellConfig(),  # noqa: B008 - immutable
+    floors: Mapping[str, int] | None = None,
+) -> int:
+    """Write the vocabularies and their delete indexes atomically; returns the number of delete keys."""
+    data, n_del = encode_vocabularies(vocabs, cfg, floors)
     tmp = path.with_name(path.name + ".partial")
     path.parent.mkdir(parents=True, exist_ok=True)
     with tmp.open("wb") as fh:
@@ -261,6 +455,10 @@ def write_vocabulary(path: Path, counts: Mapping[str, int], cfg: SpellConfig = S
     return n_del
 
 
+def write_vocabulary(path: Path, counts: Mapping[str, int], cfg: SpellConfig = SpellConfig()) -> int:  # noqa: B008
+    return write_vocabularies(path, {ANY: counts}, cfg, {ANY: cfg.min_count})
+
+
 def build_vocabulary(
     readers: Sequence[tuple[str, RefineryReader]],
     path: Path,
@@ -268,12 +466,20 @@ def build_vocabulary(
     progress: Callable[[str], None] | None = None,
 ) -> VocabStats:
     t0 = time.monotonic()
-    counts, docs, distinct = count_words(readers, cfg, progress)
-    n_del = write_vocabulary(path, counts, cfg)
-    return VocabStats(docs, distinct, len(counts), n_del, time.monotonic() - t0)
+    vocabs, docs, distinct = count_words(readers, cfg, progress)
+    floors = {lang: (cfg.min_count if n >= cfg.min_count_docs else 1) for lang, n in docs.items()}
+    n_del = write_vocabularies(path, vocabs, cfg, floors)
+    return VocabStats(
+        documents=sum(docs.values()),
+        distinct_tokens=distinct,
+        words=sum(len(v) for v in vocabs.values()),
+        deletes=n_del,
+        seconds=time.monotonic() - t0,
+        languages={lang: len(v) for lang, v in vocabs.items()},
+    )
 
 
-# --- correcting ------------------------------------------------------------------------------------
+# --- correcting ---------------------------------------------------------------------------------------
 
 
 @dataclass(frozen=True, slots=True)
@@ -284,63 +490,68 @@ class Correction:
     count: int
 
 
-class Speller:
-    """Noisy-channel corrector over a vocabulary file (or in-memory counts, for tests and samples)."""
+class Vocabulary:
+    """One language's vocabulary over aligned views of a buffer."""
 
     def __init__(
         self,
+        lang: str,
+        script: str,
         buf: npt.NDArray[np.uint8],
         *,
+        version: int = 2,
         max_distance: int = 2,
         prefix: int = 7,
         epsilon: float = 0.01,
+        min_ratio: float = 10.0,
     ) -> None:
-        if bytes(buf[: len(MAGIC)]) != MAGIC:
-            raise ValueError("not a spelling vocabulary")
-        n, blob_len, m = (int(x) for x in np.frombuffer(buf[len(MAGIC) : _HEADER], dtype=np.uint64))
-        expected = _HEADER + n * 8 + n * 4 + (n + 1) * 8 + blob_len + m * 8 + m * 4
-        if len(buf) != expected:
-            raise ValueError(f"truncated spelling vocabulary ({len(buf)} bytes, want {expected})")
-        off = _HEADER
-        self._hash: U64 = buf[off : off + 8 * n].view(np.uint64)
-        off += 8 * n
-        self._count: U32 = buf[off : off + 4 * n].view(np.uint32)
-        off += 4 * n
-        self._offsets: U64 = buf[off : off + 8 * (n + 1)].view(np.uint64)
-        off += 8 * (n + 1)
-        self._blob = buf[off : off + blob_len]
-        off += blob_len
-        self._del_hash: U64 = buf[off : off + 8 * m].view(np.uint64)
-        off += 8 * m
-        self._del_word: U32 = buf[off : off + 4 * m].view(np.uint32)
+        self.lang, self.script = lang, script
+        if version == 1:
+            n, blob_len, m = (int(x) for x in np.frombuffer(buf[8:32].tobytes(), dtype=np.uint64))
+            off = 32
+            hash_off = off
+            count_off = off + 8 * n
+            offs_off = count_off + 4 * n
+            blob_off = offs_off + 8 * (n + 1)
+            dh_off = blob_off + blob_len
+            dw_off = dh_off + 8 * m
+            expected = dw_off + 4 * m
+            floor, total = 1, 0
+            if len(buf) != expected:
+                raise ValueError(f"truncated spelling vocabulary ({len(buf)} bytes, want {expected})")
+            # version 1 may be misaligned: copy the arrays once (the blob stays a view)
+            self._hash = np.frombuffer(buf[hash_off:count_off].tobytes(), dtype=np.uint64)
+            self._count = np.frombuffer(buf[count_off:offs_off].tobytes(), dtype=np.uint32)
+            self._offsets = np.frombuffer(buf[offs_off:blob_off].tobytes(), dtype=np.uint64)
+            self._del_hash = np.frombuffer(buf[dh_off:dw_off].tobytes(), dtype=np.uint64)
+            self._del_word = np.frombuffer(buf[dw_off:expected].tobytes(), dtype=np.uint32)
+            self._blob = buf[blob_off:dh_off]
+        else:
+            if len(buf) < 40:
+                raise ValueError("truncated spelling vocabulary section")
+            n, m, blob_len, floor, total = (int(x) for x in buf[:40].view(np.uint64))
+            off = 40
+            self._hash = buf[off : off + 8 * n].view(np.uint64)
+            off += 8 * n
+            self._offsets = buf[off : off + 8 * (n + 1)].view(np.uint64)
+            off += 8 * (n + 1)
+            self._del_hash = buf[off : off + 8 * m].view(np.uint64)
+            off += 8 * m
+            self._count = buf[off : off + 4 * n].view(np.uint32)
+            off += 4 * n
+            self._del_word = buf[off : off + 4 * m].view(np.uint32)
+            off += 4 * m
+            self._blob = buf[off : off + blob_len]
+            if off + blob_len != len(buf):
+                raise ValueError(f"spelling vocabulary section of {len(buf)} bytes, want {off + blob_len}")
         self.size = n
+        self.floor = max(1, floor)
+        self.total = total or int(self._count.sum(dtype=np.uint64)) or 1
         self.max_distance = max_distance
         self.prefix = prefix
         self.log_eps = float(np.log(epsilon))
-
-    @classmethod
-    def open(cls, path: Path, **kw: Any) -> Speller | None:
-        try:
-            if not path.is_file():
-                return None
-            return cls(np.memmap(path, dtype=np.uint8, mode="r"), **kw)
-        except (OSError, ValueError):
-            return None
-
-    @classmethod
-    def from_counts(cls, counts: Mapping[str, int], **kw: Any) -> Speller:
-        """An in-memory speller (tests, the sample library)."""
-        cfg = SpellConfig(max_distance=kw.get("max_distance", 2), prefix=kw.get("prefix", 7), min_count=1)
-        data, _ = encode_vocabulary({w.casefold(): c for w, c in counts.items()}, cfg)
-        return cls(np.frombuffer(data, dtype=np.uint8), **kw)
-
-    @classmethod
-    def from_texts(cls, texts: Iterable[str], **kw: Any) -> Speller:
-        counts: dict[str, int] = {}
-        for t in texts:
-            for w in iter_words(t):
-                counts[w] = counts.get(w, 0) + 1
-        return cls.from_counts(counts, **kw)
+        self.log_total = math.log(self.total)
+        self.unknown_score = math.log(self.floor * max(1e-6, min_ratio)) + self.log_eps
 
     def __len__(self) -> int:
         return self.size
@@ -350,7 +561,6 @@ class Speller:
         return bytes(self._blob[a:b]).decode("utf-8")
 
     def count(self, word: str) -> int:
-        """How often ``word`` (lower case) occurs in the library; 0 if it is not in the vocabulary."""
         if not self.size:
             return 0
         h = np.uint64(word_hash(word))
@@ -374,21 +584,21 @@ class Speller:
         ids = np.unique(np.concatenate(spans)).astype(np.int64)
         nbytes = (self._offsets[ids + 1] - self._offsets[ids]).astype(np.int64)
         wlen = len(word.encode("utf-8"))
-        ids = ids[np.abs(nbytes - wlen) <= 2 * limit]  # bytes: ≤ 2 per character in Latin scripts
+        width = max(len(ch.encode("utf-8")) for ch in word)  # 1 Latin, 2 Cyrillic, 3 Devanagari ...
+        ids = ids[np.abs(nbytes - wlen) <= max(2, width) * limit]
         return ids[np.argsort(-self._count[ids].astype(np.int64), kind="stable")]
 
-    def _limit(self, word: str) -> int:
+    def limit(self, word: str) -> int:
         return self.max_distance if len(word) > 4 else min(1, self.max_distance)
 
-    def _cost(self, word: str, cand: str, dist: int) -> float:
+    def cost(self, word: str, cand: str, dist: int) -> float:
         """Error-model log probability: ``epsilon`` per edit, one more when the first letter differs
         (people rarely mistype it: "lisbn" is Lisbon, not ISBN)."""
         extra = 1 if word[:1] != cand[:1] else 0
         return (dist + extra) * self.log_eps
 
     def candidates(self, word: str) -> list[tuple[str, int, int]]:
-        """``(candidate, distance, count)`` of vocabulary words within the edit limit, by count."""
-        limit = self._limit(word)
+        limit = self.limit(word)
         out: list[tuple[str, int, int]] = []
         for i in self._candidate_ids(word, limit).tolist():
             cand = self._word(i)
@@ -397,12 +607,24 @@ class Speller:
                 out.append((cand, dist, int(self._count[i])))
         return out
 
-    def best(self, word: str) -> Correction | None:
-        """The noisy-channel choice for one lower-case word, or None to keep it."""
+    def best(self, word: str) -> tuple[Correction | None, float]:
+        """The noisy-channel choice for one normalized word (None: keep it) and the log probability
+        of the word under this vocabulary (its own count, or its best correction's, minus the edits).
+
+        A known word is replaced only by a word ``1 / epsilon`` times more frequent per edit. An
+        unknown word is replaced only by a word at least ``min_ratio * floor`` times frequent at one
+        edit (30 occurrences in the sample with the defaults; 3,000 at two edits): "zzq" is not
+        "zzz" (7 occurrences in 222k English articles), "insulen" is "insulin" (114); words under
+        five letters need ten times more. An unknown word without a correction scores as a word
+        three edits from a ``floor``-count word.
+        """
         own = self.count(word)
-        best_score = float(np.log(own)) if own else -np.inf
+        known = own > 0
+        best_score = float(np.log(own)) if known else self.unknown_score
+        if not known and len(word) < 5:
+            best_score += math.log(10.0)  # short words have many neighbours: "zzq" is not "zzr"
         choice: Correction | None = None
-        limit = self._limit(word)
+        limit = self.limit(word)
         for i in self._candidate_ids(word, limit).tolist():
             count = int(self._count[i])
             if float(np.log(count)) + self.log_eps < best_score:
@@ -413,48 +635,231 @@ class Speller:
             dist = osa_distance(word, cand, limit)
             if dist > limit:
                 continue
-            score = float(np.log(count)) + self._cost(word, cand, dist)
+            score = float(np.log(count)) + self.cost(word, cand, dist)
             if score > best_score:
                 best_score = score
                 choice = Correction(word, cand, dist, count)
-        return choice
+        if choice is None and not known:
+            best_score = float(np.log(self.floor)) + 3 * self.log_eps
+        return choice, best_score - self.log_total
+
+
+def _display(candidate: str, raw: str) -> str:
+    """The candidate in the raw word's capitalization; Greek final sigma restored."""
+    if candidate.endswith("\u03c3") and script_of(candidate[0]) == "GREEK":
+        candidate = candidate[:-1] + "ς"
+    if raw.isupper() and len(raw) > 1:
+        return candidate.upper()
+    if raw[:1].isupper():
+        return candidate[:1].upper() + candidate[1:]
+    return candidate
+
+
+class Speller:
+    """Noisy-channel corrector over a vocabulary file (or in-memory counts, for tests and samples)."""
+
+    def __init__(
+        self,
+        buf: npt.NDArray[np.uint8],
+        *,
+        max_distance: int = 2,
+        prefix: int = 7,
+        epsilon: float = 0.01,
+        min_ratio: float = 10.0,
+        prefer: Sequence[str] = ("en",),
+        prefer_weight: float = 100.0,
+    ) -> None:
+        """``prefer``: languages assumed ``prefer_weight`` times likelier a priori (the interface
+        language); it only matters when the words themselves do not tell (all unknown everywhere)."""
+        kw: dict[str, Any] = {
+            "max_distance": max_distance,
+            "prefix": prefix,
+            "epsilon": epsilon,
+            "min_ratio": min_ratio,
+        }
+        self.prefer = frozenset(prefer)
+        self.log_prefer = math.log(max(1.0, prefer_weight))
+        head = bytes(buf[:8])
+        self.vocabs: list[Vocabulary] = []
+        if head == MAGIC_V1:
+            self.vocabs.append(Vocabulary(ANY, ANY.upper(), buf, version=1, **kw))
+        elif head == MAGIC:
+            if len(buf) < 16:
+                raise ValueError("truncated spelling vocabulary")
+            k = int(np.frombuffer(buf[8:16].tobytes(), dtype=np.uint64)[0])
+            table_end = 16 + 32 * k
+            if len(buf) < table_end:
+                raise ValueError("truncated spelling vocabulary table")
+            end = table_end + _pad(table_end)
+            for i in range(k):
+                e = buf[16 + 32 * i : 16 + 32 * (i + 1)].tobytes()
+                lang = e[:8].rstrip(b"\0").decode("ascii")
+                script = e[8:16].rstrip(b"\0").decode("ascii")
+                off, length = (int(x) for x in np.frombuffer(e[16:32], dtype=np.uint64))
+                if off % 8 or off + length > len(buf):
+                    raise ValueError(f"spelling vocabulary section {lang!r} out of bounds")
+                self.vocabs.append(Vocabulary(lang, script, buf[off : off + length], **kw))
+                end = max(end, off + length + _pad(length))
+            if end != len(buf):
+                raise ValueError(f"spelling vocabulary of {len(buf)} bytes, want {end}")
+        else:
+            raise ValueError("not a spelling vocabulary")
+        self.size = sum(len(v) for v in self.vocabs)
+        self.max_distance = max_distance
+        self.prefix = prefix
+
+    @classmethod
+    def open(cls, path: Path, **kw: Any) -> Speller | None:
+        try:
+            if not path.is_file():
+                return None
+            with path.open("rb") as fh:
+                mm = mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_READ)
+            if hasattr(mmap, "MADV_RANDOM"):
+                mm.madvise(mmap.MADV_RANDOM)
+            return cls(np.frombuffer(mm, dtype=np.uint8), **kw)
+        except (OSError, ValueError):
+            return None
+
+    @classmethod
+    def from_counts(cls, counts: Mapping[str, int], **kw: Any) -> Speller:
+        """An in-memory single-vocabulary speller (tests, the sample library)."""
+        return cls.from_vocabularies({ANY: counts}, **kw)
+
+    @classmethod
+    def from_vocabularies(cls, vocabs: Mapping[str, Mapping[str, int]], **kw: Any) -> Speller:
+        """An in-memory speller with one vocabulary per language (``{lang: {word: count}}``).
+
+        Small in-memory vocabularies (tests, the sample library) default to ``min_ratio=0.5``: their
+        counts are too small for the library default of 10: here a word seen once beats an
+        unknown word at one edit."""
+        kw.setdefault("min_ratio", 0.5)
+        cfg = SpellConfig(max_distance=kw.get("max_distance", 2), prefix=kw.get("prefix", 7), min_count=1)
+        floors = kw.pop("floors", None)
+        norm: dict[str, dict[str, int]] = {}
+        for lang, counts in vocabs.items():
+            words = list(counts)
+            folded = (
+                cast(list[str], normalize_words(pa.array(words, type=pa.string())).to_pylist())
+                if words
+                else []
+            )
+            merged: dict[str, int] = {}
+            for w, f in zip(folded, words, strict=True):
+                merged[w] = merged.get(w, 0) + counts[f]
+            norm[lang] = merged
+        data, _ = encode_vocabularies(norm, cfg, floors or dict.fromkeys(norm, 1))
+        return cls(np.frombuffer(data, dtype=np.uint8), **kw)
+
+    @classmethod
+    def from_texts(cls, texts: Iterable[str], **kw: Any) -> Speller:
+        counts: dict[str, int] = {}
+        for t in texts:
+            for w in iter_words(t):
+                counts[w] = counts.get(w, 0) + 1
+        return cls.from_counts(counts, **kw)
+
+    def __len__(self) -> int:
+        return self.size
+
+    @property
+    def languages(self) -> list[str]:
+        return [v.lang for v in self.vocabs]
+
+    # --- vocabulary choice ---
+
+    def _for_script(self, script: str) -> list[Vocabulary]:
+        exact = [v for v in self.vocabs if v.script == script]
+        return exact or [v for v in self.vocabs if v.script in (ANY.upper(), "OTHER")]
+
+    def choose(self, words: Sequence[str]) -> Vocabulary | None:
+        """The vocabulary under which these normalized words are most probable.
+
+        The script of most words picks the candidates (Latin, Cyrillic, ...); among them, the sum of
+        each word's log probability (:meth:`Vocabulary.best`) plus the prior of ``prefer``."""
+        usable = [w for w in words if len(w) >= 3]
+        if not self.vocabs:
+            return None
+        if not usable:
+            return self.vocabs[0] if len(self.vocabs) == 1 else None
+        scripts: dict[str, int] = {}
+        for w in usable:
+            s = word_script(w)
+            scripts[s] = scripts.get(s, 0) + 1
+        script = max(scripts.items(), key=lambda kv: kv[1])[0]
+        pool = self._for_script(script)
+        if len(pool) <= 1:
+            return pool[0] if pool else None
+        best: tuple[float, int, Vocabulary] | None = None
+        for v in pool:
+            score = self.log_prefer if v.lang in self.prefer else 0.0
+            for w in usable:
+                c = v.count(w)
+                score += (math.log(c) - v.log_total) if c else v.best(w)[1]
+            key = (score, len(v), v)
+            if best is None or key[:2] > best[:2]:
+                best = key
+        return best[2] if best else None
+
+    # --- the port ---
+
+    def count(self, word: str, lang: str | None = None) -> int:
+        """How often ``word`` (normalized) occurs; the largest count over vocabularies of its script
+        unless ``lang`` names one; 0 if no vocabulary knows it."""
+        if lang is not None:
+            return next((v.count(word) for v in self.vocabs if v.lang == lang), 0)
+        return max((v.count(word) for v in self._for_script(word_script(word))), default=0)
+
+    def best(self, word: str) -> Correction | None:
+        """The noisy-channel choice for one normalized word in its vocabulary, or None to keep it."""
+        v = self.choose([word])
+        return None if v is None else v.best(word)[0]
+
+    def candidates(self, word: str) -> list[tuple[str, int, int]]:
+        v = self.choose([word])
+        return [] if v is None else v.candidates(word)
 
     def correct(self, query: str, *, only: Iterable[str] | None = None) -> str | None:
         """The query with misspelled words replaced, or None when nothing changes.
 
-        ``only`` restricts corrections to these (lower-case) words. Digits, short words and
-        anything that is not a letter run are left alone; capitalization is kept.
+        ``only`` restricts corrections to these words (normalized like the query). Digits, short
+        words and anything that is not a letter run are left alone; capitalization is kept.
         """
-        allowed = None if only is None else {w.casefold() for w in only}
+        pairs = query_words(query)
+        if not pairs:
+            return None
+        vocab = self.choose([w for _, w in pairs])
+        if vocab is None:
+            return None
+        allowed = None if only is None else {w for _, w in query_words(" ".join(only))}
+        out: list[str] = []
+        pos = 0
         changed = False
-
-        def fix(m: re.Match[str]) -> str:
-            nonlocal changed
-            raw = m.group(0)
-            low = raw.casefold()
-            if len(low) < 3 or (allowed is not None and low not in allowed):
-                return raw
-            c = self.best(low)
-            if c is None:
-                return raw
-            changed = True
-            if raw.isupper() and len(raw) > 1:
-                return c.candidate.upper()
-            if raw[0].isupper():
-                return c.candidate[:1].upper() + c.candidate[1:]
-            return c.candidate
-
-        out = _WORD.sub(fix, query)
-        return out if changed and out != query else None
+        for raw, word in pairs:
+            at = query.find(raw, pos)
+            if at < 0:  # cannot happen: tokens are substrings of the query; keep it safe anyway
+                return None
+            out.append(query[pos:at])
+            pos = at + len(raw)
+            fix = None
+            if len(word) >= 3 and (allowed is None or word in allowed):
+                fix = vocab.best(word)[0]
+            if fix is None:
+                out.append(raw)
+            else:
+                out.append(_display(fix.candidate, raw))
+                changed = True
+        out.append(query[pos:])
+        fixed = "".join(out)
+        return fixed if changed and fixed != query else None
 
     def unknown(self, query: str) -> list[str]:
-        """Lower-case words of the query (3+ letters) that are not in the vocabulary."""
-        return [w for w in iter_words(query) if len(w) >= 3 and not self.count(w)]
-
-
-def iter_words(text: str) -> Iterator[str]:
-    for m in _WORD.finditer(text):
-        yield m.group(0).casefold()
+        """Normalized words of the query (3+ letters) that its vocabulary does not know."""
+        words = [w for _, w in query_words(query)]
+        vocab = self.choose(words)
+        if vocab is None:
+            return []
+        return [w for w in words if len(w) >= 3 and not vocab.count(w)]
 
 
 class ReloadingSpeller:

@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import sqlite3
 import time
@@ -86,8 +87,19 @@ class SourceReport:
     skipped: str | None = None  # reason the source was skipped
 
 
-def _alias_title(native_id: str) -> str:
-    return native_id.rsplit("/", 1)[-1].replace("_", " ").strip()
+_ID_PREFIX = re.compile(r"^[a-z][a-z0-9._-]*/")  # a language ("en/", "zh-yue/") or ZIM book prefix
+
+
+def _alias_title(native_id: str, target: str = "") -> str:
+    """The title of a redirect: its native id without the source's language/book prefix.
+
+    The prefix is the first segment when the redirect and its ``target`` share it and it looks
+    like a prefix (lower case: ``en/``, ``wikipedia_de_all/``); a title's own "/" is kept
+    (``en/AC/DC_(album)`` -> ``AC/DC (album)``, not ``DC (album)``).
+    """
+    m = _ID_PREFIX.match(native_id)
+    title = native_id[m.end() :] if m and target.startswith(m.group(0)) else native_id
+    return title.replace("_", " ").strip()
 
 
 class Indexer:
@@ -194,7 +206,7 @@ class Indexer:
         batch: list[tuple[str, str]] = []
         for entry in adapter.entries(ctx, generation_path):
             if isinstance(entry, Redirect):
-                batch.append((entry.target, _alias_title(entry.native_id)))
+                batch.append((entry.target, _alias_title(entry.native_id, entry.target)))
                 if len(batch) >= 5_000:
                     db.executemany("INSERT INTO redirects VALUES (?, ?)", batch)
                     batch.clear()

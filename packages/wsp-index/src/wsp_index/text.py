@@ -1,11 +1,19 @@
-"""Text normalization and per-language analyzers shared by the lexical index and suggest."""
+"""Text normalization and per-language analyzers shared by the lexical index and suggest, and the
+per-language layout of a Refinery generation (for samples and catalogs that must not follow storage
+order)."""
 
 from __future__ import annotations
 
 import re
 import unicodedata
+from typing import TYPE_CHECKING, Any, cast
 
+import pyarrow.compute as pc
+import pyarrow.parquet as pq
 import tantivy
+
+if TYPE_CHECKING:
+    from wsp_index.refinery import RefineryReader
 
 # BCP-47 primary subtag -> Tantivy (Snowball) stemmer name.
 STEMMERS: dict[str, str] = {
@@ -162,3 +170,21 @@ def drop_stopwords(query: str, stopwords: frozenset[str] | None = None) -> str:
     words = query.split()
     kept = [w for w in words if w.casefold() not in stopwords]
     return " ".join(kept) if kept else query
+
+
+def language_parts(reader: RefineryReader) -> dict[str, list[tuple[int, int]]]:
+    """``{lang: [(part, rows in that language), ...]}`` of a generation, from each part's ``lang``
+    column (a few bytes a row; 641 wikipedia-top10 parts read in seconds).
+
+    Parts are not language blocks: a multi-language source writes languages roughly in turn, but
+    one language's documents spread over parts far apart (German articles sit among the Cebuano
+    parts of wikipedia-top10), so per-language work reads these parts, never a storage-order prefix.
+    Shadowed rows of a set generation are counted (one in 32M on wikipedia-top10).
+    """
+    out: dict[str, list[tuple[int, int]]] = {}
+    for part, path in enumerate(reader.parts):
+        col = pq.read_table(path, columns=["lang"]).column(0)  # pyright: ignore[reportUnknownMemberType]
+        vc = cast(Any, pc).value_counts(col)
+        for lang, count in zip(vc.field("values").to_pylist(), vc.field("counts").to_pylist(), strict=True):
+            out.setdefault(str(lang or ""), []).append((part, int(count)))
+    return out
