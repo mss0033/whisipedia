@@ -9,6 +9,10 @@ Operator commands (``ingest``, ``index build``, ``scrub``, ``drill``, ``approve`
 
 argparse rather than Typer/Click: the surface is small, it keeps the dependency tree (and the offline
 audit) minimal, and it type-checks cleanly under pyright strict.
+
+Imports are lazy (audit 2026-10-11 #11): ``wsp search --url ...`` must not load the API app, the
+index or the operator commands. Operator commands import :mod:`wsp_cli.ops` when they run, and the
+``collections`` and ``plan`` command groups are registered only when asked for (or for ``--help``).
 """
 
 from __future__ import annotations
@@ -20,21 +24,33 @@ import os
 import sys
 from collections.abc import Callable, Sequence
 from dataclasses import replace
+from importlib import import_module
 from pathlib import Path
-from typing import Protocol, TextIO
+from typing import Protocol, TextIO, cast
 
 import httpx
 from pydantic import BaseModel
 
-from wsp_api import create_app
-from wsp_api.inprocess import InProcessTransport
-from wsp_api.services import DEFAULT_HOST, DEFAULT_PORT
-from wsp_cli import bootstrap, doccollections, multilingual, ops
-from wsp_core.registry import RegistryError, load_registry
+from wsp_cli import bootstrap
 from wsp_sdk import WspApiError, WspClient
-from wsp_vault.drill import DrillKind
+
+DEFAULT_HOST = "127.0.0.1"  # = wsp_api.services.DEFAULT_HOST
+DEFAULT_PORT = 8737  # = wsp_api.services.DEFAULT_PORT
+LAZY_GROUPS = {"collections": "wsp_cli.doccollections", "plan": "wsp_cli.multilingual"}
+_TAKES_VALUE = frozenset({"--config-dir", "--url"})
 
 Handler = Callable[[argparse.Namespace, TextIO], int]
+
+
+def _ops(name: str) -> Handler:
+    """A handler from :mod:`wsp_cli.ops`, imported when the command runs (it loads the index stack)."""
+
+    def run(args: argparse.Namespace, out: TextIO) -> int:
+        handler = cast(Handler, getattr(import_module("wsp_cli.ops"), name))
+        return handler(args, out)
+
+    run.__name__ = name
+    return run
 
 
 class _Subparsers(Protocol):
@@ -58,9 +74,13 @@ def _client(args: argparse.Namespace) -> WspClient:
     url: str | None = args.url or os.environ.get("WSP_API_URL")
     if url:
         return WspClient(url)
+    from wsp_api import create_app
+    from wsp_api.inprocess import InProcessTransport
+
     lay = bootstrap.layout(args.config_dir)
     cfg = bootstrap.load(lay)
     _note_backend(cfg)
+    # In-process: no background threads, no worker processes, no warm-up (only `serve` has those).
     app = create_app(bootstrap.build_services(cfg, lay), bootstrap.api_settings(cfg, lay))
     return WspClient(http=httpx.Client(transport=InProcessTransport(app), base_url=f"http://{DEFAULT_HOST}"))
 
@@ -81,15 +101,27 @@ def cmd_serve(args: argparse.Namespace, out: TextIO) -> int:
         return 2
     import uvicorn  # local import: only `serve` needs the ASGI server
 
+    from wsp_api import create_app
+
     lay = bootstrap.layout(args.config_dir)
     cfg = bootstrap.load(lay)
-    settings = bootstrap.api_settings(cfg, lay, static_dir=args.static_dir)
+    settings = bootstrap.serve_settings(cfg, lay, static_dir=args.static_dir)
     if not _is_loopback(host):
         settings = replace(settings, allowed_hosts=(*settings.allowed_hosts, host))
     _note_backend(cfg)
     app = create_app(bootstrap.build_services(cfg, lay), settings)
     out.write(f"Whisipedia API on http://{host}:{args.port}/ (static: {settings.static_dir})\n")
-    uvicorn.run(app, host=host, port=args.port, server_header=False, proxy_headers=False, log_level="info")
+    # No access log: a page view with images is hundreds of lines (audit #21). Failed and slow requests
+    # are logged by wsp_api.serving.SlowRequestLog.
+    uvicorn.run(
+        app,
+        host=host,
+        port=args.port,
+        server_header=False,
+        proxy_headers=False,
+        log_level="info",
+        access_log=False,
+    )
     return 0
 
 
@@ -112,7 +144,7 @@ def cmd_search(args: argparse.Namespace, out: TextIO) -> int:
 
 def cmd_doc(args: argparse.Namespace, out: TextIO) -> int:
     with _client(args) as wsp:
-        doc = wsp.document(args.doc_id, at=args.at)
+        doc = wsp.document(args.doc_id, at=args.at, fields=["text"])
     if args.json:
         _emit(out, doc)
         return 0
@@ -155,6 +187,8 @@ def cmd_changes(args: argparse.Namespace, out: TextIO) -> int:
 
 
 def cmd_registry_validate(args: argparse.Namespace, out: TextIO) -> int:
+    from wsp_core.registry import RegistryError, load_registry
+
     lay = bootstrap.layout(args.config_dir)
     registry: Path = args.registry or lay.registry
     schema: Path = args.schema or lay.schema
@@ -181,15 +215,39 @@ def cmd_config_show(args: argparse.Namespace, out: TextIO) -> int:
 # --- parser -------------------------------------------------------------------------------------
 
 
-def build_parser() -> argparse.ArgumentParser:
+def command_of(argv: Sequence[str]) -> str | None:
+    """The command word of ``argv`` (after global options), or None."""
+    skip = False
+    for token in argv:
+        if skip:
+            skip = False
+            continue
+        if token in _TAKES_VALUE:
+            skip = True
+            continue
+        if token.startswith("-"):
+            continue
+        return token
+    return None
+
+
+def build_parser(argv: Sequence[str] | None = None) -> argparse.ArgumentParser:
+    """The ``wsp`` parser. With ``argv``, modules that only some commands need are imported only when
+    ``argv`` names one of those commands (or asks for help, or names no known command)."""
+    command = None if argv is None else command_of(argv)
+    wants_help = argv is None or any(t in ("-h", "--help") for t in argv[:1]) or command is None
     p = argparse.ArgumentParser(prog="wsp", description="Whisipedia: a private offline library.")
     p.add_argument("--config-dir", type=Path, default=None, help="default: $WSP_CONFIG_DIR or <repo>/config")
     p.add_argument("--url", default=None, help="API base URL (default: $WSP_API_URL, else run in-process)")
     sub = p.add_subparsers(dest="command", required=True, metavar="COMMAND")
 
+    builtin: set[str] = set()
+
     def add(name: str, handler: Handler, help_: str, parent: _Subparsers = sub) -> argparse.ArgumentParser:
         sp = parent.add_parser(name, help=help_, description=help_)
         sp.set_defaults(handler=handler)
+        if parent is sub:
+            builtin.add(name)
         return sp
 
     s = add("serve", cmd_serve, "Serve the API and the Navigator on loopback.")
@@ -228,7 +286,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = add(
         "ingest",
-        ops.cmd_ingest,
+        _ops("cmd_ingest"),
         "Adopt completed bulk downloads from <vault>/_incoming into the vault "
         "(exit 0 done, 1 a version failed, 3 another ingest runs, 4 files still missing or downloading).",
     )
@@ -245,7 +303,7 @@ def build_parser() -> argparse.ArgumentParser:
     ix_sub = ix.add_subparsers(dest="index_command", required=True, metavar="COMMAND")
     s = add(
         "build",
-        ops.cmd_index_build,
+        _ops("cmd_index_build"),
         "Refine sealed generations to Parquet and index them (local disk).",
         ix_sub,
     )
@@ -253,7 +311,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--no-rank", action="store_true", help="skip the static rank (PageRank) step")
     s = add(
         "rank",
-        ops.cmd_index_rank,
+        _ops("cmd_index_rank"),
         "Recompute the link-analysis static rank (PageRank), suggest priors and featured articles.",
         ix_sub,
     )
@@ -261,26 +319,26 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--mix", type=float, default=0.5, help="weight of the cross-source rank (0-1)")
     s = add(
         "spell",
-        ops.cmd_index_spell,
+        _ops("cmd_index_spell"),
         'Rebuild the "did you mean" vocabulary from the indexed text (local disk).',
         ix_sub,
     )
     s = add(
         "catalog",
-        ops.cmd_index_catalog,
+        _ops("cmd_index_catalog"),
         "Rebuild the portal/directory/random catalog from the Refinery (local disk).",
         ix_sub,
     )
     s.add_argument("--source", default=None, help="only this source id")
 
     s = add(
-        "scrub", ops.cmd_scrub, "Re-hash sealed files that are due and run the repair ladder on findings."
+        "scrub", _ops("cmd_scrub"), "Re-hash sealed files that are due and run the repair ladder on findings."
     )
     s.add_argument("--budget-gb", type=float, default=None, help="stop after hashing this many GB")
 
     s = add(
         "undegrade",
-        ops.cmd_undegrade,
+        _ops("cmd_undegrade"),
         "Fully re-verify a DEGRADED generation and clear the flag only if every file is intact.",
     )
     s.add_argument("source")
@@ -290,14 +348,18 @@ def build_parser() -> argparse.ArgumentParser:
     led_sub = led.add_subparsers(dest="ledger_command", required=True, metavar="COMMAND")
     s = add(
         "recover",
-        ops.cmd_ledger_recover,
+        _ops("cmd_ledger_recover"),
         "Cut a torn ledger day back to its last valid line (the cut bytes are kept as .torn).",
         led_sub,
     )
     s.add_argument("--note", default=None, help="reason recorded in the ledger")
 
-    s = add("drill", ops.cmd_drill, "Break a sandboxed copy of a sealed generation; expect detect + repair.")
-    s.add_argument("--kind", choices=[k.value for k in DrillKind], default=None)
+    s = add(
+        "drill", _ops("cmd_drill"), "Break a sandboxed copy of a sealed generation; expect detect + repair."
+    )
+    s.add_argument(
+        "--kind", choices=_drill_kinds() if wants_help or command == "drill" else None, default=None
+    )
     s.add_argument("--source", default=None, help="drill this source (default: smallest generation)")
 
     for name, help_ in (
@@ -306,7 +368,7 @@ def build_parser() -> argparse.ArgumentParser:
         ("resume", "Resume an auto-paused source."),
         ("retry", "Give a quarantined or backing-off release a fresh start (no attempts counted)."),
     ):
-        s = add(name, ops.cmd_owner, help_)
+        s = add(name, _ops("cmd_owner"), help_)
         s.set_defaults(owner_action=name)
         s.add_argument("source")
         if name != "resume":
@@ -319,30 +381,32 @@ def build_parser() -> argparse.ArgumentParser:
                 help="promote even though a newer generation is current (moves CURRENT backwards)",
             )
 
-    add("status", ops.cmd_status, "Sources, generations, degraded data and the orchestrator queue.")
+    add("status", _ops("cmd_status"), "Sources, generations, degraded data and the orchestrator queue.")
 
     pr = add("proposals", _usage, "Curator proposals: list, show, accept or reject.")
     pr_sub = pr.add_subparsers(dest="proposals_command", required=True, metavar="COMMAND")
-    s = add("list", ops.cmd_proposals_list, "List proposals, newest first.", pr_sub)
+    s = add("list", _ops("cmd_proposals_list"), "List proposals, newest first.", pr_sub)
     s.add_argument("--status", choices=["open", "applied", "accepted", "rejected"], default=None)
     s.add_argument("--json", action="store_true")
-    s = add("show", ops.cmd_proposals_show, "Print one proposal file.", pr_sub)
+    s = add("show", _ops("cmd_proposals_show"), "Print one proposal file.", pr_sub)
     s.add_argument("id", type=int)
     for name, help_ in (
         ("accept", "Write the drafted entry into registry/sources.yaml (working tree) for you to commit."),
         ("reject", "Reject a proposal; the candidate is never proposed again."),
     ):
-        s = add(name, ops.cmd_proposals_decide, help_, pr_sub)
+        s = add(name, _ops("cmd_proposals_decide"), help_, pr_sub)
         s.set_defaults(decision=name)
         s.add_argument("id", type=int)
         s.add_argument("--note", default=None)
 
-    doccollections.register(sub, add)
-    multilingual.register(sub, add)
+    for group, module in LAZY_GROUPS.items():
+        if wants_help or command == group or command not in builtin:
+            register = cast(Callable[[object, object], None], import_module(module).register)
+            register(sub, add)
 
     pa = add("parity", _usage, "par2 parity (Warden).")
     pa_sub = pa.add_subparsers(dest="parity_command", required=True, metavar="COMMAND")
-    add("status", ops.cmd_parity_status, "Parity coverage of sealed generations.", pa_sub)
+    add("status", _ops("cmd_parity_status"), "Parity coverage of sealed generations.", pa_sub)
 
     sv = add("service", _usage, "systemd user units: install, status, uninstall.")
     sv_sub = sv.add_subparsers(dest="service_command", required=True, metavar="COMMAND")
@@ -351,7 +415,7 @@ def build_parser() -> argparse.ArgumentParser:
         ("status", "Show whether the units are installed, enabled and active."),
         ("uninstall", "Disable and remove the units this command installed."),
     ):
-        s = add(name, ops.cmd_service, help_, sv_sub)
+        s = add(name, _ops("cmd_service"), help_, sv_sub)
         s.add_argument("--unit-dir", default=None, help="default: $XDG_CONFIG_HOME/systemd/user")
         if name != "status":
             s.add_argument("--dry-run", action="store_true")
@@ -359,7 +423,9 @@ def build_parser() -> argparse.ArgumentParser:
             s.add_argument("--now", action="store_true", help="also start the services")
             s.add_argument("--no-enable", action="store_true", help="only write the unit files")
 
-    s = add("doctor", ops.cmd_doctor, "Check config, vault, index, disk, tools, services, key and ledger.")
+    s = add(
+        "doctor", _ops("cmd_doctor"), "Check config, vault, index, disk, tools, services, key and ledger."
+    )
     s.add_argument("--quiet", action="store_true", help="print only problems (to stderr)")
     s.add_argument("--require", action="append", default=None, help="only these checks decide the exit code")
 
@@ -369,12 +435,19 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _drill_kinds() -> list[str]:
+    from wsp_vault.drill import DrillKind
+
+    return [k.value for k in DrillKind]
+
+
 def _usage(_: argparse.Namespace, __: TextIO) -> int:  # pragma: no cover - argparse requires a subcommand
     return 2
 
 
 def main(argv: Sequence[str] | None = None, *, out: TextIO | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    raw = list(sys.argv[1:] if argv is None else argv)
+    args = build_parser(raw).parse_args(raw)
     handler: Handler = args.handler
     try:
         return handler(args, out or sys.stdout)

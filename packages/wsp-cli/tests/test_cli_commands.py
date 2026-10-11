@@ -111,6 +111,7 @@ def test_serve_runs_uvicorn_on_loopback(monkeypatch: pytest.MonkeyPatch, tmp_pat
             "server_header": False,
             "proxy_headers": False,
             "log_level": "info",
+            "access_log": False,  # failures and slow requests only (wsp_api.serving.SlowRequestLog)
         }
     ]
     assert str(tmp_path) in text

@@ -15,12 +15,14 @@ from __future__ import annotations
 
 import html
 import re
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
+from typing import cast
 
 from wsp_api.schemas import QueryIntent
 from wsp_api.services import Services
 from wsp_api.sites import sources_named
 from wsp_core.ids import DocId, InvalidDocIdError, make_doc_id, parse_doc_id
+from wsp_core.model import SearchHit
 
 STOPWORDS = frozenset(
     [
@@ -106,6 +108,14 @@ def _exists(services: Services, doc_id: DocId) -> bool:
     return services.documents.get(doc_id) is not None
 
 
+def _title_hits(services: Services, text: str, source_id: str) -> Sequence[SearchHit]:
+    """Lexical, snippet-free hits in one source: enough to compare titles (not a ranked search)."""
+    cheap = getattr(services.index, "search_hits", None)
+    if callable(cheap):
+        return cast(Sequence[SearchHit], cheap(text, limit=20, offset=0, sources=[source_id]))
+    return services.index.search(text, limit=20, sources=[source_id])
+
+
 def _native_candidates(rest: str) -> list[str]:
     under = rest.replace(" ", "_")
     upper = under[:1].upper() + under[1:]  # MediaWiki titles: "alan turing" is "Alan_turing", a redirect
@@ -151,7 +161,7 @@ def navigate_to(
         title = rest.casefold()
         if not any(t.casefold() == title for t in services.index.suggest(rest, limit=20)):
             continue
-        for h in services.index.search(rest, limit=20, sources=[source_id]):
+        for h in _title_hits(services, rest, source_id):
             if h.title.casefold() == title:
                 return h.doc_id
     return None

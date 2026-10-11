@@ -1,165 +1,299 @@
-"""ZIM-backed :class:`~wsp_api.seams.AssetStore`: original HTML and images straight from sealed ZIMs.
+"""ZIM-backed :class:`~wsp_core.ports.AssetStore`: original HTML and images straight from sealed ZIMs.
 
 Paths are native ids. For a single-book source the native id is the ZIM entry path (``A/Alan_Turing``);
 for a bundle of books it is prefixed with the book name (``ifixit_en_all/A/Foo``), exactly as the
-``kiwix-opds`` adapter assigns them. Archives are opened read-only and kept in a small LRU.
+``kiwix-opds`` adapter assigns them (``Name`` metadata, else the dated file name).
+
+The store decides *which file* holds a page; a :class:`~wsp_api.zimread.ZimReader` reads it (worker
+processes in production, see :mod:`wsp_api.zimpool`). Lookups never walk the NAS for unknown input:
+
+* the generation id is checked against the vault's list of generations first (in the server that list
+  is the in-memory library snapshot), so a bogus id costs nothing and evicts nothing (audit #6);
+* a generation's file layout is computed once and kept in a bounded cache (sealed generations never
+  change); failures are not cached;
+* a bundle's book -> file map (``Name`` metadata of each of its ZIMs: one archive open per book) is
+  built once, off the request path when ``sync_books`` is off, and persisted in ``book_index``.
 """
 
 from __future__ import annotations
 
 import html
-import re
+import json
+import logging
+import os
 import threading
 from collections import OrderedDict
+from collections.abc import Mapping
+from concurrent.futures import Future
 from contextlib import suppress
+from dataclasses import dataclass, field
 from pathlib import Path
 
-from libzim.reader import Archive, Entry
+from wsp_api.seams import VaultView
+from wsp_api.zimread import (
+    EntryData,
+    InProcessZimReader,
+    Want,
+    ZimError,
+    ZimReader,
+    ZimUnavailable,
+    file_book_name,
+)
+from wsp_core.model import Asset, GenerationStatus
 
-from wsp_core.model import Asset
-from wsp_core.ports import Vault
+log = logging.getLogger(__name__)
 
-_ZIM_DATE_RE = re.compile(r"_(\d{4}-\d{2})[a-z]?\.zim$")  # "_2026-07", "_2026-07a" (a re-release)
-_MAX_REDIRECTS = 5
 BOOKS_PAGE = "_books"  # native id of the generated book list of a bundle source
+_MAX_LAYOUTS = 512
+_SERVED = (GenerationStatus.SEALED, GenerationStatus.DEGRADED)
 
 
-def _book_name(archive: Archive, path: Path) -> str:
-    """Same rule as ``wsp_adapters.kiwix.book_name`` (``Name`` metadata, else the dated file name)."""
-    if "Name" in archive.metadata_keys:
-        name = archive.get_metadata("Name").decode("utf-8", errors="replace").strip()
-        if name:
-            return name
-    return _ZIM_DATE_RE.sub("", path.name).removesuffix(".zim")
+@dataclass(frozen=True, slots=True)
+class ZimLayout:
+    """The ZIM files of one generation: one book, or a bundle keyed by file-derived book name."""
+
+    files: tuple[str, ...]
+    by_file_name: Mapping[str, str] = field(default_factory=dict[str, str])
+
+    @property
+    def single(self) -> str | None:
+        return self.files[0] if len(self.files) == 1 else None
+
+
+@dataclass(frozen=True, slots=True)
+class ZimPage:
+    """An HTML page: ``native_id`` is the entry actually served (after redirects / the book's front
+    page), which is what relative links in ``html`` resolve against."""
+
+    native_id: str
+    html: str
+    book_root: str  # "" for a single-book source, "<book>/" in a bundle
+
+
+class BookIndex:
+    """``(source, generation) -> {book name: file name}`` for bundles, persisted as one JSON file.
+
+    Generations are immutable, so an entry never goes stale. ``path=None`` keeps it in memory only.
+    """
+
+    def __init__(self, path: Path | None = None) -> None:
+        self.path = path
+        self._lock = threading.Lock()
+        self._maps: dict[str, dict[str, str]] = {}
+        if path is not None and path.is_file():
+            try:
+                raw = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(raw, dict):
+                    for key, value in raw.items():  # pyright: ignore[reportUnknownVariableType]
+                        if isinstance(value, dict):
+                            self._maps[str(key)] = {str(k): str(v) for k, v in value.items()}  # pyright: ignore[reportUnknownVariableType, reportUnknownArgumentType]
+            except (OSError, ValueError):
+                log.warning("ignoring unreadable book index %s", path)
+
+    @staticmethod
+    def _key(source_id: str, generation_id: str) -> str:
+        return f"{source_id}/{generation_id}"
+
+    def get(self, source_id: str, generation_id: str) -> dict[str, str] | None:
+        with self._lock:
+            return self._maps.get(self._key(source_id, generation_id))
+
+    def put(self, source_id: str, generation_id: str, books: Mapping[str, str]) -> None:
+        with self._lock:
+            self._maps[self._key(source_id, generation_id)] = dict(books)
+            snapshot = json.dumps(self._maps, sort_keys=True, ensure_ascii=False)
+        if self.path is None:
+            return
+        try:  # atomic replace; a lost write only costs a rebuild
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.path.with_name(f"{self.path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+            tmp.write_text(snapshot, encoding="utf-8")
+            tmp.replace(self.path)
+        except OSError:
+            log.warning("could not persist the book index to %s", self.path, exc_info=True)
 
 
 class ZimAssetStore:
-    def __init__(self, vault: Vault, *, max_open: int = 16) -> None:
+    def __init__(
+        self,
+        vault: VaultView,
+        reader: ZimReader | None = None,
+        *,
+        book_index: BookIndex | None = None,
+        sync_books: bool = True,
+    ) -> None:
+        """``vault`` answers ``generations``/``generation_path`` (the server passes its snapshot view).
+        ``sync_books``: build a bundle's book index on the request that first needs it (tests, CLI);
+        otherwise in a background thread, answering :class:`ZimUnavailable` meanwhile (server)."""
         self._vault = vault
-        self._max_open = max_open
-        self._open: OrderedDict[tuple[str, str], dict[str, Archive]] = OrderedDict()
-        self._books: dict[tuple[str, str], dict[str, Path]] = {}
+        self.reader: ZimReader = reader or InProcessZimReader()
+        self.book_index = book_index or BookIndex()
+        self.sync_books = sync_books
         self.names: dict[str, str] = {}  # source id -> display name, for generated pages
+        self._layouts: OrderedDict[tuple[str, str], ZimLayout] = OrderedDict()
+        self._building: dict[tuple[str, str], Future[dict[str, str] | None]] = {}
         self._lock = threading.Lock()
 
-    def _zim_files(self, source_id: str, generation_id: str) -> list[Path]:
+    # --- where things are ---
+
+    def layout(self, source_id: str, generation_id: str) -> ZimLayout | None:
+        """The ZIM files of a known generation, or ``None`` (unknown generations are never looked up)."""
+        key = (source_id, generation_id)
+        with self._lock:
+            hit = self._layouts.get(key)
+            if hit is not None:
+                self._layouts.move_to_end(key)
+                return hit
         gen = next((g for g in self._vault.generations(source_id) if g.generation_id == generation_id), None)
-        if gen is None:  # also rejects path tricks in ids: only known generations are opened
-            return []
+        if gen is None or gen.status not in _SERVED:  # never a half-staged generation
+            return None
         root = self._vault.generation_path(source_id, generation_id)
         files = [root / str(a.relpath) for a in gen.artifacts if a.relpath.suffix == ".zim"]
-        if not files and (root / "upstream").is_dir():
-            files = sorted((root / "upstream").glob("*.zim"))
-        return [f for f in files if f.is_file()]
-
-    def _archives(self, source_id: str, generation_id: str) -> dict[str, Archive]:
-        key = (source_id, generation_id)
-        with self._lock:
-            if key in self._open:
-                self._open.move_to_end(key)
-                return self._open[key]
-        files = self._zim_files(source_id, generation_id)
-        archives: dict[str, Archive] = {}
-        if len(files) == 1:
-            archives[""] = Archive(files[0])
-        else:
-            # Bundles (e.g. 181 Stack Exchange sites): open books lazily, located by file name, because
-            # opening every archive over SMB takes minutes. See ``_book``.
-            with self._lock:
-                self._books[key] = {_ZIM_DATE_RE.sub("", f.name).removesuffix(".zim"): f for f in files}
-        with self._lock:
-            self._open[key] = archives
-            while len(self._open) > self._max_open:
-                self._open.popitem(last=False)
-        return archives
-
-    def _entry(self, source_id: str, generation_id: str, path: str) -> Entry | None:
-        found = self._located(source_id, generation_id, path)
-        return None if found is None else found[1]
-
-    def _located(self, source_id: str, generation_id: str, path: str) -> tuple[str, Entry] | None:
-        """``(book prefix, entry)`` for a native id, following redirects; the prefix is ``""`` for a
-        single-book source and ``"<book>/"`` for a bundle."""
-        archives = self._archives(source_id, generation_id)
-        if "" in archives:
-            prefix, archive, entry_path = "", archives[""], path
-        else:
-            book, _, entry_path = path.partition("/")
-            prefix = f"{book}/"
-            archive = archives.get(book) or self._book(source_id, generation_id, archives, book)
-            if archive is None:
-                return None
-        if not entry_path:  # "<book>/" or "": the book's front page
-            if not archive.has_main_entry:
-                return None
-            entry = archive.main_entry
-        elif not archive.has_entry_by_path(entry_path):
+        if not files:  # older generations list no artifacts: the downloaded ZIMs under upstream/
+            with suppress(OSError):
+                files = sorted((root / "upstream").glob("*.zim"))
+        if not files:
             return None
-        else:
-            entry = archive.get_entry_by_path(entry_path)
-        for _ in range(_MAX_REDIRECTS):
-            if not entry.is_redirect:
-                return prefix, entry
-            entry = entry.get_redirect_entry()
-        return None
+        layout = ZimLayout(
+            files=tuple(str(f) for f in files),
+            by_file_name={} if len(files) == 1 else {file_book_name(f): str(f) for f in files},
+        )
+        with self._lock:
+            self._layouts[key] = layout
+            while len(self._layouts) > _MAX_LAYOUTS:
+                self._layouts.popitem(last=False)
+        return layout
 
-    def base(self, source_id: str, generation_id: str, native_id: str) -> str:
-        """The native id that relative links in a page resolve against: the entry actually served,
-        after redirects and front-page lookup (``askubuntu.com_en_all`` is served by the book's main
-        entry, so its ``questions/1`` means ``askubuntu.com_en_all/questions/1``)."""
-        if native_id == BOOKS_PAGE:
-            return native_id
-        found = self._located(source_id, generation_id, native_id)
-        return native_id if found is None else found[0] + found[1].path
+    def books(self, source_id: str, generation_id: str) -> list[str]:
+        """Book names of a bundle: the ``Name`` of each ZIM once the book index is built, before that the
+        names the file names imply. Empty for a single-book source."""
+        layout = self.layout(source_id, generation_id)
+        if layout is None or layout.single is not None:
+            return []
+        built = self.book_index.get(source_id, generation_id)
+        if built is None and self.sync_books:
+            built = self.build_books(source_id, generation_id)
+        return sorted(built if built is not None else layout.by_file_name)
 
-    def _book(
-        self, source_id: str, generation_id: str, archives: dict[str, Archive], book: str
-    ) -> Archive | None:
-        """Open one book of a bundle on first use. File names normally match the ``Name`` metadata the
-        adapter uses for native ids; if not, fall back to opening every book once to read it."""
+    def _book_file(self, source_id: str, generation_id: str, layout: ZimLayout, book: str) -> str | None:
+        built = self.book_index.get(source_id, generation_id)
+        if built is None and self.sync_books:
+            built = self.build_books(source_id, generation_id)
+        if built is not None:
+            name = built.get(book)
+            if name is None:
+                return None
+            return next((f for f in layout.files if Path(f).name == name), None)
+        self.build_books_soon(source_id, generation_id)
+        found = layout.by_file_name.get(book)  # usually the file name implies the book name
+        if found is None:
+            raise ZimUnavailable("the book list of this collection is still being built")
+        return found
+
+    def build_books(self, source_id: str, generation_id: str) -> dict[str, str] | None:
+        """Read every book name of a bundle (one archive open each) and persist the map. Single-flight."""
         key = (source_id, generation_id)
         with self._lock:
-            books = self._books.get(key, {})
-        path = books.get(book)
-        if path is not None:
-            archive = Archive(path)
-            if _book_name(archive, path) == book:
-                with self._lock:
-                    archives[book] = archive
-                return archive
-        for name, f in books.items():
-            if name in archives:
-                continue
-            archive = Archive(f)
+            pending = self._building.get(key)
+            mine = pending is None
+            if pending is None:
+                pending = self._building[key] = Future()
+        if not mine:
+            return pending.result()
+        try:
+            layout = self.layout(source_id, generation_id)
+            books: dict[str, str] | None = None
+            if layout is not None and layout.single is None:
+                books = {}
+                for f in layout.files:
+                    books.setdefault(self.reader.book_name(f), Path(f).name)
+                self.book_index.put(source_id, generation_id, books)
+            pending.set_result(books)
+            return books
+        except BaseException as exc:
+            pending.set_exception(exc)
+            raise
+        finally:
             with self._lock:
-                archives[_book_name(archive, f)] = archive
-        return archives.get(book)
+                del self._building[key]
+
+    def build_books_soon(self, source_id: str, generation_id: str) -> None:
+        with self._lock:
+            if (source_id, generation_id) in self._building:
+                return
+
+        def run() -> None:
+            try:
+                self.build_books(source_id, generation_id)
+            except Exception:
+                log.warning("could not build the book list of %s/%s", source_id, generation_id, exc_info=True)
+
+        threading.Thread(target=run, name="zim-books", daemon=True).start()
+
+    def _locate(self, source_id: str, generation_id: str, native_id: str) -> tuple[str, str, str] | None:
+        """``(file, entry path, book root)`` for a native id."""
+        layout = self.layout(source_id, generation_id)
+        if layout is None:
+            return None
+        if layout.single is not None:
+            return layout.single, native_id, ""
+        book, _, entry_path = native_id.partition("/")
+        file = self._book_file(source_id, generation_id, layout, book) if book else None
+        return None if file is None else (file, entry_path, f"{book}/")
+
+    def _read(self, file: str, path: str, want: Want) -> EntryData | None:
+        try:
+            return self.reader.read(file, path, want)
+        except ZimUnavailable:
+            raise
+        except ZimError:  # unreadable archive or entry: "not here", logged for the operator
+            log.warning("ZIM read failed: %s %s", file, path, exc_info=True)
+            return None
+
+    # --- pages and assets ---
+
+    def page(self, source_id: str, generation_id: str, native_id: str) -> ZimPage | None:
+        """The HTML page at ``native_id`` (one read: content and the entry actually served)."""
+        if native_id == BOOKS_PAGE:
+            text = self._books_page(source_id, generation_id)
+            return None if text is None else ZimPage(BOOKS_PAGE, text, "")
+        where = self._locate(source_id, generation_id, native_id)
+        if where is None:
+            return None
+        file, path, root = where
+        data = self._read(file, path, Want.HTML)
+        if data is None or data.content is None:
+            return None
+        return ZimPage(root + data.path, data.content.decode("utf-8", errors="replace"), root)
+
+    def exists(self, source_id: str, generation_id: str, native_id: str) -> bool:
+        """An HTML page is there (no content is read)."""
+        if native_id == BOOKS_PAGE:
+            return bool(self.books(source_id, generation_id))
+        where = self._locate(source_id, generation_id, native_id)
+        if where is None:
+            return False
+        data = self._read(where[0], where[1], Want.NONE)
+        return data is not None and data.is_html
 
     def home(self, source_id: str, generation_id: str) -> str | None:
         """Native id of the landing page: the ZIM's main entry for a single book, or
-        :data:`BOOKS_PAGE` (a generated list of books) for a bundle."""
-        archives = self._archives(source_id, generation_id)
-        if "" not in archives:
-            return BOOKS_PAGE if self.books(source_id, generation_id) else None
-        archive = archives[""]
-        if not archive.has_main_entry:
+        :data:`BOOKS_PAGE` (a generated list of books) for a bundle. The server calls this from its
+        snapshot refresher, so it also opens the archive / starts the bundle's book index there,
+        off the request path."""
+        layout = self.layout(source_id, generation_id)
+        if layout is None:
             return None
-        entry = archive.main_entry
-        for _ in range(_MAX_REDIRECTS):
-            if not entry.is_redirect:
-                return entry.path
-            entry = entry.get_redirect_entry()
-        return None
-
-    def books(self, source_id: str, generation_id: str) -> list[str]:
-        """Book names of a bundle (from file names; no archive is opened)."""
-        self._archives(source_id, generation_id)
-        with self._lock:
-            return sorted(self._books.get((source_id, generation_id), {}))
+        if layout.single is None:
+            if not self.sync_books and self.book_index.get(source_id, generation_id) is None:
+                self.build_books_soon(source_id, generation_id)
+            return BOOKS_PAGE
+        data = self._read(layout.single, "", Want.NONE)
+        return None if data is None else data.path
 
     def _books_page(self, source_id: str, generation_id: str) -> str | None:
         """Generated index of a bundle: one link per book (``<book>/`` resolves to its front page)."""
-        books = [] if "" in self._archives(source_id, generation_id) else self.books(source_id, generation_id)
+        books = self.books(source_id, generation_id)
         if not books:
             return None
         name = html.escape(self.names.get(source_id, source_id))
@@ -168,31 +302,20 @@ class ZimAssetStore:
         )
         return f"<html><head><title>{name}</title></head><body><h1>{name}</h1><ul>{items}</ul></body></html>"
 
-    def warm(self, source_ids: list[str]) -> None:
-        """Open the current archives of single-book sources (first open of a large ZIM over SMB takes
-        seconds); bundle books still open lazily."""
-        for source_id in source_ids:
-            with suppress(Exception):
-                gen = self._vault.current(source_id)
-                if gen is not None:
-                    self._archives(source_id, gen.generation_id)
-
     def html(self, source_id: str, generation_id: str, html_ref: str) -> str | None:
         if not html_ref.startswith("zim:"):
             return None
-        if html_ref == f"zim:{BOOKS_PAGE}":
-            return self._books_page(source_id, generation_id)
-        entry = self._entry(source_id, generation_id, html_ref.removeprefix("zim:"))
-        if entry is None:
-            return None
-        item = entry.get_item()
-        if not item.mimetype.startswith("text/html"):
-            return None
-        return bytes(item.content).decode("utf-8", errors="replace")
+        found = self.page(source_id, generation_id, html_ref.removeprefix("zim:"))
+        return None if found is None else found.html
 
     def asset(self, source_id: str, generation_id: str, path: str) -> Asset | None:
-        entry = self._entry(source_id, generation_id, path)
-        if entry is None:
+        where = self._locate(source_id, generation_id, path)
+        if where is None:
             return None
-        item = entry.get_item()
-        return Asset(content=bytes(item.content), mimetype=item.mimetype)
+        data = self._read(where[0], where[1], Want.ANY)
+        if data is None or data.content is None:
+            return None
+        return Asset(content=data.content, mimetype=data.mimetype)
+
+    def close(self) -> None:
+        self.reader.close()

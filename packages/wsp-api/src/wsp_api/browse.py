@@ -28,7 +28,7 @@ from wsp_api.schemas import (
     SourceInfo,
 )
 from wsp_api.views import Library
-from wsp_core.ids import DocId
+from wsp_core.ids import DocId, parse_doc_id
 from wsp_core.model import ChangeKind, ChangeRecord, Gap, SourceSpec
 from wsp_core.ports import PortalSource
 
@@ -70,15 +70,12 @@ def browse_router(lib: Library) -> APIRouter:
     s = lib.s
 
     def doc_ref(did: DocId | None) -> DocRef | None:
-        doc = None if did is None else s.documents.get(did)
-        if doc is None:
+        """A link to a document by its title: a projected lookup, never the article text (audit #9)."""
+        title = None if did is None else lib.title(did)
+        if did is None or title is None:
             return None
-        return DocRef(
-            doc_id=doc.doc_id,
-            source_id=doc.source_id,
-            title=doc.title,
-            address=address_of(doc.source_id, doc.native_id),
-        )
+        source_id, native_id = parse_doc_id(did)
+        return DocRef(doc_id=did, source_id=source_id, title=title, address=address_of(source_id, native_id))
 
     # --- Portal ---------------------------------------------------------------------------------
 
@@ -106,7 +103,7 @@ def browse_router(lib: Library) -> APIRouter:
         )
         newest = _presentable_recent(lib, limit=8)
         rng = random.Random(secrets.randbits(64))  # noqa: S311 - picking a page to read, not a secret
-        infos = lib.source_infos()
+        infos = lib.source_infos()  # from the library snapshot
         return Portal(
             date=today,
             featured=featured,
@@ -150,11 +147,12 @@ def browse_router(lib: Library) -> APIRouter:
         trail = [DirectoryCrumb(path=domain, name=sites.domain_name(domain))]
         members = [x for x in specs if domain in x.domain]
         if len(parts) == 1:
+            counts = lib.state.snapshot().doc_counts
             children = [
                 DirectoryCategory(
                     path=f"{domain}/{x.id}",
                     name=x.name,
-                    count=lib.catalog.doc_count(x.id) or 0,
+                    count=counts.get(x.id) or 0,
                     crosslink=x.domain[0] != domain,
                 )
                 for x in members
@@ -222,11 +220,11 @@ def browse_router(lib: Library) -> APIRouter:
                 "content": {"image/*": {"schema": {"type": "string", "format": "binary"}}},
             }
         }
-        | errors(404),
+        | errors(404, 503),
     )
-    def asset(source_id: str, generation_id: str, path: str) -> Response:
+    async def asset(source_id: str, generation_id: str, path: str) -> Response:
         lib.source(source_id)
-        found = lib.assets.asset(source_id, generation_id, path)
+        found = await lib.nas.run(lambda: lib.assets.asset(source_id, generation_id, path))
         if found is None or found.mimetype.split(";")[0].strip() not in SERVED_MIMETYPES:
             raise ApiError(404, "asset_not_found", f"no image at {source_id}/{generation_id}/{path}")
         return Response(

@@ -18,7 +18,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
-API_VERSION = "1.3.0"
+API_VERSION = "1.4.0"
 
 
 class _Wire(BaseModel):
@@ -167,7 +167,10 @@ class Document(_Wire):
     title: str
     lang: str
     license: str
-    text: str
+    text: str | None = Field(
+        description="Plain text. Null for an HTML page unless asked for with `fields=text`; always set "
+        "when `format` is `text`."
+    )
     content_hash: str = Field(description="BLAKE3 of the normalized text: the content-version id.")
     revision: str | None = None
     timestamp: datetime | None = Field(default=None, description="Upstream time of this revision.")
@@ -305,12 +308,18 @@ class SearchResults(_Wire):
     hits: list[Hit]
     next_offset: int | None = Field(default=None, description="Offset of the next page, if any.")
     kind: DocKind | None = Field(default=None, description="The `kind` filter that was applied.")
-    total: int = Field(default=0, description="Matching documents (a lower bound if `total_is_estimate`).")
+    total: int = Field(
+        default=0,
+        description="Results for the query (and `kind`), counted in the same ranked list the page comes "
+        "from (at most 200; a lower bound if `total_is_estimate`).",
+    )
     total_is_estimate: bool = False
     took_ms: float = 0.0
     intent: QueryIntent = QueryIntent.LOOKUP
     facets: list[KindFacet] = Field(
-        default_factory=list[KindFacet], description="Counts per kind, ignoring the `kind` filter."
+        default_factory=list[KindFacet],
+        description="Results per kind in the same ranked list, ignoring the `kind` filter: filtering by "
+        "a kind shows exactly its count. Kinds with no results are left out.",
     )
     navigate_to: str | None = Field(
         default=None,
@@ -622,7 +631,9 @@ class SystemStatus(_Wire):
     freshness: list[SourceFreshness]
     degraded: list[GenerationInfo]
     ledger_tail: list[LedgerEntry] = Field(description="Most recent events, oldest first.")
-    ledger_ok: bool = Field(description="Result of replaying the ledger hash chain.")
+    ledger_ok: bool | None = Field(
+        description="Result of replaying the ledger hash chain; null until the first replay has finished."
+    )
     api_version: str = API_VERSION
     uptime_seconds: float = 0.0
     ops: OpsStatus | None = Field(default=None, description="Null without orchestrator data.")

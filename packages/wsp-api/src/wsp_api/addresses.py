@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Literal
 from urllib.parse import quote, urlencode
 
@@ -54,8 +54,16 @@ def _strip(address: str) -> str:
     return a
 
 
-def resolve(services: Services, address: str, query: Mapping[str, str]) -> Resolution:
-    """Resolve an address. ``query`` carries the address's own query string (``wsp://search?q=...``)."""
+def resolve(
+    services: Services,
+    address: str,
+    query: Mapping[str, str],
+    exists: Callable[[DocId], bool] | None = None,
+) -> Resolution:
+    """Resolve an address. ``query`` carries the address's own query string (``wsp://search?q=...``).
+
+    ``exists`` decides whether a document is in the library; the API passes ``Library.exists``, which
+    also counts pages served straight from a ZIM (audit #10). Default: the document store."""
     path = _strip(address).strip("/")
     head, _, rest = path.partition("/")
     if head == "search":
@@ -83,6 +91,7 @@ def resolve(services: Services, address: str, query: Mapping[str, str]) -> Resol
         doc_id: DocId = make_doc_id(head, rest)
     except InvalidDocIdError as exc:
         raise ApiError(400, "invalid_address", str(exc)) from exc
-    if services.documents.get(doc_id) is None:
+    found = exists(doc_id) if exists is not None else services.documents.get(doc_id) is not None
+    if not found:
         raise ApiError(404, "not_in_library", f"{address_of(head, rest)} is not in the library")
     return Resolution(address=address_of(head, rest), kind="document", href=document_href(doc_id))

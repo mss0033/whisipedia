@@ -360,7 +360,11 @@ export function document(
     title: d.title,
     lang: d.lang,
     license: d.license,
-    text: v.text ?? plain(v.html ?? ''),
+    // Like the server: an HTML page's text only with `fields=text`.
+    text:
+      d.format === 'html' && !params.getAll('fields').includes('text')
+        ? null
+        : (v.text ?? plain(v.html ?? '')),
     content_hash: hashOf(id, v.revision),
     revision: v.revision,
     timestamp: v.timestamp,

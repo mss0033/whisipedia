@@ -14,7 +14,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
-API_VERSION = "1.3.0"  # the server API version these models were written for
+API_VERSION = "1.4.0"  # the server API version these models were written for
 
 
 class _Wire(BaseModel):
@@ -163,7 +163,10 @@ class Document(_Wire):
     title: str
     lang: str
     license: str
-    text: str
+    text: str | None = Field(
+        description="Plain text. Null for an HTML page unless asked for with `fields=text`; always set "
+        "when `format` is `text`."
+    )
     content_hash: str = Field(description="BLAKE3 of the normalized text: the content-version id.")
     revision: str | None = None
     timestamp: datetime | None = Field(default=None, description="Upstream time of this revision.")
@@ -615,7 +618,9 @@ class SystemStatus(_Wire):
     freshness: list[SourceFreshness]
     degraded: list[GenerationInfo]
     ledger_tail: list[LedgerEntry] = Field(description="Most recent events, oldest first.")
-    ledger_ok: bool = Field(description="Result of replaying the ledger hash chain.")
+    ledger_ok: bool | None = Field(
+        description="Result of replaying the ledger hash chain; null until the first replay has finished."
+    )
     api_version: str = API_VERSION
     uptime_seconds: float = 0.0
     ops: OpsStatus | None = Field(default=None, description="Null without orchestrator data.")

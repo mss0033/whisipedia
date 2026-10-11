@@ -20,27 +20,30 @@ _STATUS_CODES = {
     422: "invalid_request",
     500: "internal_error",
     501: "not_implemented",
+    503: "unavailable",
 }
 
 
 class ApiError(Exception):
     """Raise from a route to answer with the error envelope."""
 
-    def __init__(self, status: int, code: str, message: str) -> None:
+    def __init__(self, status: int, code: str, message: str, *, retry_after: str | None = None) -> None:
         super().__init__(message)
         self.status = status
         self.code = code
         self.message = message
+        self.retry_after = retry_after  # seconds, for 503: when to try again
 
 
-def error_response(status: int, code: str, message: str) -> JSONResponse:
+def error_response(status: int, code: str, message: str, *, retry_after: str | None = None) -> JSONResponse:
     body = ErrorResponse(error=ErrorBody(code=code, message=message))
-    return JSONResponse(body.model_dump(), status_code=status)
+    headers = {"Retry-After": retry_after, "Cache-Control": "no-store"} if retry_after else None
+    return JSONResponse(body.model_dump(), status_code=status, headers=headers)
 
 
 async def _api_error(_: Request, exc: Exception) -> JSONResponse:
     assert isinstance(exc, ApiError)
-    return error_response(exc.status, exc.code, exc.message)
+    return error_response(exc.status, exc.code, exc.message, retry_after=exc.retry_after)
 
 
 async def _http_error(_: Request, exc: Exception) -> JSONResponse:

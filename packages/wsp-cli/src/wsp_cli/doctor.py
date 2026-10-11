@@ -1,8 +1,9 @@
 """``wsp doctor``: is this machine ready to run the library? A 90s-style system check report.
 
 Only reads: it never writes to the vault (the signing key may be *looked at*, never created).
-Each check is ``OK``, ``WARN`` or ``FAIL``; the exit code is 1 when a check fails (or, with
-``--require NAME``, when one of the named checks is not OK).
+Each check is ``OK``, ``WARN`` or ``FAIL``. Exit codes: 1 when a check fails; with ``--require NAME``
+(repeatable), 1 when one of the named checks is not ``OK`` (a warning counts: the caller asked for that
+check to pass), and 2 when a name is not a check at all (a typo must not pass silently).
 """
 
 from __future__ import annotations
@@ -16,10 +17,25 @@ from contextlib import closing
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, TextIO
+from typing import Any, TextIO, cast
 
 from wsp_cli import bootstrap
 from wsp_cli.service import UNITS, Runner, systemctl
+
+CHECK_NAMES = (
+    "config",
+    "registry",
+    "vault",
+    "index",
+    "disk",
+    "aria2",
+    "par2",
+    "services",
+    "key",
+    "ledger",
+    "orchestrator",
+    "integrity",
+)  # in report order; each is a method of Doctor
 
 PLACEHOLDER = "/path/to/"
 GB = 10**9
@@ -75,21 +91,13 @@ class Doctor:
         self.paths = bootstrap.paths(cfg)
 
     def checks(self, only: Sequence[str] | None = None) -> list[Check]:
-        steps: list[tuple[str, Callable[[], Check]]] = [
-            ("config", self.config),
-            ("registry", self.registry),
-            ("vault", self.vault),
-            ("index", self.index),
-            ("disk", self.disk),
-            ("aria2", self.aria2),
-            ("par2", self.par2),
-            ("services", self.services),
-            ("key", self.key),
-            ("ledger", self.ledger),
-            ("orchestrator", self.orchestrator),
-            ("integrity", self.integrity),
+        steps = self.steps()
+        known = {name for name, _ in steps}
+        out: list[Check] = [
+            Check(name, name, Level.FAIL, f"no such check; known: {', '.join(n for n, _ in steps)}")
+            for name in dict.fromkeys(only or ())
+            if name not in known
         ]
-        out: list[Check] = []
         for name, step in steps:
             if only and name not in only:
                 continue
@@ -98,6 +106,9 @@ class Doctor:
             except Exception as exc:  # a broken check is a finding, not a crash
                 out.append(Check(name, name.title(), Level.FAIL, f"{type(exc).__name__}: {exc}"))
         return out
+
+    def steps(self) -> list[tuple[str, Callable[[], Check]]]:
+        return [(name, cast(Callable[[], Check], getattr(self, name))) for name in CHECK_NAMES]
 
     # --- checks ---
 
@@ -310,6 +321,9 @@ def render(checks: Sequence[Check], out: TextIO) -> None:
 
 
 def exit_code(checks: Sequence[Check], require: Sequence[str] | None = None) -> int:
+    """0 all good; 1 a check failed (with ``require``: a required check is not OK); 2 unknown names."""
     if require:
-        return 0 if all(c.level is not Level.FAIL for c in checks if c.name in require) else 1
+        if any(name not in CHECK_NAMES for name in require):
+            return 2
+        return 0 if all(c.level is Level.OK for c in checks if c.name in require) else 1
     return 1 if any(c.level is Level.FAIL for c in checks) else 0

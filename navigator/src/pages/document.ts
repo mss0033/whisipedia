@@ -46,13 +46,19 @@ class Lru<V> {
 
 const cache = new Lru<DocumentResponse>(40);
 
-async function loadDoc(ctx: PageContext, id: string, at?: string): Promise<DocumentResponse> {
-  const key = `${id}@${at ?? ''}`;
+/** `text`: also the plain text of an HTML page (only the diff needs it). */
+async function loadDoc(
+  ctx: PageContext,
+  id: string,
+  at?: string,
+  text = false,
+): Promise<DocumentResponse> {
+  const key = `${id}@${at ?? ''}${text ? '+text' : ''}`;
   if (!ctx.opts.reload) {
     const hit = cache.get(key);
     if (hit) return hit;
   }
-  const doc = await ctx.app.api.document(id, { at }, ctx.signal);
+  const doc = await ctx.app.api.document(id, { at, text }, ctx.signal);
   cache.set(key, doc);
   return doc;
 }
@@ -77,7 +83,7 @@ export function renderBody(doc: DocumentResponse): { node: HTMLElement; broken: 
     wrap.appendChild(fragment);
     return { node: wrap, broken: stats.broken };
   }
-  wrap.appendChild(renderPlainText(doc.text, isPreformatted(doc)));
+  wrap.appendChild(renderPlainText(doc.text ?? '', isPreformatted(doc)));
   return { node: wrap, broken: wrap.querySelectorAll('.broken-link').length };
 }
 
@@ -234,7 +240,7 @@ function timeMachine(ctx: PageContext, doc: DocumentResponse, route: DocRoute): 
 }
 
 function renderDiff(oldDoc: DocumentResponse, cur: DocumentResponse): HTMLElement {
-  const ops = diffLines(oldDoc.text, cur.text);
+  const ops = diffLines(oldDoc.text ?? '', cur.text ?? '');
   if (!ops) return h('p', { class: 'notice' }, 'This page is too large to compare in the browser.');
   const st = diffStats(ops);
   return h(
@@ -306,7 +312,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
   const route = ctx.route as DocRoute;
   let doc: DocumentResponse;
   try {
-    doc = await loadDoc(ctx, route.docId, route.at);
+    doc = await loadDoc(ctx, route.docId, route.at, Boolean(route.at && route.diff));
   } catch (err) {
     if (err instanceof ApiRequestError && err.status === 404) {
       const words = route.nativeId.replace(/[_/]+/g, ' ');
@@ -356,7 +362,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
     );
   }
   if (route.at && route.diff) {
-    const current = await loadDoc(ctx, route.docId);
+    const current = await loadDoc(ctx, route.docId, undefined, true);
     content = renderDiff(doc, current);
   } else {
     const r = renderBody(doc);

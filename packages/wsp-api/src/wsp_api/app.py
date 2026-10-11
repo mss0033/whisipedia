@@ -1,34 +1,40 @@
 """FastAPI app factory: ``create_app(services, settings)`` (PLAN §11.1, §12.2).
 
 Routes depend only on :class:`~wsp_api.services.Services` (ports, plus the seams in
-:mod:`wsp_api.seams`). Sync port calls run in FastAPI's worker threads (plain ``def`` routes);
-streaming routes are ``async``. Navigator-only resources (portal, directory, random, assets, gaps) are
-in :mod:`wsp_api.browse`.
+:mod:`wsp_api.seams`). Navigator-only resources (portal, directory, random, assets, gaps) are in
+:mod:`wsp_api.browse`. Where each route runs (audit 2026-10-11 #5):
+
+* ``async`` and memory-only: health, sources, generations, system and proposals read the library
+  snapshot (:mod:`wsp_api.snapshot`), which the server refreshes in the background;
+* the bounded ``nas`` executor (:mod:`wsp_api.offload`): routes that may read a ZIM (documents, assets,
+  ``/go``); the ``search`` executor: search; over capacity or past their deadline they answer 503;
+* plain ``def`` (FastAPI's thread pool): routes on local disk only (suggest, changes, history, portal).
+
+With ``ApiSettings.background`` (``wsp serve``) the snapshot refresher and the warm-up start with the
+application (lifespan) and stop with it; an app built for tests or the in-process CLI starts no thread.
 """
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import threading
 import time
-from collections import Counter
-from collections.abc import Callable, Sequence
-from dataclasses import replace
-from typing import Annotated, Any, Literal, cast
+from collections.abc import AsyncGenerator
+from typing import Annotated, Any, Literal
 from urllib.parse import unquote
 
 from fastapi import APIRouter, FastAPI, Header, Path, Query, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.telemetry import TelemetryConfig
+from starlette.middleware.gzip import GZipMiddleware
 
-from wsp_api import convert, search, sites
+from wsp_api import convert, sites
 from wsp_api.addresses import resolve
 from wsp_api.browse import browse_router
-from wsp_api.errors import ApiError, errors, install_error_handlers, streamed
-from wsp_api.htmlrewrite import rewrite_html
-from wsp_api.renditions import borrowed, zim_document
+from wsp_api.errors import ApiError, error_response, errors, install_error_handlers, streamed
+from wsp_api.offload import RETRY_AFTER
 from wsp_api.routing import RawSegmentRouting
 from wsp_api.schemas import (
     API_VERSION,
@@ -38,35 +44,33 @@ from wsp_api.schemas import (
     Document,
     DocumentVersion,
     ErrorResponse,
-    GenerationInfo,
     GenerationPage,
     Health,
     HistoryPage,
-    Hit,
-    KindFacet,
     ProposalPage,
     RecentChanges,
     Resolution,
     SearchResults,
-    SearchScope,
     SourceFreshness,
     SourceInfo,
     SourcePage,
     Suggestions,
     SystemStatus,
 )
+from wsp_api.searching import WINDOW, Searcher
 from wsp_api.security import SecurityMiddleware
 from wsp_api.services import ApiSettings, Services
+from wsp_api.serving import NavigatorFiles, SlowRequestLog
+from wsp_api.snapshot import MAX_LEDGER_TAIL, proposals_with
 from wsp_api.sse import change_events
 from wsp_api.views import Library, parse_doc
-from wsp_api.zim import ZimAssetStore
+from wsp_api.zimread import ZimUnavailable
 from wsp_core.activity import ActivityMiddleware
-from wsp_core.ids import parse_doc_id
-from wsp_core.model import GenerationStatus, SearchHit
 
 _DESCRIPTION = """\
 Read API of a private offline library. Everything is served from local storage; the server makes no
-outbound connections. Errors always use the envelope `{"error": {"code", "message"}}`.
+outbound connections. Errors always use the envelope `{"error": {"code", "message"}}`; `503` (with
+`Retry-After`) means the library storage is busy or still loading.
 
 List endpoints use opaque cursors: pass `next_cursor` back as `cursor`. The change feed uses its own
 cursor (`since`). Document ids are `wsp:<source_id>/<native_id>`; in URL paths a doc id is ONE
@@ -87,9 +91,8 @@ _TELEMETRY_OFF: TelemetryConfig = {
     "auto_configure": False,
 }
 
-# Search: totals and facet counts are counted up to this many hits; beyond it the index is paged directly.
-_WINDOW = 200
-_SPARSE = 5  # fewer hits than this: "did you mean" may correct any unknown or rare word
+GZIP_MIN_BYTES = 1024
+DOCUMENT_CACHE = "private, no-cache"  # revalidate with the ETag: `has_history` and link targets change
 
 Limit = Annotated[int, Query(ge=1, le=200, description="Page size.")]
 Cursor = Annotated[str | None, Query(description="Opaque cursor from a previous page's `next_cursor`.")]
@@ -124,6 +127,18 @@ class WspApp(FastAPI):
 
 def create_app(services: Services, settings: ApiSettings | None = None) -> FastAPI:
     settings = settings or ApiSettings()
+    lib = Library(services, settings)
+
+    @contextlib.asynccontextmanager
+    async def lifespan(_: FastAPI) -> AsyncGenerator[None]:
+        if settings.background:
+            lib.state.start()
+            threading.Thread(target=_warm_search, args=(services,), name="search-warm", daemon=True).start()
+        try:
+            yield
+        finally:
+            lib.close()
+
     app = WspApp(
         title="Whisipedia API",
         version=API_VERSION,
@@ -133,69 +148,90 @@ def create_app(services: Services, settings: ApiSettings | None = None) -> FastA
         redoc_url=None,
         telemetry=_TELEMETRY_OFF,
         responses={500: {"model": ErrorResponse, "description": "internal_error"}},
+        lifespan=lifespan,
     )
-    lib = Library(services, info_seconds=settings.source_info_seconds)
+    app.state.library = lib
     install_error_handlers(app)
+
+    async def zim_unavailable(_: Request, exc: Exception) -> Response:
+        return error_response(503, "zim_unavailable", str(exc), retry_after=RETRY_AFTER)
+
+    app.add_exception_handler(ZimUnavailable, zim_unavailable)
+    app.add_middleware(GZipMiddleware, minimum_size=GZIP_MIN_BYTES)  # 0.84-2.2 MB pages -> ~5x smaller
     app.add_middleware(RawSegmentRouting)
     app.add_middleware(SecurityMiddleware, settings=settings)
     app.add_middleware(ActivityMiddleware, path=settings.activity_marker)  # Warden yields (ADR-0009)
+    app.add_middleware(SlowRequestLog, slow_seconds=settings.slow_request_seconds)
     app.include_router(_v1(lib, settings))
     app.include_router(browse_router(lib))
-    app.include_router(_go(services))
+    app.include_router(_go(lib))
     _mount_navigator(app, settings)
-    if isinstance(lib.assets, ZimAssetStore):
-        # Open big single-book ZIMs in the background so the first page view does not wait on SMB.
-        zims = [x.id for x in services.sources if x.adapter == "kiwix-opds"]
-        threading.Thread(target=lib.assets.warm, args=(zims,), name="zim-warm", daemon=True).start()
-
-    def warm_search() -> None:  # first query otherwise pays for loading index segments (~1 s)
-        with contextlib.suppress(Exception):
-            services.index.search("the library", limit=10)
-            services.index.suggest("a", limit=10)
-
-    threading.Thread(target=warm_search, name="search-warm", daemon=True).start()
-    if settings.source_info_seconds > 0:  # fill the site cards before the first page asks for them
-        threading.Thread(target=lambda: _quietly(lib.source_infos), name="sources-warm", daemon=True).start()
     return app
 
 
-def _quietly(fn: Callable[[], object]) -> None:
+def _warm_search(services: Services) -> None:
+    """The first query otherwise pays for loading index segments and models (~1 s). Server only."""
     with contextlib.suppress(Exception):
-        fn()
+        services.index.search("the library", limit=10)
+        services.index.suggest("a", limit=10)
+
+
+def _etag(body: bytes) -> str:
+    return 'W/"' + hashlib.blake2b(body, digest_size=16).hexdigest() + '"'
+
+
+def _not_modified(request: Request, etag: str) -> bool:
+    wanted = request.headers.get("if-none-match")
+    if not wanted:
+        return False
+    tags = {t.strip() for t in wanted.split(",")}
+    return "*" in tags or etag in tags or etag.removeprefix("W/") in tags
 
 
 def _v1(lib: Library, settings: ApiSettings) -> APIRouter:
     r = APIRouter(prefix="/v1")
     s = lib.s
+    state = lib.state
+    searcher = Searcher(lib)
     started = time.monotonic()
 
     @r.get("/health", tags=["meta"])
-    def health() -> Health:
+    async def health() -> Health:
         return Health(sources=len(s.sources))
 
     # --- Sources --------------------------------------------------------------------------------
 
-    @r.get("/sources", tags=["sources"], responses=errors(400))
-    def list_sources(cursor: Cursor = None, limit: Limit = 50) -> SourcePage:
-        specs = sorted(s.sources, key=lambda x: x.id)
-        chunk, nxt = convert.page(specs, cursor, limit)
-        return SourcePage(items=[lib.source_info(x) for x in chunk], next_cursor=nxt)
+    @r.get("/sources", tags=["sources"], responses=errors(400, 503))
+    async def list_sources(cursor: Cursor = None, limit: Limit = 50) -> SourcePage:
+        def build() -> SourcePage:
+            snap = state.snapshot()
+            specs = sorted(s.sources, key=lambda x: x.id)
+            chunk, nxt = convert.page(specs, cursor, limit)
+            return SourcePage(items=[lib.source_info(x, snap) for x in chunk], next_cursor=nxt)
 
-    @r.get("/sources/{source_id}", tags=["sources"], responses=errors(404))
-    def get_source(source_id: str) -> SourceInfo:
-        return lib.source_info(lib.source(source_id))
+        return await state.run(build)
 
-    @r.get("/sources/{source_id}/generations", tags=["sources"], responses=errors(400, 404))
-    def list_generations(source_id: str, cursor: Cursor = None, limit: Limit = 50) -> GenerationPage:
+    @r.get("/sources/{source_id}", tags=["sources"], responses=errors(404, 503))
+    async def get_source(source_id: str) -> SourceInfo:
+        spec = lib.source(source_id)
+        return await state.run(lambda: lib.source_info(spec))
+
+    @r.get("/sources/{source_id}/generations", tags=["sources"], responses=errors(400, 404, 503))
+    async def list_generations(source_id: str, cursor: Cursor = None, limit: Limit = 50) -> GenerationPage:
         lib.source(source_id)
-        cur = s.vault.current(source_id)
-        gens = sorted(s.vault.generations(source_id), key=lambda g: g.generation_id, reverse=True)
-        chunk, nxt = convert.page(gens, cursor, limit)
-        items = [
-            convert.generation_info(g, current=cur is not None and g.generation_id == cur.generation_id)
-            for g in chunk
-        ]
-        return GenerationPage(items=items, next_cursor=nxt)
+
+        def build() -> GenerationPage:
+            st = state.snapshot().source(source_id)
+            cur = st.current
+            gens = sorted(st.generations, key=lambda g: g.generation_id, reverse=True)
+            chunk, nxt = convert.page(gens, cursor, limit)
+            items = [
+                convert.generation_info(g, current=cur is not None and g.generation_id == cur.generation_id)
+                for g in chunk
+            ]
+            return GenerationPage(items=items, next_cursor=nxt)
+
+        return await state.run(build)
 
     # --- Documents ------------------------------------------------------------------------------
     # The doc id is one raw path segment (wsp_api.routing), so the two routes cannot collide.
@@ -203,7 +239,7 @@ def _v1(lib: Library, settings: ApiSettings) -> APIRouter:
     @r.get("/documents/{doc_id}/history", tags=["documents"], responses=errors(400, 404))
     def document_history(doc_id: DocIdSegment, cursor: Cursor = None, limit: Limit = 100) -> HistoryPage:
         did = parse_doc(unquote(doc_id))
-        versions = s.documents.history(did)
+        versions = lib.history(did)
         if not versions:
             raise ApiError(404, "document_not_found", f"no such document: {did}")
         chunk, nxt = convert.page(versions, cursor, limit)
@@ -222,63 +258,48 @@ def _v1(lib: Library, settings: ApiSettings) -> APIRouter:
             )
         return HistoryPage(doc_id=did, items=items, next_cursor=nxt)
 
-    @r.get("/documents/{doc_id}", tags=["documents"], responses=errors(400, 404))
-    def get_document(
+    @r.get(
+        "/documents/{doc_id}",
+        tags=["documents"],
+        response_model=Document,
+        responses=errors(400, 404, 503) | {304: {"description": "Not modified (`If-None-Match`)"}},
+    )
+    async def get_document(
+        request: Request,
         doc_id: DocIdSegment,
         at: Annotated[
             str | None, Query(description="Generation id: the document as of that snapshot.")
         ] = None,
-    ) -> Document:
+        fields: Annotated[
+            list[Literal["text"]] | None,
+            Query(description="Extra fields: `text` also sends the plain text of an HTML page."),
+        ] = None,
+    ) -> Response:
+        """A document. An HTML page's plain `text` is sent only with `fields=text` (it doubles the size).
+        Responses carry an `ETag`; send it back as `If-None-Match` to get `304`."""
         did = parse_doc(unquote(doc_id))
-        doc = s.documents.get(did, at_generation=at)
-        if doc is None and at is None:
-            # Not refined (yet): Kiwix sources are browsable straight from their ZIM.
-            source_id, native_id = parse_doc_id(did)
-            doc = zim_document(s.source(source_id), native_id, s.vault, lib.assets)
-        if doc is None:
-            where = f" at generation {at}" if at else ""
-            raise ApiError(404, "document_not_found", f"no such document{where}: {did}")
-        introduced = lib.generation_of(did, doc.content_hash, at)
-        gen = lib.serving_generation(doc.source_id, introduced, at) or (
-            s.vault.current(doc.source_id) if doc.html_ref else None
-        )
-        html: str | None = None
-        if doc.html_ref and gen is not None:
-            original = lib.assets.html(doc.source_id, gen.generation_id, doc.html_ref)
-            if original is not None:
-                html = rewrite_html(
-                    original,
-                    source_id=doc.source_id,
-                    generation_id=gen.generation_id,
-                    native_id=_link_base(
-                        lib.assets, doc.source_id, gen.generation_id, doc.html_ref, doc.native_id
-                    ),
-                )
-        if html is None and at is None and (alt := borrowed(s.source(doc.source_id), doc, s.vault)):
-            # e.g. the Wikipedia dump (indexed text) rendered with the Kiwix ZIM's page for its title.
-            original = lib.assets.html(alt.source_id, alt.generation.generation_id, alt.html_ref)
-            if original is not None:
-                html = rewrite_html(
-                    original,
-                    source_id=alt.source_id,
-                    generation_id=alt.generation.generation_id,
-                    native_id=_link_base(
-                        lib.assets,
-                        alt.source_id,
-                        alt.generation.generation_id,
-                        alt.html_ref,
-                        alt.html_ref[4:],
-                    ),
-                )
-        return convert.document(
-            doc,
-            spec=s.source(doc.source_id),
-            links=lib.links(doc),
-            generation_id=gen.generation_id if gen is not None else introduced,
-            html=html,
-            vault=None if gen is None else lib.vault_location(gen, doc),
-            has_history=len(s.documents.history(did)) > 1,
-        )
+        include_text = "text" in (fields or [])
+
+        def build() -> bytes:
+            view = lib.document(did, at)
+            model = convert.document(
+                view.doc,
+                spec=s.source(view.doc.source_id),
+                links=lib.links(view.doc),
+                generation_id=view.generation_id,
+                html=view.html,
+                vault=view.vault,
+                has_history=view.has_history,
+                include_text=include_text,
+            )
+            return model.model_dump_json().encode("utf-8")
+
+        body = await lib.nas.run(build)
+        etag = _etag(body)
+        headers = {"ETag": etag, "Cache-Control": DOCUMENT_CACHE}
+        if _not_modified(request, etag):
+            return Response(status_code=304, headers=headers)
+        return Response(body, media_type="application/json", headers=headers)
 
     @r.get("/documents/{rest:path}", include_in_schema=False)
     def unencoded_document_path(rest: str) -> None:
@@ -291,118 +312,20 @@ def _v1(lib: Library, settings: ApiSettings) -> APIRouter:
 
     # --- Search ---------------------------------------------------------------------------------
 
-    def _kind_sources(kind: DocKind | None, wanted: list[str] | None) -> list[str] | None:
-        if kind is None:
-            return wanted
-        ids = [spec.id for spec in s.sources if sites.kind_of(spec) is kind]
-        return [x for x in ids if wanted is None or x in wanted]
-
-    def _query(q: str, limit: int, offset: int, scope: list[str] | None) -> list[SearchHit]:
-        if scope == []:  # a filter that matches no source: nothing, not everything
-            return []
-        return list(s.index.search(q, limit=limit, offset=offset, sources=scope))
-
-    def _window(q: str, scope: list[str] | None) -> list[SearchHit]:
-        """The wide window for totals and facets: snippet-free when the index supports it."""
-        if scope == []:
-            return []
-        hits_only = getattr(s.index, "search_hits", None)
-        if callable(hits_only):
-            return list(cast(Sequence[SearchHit], hits_only(q, limit=_WINDOW, offset=0, sources=scope)))
-        return _query(q, _WINDOW, 0, scope)
-
-    def _did_you_mean(q: str, scope: list[str] | None, window: Sequence[SearchHit]) -> str | None:
-        """A spelling correction, only when results are sparse or a query word matches nothing.
-
-        Sparse: fewer than ``_SPARSE`` hits; then every unknown or rare word may change. Low-score: a
-        word of the query is outside the vocabulary and matches no document, so no hit can contain it;
-        then only those words may change. The correction is offered only if it finds at least as
-        many documents as the query did.
-        """
-        speller = s.speller
-        if speller is None:
-            return None
-        only: list[str] | None = None
-        if len(window) >= _SPARSE:
-            dead = [w for w in speller.unknown(q) if not _query(w, 1, 0, None)]
-            if not dead:
-                return None
-            only = dead
-        fixed = speller.correct(q, only=only)
-        if fixed is None or fixed.casefold() == q.casefold():
-            return None
-        better = _window(fixed, scope)
-        return fixed if better and len(better) >= len(window) else None
-
-    @r.get("/search", tags=["search"], responses=errors(422))
-    def run_search(
+    @r.get("/search", tags=["search"], responses=errors(422, 503))
+    async def run_search(
         q: Annotated[str, Query(min_length=1, max_length=1000, description="Plain-language query.")],
         sources: Annotated[
             list[str] | None, Query(description="Restrict to these source ids (repeat or comma-separate).")
         ] = None,
         kind: Annotated[DocKind | None, Query(description="Restrict to sources of this kind.")] = None,
         limit: Annotated[int, Query(ge=1, le=100)] = 10,
-        offset: Annotated[int, Query(ge=0, le=10_000)] = 0,
+        offset: Annotated[
+            int, Query(ge=0, le=WINDOW, description=f"Results are ranked {WINDOW} deep; pages end there.")
+        ] = 0,
     ) -> SearchResults:
-        t0 = time.perf_counter()
         wanted = [x for raw in sources or [] for x in raw.split(",") if x] or None
-        scope = _kind_sources(kind, wanted)
-        window = _window(q, scope)
-        raw = _query(q, limit + 1, offset, scope)  # only the visible page gets snippets
-        page, more = raw[:limit], len(raw) > limit
-        estimate = len(window) >= _WINDOW
-        total = max(len(window), offset + len(page) + (1 if more else 0))
-        facet_hits = window if kind is None else _window(q, wanted)
-        kinds: dict[str, DocKind] = {spec.id: sites.kind_of(spec) for spec in s.sources}
-        present = Counter(
-            kinds.get(h.source_id or h.doc_id[4:].partition("/")[0], DocKind.OTHER) for h in facet_hits
-        )
-        # Each facet counts its own kind (up to the window), so clicking "Dictionary (52)" shows 52
-        # results rather than the top 200's share of them (E2E-5).
-        counts = {
-            k: len(window) if k is kind else len(_window(q, _kind_sources(k, wanted)))
-            for k in present
-            if k is not DocKind.OTHER
-        } | ({DocKind.OTHER: present[DocKind.OTHER]} if DocKind.OTHER in present else {})
-        terms = search.terms(q)
-        hits: list[Hit] = []
-        for h in page:
-            plain = search.plain_snippet(h.snippet)  # index snippets are HTML (<b>…</b>); the API is plain
-            hits.append(
-                convert.hit(
-                    replace(h, snippet=plain),
-                    spec=s.source(h.source_id or h.doc_id[4:].partition("/")[0]),
-                    doc=s.documents.get(h.doc_id),
-                    highlights=search.highlights(plain, terms),
-                )
-            )
-        scope_of = getattr(s.index, "scope", None)
-        routed = cast(Any, scope_of(q, scope)) if callable(scope_of) else None
-        nav = search.navigate_to(s, q, exists=lib.exists) if offset == 0 else None
-        did_you_mean = _did_you_mean(q, scope, window) if offset == 0 else None
-        if s.queries is not None and offset == 0:
-            s.queries.record(s.clock(), q, total, not window)
-        return SearchResults(
-            query=q,
-            offset=offset,
-            limit=limit,
-            hits=hits,
-            next_offset=offset + limit if more else None,
-            kind=kind,
-            total=total,
-            total_is_estimate=estimate,
-            took_ms=round((time.perf_counter() - t0) * 1000, 2),
-            intent=search.intent(q, navigational=nav is not None),
-            facets=[
-                KindFacet(kind=k, count=n) for k, n in sorted(counts.items(), key=lambda x: (-x[1], x[0]))
-            ],
-            navigate_to=nav,
-            did_you_mean=did_you_mean,
-            low_confidence=not window,
-            scope=None
-            if routed is None
-            else SearchScope(site=routed.site, sources=list(routed.sources), fallback=routed.fallback),
-        )
+        return await lib.searches.run(lambda: searcher.run(q, wanted, kind, limit, offset))
 
     @r.get("/suggest", tags=["search"], responses=errors(422))
     def suggest(
@@ -474,98 +397,78 @@ def _v1(lib: Library, settings: ApiSettings) -> APIRouter:
 
     # --- System Monitor -------------------------------------------------------------------------
 
-    verified: list[tuple[float, bool]] = []  # (monotonic time, result) of the last chain replay
-    replaying = threading.Lock()
-
-    def replay() -> None:
-        with replaying:
-            verified[:] = [(time.monotonic(), s.ledger.verify())]
-
-    threading.Thread(target=lambda: _quietly(replay), name="ledger-verify", daemon=True).start()
-
-    def ledger_ok() -> bool:
-        """Replaying the chain reads every ledger file (tens of seconds on a busy NAS): only the first
-        call waits for it; later re-checks run in the background and the page shows the last result."""
-        if not verified:
-            replay()
-        elif time.monotonic() - verified[0][0] > settings.ledger_verify_seconds and not replaying.locked():
-            threading.Thread(target=replay, name="ledger-verify", daemon=True).start()
-        return verified[0][1]
-
-    @r.get("/proposals", tags=["system"])
-    def proposals(
+    @r.get("/proposals", tags=["system"], responses=errors(503))
+    async def proposals(
         status: Annotated[
             Literal["open", "applied", "accepted", "rejected"] | None, Query(description="Filter by status.")
         ] = None,
     ) -> ProposalPage:
         """Curator proposals (newest first). Deciding them is an owner action: `wsp proposals`."""
-        items = [] if s.ops is None else list(s.ops.proposals(status))
-        return ProposalPage(items=sorted(items, key=lambda p: p.id, reverse=True))
-
-    @r.get("/system", tags=["system"])
-    def system(ledger_tail: Annotated[int, Query(ge=0, le=500)] = settings.ledger_tail) -> SystemStatus:
-        now = s.clock()
-        fresh: list[SourceFreshness] = []
-        degraded: list[GenerationInfo] = []
-        for spec in sorted(s.sources, key=lambda x: x.id):
-            cur = s.vault.current(spec.id)
-            f = sites.freshness(spec, cur, now)
-            fresh.append(
-                SourceFreshness(
-                    source_id=spec.id,
-                    name=spec.name,
-                    status=spec.status.value,
-                    cadence=spec.cadence,
-                    current_generation=None if cur is None else cur.generation_id,
-                    sealed_at=None if cur is None else cur.sealed_at,
-                    age_seconds=f.age_seconds,
-                    stale=f.stale,
-                    health=f.health,
-                )
-            )
-            degraded += [
-                convert.generation_info(g, current=cur is not None and g.generation_id == cur.generation_id)
-                for g in s.vault.generations(spec.id)
-                if g.status is GenerationStatus.DEGRADED
-            ]
-        tail = list(s.ledger.tail(ledger_tail)) if ledger_tail else []
-        return SystemStatus(
-            generated_at=now,
-            freshness=fresh,
-            degraded=degraded,
-            ledger_tail=[convert.ledger_entry(e) for e in tail],
-            ledger_ok=ledger_ok(),
-            uptime_seconds=round(time.monotonic() - started, 3),
-            ops=None if s.ops is None else s.ops.status(now),
+        return await state.run(
+            lambda: ProposalPage(items=proposals_with(state.proposals.get() or (), status))
         )
+
+    @r.get("/system", tags=["system"], responses=errors(503))
+    async def system(
+        ledger_tail: Annotated[int, Query(ge=0, le=MAX_LEDGER_TAIL)] = settings.ledger_tail,
+    ) -> SystemStatus:
+        """Freshness, degraded generations, ledger and operations, from the library snapshot. The
+        server refreshes it in the background, so the parts can be up to a refresh period old."""
+
+        def build() -> SystemStatus:
+            now = s.clock()
+            snap = state.snapshot()
+            fresh: list[SourceFreshness] = []
+            for spec in sorted(s.sources, key=lambda x: x.id):
+                cur = snap.source(spec.id).current
+                f = sites.freshness(spec, cur, now)
+                fresh.append(
+                    SourceFreshness(
+                        source_id=spec.id,
+                        name=spec.name,
+                        status=spec.status.value,
+                        cadence=spec.cadence,
+                        current_generation=None if cur is None else cur.generation_id,
+                        sealed_at=None if cur is None else cur.sealed_at,
+                        age_seconds=f.age_seconds,
+                        stale=f.stale,
+                        health=f.health,
+                    )
+                )
+            events = state.ledger_tail.get() or ()
+            tail = list(events[-ledger_tail:]) if ledger_tail else []
+            return SystemStatus(
+                generated_at=now,
+                freshness=fresh,
+                degraded=[convert.generation_info(g, current=c) for g, c in snap.degraded()],
+                ledger_tail=[convert.ledger_entry(e) for e in tail],
+                ledger_ok=state.ledger_ok.get(),
+                uptime_seconds=round(time.monotonic() - started, 3),
+                ops=state.ops.get(),
+            )
+
+        return await state.run(build)
 
     return r
 
 
-def _link_base(assets: object, source_id: str, generation_id: str, html_ref: str, native_id: str) -> str:
-    """What relative links in a page resolve against: the ZIM entry actually served (a bundle's book
-    front page or a redirect target lives elsewhere than the address asked for), else the native id."""
-    if isinstance(assets, ZimAssetStore) and html_ref.startswith("zim:"):
-        return assets.base(source_id, generation_id, html_ref.removeprefix("zim:"))
-    return native_id
-
-
-def _go(s: Services) -> APIRouter:
+def _go(lib: Library) -> APIRouter:
     r = APIRouter()
 
     @r.get(
         "/go/{address:path}",
         tags=["addresses"],
         response_model=Resolution,
-        responses={307: {"description": "Redirect to `href` (with `?redirect=true`)"}} | errors(400, 404),
+        responses={307: {"description": "Redirect to `href` (with `?redirect=true`)"}}
+        | errors(400, 404, 503),
     )
-    def go(
+    async def go(
         request: Request,
         address: Annotated[str, Path(description="`wsp://…` address, with or without the scheme.")],
         redirect: Annotated[bool, Query(description="Answer 307 to the resource instead of JSON.")] = False,
     ) -> Resolution | RedirectResponse:
         query = {k: v for k, v in request.query_params.items() if k != "redirect"}
-        res = resolve(s, address, query)
+        res = await lib.nas.run(lambda: resolve(lib.s, address, query, exists=lib.exists))
         if redirect and res.href is not None:
             return RedirectResponse(res.href, status_code=307)
         return res
@@ -577,9 +480,16 @@ def _mount_navigator(app: FastAPI, settings: ApiSettings) -> None:
     static = settings.static_dir
     if static is not None and static.is_dir():
         # Mounted last so /v1 and /go win. html=True serves index.html for directories.
-        app.mount("/", StaticFiles(directory=static, html=True), name="navigator")
+        app.mount("/", NavigatorFiles(directory=static, html=True), name="navigator")
         return
 
     @app.get("/", include_in_schema=False)
     def placeholder() -> HTMLResponse:
         return HTMLResponse(_PLACEHOLDER)
+
+
+def library_of(app: FastAPI) -> Library:
+    """The :class:`Library` behind an app (tests and tools)."""
+    found: object = app.state.library
+    assert isinstance(found, Library)
+    return found
