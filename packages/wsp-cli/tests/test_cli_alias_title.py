@@ -15,7 +15,8 @@ from wsp_cli.indexer import _alias_title  # pyright: ignore[reportPrivateUsage]
         ("zh-yue/香港", "zh-yue/香港特別行政區", "香港"),
         ("wikipedia_de_all/Berlin_(Stadt)", "wikipedia_de_all/Berlin", "Berlin (Stadt)"),
         ("AC/DC_(band)", "AC/DC", "AC/DC (band)"),  # a source without prefixes: "AC" is no prefix
-        ("A/B_test", "A/B_testing", "A/B test"),
+        ("A/Turing", "A/Alan_Turing", "Turing"),  # an old ZIM namespace
+        ("wikipedia_en_all/A/Turing", "wikipedia_en_all/A/Alan_Turing", "Turing"),  # book + namespace
         ("Turing", "Alan_Turing", "Turing"),
         ("en/Foo", "de/Foo", "en/Foo"),  # different prefixes: not a shared prefix
         ("en/Foo", "", "en/Foo"),

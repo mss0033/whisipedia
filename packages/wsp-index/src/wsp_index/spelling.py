@@ -551,7 +551,10 @@ class Vocabulary:
         self.prefix = prefix
         self.log_eps = float(np.log(epsilon))
         self.log_total = math.log(self.total)
-        self.unknown_score = math.log(self.floor * max(1e-6, min_ratio)) + self.log_eps
+        # A vocabulary that kept every word (floor 1: a small library) has no evidence that a rare
+        # neighbour is junk: any word seen at all may replace an unknown one at one edit.
+        ratio = min_ratio if self.floor > 1 else min(min_ratio, 0.5)
+        self.unknown_score = math.log(self.floor * max(1e-6, ratio)) + self.log_eps
 
     def __len__(self) -> int:
         return self.size

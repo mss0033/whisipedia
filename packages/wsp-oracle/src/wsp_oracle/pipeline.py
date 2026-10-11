@@ -31,7 +31,6 @@ log = logging.getLogger("wsp_oracle")
 
 Resolver = Callable[[str], SearchHit | None]
 PREFER_BOOST = 1.5
-_POOL = ThreadPoolExecutor(4, thread_name_prefix="oracle-dense")  # dense retrieval beside BM25
 
 
 def source_of(doc_id: str) -> str:
@@ -131,6 +130,8 @@ class OracleSearcher:
         self.passage_text = passage_text
         self.low_confidence = low_confidence
         self.budget_ms = budget_ms
+        self._pool: ThreadPoolExecutor | None = None
+        self._pool_lock = threading.Lock()
 
     # --- stages --------------------------------------------------------------------------------
 
@@ -149,6 +150,19 @@ class OracleSearcher:
 
         docs = self.vectors.search_docs(q, limit=depth, allow=None if allowed is None else allow)
         return [(d, s) for d, s, _ in docs], {d: c for d, _, c in docs}
+
+    def _dense_pool(self) -> ThreadPoolExecutor:
+        with self._pool_lock:
+            if self._pool is None:
+                self._pool = ThreadPoolExecutor(4, thread_name_prefix="oracle-dense")
+            return self._pool
+
+    def close(self) -> None:
+        """Stop the dense-retrieval threads (they also stop when the searcher is collected)."""
+        with self._pool_lock:
+            if self._pool is not None:
+                self._pool.shutdown(wait=False)
+                self._pool = None
 
     def _timed_dense(
         self, route: Route, depth: int, sources: Sequence[str] | None
@@ -267,7 +281,11 @@ class OracleSearcher:
         # Never fewer candidates than the configured depth: the ranking of the first results must not
         # depend on the page size (I'm Feeling Lucky asks for one hit, the results page for ten; E2E-6).
         depth = self.depth_for(depth)
-        dense_future = _POOL.submit(self._timed_dense, route, depth, sources)  # runs beside BM25
+        if self.vectors is None:
+            dense_future: Future[tuple[list[tuple[str, float]], dict[str, str], float]] = Future()
+            dense_future.set_result(([], {}, 0.0))
+        else:  # dense retrieval runs beside BM25
+            dense_future = self._dense_pool().submit(self._timed_dense, route, depth, sources)
         hybrid = HybridSearcher(
             self.lexical,
             _StaticDense(dense_future) if self.vectors is not None else None,
@@ -449,6 +467,7 @@ class OracleIndex:
         self._invalidate()
 
     def close(self) -> None:
+        self.searcher.close()
         self.lexical.close()
 
 
