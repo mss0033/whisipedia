@@ -34,7 +34,9 @@ _MAGIC_RE = re.compile(r"__[A-Z]+__")
 _TABLE_LINE_RE = re.compile(r"^\s*(?:\|[-+}]|\{\|).*$", re.MULTILINE)
 _TABLE_CELL_RE = re.compile(r"^\s*[|!]\s?", re.MULTILINE)
 _CELL_SEP_RE = re.compile(r"\s*(?:\|\||!!)\s*")
-_CELL_ATTR_RE = re.compile(r"^(?:[a-z-]+\s*=\s*(?:\"[^\"]*\"|'[^']*'|[^\s|]+)\s*)+\|(?!\|)", re.MULTILINE)
+# Atomic group + possessive repeat: the plain ``(...)+`` backtracks exponentially on a long attribute-like
+# line with no closing ``|`` (one English Wikipedia page stalled a refine for over 10 minutes).
+_CELL_ATTR_RE = re.compile(r"^(?>[a-z-]+\s*=\s*(?:\"[^\"]*\"|'[^']*'|[^\s|]+)\s*)++\|(?!\|)", re.MULTILINE)
 _SPACES_RE = re.compile("[ \t\u00a0]+")
 _BLANKS_RE = re.compile(r"\n{2,}")
 
