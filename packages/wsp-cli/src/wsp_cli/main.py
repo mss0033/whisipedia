@@ -286,6 +286,7 @@ def build_parser() -> argparse.ArgumentParser:
         ("approve", "Continue a release held by the integrity or sanity checks."),
         ("reject", "Reject a held release (it is quarantined)."),
         ("resume", "Resume an auto-paused source."),
+        ("retry", "Give a quarantined or backing-off release a fresh start (no attempts counted)."),
     ):
         s = add(name, ops.cmd_owner, help_)
         s.set_defaults(owner_action=name)
@@ -293,6 +294,12 @@ def build_parser() -> argparse.ArgumentParser:
         if name != "resume":
             s.add_argument("version", nargs="?", default=None, help="default: the release held for review")
             s.add_argument("--note", default=None, help="reason recorded in the ledger")
+        if name == "approve":
+            s.add_argument(
+                "--force",
+                action="store_true",
+                help="promote even though a newer generation is current (moves CURRENT backwards)",
+            )
 
     add("status", ops.cmd_status, "Sources, generations, degraded data and the orchestrator queue.")
 

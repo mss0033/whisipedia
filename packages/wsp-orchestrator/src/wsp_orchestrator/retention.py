@@ -16,7 +16,9 @@ Hard guarantees, whatever the policy says:
   ``settled`` (promoted ``integrity.settle_days`` ago and fully verified by the scrub since). While
   a new generation is still settling, the older anchor therefore stays;
 * a generation ``needed`` by a current one (an incremental generation reads files from it, e.g. a
-  ``doc-collection`` catalog pointing at earlier editions) is never pruned.
+  ``doc-collection`` catalog pointing at earlier editions) is never pruned;
+* a generation whose release is still in the pipeline (``in_flight``: refining, indexing, or *held*
+  for the owner's review) is never pruned (audit M7).
 
 **Partitioned sources** (ADR-0010): a partition is not a newer version of another partition, so
 :func:`plan_partitioned_retention` plans every partition on its own (its own newest, current, last
@@ -78,6 +80,7 @@ class GenerationInfo:
     known_good: bool = False  # passed every check before promotion (it was promoted)
     settled: bool = False  # known good, old enough and verified by the scrub since
     needed: bool = False  # a current generation reads files from it (incremental sources)
+    in_flight: bool = False  # its release is still in the pipeline or held for review
 
     @classmethod
     def from_generation(
@@ -88,9 +91,17 @@ class GenerationInfo:
         known_good: bool = False,
         settled: bool = False,
         needed: bool = False,
+        in_flight: bool = False,
     ) -> GenerationInfo:
         return cls(
-            g.generation_id, generation_date(g), g.status, holds_last_copy, known_good, settled, needed
+            g.generation_id,
+            generation_date(g),
+            g.status,
+            holds_last_copy,
+            known_good,
+            settled,
+            needed,
+            in_flight,
         )
 
 
@@ -139,6 +150,8 @@ def plan_retention(
             keep(g.generation_id, "last copy of content gone upstream")
         if g.needed:
             keep(g.generation_id, "read by a current generation")
+        if g.in_flight:
+            keep(g.generation_id, "release in progress or held for review")
     for g in sealed[: policy.last]:
         keep(g.generation_id, f"last {policy.last}")
     good = next((g for g in sealed if g.known_good), None)

@@ -100,16 +100,29 @@ class Scheduler:
     def active_sources(self) -> list[SourceSpec]:
         return [s for s in self.sources if s.status is SourceStatus.ACTIVE]
 
+    def pruned_sources(self) -> list[SourceSpec]:
+        """Active sources, plus partitioned ones still in ``candidate`` status: those are acquired
+        partition by partition with ``wsp collections fetch`` before they are active, and their
+        generations need retention too (audit M7)."""
+        return [
+            s
+            for s in self.sources
+            if s.status is SourceStatus.ACTIVE or (s.partitioned and s.status is SourceStatus.CANDIDATE)
+        ]
+
     def entries(self) -> list[ScheduleEntry]:
         out: list[ScheduleEntry] = []
         probe = IntervalCadence(self.settings.health_probe_interval)
         for spec in self.active_sources():
+            if spec.partitioned:  # ADR-0010: acquired one partition per run by `wsp collections fetch`
+                continue
             cadence = self.source_cadence(spec)
             payload = {"source_id": spec.id}
-            if not spec.partitioned:  # ADR-0010: acquired one partition per run by `wsp collections fetch`
-                out.append(ScheduleEntry(JobKind.DISCOVER, spec.id, cadence, payload, spec.id))
-                out.append(ScheduleEntry(JobKind.HEALTH_PROBE, spec.id, probe, payload, spec.id))
-            out.append(ScheduleEntry(JobKind.PRUNE, spec.id, cadence, payload, spec.id))
+            out.append(ScheduleEntry(JobKind.DISCOVER, spec.id, cadence, payload, spec.id))
+            out.append(ScheduleEntry(JobKind.HEALTH_PROBE, spec.id, probe, payload, spec.id))
+        for spec in self.pruned_sources():
+            payload = {"source_id": spec.id}
+            out.append(ScheduleEntry(JobKind.PRUNE, spec.id, self.source_cadence(spec), payload, spec.id))
         out.append(ScheduleEntry(JobKind.DISCOVERY_BOTS, GLOBAL_KEY, self.cycle))
         for name, iso in sorted(self.bots.items()):
             bot_cadence = (
@@ -124,21 +137,34 @@ class Scheduler:
 
     # --- due computation -----------------------------------------------------------------------
 
+    def _earliest(self, e: ScheduleEntry) -> datetime | None:
+        """When ``e`` may run next: its cadence, and no sooner than ``job_retry_gap`` after a failure
+        (``None``: never ran, due now)."""
+        last_success, last_attempt = self.store.schedule_marks(e.kind.value, e.key)
+        due_at = e.cadence.next_due(last_success)
+        failed_since = last_attempt is not None and (last_success is None or last_attempt > last_success)
+        if failed_since and last_attempt is not None:
+            retry_at = last_attempt + self.settings.job_retry_gap
+            due_at = retry_at if due_at is None else max(due_at, retry_at)
+        return due_at
+
+    def _blocked(self, e: ScheduleEntry) -> bool:
+        """Paused source (only its health probe still runs), or a job for it is already active."""
+        paused = e.source_id is not None and self.store.source_health(e.source_id).paused
+        if paused and e.kind is not JobKind.HEALTH_PROBE:
+            return True
+        return self.queue.active(e.kind, e.key) is not None
+
     def due(self, now: datetime | None = None) -> list[DueEntry]:
         now = now or self.clock.now()
         out: list[DueEntry] = []
         for e in self.entries():
-            last_success, last_attempt = self.store.schedule_marks(e.kind.value, e.key)
-            due_at = e.cadence.next_due(last_success)
+            due_at = self._earliest(e)
             if due_at is not None and due_at > now:
                 continue
-            failed_since = last_attempt is not None and (last_success is None or last_attempt > last_success)
-            if failed_since and last_attempt is not None and now < last_attempt + self.settings.job_retry_gap:
+            if self._blocked(e):  # SELECT before INSERT: nothing to write (audit H6)
                 continue
-            paused = e.source_id is not None and self.store.source_health(e.source_id).paused
-            if paused and e.kind is not JobKind.HEALTH_PROBE:  # paused sources are still probed
-                continue
-            out.append(DueEntry(e, due_at))
+            out.append(DueEntry(e, e.cadence.next_due(self.store.last_success(e.kind.value, e.key))))
         return out
 
     def tick(self) -> list[Job]:
@@ -166,15 +192,23 @@ class Scheduler:
         self.check_retention_windows(now)
         return enqueued
 
-    def next_wakeup(self) -> datetime | None:
-        """Earliest future time at which :meth:`tick` would enqueue something."""
+    def next_wakeup(self, now: datetime | None = None) -> datetime | None:
+        """Earliest time *after now* at which :meth:`tick` could enqueue something.
+
+        Entries that cannot be enqueued now (a job of theirs is still active, the source is paused,
+        a failure is waiting out ``job_retry_gap``) never yield a time in the past, so the main loop
+        sleeps instead of spinning (audit H6); a finishing job wakes it through the orchestrator.
+        """
+        now = now or self.clock.now()
         times: list[datetime] = []
         for e in self.entries():
-            due_at = e.cadence.next_due(self.store.last_success(e.kind.value, e.key))
-            if due_at is not None:
+            due_at = self._earliest(e)
+            if due_at is not None and due_at > now:
                 times.append(due_at)
         start, cursor = self.scrub_position()
-        times.append(start + cursor * self.settings.scrub_slice_interval)
+        scrub_at = start + cursor * self.settings.scrub_slice_interval
+        if scrub_at > now:
+            times.append(scrub_at)
         return min(times) if times else None
 
     # --- scrub ---------------------------------------------------------------------------------
@@ -189,6 +223,8 @@ class Scheduler:
     def _tick_scrub(self, now: datetime) -> Job | None:
         start, cursor = self.scrub_position()
         if now < start + cursor * self.settings.scrub_slice_interval:
+            return None
+        if self.queue.active(JobKind.SCRUB_SLICE, SCRUB_KEY) is not None:
             return None
         payload = {"slice": cursor, "slices": self.settings.scrub_slices, "cycle_start": ts(start)}
         return self.queue.enqueue(JobKind.SCRUB_SLICE, SCRUB_KEY, now=now, payload=payload)
