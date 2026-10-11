@@ -29,13 +29,19 @@ MARKER = "# Rendered by `wsp service install` from deploy/systemd/"
 Runner = Callable[[Sequence[str]], tuple[int, str]]
 
 
+SYSTEMCTL_TIMEOUT = 60.0  # seconds; a hung user manager must not hang `wsp service`
+
+
 def systemctl(args: Sequence[str]) -> tuple[int, str]:
     exe = shutil.which("systemctl")
     if exe is None:
         return 127, "systemctl not found"
-    done = subprocess.run(  # noqa: S603 - fixed argv, no shell
-        [exe, "--user", *args], capture_output=True, text=True, check=False
-    )
+    try:
+        done = subprocess.run(  # noqa: S603 - fixed argv, no shell
+            [exe, "--user", *args], capture_output=True, text=True, check=False, timeout=SYSTEMCTL_TIMEOUT
+        )
+    except subprocess.TimeoutExpired:
+        return 124, f"systemctl --user {' '.join(args)} timed out after {SYSTEMCTL_TIMEOUT:.0f}s"
     return done.returncode, (done.stdout + done.stderr).strip()
 
 
@@ -117,14 +123,18 @@ class ServiceManager:
 
     def uninstall(self, out: TextIO, *, dry_run: bool = False) -> int:
         present = [n for n in UNITS if (self.target / n).exists()]
-        if not dry_run and present:
-            code, msg = self.run(["disable", "--now", *present])
-            out.write(f"  systemctl --user disable --now: {'ok' if code == 0 else msg}\n")
+        ours: list[str] = []
         for name in present:
             dest = self.target / name
-            if not dest.read_text(encoding="utf-8").startswith(MARKER):
+            if dest.read_text(encoding="utf-8").startswith(MARKER):
+                ours.append(name)
+            else:  # the owner's own unit: neither disabled nor removed
                 out.write(f"  keep {dest}: not written by `wsp service install`\n")
-                continue
+        if not dry_run and ours:
+            code, msg = self.run(["disable", "--now", *ours])
+            out.write(f"  systemctl --user disable --now: {'ok' if code == 0 else msg}\n")
+        for name in ours:
+            dest = self.target / name
             out.write(f"  {'would remove' if dry_run else 'remove'} {dest}\n")
             if not dry_run:
                 dest.unlink()

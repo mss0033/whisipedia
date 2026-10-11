@@ -82,6 +82,7 @@ def test_recover_returns_running_jobs_to_pending(tmp_path: Path) -> None:
     assert q.recover(T0 + timedelta(minutes=10)) == 2
     q.claim(T0, lease=timedelta(hours=5), limit=2)
     assert q.recover(T0, all_running=True) == 2
-    assert all(j.status is JobStatus.PENDING and j.attempts == 1 for j in q.jobs())
+    # the crashed attempt stays counted (audit C1): a job that kills the daemon must run out of retries
+    assert all(j.status is JobStatus.PENDING and j.attempts == 2 for j in q.jobs())
     assert q.next_run_after() == T0
     assert q.depth() == {("prune", "pending"): 2}

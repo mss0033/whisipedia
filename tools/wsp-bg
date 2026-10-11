@@ -1,31 +1,61 @@
 #!/bin/sh
 # Run a Whisipedia job in the background budget: whisipedia-background.slice (shared memory, swap,
-# CPU and IO limits), lowest CPU and IO priority, its own memory ceiling, logs in the journal.
+# CPU and IO limits), lowest CPU priority, its own memory ceiling, logs in the journal.
 #
-#   tools/wsp-bg NAME [MEMORY_MAX] -- COMMAND...
+#   tools/wsp-bg [--no-heavy-lock] [--wait] NAME [MEMORY_MAX] -- COMMAND...
 #   tools/wsp-bg embed-en 6G -- .venv/bin/python packages/wsp-oracle/scripts/embed_sources.py ...
 #
 # The unit is whisipedia-job-NAME (journalctl --user -u whisipedia-job-NAME); a second start with the
 # same NAME is refused while the first runs. MEMORY_MAX defaults to 4G; MemoryHigh is set 1G lower so
 # the job is slowed down (reclaim) before it is killed.
+#
+# The job holds the machine-wide "heavy" lock (<lock dir>/heavy.lock, the lock the orchestrator's
+# refine/index/profile units and `wsp index build|rank|spell|catalog` take), so heavy jobs never run
+# at the same time and their budgets never add up. If it is held the job exits 75 at once; --wait
+# queues behind it instead; --no-heavy-lock is for light jobs. The lock directory is
+# $WSP_LOCK_DIR, else <index.root>/../locks from the config.
 set -eu
-[ $# -ge 3 ] || { echo "usage: $0 NAME [MEMORY_MAX] -- COMMAND..." >&2; exit 2; }
+usage() { echo "usage: $0 [--no-heavy-lock] [--wait] NAME [MEMORY_MAX] -- COMMAND..." >&2; exit 2; }
+lock=1
+wait=0
+while [ $# -gt 0 ]; do
+  case $1 in
+    --no-heavy-lock) lock=0; shift ;;
+    --wait) wait=1; shift ;;
+    *) break ;;
+  esac
+done
+[ $# -ge 3 ] || usage
 name=$1; shift
 max=4G
 if [ "$1" != "--" ]; then max=$1; shift; fi
-[ "$1" = "--" ] || { echo "usage: $0 NAME [MEMORY_MAX] -- COMMAND..." >&2; exit 2; }
+[ "$1" = "--" ] || usage
 shift
 case $max in
   *G) high="$(( ${max%G} - 1 ))G"; [ "${max%G}" -gt 1 ] || high=768M ;;
   *) high=$max ;;
 esac
 repo=$(cd "$(dirname "$0")/.." && pwd)
+if [ "$lock" = 1 ]; then
+  command -v flock >/dev/null 2>&1 || { echo "wsp-bg: flock (util-linux) not found; use --no-heavy-lock" >&2; exit 2; }
+  lockdir=${WSP_LOCK_DIR:-$(WSP_CONFIG_DIR="$repo/config" "$repo/.venv/bin/python" -c \
+    'from wsp_cli import bootstrap; from wsp_cli.locks import lock_dir_for;
+print(lock_dir_for(bootstrap.paths(bootstrap.load(bootstrap.layout())).require_index()))')}
+  [ -n "$lockdir" ] || { echo "wsp-bg: cannot find the lock directory (set WSP_LOCK_DIR)" >&2; exit 2; }
+  mkdir -p "$lockdir"
+  if [ "$wait" = 1 ]; then
+    set -- flock "$lockdir/heavy.lock" "$@"
+  else
+    set -- flock --nonblock --conflict-exit-code 75 "$lockdir/heavy.lock" "$@"
+  fi
+fi
 exec systemd-run --user --collect --quiet \
   --unit="whisipedia-job-$name" \
   --slice=whisipedia-background.slice \
   --working-directory="$repo" \
   -p MemoryHigh="$high" -p MemoryMax="$max" -p MemorySwapMax=1G \
-  -p OOMScoreAdjust=500 -p Nice=19 -p IOSchedulingClass=idle -p CPUWeight=20 \
+  -p OOMScoreAdjust=500 -p Nice=19 -p IOSchedulingClass=best-effort -p IOSchedulingPriority=7 \
+  -p CPUWeight=20 -p KillMode=mixed \
   -E WSP_MAX_WORKERS="${WSP_MAX_WORKERS:-4}" -E OMP_NUM_THREADS=4 -E MKL_NUM_THREADS=4 \
   -E TOKENIZERS_PARALLELISM=false -E PYTHONUNBUFFERED=1 \
   -E WSP_CONFIG_DIR="$repo/config" \

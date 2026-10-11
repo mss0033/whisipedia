@@ -19,7 +19,7 @@ from wsp_cli.doctor import exit_code as doctor_exit
 from wsp_cli.doctor import render as render_doctor
 from wsp_cli.indexer import Indexer
 from wsp_cli.ingest import Ingestor, VersionStatus, render
-from wsp_cli.locks import LockHeldError, exclusive
+from wsp_cli.locks import DRILL, EXIT_BUSY, HEAVY, INDEX, SCRUB, LockHeldError, exclusive, lock_dir_for
 from wsp_cli.service import ServiceManager, unit_dir
 from wsp_cli.wiring import drill_once, parity_targets, repair_ladder, scrubber
 from wsp_core.model import GenerationStatus, SourceSpec
@@ -29,8 +29,10 @@ from wsp_index.spelling import SPELL_FILE
 from wsp_orchestrator.curator import ProposalFiles
 from wsp_orchestrator.curator.registry_edit import apply_to_registry_text, remove_from_overlay
 from wsp_orchestrator.orchestrator import Orchestrator
+from wsp_orchestrator.pipeline import IllegalTransitionError
 from wsp_orchestrator.settings import OrchestratorSettings
-from wsp_orchestrator.store import StateStore
+from wsp_orchestrator.store import ConcurrentUpdateError, StateStore
+from wsp_orchestrator.versions import version_key
 from wsp_vault.drill import DrillKind
 from wsp_vault.vault import FileVault
 
@@ -45,7 +47,23 @@ def _context(args: argparse.Namespace) -> tuple[bootstrap.Layout, dict[str, Any]
 
 def _lock_dir(cfg: Mapping[str, Any]) -> Path:
     """Local-disk lock directory, next to the index root."""
-    return bootstrap.paths(cfg).require_index().parent / "locks"
+    return lock_dir_for(bootstrap.paths(cfg).require_index())
+
+
+@contextlib.contextmanager
+def _index_writer(cfg: Mapping[str, Any]) -> Generator[None]:
+    """``HEAVY`` then ``INDEX`` (the global order): one heavy job on the machine, one index writer.
+
+    Shared with the orchestrator's refine/index units and the nightly timer; a held lock raises
+    :class:`LockHeldError` at once (exit :data:`EXIT_BUSY`).
+    """
+    with exclusive(_lock_dir(cfg), HEAVY), exclusive(_lock_dir(cfg), INDEX):
+        yield
+
+
+def _busy(exc: LockHeldError) -> int:
+    print(f"error: {exc}", file=sys.stderr)
+    return EXIT_BUSY
 
 
 def _vault(
@@ -69,8 +87,7 @@ def cmd_ingest(args: argparse.Namespace, out: TextIO) -> int:
         with exclusive(_lock_dir(cfg), "ingest"):
             return _ingest(args, out, lay, cfg, specs)
     except LockHeldError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 3
+        return _busy(exc)
 
 
 def _ingest(
@@ -144,7 +161,7 @@ def open_indexer(
 def cmd_index_build(args: argparse.Namespace, out: TextIO) -> int:
     lay, cfg, specs = _context(args)
     try:
-        with exclusive(_lock_dir(cfg), "index"), open_indexer(cfg, lay, specs, out) as ix:
+        with _index_writer(cfg), open_indexer(cfg, lay, specs, out) as ix:
             reports = ix.build([args.source] if args.source else None)
             changed = any(r.upserted or r.deleted or r.refined for r in reports)
             if not getattr(args, "no_rank", False) and (changed or not ix.index.rank_path.is_file()):
@@ -152,8 +169,7 @@ def cmd_index_build(args: argparse.Namespace, out: TextIO) -> int:
             if changed or not (ix.index.path / SPELL_FILE).is_file():
                 ix.spell()
     except LockHeldError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 3
+        return _busy(exc)
     for r in reports:
         if r.skipped:
             out.write(f"{r.source_id}: skipped ({r.skipped})\n")
@@ -171,14 +187,17 @@ def cmd_index_catalog(args: argparse.Namespace, out: TextIO) -> int:
 
     lay, cfg, specs = _context(args)
     built = 0
-    with open_indexer(cfg, lay, specs, out) as ix:
-        for spec in specs:
-            if args.source and spec.id != args.source:
-                continue
-            gen = current_generation(ix.refinery, spec.id)
-            if gen is None:
-                continue
-            built += ix.build_catalog(spec, gen) is not None
+    try:
+        with _index_writer(cfg), open_indexer(cfg, lay, specs, out) as ix:
+            for spec in specs:
+                if args.source and spec.id != args.source:
+                    continue
+                gen = current_generation(ix.refinery, spec.id)
+                if gen is None:
+                    continue
+                built += ix.build_catalog(spec, gen) is not None
+    except LockHeldError as exc:
+        return _busy(exc)
     out.write(f"catalog: {built} source(s) rebuilt\n")
     return 0
 
@@ -190,11 +209,10 @@ def cmd_index_rank(args: argparse.Namespace, out: TextIO) -> int:
     lay, cfg, specs = _context(args)
     rc = RankConfig(damping=args.damping, mix=args.mix)
     try:
-        with exclusive(_lock_dir(cfg), "index"), open_indexer(cfg, lay, specs, out) as ix:
+        with _index_writer(cfg), open_indexer(cfg, lay, specs, out) as ix:
             stats = ix.rank(rc)
     except LockHeldError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 3
+        return _busy(exc)
     if stats is None:
         out.write("rank: nothing indexed\n")
     return 0
@@ -204,11 +222,10 @@ def cmd_index_spell(args: argparse.Namespace, out: TextIO) -> int:
     """Rebuild only the "did you mean" vocabulary from the indexed Refinery generations."""
     lay, cfg, specs = _context(args)
     try:
-        with exclusive(_lock_dir(cfg), "index"), open_indexer(cfg, lay, specs, out) as ix:
+        with _index_writer(cfg), open_indexer(cfg, lay, specs, out) as ix:
             stats = ix.spell()
     except LockHeldError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 3
+        return _busy(exc)
     if stats is None:
         out.write("spell: nothing indexed\n")
     return 0
@@ -218,7 +235,22 @@ def cmd_index_spell(args: argparse.Namespace, out: TextIO) -> int:
 
 
 def cmd_scrub(args: argparse.Namespace, out: TextIO) -> int:
+    """One scrub pass (the ``SCRUB`` lock, shared with the orchestrator's slices). Exit 1 on findings."""
     lay, cfg, specs = _context(args)
+    try:
+        with exclusive(_lock_dir(cfg), SCRUB):
+            return _scrub(cfg, lay, specs, args, out)
+    except LockHeldError as exc:
+        return _busy(exc)
+
+
+def _scrub(
+    cfg: Mapping[str, Any],
+    lay: bootstrap.Layout,
+    specs: Sequence[SourceSpec],
+    args: argparse.Namespace,
+    out: TextIO,
+) -> int:
     vault = _vault(cfg, lay, specs, writable=True)
     budget = int(float(args.budget_gb) * 1e9) if args.budget_gb is not None else None
     report = scrubber(cfg, vault).run(max_bytes=budget)
@@ -240,10 +272,15 @@ def cmd_scrub(args: argparse.Namespace, out: TextIO) -> int:
 
 
 def cmd_drill(args: argparse.Namespace, out: TextIO) -> int:
+    """One chaos drill (the ``DRILL`` lock, shared with the orchestrator). Exit 1 if it failed."""
     lay, cfg, specs = _context(args)
-    vault = _vault(cfg, lay, specs, writable=True)
-    kind = DrillKind(args.kind) if args.kind else None
-    result = drill_once(cfg, vault, kind=kind, source_id=args.source)
+    try:
+        with exclusive(_lock_dir(cfg), DRILL):
+            vault = _vault(cfg, lay, specs, writable=True)
+            kind = DrillKind(args.kind) if args.kind else None
+            result = drill_once(cfg, vault, kind=kind, source_id=args.source)
+    except LockHeldError as exc:
+        return _busy(exc)
     out.write(json.dumps(result, indent=2) + "\n")
     return 0 if result.get("ok") else 1
 
@@ -263,8 +300,13 @@ def open_orchestrator(cfg: Mapping[str, Any]) -> Generator[Orchestrator]:
 
 
 def _held_version(orch: Orchestrator, source_id: str) -> str | None:
-    held = [r for r in orch.store.releases(source_id=source_id) if r.hold_reason is not None]
-    return held[-1].version if held else None
+    """The newest release of the source that waits for the owner (natural version order, M8)."""
+    held = [
+        r.version
+        for r in orch.store.releases(source_id=source_id)
+        if r.hold_reason is not None and r.state.value not in ("promoted", "quarantined")
+    ]
+    return max(held, key=version_key, default=None)
 
 
 def cmd_owner(args: argparse.Namespace, out: TextIO) -> int:
@@ -279,12 +321,20 @@ def cmd_owner(args: argparse.Namespace, out: TextIO) -> int:
         if version is None:
             print(f"error: {args.source} has no release held for review; give a version", file=sys.stderr)
             return 2
-        if action == "approve":
-            orch.approve_release(args.source, version, note=args.note or "")
-            out.write(f"{args.source}/{version}: approved; promotion queued\n")
-        else:
-            orch.reject_release(args.source, version, reason=args.note or "rejected by owner")
-            out.write(f"{args.source}/{version}: rejected (quarantined)\n")
+        try:
+            if action == "approve":
+                force = bool(getattr(args, "force", False))
+                orch.approve_release(args.source, version, note=args.note or "", force=force)
+                out.write(f"{args.source}/{version}: approved; promotion queued\n")
+            elif action == "retry":
+                orch.retry_release(args.source, version, note=args.note or "")
+                out.write(f"{args.source}/{version}: queued for a fresh attempt\n")
+            else:
+                orch.reject_release(args.source, version, reason=args.note or "rejected by owner")
+                out.write(f"{args.source}/{version}: rejected (quarantined)\n")
+        except (IllegalTransitionError, ConcurrentUpdateError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
     return 0
 
 

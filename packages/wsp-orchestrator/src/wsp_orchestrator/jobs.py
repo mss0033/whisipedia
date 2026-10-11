@@ -1,7 +1,10 @@
 """Persistent job queue in the local state store (PLAN §6.5).
 
 At most one *active* (pending or running) job exists per ``(kind, key)``. A claimed job holds a lease;
-after a crash the daemon returns running jobs to pending on startup (:meth:`JobQueue.recover`).
+after a crash the daemon returns running jobs to pending on startup (:meth:`JobQueue.recover`). The
+attempt a crashed job was making stays counted: a job that crashes the daemon every time must not
+retry forever (audit C1). :meth:`JobQueue.enqueue` looks before it inserts, so a scheduler asking
+again for a job that is already active writes nothing (audit H6).
 """
 
 from __future__ import annotations
@@ -78,6 +81,8 @@ class JobQueue:
         host: str | None = None,
     ) -> Job | None:
         """Add a job. Returns ``None`` if an active job with the same kind and key already exists."""
+        if self.active(kind, key) is not None:  # read first: no write transaction, no id burnt
+            return None
         with self.store.tx() as c:
             cur = c.execute(
                 "INSERT OR IGNORE INTO jobs(kind, key, payload_json, status, run_after, host, created_at,"
@@ -192,12 +197,16 @@ class JobQueue:
             c.execute("UPDATE jobs SET lease_until=? WHERE id=? AND status='running'", (ts(until), job.id))
 
     def recover(self, now: datetime, *, all_running: bool = False) -> int:
-        """Return running jobs to pending: all of them at startup, or only those whose lease expired."""
+        """Return running jobs to pending: all of them at startup, or only those whose lease expired.
+
+        The attempt is *not* given back: a job still running at startup was interrupted by a crash
+        (a clean shutdown defers its jobs), and a job that crashes the daemon each time must reach
+        its retry limit instead of looping forever.
+        """
         with self.store.tx() as c:
             if all_running:
                 cur = c.execute(
-                    "UPDATE jobs SET status='pending', attempts=MAX(attempts-1, 0), lease_until=NULL,"
-                    " updated_at=? WHERE status='running'",
+                    "UPDATE jobs SET status='pending', lease_until=NULL, updated_at=? WHERE status='running'",
                     (ts(now),),
                 )
             else:
@@ -208,12 +217,38 @@ class JobQueue:
                 )
             return cur.rowcount
 
+    def requeue(self, job_ids: Sequence[int], now: datetime, note: str) -> int:
+        """Return orphaned running jobs (no thread owns them any more) to pending (watchdog, M2)."""
+        if not job_ids:
+            return 0
+        marks = ",".join("?" * len(job_ids))
+        with self.store.tx() as c:
+            cur = c.execute(
+                f"UPDATE jobs SET status='pending', lease_until=NULL, last_error=?, updated_at=?"  # noqa: S608
+                f" WHERE status='running' AND id IN ({marks})",
+                (note, ts(now), *job_ids),
+            )
+            return cur.rowcount
+
+    def running_ids(self) -> set[int]:
+        return {int(r["id"]) for r in self.store.query("SELECT id FROM jobs WHERE status='running'")}
+
     def depth(self) -> Mapping[tuple[str, str], int]:
         rows = self.store.query("SELECT kind, status, COUNT(*) AS n FROM jobs GROUP BY kind, status")
         return {(r["kind"], r["status"]): int(r["n"]) for r in rows}
 
-    def next_run_after(self) -> datetime | None:
-        rows = self.store.query("SELECT MIN(run_after) AS t FROM jobs WHERE status='pending'")
+    def next_run_after(self, after: datetime | None = None) -> datetime | None:
+        """Earliest ``run_after`` of a pending job (strictly later than ``after`` when given).
+
+        Jobs already due but not claimed are waiting for capacity; the daemon is woken when a job
+        finishes, so they must not make it poll (audit H6).
+        """
+        if after is None:
+            rows = self.store.query("SELECT MIN(run_after) AS t FROM jobs WHERE status='pending'")
+        else:
+            rows = self.store.query(
+                "SELECT MIN(run_after) AS t FROM jobs WHERE status='pending' AND run_after>?", (ts(after),)
+            )
         return parse_ts(rows[0]["t"]) if rows else None
 
 

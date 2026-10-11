@@ -7,10 +7,11 @@ database costs only re-planning: the vault and the ledger remain the source of t
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sqlite3
 import threading
-from collections.abc import Generator, Mapping, Sequence
+from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -20,8 +21,20 @@ from typing import Any, cast
 from wsp_core.model import ReleaseState
 from wsp_orchestrator.clock import ensure_utc
 
-SCHEMA_VERSION = 4  # 2: releases.fetched_json (v0.2); 3: upstream_offers, proposal ids;
-# 4: origin_pins, provenance (source integrity, ADR-0009)
+SCHEMA_VERSION = 5  # 2: releases.fetched_json (v0.2); 3: upstream_offers, proposal ids;
+# 4: origin_pins, provenance (source integrity, ADR-0009);
+# 5: releases.row_version (optimistic concurrency), step token and crash accounting, state_since
+
+# Columns added to ``releases`` by v5 (name, declaration); added idempotently on open.
+_RELEASE_V5_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("row_version", "INTEGER NOT NULL DEFAULT 0"),
+    ("step_token", "TEXT"),
+    ("step_state", "TEXT"),
+    ("step_started_at", "TEXT"),
+    ("crash_count", "INTEGER NOT NULL DEFAULT 0"),
+    ("crash_state", "TEXT"),
+    ("state_since", "TEXT"),
+)
 
 # Filesystems on which SQLite WAL locking/shared memory is unsafe or unsupported.
 UNSAFE_FS_TYPES = frozenset(
@@ -37,6 +50,10 @@ class StoreError(RuntimeError):
 
 class UnsafeStoragePathError(StoreError):
     pass
+
+
+class ConcurrentUpdateError(StoreError):
+    """The release row changed since it was read (another thread, the CLI, the owner)."""
 
 
 def ts(when: datetime) -> str:
@@ -102,10 +119,23 @@ class ReleaseRecord:
     size_bytes: int | None = None
     hold_reason: str | None = None
     approved: bool = False  # owner approved promotion despite a sanity hold
+    # owner approved promoting it although a newer generation is current (``wsp approve --force``);
+    # stored as ``approved = 2``
+    force_older: bool = False
     last_error: str | None = None
     next_attempt_at: datetime | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
+    # Optimistic concurrency: every update is ``WHERE row_version=?`` and bumps it.
+    row_version: int = 0
+    # Crash accounting (audit C1): the step in progress, persisted before its side effects. A token
+    # still set when the daemon starts means the process died inside that step.
+    step_token: str | None = None
+    step_state: ReleaseState | None = None
+    step_started_at: datetime | None = None
+    crash_count: int = 0  # crashes (or OOM kills of the step's unit) in ``crash_state``
+    crash_state: ReleaseState | None = None
+    state_since: datetime | None = None  # when ``state`` was entered (stuck-state alerts)
 
     @property
     def subject(self) -> str:
@@ -151,6 +181,7 @@ CREATE TABLE IF NOT EXISTS releases (
   doc_count INTEGER, size_bytes INTEGER, hold_reason TEXT, approved INTEGER NOT NULL DEFAULT 0,
   last_error TEXT, next_attempt_at TEXT,
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY (source_id, version));
+CREATE INDEX IF NOT EXISTS releases_state ON releases(state);
 CREATE TABLE IF NOT EXISTS jobs (
   id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, key TEXT NOT NULL, payload_json TEXT NOT NULL,
   status TEXT NOT NULL, run_after TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, host TEXT,
@@ -185,6 +216,19 @@ CREATE TABLE IF NOT EXISTS provenance (
   source_id TEXT NOT NULL, version TEXT NOT NULL, verdict TEXT NOT NULL, provenance_json TEXT NOT NULL,
   checked_at TEXT NOT NULL, PRIMARY KEY (source_id, version));
 """
+
+
+def migrate_v5(c: sqlite3.Connection) -> None:
+    """v4 -> v5, idempotent: add the missing ``releases`` columns, date ``state_since``.
+
+    Runs on every open inside the schema transaction; a column that exists is left alone, so a
+    database migrated by a crashed earlier open (or created at v5) is not touched twice.
+    """
+    have = {str(r[1]) for r in c.execute("PRAGMA table_info(releases)")}
+    for name, decl in _RELEASE_V5_COLUMNS:
+        if name not in have:
+            c.execute(f"ALTER TABLE releases ADD COLUMN {name} {decl}")
+    c.execute("UPDATE releases SET state_since=updated_at WHERE state_since IS NULL")
 
 
 def _dumps(value: object) -> str:
@@ -231,6 +275,7 @@ class StateStore:
                     c.execute("ALTER TABLE releases ADD COLUMN fetched_json TEXT NOT NULL DEFAULT '{}'")
                 # v2 -> v3 and v3 -> v4: new tables only (created above)
                 c.execute("UPDATE meta SET value=? WHERE key='schema_version'", (str(SCHEMA_VERSION),))
+            migrate_v5(c)
 
     def close(self) -> None:
         with self._lock:
@@ -238,15 +283,30 @@ class StateStore:
 
     @contextmanager
     def tx(self) -> Generator[sqlite3.Connection]:
-        """A write transaction (``BEGIN IMMEDIATE``); rolled back on any exception."""
+        """A write transaction (``BEGIN IMMEDIATE``); rolled back on any exception.
+
+        A failed ``COMMIT`` (a deferred constraint, ``SQLITE_BUSY``, a full disk) leaves SQLite inside
+        the transaction; it is rolled back too, so the next ``tx()`` does not fail with "cannot
+        start a transaction within a transaction" (audit M3).
+        """
         with self._lock:
             self._conn.execute("BEGIN IMMEDIATE")
             try:
                 yield self._conn
             except BaseException:
-                self._conn.execute("ROLLBACK")
+                self._rollback()
                 raise
-            self._conn.execute("COMMIT")
+            try:
+                self._conn.execute("COMMIT")
+            except BaseException:
+                self._rollback()
+                raise
+
+    def _rollback(self) -> None:
+        if self._conn.in_transaction:
+            # already rolled back by SQLite itself (e.g. after SQLITE_FULL): nothing left to undo
+            with contextlib.suppress(sqlite3.Error):
+                self._conn.execute("ROLLBACK")
 
     def query(self, sql: str, params: Sequence[object] = ()) -> list[sqlite3.Row]:
         with self._lock:
@@ -266,6 +326,10 @@ class StateStore:
         with self.tx() as c:
             c.execute(sql, (key, value))
 
+    def delete_meta(self, key: str) -> None:
+        with self.tx() as c:
+            c.execute("DELETE FROM meta WHERE key=?", (key,))
+
     # --- releases ------------------------------------------------------------------------------
 
     @staticmethod
@@ -284,10 +348,18 @@ class StateStore:
             size_bytes=r["size_bytes"],
             hold_reason=r["hold_reason"],
             approved=bool(r["approved"]),
+            force_older=int(r["approved"]) >= 2,
             last_error=r["last_error"],
             next_attempt_at=parse_ts(r["next_attempt_at"]),
             created_at=parse_ts(r["created_at"]),
             updated_at=parse_ts(r["updated_at"]),
+            row_version=int(r["row_version"]),
+            step_token=r["step_token"],
+            step_state=ReleaseState(r["step_state"]) if r["step_state"] else None,
+            step_started_at=parse_ts(r["step_started_at"]),
+            crash_count=int(r["crash_count"]),
+            crash_state=ReleaseState(r["crash_state"]) if r["crash_state"] else None,
+            state_since=parse_ts(r["state_since"]),
         )
 
     def get_release(self, source_id: str, version: str) -> ReleaseRecord | None:
@@ -311,7 +383,7 @@ class StateStore:
         """Insert if absent. Returns False if the release was already known."""
         cur = conn.execute(
             "INSERT OR IGNORE INTO releases(source_id, version, state, attempts, generation_id, ref_json,"
-            " created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            " created_at, updated_at, state_since) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 rec.source_id,
                 rec.version,
@@ -321,17 +393,28 @@ class StateStore:
                 _dumps(rec.ref),
                 ts(now),
                 ts(now),
+                ts(now),
             ),
         )
         return cur.rowcount == 1
 
     def update_release(self, rec: ReleaseRecord, now: datetime, conn: sqlite3.Connection) -> None:
-        conn.execute(
-            "UPDATE releases SET state=?, attempts=?, plan_json=?, local_files_json=?, fetched_json=?,"
+        """Write ``rec`` if the row is still at ``rec.row_version`` (and bump it).
+
+        Raises :class:`ConcurrentUpdateError` when someone else updated the release since ``rec`` was
+        read: a stale record never overwrites newer state (audit H4).
+        """
+        cur = conn.execute(
+            "UPDATE releases SET state_since=CASE WHEN state=? THEN state_since ELSE ? END,"
+            " state=?, attempts=?, plan_json=?, local_files_json=?, fetched_json=?,"
             " doc_count=?,"
-            " size_bytes=?, hold_reason=?, approved=?, last_error=?, next_attempt_at=?, updated_at=?"
-            " WHERE source_id=? AND version=?",
+            " size_bytes=?, hold_reason=?, approved=?, last_error=?, next_attempt_at=?, updated_at=?,"
+            " step_token=?, step_state=?, step_started_at=?, crash_count=?, crash_state=?,"
+            " row_version=row_version+1"
+            " WHERE source_id=? AND version=? AND row_version=?",
             (
+                rec.state.value,
+                ts(now),
                 rec.state.value,
                 rec.attempts,
                 _dumps(rec.plan) if rec.plan is not None else None,
@@ -340,14 +423,24 @@ class StateStore:
                 rec.doc_count,
                 rec.size_bytes,
                 rec.hold_reason,
-                int(rec.approved),
+                2 if rec.approved and rec.force_older else int(rec.approved),
                 rec.last_error,
                 ts(rec.next_attempt_at) if rec.next_attempt_at else None,
                 ts(now),
+                rec.step_token,
+                rec.step_state.value if rec.step_state else None,
+                ts(rec.step_started_at) if rec.step_started_at else None,
+                rec.crash_count,
+                rec.crash_state.value if rec.crash_state else None,
                 rec.source_id,
                 rec.version,
+                rec.row_version,
             ),
         )
+        if cur.rowcount != 1:
+            raise ConcurrentUpdateError(
+                f"{rec.subject} changed since it was read (row_version {rec.row_version})"
+            )
 
     # --- ledger outbox (exactly-once ledger events across crashes) ----------------------------
 
@@ -374,7 +467,13 @@ class StateStore:
     def remove_outbox(self, event_id: str, ledger_seq: int) -> None:
         with self.tx() as c:
             c.execute("DELETE FROM outbox WHERE event_id=?", (event_id,))
-            self.set_meta("ledger_watermark", str(ledger_seq), c)
+            # Never backwards: concurrent flushes may finish out of order (audit M4).
+            c.execute(
+                "INSERT INTO meta(key, value) VALUES ('ledger_watermark', ?) ON CONFLICT(key) DO UPDATE"
+                " SET value=excluded.value"
+                " WHERE CAST(excluded.value AS INTEGER) > CAST(meta.value AS INTEGER)",
+                (str(ledger_seq),),
+            )
 
     # --- schedule marks ------------------------------------------------------------------------
 
@@ -402,10 +501,19 @@ class StateStore:
 
     # --- alerts --------------------------------------------------------------------------------
 
+    def alert_is_open(self, key: str) -> bool:
+        rows = self.query("SELECT 1 FROM alerts WHERE key=? AND resolved_at IS NULL", (key,))
+        return bool(rows)
+
     def open_alert(
         self, key: str, severity: str, message: str, data: Mapping[str, object], now: datetime
     ) -> bool:
-        """Open an alert unless one with the same key is already open. Returns True if newly opened."""
+        """Open an alert unless one with the same key is already open. Returns True if newly opened.
+
+        Reads first: an alert that is already open costs no write transaction (audit H6).
+        """
+        if self.alert_is_open(key):
+            return False
         with self.tx() as c:
             row = c.execute("SELECT resolved_at FROM alerts WHERE key=?", (key,)).fetchone()
             if row is not None and row["resolved_at"] is None:
@@ -420,6 +528,8 @@ class StateStore:
             return True
 
     def resolve_alert(self, key: str, now: datetime) -> bool:
+        if not self.alert_is_open(key):
+            return False
         with self.tx() as c:
             cur = c.execute(
                 "UPDATE alerts SET resolved_at=? WHERE key=? AND resolved_at IS NULL", (ts(now), key)
@@ -471,6 +581,23 @@ class StateStore:
             return
         with self.tx() as c:
             c.execute(sql, params)
+
+    def modify_source_health(
+        self,
+        source_id: str,
+        change: Callable[[SourceHealth], SourceHealth],
+        conn: sqlite3.Connection | None = None,
+    ) -> SourceHealth:
+        """Read-modify-write the health row inside one transaction (no lost concurrent pause, H4).
+
+        With ``conn`` the caller's transaction is used; the read happens inside it.
+        """
+        if conn is None:
+            with self.tx() as c:
+                return self.modify_source_health(source_id, change, c)
+        new = change(self.source_health(source_id))
+        self.put_source_health(new, conn)
+        return new
 
     # --- generation stats (trend for promotion sanity checks) ---------------------------------
 

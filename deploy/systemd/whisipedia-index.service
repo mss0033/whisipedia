@@ -16,6 +16,11 @@ Environment=PYTHONUNBUFFERED=1
 Environment=WSP_CONFIG_DIR=@CONFIG_DIR@
 ExecStartPre=@REPO@/.venv/bin/wsp --config-dir @CONFIG_DIR@ doctor --quiet --require vault
 ExecStart=@REPO@/.venv/bin/wsp --config-dir @CONFIG_DIR@ index build
+# Exit 3: the machine-wide "heavy" or "index" lock is held (an orchestrator refine/index unit, a
+# manual build). Not a failure: the timer (Persistent=true) tries again the next night.
+SuccessExitStatus=3
+KillMode=mixed
+TimeoutStopSec=120
 Nice=19
 CPUWeight=20
 Slice=whisipedia-background.slice
@@ -23,7 +28,9 @@ MemoryHigh=7G
 MemoryMax=9G
 OOMScoreAdjust=500
 Environment=WSP_MAX_WORKERS=4
-IOSchedulingClass=idle
+# best-effort/7, not idle: the build holds the index lock for hours (priority inversion).
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
 StandardOutput=journal
 StandardError=journal
 IPAddressDeny=any
