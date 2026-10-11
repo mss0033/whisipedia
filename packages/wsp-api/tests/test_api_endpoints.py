@@ -63,8 +63,8 @@ def test_document_current_and_at_generation(client: httpx.Client) -> None:
     old = Document.model_validate(client.get(document_href(TURING), params={"at": SAMPLE_GEN_1}).json())
     assert now.native_id == "A/Alan_Turing"
     assert now.address == "wsp://wikipedia-en-zim/A/Alan_Turing"
-    assert "father of theoretical computer science" in now.text
-    assert "father" not in old.text
+    assert "father of theoretical computer science" in (now.text or "")
+    assert "father" not in (old.text or "")
     assert now.content_hash != old.content_hash
 
 

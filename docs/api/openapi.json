@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Whisipedia API",
-    "description": "Read API of a private offline library. Everything is served from local storage; the server makes no\noutbound connections. Errors always use the envelope `{\"error\": {\"code\", \"message\"}}`.\n\nList endpoints use opaque cursors: pass `next_cursor` back as `cursor`. The change feed uses its own\ncursor (`since`). Document ids are `wsp:<source_id>/<native_id>`; in URL paths a doc id is ONE\npercent-encoded segment (`/v1/documents/wsp%3Arfc%2F9110`), as produced by `encodeURIComponent`.\n",
-    "version": "1.3.0"
+    "description": "Read API of a private offline library. Everything is served from local storage; the server makes no\noutbound connections. Errors always use the envelope `{\"error\": {\"code\", \"message\"}}`; `503` (with\n`Retry-After`) means the library storage is busy or still loading.\n\nList endpoints use opaque cursors: pass `next_cursor` back as `cursor`. The change feed uses its own\ncursor (`since`). Document ids are `wsp:<source_id>/<native_id>`; in URL paths a doc id is ONE\npercent-encoded segment (`/v1/documents/wsp%3Arfc%2F9110`), as produced by `encodeURIComponent`.\n",
+    "version": "1.4.0"
   },
   "paths": {
     "/v1/health": {
@@ -109,6 +109,16 @@
               }
             }
           },
+          "503": {
+            "description": "unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "invalid_request",
             "content": {
@@ -163,6 +173,16 @@
           },
           "404": {
             "description": "not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "unavailable",
             "content": {
               "application/json": {
                 "schema": {
@@ -267,6 +287,16 @@
           },
           "404": {
             "description": "not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "unavailable",
             "content": {
               "application/json": {
                 "schema": {
@@ -400,6 +430,7 @@
           "documents"
         ],
         "summary": "Get Document",
+        "description": "A document. An HTML page's plain `text` is sent only with `fields=text` (it doubles the size).\nResponses carry an `ETag`; send it back as `If-None-Match` to get `304`.",
         "operationId": "get_document_v1_documents__doc_id__get",
         "parameters": [
           {
@@ -430,6 +461,28 @@
               "title": "At"
             },
             "description": "Generation id: the document as of that snapshot."
+          },
+          {
+            "name": "fields",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "const": "text",
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Extra fields: `text` also sends the plain text of an HTML page.",
+              "title": "Fields"
+            },
+            "description": "Extra fields: `text` also sends the plain text of an HTML page."
           }
         ],
         "responses": {
@@ -472,6 +525,19 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "Not modified (`If-None-Match`)"
           },
           "422": {
             "description": "invalid_request",
@@ -564,11 +630,13 @@
             "required": false,
             "schema": {
               "type": "integer",
-              "maximum": 10000,
+              "maximum": 200,
               "minimum": 0,
+              "description": "Results are ranked 200 deep; pages end there.",
               "default": 0,
               "title": "Offset"
-            }
+            },
+            "description": "Results are ranked 200 deep; pages end there."
           }
         ],
         "responses": {
@@ -594,6 +662,16 @@
           },
           "422": {
             "description": "invalid_request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "unavailable",
             "content": {
               "application/json": {
                 "schema": {
@@ -1002,6 +1080,16 @@
               }
             }
           },
+          "503": {
+            "description": "unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "invalid_request",
             "content": {
@@ -1021,6 +1109,7 @@
           "system"
         ],
         "summary": "System",
+        "description": "Freshness, degraded generations, ledger and operations, from the library snapshot. The\nserver refreshes it in the background, so the parts can be up to a refresh period old.",
         "operationId": "system_v1_system_get",
         "parameters": [
           {
@@ -1049,6 +1138,16 @@
           },
           "500": {
             "description": "internal_error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "unavailable",
             "content": {
               "application/json": {
                 "schema": {
@@ -1324,6 +1423,16 @@
               }
             }
           },
+          "503": {
+            "description": "unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "invalid_request",
             "content": {
@@ -1470,6 +1579,16 @@
           },
           "404": {
             "description": "not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "unavailable",
             "content": {
               "application/json": {
                 "schema": {
@@ -2044,8 +2163,16 @@
             "title": "License"
           },
           "text": {
-            "type": "string",
-            "title": "Text"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text",
+            "description": "Plain text. Null for an HTML page unless asked for with `fields=text`; always set when `format` is `text`."
           },
           "content_hash": {
             "type": "string",
@@ -2681,7 +2808,7 @@
           "api_version": {
             "type": "string",
             "title": "Api Version",
-            "default": "1.3.0"
+            "default": "1.4.0"
           },
           "sources": {
             "type": "integer",
@@ -3733,7 +3860,7 @@
           "total": {
             "type": "integer",
             "title": "Total",
-            "description": "Matching documents (a lower bound if `total_is_estimate`).",
+            "description": "Results for the query (and `kind`), counted in the same ranked list the page comes from (at most 200; a lower bound if `total_is_estimate`).",
             "default": 0
           },
           "total_is_estimate": {
@@ -3756,7 +3883,7 @@
             },
             "type": "array",
             "title": "Facets",
-            "description": "Counts per kind, ignoring the `kind` filter."
+            "description": "Results per kind in the same ranked list, ignoring the `kind` filter: filtering by a kind shows exactly its count. Kinds with no results are left out."
           },
           "navigate_to": {
             "anyOf": [
@@ -4415,14 +4542,21 @@
             "description": "Most recent events, oldest first."
           },
           "ledger_ok": {
-            "type": "boolean",
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Ledger Ok",
-            "description": "Result of replaying the ledger hash chain."
+            "description": "Result of replaying the ledger hash chain; null until the first replay has finished."
           },
           "api_version": {
             "type": "string",
             "title": "Api Version",
-            "default": "1.3.0"
+            "default": "1.4.0"
           },
           "uptime_seconds": {
             "type": "number",

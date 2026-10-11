@@ -3,13 +3,12 @@
 from dataclasses import replace
 from pathlib import Path, PurePosixPath
 
-from libzim.writer import Creator, Hint, Item, StringProvider
-
 from wsp_api import create_app
 from wsp_api.addresses import document_href
 from wsp_api.schemas import Document
 from wsp_api.testing import local_client
 from wsp_api.testing.fakes import SAMPLE_GEN_2, InMemoryVault, sample_services
+from wsp_api.testing.zims import write_zim
 from wsp_api.zim import ZimAssetStore
 from wsp_core.ids import make_doc_id
 from wsp_core.model import Artifact, Generation, GenerationStatus
@@ -17,39 +16,8 @@ from wsp_core.model import Artifact, Generation, GenerationStatus
 SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>'
 
 
-class _Item(Item):
-    def __init__(self, path: str, mimetype: str, content: str) -> None:
-        super().__init__()
-        self._path, self._mimetype, self._content = path, mimetype, content
-
-    def get_path(self) -> str:
-        return self._path
-
-    def get_title(self) -> str:
-        return self._path
-
-    def get_mimetype(self) -> str:
-        return self._mimetype
-
-    def get_contentprovider(self) -> StringProvider:
-        return StringProvider(self._content)
-
-    def get_hints(self) -> dict[Hint, int]:
-        return {Hint.FRONT_ARTICLE: self._mimetype == "text/html"}
-
-
 def _zim(path: Path, name: str, items: list[tuple[str, str, str]], redirects: list[tuple[str, str]]) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with Creator(path).config_indexing(False, "eng").config_verbose(False) as creator:
-        creator.set_mainpath(items[0][0])
-        for p, mime, body in items:
-            creator.add_item(_Item(p, mime, body))
-        for p, target in redirects:
-            creator.add_redirection(p, p, target, {Hint.FRONT_ARTICLE: True})
-        creator.add_metadata("Name", name)
-        creator.add_metadata("Language", "eng")
-        creator.add_metadata("Date", "2026-09-01")
-    return path
+    return write_zim(path, name, items, redirects)
 
 
 def _vault(tmp_path: Path, files: list[str]) -> InMemoryVault:
@@ -129,16 +97,25 @@ def test_document_html_and_image_through_the_api(tmp_path: Path) -> None:
         assert img.headers["content-type"].startswith("image/svg+xml")
 
 
-def test_link_base_is_the_entry_actually_served(tmp_path: Path) -> None:
+def test_page_reports_the_entry_actually_served(tmp_path: Path) -> None:
     up = tmp_path / "wiki" / SAMPLE_GEN_2 / "upstream"
     _zim(up / "askubuntu_2026-07a.zim", "askubuntu", [("questions", "text/html", "<p>front</p>")], [])
     _zim(up / "b_2026-09.zim", "book_b", [("A/Two", "text/html", "<p>two</p>")], [("A/Old", "A/Two")])
     store = ZimAssetStore(_vault(tmp_path, []))
-    assert store.books("wiki", SAMPLE_GEN_2) == ["askubuntu", "b"]  # re-release suffix "a" stripped
+    # Book names are the ZIMs' `Name` metadata (as the adapter assigns native ids), not file names.
+    assert store.books("wiki", SAMPLE_GEN_2) == ["askubuntu", "book_b"]
     assert store.html("wiki", SAMPLE_GEN_2, "zim:askubuntu") == "<p>front</p>"
+
+    def served(native_id: str) -> tuple[str, str] | None:
+        page = store.page("wiki", SAMPLE_GEN_2, native_id)
+        return None if page is None else (page.native_id, page.book_root)
+
     # A book front page (no slash) resolves its links inside the book, not at the source root.
-    assert store.base("wiki", SAMPLE_GEN_2, "askubuntu") == "askubuntu/questions"
-    assert store.base("wiki", SAMPLE_GEN_2, "askubuntu/") == "askubuntu/questions"
-    assert store.base("wiki", SAMPLE_GEN_2, "book_b/A/Old") == "book_b/A/Two"
-    assert store.base("wiki", SAMPLE_GEN_2, "book_b/A/Missing") == "book_b/A/Missing"
-    assert store.base("wiki", SAMPLE_GEN_2, "_books") == "_books"
+    assert served("askubuntu") == ("askubuntu/questions", "askubuntu/")
+    assert served("askubuntu/") == ("askubuntu/questions", "askubuntu/")
+    assert served("book_b/A/Old") == ("book_b/A/Two", "book_b/")
+    assert served("book_b/A/Missing") is None
+    assert served("_books") == ("_books", "")
+    assert store.exists("wiki", SAMPLE_GEN_2, "book_b/A/Old")
+    assert not store.exists("wiki", SAMPLE_GEN_2, "book_b/A/Missing")
+    assert store.home("wiki", SAMPLE_GEN_2) == "_books"

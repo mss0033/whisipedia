@@ -163,13 +163,17 @@ export class WspClient {
     return this.get('GET /v1/suggest', NO_PATH, { q, limit }, signal);
   }
 
-  /** `at` is a generation id (time machine). */
+  /**
+   * `at` is a generation id (time machine). An HTML page's plain `text` is sent only with
+   * `text: true` (it doubles the response); a text page always has it.
+   */
   document(
     id: DocId,
-    opts: { at?: string | undefined } = {},
+    opts: { at?: string | undefined; text?: boolean } = {},
     signal?: AbortSignal,
   ): Promise<DocumentResponse> {
-    return this.get('GET /v1/documents/{doc_id}', { doc_id: id }, { at: opts.at }, signal);
+    const fields: Array<'text'> | undefined = opts.text ? ['text'] : undefined;
+    return this.get('GET /v1/documents/{doc_id}', { doc_id: id }, { at: opts.at, fields }, signal);
   }
 
   history(id: DocId, signal?: AbortSignal): Promise<HistoryPage> {

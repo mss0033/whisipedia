@@ -1,27 +1,42 @@
-"""Read-side helpers shared by the routes: the services plus the defaults for unwired seams."""
+"""Read-side helpers shared by the routes: the services, the library snapshot and the defaults for
+unwired seams."""
 
 from __future__ import annotations
 
 import logging
 import threading
-import time
-from collections.abc import Sequence
+from collections import OrderedDict
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from typing import cast
 
 from wsp_api import convert
 from wsp_api.catalog import FeedCatalog
 from wsp_api.errors import ApiError
-from wsp_api.renditions import zim_document
+from wsp_api.htmlrewrite import VERSION as REWRITE_VERSION
+from wsp_api.htmlrewrite import rewrite_html
+from wsp_api.offload import Offload
+from wsp_api.pages import ByteLRU, Rendered, render
+from wsp_api.renditions import borrowed
 from wsp_api.schemas import Change, DocumentLink, SourceInfo, VaultLocation
-from wsp_api.services import Services
-from wsp_api.zim import ZimAssetStore
+from wsp_api.seams import DocumentFields, VaultView
+from wsp_api.services import ApiSettings, Services
+from wsp_api.snapshot import LibrarySnapshot, LibraryState, StateSettings
+from wsp_api.zim import BookIndex, ZimAssetStore
+from wsp_api.zimpool import ZimProcessPool
+from wsp_api.zimread import InProcessZimReader, ZimReader
 from wsp_core.ids import DocId, InvalidDocIdError, make_doc_id, parse_doc_id
-from wsp_core.model import ChangeRecord, DocRecord, Generation, GenerationStatus, SourceSpec
+from wsp_core.model import ChangeRecord, DocRecord, Generation, GenerationStatus, SearchHit, SourceSpec
 from wsp_core.ports import AssetStore, Catalog
 
 log = logging.getLogger(__name__)
 MANIFEST_NAME = "MANIFEST.json"  # same name as wsp_vault.manifest.MANIFEST_NAME
+ZIM_ADAPTER = "kiwix-opds"
+BOOK_INDEX_FILE = "zim-books.json"
 _MAX_LINK_LOOKUPS = 1000
+_HISTORY_CACHE = 2048
+HIT_COLUMNS = ("license", "timestamp", "lang", "url_native")
 
 
 def parse_doc(raw: str) -> DocId:
@@ -32,19 +47,95 @@ def parse_doc(raw: str) -> DocId:
         raise ApiError(400, "invalid_doc_id", str(exc)) from exc
 
 
+@dataclass(frozen=True, slots=True)
+class DocumentView:
+    """Everything ``GET /v1/documents/{id}`` returns, before it becomes JSON."""
+
+    doc: DocRecord
+    generation_id: str | None
+    html: str | None
+    vault: VaultLocation | None
+    has_history: bool
+
+
+def _zim_reader(settings: ApiSettings, services: Services) -> ZimReader:
+    if settings.zim_workers <= 0:
+        return InProcessZimReader()
+    zims = sum(1 for x in services.sources if x.adapter == ZIM_ADAPTER)
+    max_open = settings.zim_max_open or max(4, zims)
+    return ZimProcessPool(
+        workers=settings.zim_workers, max_open=max_open, timeout=settings.zim_timeout_seconds
+    )
+
+
 class Library:
-    def __init__(self, services: Services, *, info_seconds: float = 0.0) -> None:
+    def __init__(self, services: Services, settings: ApiSettings | None = None) -> None:
+        settings = settings or ApiSettings()
         self.s = services
-        self._info_seconds = info_seconds
-        self._infos: dict[str, tuple[float, SourceInfo]] = {}
-        self._refreshing: set[str] = set()
-        self._infos_lock = threading.Lock()
+        self.settings = settings
         self.catalog: Catalog = services.catalog or FeedCatalog(services.changes)
-        # TODO(integration): wire both in wsp_cli.bootstrap; these defaults keep `wsp serve` working.
-        self.assets: AssetStore = services.assets or ZimAssetStore(services.vault)
-        if isinstance(self.assets, ZimAssetStore):
-            self.assets.names = {x.id: x.name for x in services.sources}
-        self._homes: dict[tuple[str, str], str | None] = {}
+        self.state = LibraryState(
+            vault=services.vault,
+            specs=services.sources,
+            catalog=self.catalog,
+            ledger=services.ledger,
+            ops=services.ops,
+            clock=services.clock,
+            settings=StateSettings(
+                background=settings.background,
+                snapshot_seconds=settings.snapshot_seconds,
+                ops_seconds=settings.ops_seconds,
+                ledger_verify_seconds=settings.ledger_verify_seconds,
+            ),
+        )
+        self.zim: ZimAssetStore | None
+        if services.assets is None:
+            index = BookIndex(settings.cache_dir / BOOK_INDEX_FILE if settings.cache_dir else None)
+            self.zim = ZimAssetStore(
+                self.state.vault,
+                _zim_reader(settings, services),
+                book_index=index,
+                sync_books=not settings.background,
+            )
+            self.assets: AssetStore = self.zim
+        else:
+            self.assets = services.assets
+            self.zim = services.assets if isinstance(services.assets, ZimAssetStore) else None
+        if self.zim is not None:
+            self.zim.names = {x.id: x.name for x in services.sources}
+            self.state.home_finder = self.zim
+        self.pages: ByteLRU[tuple[str, ...], Rendered] = ByteLRU(
+            settings.page_cache_bytes, lambda r: r.nbytes
+        )
+        self.nas = Offload(
+            workers=settings.nas_workers,
+            queue=settings.nas_queue,
+            timeout=settings.nas_timeout_seconds,
+            name="nas",
+        )
+        self.searches = Offload(
+            workers=settings.search_workers,
+            queue=settings.search_queue,
+            timeout=settings.search_timeout_seconds,
+            name="search",
+        )
+        self._history: OrderedDict[tuple[DocId, tuple[str, ...]], tuple[tuple[str, str], ...]] = OrderedDict()
+        self._history_lock = threading.Lock()
+        self._fields = services.documents if isinstance(services.documents, DocumentFields) else None
+        lookup = getattr(services.index, "lookup", None)
+        self._index_lookup = cast(Callable[[str], SearchHit | None], lookup) if callable(lookup) else None
+
+    @property
+    def vault(self) -> VaultView:
+        """The vault as requests see it: the in-memory snapshot in the server, else the vault itself."""
+        return self.state.vault
+
+    def close(self) -> None:
+        self.state.stop()
+        self.nas.close()
+        self.searches.close()
+        if self.zim is not None:
+            self.zim.close()
 
     # --- sources ---
 
@@ -54,91 +145,82 @@ class Library:
             raise ApiError(404, "source_not_found", f"unknown source: {source_id}")
         return spec
 
-    def source_info(self, spec: SourceSpec) -> SourceInfo:
-        """A site's card. With ``info_seconds`` set, a card is reused that long and then refreshed in
-        the background while the old one is served: each card costs NAS reads, and every Navigator
-        page needs the site list, so a busy NAS must not stall browsing (E2E-2)."""
-        if self._info_seconds <= 0:
-            return self._fresh_info(spec)
-        with self._infos_lock:
-            hit = self._infos.get(spec.id)
-            stale = hit is not None and time.monotonic() - hit[0] > self._info_seconds
-            refresh = stale and spec.id not in self._refreshing
-            if refresh:
-                self._refreshing.add(spec.id)
-        if hit is None:
-            info = self._fresh_info(spec)
-            with self._infos_lock:
-                self._infos[spec.id] = (time.monotonic(), info)
-            return info
-        if refresh:
-            threading.Thread(target=self._refresh_info, args=(spec,), name="source-info", daemon=True).start()
-        return hit[1]
-
-    def _refresh_info(self, spec: SourceSpec) -> None:
-        try:
-            info = self._fresh_info(spec)
-            with self._infos_lock:
-                self._infos[spec.id] = (time.monotonic(), info)
-        except Exception:  # keep serving the old card; the next request retries
-            log.warning("could not refresh the card of %s", spec.id, exc_info=True)
-        finally:
-            with self._infos_lock:
-                self._refreshing.discard(spec.id)
-
-    def _fresh_info(self, spec: SourceSpec) -> SourceInfo:
-        current = self.s.vault.current(spec.id)
-        # A partitioned source (ADR-0010) is one site made of every current partition, not only the
-        # partition promoted last.
-        members = self.s.vault.current_set(spec.id) if spec.partitioned else ()
+    def source_info(self, spec: SourceSpec, snap: LibrarySnapshot | None = None) -> SourceInfo:
+        """A site's card, from the snapshot (no NAS read in the server, audit #4/#11)."""
+        snap = snap or self.state.snapshot()
+        st = snap.source(spec.id)
         return convert.source_info(
             spec,
-            current,
+            st.current,
             specs=self.s.sources,
             now=self.s.clock(),
-            doc_count=self.catalog.doc_count(spec.id),
-            home_doc_id=self.home_doc_id(spec, current),
-            members=members,
+            doc_count=snap.doc_counts.get(spec.id),
+            home_doc_id=self.state.home_doc_id(spec, st.current),
+            members=st.members if spec.partitioned else (),
         )
 
-    def home_doc_id(self, spec: SourceSpec, current: Generation | None) -> str | None:
-        """Landing page of a Kiwix site (ZIM main page, or the book list of a bundle); cached."""
-        if current is None or spec.adapter != "kiwix-opds" or not isinstance(self.assets, ZimAssetStore):
-            return None
-        key = (spec.id, current.generation_id)
-        if key not in self._homes:
-            try:
-                native = self.assets.home(spec.id, current.generation_id)
-            except Exception:
-                native = None
-            self._homes[key] = None if native is None else make_doc_id(spec.id, native)
-        return self._homes[key]
-
-    def source_infos(self) -> list[SourceInfo]:
-        return [self.source_info(x) for x in sorted(self.s.sources, key=lambda x: x.id)]
+    def source_infos(self, snap: LibrarySnapshot | None = None) -> list[SourceInfo]:
+        snap = snap or self.state.snapshot()
+        return [self.source_info(x, snap) for x in sorted(self.s.sources, key=lambda x: x.id)]
 
     def source_name(self, source_id: str) -> str:
         spec = self.s.source(source_id)
         return source_id if spec is None else spec.name
 
-    # --- documents & changes ---
+    def has_docs(self, sources: Sequence[str]) -> list[str]:
+        counts = self.state.snapshot().doc_counts
+        return [x for x in sources if counts.get(x)]
+
+    # --- cheap document lookups (no article text: audit #9, #10, #20) ---
+
+    def fields(self, did: DocId, columns: Sequence[str]) -> Mapping[str, object] | None:
+        """Some columns of the current version, without the text when the store can project."""
+        if self._fields is not None:
+            return self._fields.fields(did, columns)
+        doc = self.s.documents.get(did)
+        return None if doc is None else {c: getattr(doc, c) for c in ("doc_id", *columns)}
+
+    def in_store(self, did: DocId) -> bool:
+        """In the document store (current version)."""
+        if self._index_lookup is not None and self._index_lookup(did) is not None:
+            return True
+        return self.fields(did, ()) is not None
 
     def exists(self, did: DocId) -> bool:
-        """In the document store, or (Kiwix sources) a page of the current ZIM."""
-        if self.s.documents.get(did) is not None:
+        """In the document store, or (Kiwix sources) an HTML page of the current ZIM. Never reads a page."""
+        if self.in_store(did):
             return True
         source_id, native_id = parse_doc_id(did)
+        spec = self.s.source(source_id)
+        if spec is None or spec.adapter != ZIM_ADAPTER:
+            return False
         try:
-            return zim_document(self.s.source(source_id), native_id, self.s.vault, self.assets) is not None
+            gen = self.vault.current(source_id)
+            if gen is None:
+                return False
+            if self.zim is not None:
+                return self.zim.exists(source_id, gen.generation_id, native_id)
+            return self.assets.html(source_id, gen.generation_id, f"zim:{native_id}") is not None
+        except ApiError:
+            raise
         except Exception:  # an unreadable archive is "not here", not an error page
+            log.warning("existence check failed for %s", did, exc_info=True)
             return False
 
     def title(self, did: str) -> str | None:
         try:
-            doc = self.s.documents.get(parse_doc(did))
+            parsed = parse_doc(did)
         except ApiError:
             return None
-        return None if doc is None else doc.title
+        if self._index_lookup is not None:
+            hit = self._index_lookup(parsed)
+            if hit is not None and hit.title:
+                return hit.title
+        row = self.fields(parsed, ("title",))
+        return None if row is None else str(row["title"])
+
+    def hit_fields(self, did: DocId) -> Mapping[str, object] | None:
+        return self.fields(did, HIT_COLUMNS)
 
     def change(self, rec: ChangeRecord) -> Change:
         return convert.change(rec, title=self.title(rec.doc_id))
@@ -152,15 +234,41 @@ class Library:
                     did = parse_doc(href)
                 except ApiError:
                     did = None
-                if did is not None and self.s.documents.get(did) is not None:
+                if did is not None and self.in_store(did):
                     target = did
             out.append(DocumentLink(href=href, target=target))
         return out
 
-    def generation_of(self, did: DocId, content_hash: str, at: str | None) -> str | None:
+    # --- history ---
+
+    def history(self, did: DocId) -> tuple[tuple[str, str], ...]:
+        """``(generation, content hash)`` versions, oldest first; cached per set of refined generations
+        (reading it opens a reader per generation)."""
+        generations = getattr(self.s.documents, "generations", None)
+        if not callable(generations):
+            return tuple(self.s.documents.history(did))
+        try:
+            stamp = tuple(cast(Callable[[str], Sequence[str]], generations)(parse_doc_id(did)[0]))
+        except Exception:
+            return tuple(self.s.documents.history(did))
+        key = (did, stamp)
+        with self._history_lock:
+            hit = self._history.get(key)
+            if hit is not None:
+                self._history.move_to_end(key)
+                return hit
+        versions = tuple(self.s.documents.history(did))
+        with self._history_lock:
+            self._history[key] = versions
+            while len(self._history) > _HISTORY_CACHE:
+                self._history.popitem(last=False)
+        return versions
+
+    @staticmethod
+    def generation_of(versions: Sequence[tuple[str, str]], content_hash: str, at: str | None) -> str | None:
         """The generation that introduced this content version (history is oldest first)."""
         found: str | None = None
-        for gen, h in self.s.documents.history(did):
+        for gen, h in versions:
             if at is not None and gen > at:
                 break
             if h == content_hash:
@@ -172,15 +280,108 @@ class Library:
         usable = (GenerationStatus.SEALED, GenerationStatus.DEGRADED)
         gens = [
             g
-            for g in self.s.vault.generations(source_id)
+            for g in self.vault.generations(source_id)
             if g.status in usable
             and (introduced is None or g.generation_id >= introduced)
             and (at is None or g.generation_id <= at)
         ]
-        current = self.s.vault.current(source_id)
+        current = self.vault.current(source_id)
         if at is None and current is not None and any(g.generation_id == current.generation_id for g in gens):
             return current
         return max(gens, key=lambda g: g.generation_id, default=None)
+
+    # --- pages ---
+
+    def rendered(self, source_id: str, gen: Generation, html_ref: str, native_id: str) -> Rendered | None:
+        """The page ``html_ref`` of a generation, links rewritten; rendered once, then cached by bytes."""
+        gid = gen.generation_id
+        key = (source_id, gid, html_ref, native_id, str(REWRITE_VERSION))
+
+        def build() -> Rendered | None:
+            if self.zim is not None and html_ref.startswith("zim:"):
+                page = self.zim.page(source_id, gid, html_ref.removeprefix("zim:"))
+                if page is None:
+                    return None
+                base, root, original = page.native_id, page.book_root, page.html
+            else:
+                found = self.assets.html(source_id, gid, html_ref)
+                if found is None:
+                    return None
+                base, root, original = native_id, "", found
+            return render(
+                original,
+                lambda h: rewrite_html(h, source_id=source_id, generation_id=gid, native_id=base, root=root),
+            )
+
+        return self.pages.get_or_build(key, build)
+
+    def live_zim(self, did: DocId) -> tuple[DocRecord, Rendered, Generation] | None:
+        """A Kiwix page that is not refined (yet), read straight from the source's current ZIM."""
+        source_id, native_id = parse_doc_id(did)
+        spec = self.s.source(source_id)
+        if spec is None or spec.adapter != ZIM_ADAPTER:
+            return None
+        try:
+            gen = self.vault.current(source_id)
+        except ApiError:
+            raise
+        except Exception:  # an unreachable or missing source is simply not browsable
+            return None
+        if gen is None:
+            return None
+        page = self.rendered(source_id, gen, f"zim:{native_id}", native_id)
+        if page is None:
+            return None
+        doc = DocRecord(
+            doc_id=did,
+            source_id=spec.id,
+            native_id=native_id,
+            title=page.title or native_id.rsplit("/", 1)[-1].replace("_", " "),
+            lang="",
+            license=spec.license,
+            text=page.text,
+            revision=gen.generation_id,
+            timestamp=gen.sealed_at,
+            html_ref=f"zim:{native_id}",
+            content_hash=page.content_hash,
+        )
+        return doc, page, gen
+
+    def document(self, did: DocId, at: str | None) -> DocumentView:
+        """The document (as of generation ``at``), its HTML and where it lives. Each entry is read once."""
+        versions = self.history(did)
+        doc = self.s.documents.get(did, at_generation=at)
+        html: str | None = None
+        gen: Generation | None = None
+        introduced: str | None = None
+        if doc is None and at is None:
+            live = self.live_zim(did)
+            if live is not None:
+                doc, page, gen = live
+                html = page.html
+        if doc is None:
+            where = f" at generation {at}" if at else ""
+            raise ApiError(404, "document_not_found", f"no such document{where}: {did}")
+        if gen is None:
+            introduced = self.generation_of(versions, doc.content_hash, at)
+            gen = self.serving_generation(doc.source_id, introduced, at) or (
+                self.vault.current(doc.source_id) if doc.html_ref else None
+            )
+            if doc.html_ref and gen is not None:
+                page = self.rendered(doc.source_id, gen, doc.html_ref, doc.native_id)
+                html = None if page is None else page.html
+            spec = self.s.source(doc.source_id)
+            if html is None and at is None and (alt := borrowed(spec, doc, self.vault)):
+                # e.g. the Wikipedia dump (indexed text) rendered with the Kiwix ZIM's page for its title.
+                page = self.rendered(alt.source_id, alt.generation, alt.html_ref, alt.html_ref[4:])
+                html = None if page is None else page.html
+        return DocumentView(
+            doc=doc,
+            generation_id=gen.generation_id if gen is not None else introduced,
+            html=html,
+            vault=None if gen is None else self.vault_location(gen, doc),
+            has_history=len(versions) > 1,
+        )
 
     def vault_location(self, gen: Generation, doc: DocRecord) -> VaultLocation:
         base = self._vault_rel(gen)
@@ -199,9 +400,9 @@ class Library:
 
     def _vault_rel(self, gen: Generation) -> PurePosixPath:
         """Generation directory relative to the vault root. Never an absolute path (no host details)."""
-        path = self.s.vault.generation_path(gen.source_id, gen.generation_id)
+        path = self.vault.generation_path(gen.source_id, gen.generation_id)
         # TODO(port): Vault should expose the relative path; FileVault has `root`, the port does not.
-        root: object = getattr(self.s.vault, "root", None)
+        root: object = getattr(self.vault, "root", None)
         if isinstance(root, Path):
             try:
                 return PurePosixPath(path.relative_to(root).as_posix())
@@ -212,6 +413,3 @@ class Library:
             i = len(parts) - 1 - parts[::-1].index("library")
             return PurePosixPath(*parts[i:])
         return PurePosixPath(gen.source_id, gen.generation_id)
-
-    def has_docs(self, sources: Sequence[str]) -> list[str]:
-        return [x for x in sources if self.catalog.doc_count(x)]

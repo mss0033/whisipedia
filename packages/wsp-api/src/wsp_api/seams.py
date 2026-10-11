@@ -10,12 +10,14 @@ Defaults when a composition root leaves them unset (see ``wsp_api.services.Servi
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from datetime import datetime
+from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from wsp_api.schemas import OpsStatus, ProposalInfo
-from wsp_core.model import Asset, Category, Gap
+from wsp_core.ids import DocId
+from wsp_core.model import Asset, Category, Gap, Generation
 from wsp_core.ports import AssetStore, Catalog, GapLog
 
 
@@ -42,6 +44,31 @@ class SpellingCorrector(Protocol):
         ...
 
 
+class VaultView(Protocol):
+    """The read side of :class:`wsp_core.ports.Vault` that the API uses (the server answers it from
+    the in-memory library snapshot, :class:`wsp_api.snapshot.SnapshotVault`)."""
+
+    def current(self, source_id: str) -> Generation | None: ...
+
+    def current_set(self, source_id: str) -> Sequence[Generation]: ...
+
+    def generations(self, source_id: str) -> Sequence[Generation]: ...
+
+    def generation_path(self, source_id: str, generation_id: str) -> Path: ...
+
+
+@runtime_checkable
+class DocumentFields(Protocol):
+    """Projected reads from the document store: some columns of the current version of a document,
+    without decoding its text (titles for lists, existence, hit metadata; audit 2026-10-11 #9).
+
+    Optional: a store without it is read with ``get``. Columns are ``DocRecord`` field names."""
+
+    def fields(self, doc_id: DocId, columns: Sequence[str]) -> Mapping[str, object] | None:
+        """The requested columns (plus ``doc_id``), or None when the document is not there."""
+        ...
+
+
 @runtime_checkable
 class QueryLog(Protocol):
     """Local-only search log for the gap miner (PLAN §5.3): query text and result count."""
@@ -54,9 +81,11 @@ __all__ = [
     "AssetStore",
     "Catalog",
     "Category",
+    "DocumentFields",
     "Gap",
     "GapLog",
     "OpsProvider",
     "QueryLog",
     "SpellingCorrector",
+    "VaultView",
 ]

@@ -16,22 +16,20 @@ Two cases:
 
 from __future__ import annotations
 
-import html as htmllib
-import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any, Protocol, cast
 
+from wsp_api.pages import page_text, page_title
 from wsp_api.seams import AssetStore
 from wsp_core.ids import DocId, content_hash, make_doc_id
 from wsp_core.model import DocRecord, Generation, SourceSpec
-from wsp_core.ports import Vault
 
-_TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
-_TAG_RE = re.compile(r"<[^>]+>")
-_CODE_RE = re.compile(r"<(script|style|noscript)\b[^>]*>.*?</\1\s*>", re.IGNORECASE | re.DOTALL)
-_WS_RE = re.compile(r"\s+")
 _ZIM_ADAPTER = "kiwix-opds"
+
+
+class _Current(Protocol):
+    def current(self, source_id: str) -> Generation | None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,7 +41,7 @@ class Rendition:
     html_ref: str
 
 
-def _current(vault: Vault, source_id: str) -> Generation | None:
+def _current(vault: _Current, source_id: str) -> Generation | None:
     try:
         return vault.current(source_id)
     except Exception:  # an unreachable or missing source is simply not browsable
@@ -51,9 +49,12 @@ def _current(vault: Vault, source_id: str) -> Generation | None:
 
 
 def zim_document(
-    spec: SourceSpec | None, native_id: str, vault: Vault, assets: AssetStore
+    spec: SourceSpec | None, native_id: str, vault: _Current, assets: AssetStore
 ) -> DocRecord | None:
-    """A document read live from the source's current ZIM, or ``None`` if it has no such entry."""
+    """A document read live from the source's current ZIM, or ``None`` if it has no such entry.
+
+    The API serves these through ``wsp_api.views.Library.live_zim`` (one read, cached render); this
+    is the same record for any :class:`AssetStore`."""
     if spec is None or spec.adapter != _ZIM_ADAPTER:
         return None
     gen = _current(vault, spec.id)
@@ -62,10 +63,8 @@ def zim_document(
     html = assets.html(spec.id, gen.generation_id, f"zim:{native_id}")
     if html is None:
         return None
-    match = _TITLE_RE.search(html)
-    title = htmllib.unescape(match.group(1)).strip() if match else ""
-    body = _CODE_RE.sub(" ", _TITLE_RE.sub(" ", html))  # readable text only (E2E-9)
-    text = _WS_RE.sub(" ", htmllib.unescape(_TAG_RE.sub(" ", body))).strip()
+    title = page_title(html)
+    text = page_text(html)  # readable text only (E2E-9)
     return DocRecord(
         doc_id=make_doc_id(spec.id, native_id),
         source_id=spec.id,
@@ -91,7 +90,7 @@ def _rules(spec: SourceSpec) -> Sequence[Mapping[str, Any]]:
     return [cast(Mapping[str, Any], r) for r in cast(list[object], rules) if isinstance(r, Mapping)]
 
 
-def borrowed(spec: SourceSpec | None, doc: DocRecord, vault: Vault) -> Rendition | None:
+def borrowed(spec: SourceSpec | None, doc: DocRecord, vault: _Current) -> Rendition | None:
     """The HTML another source holds for this document's title, per the registry's ``rendition``."""
     if spec is None:
         return None

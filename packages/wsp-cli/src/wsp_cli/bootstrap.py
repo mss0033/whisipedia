@@ -27,28 +27,22 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from wsp_api import ApiSettings, Services
-from wsp_api.services import LOOPBACK_HOSTS
-from wsp_api.testing.fakes import (
-    SAMPLE_SOURCES,
-    InMemoryChangeFeed,
-    InMemoryDocumentStore,
-    InMemoryLedger,
-    InMemoryLexicalIndex,
-    InMemoryVault,
-    seed_sample_library,
-)
 from wsp_core.config import load_config
 from wsp_core.model import SourceSpec, SourceStatus
 from wsp_core.ports import Catalog, ChangeFeed, Fetcher, Signer, SourceAdapter
-from wsp_core.registry import load_registry
 
-if TYPE_CHECKING:  # heavy imports stay lazy so `wsp search --url ...` starts fast
+if TYPE_CHECKING:  # heavy imports stay lazy so `wsp search --url ...` starts fast (audit #11)
+    from wsp_api import ApiSettings, Services
+    from wsp_api.feed import ReadOnlyChangeFeed
     from wsp_cli.monitor import LibraryMonitor
+    from wsp_core.ids import DocId
+    from wsp_core.model import DocRecord
     from wsp_index import ParquetDocumentStore, SqliteChangeFeed, TantivyIndex
     from wsp_index.spelling import ReloadingSpeller
     from wsp_vault.ledger import JsonlLedger
     from wsp_vault.vault import FileVault
+
+LOOPBACK_HOSTS: tuple[str, ...] = ("127.0.0.1", "localhost", "::1")  # = wsp_api.services.LOOPBACK_HOSTS
 
 BACKEND_NOTE = "using in-memory sample backends (set vault.root / index.root for the real library)"
 CYCLE_DURATIONS = {"monthly": "P1M", "quarterly": "P3M"}
@@ -111,6 +105,8 @@ def load_sources(cfg: Mapping[str, Any], lay: Layout) -> Sequence[SourceSpec]:
     schema = Path(reg.get("schema", lay.schema))
     if not registry.is_file():
         return ()
+    from wsp_core.registry import load_registry
+
     return load_registry(registry, schema, overlay=overlay_path(cfg, lay))
 
 
@@ -128,16 +124,59 @@ def effective_sources(specs: Sequence[SourceSpec], cfg: Mapping[str, Any]) -> tu
 
 
 def api_settings(cfg: Mapping[str, Any], lay: Layout, *, static_dir: Path | None = None) -> ApiSettings:
+    """Settings for an app run in-process by a CLI command: no background threads or worker processes;
+    library metadata is read when a request needs it and reused for ``[api] snapshot_seconds``."""
+    from wsp_api import ApiSettings
+
     api = section(cfg, "api")
     static = static_dir or (Path(api["static_dir"]) if api.get("static_dir") else lay.navigator_dist)
     extra = tuple(str(h) for h in api.get("allowed_hosts", ()))
     marker = activity_marker(cfg)
+    every = _number(api, "snapshot_seconds", 30.0)
     return ApiSettings(
         static_dir=static,
         allowed_hosts=(*LOOPBACK_HOSTS, *extra),
         activity_marker=marker,
-        source_info_seconds=30.0,
+        snapshot_seconds=every,
+        ops_seconds=every,
+        cache_dir=api_cache_dir(cfg),
     )
+
+
+def serve_settings(cfg: Mapping[str, Any], lay: Layout, *, static_dir: Path | None = None) -> ApiSettings:
+    """Settings for ``wsp serve``: library metadata refreshed in the background (requests never read the
+    vault for it), warm-up at start, ZIMs read in worker processes (a NAS ``SIGBUS`` kills a worker,
+    not the server). Tunables under ``[api]``: ``snapshot_seconds`` (30), ``zim_workers`` (2),
+    ``zim_timeout_seconds`` (15), ``page_cache_mb`` (64), ``nas_workers`` (8), ``nas_queue`` (32),
+    ``nas_timeout_seconds`` (20), ``slow_request_seconds`` (2), ``cache_dir`` (local disk)."""
+    api = section(cfg, "api")
+    base = api_settings(cfg, lay, static_dir=static_dir)
+    return dataclasses.replace(
+        base,
+        background=True,
+        zim_workers=int(_number(api, "zim_workers", 2)),
+        zim_timeout_seconds=_number(api, "zim_timeout_seconds", 15.0),
+        page_cache_bytes=int(_number(api, "page_cache_mb", 64) * 1024 * 1024),
+        nas_workers=max(1, int(_number(api, "nas_workers", 8))),
+        nas_queue=int(_number(api, "nas_queue", 32)),
+        nas_timeout_seconds=_number(api, "nas_timeout_seconds", 20.0),
+        slow_request_seconds=_number(api, "slow_request_seconds", 2.0),
+    )
+
+
+def _number(table: Mapping[str, Any], key: str, default: float) -> float:
+    value = table.get(key, default)
+    if isinstance(value, bool) or not isinstance(value, int | float) or value < 0:
+        raise ConfigError(f"[api] {key} must be a non-negative number, not {value!r}")
+    return float(value)
+
+
+def api_cache_dir(cfg: Mapping[str, Any]) -> Path | None:
+    """Local-disk cache of derived API data (the ZIM book index): ``[api] cache_dir``, else
+    ``<index.root>/../cache/api``; None without an index root (kept in memory only)."""
+    configured = _opt_path(section(cfg, "api").get("cache_dir"))
+    root = paths(cfg).index_root
+    return configured or (None if root is None else root.parent / "cache" / "api")
 
 
 def activity_marker(cfg: Mapping[str, Any]) -> Path | None:
@@ -391,28 +430,33 @@ def open_changes(cfg: Mapping[str, Any]) -> SqliteChangeFeed:
 
 
 def build_services(cfg: Mapping[str, Any], lay: Layout) -> Services:
-    """Build the API's ports from config. Nothing here may open a network connection (PLAN §10.5)."""
+    """Build the API's ports from config. Nothing here may open a network connection (PLAN §10.5), and
+    nothing here writes to the vault: the signing key is only read (``create=False``, audit #14) and the
+    change feed is opened read-only (audit #13)."""
+    from wsp_api import Services
+
     specs = tuple(load_sources(cfg, lay))
     if real_backends_available(cfg):
         from wsp_api.gaps import JsonlGapLog, JsonlQueryLog
-        from wsp_api.zim import ZimAssetStore
-
-        signer = load_signer(cfg, lay)
-        vault = build_vault(cfg, specs, signer, ledger=False)
-        changes = open_changes(cfg)
+        from wsp_api.snapshot import memoize_domains
         from wsp_oracle.services import build_oracle
 
+        signer = load_signer(cfg, lay, create=False)
+        vault = build_vault(cfg, specs, signer, ledger=False)
+        memoize_domains(vault)  # TODO(vault): FileVault.domain_of lists the NAS on every call
+        changes = open_feed_read_only(cfg)
         live = [s for s in specs if s.status is not SourceStatus.EXCLUDED]
         oracle = build_oracle(cfg, lexical=open_index(cfg, specs), sources=[s.id for s in live])
         return Services(
             index=oracle.index,
-            documents=open_documents(cfg),
+            documents=RefineryDocuments(open_documents(cfg)),
             changes=changes,
             vault=vault,
             ledger=build_ledger(cfg, signer),
-            sources=effective_sources([s for s in specs if s.status is not SourceStatus.EXCLUDED], cfg),
+            sources=effective_sources(live, cfg),
             catalog=build_catalog(cfg, specs, changes),
-            assets=ZimAssetStore(vault),  # original HTML and images from sealed ZIMs (read-only)
+            # No `assets`: the API reads the sealed ZIMs itself, through its library snapshot (in worker
+            # processes when serving; wsp_api.zimpool).
             gaps=JsonlGapLog(paths(cfg).gaps_log),  # local disk next to the index, never the vault
             ops=build_monitor(cfg, specs, vault),
             queries=JsonlQueryLog(paths(cfg).queries_log)
@@ -421,6 +465,15 @@ def build_services(cfg: Mapping[str, Any], lay: Layout) -> Services:
             speller=open_speller(cfg),
         )
 
+    from wsp_api.testing.fakes import (
+        SAMPLE_SOURCES,
+        InMemoryChangeFeed,
+        InMemoryDocumentStore,
+        InMemoryLedger,
+        InMemoryLexicalIndex,
+        InMemoryVault,
+        seed_sample_library,
+    )
     from wsp_index.spelling import Speller
 
     index, documents, changes = InMemoryLexicalIndex(), InMemoryDocumentStore(), InMemoryChangeFeed()
@@ -435,6 +488,45 @@ def build_services(cfg: Mapping[str, Any], lay: Layout) -> Services:
         sources=effective_sources(specs, cfg) or SAMPLE_SOURCES,  # sample specs outside a checkout
         speller=Speller.from_texts(f"{d.title} {d.text}" for d in documents.all_current()),
     )
+
+
+def open_feed_read_only(cfg: Mapping[str, Any]) -> ReadOnlyChangeFeed | SqliteChangeFeed:
+    """The change feed for the API: read-only (``mode=ro``, a connection per thread). Only a missing
+    feed (a library never indexed) is created, by the writer's class."""
+    from wsp_api.feed import ReadOnlyChangeFeed
+
+    db = paths(cfg).changes_db
+    return ReadOnlyChangeFeed(db) if db.is_file() else open_changes(cfg)
+
+
+class RefineryDocuments:
+    """``ParquetDocumentStore`` plus projected reads (:class:`wsp_api.seams.DocumentFields`): titles,
+    existence and hit metadata read only their columns, never the article text (audit #9).
+    TODO(index): ``ParquetDocumentStore.fields`` itself."""
+
+    def __init__(self, store: ParquetDocumentStore) -> None:
+        self.store = store
+
+    def get(self, doc_id: DocId, *, at_generation: str | None = None) -> DocRecord | None:
+        return self.store.get(doc_id, at_generation=at_generation)
+
+    def history(self, doc_id: DocId) -> Sequence[tuple[str, str]]:
+        return self.store.history(doc_id)
+
+    def generations(self, source_id: str) -> list[str]:
+        return self.store.generations(source_id)
+
+    def fields(self, doc_id: DocId, columns: Sequence[str]) -> Mapping[str, object] | None:
+        from wsp_core.ids import InvalidDocIdError, parse_doc_id
+        from wsp_index.refinery import current_generation
+
+        try:
+            source_id, _ = parse_doc_id(doc_id)
+        except InvalidDocIdError:
+            return None
+        gen = current_generation(self.store.root, source_id)
+        reader = None if gen is None else self.store.reader(source_id, gen)
+        return None if reader is None else reader.lookup(doc_id, tuple(columns))
 
 
 def open_speller(cfg: Mapping[str, Any]) -> ReloadingSpeller | None:
@@ -464,7 +556,7 @@ def build_catalog(cfg: Mapping[str, Any], specs: Sequence[SourceSpec], changes: 
 
 def build_monitor(cfg: Mapping[str, Any], specs: Sequence[SourceSpec], vault: FileVault) -> LibraryMonitor:
     """System Monitor data for ``/v1/system`` (read-only views of local state and the vault)."""
-    from wsp_cli.monitor import LibraryMonitor, default_downloads_dir
+    from wsp_cli.monitor import CachedProposals, LibraryMonitor, default_downloads_dir
     from wsp_cli.wiring import TB, domain_usage
     from wsp_orchestrator.curator import ProposalFiles
     from wsp_vault.paritykeeper import ParityCoverage, ParityKeeper
@@ -485,7 +577,7 @@ def build_monitor(cfg: Mapping[str, Any], specs: Sequence[SourceSpec], vault: Fi
         vault=vault,
         state_db=_opt_path(orch.get("state_db")),
         scrub_db=p.state_dir / "scrub.sqlite" if p.state_dir else None,
-        proposals=lambda: files.list(),
+        proposals=CachedProposals(files.files),  # parsed once per file change, with libyaml
         downloads_dir=_opt_path(ops.get("downloads_dir")) or default_downloads_dir(),
         disks={"vault": p.vault_root, "index": p.index_root, "state": p.state_dir},
         cycle_days=91.0 if cycle == "quarterly" else 30.5,
