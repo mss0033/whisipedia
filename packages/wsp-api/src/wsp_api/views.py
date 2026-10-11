@@ -33,6 +33,9 @@ class Library:
         self.catalog: Catalog = services.catalog or FeedCatalog(services.changes)
         # TODO(integration): wire both in wsp_cli.bootstrap; these defaults keep `wsp serve` working.
         self.assets: AssetStore = services.assets or ZimAssetStore(services.vault)
+        if isinstance(self.assets, ZimAssetStore):
+            self.assets.names = {x.id: x.name for x in services.sources}
+        self._homes: dict[tuple[str, str], str | None] = {}
 
     # --- sources ---
 
@@ -43,13 +46,28 @@ class Library:
         return spec
 
     def source_info(self, spec: SourceSpec) -> SourceInfo:
+        current = self.s.vault.current(spec.id)
         return convert.source_info(
             spec,
-            self.s.vault.current(spec.id),
+            current,
             specs=self.s.sources,
             now=self.s.clock(),
             doc_count=self.catalog.doc_count(spec.id),
+            home_doc_id=self.home_doc_id(spec, current),
         )
+
+    def home_doc_id(self, spec: SourceSpec, current: Generation | None) -> str | None:
+        """Landing page of a Kiwix site (ZIM main page, or the book list of a bundle); cached."""
+        if current is None or spec.adapter != "kiwix-opds" or not isinstance(self.assets, ZimAssetStore):
+            return None
+        key = (spec.id, current.generation_id)
+        if key not in self._homes:
+            try:
+                native = self.assets.home(spec.id, current.generation_id)
+            except Exception:
+                native = None
+            self._homes[key] = None if native is None else make_doc_id(spec.id, native)
+        return self._homes[key]
 
     def source_infos(self) -> list[SourceInfo]:
         return [self.source_info(x) for x in sorted(self.s.sources, key=lambda x: x.id)]

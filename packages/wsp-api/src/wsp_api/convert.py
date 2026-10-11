@@ -36,6 +36,7 @@ def source_info(
     specs: Sequence[SourceSpec] = (),
     now: datetime | None = None,
     doc_count: int | None = None,
+    home_doc_id: str | None = None,
 ) -> SourceInfo:
     fresh = None if now is None else sites.freshness(spec, current, now)
     return SourceInfo(
@@ -59,7 +60,7 @@ def source_info(
         doc_count=doc_count,
         bytes=None if current is None else sum(a.size for a in current.artifacts),
         as_of=None if current is None else current.sealed_at,
-        home_doc_id=sites.raw_str(spec, "home_doc_id"),
+        home_doc_id=sites.raw_str(spec, "home_doc_id") or home_doc_id,
         related=sites.related(spec, specs),
     )
 
