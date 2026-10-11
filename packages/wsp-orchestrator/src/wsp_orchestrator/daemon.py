@@ -1,9 +1,12 @@
 """Daemon entry point: ``wsp_orchestrator.daemon:run(config)`` (PLAN §6.5).
 
 The main loop ticks the scheduler (catch-up on start), dispatches jobs to a bounded worker pool,
-writes Prometheus-text metrics and sleeps until something is due. SIGTERM/SIGINT trigger a prompt
-shutdown (well inside systemd's ``TimeoutStopSec``): no new jobs are claimed, downloads, hashing,
-scrub and parity are cancelled, pipelines stop between steps, the daemon waits at most
+runs the watchdog, writes Prometheus-text metrics (at most every ``metrics_interval_seconds``) and
+sleeps until something can be enqueued or a job finishes (:class:`~wsp_orchestrator.orchestrator.Waker`,
+no polling of due-but-blocked work). SIGTERM/SIGINT trigger a prompt shutdown (well inside systemd's
+``TimeoutStopSec``): the handler sets ``Orchestrator.stopping`` itself, so no new job or step starts
+from that instant, and the wakeup fd interrupts the sleep; downloads, hashing, scrub, parity and heavy
+step units are cancelled, pipelines stop between steps, the daemon waits at most
 ``shutdown_grace_seconds`` (10 s) and exits; anything unfinished resumes on the next start. Job
 threads are daemon threads, and ``main`` leaves with ``os._exit`` if a library left a non-daemon
 thread behind, so nothing can hold the process open. A second signal exits immediately.
@@ -47,20 +50,31 @@ def load_wiring(spec: str | None, config: Mapping[str, Any]) -> Wiring:
     return wiring
 
 
-def _install_signals(stop: threading.Event) -> dict[int, Any]:
+def _install_signals(stop: threading.Event, orch: Orchestrator) -> dict[int, Any]:
+    """SIGTERM/SIGINT: set ``orch.stopping`` and ``stop`` at once (audit H7).
+
+    The main thread never waits on either Event (it sleeps in ``select`` on the waker pipe, which
+    ``signal.set_wakeup_fd`` makes readable), so setting them here cannot deadlock on their locks.
+    """
+
     def handler(signum: int, _frame: FrameType | None) -> None:
         name = signal.Signals(signum).name
         if stop.is_set():  # second signal: the owner wants it gone now
             log.warning("second signal, exiting immediately", extra={"fields": {"signal": name}})
             _flush_logs()
             os._exit(128 + signum)
-        log.info("shutdown requested", extra={"fields": {"signal": name}})
+        orch.stopping.set()  # no job or step starts from now on
         stop.set()
+        log.info("shutdown requested", extra={"fields": {"signal": name}})
 
     previous: dict[int, Any] = {}
     for sig in (signal.SIGTERM, signal.SIGINT):
         previous[sig] = signal.signal(sig, handler)
+    previous[_WAKEUP] = signal.set_wakeup_fd(orch.waker.write_fd, warn_on_full_buffer=False)
     return previous
+
+
+_WAKEUP = -1  # key under which _install_signals keeps the previous wakeup fd
 
 
 def run(
@@ -77,20 +91,26 @@ def run(
     configure_logging(settings.log_level)
     wiring = wiring or load_wiring(settings.wiring, config)
     stop = stop or threading.Event()
-    previous = _install_signals(stop) if install_signals else {}
     orch = Orchestrator(settings, wiring, clock=clock, check_local=check_local)
+    previous = _install_signals(stop, orch) if install_signals else {}
     try:
         orch.start()
-        while not stop.is_set():
+        while not stop.is_set() and not orch.stopping.is_set():
             orch.scheduler.tick()
             orch.dispatch()
-            orch.refresh_metrics()
-            stop.wait(orch.sleep_seconds())
+            orch.watchdog()
+            orch.maybe_refresh_metrics()
+            orch.waker.wait(orch.sleep_seconds())
     finally:
-        clean = orch.shutdown()
-        orch.close()
-        for sig, old in previous.items():
-            signal.signal(sig, old)
+        try:
+            clean = orch.shutdown()
+        finally:
+            for sig, old in previous.items():
+                if sig == _WAKEUP:
+                    signal.set_wakeup_fd(old)
+                else:
+                    signal.signal(sig, old)
+            orch.close()
         log.info("orchestrator stopped", extra={"fields": {"clean": clean}})
     return 0
 

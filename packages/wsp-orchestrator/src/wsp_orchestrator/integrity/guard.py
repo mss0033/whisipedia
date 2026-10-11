@@ -27,6 +27,7 @@ from wsp_core.model import Generation, RemoteFile, SourceSpec
 from wsp_core.ports import Fetcher
 from wsp_orchestrator.alerts import Alert, Alerter, Severity
 from wsp_orchestrator.clock import Clock
+from wsp_orchestrator.errors import TransientError
 from wsp_orchestrator.integrity.anomaly import (
     AnomalyThresholds,
     Check,
@@ -46,7 +47,7 @@ from wsp_orchestrator.integrity.channels import (
 )
 from wsp_orchestrator.integrity.findings import Action, Finding, strongest, summarize
 from wsp_orchestrator.integrity.origins import HostSeen, OriginPin, evaluate_origins
-from wsp_orchestrator.store import StateStore, parse_ts
+from wsp_orchestrator.store import StateStore, parse_ts, ts
 
 log = logging.getLogger("wsp.orchestrator.integrity")
 
@@ -251,17 +252,10 @@ class IntegrityGuard:
             independently_verified=all_independent,
             unknown_origin=self.settings.unknown_origin,
         )
-        for pin in origin.pins:
-            self.store.put_origin_pin(
-                pin.source_id,
-                pin.host,
-                pin.role,
-                pin.issuer_family,
-                pin.cert_sha256,
-                pin.first_seen,
-                pin.last_seen,
-            )
         findings += origin.findings
+        # Pins are staged with the release and committed only when it is promoted (audit M5): a
+        # release that is later quarantined must not teach the source new trusted hosts.
+        self.store.set_meta(_staged_key(spec.id, version), _dumps([_pin_json(p) for p in origin.pins]))
         action = strongest(findings)
         provenance: dict[str, Any] = {
             "version": version,
@@ -391,6 +385,29 @@ class IntegrityGuard:
                 )
             )
 
+    def commit_pins(self, source_id: str, version: str) -> int:
+        """Promotion: make the pins staged by :meth:`check_fetch` for this release permanent."""
+        key = _staged_key(source_id, version)
+        raw = self.store.get_meta(key)
+        if raw is None:
+            return 0
+        pins = cast(list[Mapping[str, Any]], json.loads(raw))
+        for p in pins:
+            first, last = parse_ts(str(p["first_seen"])), parse_ts(str(p["last_seen"]))
+            assert first is not None
+            assert last is not None
+            self.store.put_origin_pin(
+                source_id,
+                str(p["host"]),
+                str(p["role"]),
+                cast(str | None, p.get("issuer_family")),
+                cast(str | None, p.get("cert_sha256")),
+                first,
+                last,
+            )
+        self.store.delete_meta(key)
+        return len(pins)
+
     def trust(self, source_id: str, version: str) -> list[str]:
         """Owner approved an origin hold: pin the blocked hosts so the release can continue."""
         stored = self.store.provenance(source_id, version)
@@ -478,6 +495,8 @@ class IntegrityGuard:
         summary: Mapping[str, object] = {}
         try:
             prof = self.profile(spec, generation, generation_dir)
+        except TransientError:
+            raise  # a busy lock or an OOM kill says nothing about the content: retried, not held
         except Exception as exc:  # cannot look at the content: the owner decides, data is never lost
             log.exception("content profile failed", extra={"fields": {"source": spec.id}})
             checks.append(Check("profile", False, None, None, f"content could not be profiled: {exc!r}"))
@@ -527,6 +546,21 @@ def _host_json(h: HostSeen) -> dict[str, object]:
         "url": h.url,
         "issuer_family": h.issuer_family,
         "cert_sha256": h.cert_sha256,
+    }
+
+
+def _staged_key(source_id: str, version: str) -> str:
+    return f"pins-staged:{source_id}/{version}"
+
+
+def _pin_json(p: OriginPin) -> dict[str, object]:
+    return {
+        "host": p.host,
+        "role": p.role,
+        "issuer_family": p.issuer_family,
+        "cert_sha256": p.cert_sha256,
+        "first_seen": ts(p.first_seen),
+        "last_seen": ts(p.last_seen),
     }
 
 

@@ -141,7 +141,7 @@ def test_withheld_documents_are_dropped_and_the_release_goes_on(tmp_path: Path) 
     assert [str(a.relpath) for a in current.artifacts] == ["upstream/c.pdf"]
     work = tmp_path / "work"
     assert not (work / "src" / "a.pdf").exists(), "restricted bytes are deleted"
-    held = work / "_quarantine" / "src" / "b.pdf"
+    held = work / "_quarantine" / "src" / "2026-10-01" / "b.pdf"
     assert held.read_bytes() == FILES["b.pdf"], "held bytes wait outside the vault"
     assert not list((tmp_path / "vault").rglob("a.pdf"))
     assert not list((tmp_path / "vault").rglob("b.pdf"))

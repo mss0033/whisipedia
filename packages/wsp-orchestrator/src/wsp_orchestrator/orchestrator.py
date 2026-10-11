@@ -3,18 +3,28 @@
 Real components plug in through :class:`Wiring` - every field is a wsp-core port or a plain callable,
 so the vault, ledger, fetcher, adapters, refinery, index, warden and curator can be developed and
 swapped independently (PLAN §12.2).
+
+The daemon is a small control plane (audit 2026-10-11): memory-heavy steps run in child units
+(``wsp_orchestrator.isolation``, wired by the composition root), one daemon owns a state DB
+(``<state_db>.daemon.lock``), the main loop sleeps until something can actually be enqueued or a job
+finishes (:class:`Waker`), and a watchdog returns orphaned jobs to the queue and raises alerts for
+stuck releases and jobs, crash loops of the daemon and a growing RSS.
 """
 
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import json
 import logging
+import os
+import select
 import threading
 import time
 from collections import Counter
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import cast
 from urllib.parse import urlparse
@@ -26,10 +36,12 @@ from wsp_orchestrator.bots import Bot, BotContext, BotResult
 from wsp_orchestrator.clock import Clock, SystemClock, ensure_utc
 from wsp_orchestrator.codec import release_from_json
 from wsp_orchestrator.curator.proposals import ProposalRecord
+from wsp_orchestrator.errors import FailureKind, classify
 from wsp_orchestrator.integrity.guard import IntegrityGuard, IntegrityHooks
 from wsp_orchestrator.jobs import Job, JobKind, JobQueue
 from wsp_orchestrator.metrics import Metrics
 from wsp_orchestrator.pipeline import (
+    DocumentScreenHook,
     IndexStep,
     Outcome,
     RefineStep,
@@ -58,7 +70,8 @@ from wsp_orchestrator.retention import (
 )
 from wsp_orchestrator.scheduler import GLOBAL_KEY, PARITY_KEY, Scheduler
 from wsp_orchestrator.settings import OrchestratorSettings
-from wsp_orchestrator.store import StateStore
+from wsp_orchestrator.store import StateStore, parse_ts, ts
+from wsp_orchestrator.versions import version_key
 
 log = logging.getLogger("wsp.orchestrator")
 
@@ -99,9 +112,59 @@ class Wiring:
     integrity: IntegrityHooks | None = None  # source integrity guard (ADR-0009); None = off
     # Files document policy withheld from a release (ADR-0010): e.g. file one doc-review proposal.
     on_withheld: WithheldHook | None = None
-    # Called once on shutdown (SIGTERM): cancel downloads, stop scrub/parity, kill par2. The
-    # fetcher's own ``cancel()`` is called too when it has one.
+    # Called once on shutdown (SIGTERM): cancel downloads, stop scrub/parity, kill par2 and heavy
+    # step units. The fetcher's own ``cancel()`` is called too when it has one.
     on_shutdown: Sequence[Callable[[], None]] = ()
+    # Document-policy screen for adapters without ``screen()`` (audit H3); ``None`` from the hook
+    # means "unknown policy": the adapter's ``verify`` then always runs.
+    document_screen: DocumentScreenHook | None = None
+    # Cheap probe of the vault mount: an OSError while it is down defers the step (audit M1).
+    storage_available: Callable[[], bool] | None = None
+
+
+class Waker:
+    """Wakes the main loop: a job finished, or a signal arrived (``signal.set_wakeup_fd``).
+
+    A self-pipe rather than a ``threading.Event``: a signal handler that sets an Event the main
+    thread is waiting on can deadlock on the Event's internal lock; a write to a pipe cannot.
+    """
+
+    def __init__(self) -> None:
+        self._r, self._w = os.pipe()
+        os.set_blocking(self._r, False)
+        os.set_blocking(self._w, False)
+        self._closed = False
+
+    @property
+    def write_fd(self) -> int:
+        return self._w
+
+    def notify(self) -> None:
+        with contextlib.suppress(BlockingIOError, OSError):  # full pipe: a wakeup is pending anyway
+            os.write(self._w, b"\0")
+
+    def wait(self, timeout: float) -> bool:
+        """Sleep until notified or ``timeout`` seconds passed. True if notified."""
+        if self._closed:
+            time.sleep(max(timeout, 0))
+            return False
+        ready, _, _ = select.select([self._r], [], [], max(timeout, 0))
+        if not ready:
+            return False
+        with contextlib.suppress(BlockingIOError, OSError):
+            while os.read(self._r, 4096):
+                pass
+        return True
+
+    def close(self) -> None:
+        if not self._closed:
+            self._closed = True
+            os.close(self._r)
+            os.close(self._w)
+
+
+class DaemonLockedError(RuntimeError):
+    """Another orchestrator daemon owns this state DB."""
 
 
 class Handled(StrEnum):
@@ -176,6 +239,10 @@ class Orchestrator:
             checkpoint=checkpoint or _no_checkpoint,
             integrity=self.integrity,
             on_withheld=wiring.on_withheld,
+            document_screen=wiring.document_screen,
+            storage_available=wiring.storage_available,
+            defer_delay=settings.defer_delay,
+            crashes_to_fail=settings.crashes_to_fail,
         )
         self.scheduler = Scheduler(
             store=self.store,
@@ -199,38 +266,98 @@ class Orchestrator:
             JobKind.PARITY: self._parity,
         }
         self.stopping = threading.Event()
+        self.waker = Waker()
         self._lock = threading.Lock()
         self._running_kind: Counter[JobKind] = Counter()
         self._running_host: Counter[str] = Counter()
         # Job threads are daemon threads: a job that ignores cancellation can never keep the
         # process alive past shutdown (systemd's TimeoutStopSec); its work resumes on next start.
         self._threads: set[threading.Thread] = set()
+        self._active: dict[int, tuple[Job, float]] = {}  # job id -> (job, monotonic start)
+        self._daemon_lock: int | None = None
+        self._metrics_at: float | None = None  # monotonic time of the last metrics write
 
     # --- lifecycle -----------------------------------------------------------------------------
 
     def start(self) -> list[Job]:
-        """Crash recovery and catch-up. Returns jobs enqueued by the first scheduler tick."""
+        """Crash recovery and catch-up. Returns jobs enqueued by the first scheduler tick.
+
+        Takes the daemon lock first (:class:`DaemonLockedError` if another daemon runs): crash
+        recovery may only look at step tokens no live process owns.
+        """
+        self._lock_daemon()
         now = self.clock.now()
+        unclean = self.store.get_meta(_RUNNING_MARK) is not None
+        self.store.set_meta(_RUNNING_MARK, ts(now))
         recovered = self.queue.recover(now, all_running=True)
+        crashed = self.pipeline.recover_crashes()
+        swept = self.pipeline.sweep_workdir()
         flushed = self.pipeline.flush_ledger()
         resumed = 0
         for rec in self.store.releases():
             if rec.state not in (ReleaseState.PROMOTED, ReleaseState.QUARANTINED):
-                resumed += self._enqueue_fetch(rec.source_id, rec.version, now) is not None
+                self._enqueue_fetch(rec.source_id, rec.version, now)
+                key = f"{rec.source_id}/{rec.version}"
+                resumed += self.queue.active(JobKind.FETCH_RELEASE, key) is not None
+        self._note_start(now, unclean=unclean)
         log.info(
             "orchestrator started",
             extra={
                 "fields": {
                     "recovered_jobs": recovered,
+                    "crashed_steps": len(crashed),
+                    "workdirs_swept": swept,
                     "ledger_flushed": flushed,
                     "resumed_releases": resumed,
+                    "unclean_previous_stop": unclean,
                 }
             },
         )
+        self.metrics.set("resumed_releases", "Releases resumed at the last start", resumed)
         return self.scheduler.tick()
 
+    def _lock_daemon(self) -> None:
+        if self._daemon_lock is not None:
+            return
+        path = self.settings.state_db.with_name(self.settings.state_db.name + ".daemon.lock")
+        fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            os.close(fd)
+            raise DaemonLockedError(f"another orchestrator daemon uses {self.settings.state_db}") from None
+        self._daemon_lock = fd
+
+    def _note_start(self, now: datetime, *, unclean: bool) -> None:
+        """Crash-loop alert: the daemon stopped uncleanly ``CRASH_LOOP_STARTS`` times within an hour."""
+        raw = self.store.get_meta(_UNCLEAN_STARTS)
+        starts = [t for t in (parse_ts(x) for x in json.loads(raw or "[]")) if t is not None]
+        starts = [t for t in starts if now - t < CRASH_LOOP_WINDOW]
+        if unclean:
+            starts.append(now)
+        self.store.set_meta(_UNCLEAN_STARTS, json.dumps([ts(t) for t in starts]))
+        if len(starts) >= CRASH_LOOP_STARTS:
+            self.alerter.raise_(
+                Alert(
+                    "crash-loop",
+                    Severity.CRITICAL,
+                    f"the orchestrator stopped uncleanly {len(starts)} times within an hour "
+                    "(probably OOM-killed); see journalctl --user -u whisipedia-orchestrator",
+                    {"starts": [t.isoformat() for t in starts]},
+                )
+            )
+        elif not unclean:
+            self.alerter.resolve("crash-loop")
+
     def close(self) -> None:
+        with contextlib.suppress(Exception):  # the store may be gone after an abandoned job
+            if self._daemon_lock is not None:
+                self.store.delete_meta(_RUNNING_MARK)  # a clean stop: not counted as a crash
         self.store.close()
+        self.waker.close()
+        if self._daemon_lock is not None:
+            os.close(self._daemon_lock)
+            self._daemon_lock = None
 
     # --- dispatch ------------------------------------------------------------------------------
 
@@ -253,6 +380,7 @@ class Orchestrator:
                 if not jobs:
                     return claimed
                 job = jobs[0]
+                self._active[job.id] = (job, time.monotonic())  # owned from the claim on (watchdog)
                 self._running_kind[job.kind] += 1
                 if job.host:
                     self._running_host[job.host] += 1
@@ -300,15 +428,18 @@ class Orchestrator:
             self.execute(job)
         except Exception:
             if not self.stopping.is_set():
-                raise
-            # A job abandoned at shutdown finished after the state DB was closed: its outcome is
-            # not recorded and it runs again on the next start (it is still "running" there).
-            log.info(
-                "job finished after shutdown", extra={"fields": {"kind": job.kind.value, "key": job.key}}
-            )
+                log.exception("job thread failed", extra={"fields": {"kind": job.kind.value, "key": job.key}})
+            else:
+                # A job abandoned at shutdown finished after the state DB was closed: its outcome is
+                # not recorded and it runs again on the next start (it is still "running" there).
+                log.info(
+                    "job finished after shutdown",
+                    extra={"fields": {"kind": job.kind.value, "key": job.key}},
+                )
         finally:
             with self._lock:
                 self._threads.discard(threading.current_thread())
+            self.waker.notify()  # capacity is free: the main loop may claim the next job
 
     def running_jobs(self) -> int:
         with self._lock:
@@ -354,6 +485,8 @@ class Orchestrator:
     def execute(self, job: Job) -> None:
         started = time.monotonic()
         outcome = "error"
+        with self._lock:
+            self._active.setdefault(job.id, (job, started))
         try:
             result = self.handlers[job.kind](job)
             now = self.clock.now()
@@ -367,6 +500,18 @@ class Orchestrator:
             outcome = result.status.value
         except Exception as exc:
             now = self.clock.now()
+            kind = classify(exc, storage_available=self.wiring.storage_available)
+            if self.stopping.is_set() or kind in (FailureKind.BUSY, FailureKind.UNAVAILABLE):
+                # Not the job's fault: interrupted by shutdown (a pool torn down, a cancelled
+                # download) or a lock/NAS problem. Again later, no attempt counted (H1, H7).
+                stopping = self.stopping.is_set()
+                note = "shutdown" if stopping else f"deferred ({kind.value}): {type(exc).__name__}: {exc}"
+                self.queue.defer(job, now, now if stopping else now + self.settings.defer_delay, note=note)
+                log.warning(
+                    "job deferred", extra={"fields": {"kind": job.kind.value, "key": job.key, "note": note}}
+                )
+                outcome = Handled.DEFER.value
+                return
             retry = self.settings.retry
             retry_at = now + retry.delay(job.attempts) if job.attempts < retry.max_attempts else None
             self.queue.fail(job, now, f"{type(exc).__name__}: {exc}", retry_at=retry_at)
@@ -381,6 +526,8 @@ class Orchestrator:
                     )
                 )
         finally:
+            with self._lock:
+                self._active.pop(job.id, None)
             self._release_capacity(job)
             labels = {"kind": job.kind.value}
             self.metrics.inc(
@@ -394,12 +541,17 @@ class Orchestrator:
 
     # --- owner actions -------------------------------------------------------------------------
 
-    def approve_release(self, source_id: str, version: str, *, note: str = "") -> None:
-        self.pipeline.approve(source_id, version, note=note)
+    def approve_release(self, source_id: str, version: str, *, note: str = "", force: bool = False) -> None:
+        self.pipeline.approve(source_id, version, note=note, force=force)
         self._enqueue_fetch(source_id, version, self.clock.now())
 
     def reject_release(self, source_id: str, version: str, *, reason: str) -> None:
         self.pipeline.reject(source_id, version, reason=reason)
+
+    def retry_release(self, source_id: str, version: str, *, note: str = "") -> None:
+        """``wsp retry``: un-quarantine (or end the backoff of) a release and queue it now."""
+        self.pipeline.retry_release(source_id, version, note=note)
+        self._enqueue_fetch(source_id, version, self.clock.now())
 
     def resume_source(self, source_id: str) -> None:
         resume_source(self.store, self.pipeline.ledger_outbox_writer, source_id, alerter=self.alerter)
@@ -479,14 +631,18 @@ class Orchestrator:
             cadence_period=self.scheduler.source_cadence(spec).approx_period(),
             now=now,
         )
-        if not findings:
-            updated = replace(
-                health,
-                observed_format=obs.format or health.observed_format,
-                observed_license=obs.license or health.observed_license,
+        if not findings and (
+            (obs.format and obs.format != health.observed_format)
+            or (obs.license and obs.license != health.observed_license)
+        ):
+            self.store.modify_source_health(
+                spec.id,
+                lambda h: replace(
+                    h,
+                    observed_format=obs.format or h.observed_format,
+                    observed_license=obs.license or h.observed_license,
+                ),
             )
-            if updated != health:
-                self.store.put_source_health(updated)
         for f in findings:
             pause_source(
                 self.store,
@@ -499,8 +655,8 @@ class Orchestrator:
         return bool(findings) or self.store.source_health(spec.id).paused
 
     def _mark_cycle_ok(self, source_id: str) -> None:
-        health = self.store.source_health(source_id)
-        self.store.put_source_health(replace(health, last_cycle_ok=self.clock.now()))
+        now = self.clock.now()
+        self.store.modify_source_health(source_id, lambda h: replace(h, last_cycle_ok=now))
         self.alerter.resolve(f"retention-window:{source_id}")
 
     def _discover(self, job: Job) -> JobResult:
@@ -509,14 +665,15 @@ class Orchestrator:
             return JobResult(Handled.CANCEL, note="unknown source")
         if self.store.source_health(spec.id).paused:
             return JobResult(Handled.CANCEL, note="source paused")
-        newest = max(self._upstream(spec), key=lambda r: r.version)
+        newest = max(self._upstream(spec), key=lambda r: version_key(r.version))
         if self._observe(spec, newest):
             return JobResult(Handled.CANCEL, note="source paused by policy")
         now = self.clock.now()
         rec = self.store.get_release(spec.id, newest.version)
         current = self.wiring.vault.current(spec.id)
         if rec is None:
-            if current is not None and current.generation_id >= generation_id_for(newest):
+            gid = generation_id_for(newest)
+            if current is not None and version_key(current.generation_id) >= version_key(gid):
                 self._mark_cycle_ok(spec.id)
                 return JobResult()
             self.pipeline.register(newest)
@@ -540,6 +697,9 @@ class Orchestrator:
                 return JobResult()
             case Outcome.BACKOFF:
                 return JobResult(Handled.DEFER, run_after=result.record.next_attempt_at, note="backoff")
+            case Outcome.DEFERRED:
+                note = result.record.last_error or "deferred"
+                return JobResult(Handled.DEFER, run_after=result.record.next_attempt_at, note=note[:500])
             case Outcome.CANCELLED:
                 return JobResult(Handled.DEFER, run_after=now, note="shutdown")
             case Outcome.PAUSED:
@@ -551,7 +711,7 @@ class Orchestrator:
         spec = self._spec(job)
         if spec is None:
             return JobResult(Handled.CANCEL, note="unknown source")
-        newest = max(self._upstream(spec), key=lambda r: r.version)
+        newest = max(self._upstream(spec), key=lambda r: version_key(r.version))
         key = f"no-checksums:{spec.id}"
         if not newest.files or any(not f.checksums for f in newest.files):
             self.alerter.raise_(
@@ -582,6 +742,15 @@ class Orchestrator:
         promoted = {
             g.generation_id: g.promoted_at for g in self.store.generation_stats(spec.id, limit=10_000)
         }
+        if not promoted and not spec.partitioned and current is not None:
+            # A promoted source without promotion history: the state DB was lost or replaced, so the
+            # known-good anchors are unknown. Prune nothing rather than guess (audit M7).
+            return JobResult(note="no promotion history in the state DB: nothing pruned")
+        in_flight = {
+            r.generation_id
+            for r in self.store.releases(source_id=spec.id)
+            if r.state not in (ReleaseState.PROMOTED, ReleaseState.QUARANTINED)
+        }
         infos = [
             GenerationInfo.from_generation(
                 g,
@@ -589,6 +758,7 @@ class Orchestrator:
                 known_good=g.generation_id in promoted,
                 settled=self._settled(spec.id, g.generation_id, promoted.get(g.generation_id)),
                 needed=g.generation_id in needed,
+                in_flight=g.generation_id in in_flight,
             )
             for g in vault.generations(spec.id)
         ]
@@ -759,13 +929,15 @@ class Orchestrator:
             known.add(candidate.key)
             now = self.clock.now()
             proposal = evaluate_candidate(candidate, gate, self.wiring.sources)
+            # Recorded before it is applied: a promoter that fails leaves an open proposal, never an
+            # applied change nobody can trace (audit LOW).
+            pid = self.store.add_proposal(candidate.key, proposal.decision.value, proposal.to_json(), now)
             status = "open"
             if proposal.decision is Decision.REJECT:
                 status = "rejected"
             elif proposal.decision is Decision.AUTO_PROMOTE and self.wiring.promoter is not None:
                 self.wiring.promoter(proposal)
                 status = "applied"
-            pid = self.store.add_proposal(candidate.key, proposal.decision.value, proposal.to_json(), now)
             if status != "open":
                 self.store.set_proposal_status(pid, status)
             self.pipeline.ledger_outbox_writer(
@@ -814,7 +986,94 @@ class Orchestrator:
             return JobResult(Handled.DEFER, run_after=now + self.settings.parity_continue, note="more to do")
         return JobResult()
 
+    # --- watchdog and health alerts -------------------------------------------------------------
+
+    def watchdog(self) -> None:
+        """Requeue orphaned jobs, extend live leases, alert on stuck jobs and releases (M2, M9).
+
+        A job is orphaned when the DB says it runs but no thread of this daemon owns it (its thread
+        died while recording the outcome, e.g. the DB was briefly read-only). Only the daemon calls
+        this: it holds the daemon lock, so no other process runs jobs.
+        """
+        now = self.clock.now()
+        mono = time.monotonic()
+        with self._lock:
+            active = dict(self._active)
+        orphans = sorted(self.queue.running_ids() - set(active))
+        if orphans:
+            n = self.queue.requeue(orphans, now, "requeued by the watchdog: no thread owned it")
+            log.warning("orphaned jobs requeued", extra={"fields": {"jobs": orphans, "requeued": n}})
+        for job, started in active.values():
+            self.queue.extend_lease(job, now + self.settings.lease)
+            key = f"job-stuck:{job.kind.value}:{job.key}"
+            if mono - started > self.settings.job_stuck_after.total_seconds():
+                self.alerter.raise_(
+                    Alert(
+                        key,
+                        Severity.WARNING,
+                        f"{job.kind.value} {job.key} has been running for {(mono - started) / 3600:.1f} h",
+                        {"kind": job.kind.value, "key": job.key},
+                    )
+                )
+        self.check_stuck_releases(now)
+        self._check_rss()
+
+    def check_stuck_releases(self, now: datetime | None = None) -> list[str]:
+        """``stuck:<release>`` for a release that has not left its state for ``stuck_after``."""
+        now = now or self.clock.now()
+        raised: list[str] = []
+        for rec in self.store.releases():
+            key = f"stuck:{rec.subject}"
+            since = rec.state_since
+            stuck = (
+                rec.state not in (ReleaseState.PROMOTED, ReleaseState.QUARANTINED)
+                and rec.hold_reason is None
+                and since is not None
+                and now - since > self.settings.stuck_after
+                and not self.store.source_health(rec.source_id).paused
+            )
+            if stuck and since is not None:
+                if self.alerter.raise_(
+                    Alert(
+                        key,
+                        Severity.WARNING,
+                        f"{rec.subject} has been {rec.state.value} since {since:%Y-%m-%d %H:%M} UTC"
+                        f" (last error: {rec.last_error or 'none'})",
+                        {"source_id": rec.source_id, "version": rec.version, "state": rec.state.value},
+                    )
+                ):
+                    raised.append(key)
+            elif self.store.alert_is_open(key):
+                self.alerter.resolve(key)
+        return raised
+
+    def _check_rss(self) -> None:
+        rss = _rss_bytes()
+        if rss is None:
+            return
+        self.metrics.set("rss_bytes", "Resident memory of the orchestrator process", rss)
+        limit = self.settings.rss_alert_mb * 1024 * 1024
+        if rss > limit:
+            self.alerter.raise_(
+                Alert(
+                    "orchestrator-rss",
+                    Severity.WARNING,
+                    f"the orchestrator uses {rss / 2**20:.0f} MiB"
+                    f" (alert above {self.settings.rss_alert_mb} MiB)",
+                    {"rss_bytes": rss},
+                )
+            )
+        elif rss < limit * 0.8:
+            self.alerter.resolve("orchestrator-rss")
+
     # --- metrics -------------------------------------------------------------------------------
+
+    def maybe_refresh_metrics(self) -> None:
+        """:meth:`refresh_metrics` at most every ``metrics_interval_seconds`` (each write fsyncs)."""
+        mono = time.monotonic()
+        if self._metrics_at is None or mono - self._metrics_at >= self.settings.metrics_interval_seconds:
+            self._metrics_at = mono
+            self.refresh_metrics()
 
     def refresh_metrics(self) -> None:
         m = self.metrics
@@ -834,13 +1093,35 @@ class Orchestrator:
             m.write(self.settings.metrics_path)
 
     def sleep_seconds(self) -> float:
-        """How long the main loop may sleep before something could become due."""
+        """How long the main loop may sleep before something could become due.
+
+        Only future times count: a due job that waits for capacity is started when a running job
+        finishes (the :class:`Waker`), not by polling (audit H6).
+        """
         now = self.clock.now()
         candidates = [self.settings.poll_interval_seconds]
-        for when in (self.queue.next_run_after(), self.scheduler.next_wakeup()):
+        for when in (self.queue.next_run_after(after=now), self.scheduler.next_wakeup(now)):
             if when is not None:
                 candidates.append((when - now).total_seconds())
-        return max(0.05, min(candidates))
+        floor = min(0.5, self.settings.poll_interval_seconds)
+        return max(floor, min(candidates))
+
+
+_RUNNING_MARK = "daemon:running"  # set while a daemon runs; still set at start = unclean stop
+_UNCLEAN_STARTS = "daemon:unclean_starts"
+CRASH_LOOP_STARTS = 3
+CRASH_LOOP_WINDOW = timedelta(hours=1)
+
+
+def _rss_bytes() -> int | None:
+    try:
+        text = open("/proc/self/status", encoding="ascii").read()  # noqa: SIM115 - tiny procfs read
+    except OSError:
+        return None
+    for line in text.splitlines():
+        if line.startswith("VmRSS:"):
+            return int(line.split()[1]) * 1024
+    return None
 
 
 def _notes(summary: object) -> Mapping[str, object]:
