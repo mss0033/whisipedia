@@ -344,3 +344,470 @@ sources:
     license: LicenseRef-infringing
     legal_basis: none
     notes: Firm exclusion. Copyright infringement.
+
+  # ---------------------------------------------------------------------------------------------
+  # Preparedness & resilience (shelf `preparedness`) and defensive & security literature (shelf
+  # `defense`). Research, rubric deltas, boundaries and the doc-collection adapter spec:
+  # docs/research/PREPAREDNESS_AND_DEFENSE.md. Boundaries (§3): lawfully public only (PD, open
+  # licence, or Distribution Statement A); no CBRN/explosives/weapons/targeting/offensive tooling;
+  # mixed collections are filtered per document, with owner review through `wsp proposals`.
+  # Scores are in the research doc (`scores` holds integer axes only).
+  # ---------------------------------------------------------------------------------------------
+
+  - id: nga-nautical-pubs
+    name: NGA nautical publications (Bowditch American Practical Navigator, Pubs 229/249/102/117, Sailing Directions)
+    publisher: National Geospatial-Intelligence Agency
+    domain: [preparedness, navigation]
+    tier: T1
+    status: candidate
+    license: LicenseRef-US-Gov-PD
+    legal_basis: public-domain
+    access: {adapter: doc-collection, issuer: NGA, origins: [msi.nga.mil], discovery: [{kind: index-page, url: "https://msi.nga.mil/Publications"}]}
+    update: {cadence: P3M, strategy: snapshot-retention}
+    size: {bytes: 2e9, measured: false, as_of: 2026-10-10}
+    notes: Score 4.6. Index pages answer 200; direct PDF downloads answered 403 to a plain client (WAF), see research doc §5.6.
+
+  - id: noaa-nautical-charts
+    name: NOAA electronic navigational charts and US Coast Pilot
+    publisher: NOAA Office of Coast Survey
+    domain: [preparedness, navigation, geography]
+    tier: T1
+    status: candidate
+    license: LicenseRef-US-Gov-PD
+    legal_basis: public-domain
+    access: {adapter: http-files, endpoints: ["https://charts.noaa.gov/ENCs/All_ENCs.zip", "https://nauticalcharts.noaa.gov/publications/coast-pilot/"]}
+    update: {cadence: P3M, strategy: snapshot-retention}
+    size: {enc_all_bytes: 829.4e6, measured: true, as_of: 2026-10-10}
+    notes: Score 4.3. ENC zip is rebuilt daily upstream; a quarterly snapshot is enough offline. Coast Pilot ≈ 0.2 GB (volume 1 measured at 7.7 MB).
+
+  - id: faa-handbooks
+    name: FAA aviation handbooks and manuals
+    publisher: Federal Aviation Administration
+    domain: [preparedness, navigation]
+    tier: T1
+    status: candidate
+    license: LicenseRef-US-Gov-PD
+    legal_basis: public-domain
+    access: {adapter: doc-collection, issuer: FAA, origins: [www.faa.gov], discovery: [{kind: index-page, url: "https://www.faa.gov/regulations_policies/handbooks_manuals/aviation"}]}
+    update: {cadence: P3M, strategy: snapshot-retention}
+    size: {bytes: 2e9, measured: false, as_of: 2026-10-10}
+    notes: Score 4.3. Pilot's Handbook of Aeronautical Knowledge, Aviation Weather Handbook, Airplane Flying Handbook, AIM.
+
+  - id: ncvec-question-pools
+    name: NCVEC amateur radio question pools
+    publisher: NCVEC Question Pool Committee
+    domain: [preparedness, communications]
+    tier: T1
+    status: candidate
+    license: LicenseRef-PD-dedication
+    legal_basis: public-domain
+    access: {adapter: doc-collection, issuer: NCVEC, origins: [www.ncvec.org], discovery: [{kind: index-page, url: "https://www.ncvec.org/index.php/amateur-question-pools"}]}
+    update: {cadence: P3M, strategy: snapshot-retention}
+    size: {bytes: 10e6, measured: false, as_of: 2026-10-10}
+    notes: Score 4.2. Each pool is released into the public domain by the committee. Keep superseded pools as history.
+
+  - id: cisa-safecom-field-guides
+    name: CISA SAFECOM field operations guides (NIFOG, AUXFOG)
+    publisher: Cybersecurity and Infrastructure Security Agency
+    domain: [preparedness, communications]
+    tier: T1
+    status: candidate
+    license: LicenseRef-US-Gov-PD
+    legal_basis: public-domain
+    access: {adapter: doc-collection, issuer: CISA, origins: [www.cisa.gov], discovery: [{kind: index-page, url: "https://www.cisa.gov/safecom/field-operations-guides"}]}
+    update: {cadence: P3M, strategy: snapshot-retention}
+    size: {bytes: 0.1e9, measured: false, as_of: 2026-10-10}
+    notes: Score 4.4.
+
+  - id: fema-preparedness-doctrine
+    name: FEMA preparedness doctrine and continuity directives (NRF, NIMS, CPG 101/201, FCD-1/FCD-2, Continuity Guidance Circular)
+    publisher: Federal Emergency Management Agency
+    domain: [preparedness, emergency-management]
+    tier: T1
+    status: candidate
+    license: LicenseRef-US-Gov-PD
+    legal_basis: public-domain
+    access: {adapter: doc-collection, issuer: FEMA, origins: [www.fema.gov], discovery: [{kind: index-page, url: "https://www.fema.gov/emergency-managers/national-preparedness"}]}
+    update: {cadence: P3M, strategy: snapshot-retention}
+    size: {bytes: 1.2e9, measured: false, as_of: 2026-10-10}
+    notes: Score 4.5. fema.gov answered 403 to a plain client on 2026-10-10 (WAF); the access path is an open question (research doc §5.6).
+
+  - id: fema-independent-study
+    name: FEMA Independent Study courses (EMI, now NDEMU)
+    publisher: Federal Emergency Management Agency
+    domain: [preparedness, emergency-management, education]
+    tier: T1
+    status: candidate
+    license: LicenseRef-US-Gov-PD
+    legal_basis: public-domain
+    access: {adapter: doc-collection, issuer: FEMA, origins: [training.fema.gov], discovery: [{kind: index-page, url: "https://training.fema.gov/programs/independent-study/crslist.aspx"}]}
+    update: {cadence: P3M, strategy: snapshot-retention}
+    size: {bytes: 20e9, measured: false, as_of: 2026-10-10}
+    notes: Score 4.3. Student manuals and job aids; the course list page is now titled NDEMU Independent Study.
+
+  - id: fema-building-science
+    name: FEMA Building Science publications
+    publisher: Federal Emergency Management Agency
+    domain: [preparedness, engineering]
+    tier: T1
+    status: candidate
+    license: LicenseRef-US-Gov-PD
+    legal_basis: public-domain
+    access: {adapter: doc-collection, issuer: FEMA, origins: [www.fema.gov], discovery: [{kind: index-page, url: "https://www.fema.gov/emergency-managers/risk-management/building-science/publications"}]}
+    update: {cadence: P3M, strategy: snapshot-retention}
+    size: {bytes: 5e9, measured: false, as_of: 2026-10-10}
+    notes: Score 4.2. Safe rooms (P-361, P-320), flood, wind and seismic retrofit. WAF-blocked to a plain client on 2026-10-10.
+
+  - id: uk-resilience-guidance
+    name: UK Cabinet Office resilience and civil contingencies guidance
+    publisher: UK Cabinet Office
+    domain: [preparedness, emergency-management]
+    tier: T1
+    status: candidate
+    license: OGL-UK-3.0
+    legal_basis: open-license
+    access: {adapter: doc-collection, issuer: UK Cabinet Office, origins: [www.gov.uk, assets.publishing.service.gov.uk], discovery: [{kind: api, url: "https://www.gov.uk/api/search.json?filter_organisations=cabinet-office"}]}
+    update: {cadence: P3M, strategy: snapshot-retention}
+    size: {bytes: 1e9, measured: false, as_of: 2026-10-10}
+    notes: Score 4.3. OGL v3 applies to GOV.UK content unless a page says otherwise; check per document (MOD doctrine on GOV.UK is not OGL, see uk-mod-doctrine).
+
+  - id: usda-farmers-bulletins
+    name: USDA Farmers' Bulletins (historical)
+    publisher: US Department of Agriculture (digitised by the National Agricultural Library)
+    domain: [preparedness, agriculture, history]
+    tier: T1
+    status: candidate
+    license: LicenseRef-US-Gov-PD
+    legal_basis: public-domain
+    access: {adapter: doc-collection, issuer: USDA, origins: [archive.org], discovery: [{kind: archive-org, query: "collection:usdanationalagriculturallibrary AND title:(\"farmers' bulletin\")"}]}
+    update: {cadence: P6M, strategy: snapshot-retention}
+    size: {bytes: 30e9, measured: false, as_of: 2026-10-10}
+    notes: Score 4.1. Every document is currency=historical; pesticide and canning advice is superseded by usda-home-canning and current extension guidance.
+
+  - id: usda-home-canning
+    name: USDA Complete Guide to Home Canning and National Center for Home Food Preservation
+    publisher: USDA NIFA / University of Georgia
+    domain: [preparedness, agriculture]
+    tier: T1
+    status: candidate
+    license: LicenseRef-US-Gov-PD
+    legal_basis: public-domain
+    access: {adapter: doc-collection, issuer: USDA, origins: [nchfp.uga.edu], discovery: [{kind: index-page, url: "https://nchfp.uga.edu/"}]}
+    update: {cadence: P3M, strategy: snapshot-retention}
+    size: {bytes: 0.2e9, measured: false, as_of: 2026-10-10}
+    notes: Score 4.3. The USDA guide (AIB 539) is PD; NCHFP's own pages are (c) UGA, so take the USDA documents only unless UGA grants permission.
+
+  - id: fao-knowledge-repository
+    name: FAO Knowledge Repository (agriculture, fisheries, food security subsets)
+    publisher: Food and Agriculture Organization of the United Nations
+    domain: [preparedness, agriculture]
+    tier: T2
+    status: candidate
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access: {adapter: oai-pmh, oai_endpoint: "https://openknowledge.fao.org/server/oai/request", filter: doc-collection}
+    update: {cadence: P3M, strategy: base-plus-incremental}
+    size: {bytes: 200e9, measured: false, as_of: 2026-10-10}
+    notes: Score 3.9. CC BY 4.0 since January 2025; older items mostly CC BY-NC-SA 3.0 IGO. Licence read per item.
+
+  - id: who-iris
+    name: WHO IRIS (water, sanitation, emergency and clinical guidance subsets)
+    publisher: World Health Organization
+    domain: [preparedness, medicine, water]
+    tier: T1
+    status: candidate
+    license: CC-BY-NC-SA-3.0-IGO
+    legal_basis: open-license
+    access: {adapter: oai-pmh, oai_endpoint: "https://iris.who.int/server/oai/request", filter: doc-collection}
+    update: {cadence: P3M, strategy: base-plus-incremental}
+    size: {records: 277401, bytes: 70e9, measured: false, as_of: 2026-10-10}
+    notes: Score 4.2. Record count measured (OAI completeListSize); bytes are an estimate for the selected subsets. Personal non-commercial offline use fits the licence; licence checked per item.
+
+  - id: jts-clinical-practice-guidelines
+    name: Joint Trauma System clinical practice guidelines
+    publisher: DoD Defense Health Agency
+    domain: [preparedness, medicine]
+    tier: T1
+    status: candidate
+    license: LicenseRef-US-Gov-PD
+    legal_basis: public-domain
+    access: {adapter: doc-collection, issuer: Joint Trauma System, origins: [jts.health.mil], discovery: [{kind: index-page, url: "https://jts.health.mil/index.cfm/CPGs/cpgs"}]}
+    update: {cadence: P3M, strategy: snapshot-retention}
+    size: {bytes: 1e9, measured: false, as_of: 2026-10-10}
+    notes: Score 4.5. 157 guideline links on the index on 2026-10-10. Keep superseded editions.
+
+  - id: borden-institute
+    name: Borden Institute (Emergency War Surgery, Textbooks of Military Medicine)
+    publisher: US Army Medical Center of Excellence
+    domain: [preparedness, medicine]
+    tier: T1
+    status: candidate
+    license: LicenseRef-US-Gov-PD
+    legal_basis: public-domain
+    access: {adapter: doc-collection, issuer: Borden Institute, origins: [medcoe.army.mil], discovery: [{kind: index-page, url: "https://medcoe.army.mil/borden"}]}
+    update: {cadence: P3M, strategy: snapshot-retention}
+    size: {bytes: 10e9, measured: false, as_of: 2026-10-10}
+    notes: Score 4.3. Some chapters carry third-party figures; the text is a federal work.
+
+  - id: usgs-publications
+    name: USGS Publications Warehouse (natural hazards and water resources)
+    publisher: US Geological Survey
+    domain: [preparedness, science]
+    tier: T1
+    status: candidate
+    license: LicenseRef-US-Gov-PD
+    legal_basis: public-domain
+    access: {adapter: doc-collection, issuer: USGS, origins: [pubs.usgs.gov], discovery: [{kind: api, url: "https://pubs.usgs.gov/pubs-services/publication/"}]}
+    update: {cadence: P3M, strategy: base-plus-incremental}
+    size: {records: 186593, bytes: 200e9, measured: false, as_of: 2026-10-10}
+    notes: Score 4.2. Record count measured via the API; bytes are an estimate for a hazards and water selection.
+
+  - id: osti-doe-reports
+    name: OSTI.GOV DOE technical reports (energy, civil defense research, DOE Fundamentals Handbooks)
+    publisher: DOE Office of Scientific and Technical Information
+    domain: [preparedness, engineering, science]
+    tier: T2
+    status: candidate
+    license: LicenseRef-US-Gov-PD
+    legal_basis: public-domain
+    access: {adapter: doc-collection, issuer: DOE, origins: [www.osti.gov, www.energy.gov], discovery: [{kind: api, url: "https://www.osti.gov/api/v1/records"}]}
+    update: {cadence: P3M, strategy: base-plus-incremental}
+    size: {bytes: 50e9, measured: false, as_of: 2026-10-10}
+    notes: Score 4.0. Rights per record (most DOE reports are PD). Includes ORNL-5037 Nuclear War Survival Skills (currency=historical). Any record with export-control or OUO markings is rejected.
+
+  - id: neets
+    name: Navy Electricity and Electronics Training Series (NEETS, NAVEDTRA 14173-14196)
+    publisher: Naval Education and Training Command
+    domain: [defense, electronics, education]
+    tier: T1
+    status: candidate
+    license: LicenseRef-US-Gov-PD
+    legal_basis: public-domain
+    access: {adapter: doc-collection, issuer: NETC, origins: [apps.dtic.mil, everyspec.com], filter: {distribution: {require: [A]}}, mirrors_required: 2}
+    update: {cadence: P1Y, strategy: snapshot-retention}
+    size: {bytes: 0.6e9, measured: false, as_of: 2026-10-10}
+    notes: Score 4.3. Distribution Statement A on every module. No live official host; require two matching copies plus the Dist A statement. Static series, so a yearly check is enough.
+
+  - id: nist-csrc
+    name: NIST Computer Security Resource Center publications (SP 800, SP 1800, FIPS, IR, CSWP)
+    publisher: National Institute of Standards and Technology
+    domain: [defense, cybersecurity, standards]
+    tier: T1
+    status: candidate
+    license: LicenseRef-US-Gov-PD
+    legal_basis: public-domain
+    access: {adapter: doc-collection, issuer: NIST, origins: [csrc.nist.gov, nvlpubs.nist.gov], discovery: [{kind: index-page, url: "https://csrc.nist.gov/publications/sp800"}]}
+    update: {cadence: P3M, strategy: snapshot-retention}
+    size: {bytes: 15e9, measured: false, as_of: 2026-10-10}
+    notes: Score 4.7. Keep withdrawn and superseded revisions (SP 800-53 rev 4 alongside rev 5).
+
+  - id: nist-oscal-content
+    name: NIST OSCAL content (SP 800-53 catalog and baselines)
+    publisher: National Institute of Standards and Technology
+    domain: [defense, cybersecurity, standards]
+    tier: T1
+    status: candidate
+    license: LicenseRef-US-Gov-PD
+    legal_basis: public-domain
+    access: {adapter: git-mirror, endpoints: ["https://github.com/usnistgov/oscal-content"]}
+    update: {cadence: P3M, strategy: mirror}
+    size: {bytes: 93.7e6, measured: true, as_of: 2026-10-10}
+    notes: Score 4.4. Size is the GitHub repository size.
+
+  - id: mitre-attack-cwe-capec
+    name: MITRE ATT&CK (STIX), CWE and CAPEC
+    publisher: The MITRE Corporation
+    domain: [defense, cybersecurity]
+    tier: T1
+    status: candidate
+    license: LicenseRef-MITRE-terms-of-use
+    legal_basis: open-license
+    access: {adapter: git-mirror, endpoints: ["https://github.com/mitre-attack/attack-stix-data", "https://cwe.mitre.org/data/downloads.html"]}
+    update: {cadence: P3M, strategy: mirror}
+    size: {attack_repo_bytes: 132.4e6, measured: true, as_of: 2026-10-10}
+    notes: Score 4.2. Royalty-free licence with attribution. Defender taxonomies only; no exploit code (boundary §3.2).
+
+  - id: disa-stigs
+    name: DISA Security Technical Implementation Guides and SRGs
+    publisher: Defense Information Systems Agency
+    domain: [defense, cybersecurity, standards]
+    tier: T1
+    status: candidate
+    license: LicenseRef-US-Gov-PD
+    legal_basis: public-domain
+    access: {adapter: doc-collection, issuer: DISA, origins: [www.cyber.mil], discovery: [{kind: index-page, url: "https://www.cyber.mil/stigs/downloads/"}]}
+    update: {cadence: P3M, strategy: snapshot-retention}
+    size: {bytes: 5e9, measured: false, as_of: 2026-10-10}
+    notes: Score 4.3. public.cyber.mil now redirects to www.cyber.mil and the landing page changed; re-check the download path.
+
+  - id: cisa-protective-security
+    name: CISA protective security, Interagency Security Committee public standards, and USSS NTAC threat assessment
+    publisher: Cybersecurity and Infrastructure Security Agency / US Secret Service
+    domain: [defense, protective-security]
+    tier: T1
+    status: candidate
+    license: LicenseRef-US-Gov-PD
+    legal_basis: public-domain
+    access:
+      adapter: doc-collection
+      issuer: CISA / USSS
+      origins: [www.cisa.gov, www.secretservice.gov]
+      discovery:
+        - {kind: index-page, url: "https://www.cisa.gov/resources-tools/resources"}
+        - {kind: index-page, url: "https://www.cisa.gov/resources-tools/groups/interagency-security-committee-isc"}
+        - {kind: index-page, url: "https://www.secretservice.gov/protection/ntac"}
+      filter: {distribution: {require: [public-release]}, deny_keywords: [FOUO, CUI, "Design-Basis Threat"], default: review}
+    update: {cadence: P3M, strategy: snapshot-retention}
+    size: {bytes: 2.5e9, measured: false, as_of: 2026-10-10}
+    notes: Score 4.3. Public documents only; the ISC Design-Basis Threat and countermeasure appendices are restricted and excluded.
+
+  - id: army-pubs-public
+    name: Army Publishing Directorate public doctrine (filtered ADP/FM/ATP/TC)
+    publisher: Department of the Army
+    domain: [defense, doctrine]
+    tier: T1
+    status: candidate
+    license: LicenseRef-US-Gov-PD
+    legal_basis: public-domain
+    access:
+      adapter: doc-collection
+      issuer: Department of the Army
+      origins: [armypubs.army.mil]
+      discovery:
+        - {kind: index-page, url: "https://armypubs.army.mil/ProductMaps/PubForm/ADP.aspx"}
+        - {kind: index-page, url: "https://armypubs.army.mil/ProductMaps/PubForm/FM.aspx"}
+        - {kind: index-page, url: "https://armypubs.army.mil/ProductMaps/PubForm/ATP.aspx"}
+        - {kind: index-page, url: "https://armypubs.army.mil/ProductMaps/PubForm/TC.aspx"}
+      filter: {distribution: {require: [A], read_from: pdf-front-matter}, rules: registry/filters/army-pubs-public.yaml, default: review}
+    update: {cadence: P3M, strategy: snapshot-retention}
+    size: {bytes: 30e9, measured: false, as_of: 2026-10-10}
+    notes: Score 4.3. The index has no distribution column, so the gate reads the PDF front matter (ADP 1 PDF measured at 8.2 MB). Series allow-list (planning, leadership, sustainment, engineering, medical, physical security, land navigation) and deny-list (fires, targeting, munitions, weapons, demolitions) per research doc §3.3 and §5.2; everything else goes to owner review. The rules file is created with the adapter.
+
+  - id: joint-publications
+    name: Joint Publications (Joint Electronic Library, public set)
+    publisher: Joint Chiefs of Staff
+    domain: [defense, doctrine]
+    tier: T1
+    status: candidate
+    license: LicenseRef-US-Gov-PD
+    legal_basis: public-domain
+    access: {adapter: doc-collection, issuer: Joint Chiefs of Staff, origins: [www.jcs.mil], discovery: [{kind: index-page, url: "https://www.jcs.mil/Doctrine/Joint-Doctrine-Pubs/"}], filter: {distribution: {require: [A]}, deny_series_prefix: ["JP 3-60", "JP 3-09"], default: review}}
+    update: {cadence: P3M, strategy: snapshot-retention}
+    size: {bytes: 2e9, measured: false, as_of: 2026-10-10}
+    notes: Score 4.4. jcs.mil answered 403 to a plain client on 2026-10-10 (WAF).
+
+  - id: usmc-mcpel
+    name: USMC doctrinal publications (MCDP series, MCWP 5-10)
+    publisher: US Marine Corps
+    domain: [defense, doctrine]
+    tier: T1
+    status: candidate
+    license: LicenseRef-US-Gov-PD
+    legal_basis: public-domain
+    access: {adapter: doc-collection, issuer: USMC, origins: [www.marines.mil], discovery: [{kind: index-page, url: "https://www.marines.mil/News/Publications/MCPEL/"}], filter: {distribution: {require: [A]}, default: review}}
+    update: {cadence: P3M, strategy: snapshot-retention}
+    size: {bytes: 3e9, measured: false, as_of: 2026-10-10}
+    notes: Score 4.4. Start with MCDP 1-8; other series through review. WAF-blocked to a plain client on 2026-10-10.
+
+  - id: army-cmh-histories
+    name: US Army Center of Military History official histories
+    publisher: US Army Center of Military History
+    domain: [defense, history]
+    tier: T1
+    status: candidate
+    license: LicenseRef-US-Gov-PD
+    legal_basis: public-domain
+    access: {adapter: doc-collection, issuer: US Army CMH, origins: [history.army.mil], discovery: [{kind: index-page, url: "https://history.army.mil/"}]}
+    update: {cadence: P6M, strategy: snapshot-retention}
+    size: {bytes: 30e9, measured: false, as_of: 2026-10-10}
+    notes: Score 4.3. WAF-blocked to a plain client on 2026-10-10.
+
+  - id: nps-calhoun
+    name: Naval Postgraduate School Calhoun repository (public-release theses and reports)
+    publisher: Naval Postgraduate School
+    domain: [defense, science]
+    tier: T2
+    status: candidate
+    license: LicenseRef-per-item
+    legal_basis: public-domain
+    access: {adapter: oai-pmh, oai_endpoint: "https://calhoun.nps.edu/server/oai/request", metadata_prefix: dim, filter: {distribution: {require: [A], read_from: dc.rights}, default: review}}
+    update: {cadence: P3M, strategy: base-plus-incremental}
+    size: {records: 74327, bytes: 100e9, measured: false, as_of: 2026-10-10}
+    notes: Score 3.9. Record count measured (OAI completeListSize). Only items stating "Approved for public release; distribution is unlimited", then the subject filter of research doc §3.3.
+
+  - id: cia-csi
+    name: CIA Center for the Study of Intelligence (Studies in Intelligence, books and monographs)
+    publisher: Central Intelligence Agency
+    domain: [defense, intelligence, history]
+    tier: T1
+    status: candidate
+    license: LicenseRef-US-Gov-PD
+    legal_basis: public-domain
+    access: {adapter: doc-collection, issuer: CIA, origins: [www.cia.gov], discovery: [{kind: index-page, url: "https://www.cia.gov/resources/csi/"}]}
+    update: {cadence: P3M, strategy: snapshot-retention}
+    size: {bytes: 3e9, measured: false, as_of: 2026-10-10}
+    notes: Score 4.5. Unclassified journal issues 1992 onward; Heuer's Psychology of Intelligence Analysis PDF is on the site.
+
+  - id: frus
+    name: Foreign Relations of the United States (TEI XML)
+    publisher: US Department of State, Office of the Historian
+    domain: [defense, history, intelligence]
+    tier: T1
+    status: candidate
+    license: LicenseRef-US-Gov-PD
+    legal_basis: public-domain
+    access: {adapter: git-mirror, endpoints: ["https://github.com/HistoryAtState/frus"]}
+    update: {cadence: P3M, strategy: mirror}
+    size: {bytes: 14.83e9, measured: true, as_of: 2026-10-10}
+    notes: Score 4.6. The repository README states the files are in the public domain. Size is the GitHub repository size.
+
+  # Boundary records: tracked so the gate and the discovery bots never propose them as-is.
+
+  - id: uk-mod-doctrine
+    name: UK MOD Joint Doctrine Publications (Defence Futures, formerly DCDC)
+    publisher: UK Ministry of Defence
+    domain: [defense, doctrine]
+    tier: T3
+    status: candidate
+    license: LicenseRef-Crown-copyright-MOD-use-only
+    legal_basis: none
+    notes: Not OGL. Crown copyright with reproduction "for UK government and MOD use only". Needs MOD permission before any copy.
+
+  - id: hesperian-health-guides
+    name: Hesperian Health Guides (Where There Is No Doctor family)
+    publisher: Hesperian Health Guides
+    domain: [preparedness, medicine]
+    tier: T3
+    status: candidate
+    license: LicenseRef-Hesperian-open-copyright
+    legal_basis: none
+    notes: Non-commercial copying allowed, but any digital format requires permission from Hesperian. High value; worth requesting.
+
+  - id: sphere-handbook
+    name: Sphere Handbook (humanitarian minimum standards)
+    publisher: Sphere Association
+    domain: [preparedness, emergency-management]
+    tier: T3
+    status: candidate
+    license: LicenseRef-copyright
+    legal_basis: none
+    notes: All rights reserved; posting online or other copying needs written permission.
+
+  - id: osac-reports
+    name: OSAC reports (Overseas Security Advisory Council)
+    publisher: US Department of State, Bureau of Diplomatic Security
+    domain: [defense, protective-security]
+    tier: X
+    status: excluded
+    license: LicenseRef-restricted-access
+    legal_basis: none
+    notes: Login-gated; products are for internal US private-sector use and redistribution can cost account access. Excluded (research doc §3.1).
+
+  - id: restricted-defense-material
+    name: Classified, leaked, export-controlled or Distribution B-F material (any origin)
+    domain: [defense]
+    tier: X
+    status: excluded
+    license: LicenseRef-restricted
+    legal_basis: none
+    notes: Firm exclusion (research doc §3). Includes FOUO/CUI, ITAR/EAR technical data, DHS TRIPwire and any mirror of such material. CBRN, explosives, weapons, targeting and offensive-tooling content is excluded regardless of release status (§3.2).
