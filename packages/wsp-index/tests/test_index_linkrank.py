@@ -1,5 +1,5 @@
-"""Link-analysis static rank: PageRank correctness on synthetic graphs, link resolution, the sidecar,
-and its use in lexical ranking, fusion and the portal's featured article."""
+"""Link-analysis static rank: PageRank correctness on synthetic graphs, link resolution, per-language
+groups, 64-bit keys, the sidecar, and its use in lexical ranking, fusion and the featured article."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import cast
 
 import numpy as np
+import pyarrow as pa
 import pytest
 
 from wsp_core.ids import DocId
@@ -24,13 +25,17 @@ from wsp_index import (
 from wsp_index.catalog import CatalogConfig, build_source_catalog, refresh_featured
 from wsp_index.linkrank import (
     RANK_FILE,
+    LinkGraph,
     RankConfig,
     StaticRank,
     alias_doc_id,
     blend,
     build_graph,
     compute_static_rank,
+    key64,
+    key64_one,
     pagerank,
+    percentiles,
     top_documents,
     write_rank_file,
 )
@@ -50,6 +55,21 @@ def write(root: Path, docs: Sequence[DocRecord], gen: str = "g1") -> list[tuple[
             w.write(recs)
         out.append((source, RefineryReader(generation_dir(root, source, gen))))
     return out
+
+
+def scan_ids(readers: Sequence[tuple[str, RefineryReader]]) -> list[str]:
+    """Doc ids in node order (the order build_graph numbers them)."""
+    return [
+        d for _, r in readers for b in r.scan(["doc_id"]) for d in cast(list[str], b.column(0).to_pylist())
+    ]
+
+
+def edge_pairs(graph: LinkGraph, ids: Sequence[str]) -> set[tuple[str, str]]:
+    pairs: set[tuple[str, str]] = set()
+    for kind, indeg in (("intra", graph.indeg_intra), ("cross", graph.indeg_cross)):
+        dst = np.repeat(np.arange(graph.n), indeg)
+        pairs |= {(ids[int(s)], ids[int(t)]) for s, t in zip(graph.edge_src(kind), dst, strict=True)}
+    return pairs
 
 
 def reference_pagerank(n: int, edges: list[tuple[int, int]], d: float = 0.85) -> np.ndarray:
@@ -79,19 +99,22 @@ def random_library(seed: int, n: int, m: int) -> tuple[list[DocRecord], list[tup
 def test_streamed_pagerank_matches_the_dense_reference(tmp_path: Path) -> None:
     docs, edges = random_library(7, 60, 240)
     readers = write(tmp_path / "ref", docs)
-    # tiny chunks: the streamed power iteration must not depend on chunk boundaries
-    cfg = RankConfig(edge_chunk=17, tolerance=1e-12, max_iterations=500)
+    # tiny chunks, buckets and batches: the result must not depend on any boundary
+    cfg = RankConfig(edge_chunk=17, tolerance=1e-7, max_iterations=500, bucket_nodes=8, batch_size=7)
     graph = build_graph(readers, tmp_path / "work", config=cfg)
     assert graph.n == 60
     assert graph.edges == len(set(edges))
+    ids = scan_ids(readers)
+    assert edge_pairs(graph, ids) == {(f"wsp:enc/N{s:04d}", f"wsp:enc/N{t:04d}") for s, t in edges}
     per_source, global_, iters, _, res = pagerank(graph, cfg)
     assert iters < 500
-    assert res < 1e-10
+    assert res < 1e-6
     want = reference_pagerank(60, edges)
-    order = [int(x.split("N")[-1]) for x in cast(list[str], graph.doc_ids.to_pylist())]
-    np.testing.assert_allclose(global_, want[order], rtol=1e-6)
-    np.testing.assert_allclose(per_source, global_, rtol=1e-9)  # one source: both are the same
-    assert global_.sum() == pytest.approx(1.0)
+    order = [int(x.split("N")[-1]) for x in ids]
+    np.testing.assert_allclose(global_, want[order], rtol=1e-4)  # float32 ranks, float64 sums
+    np.testing.assert_allclose(per_source, global_, rtol=1e-9)  # one group: both are the same
+    assert float(global_.sum(dtype=np.float64)) == pytest.approx(1.0, rel=1e-5)
+    graph.remove_edges()
 
 
 def test_per_source_rank_is_computed_inside_each_source(tmp_path: Path) -> None:
@@ -106,21 +129,23 @@ def test_per_source_rank_is_computed_inside_each_source(tmp_path: Path) -> None:
     readers = write(tmp_path / "ref", docs)
     graph = build_graph(readers, tmp_path / "w")
     assert (graph.edges, graph.intra_edges) == (6, 3)
-    per_source, global_, *_ = pagerank(graph, RankConfig(tolerance=1e-12, max_iterations=300))
-    ids = cast(list[str], graph.doc_ids.to_pylist())
+    per_source, global_, *_ = pagerank(graph, RankConfig(tolerance=1e-8, max_iterations=300))
+    ids = scan_ids(readers)
     for source in ("wiki", "rfc"):
         rows = [i for i, d in enumerate(ids) if d.startswith(f"wsp:{source}/")]
-        assert per_source[rows].sum() == pytest.approx(1.0)
-    assert global_.sum() == pytest.approx(1.0)
+        assert float(per_source[rows].sum()) == pytest.approx(1.0, rel=1e-5)
+    assert float(global_.sum()) == pytest.approx(1.0, rel=1e-5)
     hub = ids.index("wsp:wiki/Hub")
     rfc1 = ids.index("wsp:rfc/1")
     # cross-source citations lift the hub globally; inside rfc, RFC 1 is the best-linked page
     assert global_[hub] == global_.max()
     rfc_rows = [i for i, d in enumerate(ids) if d.startswith("wsp:rfc/")]
     assert per_source[rfc1] == per_source[rfc_rows].max()
-    feature = blend(per_source, global_, graph.node_source, 0.5)
+    feature = blend(per_source, global_, graph.node_group, 0.5)
     assert feature[hub] == feature.max()
-    assert float(feature.min()) > 0
+    assert float(feature.min()) >= 0
+    assert float(feature.max()) <= 1
+    assert graph.node_source.tolist() == [graph.sources.index(d[4:].split("/")[0]) for d in ids]
 
 
 def test_links_resolve_through_case_fragments_and_redirects(tmp_path: Path) -> None:
@@ -142,10 +167,101 @@ def test_links_resolve_through_case_fragments_and_redirects(tmp_path: Path) -> N
     readers = write(tmp_path / "ref", docs)
     graph = build_graph(readers, tmp_path / "w", aliases=[("wsp:w/A/Alan_Turing", "Turing")])
     assert (graph.edges, graph.unresolved) == (1, 1)  # both resolved links are the same edge
+    assert graph.resolved == {"exact": 1, "loose": 1, "alias": 1}  # the self-link resolves exactly
     no_alias = build_graph(readers, tmp_path / "w2", config=RankConfig(resolve_aliases=False))
     assert (no_alias.edges, no_alias.unresolved) == (0, 3)
-    assert alias_doc_id("wsp:w/A/Alan_Turing", "Alan M. Turing") == "wsp:w/A/Alan_M._Turing"
-    assert alias_doc_id("wsp:rfc/9110", "HTTP Semantics") == "wsp:rfc/HTTP_Semantics"
+    assert alias_doc_id("wsp:w/A/Alan_Turing", "Alan M. Turing", prefixed=True) == "wsp:w/A/Alan_M._Turing"
+    assert alias_doc_id("wsp:rfc/9110", "HTTP Semantics", prefixed=False) == "wsp:rfc/HTTP_Semantics"
+    assert alias_doc_id("wsp:w/en/AC/DC", "AC DC", prefixed=True) == "wsp:w/en/AC_DC"
+    assert alias_doc_id("wsp:w/AC/DC", "ACDC", prefixed=False) == "wsp:w/ACDC"
+
+
+def test_redirect_aliases_keep_the_language_prefix(tmp_path: Path) -> None:
+    """A multi-wiki source: redirects resolve in their own language, titles may contain "/"."""
+    docs = [
+        doc("w", "en/Alan_Turing", "Alan Turing"),
+        doc("w", "de/Alan_Turing", "Alan Turing", lang="de"),
+        doc("w", "en/AC/DC", "AC/DC"),
+        doc(
+            "w", "en/Enigma", "Enigma", links=("wsp:w/en/Turing", "wsp:w/en/AC_DC", "wsp:w/en/Bon_Scott_band")
+        ),
+        doc("w", "de/Enigma", "Enigma", lang="de", links=("wsp:w/de/Turing",)),
+    ]
+    readers = write(tmp_path / "ref", docs)
+    aliases = [
+        ("wsp:w/en/Alan_Turing", "Turing"),
+        ("wsp:w/de/Alan_Turing", "Turing"),
+        ("wsp:w/en/AC/DC", "AC DC"),
+        ("wsp:w/en/AC/DC", "Bon Scott band"),
+        ("wsp:w/en/Missing", "Whatever"),  # redirect to a page the generation does not have
+    ]
+    graph = build_graph(readers, tmp_path / "work", aliases=aliases)
+    assert graph.aliases == 4
+    assert graph.resolved["alias"] == 4
+    assert graph.unresolved == 0
+    assert edge_pairs(graph, scan_ids(readers)) == {
+        ("wsp:w/en/Enigma", "wsp:w/en/Alan_Turing"),
+        ("wsp:w/en/Enigma", "wsp:w/en/AC/DC"),
+        ("wsp:w/de/Enigma", "wsp:w/de/Alan_Turing"),
+    }
+    assert sorted(graph.groups) == [("w", "de"), ("w", "en")]
+    assert graph.intra_edges == 3
+    graph.remove_edges()
+
+
+def test_languages_are_ranked_among_themselves(tmp_path: Path) -> None:
+    """A big clique of interlinked stubs in one language must not outrank another language's pages."""
+    stubs = [
+        doc(
+            "w", f"ceb/S{i}", f"S{i}", lang="ceb", links=tuple(f"wsp:w/ceb/S{j}" for j in range(40) if j != i)
+        )
+        for i in range(40)
+    ]
+    en = [doc("w", f"en/P{i}", f"P{i}", links=("wsp:w/en/Hub",)) for i in range(5)] + [
+        doc("w", "en/Hub", "Hub")
+    ]
+    readers = write(tmp_path / "ref", [*stubs, *en])
+    out = tmp_path / RANK_FILE
+    stats = compute_static_rank(readers, out, tmp_path / "work")
+    assert stats.groups == {"w/ceb": 40, "w/en": 6}
+    rank = StaticRank(out)
+    hub, stub, leaf = rank.features(["wsp:w/en/Hub", "wsp:w/ceb/S3", "wsp:w/en/P1"]).tolist()
+    assert hub > stub  # the best English page beats a stub of a 40-page clique
+    assert leaf == 0.0  # nobody links to it
+    found = rank.pageranks(["wsp:w/en/Hub", "wsp:w/ceb/S3"])
+    assert found is not None
+    per, _ = found
+    assert per[0] > per[1]  # inside its own language the hub holds a larger share
+
+
+def test_key64() -> None:
+    import wsp_index.linkrank as lr
+
+    words = [f"wsp:w/en/T{i}" for i in range(50_000)] + ["", "a", "é", "東京", "x" * 10_000]
+    keys = key64(pa.array(words))
+    assert len(set(keys.tolist())) == len(words)  # no collisions, the empty string included
+    assert key64_one("wsp:w/en/T7") == int(keys[7])
+    assert np.array_equal(key64(pa.array(words, type=pa.large_string())), keys)
+    assert np.array_equal(key64(pa.array(words).slice(3, 10)), keys[3:13])  # Arrow offsets honoured
+    assert np.array_equal(key64(pa.chunked_array([words[:5], words[5:9]])), keys[:9])
+    assert np.array_equal(key64(pa.array(["a", None, "b"])), key64(pa.array(["a", "", "b"])))
+    assert np.array_equal(key64(["a", "b"]), key64(pa.array(["a", "b"])))  # a plain sequence
+    assert key64(pa.array([], type=pa.string())).shape == (0,)
+    old = lr._CHUNK_BYTES  # pyright: ignore[reportPrivateUsage]
+    try:
+        lr._CHUNK_BYTES = 64  # pyright: ignore[reportPrivateUsage] - every chunking path, oversized rows too
+        assert np.array_equal(key64(pa.array(words)), keys)
+    finally:
+        lr._CHUNK_BYTES = old  # pyright: ignore[reportPrivateUsage]
+    with pytest.raises(TypeError):
+        key64(pa.array([1, 2]))
+
+
+def test_percentiles() -> None:
+    v = np.array([0.1, 0.5, 0.5, 0.9, 0.2, 0.3], dtype=np.float32)
+    assert percentiles(v).tolist() == pytest.approx([0.0, 0.6, 0.6, 1.0, 0.2, 0.4])
+    g = np.array([0, 0, 0, 0, 1, 1], dtype=np.int32)
+    assert percentiles(v, g).tolist() == pytest.approx([0.0, 1 / 3, 1 / 3, 1.0, 0.0, 1.0])
 
 
 def test_sidecar_round_trip_and_corruption(tmp_path: Path) -> None:
@@ -160,9 +276,12 @@ def test_sidecar_round_trip_and_corruption(tmp_path: Path) -> None:
     assert not list((tmp_path / "work").iterdir()), "the edge list is scratch"
     rank = StaticRank(out)
     assert len(rank) == 40
+    assert rank.version == 2
     feats = rank.features([d.doc_id for d in docs] + ["wsp:enc/missing"])
     assert feats[-1] == 0.0
-    assert (feats[:-1] > 0).all()
+    assert (feats >= 0).all()
+    assert (feats <= 1).all()
+    assert float(feats.max()) > 0.9
     pr = rank.pagerank(docs[0].doc_id)
     assert pr is not None
     assert pr[0] == pytest.approx(pr[1], rel=1e-5)
@@ -180,10 +299,30 @@ def test_sidecar_round_trip_and_corruption(tmp_path: Path) -> None:
 
 def test_empty_library(tmp_path: Path) -> None:
     out = tmp_path / RANK_FILE
-    write_rank_file(out, [], np.zeros(0, np.float32), np.zeros(0), np.zeros(0))
+    z = np.zeros(0, np.float32)
+    write_rank_file(out, np.zeros(0, np.uint64), np.zeros(0, np.int32), z, z, z)
     rank = StaticRank(out)
     assert len(rank) == 0
     assert rank.features(["wsp:a/b"]).tolist() == [0.0]
+    assert rank.pagerank("wsp:a/b") is None
+    stats = compute_static_rank([], tmp_path / "e" / RANK_FILE, tmp_path / "work")
+    assert stats.nodes == 0
+
+
+def test_version_1_sidecar_still_reads(tmp_path: Path) -> None:
+    """Files from before the percentile feature: blake2b keys, the log feature squashed into [0, 1)."""
+    from wsp_index.refinery import id_hash
+
+    ids = ["wsp:a/x", "wsp:a/y"]
+    h = np.array([id_hash(d) for d in ids], dtype=np.uint64)
+    order = np.argsort(h)
+    feat = np.array([3.0, 0.5], dtype=np.float32)[order]
+    body = h[order].tobytes() + feat.tobytes() * 3
+    out = tmp_path / RANK_FILE
+    out.write_bytes(b"WSPRANK1" + np.uint64(2).tobytes() + body)
+    rank = StaticRank(out)
+    assert rank.version == 1
+    assert rank.features(ids).tolist() == pytest.approx([0.75, 0.5 / 1.5])
 
 
 def _same_text_corpus() -> list[DocRecord]:
@@ -259,10 +398,10 @@ def test_fusion_static_boost() -> None:
     plain = HybridSearcher(lex, config=FusionConfig())
     assert [h.doc_id for h in plain.search("q")] == ["wsp:a/0", "wsp:a/1", "wsp:a/2"]
     boosted = HybridSearcher(
-        lex, config=FusionConfig(static_rank=_Static({"wsp:a/2": 5.0}), static_weight=0.1)
+        lex, config=FusionConfig(static_rank=_Static({"wsp:a/2": 1.0}), static_weight=0.1)
     )
     assert boosted.search("q")[0].doc_id == "wsp:a/2"
-    zero = HybridSearcher(lex, config=FusionConfig(static_rank=_Static({"wsp:a/2": 5.0})))
+    zero = HybridSearcher(lex, config=FusionConfig(static_rank=_Static({"wsp:a/2": 1.0})))
     assert zero.search("q")[0].doc_id == "wsp:a/0"  # weight 0: off
 
 

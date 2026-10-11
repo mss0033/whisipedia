@@ -63,7 +63,9 @@ class CrossEncoderReranker:
         torch, tf = devices.torch(), devices.transformers()
         self._torch: Any = torch
         self._tok: Any = tf.AutoTokenizer.from_pretrained(str(model_dir), local_files_only=True)
-        dtype = torch.float16 if self.device.startswith("cuda") else torch.float32
+        from wsp_oracle.embedder import half_dtype
+
+        dtype = getattr(torch, half_dtype(torch, self.device))
         model: Any = tf.AutoModelForSequenceClassification.from_pretrained(
             str(model_dir), local_files_only=True, dtype=dtype
         )

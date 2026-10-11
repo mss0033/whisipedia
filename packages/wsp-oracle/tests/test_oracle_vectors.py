@@ -60,8 +60,9 @@ def test_crash_between_saves_is_repaired(tmp_path: Path) -> None:
     # simulate a crash: commit the id map but never write the graph again
     s._db.execute("COMMIT")  # pyright: ignore[reportPrivateUsage]
     s._db.close()  # pyright: ignore[reportPrivateUsage]
-    s._int8_f.close()  # pyright: ignore[reportPrivateUsage]
-    s._scale_f.close()  # pyright: ignore[reportPrivateUsage]
+    for f in (s._int8_f, s._scale_f):  # pyright: ignore[reportPrivateUsage]
+        if f is not None:
+            f.close()
 
     again = ChunkVectorStore(tmp_path / "v", DIMS)
     assert len(again) == 59

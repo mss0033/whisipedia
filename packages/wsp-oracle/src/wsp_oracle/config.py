@@ -80,8 +80,9 @@ class VectorConfig:
     """Vector store directory; ``""`` = ``<index.root>/vectors``. Local disk only (ADR-0002)."""
     mode: str = "load"
     """``load`` keeps the binary HNSW graph in RAM (writable); ``view`` memory-maps it read-only."""
-    oversample: int = 16
-    """Binary candidates per wanted result, rescored with the int8 vectors."""
+    oversample: int = 8
+    """Binary candidates per wanted result, rescored with the int8 vectors. With centered codes 8
+    finds 95.6% of the exact top 10 on the library's e5-base passages (raw codes needed 16 for 81%)."""
     connectivity: int = 16
     expansion_add: int = 128
     expansion_search: int = 96
@@ -105,7 +106,8 @@ class OracleConfig:
     spelling: bool = True
     """Offer "did you mean" from the index vocabulary when results are sparse."""
     chunk_words: int = 200
-    max_chunks_per_doc: int = 256
+    max_chunks_per_doc: int = 0
+    """Passages per document at most; 0: no cap (a cap of 256 kept the first ~51k words of a book)."""
     cache_size: int = 256
     """Recent result lists kept so paging and facets do not re-run the pipeline."""
     budget_ms: float = 100.0
@@ -172,7 +174,7 @@ class OracleConfig:
             vectors = VectorConfig(
                 path=str(vec.get("path", "")),
                 mode=str(vec.get("mode", "load")),
-                oversample=int(vec.get("oversample", 16)),
+                oversample=int(vec.get("oversample", 8)),
                 connectivity=int(vec.get("connectivity", 16)),
                 expansion_add=int(vec.get("expansion_add", 128)),
                 expansion_search=int(vec.get("expansion_search", 96)),
@@ -190,7 +192,7 @@ class OracleConfig:
                 static_rank_weight=float(section.get("static_rank_weight", 0.1)),
                 spelling=bool(section.get("spelling", True)),
                 chunk_words=int(section.get("chunk_words", 200)),
-                max_chunks_per_doc=int(section.get("max_chunks_per_doc", 256)),
+                max_chunks_per_doc=int(section.get("max_chunks_per_doc", 0)),
                 cache_size=int(section.get("cache_size", 256)),
                 budget_ms=float(section.get("budget_ms", 100.0)),
                 embedder=embedder,

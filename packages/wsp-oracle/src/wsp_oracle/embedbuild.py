@@ -7,37 +7,45 @@ For each source the current sealed Refinery generation under ``<index.root>/refi
 batches; documents whose ``content_hash`` the store already holds are skipped (that is what makes
 a re-run resume, and a new generation cost only its changed documents), changed documents are
 re-chunked and replaced, and documents the new generation no longer has are deleted at the end.
-The store is saved every ``save_every`` passages, so an interrupted run loses at most that much.
+Rows and ids are saved every ``save_every`` passages, so an interrupted run loses at most that much.
 
-Reading and chunking run in a producer thread (and in ``--workers`` processes) while the GPU
-embeds the previous batch.
+Reading and chunking run in a producer thread while the GPU embeds the previous batch (the chunker
+does ~48k chunks/s on one core; the old process pool forked after CUDA had started). The producer
+reads only ids, hashes and languages first and reads the text of changed documents only. The HNSW
+graph is built once at the end of a run.
 """
 
 from __future__ import annotations
 
 import argparse
 import logging
-import os
 import queue
 import sys
 import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
-from concurrent.futures import Executor, ProcessPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
+import numpy as np
+import numpy.typing as npt
+import pyarrow as pa
+import pyarrow.compute as _pc
+
 from wsp_core.ports import Embedder
 from wsp_index import RefineryReader
 from wsp_index.refinery import current_generation, generation_dir
-from wsp_oracle.chunker import Chunk, chunk_text, make_chunk_id
+from wsp_index.text import language_parts
+from wsp_oracle.chunker import Chunk, chunk_text, is_wiki_like, make_chunk_id
 from wsp_oracle.embedder import encode_passages
 from wsp_oracle.vectors import ChunkVectorStore
 
 log = logging.getLogger("wsp_oracle.embed")
+pc: Any = _pc
 
-_COLUMNS = ("doc_id", "source_id", "title", "text", "content_hash", "lang")
+_STATE_COLUMNS = ("doc_id", "content_hash", "lang")
+_DOC_COLUMNS = ("doc_id", "source_id", "title", "text", "content_hash", "lang")
 
 
 @dataclass(slots=True)
@@ -51,6 +59,15 @@ class EmbedStats:
     chunks: int = 0
     total_docs: int = 0
     started: float = field(default_factory=time.monotonic)
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+
+    def add(self, *, seen: int = 0, embedded: int = 0, unchanged: int = 0, chunks: int = 0) -> None:
+        """Counters are updated from the producer and the consumer thread."""
+        with self._lock:
+            self.docs_seen += seen
+            self.docs_embedded += embedded
+            self.docs_unchanged += unchanged
+            self.chunks += chunks
 
     @property
     def seconds(self) -> float:
@@ -78,17 +95,29 @@ class _Doc:
     doc_id: str
     source_id: str
     content_hash: str
+    lang: str
     replace: bool
     chunks: tuple[Chunk, ...]
 
 
-def _chunk_one(args: tuple[str, str, str, int, int]) -> list[tuple[str, str]]:
-    title, text, _doc_id, words, max_chunks = args
-    return chunk_text(title, text, target_words=words, max_chunks=max_chunks) or [("", title)]
+def _chunk_one(title: str, text: str, words: int, max_chunks: int, wiki: bool) -> list[tuple[str, str]]:
+    return chunk_text(title, text, target_words=words, max_chunks=max_chunks, stop_at_references=wiki) or [
+        ("", title)
+    ]
 
 
-def _chunk_many(batch: list[tuple[str, str, str, int, int]]) -> list[list[tuple[str, str]]]:
-    return [_chunk_one(a) for a in batch]
+def _wanted(langs: pa.Array[Any], wanted: frozenset[str] | None) -> npt.NDArray[np.bool_]:
+    if wanted is None:
+        return np.ones(len(langs), dtype=bool)
+    mask = pc.is_in(langs, value_set=pa.array(sorted(wanted), type=pa.string()))
+    return np.asarray(mask.to_numpy(zero_copy_only=False), dtype=bool)
+
+
+def count_docs(reader: RefineryReader, langs: frozenset[str] | None) -> int:
+    """Documents an embed run will look at (the ETA's denominator; reads only the ``lang`` column)."""
+    if langs is None:
+        return len(reader)
+    return sum(r for lang, parts in language_parts(reader).items() if lang in langs for _, r in parts)
 
 
 def _produce(
@@ -101,62 +130,56 @@ def _produce(
     words: int,
     max_chunks: int,
     limit: int | None,
-    pool: Executor | None,
     batch_docs: int,
     langs: frozenset[str] | None = None,
 ) -> None:
+    """Per part: read only ids, hashes and languages; skip unchanged documents; read and chunk the
+    rest (title and text of their row groups only) in this thread (~48k chunks/s on one core)."""
     try:
         seen = 0
-        for batch in reader.scan(_COLUMNS, batch_size=batch_docs):
-            cols: dict[str, list[Any]] = {name: batch.column(name).to_pylist() for name in _COLUMNS}
-            if langs is not None:  # e.g. only the English part of a multi-language source
-                keep = [i for i, lang in enumerate(cols["lang"]) if str(lang) in langs]
-                cols = {name: [values[i] for i in keep] for name, values in cols.items()}
-            ids = [str(x) for x in cols["doc_id"]]
-            if limit is not None:
-                ids = ids[: max(0, limit - seen)]
-            if not ids:
-                if limit is not None and seen >= limit:
-                    break
-                continue  # a batch with no documents in the wanted languages
-            seen += len(ids)
-            known = store.doc_hashes(ids)
-            todo: list[int] = []
-            unchanged: list[str] = []
-            for i, doc_id in enumerate(ids):
-                if known.get(doc_id) == cols["content_hash"][i]:
-                    unchanged.append(doc_id)
-                else:
-                    todo.append(i)
-            if unchanged:
-                store.touch_docs(unchanged, generation_id)
-            stats.docs_unchanged += len(unchanged)
-            args = [(str(cols["title"][i]), str(cols["text"][i]), ids[i], words, max_chunks) for i in todo]
-            if pool is not None and len(args) > 64:
-                parts = [args[j : j + 64] for j in range(0, len(args), 64)]
-                pieces = [p for chunked in pool.map(_chunk_many, parts) for p in chunked]
-            else:
-                pieces = [_chunk_one(a) for a in args]
-            docs: list[_Doc] = []
-            for i, pairs in zip(todo, pieces, strict=True):
-                doc_id, title = ids[i], str(cols["title"][i])
-                chunks = tuple(
-                    Chunk(make_chunk_id(doc_id, n), doc_id, n, title, sec, txt)
-                    for n, (sec, txt) in enumerate(pairs)
-                )
-                docs.append(
-                    _Doc(
-                        doc_id,
-                        str(cols["source_id"][i]),
-                        str(cols["content_hash"][i]),
-                        doc_id in known,
-                        chunks,
-                    )
-                )
-            stats.docs_seen += len(unchanged)
-            out.put(docs)
+        wiki = is_wiki_like(reader.source_id)
+        for part in range(reader.n_parts):
             if limit is not None and seen >= limit:
                 break
+            state, positions = reader.part_table(part, _STATE_COLUMNS)
+            keep = _wanted(state.column("lang").combine_chunks(), langs)
+            ids_all = cast(list[str], state.column("doc_id").to_pylist())
+            hashes_all = cast(list[str], state.column("content_hash").to_pylist())
+            rows = np.flatnonzero(keep)
+            if limit is not None:
+                rows = rows[: max(0, limit - seen)]
+            for start in range(0, len(rows), batch_docs):
+                sel = cast(list[int], rows[start : start + batch_docs].tolist())
+                ids = [ids_all[i] for i in sel]
+                seen += len(ids)
+                known = store.doc_hashes(ids)
+                todo = [i for i, d in zip(sel, ids, strict=True) if known.get(d) != hashes_all[i]]
+                unchanged = [d for i, d in zip(sel, ids, strict=True) if known.get(d) == hashes_all[i]]
+                if unchanged:
+                    store.touch_docs(unchanged, generation_id)
+                stats.add(seen=len(unchanged), unchanged=len(unchanged))
+                if not todo:
+                    continue
+                table = reader.part_rows(part, positions[np.asarray(todo, dtype=np.int64)], _DOC_COLUMNS)
+                docs: list[_Doc] = []
+                for r in table.to_pylist():
+                    doc_id, title = str(r["doc_id"]), str(r["title"])
+                    pairs = _chunk_one(title, str(r["text"]), words, max_chunks, wiki)
+                    chunks = tuple(
+                        Chunk(make_chunk_id(doc_id, n), doc_id, n, title, sec, txt)
+                        for n, (sec, txt) in enumerate(pairs)
+                    )
+                    docs.append(
+                        _Doc(
+                            doc_id,
+                            str(r["source_id"]),
+                            str(r["content_hash"]),
+                            str(r["lang"]),
+                            doc_id in known,
+                            chunks,
+                        )
+                    )
+                out.put(docs)
         out.put(None)
     except BaseException as exc:  # handed to the consumer, which re-raises
         out.put(exc)
@@ -170,23 +193,25 @@ def embed_generation(
     source_id: str,
     generation_id: str,
     chunk_words: int = 200,
-    max_chunks_per_doc: int = 256,
+    max_chunks_per_doc: int = 0,
     batch_chunks: int = 4096,
     batch_docs: int = 1024,
     save_every: int = 250_000,
     limit: int | None = None,
     langs: frozenset[str] | None = None,
-    workers: int = 0,
     progress: Callable[[EmbedStats], None] | None = None,
     progress_every_s: float = 10.0,
 ) -> EmbedStats:
     """Bring ``store`` up to date with one Refinery generation of ``source_id``.
 
-    With ``limit`` only the first ``limit`` documents are considered and nothing is deleted.
+    The graph is built once at the end (``ChunkVectorStore.build_graph``); ``save_every`` passages
+    only make rows and ids durable, so an interrupted run loses at most that much and resumes.
+    With ``limit`` only the first ``limit`` documents are considered and nothing is deleted; with
+    ``langs`` only documents of those languages are embedded or removed.
     """
-    stats = EmbedStats(source_id=source_id, generation_id=generation_id, total_docs=limit or len(reader))
+    total = limit or count_docs(reader, langs)
+    stats = EmbedStats(source_id=source_id, generation_id=generation_id, total_docs=total)
     q: queue.Queue[list[_Doc] | BaseException | None] = queue.Queue(maxsize=4)
-    pool = ProcessPoolExecutor(workers) if workers > 0 else None
     producer = threading.Thread(
         target=_produce,
         args=(reader, store, stats, q),
@@ -195,13 +220,14 @@ def embed_generation(
             "words": chunk_words,
             "max_chunks": max_chunks_per_doc,
             "limit": limit,
-            "pool": pool,
             "batch_docs": batch_docs,
             "langs": langs,
         },
         daemon=True,
         name="embed-producer",
     )
+    deferred = store.defer_graph
+    store.defer_graph = True
     producer.start()
     pending: list[_Doc] = []
     pending_chunks = 0
@@ -219,11 +245,9 @@ def embed_generation(
         mat = encode_passages(embedder, [c.embed_text() for c in chunks], store.dimensions)
         store.add_chunks(chunks, mat)
         store.record_docs(
-            (d.doc_id, d.source_id, d.content_hash, generation_id, len(d.chunks)) for d in pending
+            (d.doc_id, d.source_id, d.content_hash, generation_id, len(d.chunks), d.lang) for d in pending
         )
-        stats.docs_embedded += len(pending)
-        stats.docs_seen += len(pending)
-        stats.chunks += len(chunks)
+        stats.add(seen=len(pending), embedded=len(pending), chunks=len(chunks))
         since_save += len(chunks)
         pending.clear()
         pending_chunks = 0
@@ -248,26 +272,20 @@ def embed_generation(
                 last_report = time.monotonic()
         flush()
         if limit is None:
-            stale = store.stale_docs(source_id, generation_id)
+            stale = store.stale_docs(source_id, generation_id, langs)
             if stale:
                 store.delete_docs(stale)
                 stats.docs_removed = len(stale)
         store.save()
     finally:
-        if pool is not None:
-            pool.shutdown(cancel_futures=True)
+        store.defer_graph = deferred
+    store.build_graph()
     if progress is not None:
         progress(stats)
     return stats
 
 
 # --- CLI ------------------------------------------------------------------------------------------
-
-
-def default_workers() -> int:
-    """Four chunking processes, fewer when ``WSP_MAX_WORKERS`` asks for it (the GPU is the bottleneck)."""
-    cap = os.environ.get("WSP_MAX_WORKERS", "")
-    return min(4, int(cap)) if cap.isdigit() and int(cap) > 0 else 4
 
 
 def _find_config_dir() -> Path:
@@ -298,12 +316,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     ap.add_argument("--limit", type=int, default=None, help="only the first N documents (benchmarks)")
     ap.add_argument("--langs", default="", help="comma-separated language codes to embed (default: all)")
     ap.add_argument("--batch-chunks", type=int, default=4096)
-    ap.add_argument(
-        "--workers",
-        type=int,
-        default=default_workers(),
-        help="chunking processes (0 = in the producer thread; default min(4, WSP_MAX_WORKERS))",
-    )
     ap.add_argument("--device", default="", help="override oracle.embedder.device")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
@@ -345,7 +357,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                 batch_chunks=args.batch_chunks,
                 limit=args.limit,
                 langs=frozenset(x for x in args.langs.split(",") if x) or None,
-                workers=args.workers,
                 progress=lambda s: log.info(s.line()),
             )
             log.info(

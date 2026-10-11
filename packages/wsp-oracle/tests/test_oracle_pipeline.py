@@ -102,7 +102,7 @@ def test_embed_generation_is_resumable_and_incremental(tmp_path: Path) -> None:
         ),
     )
     r2 = write_generation(root, "g2", changed)
-    upd = embed_generation(r2, s, emb, source_id="encyclo", generation_id="g2", workers=0)
+    upd = embed_generation(r2, s, emb, source_id="encyclo", generation_id="g2")
     assert (upd.docs_embedded, upd.docs_unchanged, upd.docs_removed) == (1, 6, 1)
     assert s.doc_count("encyclo") == 7
     assert s.texts(["wsp:encyclo/Lisbon#0"]) == {}
@@ -132,8 +132,11 @@ def test_pins_exact_titles_and_comparisons(lexical: TantivyIndex, store: ChunkVe
     assert searcher.run("map of Lisbon").hits[0].doc_id == "wsp:encyclo/Lisbon"
     top2 = {h.doc_id for h in searcher.run("alligator vs crocodile").hits[:2]}
     assert top2 == {"wsp:encyclo/Alligator", "wsp:encyclo/Crocodile"}
-    nav = searcher.run("rfc http caching")
+    nav = searcher.run("rfc 9111")  # site + identifier: searched only there
     assert {h.source_id for h in nav.hits} == {"rfc"}
+    soft = searcher.run("rfc http caching")  # site + words: a soft prior, searched everywhere
+    assert soft.scope is None
+    assert soft.hits[0].source_id == "rfc"
 
 
 def test_oracle_index_port_and_cache(lexical: TantivyIndex, store: ChunkVectorStore) -> None:
@@ -226,25 +229,27 @@ def test_site_scope_is_consistent_and_falls_back(lexical: TantivyIndex) -> None:
     router = Router.from_sources(["encyclo", "dictionary", "rfc", "gutenberg"])
     searcher = OracleSearcher(lexical, router=router)
     index = OracleIndex(searcher)
-    # the site has the answer: results, totals and facets all come from it
-    res = searcher.run("rfc http caching")
+    # site + identifier with an answer there: results, totals and facets all come from it
+    res = searcher.run("rfc 9111")
     assert res.scope is not None
     assert (res.scope.site, res.scope.sources, res.scope.fallback) == ("rfc", ("rfc",), False)
     assert {h.source_id for h in res.hits} == {"rfc"}
-    window = index.search_hits("rfc http caching", limit=200)
-    assert {h.doc_id for h in window} == {h.doc_id for h in index.search("rfc http caching", limit=50)}
-    # the site has nothing for it (or nothing indexed): the whole library, flagged as a fallback
-    for q in ("rfc alan turing", "gutenberg alan turing"):
+    window = index.search_hits("rfc 9111", limit=200)
+    assert {h.doc_id for h in window} == {h.doc_id for h in index.search("rfc 9111", limit=50)}
+    # the site has nothing for the identifier (or nothing indexed): the whole library, flagged
+    for q in ("rfc 9999", "gutenberg 1342"):
         scope = index.scope(q)
         assert scope is not None
         assert scope.fallback, q
         hits = index.search(q, limit=10)
-        assert "wsp:encyclo/Alan_Turing" in {h.doc_id for h in hits}
         assert {h.doc_id for h in index.search_hits(q, limit=200)} >= {h.doc_id for h in hits}
+    # a site with words is a soft prior, never a scope: other sources still answer
+    assert index.scope("rfc alan turing") is None
+    assert "wsp:encyclo/Alan_Turing" in {h.doc_id for h in index.search("gutenberg alan turing", limit=10)}
     # explicit filters win over the router; plain queries have no scope
-    assert index.scope("rfc alan turing", sources=["encyclo"]) is None
+    assert index.scope("rfc 9111", sources=["encyclo"]) is None
     assert index.scope("alan turing") is None
-    assert index.search_hits("rfc http caching", sources=[]) == []
+    assert index.search_hits("rfc 9111", sources=[]) == []
 
 
 def test_typos_are_deterministic_single_edits() -> None:

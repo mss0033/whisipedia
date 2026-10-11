@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import sqlite3
 import time
@@ -102,8 +103,27 @@ def _write_durably(path: Path, text: str) -> None:
         os.close(fd)
 
 
-def _alias_title(native_id: str) -> str:
-    return native_id.rsplit("/", 1)[-1].replace("_", " ").strip()
+# A language ("en/", "zh-yue/") or ZIM book prefix, or an old-style ZIM namespace ("A/").
+_ID_PREFIX = re.compile(r"^(?:[a-z][a-z0-9._-]*|[A-Z])/")
+
+
+def _alias_title(native_id: str, target: str = "") -> str:
+    """The title of a redirect: its native id without the source's prefixes.
+
+    A prefix is a leading segment the redirect and its ``target`` share that looks like one: lower
+    case (``en/``, ``wikipedia_de_all/``) or a single capital letter (an old ZIM namespace,
+    ``A/``); at most two (a book and its namespace). A title's own "/" is kept (``en/AC/DC_(album)``
+    -> ``AC/DC (album)``, not ``DC (album)``). Ambiguous by construction: a title of a source
+    without prefixes that starts like one ("A/B testing" redirecting to "A/B_testing" in a new-style
+    ZIM) loses that start, as every title did before.
+    """
+    title, tgt = native_id, target
+    for _ in range(2):
+        m = _ID_PREFIX.match(title)
+        if not m or not tgt.startswith(m.group(0)):
+            break
+        title, tgt = title[m.end() :], tgt[m.end() :]
+    return title.replace("_", " ").strip()
 
 
 class Indexer:
@@ -248,7 +268,7 @@ class Indexer:
         batch: list[tuple[str, str]] = []
         for entry in adapter.entries(ctx, generation_path):
             if isinstance(entry, Redirect):
-                batch.append((entry.target, _alias_title(entry.native_id)))
+                batch.append((entry.target, _alias_title(entry.native_id, entry.target)))
                 if len(batch) >= 5_000:
                     db.executemany("INSERT INTO redirects VALUES (?, ?)", batch)
                     batch.clear()

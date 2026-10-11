@@ -116,11 +116,13 @@ def build_oracle(
     lexical: LexicalIndex | None = None,
     sources: Sequence[str] = (),
     resolve: Resolver | None = None,
+    site_words: Mapping[str, Sequence[str]] | None = None,
 ) -> OracleServices:
     """Build the Oracle from the full layered config (reads ``[oracle]`` and ``[index]``).
 
     ``lexical`` is the already-open lexical index (opened from ``index.root`` when omitted);
-    ``sources`` are the library's source ids (they name the sites the router recognizes).
+    ``sources`` are the library's source ids and ``site_words`` their registry site words (source
+    id -> words): together they name the sites the router recognizes (``Router.from_sources``).
     """
     section = cfg.get("oracle", {})
     ocfg = OracleConfig.from_mapping(cast(Mapping[str, Any], section) if isinstance(section, Mapping) else {})
@@ -129,7 +131,7 @@ def build_oracle(
     if resolve is None:
         lookup = getattr(lexical, "lookup", None)
         resolve = cast(Resolver, lookup) if callable(lookup) else None
-    router = Router.from_sources(sources)
+    router = Router.from_sources(sources, site_words)
 
     embedder: TransformerEmbedder | None = None
     store: ChunkVectorStore | None = None
@@ -178,7 +180,9 @@ def build_oracle(
     )
     return OracleServices(
         config=ocfg,
-        index=OracleIndex(searcher, cache_size=ocfg.cache_size),
+        index=OracleIndex(
+            searcher, cache_size=ocfg.cache_size, refresh=store.refresh if store is not None else None
+        ),
         searcher=searcher,
         router=router,
         embedder=embedder,
