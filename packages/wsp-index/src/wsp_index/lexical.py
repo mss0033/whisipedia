@@ -124,11 +124,11 @@ class TantivyIndex:
         self._pending_suggest: list[SuggestEntry] = []
         self._pending_removed: list[str] = []
         self._suggest_stale = False
-        self._trie_mtime = 0.0
+        self._trie_stamp: tuple[int, int, int] = (0, 0, 0)
         self._trie_checked = 0.0
         if TitleTrie.exists(self._suggest_dir) and self._meta("suggest_dirty") != "1":
             self._suggester.replace_base(TitleTrie.open(self._suggest_dir))
-            self._trie_mtime = self._trie_file_mtime()
+            self._trie_stamp = self._trie_file_stamp()
         else:
             self._rebuild_suggest()
 
@@ -367,7 +367,7 @@ class TantivyIndex:
             top_k=self.config.suggest_top_k,
         )
         self._suggester.replace_base(trie)
-        self._trie_mtime = self._trie_file_mtime()
+        self._trie_stamp = self._trie_file_stamp()
         self._suggest_stale = False
         self._pending_suggest.clear()
         self._pending_removed.clear()
@@ -385,11 +385,13 @@ class TantivyIndex:
         self._reload_trie_if_rebuilt()
         return self._suggester.suggest(prefix, limit=limit)
 
-    def _trie_file_mtime(self) -> float:
+    def _trie_file_stamp(self) -> tuple[int, int, int]:
+        """Identity of the trie file on disk: a rebuild changes at least one of these."""
         try:
-            return (self._suggest_dir / TRIE_FILE).stat().st_mtime
+            st = (self._suggest_dir / TRIE_FILE).stat()
         except OSError:
-            return 0.0
+            return (0, 0, 0)
+        return (st.st_ino, st.st_mtime_ns, st.st_size)
 
     def _reload_trie_if_rebuilt(self, *, every: float = 5.0) -> None:
         """Pick up a trie rebuilt by another process (e.g. ``wsp index build`` while ``wsp serve`` runs).
@@ -401,12 +403,12 @@ class TantivyIndex:
         if now - self._trie_checked < every:
             return
         self._trie_checked = now
-        mtime = self._trie_file_mtime()
-        if mtime <= self._trie_mtime or self._suggester.pending:
+        stamp = self._trie_file_stamp()
+        if stamp == self._trie_stamp or stamp == (0, 0, 0) or self._suggester.pending:
             return
         with self._lock:
             self._suggester.replace_base(TitleTrie.open(self._suggest_dir))
-            self._trie_mtime = mtime
+            self._trie_stamp = stamp
 
     # --- reads ---------------------------------------------------------------------------------
 

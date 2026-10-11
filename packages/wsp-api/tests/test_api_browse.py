@@ -184,8 +184,11 @@ def test_portal(browse: httpx.Client) -> None:
     assert portal.featured is not None
     assert portal.featured.doc_id.startswith("wsp:wikipedia-en-zim/")
     assert portal.featured.blurb
-    assert portal.newest[0].doc_id == ENIGMA
-    assert portal.newest[0].title == "Enigma machine"
+    sites_first = [c for c in portal.newest if c.title and "— updated" in c.title]
+    assert portal.newest[: len(sites_first)] == sites_first  # recently sealed sites lead What's New
+    docs = portal.newest[len(sites_first) :]
+    assert docs[0].doc_id == ENIGMA
+    assert docs[0].title == "Enigma machine"
     assert portal.random is not None
     assert {s.id for s in portal.sites} == {"gutenberg", "rfc", "wikipedia-en-zim"}
     assert set(portal.random_sources) == {"gutenberg", "rfc", "wikipedia-en-zim"}

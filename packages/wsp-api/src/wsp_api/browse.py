@@ -5,6 +5,7 @@ from __future__ import annotations
 import ipaddress
 import random
 import secrets
+from collections.abc import Sequence
 from typing import Annotated
 
 from fastapi import APIRouter, Query, Request, Response
@@ -13,6 +14,7 @@ from wsp_api import sites
 from wsp_api.addresses import address_of
 from wsp_api.errors import ApiError, errors
 from wsp_api.schemas import (
+    Change,
     DirectoryCategory,
     DirectoryCrumb,
     DirectoryEntry,
@@ -23,6 +25,7 @@ from wsp_api.schemas import (
     GapReport,
     OnThisDay,
     Portal,
+    SourceInfo,
 )
 from wsp_api.views import Library
 from wsp_core.ids import DocId
@@ -112,7 +115,7 @@ def browse_router(lib: Library) -> APIRouter:
                 for e in (portal_source.on_this_day(today) if portal_source is not None else ())
             ],
             did_you_know=[],  # TODO: Wikipedia "Did you know" pages are not in the dumps or ZIMs
-            newest=[lib.change(c) for c in newest],
+            newest=(news := _site_news(infos, limit=6)) + [lib.change(c) for c in newest][: 8 - len(news)],
             random=doc_ref(lib.catalog.random_doc(sources=None, rng=rng)),
             random_sources=[i.id for i in infos if i.doc_count],
             sites=infos,
@@ -273,4 +276,27 @@ def _presentable_recent(lib: Library, *, limit: int) -> list[ChangeRecord]:
                 queues.remove(q)
             if len(out) >= limit:
                 break
+    return out
+
+
+def _site_news(infos: Sequence[SourceInfo], *, limit: int) -> list[Change]:
+    """Recently sealed sites, newest first, linked to each site's landing page (PLAN §10.2 What's New)."""
+    fresh = sorted(
+        (i for i in infos if i.as_of is not None and i.current_generation),
+        key=lambda i: i.as_of or 0,
+        reverse=True,
+    )
+    out: list[Change] = []
+    for info in fresh[:limit]:
+        when = info.as_of.strftime("%b %d") if info.as_of else ""
+        out.append(
+            Change(
+                doc_id=info.home_doc_id or "",
+                kind="added" if info.current_generation else "modified",
+                generation_id=info.current_generation or "",
+                source_id=info.id,
+                title=f"{info.name} — updated {when}".strip(),
+                address=info.address,
+            )
+        )
     return out

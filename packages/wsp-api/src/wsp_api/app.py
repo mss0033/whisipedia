@@ -9,6 +9,7 @@ in :mod:`wsp_api.browse`.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import threading
 import time
 from collections import Counter
@@ -149,6 +150,13 @@ def create_app(services: Services, settings: ApiSettings | None = None) -> FastA
         # Open big single-book ZIMs in the background so the first page view does not wait on SMB.
         zims = [x.id for x in services.sources if x.adapter == "kiwix-opds"]
         threading.Thread(target=lib.assets.warm, args=(zims,), name="zim-warm", daemon=True).start()
+
+    def warm_search() -> None:  # first query otherwise pays for loading index segments (~1 s)
+        with contextlib.suppress(Exception):
+            services.index.search("the library", limit=10)
+            services.index.suggest("a", limit=10)
+
+    threading.Thread(target=warm_search, name="search-warm", daemon=True).start()
     return app
 
 
