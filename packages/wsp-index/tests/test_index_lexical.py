@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator, Sequence
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -241,3 +242,23 @@ def test_reader_picks_up_trie_rebuilt_by_another_process(tmp_path: Path) -> None
     assert reader.suggest("Zeb") == ["Zebra"]
     reader.close()
     writer.close()
+
+
+def test_source_priors_lift_curated_sources(tmp_path: Path) -> None:
+    docs = [
+        doc("dict", "insulinized", "insulin", "insulin insulin insulin insulin"),
+        doc(
+            "enc", "Insulin", "Insulin hormone", "Insulin is a peptide hormone that regulates blood glucose."
+        ),
+    ]
+
+    def top(name: str, priors: dict[str, float]) -> str:
+        ix = TantivyIndex(tmp_path / name, replace(SMALL, source_priors=priors))
+        ix.upsert(docs)
+        ix.commit()
+        first = ix.search("insulin")[0].source_id
+        ix.close()
+        return first
+
+    assert top("plain", {}) == "dict"
+    assert top("prior", {"enc": 50.0}) == "enc"

@@ -24,7 +24,7 @@ import sqlite3
 import threading
 import time
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import TracebackType
 from typing import Self
@@ -77,6 +77,9 @@ class TantivyConfig:
     """Rebuild the suggest trie at commit when more than this many titles changed since the last build."""
     suggest_heavy_threshold: int = DEFAULT_HEAVY_THRESHOLD
     suggest_top_k: int = DEFAULT_TOP_K
+    source_priors: Mapping[str, float] = field(default_factory=dict[str, float])
+    """Constant score added to matches from a source (PLAN §9.3 source-quality priors): lets curated
+    references outrank sheer volume, e.g. an encyclopedia article over millions of dictionary stubs."""
 
     def schema_signature(self) -> str:
         return json.dumps({"languages": sorted(self.languages), "store_text": self.store_text})
@@ -115,6 +118,7 @@ class TantivyIndex:
         self._buffered = 0
         self._closed = False
 
+        self._prior_clauses = self._build_prior_clauses()
         self._suggest_dir = self.path / "suggest"
         self._suggester = Suggester()
         self._pending_suggest: list[SuggestEntry] = []
@@ -129,6 +133,21 @@ class TantivyIndex:
             self._rebuild_suggest()
 
     # --- setup ---------------------------------------------------------------------------------
+
+    def _build_prior_clauses(self) -> list[tuple[tantivy.Occur, tantivy.Query]]:
+        by_bonus: dict[float, list[str]] = {}
+        for source_id, bonus in self.config.source_priors.items():
+            if bonus > 0:
+                by_bonus.setdefault(float(bonus), []).append(source_id)
+        return [
+            (
+                tantivy.Occur.Should,
+                tantivy.Query.const_score_query(
+                    tantivy.Query.term_set_query(self._schema, "source_id", sorted(ids)), bonus
+                ),
+            )
+            for bonus, ids in sorted(by_bonus.items())
+        ]
 
     def _meta(self, key: str) -> str | None:
         row = self._db.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
@@ -429,14 +448,14 @@ class TantivyIndex:
         parsed = self.parse(query)
         if parsed is None:
             return []
-        q = parsed
+        clauses: list[tuple[tantivy.Occur, tantivy.Query]] = [(tantivy.Occur.Must, parsed)]
         if sources is not None:
             if not sources:
                 return []
             source_filter = tantivy.Query.term_set_query(self._schema, "source_id", list(sources))
-            q = tantivy.Query.boolean_query(
-                [(tantivy.Occur.Must, parsed), (tantivy.Occur.Must, source_filter)]
-            )
+            clauses.append((tantivy.Occur.Must, source_filter))
+        clauses += self._prior_clauses
+        q = parsed if len(clauses) == 1 else tantivy.Query.boolean_query(clauses)
         searcher = self._index.searcher()
         result = searcher.search(q, limit, count=False, offset=offset)
         generators: dict[str, tantivy.SnippetGenerator] = {}

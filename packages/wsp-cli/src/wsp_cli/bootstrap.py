@@ -334,12 +334,24 @@ def index_languages(cfg: Mapping[str, Any]) -> tuple[str, ...]:
     return tuple(str(x) for x in cast(Sequence[object], langs))
 
 
-def open_index(cfg: Mapping[str, Any]) -> TantivyIndex:
+def source_priors(cfg: Mapping[str, Any], specs: Sequence[SourceSpec]) -> dict[str, float]:
+    """Per-source ranking bonus from ``[index.domain_priors]``, keyed by each source's first domain."""
+    table = section(section(cfg, "index"), "domain_priors")
+    priors: dict[str, float] = {}
+    for spec in specs:
+        bonus = table.get(spec.domain[0]) if spec.domain else None
+        if isinstance(bonus, int | float) and bonus > 0:
+            priors[spec.id] = float(bonus)
+    return priors
+
+
+def open_index(cfg: Mapping[str, Any], specs: Sequence[SourceSpec] = ()) -> TantivyIndex:
     from wsp_index import TantivyConfig, TantivyIndex, ensure_local
 
     p = paths(cfg)
     ensure_local(p.require_index())
-    return TantivyIndex(p.lexical, TantivyConfig(languages=index_languages(cfg)))
+    config = TantivyConfig(languages=index_languages(cfg), source_priors=source_priors(cfg, specs))
+    return TantivyIndex(p.lexical, config)
 
 
 def open_documents(cfg: Mapping[str, Any]) -> ParquetDocumentStore:
@@ -373,7 +385,7 @@ def build_services(cfg: Mapping[str, Any], lay: Layout) -> Services:
         vault = build_vault(cfg, specs, signer, ledger=False)
         changes = open_changes(cfg)
         return Services(
-            index=open_index(cfg),
+            index=open_index(cfg, specs),
             documents=open_documents(cfg),
             changes=changes,
             vault=vault,

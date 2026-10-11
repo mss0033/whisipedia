@@ -124,7 +124,7 @@ def open_indexer(
         specs,
         bootstrap.load_adapters(),
         p.require_index(),
-        bootstrap.open_index(cfg),
+        bootstrap.open_index(cfg, specs),
         bootstrap.open_changes(cfg),
         user_agent=bootstrap.user_agent(cfg),
         out=out,

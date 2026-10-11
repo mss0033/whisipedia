@@ -26,6 +26,20 @@ health_probe_interval = "P1W"
 root = "/path/to/local/index"    # local disk, never SMB (ADR-0002): refinery/, lexical/, changes.sqlite
 languages = ["en"]               # Tantivy analyzers; other languages use the unstemmed fallback
 
+[index.domain_priors]
+# Ranking bonus added to matches from sources of each domain (PLAN §9.3 source-quality priors).
+# BM25 scores are typically 5-40; curated references outrank bulk volume such as dictionary stubs.
+encyclopedia = 6.0
+medicine = 6.0
+textbooks = 5.0
+standards = 4.0
+law = 3.0
+qa = 3.0
+science = 3.0
+books = 2.0
+education = 2.0
+howto = 2.0
+
 [api]
 query_log = true                 # local-only search log (query + result count) for the gap miner; rotated
 backend = "auto"                 # "auto" (real if vault.root exists) | "real" | "sample"

@@ -281,7 +281,7 @@ class IndexHooks:
             self.specs,
             self.adapters,
             p.require_index(),
-            bootstrap.open_index(self.cfg),
+            bootstrap.open_index(self.cfg, self.specs),
             bootstrap.open_changes(self.cfg),
             user_agent=bootstrap.user_agent(self.cfg),
         )
