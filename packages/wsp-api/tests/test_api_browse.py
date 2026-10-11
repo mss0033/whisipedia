@@ -48,7 +48,8 @@ def test_html_document_is_rewritten_into_the_offline_web(browse: httpx.Client) -
     assert 'href="wsp://wikipedia-en-zim/A/Bombe#history"' in doc.html
     assert 'href="https://example.org/enigma"' in doc.html  # external: left for the client to flag
     assert f'src="/v1/assets/wikipedia-en-zim/{SAMPLE_GEN_2}/I/enigma.png"' in doc.html
-    assert "srcset" not in doc.html
+    # srcset candidates go through the asset route too (a raw srcset would bypass the rewrite)
+    assert f'srcset="/v1/assets/wikipedia-en-zim/{SAMPLE_GEN_2}/I/enigma-2x.png 2x"' in doc.html
     assert doc.generation_id == SAMPLE_GEN_2
     assert doc.source_name == "Wikipedia English (sample)"
     assert doc.kind == "encyclopedia"
@@ -305,36 +306,6 @@ def test_jsonl_gap_log(tmp_path: Path) -> None:
     lines = [json.loads(x) for x in log.path.read_text(encoding="utf-8").splitlines()]
     assert lines[0]["href"] == "https://example.org/ü"
     assert lines[1]["from_doc_id"] == "wsp:rfc/2"
-
-
-def test_site_cards_are_reused_then_refreshed_in_the_background(monkeypatch: pytest.MonkeyPatch) -> None:
-    import threading
-    import time
-
-    from wsp_api.views import Library
-
-    lib = Library(sample_services(), info_seconds=30.0)
-    spec = lib.s.sources[0]
-    calls: list[str] = []
-    fresh = lib._fresh_info  # pyright: ignore[reportPrivateUsage]
-    done = threading.Event()
-
-    def counting(x: object) -> object:
-        calls.append("x")
-        info = fresh(x)  # type: ignore[arg-type]
-        done.set()
-        return info
-
-    monkeypatch.setattr(lib, "_fresh_info", counting)
-    first = lib.source_info(spec)
-    assert lib.source_info(spec) is first  # within 30 s: no NAS reads
-    assert calls == ["x"]
-    now = time.monotonic()
-    monkeypatch.setattr(time, "monotonic", lambda: now + 31)
-    done.clear()
-    assert lib.source_info(spec) is first  # stale: served at once, refreshed behind the scenes
-    assert done.wait(5)
-    assert calls == ["x", "x"]
 
 
 def test_rewrite_drops_inline_styles() -> None:

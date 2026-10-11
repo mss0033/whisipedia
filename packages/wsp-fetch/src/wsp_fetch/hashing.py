@@ -20,21 +20,13 @@ from typing import Protocol
 
 from blake3 import blake3
 
+from wsp_core.checksums import normalize_algorithm as normalize_algorithm  # re-export: one rule everywhere
 from wsp_core.model import Checksum
 from wsp_fetch.errors import ChecksumMismatchError, ConflictingChecksumsError, UnsupportedChecksumError
 
 OWN_ALGORITHMS: tuple[str, ...] = ("sha256", "blake3")
 """Digests Whisipedia always records for its own manifests (PLAN §8.1)."""
 
-_ALIASES = {
-    "sha-1": "sha1",
-    "sha-224": "sha224",
-    "sha-256": "sha256",
-    "sha-384": "sha384",
-    "sha-512": "sha512",
-    "sha3-256": "sha3_256",
-    "sha3-512": "sha3_512",
-}
 _PARALLEL_MIN = 1 << 20
 
 
@@ -42,12 +34,6 @@ class Hasher(Protocol):
     def update(self, data: Buffer, /) -> object: ...
 
     def hexdigest(self) -> str: ...
-
-
-def normalize_algorithm(name: str) -> str:
-    """``SHA-256`` / ``sha-256`` / ``sha256`` -> ``sha256`` (Metalink uses IANA names)."""
-    key = name.strip().lower()
-    return _ALIASES.get(key, key.replace("-", ""))
 
 
 def new_hasher(algorithm: str) -> Hasher:

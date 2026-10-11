@@ -25,7 +25,8 @@ class InProcessTransport(httpx.BaseTransport):
     async def _call(self, request: httpx.Request, body: bytes) -> httpx.Response:
         replay = httpx.Request(request.method, request.url, headers=request.headers, content=body)
         response = await self._inner.handle_async_request(replay)
-        content = await response.aread()
+        # Raw bytes: the new Response decodes them per its (copied) Content-Encoding header, once.
+        content = b"".join([chunk async for chunk in response.aiter_raw()])
         await response.aclose()
         return httpx.Response(
             response.status_code, headers=response.headers, content=content, request=request

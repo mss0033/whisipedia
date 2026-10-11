@@ -41,9 +41,13 @@ export function renderSystem(sys: SystemStatus, names: Map<string, string>): HTM
             h(
               'td',
               null,
-              statusLamp(sys.ledger_ok ? 'ok' : 'degraded'),
+              statusLamp(sys.ledger_ok === null ? 'stale' : sys.ledger_ok ? 'ok' : 'degraded'),
               ' hash chain ',
-              sys.ledger_ok ? 'verifies' : 'is BROKEN',
+              sys.ledger_ok === null
+                ? 'is being verified (check back shortly)'
+                : sys.ledger_ok
+                  ? 'verifies'
+                  : 'is BROKEN',
             ),
           ),
           h(

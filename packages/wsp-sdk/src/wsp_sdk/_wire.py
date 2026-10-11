@@ -8,6 +8,7 @@ from typing import cast
 from urllib.parse import parse_qsl, quote
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8737"
+DEFAULT_RETRY_MS = 3000  # SSE reconnection delay until the server sends its own `retry:`
 
 Params = tuple[tuple[str, str], ...]
 
@@ -55,8 +56,8 @@ def generations(source_id: str, cursor: str | None, limit: int) -> Req:
     return Req("GET", f"/v1/sources/{quote(source_id, safe='')}/generations", _p(cursor=cursor, limit=limit))
 
 
-def document(doc_id: str, at: str | None) -> Req:
-    return Req("GET", doc_path(doc_id), _p(at=at))
+def document(doc_id: str, at: str | None, fields: Sequence[str] | None = None) -> Req:
+    return Req("GET", doc_path(doc_id), _p(at=at, fields=list(fields) if fields else None))
 
 
 def history(doc_id: str, cursor: str | None, limit: int) -> Req:
@@ -128,11 +129,19 @@ class SSEEvent:
 
 @dataclass(slots=True)
 class SSEParser:
-    """Incremental parser for ``text/event-stream`` (WHATWG HTML §9.2), fed one line at a time."""
+    """Incremental parser for ``text/event-stream`` (WHATWG HTML §9.2), fed one line at a time.
+
+    ``SSEEvent.id`` is the ``id`` field sent *with that event* (the server sets it on the last change of
+    a batch). ``last_event_id`` is the spec's last-event-ID buffer: it persists across events and is
+    what a client sends back as ``Last-Event-ID`` when it reconnects. ``retry_ms`` is the server's
+    reconnection delay, if it sent one.
+    """
 
     _event: str = ""
     _data: list[str] = field(default_factory=list[str])
     _id: str | None = None
+    last_event_id: str | None = None
+    retry_ms: int | None = None
 
     def feed(self, line: str) -> SSEEvent | None:
         line = line.rstrip("\r\n")
@@ -153,4 +162,7 @@ class SSEParser:
             self._event = value
         elif name == "id" and "\0" not in value:
             self._id = value
+            self.last_event_id = value or None
+        elif name == "retry" and value.isdigit():
+            self.retry_ms = int(value)
         return None

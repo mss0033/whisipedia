@@ -8,3 +8,4 @@ def test_forward_path_and_failure() -> None:
         ReleaseState.QUARANTINED,
     }
     assert allowed_transitions(ReleaseState.PROMOTED) == frozenset()
+    assert allowed_transitions(ReleaseState.QUARANTINED) == {ReleaseState.FAILED}  # owner retry

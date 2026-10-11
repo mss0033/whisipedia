@@ -135,7 +135,14 @@ def test_state_roundtrip_and_target_identity(tmp_path: Path) -> None:
     loaded = load_state(p)
     assert loaded == s
     assert loaded is not None
-    assert loaded.same_target(PartialState("u", 10, 4, "blake3", {"sha256": "ab"}, None))
+    # a missing validator on either side forbids resuming (upstream may have changed), unless every
+    # resumed piece is checked against upstream piece hashes
+    assert not loaded.same_target(PartialState("u", 10, 4, "blake3", {"sha256": "ab"}, None))
+    assert loaded.same_target(
+        PartialState("u", 10, 4, "blake3", {"sha256": "ab"}, None), require_validator=False
+    )
+    assert loaded.same_target(PartialState("u", 10, 4, "blake3", {"sha256": "ab"}, loaded.validator))
+    assert not loaded.same_target(PartialState("u", 10, 4, "blake3", {"sha256": "ab"}, '"other"'))
     assert not loaded.same_target(PartialState("u", 11, 4, "blake3", {"sha256": "ab"}))
     p.write_text("{garbage")
     assert load_state(p) is None

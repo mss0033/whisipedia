@@ -1,0 +1,106 @@
+"""A ZIM worker process: ``python -m wsp_api.zimworker --fd-in R --fd-out W ...``.
+
+Started by :class:`wsp_api.zimpool.ZimProcessPool`. It reads requests ``(id, op, args)`` from one pipe and
+answers ``(id, ok, value)`` on the other, serving several requests at once from a few threads. Archives
+stay open between requests (an LRU per worker). If libzim touches a page of a memory-mapped ZIM that
+the NAS cannot deliver, the kernel sends ``SIGBUS`` and this process dies; the pool notices, fails the
+requests in flight and starts a new worker. The process is marked non-dumpable first, so such a death
+never writes a core dump (on this machine a crash dump is gigabytes on C:).
+"""
+
+from __future__ import annotations
+
+import argparse
+import ctypes
+import os
+import signal
+import sys
+import threading
+import time
+from collections.abc import Sequence
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import suppress
+from multiprocessing.connection import Connection
+
+from wsp_api.zimread import ArchiveCache, Want, book_name_of, open_archive, read_entry
+
+_PR_SET_DUMPABLE = 4
+
+
+def harden() -> None:
+    """No core dumps (Linux only; elsewhere a no-op).
+
+    Not ``PR_SET_PDEATHSIG``: it fires when the *thread* that started the worker exits, which in a
+    thread pool is any time. The worker ends when its request pipe closes, which happens when the API
+    process exits however it exits.
+    """
+    if not sys.platform.startswith("linux"):
+        return
+    try:
+        libc = ctypes.CDLL(None, use_errno=True)
+        libc.prctl(_PR_SET_DUMPABLE, 0, 0, 0, 0)
+    except (OSError, AttributeError):  # pragma: no cover - no libc prctl
+        pass
+
+
+class _Server:
+    def __init__(self, out: Connection, max_open: int, test_ops: bool) -> None:
+        self.out = out
+        self.cache = ArchiveCache(max_open)
+        self.test_ops = test_ops
+        self.send_lock = threading.Lock()
+
+    def handle(self, msg: tuple[int, str, tuple[object, ...]]) -> None:
+        rid, op, args = msg
+        try:
+            value = self.run(op, args)
+        except Exception as exc:
+            reply: tuple[int, bool, object] = (rid, False, (type(exc).__name__, str(exc)[:500]))
+        else:
+            reply = (rid, True, value)
+        # If the pool went away, the main loop ends on EOF.
+        with self.send_lock, suppress(OSError, ValueError):
+            self.out.send(reply)
+
+    def run(self, op: str, args: Sequence[object]) -> object:
+        if op == "read":
+            file, path, want = (str(a) for a in args)
+            return read_entry(self.cache.get(file), path, Want(want))
+        if op == "book":
+            file = str(args[0])
+            return book_name_of(open_archive(file), file)  # not cached: bundles have hundreds of books
+        if op == "ping":
+            return os.getpid()
+        if self.test_ops and op == "_sleep":
+            time.sleep(float(str(args[0])))
+            return None
+        raise ValueError(f"unknown op {op!r}")
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    p = argparse.ArgumentParser(prog="wsp_api.zimworker")
+    p.add_argument("--fd-in", type=int, required=True)
+    p.add_argument("--fd-out", type=int, required=True)
+    p.add_argument("--max-open", type=int, default=16)
+    p.add_argument("--threads", type=int, default=4)
+    p.add_argument("--test-ops", action="store_true")
+    args = p.parse_args(argv)
+    harden()
+    signal.signal(signal.SIGINT, signal.SIG_IGN)  # Ctrl-C goes to the API; the pool closes us
+    inbox = Connection(args.fd_in, writable=False)
+    server = _Server(Connection(args.fd_out, readable=False), args.max_open, args.test_ops)
+    pool = ThreadPoolExecutor(max(1, args.threads), thread_name_prefix="zim")
+    while True:
+        try:
+            msg = inbox.recv()
+        except (EOFError, OSError):
+            break
+        if msg is None:
+            break
+        pool.submit(server.handle, msg)
+    pool.shutdown(wait=False, cancel_futures=True)
+    os._exit(0)  # do not wait for reads stuck on the NAS
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

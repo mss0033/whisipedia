@@ -1,9 +1,9 @@
 /**
- * Whisipedia API v1.3.0: types generated from docs/api/openapi.json
+ * Whisipedia API v1.4.0: types generated from docs/api/openapi.json
  * by scripts/gen-api.mjs. Do not edit; run `npm run gen:api`.
  */
 
-export const API_VERSION = '1.3.0';
+export const API_VERSION = '1.4.0';
 
 /** Marks a `text/event-stream` response; `T` is the JSON in each `data:` line. */
 export type EventStream<T> = { readonly __events: T };
@@ -120,7 +120,8 @@ export interface Document {
   title: string;
   lang: string;
   license: string;
-  text: string;
+  /** Plain text. Null for an HTML page unless asked for with `fields=text`; always set when `format` is `text`. */
+  text: string | null;
   /** BLAKE3 of the normalized text: the content-version id. */
   content_hash: string;
   revision: string | null;
@@ -457,12 +458,12 @@ export interface SearchResults {
   next_offset: number | null;
   /** The `kind` filter that was applied. */
   kind: DocKind | null;
-  /** Matching documents (a lower bound if `total_is_estimate`). */
+  /** Results for the query (and `kind`), counted in the same ranked list the page comes from (at most 200; a lower bound if `total_is_estimate`). */
   total: number;
   total_is_estimate: boolean;
   took_ms: number;
   intent: QueryIntent;
-  /** Counts per kind, ignoring the `kind` filter. */
+  /** Results per kind in the same ranked list, ignoring the `kind` filter: filtering by a kind shows exactly its count. Kinds with no results are left out. */
   facets: Array<KindFacet>;
   /** Doc id when the query names one page (`rfc 9110`, `wikipedia Alan Turing`). */
   navigate_to: string | null;
@@ -578,8 +579,8 @@ export interface SystemStatus {
   degraded: Array<GenerationInfo>;
   /** Most recent events, oldest first. */
   ledger_tail: Array<LedgerEntry>;
-  /** Result of replaying the ledger hash chain. */
-  ledger_ok: boolean;
+  /** Result of replaying the ledger hash chain; null until the first replay has finished. */
+  ledger_ok: boolean | null;
   api_version: string;
   uptime_seconds: number;
   /** Null without orchestrator data. */
@@ -670,6 +671,8 @@ export interface Routes {
     query: {
       /** Generation id: the document as of that snapshot. */
       at?: string | null | undefined;
+      /** Extra fields: `text` also sends the plain text of an HTML page. */
+      fields?: Array<'text'> | null | undefined;
     };
     body: null;
     response: Document;
@@ -685,6 +688,7 @@ export interface Routes {
       /** Restrict to sources of this kind. */
       kind?: DocKind | null | undefined;
       limit?: number | undefined;
+      /** Results are ranked 200 deep; pages end there. */
       offset?: number | undefined;
     };
     body: null;

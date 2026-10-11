@@ -93,7 +93,9 @@ def document(
     html: str | None = None,
     vault: VaultLocation | None = None,
     has_history: bool = False,
+    include_text: bool = True,
 ) -> Document:
+    """``include_text``: send ``text`` even when there is HTML (always sent when there is none)."""
     return Document(
         doc_id=doc.doc_id,
         source_id=doc.source_id,
@@ -101,7 +103,7 @@ def document(
         title=doc.title,
         lang=doc.lang,
         license=doc.license,
-        text=doc.text,
+        text=doc.text if include_text or html is None else None,
         content_hash=doc.content_hash,
         revision=doc.revision,
         timestamp=doc.timestamp,
@@ -126,10 +128,14 @@ def hit(
     h: SearchHit,
     *,
     spec: SourceSpec | None = None,
-    doc: DocRecord | None = None,
+    doc: DocRecord | Mapping[str, object] | None = None,
     highlights: Sequence[tuple[int, int]] = (),
 ) -> Hit:
+    """``doc``: the document, or just its ``license``/``timestamp``/``lang``/``url_native`` fields."""
     source_id, _, native_id = h.doc_id.removeprefix("wsp:").partition("/")
+    meta: Mapping[str, object] = (
+        {} if doc is None else doc if isinstance(doc, Mapping) else {f: getattr(doc, f) for f in _HIT_FIELDS}
+    )
     return Hit(
         doc_id=h.doc_id,
         score=h.score,
@@ -139,12 +145,19 @@ def hit(
         address=address_of(source_id, native_id),
         source_name=(h.source_id or source_id) if spec is None else spec.name,
         kind=DocKind.OTHER if spec is None else sites.kind_of(spec),
-        license=None if doc is None else doc.license,
-        as_of=None if doc is None else doc.timestamp,
-        lang=None if doc is None else doc.lang,
-        url_native=None if doc is None else doc.url_native,
+        license=_opt_str(meta.get("license")),
+        as_of=ts if isinstance(ts := meta.get("timestamp"), datetime) else None,
+        lang=_opt_str(meta.get("lang")),
+        url_native=_opt_str(meta.get("url_native")),
         highlights=list(highlights),
     )
+
+
+_HIT_FIELDS = ("license", "timestamp", "lang", "url_native")
+
+
+def _opt_str(value: object) -> str | None:
+    return None if value is None else str(value)
 
 
 def change(c: ChangeRecord, *, title: str | None = None) -> Change:

@@ -198,6 +198,55 @@ def _dt(value: object) -> datetime | None:
         return None
 
 
+class CachedProposals:
+    """The proposal files as dicts, each parsed once per change (audit #4).
+
+    ``/v1/system`` and ``/v1/proposals`` need every proposal. Parsing 75 YAML files with the pure-Python
+    loader took ~0.5 s per call; files are re-parsed only when their ``(mtime, size)`` changes, with
+    libyaml's ``CSafeLoader`` when PyYAML has it. ``files`` lists the proposal files (local disk).
+    """
+
+    def __init__(self, files: Callable[[], Sequence[Path]]) -> None:
+        self._files = files
+        self._cache: dict[Path, tuple[tuple[int, int], dict[str, Any]]] = {}
+        self._lock = threading.Lock()
+        self.parsed = 0  # files parsed so far (tests)
+
+    def __call__(self) -> list[dict[str, Any]]:
+        import yaml
+
+        loader = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+        out: list[dict[str, Any]] = []
+        seen: set[Path] = set()
+        for path in self._files():
+            try:
+                st = path.stat()
+            except OSError:
+                continue
+            stamp = (st.st_mtime_ns, st.st_size)
+            seen.add(path)
+            with self._lock:
+                hit = self._cache.get(path)
+            if hit is not None and hit[0] == stamp:
+                out.append(hit[1])
+                continue
+            try:
+                doc: object = yaml.load(path.read_text(encoding="utf-8"), Loader=loader)  # noqa: S506 - safe loader
+            except (OSError, yaml.YAMLError):
+                continue
+            if not isinstance(doc, dict):
+                continue
+            parsed = cast(dict[str, Any], doc)
+            with self._lock:
+                self._cache[path] = (stamp, parsed)
+                self.parsed += 1
+            out.append(parsed)
+        with self._lock:
+            for gone in set(self._cache) - seen:
+                del self._cache[gone]
+        return out
+
+
 def proposal_info(doc: Mapping[str, Any]) -> ProposalInfo | None:
     try:
         cand = cast(Mapping[str, Any], doc.get("candidate") or {})

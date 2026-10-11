@@ -1,9 +1,15 @@
 """Chaos drills (PLAN §8.5): break a sandboxed copy of a sealed generation, expect detect + repair.
 
-The generation is copied into ``<workdir>/vault`` (the real vault is only read). A fault is
-injected there, a fresh :class:`Scrubber` must find it, and a :class:`RepairLadder` that uses the
-real vault as its second copy must fix it, after which a full re-scrub must be clean. The result
-is optionally appended to the real ledger as ``drill.result`` for the health page.
+The generation (with the vault's published keys) is copied into ``<workdir>/vault`` (the real
+vault is only read). A fault is injected there, a fresh :class:`Scrubber` must find it, and a
+:class:`RepairLadder` that uses the real vault as its second copy must fix it, after which a full
+re-scrub must be clean. The result is optionally appended to the real ledger as ``drill.result``
+for the health page.
+
+Faults touch single bytes in place (``pread``/``pwrite``), so a bit flip in a 250 GB file costs one
+byte of I/O, not a read and rewrite of the whole file. The copy itself is still a full copy of the
+generation (callers pick the smallest one). The sandbox lives on local disk, so a drill exercises
+detection and repair logic, not the SMB share's behaviour under faults.
 """
 
 from __future__ import annotations
@@ -21,7 +27,7 @@ from wsp_vault.ledger import JsonlLedger
 from wsp_vault.manifest import MANIFEST_NAME, SIGNATURE_NAME
 from wsp_vault.repair import Refetcher, RepairLadder
 from wsp_vault.scrub import Scrubber
-from wsp_vault.vault import CURRENT_NAME, FileVault
+from wsp_vault.vault import CURRENT_NAME, KEYS_DIR, FileVault
 
 
 class DrillKind(StrEnum):
@@ -67,12 +73,18 @@ def run_drill(
     sandbox_root = workdir / "vault"
     sandbox_ledger = JsonlLedger(workdir / "ledger", vault.signer)
     sandbox = FileVault(
-        sandbox_root, vault.signer, domains={source_id: vault.domain_of(source_id)}, ledger=sandbox_ledger
+        sandbox_root,
+        vault.signer,
+        domains={source_id: vault.domain_of(source_id)},
+        ledger=sandbox_ledger,
+        lock_dir=workdir / "locks",
     )
     manifest = vault.manifest(source_id, generation_id)
     src_lib = vault.library_path(source_id, generation_id)
     lib = sandbox.library_path(source_id, generation_id)
     shutil.copytree(src_lib, lib)
+    if (vault.root / KEYS_DIR).is_dir():
+        shutil.copytree(vault.root / KEYS_DIR, sandbox_root / KEYS_DIR)
     (sandbox.source_dir(source_id) / CURRENT_NAME).write_text(f"{generation_id}\n", encoding="utf-8")
 
     if kind is DrillKind.INTERRUPTED_PROMOTION:
@@ -83,12 +95,7 @@ def run_drill(
     path = lib / target
     os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
     if kind is DrillKind.BIT_FLIP:
-        raw = bytearray(path.read_bytes())
-        if raw:
-            raw[rng.randrange(len(raw))] ^= 1 << rng.randrange(8)
-        else:
-            raw = bytearray(b"\0")
-        path.write_bytes(bytes(raw))
+        _flip_bit(path, rng)
     elif kind is DrillKind.TRUNCATE:
         os.truncate(path, path.stat().st_size // 2)
     elif kind is DrillKind.DELETE:
@@ -118,6 +125,22 @@ def run_drill(
     return _record(
         ledger, DrillResult(kind, source_id, generation_id, target, detected, repaired, detail or "restored")
     )
+
+
+def _flip_bit(path: Path, rng: random.Random) -> None:
+    """Flip one random bit in place with a single-byte ``pread``/``pwrite`` (an empty file gets a byte)."""
+    fd = os.open(path, os.O_RDWR)
+    try:
+        size = os.fstat(fd).st_size
+        if size == 0:
+            os.pwrite(fd, b"\0", 0)
+            return
+        offset = rng.randrange(size)
+        (byte,) = os.pread(fd, 1, offset)
+        os.pwrite(fd, bytes([byte ^ (1 << rng.randrange(8))]), offset)
+        os.fsync(fd)
+    finally:
+        os.close(fd)
 
 
 def _interrupted_promotion(sandbox: FileVault, source_id: str, generation_id: str) -> DrillResult:

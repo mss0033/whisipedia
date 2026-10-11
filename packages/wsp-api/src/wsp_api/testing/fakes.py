@@ -522,3 +522,31 @@ def sample_services(*, sources: Sequence[SourceSpec] | None = None) -> Services:
         ledger=ledger,
         sources=tuple(SAMPLE_SOURCES if sources is None else sources),
     )
+
+
+class CountingVault:
+    """Wraps a vault's read side and counts each call: proves which code paths read the vault (NAS)."""
+
+    def __init__(self, inner: InMemoryVault) -> None:
+        self.inner = inner
+        self.calls: list[tuple[str, str]] = []
+
+    @property
+    def root(self) -> Path:
+        return self.inner._root  # pyright: ignore[reportPrivateUsage]
+
+    def current(self, source_id: str) -> Generation | None:
+        self.calls.append(("current", source_id))
+        return self.inner.current(source_id)
+
+    def current_set(self, source_id: str) -> Sequence[Generation]:
+        self.calls.append(("current_set", source_id))
+        return self.inner.current_set(source_id)
+
+    def generations(self, source_id: str) -> Sequence[Generation]:
+        self.calls.append(("generations", source_id))
+        return self.inner.generations(source_id)
+
+    def generation_path(self, source_id: str, generation_id: str) -> Path:
+        self.calls.append(("generation_path", source_id))
+        return self.inner.generation_path(source_id, generation_id)

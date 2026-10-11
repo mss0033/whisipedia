@@ -9,10 +9,17 @@
             ...
 
 Pass ``http=`` to inject a preconfigured ``httpx`` client (custom transport, timeouts, in-process app).
+
+``stream_changes`` follows the SSE change feed: it reads with a timeout (the server sends a keepalive
+at least every 15 s, so a silent connection is a dead one) and, when the connection drops, reconnects
+with ``Last-Event-ID`` after the server's retry delay. Delivery is at-least-once: a batch cut off in
+the middle is sent again.
 """
 
 from __future__ import annotations
 
+import asyncio
+import time
 from collections.abc import AsyncIterator, Iterator, Sequence
 from types import TracebackType
 from typing import Self
@@ -53,6 +60,60 @@ DEFAULT_BASE_URL = w.DEFAULT_BASE_URL
 def _parse[M: BaseModel](model: type[M], response: httpx.Response) -> M:
     raise_for_error(response)
     return model.model_validate_json(response.content)
+
+
+STREAM_READ_TIMEOUT = 60.0  # seconds without a byte before a stream counts as dead (keepalive: 15 s)
+MAX_RETRY_SECONDS = 30.0
+
+
+def _timeout(read: float) -> httpx.Timeout:
+    return httpx.Timeout(10.0, read=read)
+
+
+class _Follow:
+    """Reconnect bookkeeping for ``stream_changes`` (shared by the sync and async clients)."""
+
+    def __init__(
+        self, since: str | None, max_seconds: float | None, reconnect: bool, max_retries: int | None
+    ) -> None:
+        self.since = since
+        self.last_event_id: str | None = None
+        self.retry = w.DEFAULT_RETRY_MS / 1000
+        self.failures = 0
+        self.reconnect = reconnect
+        self.max_retries = max_retries
+        self.deadline = None if max_seconds is None else time.monotonic() + max_seconds
+
+    def remaining(self) -> float | None:
+        return None if self.deadline is None else max(0.001, self.deadline - time.monotonic())
+
+    def headers(self) -> dict[str, str]:
+        """``Last-Event-ID`` after the first connection: the server resumes after it (and it wins over
+        ``since``)."""
+        return {} if self.last_event_id is None else {"Last-Event-ID": self.last_event_id}
+
+    def saw(self, parser: w.SSEParser) -> None:
+        if parser.last_event_id is not None:
+            self.last_event_id = parser.last_event_id
+        if parser.retry_ms is not None:
+            self.retry = parser.retry_ms / 1000
+        self.failures = 0
+
+    def failed(self, exc: Exception) -> float:
+        """How long to wait before reconnecting after ``exc``; re-raises it when that is not wanted."""
+        self.failures += 1
+        if not self.reconnect or (self.max_retries is not None and self.failures > self.max_retries):
+            raise exc
+        if self.deadline is not None and time.monotonic() >= self.deadline:
+            raise exc
+        return min(self.retry * self.failures, MAX_RETRY_SECONDS)
+
+    def done(self) -> bool:
+        """After the server closed the stream cleanly: finished, or reconnect after :meth:`delay`."""
+        return not self.reconnect or (self.deadline is not None and time.monotonic() >= self.deadline - 0.05)
+
+    def delay(self) -> float:
+        return self.retry
 
 
 def _change_from(ev: w.SSEEvent) -> StreamedChange | None:
@@ -117,8 +178,11 @@ class WspClient:
 
     # --- documents ---
 
-    def document(self, doc_id: str, *, at: str | None = None) -> Document:
-        return _parse(Document, self._send(w.document(doc_id, at)))
+    def document(
+        self, doc_id: str, *, at: str | None = None, fields: Sequence[str] | None = None
+    ) -> Document:
+        """``fields=["text"]``: also the plain text of an HTML page (``text`` is null otherwise)."""
+        return _parse(Document, self._send(w.document(doc_id, at, fields)))
 
     def history(self, doc_id: str, *, cursor: str | None = None, limit: int = 100) -> HistoryPage:
         return _parse(HistoryPage, self._send(w.history(doc_id, cursor, limit)))
@@ -174,18 +238,46 @@ class WspClient:
             since = page.cursor
 
     def stream_changes(
-        self, *, since: str | None = None, max_seconds: float | None = None
+        self,
+        *,
+        since: str | None = None,
+        max_seconds: float | None = None,
+        reconnect: bool = True,
+        max_retries: int | None = None,
+        read_timeout: float = STREAM_READ_TIMEOUT,
     ) -> Iterator[StreamedChange]:
-        """Follow the SSE stream. ``cursor`` is set on the last change of each server batch."""
-        req = w.changes_stream(since, max_seconds)
-        with self._http.stream(req.method, req.path, params=req.params, timeout=None) as r:
-            if r.status_code >= 400:
-                raise_for_error(r, r.read())
-            parser = w.SSEParser()
-            for line in r.iter_lines():
-                ev = parser.feed(line)
-                if ev is not None and (item := _change_from(ev)) is not None:
-                    yield item
+        """Follow the SSE stream. ``cursor`` is set on the last change of each server batch.
+
+        Without ``max_seconds`` the stream runs until the caller stops: a dropped or silent connection
+        (nothing, not even a keepalive, for ``read_timeout`` seconds) or a server restart is followed by
+        a reconnect from the last cursor (``reconnect=False`` raises instead; ``max_retries`` bounds
+        consecutive failures). With ``max_seconds`` the stream ends when the server closes it.
+        """
+        follow = _Follow(since, max_seconds, reconnect, max_retries)
+        while True:
+            req = w.changes_stream(follow.since, follow.remaining())
+            try:
+                with self._http.stream(
+                    req.method,
+                    req.path,
+                    params=req.params,
+                    headers=follow.headers(),
+                    timeout=_timeout(read_timeout),
+                ) as r:
+                    if r.status_code >= 400:
+                        raise_for_error(r, r.read())
+                    parser = w.SSEParser()
+                    for line in r.iter_lines():
+                        ev = parser.feed(line)
+                        follow.saw(parser)
+                        if ev is not None and (item := _change_from(ev)) is not None:
+                            yield item
+            except httpx.TransportError as exc:
+                time.sleep(follow.failed(exc))
+                continue
+            if follow.done():
+                return
+            time.sleep(follow.delay())
 
     # --- system, addresses ---
 
@@ -277,8 +369,10 @@ class AsyncWspClient:
             if (cursor := page.next_cursor) is None:
                 return
 
-    async def document(self, doc_id: str, *, at: str | None = None) -> Document:
-        return _parse(Document, await self._send(w.document(doc_id, at)))
+    async def document(
+        self, doc_id: str, *, at: str | None = None, fields: Sequence[str] | None = None
+    ) -> Document:
+        return _parse(Document, await self._send(w.document(doc_id, at, fields)))
 
     async def history(self, doc_id: str, *, cursor: str | None = None, limit: int = 100) -> HistoryPage:
         return _parse(HistoryPage, await self._send(w.history(doc_id, cursor, limit)))
@@ -335,17 +429,40 @@ class AsyncWspClient:
             since = page.cursor
 
     async def stream_changes(
-        self, *, since: str | None = None, max_seconds: float | None = None
+        self,
+        *,
+        since: str | None = None,
+        max_seconds: float | None = None,
+        reconnect: bool = True,
+        max_retries: int | None = None,
+        read_timeout: float = STREAM_READ_TIMEOUT,
     ) -> AsyncIterator[StreamedChange]:
-        req = w.changes_stream(since, max_seconds)
-        async with self._http.stream(req.method, req.path, params=req.params, timeout=None) as r:
-            if r.status_code >= 400:
-                raise_for_error(r, await r.aread())
-            parser = w.SSEParser()
-            async for line in r.aiter_lines():
-                ev = parser.feed(line)
-                if ev is not None and (item := _change_from(ev)) is not None:
-                    yield item
+        """See :meth:`WspClient.stream_changes`."""
+        follow = _Follow(since, max_seconds, reconnect, max_retries)
+        while True:
+            req = w.changes_stream(follow.since, follow.remaining())
+            try:
+                async with self._http.stream(
+                    req.method,
+                    req.path,
+                    params=req.params,
+                    headers=follow.headers(),
+                    timeout=_timeout(read_timeout),
+                ) as r:
+                    if r.status_code >= 400:
+                        raise_for_error(r, await r.aread())
+                    parser = w.SSEParser()
+                    async for line in r.aiter_lines():
+                        ev = parser.feed(line)
+                        follow.saw(parser)
+                        if ev is not None and (item := _change_from(ev)) is not None:
+                            yield item
+            except httpx.TransportError as exc:
+                await asyncio.sleep(follow.failed(exc))
+                continue
+            if follow.done():
+                return
+            await asyncio.sleep(follow.delay())
 
     async def system(self, *, ledger_tail: int | None = None) -> SystemStatus:
         return _parse(SystemStatus, await self._send(w.system(ledger_tail)))

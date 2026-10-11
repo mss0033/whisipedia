@@ -14,11 +14,13 @@ __all__ = [
     "ConflictingChecksumsError",
     "FetchCancelledError",
     "FetchError",
+    "FetchLockedError",
     "MirrorsExhaustedError",
     "NotFoundError",
     "ResponseTooLargeError",
     "SizeMismatchError",
     "UnsupportedChecksumError",
+    "UnverifiableError",
 ]
 
 
@@ -52,3 +54,12 @@ class Aria2Error(FetchError):
     def __init__(self, returncode: int, message: str) -> None:
         super().__init__(f"aria2c exited with status {returncode}: {message}")
         self.returncode = returncode
+
+
+class UnverifiableError(FetchError):
+    """Upstream publishes no checksum and ``unverified_policy`` refuses it, or a second download
+    needed to corroborate it could not be made."""
+
+
+class FetchLockedError(FetchError):
+    """Another fetch (thread or process) is already downloading to the same destination."""
