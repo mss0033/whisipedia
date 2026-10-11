@@ -40,6 +40,12 @@ books = 2.0
 education = 2.0
 howto = 2.0
 
+[curator.multilingual]
+# Non-English budget (PLAN D15): for each language, take the highest-value material (registry score
+# per GB, T1 first) until the per-language budget is spent. English is not limited by this table.
+languages = ["de", "fr", "es", "ru", "it", "pl", "ja", "zh", "pt", "ar"]
+budget_tb_per_language = 0.3
+
 [api]
 query_log = true                 # local-only search log (query + result count) for the gap miner; rotated
 backend = "auto"                 # "auto" (real if vault.root exists) | "real" | "sample"

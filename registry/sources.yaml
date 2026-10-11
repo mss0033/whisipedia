@@ -761,6 +761,45 @@ sources:
     size: {bytes: 14.83e9, measured: true, as_of: 2026-10-10}
     notes: Score 4.6. The repository README states the files are in the public domain. Size is the GitHub repository size.
 
+  - id: nawcwd-tp8347
+    name: Electronic Warfare and Radar Systems Engineering Handbook (NAWCWD TP 8347)
+    publisher: Naval Air Warfare Center Weapons Division
+    domain: [defense, radar-electronics]
+    tier: T2
+    status: candidate
+    license: LicenseRef-US-Gov-PD
+    legal_basis: public-domain
+    access: {adapter: doc-collection, issuer: NAWCWD, origins: [apps.dtic.mil], discovery: [{kind: document, url: "https://apps.dtic.mil/sti/citations/ADA617071"}]}
+    update: {cadence: P1Y, strategy: snapshot-retention}
+    size: {bytes: 0.03e9, measured: false, as_of: 2026-10-10}
+    notes: Distribution Statement A (DTIC ADA617071). Radar equation, antennas, propagation, receivers and EW engineering fundamentals. Included by owner decision D13 (2026-10-10).
+
+  - id: cia-reading-room
+    name: CIA FOIA Electronic Reading Room (CREST and declassified collections)
+    publisher: Central Intelligence Agency
+    domain: [defense, intelligence]
+    tier: T2
+    status: candidate
+    license: LicenseRef-US-Gov-PD
+    legal_basis: public-domain
+    access: {adapter: doc-collection, issuer: CIA, origins: [www.cia.gov], discovery: [{kind: index-page, url: "https://www.cia.gov/readingroom/"}]}
+    update: {cadence: P3M, strategy: mirror}
+    size: {bytes: 7.5e12, measured: false, as_of: 2026-10-10}
+    notes: Officially released, declassified documents (≈5-10 TB). Document-level filtering applies (PLAN §13 boundaries). Included by owner decision D14 (2026-10-10).
+
+  - id: usgs-historical-topo
+    name: USGS Historical Topographic Map Collection
+    publisher: US Geological Survey
+    domain: [geography, maps]
+    tier: T2
+    status: candidate
+    license: LicenseRef-US-Gov-PD
+    legal_basis: public-domain
+    access: {adapter: doc-collection, issuer: USGS, origins: [prd-tnm.s3.amazonaws.com], discovery: [{kind: index-page, url: "https://www.usgs.gov/programs/national-geospatial-program/historical-topographic-maps-preserving-past"}]}
+    update: {cadence: P1Y, strategy: mirror}
+    size: {bytes: 15e12, measured: false, as_of: 2026-10-10}
+    notes: Every historical USGS topographic quadrangle (GeoPDF/GeoTIFF, ≈10-20 TB). Included by owner decision D14 (2026-10-10).
+
   # Boundary records: tracked so the gate and the discovery bots never propose them as-is.
 
   - id: uk-mod-doctrine
@@ -771,7 +810,7 @@ sources:
     status: candidate
     license: LicenseRef-Crown-copyright-MOD-use-only
     legal_basis: none
-    notes: Not OGL. Crown copyright with reproduction "for UK government and MOD use only". Needs MOD permission before any copy.
+    notes: Not OGL. Crown copyright with reproduction "for UK government and MOD use only". Needs MOD permission before any copy. Deferred by owner decision D12 (2026-10-10).
 
   - id: hesperian-health-guides
     name: Hesperian Health Guides (Where There Is No Doctor family)
@@ -781,7 +820,7 @@ sources:
     status: candidate
     license: LicenseRef-Hesperian-open-copyright
     legal_basis: none
-    notes: Non-commercial copying allowed, but any digital format requires permission from Hesperian. High value; worth requesting.
+    notes: Non-commercial copying allowed, but any digital format requires permission from Hesperian. Deferred by owner decision D12 (2026-10-10); not requesting permission for now.
 
   - id: sphere-handbook
     name: Sphere Handbook (humanitarian minimum standards)
@@ -791,7 +830,7 @@ sources:
     status: candidate
     license: LicenseRef-copyright
     legal_basis: none
-    notes: All rights reserved; posting online or other copying needs written permission.
+    notes: All rights reserved; posting online or other copying needs written permission. Deferred by owner decision D12 (2026-10-10).
 
   - id: osac-reports
     name: OSAC reports (Overseas Security Advisory Council)
