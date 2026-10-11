@@ -73,6 +73,7 @@ def zim_document(
         license=spec.license,
         text=text,
         revision=gen.generation_id,
+        timestamp=gen.sealed_at,
         html_ref=f"zim:{native_id}",
         content_hash=content_hash(text),
     )

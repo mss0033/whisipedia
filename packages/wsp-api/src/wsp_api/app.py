@@ -12,8 +12,9 @@ import asyncio
 import threading
 import time
 from collections import Counter
-from collections.abc import AsyncIterator
-from typing import Annotated, Any, Literal
+from collections.abc import AsyncIterator, Sequence
+from dataclasses import replace
+from typing import Annotated, Any, Literal, cast
 from urllib.parse import unquote
 
 from fastapi import APIRouter, FastAPI, Header, Path, Query, Request
@@ -40,6 +41,7 @@ from wsp_api.schemas import (
     GenerationPage,
     Health,
     HistoryPage,
+    Hit,
     KindFacet,
     ProposalPage,
     RecentChanges,
@@ -280,6 +282,15 @@ def _v1(lib: Library, settings: ApiSettings) -> APIRouter:
             return []
         return list(s.index.search(q, limit=limit, offset=offset, sources=scope))
 
+    def _window(q: str, scope: list[str] | None) -> list[SearchHit]:
+        """The wide window for totals and facets: snippet-free when the index supports it."""
+        if scope == []:
+            return []
+        hits_only = getattr(s.index, "search_hits", None)
+        if callable(hits_only):
+            return list(cast(Sequence[SearchHit], hits_only(q, limit=_WINDOW, offset=0, sources=scope)))
+        return _query(q, _WINDOW, 0, scope)
+
     @r.get("/search", tags=["search"], responses=errors(422))
     def run_search(
         q: Annotated[str, Query(min_length=1, max_length=1000, description="Plain-language query.")],
@@ -293,29 +304,28 @@ def _v1(lib: Library, settings: ApiSettings) -> APIRouter:
         t0 = time.perf_counter()
         wanted = [x for raw in sources or [] for x in raw.split(",") if x] or None
         scope = _kind_sources(kind, wanted)
-        window = _query(q, _WINDOW, 0, scope)
-        if offset + limit < _WINDOW:
-            page, more = window[offset : offset + limit], len(window) > offset + limit
-        else:
-            raw = _query(q, limit + 1, offset, scope)
-            page, more = raw[:limit], len(raw) > limit
+        window = _window(q, scope)
+        raw = _query(q, limit + 1, offset, scope)  # only the visible page gets snippets
+        page, more = raw[:limit], len(raw) > limit
         estimate = len(window) >= _WINDOW
         total = max(len(window), offset + len(page) + (1 if more else 0))
-        facet_hits = window if kind is None else _query(q, _WINDOW, 0, wanted)
+        facet_hits = window if kind is None else _window(q, wanted)
         kinds: dict[str, DocKind] = {spec.id: sites.kind_of(spec) for spec in s.sources}
         counts = Counter(
             kinds.get(h.source_id or h.doc_id[4:].partition("/")[0], DocKind.OTHER) for h in facet_hits
         )
         terms = search.terms(q)
-        hits = [
-            convert.hit(
-                h,
-                spec=s.source(h.source_id or h.doc_id[4:].partition("/")[0]),
-                doc=s.documents.get(h.doc_id),
-                highlights=search.highlights(h.snippet, terms),
+        hits: list[Hit] = []
+        for h in page:
+            plain = search.plain_snippet(h.snippet)  # index snippets are HTML (<b>…</b>); the API is plain
+            hits.append(
+                convert.hit(
+                    replace(h, snippet=plain),
+                    spec=s.source(h.source_id or h.doc_id[4:].partition("/")[0]),
+                    doc=s.documents.get(h.doc_id),
+                    highlights=search.highlights(plain, terms),
+                )
             )
-            for h in page
-        ]
         nav = search.navigate_to(s, q) if offset == 0 else None
         if s.queries is not None and offset == 0:
             s.queries.record(s.clock(), q, total, not window)

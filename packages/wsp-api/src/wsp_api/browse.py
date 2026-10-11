@@ -26,7 +26,7 @@ from wsp_api.schemas import (
 )
 from wsp_api.views import Library
 from wsp_core.ids import DocId
-from wsp_core.model import Gap, SourceSpec
+from wsp_core.model import ChangeKind, ChangeRecord, Gap, SourceSpec
 from wsp_core.ports import PortalSource
 
 # Only images are served from containers: never HTML or scripts at our origin.
@@ -101,7 +101,7 @@ def browse_router(lib: Library) -> APIRouter:
                 blurb=_blurb(featured_doc.text),
             )
         )
-        newest, _ = lib.catalog.recent(limit=8)
+        newest = _presentable_recent(lib, limit=8)
         rng = random.Random(secrets.randbits(64))  # noqa: S311 - picking a page to read, not a secret
         infos = lib.source_infos()
         return Portal(
@@ -245,3 +245,32 @@ def browse_router(lib: Library) -> APIRouter:
         return Response(status_code=204)
 
     return r
+
+
+def _readable(title: str) -> bool:
+    """A title worth showing on the start page: printable, with a letter or digit from a common script."""
+    if not title or not title.isprintable():
+        return False
+    return any(ch.isalnum() and ord(ch) < 0x3000 for ch in title)
+
+
+def _presentable_recent(lib: Library, *, limit: int) -> list[ChangeRecord]:
+    """Newest additions for the start page: readable titles, mixed across sources (round-robin), so one
+    huge new generation (millions of dictionary entries) does not fill the box with obscure glyphs."""
+    pool, _ = lib.catalog.recent(limit=limit * 50)
+    by_source: dict[str, list[ChangeRecord]] = {}
+    for c in pool:
+        if c.kind is ChangeKind.REMOVED or not _readable(lib.title(c.doc_id) or ""):
+            continue
+        by_source.setdefault(c.doc_id.removeprefix("wsp:").partition("/")[0], []).append(c)
+    out: list[ChangeRecord] = []
+    queues = list(by_source.values())
+    while queues and len(out) < limit:
+        for q in list(queues):
+            if q:
+                out.append(q.pop(0))
+            if not q:
+                queues.remove(q)
+            if len(out) >= limit:
+                break
+    return out

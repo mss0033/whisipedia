@@ -22,8 +22,9 @@ import html
 import json
 import sqlite3
 import threading
+import time
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import TracebackType
 from typing import Self
@@ -36,11 +37,12 @@ from wsp_index.localfs import ensure_local
 from wsp_index.suggest import (
     DEFAULT_HEAVY_THRESHOLD,
     DEFAULT_TOP_K,
+    TRIE_FILE,
     SuggestEntry,
     Suggester,
     TitleTrie,
 )
-from wsp_index.text import FALLBACK_LANG, build_analyzer, primary_lang, sanitize_query
+from wsp_index.text import FALLBACK_LANG, build_analyzer, drop_stopwords, primary_lang, sanitize_query
 
 _META_SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -75,6 +77,9 @@ class TantivyConfig:
     """Rebuild the suggest trie at commit when more than this many titles changed since the last build."""
     suggest_heavy_threshold: int = DEFAULT_HEAVY_THRESHOLD
     suggest_top_k: int = DEFAULT_TOP_K
+    source_priors: Mapping[str, float] = field(default_factory=dict[str, float])
+    """Constant score added to matches from a source (PLAN §9.3 source-quality priors): lets curated
+    references outrank sheer volume, e.g. an encyclopedia article over millions of dictionary stubs."""
 
     def schema_signature(self) -> str:
         return json.dumps({"languages": sorted(self.languages), "store_text": self.store_text})
@@ -113,17 +118,36 @@ class TantivyIndex:
         self._buffered = 0
         self._closed = False
 
+        self._prior_clauses = self._build_prior_clauses()
         self._suggest_dir = self.path / "suggest"
         self._suggester = Suggester()
         self._pending_suggest: list[SuggestEntry] = []
         self._pending_removed: list[str] = []
         self._suggest_stale = False
+        self._trie_mtime = 0.0
+        self._trie_checked = 0.0
         if TitleTrie.exists(self._suggest_dir) and self._meta("suggest_dirty") != "1":
             self._suggester.replace_base(TitleTrie.open(self._suggest_dir))
+            self._trie_mtime = self._trie_file_mtime()
         else:
             self._rebuild_suggest()
 
     # --- setup ---------------------------------------------------------------------------------
+
+    def _build_prior_clauses(self) -> list[tuple[tantivy.Occur, tantivy.Query]]:
+        by_bonus: dict[float, list[str]] = {}
+        for source_id, bonus in self.config.source_priors.items():
+            if bonus > 0:
+                by_bonus.setdefault(float(bonus), []).append(source_id)
+        return [
+            (
+                tantivy.Occur.Should,
+                tantivy.Query.const_score_query(
+                    tantivy.Query.term_set_query(self._schema, "source_id", sorted(ids)), bonus
+                ),
+            )
+            for bonus, ids in sorted(by_bonus.items())
+        ]
 
     def _meta(self, key: str) -> str | None:
         row = self._db.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
@@ -343,6 +367,7 @@ class TantivyIndex:
             top_k=self.config.suggest_top_k,
         )
         self._suggester.replace_base(trie)
+        self._trie_mtime = self._trie_file_mtime()
         self._suggest_stale = False
         self._pending_suggest.clear()
         self._pending_removed.clear()
@@ -357,7 +382,31 @@ class TantivyIndex:
                 self._rebuild_suggest()
 
     def suggest(self, prefix: str, *, limit: int = 10) -> Sequence[str]:
+        self._reload_trie_if_rebuilt()
         return self._suggester.suggest(prefix, limit=limit)
+
+    def _trie_file_mtime(self) -> float:
+        try:
+            return (self._suggest_dir / TRIE_FILE).stat().st_mtime
+        except OSError:
+            return 0.0
+
+    def _reload_trie_if_rebuilt(self, *, every: float = 5.0) -> None:
+        """Pick up a trie rebuilt by another process (e.g. ``wsp index build`` while ``wsp serve`` runs).
+
+        Tantivy readers reload on commit by themselves; the mmapped trie does not. Checked at most every
+        ``every`` seconds; a process with its own unsaved overlay keeps it.
+        """
+        now = time.monotonic()
+        if now - self._trie_checked < every:
+            return
+        self._trie_checked = now
+        mtime = self._trie_file_mtime()
+        if mtime <= self._trie_mtime or self._suggester.pending:
+            return
+        with self._lock:
+            self._suggester.replace_base(TitleTrie.open(self._suggest_dir))
+            self._trie_mtime = mtime
 
     # --- reads ---------------------------------------------------------------------------------
 
@@ -372,7 +421,7 @@ class TantivyIndex:
         return None if row is None else SearchHit(DocId(doc_id), 0.0, str(row[0]), "", str(row[1]))
 
     def parse(self, query: str) -> tantivy.Query | None:
-        text = sanitize_query(query)
+        text = drop_stopwords(sanitize_query(query))
         if not text:
             return None
         fields = [f"{kind}_{lang}" for lang in self._routes for kind in ("title", "text")]
@@ -383,19 +432,30 @@ class TantivyIndex:
     def search(
         self, query: str, *, limit: int = 10, offset: int = 0, sources: Sequence[str] | None = None
     ) -> Sequence[SearchHit]:
+        return self._search(query, limit=limit, offset=offset, sources=sources, snippets=True)
+
+    def search_hits(
+        self, query: str, *, limit: int = 10, offset: int = 0, sources: Sequence[str] | None = None
+    ) -> Sequence[SearchHit]:
+        """Like :meth:`search` without snippets: much cheaper for wide windows (totals, facets)."""
+        return self._search(query, limit=limit, offset=offset, sources=sources, snippets=False)
+
+    def _search(
+        self, query: str, *, limit: int, offset: int, sources: Sequence[str] | None, snippets: bool
+    ) -> Sequence[SearchHit]:
         if limit <= 0 or offset < 0:
             return []
         parsed = self.parse(query)
         if parsed is None:
             return []
-        q = parsed
+        clauses: list[tuple[tantivy.Occur, tantivy.Query]] = [(tantivy.Occur.Must, parsed)]
         if sources is not None:
             if not sources:
                 return []
             source_filter = tantivy.Query.term_set_query(self._schema, "source_id", list(sources))
-            q = tantivy.Query.boolean_query(
-                [(tantivy.Occur.Must, parsed), (tantivy.Occur.Must, source_filter)]
-            )
+            clauses.append((tantivy.Occur.Must, source_filter))
+        clauses += self._prior_clauses
+        q = parsed if len(clauses) == 1 else tantivy.Query.boolean_query(clauses)
         searcher = self._index.searcher()
         result = searcher.search(q, limit, count=False, offset=offset)
         generators: dict[str, tantivy.SnippetGenerator] = {}
@@ -405,7 +465,7 @@ class TantivyIndex:
             route = self.route(str(doc.get_first("lang") or ""))
             title = str(doc.get_first(f"title_{route}") or "")
             snippet = ""
-            if self.config.store_text:
+            if snippets and self.config.store_text:
                 gen = generators.get(route)
                 if gen is None:
                     gen = tantivy.SnippetGenerator.create(searcher, parsed, self._schema, f"text_{route}")

@@ -13,6 +13,7 @@ No fuzzy matching: a wrong jump is worse than a results page.
 
 from __future__ import annotations
 
+import html
 import re
 from collections.abc import Iterable
 
@@ -82,6 +83,14 @@ def intent(query: str, *, navigational: bool) -> QueryIntent:
         if pattern.search(query):
             return kind
     return QueryIntent.LOOKUP if len(query.split()) <= 3 else QueryIntent.ASK
+
+
+_TAG = re.compile(r"<[^>]+>")
+
+
+def plain_snippet(snippet: str) -> str:
+    """Index snippets carry HTML highlight markup; the API returns plain text plus ``highlights``."""
+    return html.unescape(_TAG.sub("", snippet))
 
 
 def highlights(snippet: str, query_terms: Iterable[str]) -> list[tuple[int, int]]:
