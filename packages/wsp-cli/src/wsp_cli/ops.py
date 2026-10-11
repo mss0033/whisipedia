@@ -130,16 +130,15 @@ def open_indexer(
         specs,
         bootstrap.load_adapters(),
         p.require_index(),
-        bootstrap.open_index(cfg, specs),
-        bootstrap.open_changes(cfg),
+        lambda: bootstrap.open_index(cfg, specs),  # opened on first use (refining needs neither)
+        lambda: bootstrap.open_changes(cfg),
         user_agent=bootstrap.user_agent(cfg),
         out=out,
     )
     try:
         yield ix
     finally:
-        ix.index.close()
-        ix.feed.close()
+        ix.close()
 
 
 def cmd_index_build(args: argparse.Namespace, out: TextIO) -> int:

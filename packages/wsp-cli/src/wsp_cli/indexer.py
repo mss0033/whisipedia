@@ -53,6 +53,7 @@ from wsp_index.catalog import (
 from wsp_index.linkrank import RankConfig, RankStats, StaticRank, compute_static_rank
 from wsp_index.refinery import (
     CURRENT_FILE,
+    SUCCESS_FILE,
     compose_set,
     current_generation,
     generation_dir,
@@ -86,6 +87,21 @@ class SourceReport:
     skipped: str | None = None  # reason the source was skipped
 
 
+def _write_durably(path: Path, text: str) -> None:
+    """Replace ``path`` atomically and durably (unique temp name, file and directory fsync)."""
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.partial")
+    with tmp.open("w", encoding="utf-8") as fh:
+        fh.write(text)
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp, path)
+    fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
 def _alias_title(native_id: str) -> str:
     return native_id.rsplit("/", 1)[-1].replace("_", " ").strip()
 
@@ -99,8 +115,8 @@ class Indexer:
         specs: Sequence[SourceSpec],
         adapters: Mapping[str, SourceAdapter],
         root: Path,
-        index: TantivyIndex,
-        feed: ChangeFeed,
+        index: TantivyIndex | Callable[[], TantivyIndex],
+        feed: ChangeFeed | Callable[[], ChangeFeed],
         *,
         user_agent: str = "Whisipedia indexer",
         out: TextIO | None = None,
@@ -112,11 +128,49 @@ class Indexer:
         self.root = ensure_local(root)
         self.refinery = root / "refinery"
         self.work = root / "work"
-        self.index = index
-        self.feed = feed
+        # Opened on first use: refining needs neither, and opening the index is not free.
+        self._index = index if isinstance(index, TantivyIndex) else None
+        self._open_index = None if isinstance(index, TantivyIndex) else index
+        if hasattr(feed, "publish"):
+            self._feed: ChangeFeed | None = cast(ChangeFeed, feed)
+            self._open_feed: Callable[[], ChangeFeed] | None = None
+        else:
+            self._feed, self._open_feed = None, cast(Callable[[], ChangeFeed], feed)
+        self._changed = False  # anything indexed this run (suggest is rebuilt once, in finish())
         self.user_agent = user_agent
         self.out = out
         self.clock = clock
+
+    # --- stores --------------------------------------------------------------------------------
+
+    @property
+    def index(self) -> TantivyIndex:
+        if self._index is None:
+            assert self._open_index is not None
+            self._index = self._open_index()
+        return self._index
+
+    @property
+    def feed(self) -> ChangeFeed:
+        if self._feed is None:
+            assert self._open_feed is not None
+            self._feed = self._open_feed()
+        return self._feed
+
+    def close(self) -> None:
+        """Close whatever was opened (idempotent)."""
+        if self._index is not None:
+            self._index.close()
+        if self._feed is not None:
+            self._feed.close()
+
+    def finish(self) -> None:
+        """After a run that changed the index: rebuild the suggest trie once (bulk commits defer it)."""
+        if self._changed:
+            started = self.clock()
+            self.index.rebuild_suggest()
+            self._say(f"suggest: rebuilt in {self.clock() - started:.1f}s")
+            self._changed = False
 
     # --- helpers -------------------------------------------------------------------------------
 
@@ -141,10 +195,7 @@ class Indexer:
         return dict(json.loads(path.read_text(encoding="utf-8"))) if path.is_file() else {}
 
     def _save_state(self, state: Mapping[str, str]) -> None:
-        path = self.root / STATE_FILE
-        tmp = path.with_name(path.name + ".partial")
-        tmp.write_text(json.dumps(dict(state), indent=1, sort_keys=True) + "\n", encoding="utf-8")
-        os.replace(tmp, path)
+        _write_durably(self.root / STATE_FILE, json.dumps(dict(state), indent=1, sort_keys=True) + "\n")
 
     # --- refine --------------------------------------------------------------------------------
 
@@ -159,7 +210,8 @@ class Indexer:
         gid = generation.generation_id
         out_dir = self.refined_dir(spec, gid)
         if is_sealed(out_dir):
-            return RefineResult(len(RefineryReader(out_dir)))
+            meta = json.loads((out_dir / SUCCESS_FILE).read_text(encoding="utf-8"))
+            return RefineResult(int(meta.get("docs", 0)))
         adapter = self.adapter_for(spec)
         if adapter is None:
             raise LookupError(f"no adapter installed for {spec.id} ({spec.adapter})")
@@ -204,8 +256,21 @@ class Indexer:
 
     # --- index ---------------------------------------------------------------------------------
 
-    def index_generation(self, spec: SourceSpec, generation_id: str) -> SourceReport:
-        """Bring the search index from the last indexed generation of ``spec`` to ``generation_id``."""
+    def index_generation(
+        self, spec: SourceSpec, generation_id: str, *, alias_generations: Sequence[str] = ()
+    ) -> SourceReport:
+        """Bring the search index from the last indexed generation of ``spec`` to ``generation_id``.
+
+        Order (each step idempotent, so a crash anywhere re-runs into the same result):
+
+        1. the Refinery ``CURRENT`` pointer moves first, so the document store serves every document
+           search can return (until the refresh ends, a removed document may 404; an added one never);
+        2. the resumable refresh (index commits and feed records, part by part);
+        3. redirect aliases of this generation and of ``alias_generations`` (set members);
+        4. the indexed-generation state, last: until it is saved, a re-run resumes the refresh.
+
+        The suggest trie is rebuilt once per run, in :meth:`finish`.
+        """
         state = self._state()
         previous = state.get(spec.id)
         new_dir = generation_dir(self.refinery, spec.id, generation_id)
@@ -216,13 +281,12 @@ class Indexer:
         new = RefineryReader(new_dir)
         old_dir = generation_dir(self.refinery, spec.id, previous) if previous else None
         old = RefineryReader(old_dir) if old_dir is not None and is_sealed(old_dir) else None
-        stats = refresh(self.index, self.feed, old, new)
-        self._apply_redirect_aliases(spec, generation_id)
-        self.index.commit()
-        pointer = self.refinery / spec.id / CURRENT_FILE
-        tmp = pointer.with_name(CURRENT_FILE + ".partial")
-        tmp.write_text(generation_id + "\n", encoding="utf-8")
-        os.replace(tmp, pointer)
+        _write_durably(self.refinery / spec.id / CURRENT_FILE, generation_id + "\n")
+        stats = refresh(self.index, self.feed, old, new, progress=self._say)
+        for gid in dict.fromkeys((generation_id, *alias_generations)):
+            self._apply_redirect_aliases(spec, gid)
+        self.index.commit(rebuild_suggest=False)
+        self._changed = True
         state[spec.id] = generation_id
         self._save_state(state)
         self.build_catalog(spec, generation_id)
@@ -255,11 +319,8 @@ class Indexer:
             members.append(out_dir)
         set_id = compose_set(self.refinery, spec.id, members)
         self._say(f"  {spec.id}: set {set_id} of {len(members)} partition(s)")
-        report = self.index_generation(spec, set_id)
-        for gid in ids:  # aliases of every member (index_generation only knows the set's own work dir)
-            self._apply_redirect_aliases(spec, gid)
-        self.index.commit()
-        return report
+        # Every member's aliases are applied before the state is saved (a crash cannot lose them).
+        return self.index_generation(spec, set_id, alias_generations=sorted(ids))
 
     def build_catalog(self, spec: SourceSpec, generation_id: str) -> Path | None:
         """Precompute the portal/directory/random data of one indexed generation (derived, local)."""
@@ -357,7 +418,10 @@ class Indexer:
     # --- whole runs ----------------------------------------------------------------------------
 
     def build(self, source_ids: Sequence[str] | None = None) -> list[SourceReport]:
-        """Refine every sealed generation, then index the vault's current one, per source."""
+        """Refine and index the vault's current generation of each source (for a partitioned source,
+        every current partition). Older generations are not refined: nothing reads them until the
+        history view asks, and refining them costs as much as the current one. Ends with
+        :meth:`finish` (one suggest rebuild)."""
         reports: list[SourceReport] = []
         wanted = list(source_ids) if source_ids else sorted(self.specs)
         for sid in wanted:
@@ -373,10 +437,11 @@ class Indexer:
             if self.adapter_for(spec) is None:
                 reports.append(SourceReport(sid, skipped=f"no adapter installed for {spec.adapter!r}"))
                 continue
-            self._say(f"{sid}: {len(gens)} sealed generation(s)")
+            wanted_ids = {g.generation_id for g in self.vault.current_set(sid)}
+            self._say(f"{sid}: {len(gens)} sealed generation(s), {len(wanted_ids)} current")
             refined: list[tuple[str, int]] = []
             for g in gens:
-                if is_sealed(self.refined_dir(spec, g.generation_id)):
+                if g.generation_id not in wanted_ids or is_sealed(self.refined_dir(spec, g.generation_id)):
                     continue
                 result = self.refine(spec, g, self.vault.generation_path(sid, g.generation_id))
                 refined.append((g.generation_id, result.doc_count or 0))
@@ -394,4 +459,5 @@ class Indexer:
             reports.append(
                 SourceReport(sid, tuple(refined), rep.indexed, rep.upserted, rep.deleted, rep.skipped)
             )
+        self.finish()
         return reports
