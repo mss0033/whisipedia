@@ -437,9 +437,21 @@ export interface SearchResults {
   navigate_to: string | null;
   /** Instant-answer box (definition, fact, map). Reserved: not produced yet. */
   instant: DefinitionAnswer | FactAnswer | MapAnswer | null;
+  /** A spelling correction from the library's vocabulary, offered when results are sparse or a query word is unknown. */
   did_you_mean: string | null;
+  /** Set when the query named a site (`rfc 9110`): totals and facets count that scope. */
+  scope: SearchScope | null;
   /** True when retrieval found little or nothing. */
   low_confidence: boolean;
+}
+
+export interface SearchScope {
+  /** The site named in the query, as typed (`rfc` in `rfc 9110`). */
+  site: string;
+  /** Source ids that site names. */
+  sources: Array<string>;
+  /** True when those sources had nothing for the query and the whole library was searched. */
+  fallback: boolean;
 }
 
 export interface SourceFreshness {

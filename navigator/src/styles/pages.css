@@ -401,6 +401,10 @@
 .did-you-mean {
   color: var(--bad);
 }
+.scope-hint {
+  margin: 4px 0;
+  font-size: 0.9em;
+}
 .results {
   margin: 0;
   padding-left: 2em;

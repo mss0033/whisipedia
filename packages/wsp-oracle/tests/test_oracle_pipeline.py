@@ -213,3 +213,28 @@ def test_config_parsing() -> None:
             OracleConfig.from_mapping(bad)
     with pytest.raises(OracleConfigError, match=r"index\.root"):
         OracleConfig().vector_path(None)
+
+
+def test_site_scope_is_consistent_and_falls_back(lexical: TantivyIndex) -> None:
+    router = Router.from_sources(["encyclo", "dictionary", "rfc", "gutenberg"])
+    searcher = OracleSearcher(lexical, router=router)
+    index = OracleIndex(searcher)
+    # the site has the answer: results, totals and facets all come from it
+    res = searcher.run("rfc http caching")
+    assert res.scope is not None
+    assert (res.scope.site, res.scope.sources, res.scope.fallback) == ("rfc", ("rfc",), False)
+    assert {h.source_id for h in res.hits} == {"rfc"}
+    window = index.search_hits("rfc http caching", limit=200)
+    assert {h.doc_id for h in window} == {h.doc_id for h in index.search("rfc http caching", limit=50)}
+    # the site has nothing for it (or nothing indexed): the whole library, flagged as a fallback
+    for q in ("rfc alan turing", "gutenberg alan turing"):
+        scope = index.scope(q)
+        assert scope is not None
+        assert scope.fallback, q
+        hits = index.search(q, limit=10)
+        assert "wsp:encyclo/Alan_Turing" in {h.doc_id for h in hits}
+        assert {h.doc_id for h in index.search_hits(q, limit=200)} >= {h.doc_id for h in hits}
+    # explicit filters win over the router; plain queries have no scope
+    assert index.scope("rfc alan turing", sources=["encyclo"]) is None
+    assert index.scope("alan turing") is None
+    assert index.search_hits("rfc http caching", sources=[]) == []

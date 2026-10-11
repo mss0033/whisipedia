@@ -100,6 +100,10 @@ class OracleConfig:
     dense_weight: float = 2.0
     depth: int = 50
     source_priors: Mapping[str, float] = field(default_factory=dict[str, float])
+    static_rank_weight: float = 0.1
+    """Fusion boost ``1 + w * feature`` from the link-analysis static rank (0 = off)."""
+    spelling: bool = True
+    """Offer "did you mean" from the index vocabulary when results are sparse."""
     chunk_words: int = 200
     max_chunks_per_doc: int = 256
     cache_size: int = 256
@@ -133,6 +137,8 @@ class OracleConfig:
             "dense_weight",
             "depth",
             "source_priors",
+            "static_rank_weight",
+            "spelling",
             "chunk_words",
             "max_chunks_per_doc",
             "cache_size",
@@ -181,6 +187,8 @@ class OracleConfig:
                 dense_weight=float(section.get("dense_weight", 2.0)),
                 depth=int(section.get("depth", 50)),
                 source_priors=_floats(section.get("source_priors", {}), "source_priors"),
+                static_rank_weight=float(section.get("static_rank_weight", 0.1)),
+                spelling=bool(section.get("spelling", True)),
                 chunk_words=int(section.get("chunk_words", 200)),
                 max_chunks_per_doc=int(section.get("max_chunks_per_doc", 256)),
                 cache_size=int(section.get("cache_size", 256)),

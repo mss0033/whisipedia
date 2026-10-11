@@ -25,6 +25,7 @@ from wsp_cli.wiring import drill_once, parity_targets, repair_ladder, scrubber
 from wsp_core.model import GenerationStatus, SourceSpec
 from wsp_core.ports import Fetcher
 from wsp_core.registry import RegistryError, load_registry
+from wsp_index.spelling import SPELL_FILE
 from wsp_orchestrator.curator import ProposalFiles
 from wsp_orchestrator.curator.registry_edit import apply_to_registry_text, remove_from_overlay
 from wsp_orchestrator.orchestrator import Orchestrator
@@ -144,6 +145,8 @@ def cmd_index_build(args: argparse.Namespace, out: TextIO) -> int:
             changed = any(r.upserted or r.deleted or r.refined for r in reports)
             if not getattr(args, "no_rank", False) and (changed or not ix.index.rank_path.is_file()):
                 ix.rank()
+            if changed or not (ix.index.path / SPELL_FILE).is_file():
+                ix.spell()
     except LockHeldError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 3
@@ -190,6 +193,20 @@ def cmd_index_rank(args: argparse.Namespace, out: TextIO) -> int:
         return 3
     if stats is None:
         out.write("rank: nothing indexed\n")
+    return 0
+
+
+def cmd_index_spell(args: argparse.Namespace, out: TextIO) -> int:
+    """Rebuild only the "did you mean" vocabulary from the indexed Refinery generations."""
+    lay, cfg, specs = _context(args)
+    try:
+        with exclusive(_lock_dir(cfg), "index"), open_indexer(cfg, lay, specs, out) as ix:
+            stats = ix.spell()
+    except LockHeldError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 3
+    if stats is None:
+        out.write("spell: nothing indexed\n")
     return 0
 
 

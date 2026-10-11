@@ -3661,7 +3661,19 @@
                 "type": "null"
               }
             ],
-            "title": "Did You Mean"
+            "title": "Did You Mean",
+            "description": "A spelling correction from the library's vocabulary, offered when results are sparse or a query word is unknown."
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SearchScope"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set when the query named a site (`rfc 9110`): totals and facets count that scope."
           },
           "low_confidence": {
             "type": "boolean",
@@ -3686,9 +3698,40 @@
           "navigate_to",
           "instant",
           "did_you_mean",
+          "scope",
           "low_confidence"
         ],
         "title": "SearchResults"
+      },
+      "SearchScope": {
+        "properties": {
+          "site": {
+            "type": "string",
+            "title": "Site",
+            "description": "The site named in the query, as typed (`rfc` in `rfc 9110`)."
+          },
+          "sources": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Sources",
+            "description": "Source ids that site names."
+          },
+          "fallback": {
+            "type": "boolean",
+            "title": "Fallback",
+            "description": "True when those sources had nothing for the query and the whole library was searched.",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "site",
+          "sources",
+          "fallback"
+        ],
+        "title": "SearchScope"
       },
       "SourceFreshness": {
         "properties": {

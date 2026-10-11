@@ -46,6 +46,7 @@ from wsp_core.registry import load_registry
 if TYPE_CHECKING:  # heavy imports stay lazy so `wsp search --url ...` starts fast
     from wsp_cli.monitor import LibraryMonitor
     from wsp_index import ParquetDocumentStore, SqliteChangeFeed, TantivyIndex
+    from wsp_index.spelling import ReloadingSpeller
     from wsp_vault.ledger import JsonlLedger
     from wsp_vault.vault import FileVault
 
@@ -403,7 +404,10 @@ def build_services(cfg: Mapping[str, Any], lay: Layout) -> Services:
             queries=JsonlQueryLog(paths(cfg).queries_log)
             if section(cfg, "api").get("query_log", True)
             else None,
+            speller=open_speller(cfg),
         )
+
+    from wsp_index.spelling import Speller
 
     index, documents, changes = InMemoryLexicalIndex(), InMemoryDocumentStore(), InMemoryChangeFeed()
     vault, ledger = InMemoryVault(), InMemoryLedger()
@@ -415,7 +419,19 @@ def build_services(cfg: Mapping[str, Any], lay: Layout) -> Services:
         vault=vault,
         ledger=ledger,
         sources=effective_sources(specs, cfg) or SAMPLE_SOURCES,  # sample specs outside a checkout
+        speller=Speller.from_texts(f"{d.title} {d.text}" for d in documents.all_current()),
     )
+
+
+def open_speller(cfg: Mapping[str, Any]) -> ReloadingSpeller | None:
+    """Spelling corrections ("did you mean") from ``<index>/lexical/spelling.bin`` (``wsp index spell``).
+
+    Off with ``[oracle] spelling = false``. Picks up a rebuilt vocabulary without a restart."""
+    from wsp_index.spelling import SPELL_FILE, ReloadingSpeller
+
+    if not section(cfg, "oracle").get("spelling", True):
+        return None
+    return ReloadingSpeller(paths(cfg).lexical / SPELL_FILE)
 
 
 def build_catalog(cfg: Mapping[str, Any], specs: Sequence[SourceSpec], changes: ChangeFeed) -> Catalog:

@@ -60,8 +60,9 @@ def cmd_iterate(args: argparse.Namespace) -> dict[str, object]:
     t0 = time.monotonic()
     m = synthetic_edges(out, args.nodes, args.edges)
     t_gen = time.monotonic() - t0
-    n_sources = args.sources
-    node_source = (np.arange(args.nodes) % n_sources).astype(np.int16)
+    n_sources = int(args.sources)
+    nodes = int(args.nodes)
+    node_source = (np.arange(nodes) % int(n_sources)).astype(np.int16)
     graph = LinkGraph(
         doc_ids=pa.nulls(args.nodes, type=pa.string()),  # pagerank only needs the node count
         node_source=node_source,
@@ -95,13 +96,14 @@ def cmd_graph(args: argparse.Namespace) -> dict[str, object]:
     out: Path = args.out
     shutil.rmtree(out, ignore_errors=True)
     rng = np.random.default_rng(2)
-    n = args.docs
+    n = int(args.docs)
+    n_links = int(args.links)
     t0 = time.monotonic()
     with RefineryWriter(out / "ref", "syn", "g1") as w:
         for start in range(0, n, 10_000):
             batch: list[DocRecord] = []
             for i in range(start, min(n, start + 10_000)):
-                targets = np.minimum((n * rng.random(args.links) ** 3).astype(np.int64), n - 1)
+                targets = np.minimum((n * rng.random(n_links) ** 3).astype(np.int64), n - 1)
                 links = tuple(f"wsp:syn/P{int(t):08d}" for t in targets)
                 batch.append(
                     DocRecord(

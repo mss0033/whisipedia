@@ -279,6 +279,15 @@ class MapAnswer(_Wire):
 InstantAnswer = Annotated[DefinitionAnswer | FactAnswer | MapAnswer, Field(discriminator="type")]
 
 
+class SearchScope(_Wire):
+    site: str = Field(description="The site named in the query, as typed (`rfc` in `rfc 9110`).")
+    sources: list[str] = Field(description="Source ids that site names.")
+    fallback: bool = Field(
+        default=False,
+        description="True when those sources had nothing for the query and the whole library was searched.",
+    )
+
+
 class SearchResults(_Wire):
     query: str
     offset: int
@@ -300,7 +309,15 @@ class SearchResults(_Wire):
     instant: InstantAnswer | None = Field(
         default=None, description="Instant-answer box (definition, fact, map). Reserved: not produced yet."
     )
-    did_you_mean: str | None = None
+    did_you_mean: str | None = Field(
+        default=None,
+        description="A spelling correction from the library's vocabulary, offered when results are sparse "
+        "or a query word is unknown.",
+    )
+    scope: SearchScope | None = Field(
+        default=None,
+        description="Set when the query named a site (`rfc 9110`): totals and facets count that scope.",
+    )
     low_confidence: bool = Field(default=False, description="True when retrieval found little or nothing.")
 
 

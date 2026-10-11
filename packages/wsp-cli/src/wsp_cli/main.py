@@ -255,6 +255,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--damping", type=float, default=0.85, help="PageRank damping factor")
     s.add_argument("--mix", type=float, default=0.5, help="weight of the cross-source rank (0-1)")
     s = add(
+        "spell",
+        ops.cmd_index_spell,
+        'Rebuild the "did you mean" vocabulary from the indexed text (local disk).',
+        ix_sub,
+    )
+    s = add(
         "catalog",
         ops.cmd_index_catalog,
         "Rebuild the portal/directory/random catalog from the Refinery (local disk).",

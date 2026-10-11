@@ -148,7 +148,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
       top.form,
     ),
     h('h1', { class: 'visually-hidden', tabindex: '-1' }, `Search results for ${route.query}`),
-    renderResultsPage(resp, route, sourceName),
+    renderResultsPage(resp, route, sourceName, new Map(sources.map((x) => [x.id, x.name]))),
     h('div', { class: 'results-footer' }, bottom.form),
   );
   return { title: `${ENGINE_NAME} Search: ${route.query}`, body };
@@ -164,6 +164,7 @@ export function renderResultsPage(
   resp: SearchResults,
   route: SearchRoute,
   sourceName: string | null,
+  sourceNames: ReadonlyMap<string, string> = new Map(),
 ): DocumentFragment {
   const first = resp.offset + 1;
   const last = first + resp.hits.length - 1;
@@ -198,6 +199,7 @@ export function renderResultsPage(
           wspLink(searchAddress(route.query, { kind: route.kind }), 'Search all sites'),
         )
       : null,
+    scopeHint(resp, sourceNames),
     resp.did_you_mean
       ? h(
           'p',
@@ -219,6 +221,27 @@ export function renderResultsPage(
     resp.instant ? instantBox(resp.instant) : null,
     resultsList(resp),
     pagination(resp, route),
+  );
+}
+
+/**
+ * A quiet line about where a site-naming query (`rfc 9110`) was searched. When the
+ * site had nothing, the whole library was searched instead; no warning box.
+ */
+export function scopeHint(
+  resp: SearchResults,
+  sourceNames: ReadonlyMap<string, string>,
+): HTMLElement | null {
+  const scope = resp.scope;
+  if (!scope) return null;
+  const first = scope.sources[0];
+  const name = (first && sourceNames.get(first)) ?? scope.site;
+  return h(
+    'p',
+    { class: 'scope-hint' },
+    scope.fallback
+      ? ['No results on site ', h('b', null, name), '; showing results from the whole library.']
+      : ['Showing results from ', h('b', null, name), '.'],
   );
 }
 

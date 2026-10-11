@@ -3,7 +3,8 @@
 Layout under ``index.root`` (local disk only, ADR-0002)::
 
     refinery/<source_id>/<generation_id>/   Refinery Parquet (wsp_index.refinery), CURRENT.txt per source
-    lexical/                                Tantivy + suggest tries (TantivyIndex), static_rank.bin
+    lexical/                                Tantivy + suggest tries (TantivyIndex), static_rank.bin,
+                                            spelling.bin ("did you mean")
     changes.sqlite                          change feed (SqliteChangeFeed)
     index-state.json                        {source_id: generation indexed last}
     catalog/<source_id>.json                portal/directory/random data (wsp_index.catalog)
@@ -43,6 +44,7 @@ from wsp_index.catalog import (
 )
 from wsp_index.linkrank import RankConfig, RankStats, StaticRank, compute_static_rank
 from wsp_index.refinery import CURRENT_FILE, current_generation, generation_dir, is_sealed
+from wsp_index.spelling import SPELL_FILE, SpellConfig, VocabStats, build_vocabulary
 from wsp_orchestrator.pipeline import RefineResult
 
 PROGRESS_EVERY = 10_000
@@ -243,11 +245,7 @@ class Indexer:
         Writes ``lexical/static_rank.bin``, then uses it for suggest priors and the portal's
         featured articles. Re-runnable on its own; it reads only the Refinery and the index's aliases.
         """
-        readers: list[tuple[str, RefineryReader]] = []
-        for sid in sorted(self.specs):
-            gen = current_generation(self.refinery, sid)
-            if gen is not None and is_sealed(generation_dir(self.refinery, sid, gen)):
-                readers.append((sid, RefineryReader(generation_dir(self.refinery, sid, gen))))
+        readers = self._current_readers()
         if not readers:
             self._say("rank: nothing indexed")
             return None
@@ -270,6 +268,27 @@ class Indexer:
                     cfg = CatalogConfig(featured=True, rank=rank)
                     refresh_featured(self.refinery, sid, reader.generation_id, self.root / CATALOG_DIR, cfg)
         self._say(f"rank: done in {self.clock() - started:.1f}s")
+        return stats
+
+    # --- "did you mean" vocabulary ------------------------------------------------------------
+
+    def _current_readers(self) -> list[tuple[str, RefineryReader]]:
+        readers: list[tuple[str, RefineryReader]] = []
+        for sid in sorted(self.specs):
+            gen = current_generation(self.refinery, sid)
+            if gen is not None and is_sealed(generation_dir(self.refinery, sid, gen)):
+                readers.append((sid, RefineryReader(generation_dir(self.refinery, sid, gen))))
+        return readers
+
+    def spell(self, config: SpellConfig | None = None) -> VocabStats | None:
+        """Rebuild the spelling vocabulary from every indexed source (``wsp index spell``)."""
+        readers = self._current_readers()
+        if not readers:
+            self._say("spell: nothing indexed")
+            return None
+        path = self.index.path / SPELL_FILE
+        stats = build_vocabulary(readers, path, config or SpellConfig(), progress=self._say)
+        self._say(f"spell: {stats.line()}")
         return stats
 
     def _apply_priors(self, readers: Sequence[tuple[str, RefineryReader]], rank: StaticRank) -> None:

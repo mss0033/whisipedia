@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from wsp_api.seams import OpsProvider, QueryLog
+from wsp_api.seams import OpsProvider, QueryLog, SpellingCorrector
 from wsp_core.model import SourceSpec
 from wsp_core.ports import (
     AssetStore,
@@ -42,6 +42,7 @@ class Services:
     gaps: GapLog | None = None  # None: POST /v1/gaps answers 501
     ops: OpsProvider | None = None  # None: /v1/system has no `ops`, /v1/proposals is empty
     queries: QueryLog | None = None  # None: searches are not logged
+    speller: SpellingCorrector | None = None  # None: no "did you mean"
 
     def source(self, source_id: str) -> SourceSpec | None:
         return next((s for s in self.sources if s.id == source_id), None)

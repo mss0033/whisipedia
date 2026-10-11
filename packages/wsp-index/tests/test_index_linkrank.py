@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 from collections.abc import Sequence
 from pathlib import Path
+from typing import cast
 
 import numpy as np
 import pytest
@@ -87,7 +88,7 @@ def test_streamed_pagerank_matches_the_dense_reference(tmp_path: Path) -> None:
     assert iters < 500
     assert res < 1e-10
     want = reference_pagerank(60, edges)
-    order = [int(x.split("N")[-1]) for x in graph.doc_ids.to_pylist()]
+    order = [int(x.split("N")[-1]) for x in cast(list[str], graph.doc_ids.to_pylist())]
     np.testing.assert_allclose(global_, want[order], rtol=1e-6)
     np.testing.assert_allclose(per_source, global_, rtol=1e-9)  # one source: both are the same
     assert global_.sum() == pytest.approx(1.0)
@@ -106,7 +107,7 @@ def test_per_source_rank_is_computed_inside_each_source(tmp_path: Path) -> None:
     graph = build_graph(readers, tmp_path / "w")
     assert (graph.edges, graph.intra_edges) == (6, 3)
     per_source, global_, *_ = pagerank(graph, RankConfig(tolerance=1e-12, max_iterations=300))
-    ids = graph.doc_ids.to_pylist()
+    ids = cast(list[str], graph.doc_ids.to_pylist())
     for source in ("wiki", "rfc"):
         rows = [i for i, d in enumerate(ids) if d.startswith(f"wsp:{source}/")]
         assert per_source[rows].sum() == pytest.approx(1.0)

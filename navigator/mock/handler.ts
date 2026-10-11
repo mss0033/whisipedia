@@ -5,7 +5,15 @@
  * Used by the Vite dev/preview middleware (mock/vite-plugin.ts) and by tests.
  * Deterministic except for /v1/random (without `seed`) and uptime.
  */
-import type { Change, DocKind, Hit, InstantAnswer, Routes, SourceInfo } from '../src/api/types.ts';
+import type {
+  Change,
+  DocKind,
+  Hit,
+  InstantAnswer,
+  Routes,
+  SearchResults,
+  SourceInfo,
+} from '../src/api/types.ts';
 import { DESCRIPTIONS, DIRECTORY, DOCS, type FixtureDoc, GENERATION, SOURCES } from './data.ts';
 
 type Response<K extends keyof Routes> = Routes[K]['response'];
@@ -290,7 +298,17 @@ export function search(params: URLSearchParams): Response<'GET /v1/search'> {
     instant: offset === 0 ? instantFor(q) : null,
     did_you_mean: /\bvacine/.test(lq) ? lq.replace(/vacine/g, 'vaccine') : null,
     low_confidence: filtered.length === 0,
+    scope: mockScope(lq),
   };
+}
+
+/** `gutenberg …` names a site the mock holds nothing for: the API's whole-library fallback. */
+function mockScope(lq: string): SearchResults['scope'] {
+  const site = lq.split(/\s+/)[0] ?? '';
+  if (site === 'rfc') return { site, sources: ['rfc'], fallback: false };
+  if (site === 'gutenberg' && !/^gutenberg\s+\d+$/.test(lq))
+    return { site, sources: ['gutenberg'], fallback: true };
+  return null;
 }
 
 export function suggest(params: URLSearchParams): Response<'GET /v1/suggest'> {

@@ -48,6 +48,7 @@ from wsp_api.schemas import (
     RecentChanges,
     Resolution,
     SearchResults,
+    SearchScope,
     SourceFreshness,
     SourceInfo,
     SourcePage,
@@ -87,6 +88,7 @@ _TELEMETRY_OFF: TelemetryConfig = {
 
 # Search: facets and totals come from the top of the ranking; beyond it the index is paged directly.
 _WINDOW = 200
+_SPARSE = 5  # fewer hits than this: "did you mean" may correct any unknown or rare word
 
 Limit = Annotated[int, Query(ge=1, le=200, description="Page size.")]
 Cursor = Annotated[str | None, Query(description="Opaque cursor from a previous page's `next_cursor`.")]
@@ -292,6 +294,29 @@ def _v1(lib: Library, settings: ApiSettings) -> APIRouter:
             return list(cast(Sequence[SearchHit], hits_only(q, limit=_WINDOW, offset=0, sources=scope)))
         return _query(q, _WINDOW, 0, scope)
 
+    def _did_you_mean(q: str, scope: list[str] | None, window: Sequence[SearchHit]) -> str | None:
+        """A spelling correction, only when results are sparse or a query word matches nothing.
+
+        Sparse: fewer than ``_SPARSE`` hits; then every unknown or rare word may change. Low-score: a
+        word of the query is outside the vocabulary and matches no document, so no hit can contain it;
+        then only those words may change. The correction is offered only if it finds at least as
+        many documents as the query did.
+        """
+        speller = s.speller
+        if speller is None:
+            return None
+        only: list[str] | None = None
+        if len(window) >= _SPARSE:
+            dead = [w for w in speller.unknown(q) if not _query(w, 1, 0, None)]
+            if not dead:
+                return None
+            only = dead
+        fixed = speller.correct(q, only=only)
+        if fixed is None or fixed.casefold() == q.casefold():
+            return None
+        better = _window(fixed, scope)
+        return fixed if better and len(better) >= len(window) else None
+
     @r.get("/search", tags=["search"], responses=errors(422))
     def run_search(
         q: Annotated[str, Query(min_length=1, max_length=1000, description="Plain-language query.")],
@@ -327,7 +352,10 @@ def _v1(lib: Library, settings: ApiSettings) -> APIRouter:
                     highlights=search.highlights(plain, terms),
                 )
             )
+        scope_of = getattr(s.index, "scope", None)
+        routed = cast(Any, scope_of(q, scope)) if callable(scope_of) else None
         nav = search.navigate_to(s, q) if offset == 0 else None
+        did_you_mean = _did_you_mean(q, scope, window) if offset == 0 else None
         if s.queries is not None and offset == 0:
             s.queries.record(s.clock(), q, total, not window)
         return SearchResults(
@@ -345,7 +373,11 @@ def _v1(lib: Library, settings: ApiSettings) -> APIRouter:
                 KindFacet(kind=k, count=n) for k, n in sorted(counts.items(), key=lambda x: (-x[1], x[0]))
             ],
             navigate_to=nav,
+            did_you_mean=did_you_mean,
             low_confidence=not window,
+            scope=None
+            if routed is None
+            else SearchScope(site=routed.site, sources=list(routed.sources), fallback=routed.fallback),
         )
 
     @r.get("/suggest", tags=["search"], responses=errors(422))
