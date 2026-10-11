@@ -22,7 +22,10 @@ DATA = b"0123456789abcdef" * 4096
 
 def no_sleep_policy(delays: list[float] | None = None, attempts: int = 3) -> RetryPolicy:
     return RetryPolicy(
-        attempts=attempts, base_delay=0.5, sleep=(delays.append if delays is not None else lambda _: None)
+        attempts=attempts,
+        base_delay=0.5,
+        sleep=(delays.append if delays is not None else lambda _: None),
+        jitter=0.0,
     )
 
 

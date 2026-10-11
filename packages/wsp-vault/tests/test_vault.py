@@ -289,6 +289,7 @@ def test_manifests_are_parsed_once_and_revalidated(
     vault: FileVault, seal: SealFn, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     lib = seal()
+    vault = FileVault(vault.root, vault.signer, domains={SOURCE: "reference"})  # a reader, cold cache
     calls: list[int] = []
     parse = Manifest.from_bytes
 

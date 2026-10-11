@@ -14,6 +14,8 @@ from typing import Protocol
 
 import blake3
 
+from wsp_core.checksums import normalize_algorithm
+
 BUFSIZE = 8 * 1024 * 1024
 OWN_ALGORITHMS = frozenset({"sha256", "blake3"})
 
@@ -39,7 +41,7 @@ class MultiHasher:
         self.size = 0
         self._sha256 = hashlib.sha256()
         self._blake3 = blake3.blake3(max_threads=blake3.blake3.AUTO)
-        names = sorted({a.lower() for a in extra} - OWN_ALGORITHMS)
+        names = sorted({normalize_algorithm(a) for a in extra} - OWN_ALGORITHMS)
         self._extra = {name: hashlib.new(name, usedforsecurity=False) for name in names}
 
     def update(self, chunk: memoryview | bytes) -> None:
@@ -59,10 +61,10 @@ class MultiHasher:
 
 
 def supported_extra(algorithms: Iterable[str]) -> frozenset[str]:
-    """The subset of ``algorithms`` that hashlib can compute alongside our own digests."""
-    return (
-        frozenset(a.lower() for a in algorithms if a.lower() in hashlib.algorithms_available) - OWN_ALGORITHMS
-    )
+    """The subset of ``algorithms`` (normalized: ``SHA-1`` -> ``sha1``) that hashlib can compute
+    alongside our own digests."""
+    names = {normalize_algorithm(a) for a in algorithms}
+    return frozenset(n for n in names if n in hashlib.algorithms_available) - OWN_ALGORITHMS
 
 
 def hash_stream(
