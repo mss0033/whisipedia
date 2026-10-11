@@ -24,7 +24,7 @@ import re
 import threading
 import xml.etree.ElementTree as ET
 from collections.abc import Iterable, Iterator, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlencode
@@ -114,10 +114,14 @@ class OpdsEntry:
 
 @dataclass(frozen=True, slots=True)
 class Selector:
+    """Catalog filter. A name may pin its own flavour as ``<name>@<flavour>`` (``wikipedia_de_all@nopic``),
+    so one bundle can mix flavours (the multilingual plan, D15); ``flavour`` applies to the rest."""
+
     names: tuple[str, ...] = ()
     flavour: str | None = None
     category: str | None = None
     lang: str | None = None
+    pinned: Mapping[str, str] = field(default_factory=dict[str, str])  # name -> flavour
 
     @classmethod
     def from_spec(cls, spec: SourceSpec) -> Selector:
@@ -125,7 +129,9 @@ class Selector:
         if not isinstance(raw, Mapping):
             raise ValueError(f"{spec.id}: kiwix-opds needs access.selector")
         sel: Mapping[str, object] = raw  # pyright: ignore[reportUnknownVariableType]
-        names = str_list(sel.get("name")) + str_list(sel.get("names"))
+        raw_names = str_list(sel.get("name")) + str_list(sel.get("names"))
+        names = tuple(n.split("@", 1)[0] for n in raw_names)
+        pinned = {n.split("@", 1)[0]: n.split("@", 1)[1] for n in raw_names if "@" in n}
         flavour, category, lang = sel.get("flavour"), sel.get("category"), sel.get("lang")
         if not names and category is None:
             raise ValueError(f"{spec.id}: selector needs name, names or category")
@@ -134,6 +140,7 @@ class Selector:
             flavour=None if flavour is None else str(flavour),
             category=None if category is None else str(category),
             lang=None if lang is None else str(lang),
+            pinned=pinned,
         )
 
     @property
@@ -152,7 +159,10 @@ class Selector:
     def matches(self, entry: OpdsEntry) -> bool:
         if self.names and entry.name not in self.names:
             return False
-        if self.flavour is not None and entry.flavour != self.flavour:
+        if entry.name in self.pinned:
+            if entry.flavour != self.pinned[entry.name]:
+                return False
+        elif self.flavour is not None and entry.flavour != self.flavour:
             return False
         if self.category is not None and entry.category != self.category:
             return False

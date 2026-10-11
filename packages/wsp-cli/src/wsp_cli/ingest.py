@@ -4,6 +4,9 @@ Bulk downloads (aria2c, rsync) land in ``<vault.root>/_incoming/<source_id>/<ver
 same filesystem as the vault, so adoption is a rename, never a copy. The download plan is
 ``_incoming/_plans/targets.json``: a list of ``{source_id, version, name, uris, lane, checksum, size,
 meta}`` where ``checksum`` is ``[algo, hex]`` (aria2 names: ``sha-1``, ``sha-256``, ``md5``) or null.
+Per-source plans in ``_incoming/_plans/targets.d/*.json`` (same format; written by ``wsp collections
+fetch`` for document collections) are read too. A target whose ``meta.relpath`` is set (the
+collection catalog ``meta/documents.jsonl``) is stored at that path instead of ``upstream/<name>``.
 
 A file is **complete** when no sibling ``<name>.aria2`` control file exists, its size matches the plan
 (when the plan knows it) and it has not been modified for ``settle_seconds``. A version is ingested
@@ -65,6 +68,7 @@ from wsp_vault.vault import FileVault, VaultError
 ARXIV_SOURCE = "arxiv"
 PLANS_DIR = "_plans"
 TARGETS_FILE = "targets.json"
+TARGETS_DIR = "targets.d"  # per-source plans (`wsp collections fetch`): same format as targets.json
 CONTROL_SUFFIX = ".aria2"
 MIRROR_SOURCE = "gutenberg"
 MIRROR_DIR = "mirror"
@@ -105,6 +109,14 @@ class Target:
     checksum: Checksum | None
     size: int | None
     meta: Mapping[str, object]
+
+    @property
+    def relpath(self) -> str:
+        """Where the file goes in the generation: ``upstream/<name>``, or ``meta.relpath`` (catalogs)."""
+        rel = str(self.meta.get("relpath") or "")
+        if rel and not rel.startswith("/") and ".." not in rel.split("/"):
+            return rel
+        return f"upstream/{self.name}"
 
     @property
     def is_kiwix_metalink(self) -> bool:
@@ -273,10 +285,11 @@ class Ingestor:
     def plan(self, source_id: str | None = None) -> IngestReport:
         report = IngestReport(dry_run=True)
         targets_path = self.incoming / PLANS_DIR / TARGETS_FILE
+        extra_plans = sorted((self.incoming / PLANS_DIR / TARGETS_DIR).glob("*.json"))
         targets: list[Target] = []
-        if targets_path.is_file():
-            targets = [t for t in load_targets(targets_path) if source_id in (None, t.source_id)]
-        else:
+        for path in ([targets_path] if targets_path.is_file() else []) + extra_plans:
+            targets += [t for t in load_targets(path) if source_id in (None, t.source_id)]
+        if not targets_path.is_file() and not extra_plans:
             report.notes.append(f"no download plan at {targets_path}")
         groups: dict[tuple[str, str], list[Target]] = {}
         for t in targets:
@@ -330,12 +343,12 @@ class Ingestor:
         lib = self.vault.library_path(sid, gid)
         if (lib / "MANIFEST.json").is_file():
             vp.status = VersionStatus.SEALED
-            self._classify(vp, group, staged_dir=lib / "upstream")
+            self._classify(vp, group, staged_dir=lib)
             leftovers = sum(f.path.exists() for f in vp.files)
             if leftovers:
                 vp.reason = f"{leftovers} file(s) still in _incoming were left untouched"
             return vp
-        self._classify(vp, group, staged_dir=self.vault.staging_path(sid, gid) / "upstream")
+        self._classify(vp, group, staged_dir=self.vault.staging_path(sid, gid))
         if vp.complete:
             vp.status = VersionStatus.READY
         else:
@@ -365,7 +378,7 @@ class Ingestor:
         for t in group:
             path = self._path(t)
             state, note = self._state(t, path)
-            if state is FileState.MISSING and staged_dir is not None and (staged_dir / t.name).is_file():
+            if state is FileState.MISSING and staged_dir is not None and (staged_dir / t.relpath).is_file():
                 state = FileState.STAGED
             checksums = (t.checksum,) if t.checksum is not None else ()
             files.append(FilePlan(t, path, state, checksums, note))
@@ -434,7 +447,7 @@ class Ingestor:
             self.vault.stage(sid, gid)
             for f in vp.files:
                 started = time.monotonic()
-                self.vault.adopt(sid, gid, f.path, f"upstream/{f.target.name}", upstream=f.checksums)
+                self.vault.adopt(sid, gid, f.path, f.target.relpath, upstream=f.checksums)
                 f.state = FileState.STAGED
                 how = "verified" if f.verifiable else "unverifiable"
                 self._say(f"  {f.target.name}: {how} ({time.monotonic() - started:.1f}s)")

@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TextIO, cast
 
-from wsp_cli import bootstrap
+from wsp_cli import bootstrap, doccollections
 from wsp_cli.doctor import Doctor, Level
 from wsp_cli.doctor import exit_code as doctor_exit
 from wsp_cli.doctor import render as render_doctor
@@ -367,6 +367,9 @@ def cmd_proposals_decide(args: argparse.Namespace, out: TextIO) -> int:
         print(f"error: proposal {args.id} is already {doc.get('status')}", file=sys.stderr)
         return 2
     now = datetime.now(UTC)
+    if doc.get("doc_review") and lay.root is not None:  # per-document review (doc-collection, D13)
+        rules = doccollections.apply_review_decision(lay.root, doc, accept=args.decision == "accept")
+        out.write(f"{rules}: recorded the decision for every listed document; review and commit it\n")
     if args.decision == "reject":
         files.decide(args.id, "rejected", at=now, note=args.note)
         _mark_state(cfg, args.id, "rejected")

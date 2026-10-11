@@ -23,6 +23,7 @@ courtlistener = "wsp_adapters.courtlistener:CourtListenerAdapter"
 open-library = "wsp_adapters.openlibrary:OpenLibraryAdapter"
 gutenberg = "wsp_adapters.gutenberg:GutenbergAdapter"
 osm-planet = "wsp_adapters.osm:OsmPlanetAdapter"
+doc-collection = "wsp_adapters.doccollection:DocCollectionAdapter"
 
 [dependency-groups]
 dev = ["wsp-core[testing]"]
