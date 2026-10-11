@@ -10,6 +10,7 @@ import pytest
 from adapters_testkit import dumps_listing, make_ctx, make_spec
 
 from wsp_adapters import available_adapters
+from wsp_adapters._common import IncompleteGenerationError
 from wsp_adapters.wikidata import LOOKUP_NAME, EntityLookup, WikidataAdapter, entity_doc
 from wsp_adapters.wikimedia import DUMPS_BASE
 from wsp_core.ports import Ctx, SourceAdapter
@@ -129,3 +130,15 @@ def test_lookup_is_published_only_after_a_full_pass(generation_dir: Path, tmp_pa
 
 def test_entity_without_id_is_skipped() -> None:
     assert entity_doc({"labels": {}}, "wikidata", "CC0-1.0", ("en",)) is None
+
+
+def test_a_generation_without_the_json_dump_raises_and_publishes_no_lookup(tmp_path: Path) -> None:
+    """Audit 2026-10-11 C1: a truthy-only generation used to refine to 0 documents and commit an
+    empty lookup (and the diff then deleted every Wikidata document)."""
+    up = tmp_path / "2026-10-07" / "upstream"
+    up.mkdir(parents=True)
+    (up / "wikidata-20261007-truthy-BETA.nt.bz2").write_bytes(bz2.compress(b"<a> <b> <c> .\n"))
+    work = tmp_path / "work"
+    with pytest.raises(IncompleteGenerationError, match=r"all\.json\.bz2"):
+        list(WikidataAdapter().documents(make_ctx(SPEC, FakeFetcher(), work), up.parent))
+    assert not (work / LOOKUP_NAME).exists()

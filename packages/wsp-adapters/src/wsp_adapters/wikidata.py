@@ -37,6 +37,7 @@ from typing import Any, cast
 from urllib.parse import quote
 
 from wsp_adapters._common import (
+    IncompleteGenerationError,
     access,
     default_workers,
     int_option,
@@ -262,6 +263,13 @@ class WikidataAdapter(WikimediaDumpsAdapter):
         workers = int_option(spec, "workers", default_workers())
         languages = languages_for(spec)
         dumps = sorted(p for p in upstream_dir(generation_dir).iterdir() if p.name.endswith(_DUMP_SUFFIX))
+        if not dumps:
+            # Never refine to nothing: an empty pass would publish an empty entity lookup and make
+            # the snapshot diff delete every Wikidata document (audit 2026-10-11 C1).
+            found = ", ".join(sorted(p.name for p in upstream_dir(generation_dir).iterdir())) or "nothing"
+            raise IncompleteGenerationError(
+                f"{generation_dir.name}: no *{_DUMP_SUFFIX} entity dump in this generation (found: {found})"
+            )
         wants_lookup = bool(access(spec).get("entity_lookup", True))
         writer = EntityLookupWriter(ctx.workdir / LOOKUP_NAME) if wants_lookup else None
         try:

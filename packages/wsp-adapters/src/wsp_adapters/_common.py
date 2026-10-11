@@ -30,6 +30,11 @@ _HASH_ALIASES = {"sha-1": "sha1", "sha-256": "sha256", "sha-512": "sha512"}
 _READ_CHUNK = 8 * 1024 * 1024
 
 
+class IncompleteGenerationError(ValueError):
+    """A generation's content set is missing files: refining it would publish a partial release, and
+    the snapshot diff would delete every document it lacks. Raised instead (audit 2026-10-11 C1)."""
+
+
 def access(spec: SourceSpec) -> Mapping[str, object]:
     """The ``access`` block of a registry entry (empty mapping if absent)."""
     value = spec.raw.get("access")
@@ -153,25 +158,63 @@ def default_workers() -> int:
     return min(workers, int(cap)) if cap.isdigit() and int(cap) > 0 else workers
 
 
+class WorkerPool:
+    """One process pool for a whole refine (spawned on first use, shut down on exit).
+
+    Starting a spawn pool costs about half a second (a fresh interpreter per worker importing the
+    adapters); a refine that maps several phases over many files (181 Stack Exchange ZIMs, three
+    phases each) used to pay it every time. ``workers <= 1`` runs everything inline.
+    """
+
+    def __init__(self, workers: int) -> None:
+        self.workers = workers
+        self._pool: ProcessPoolExecutor | None = None
+
+    def __enter__(self) -> WorkerPool:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
+
+    def close(self) -> None:
+        if self._pool is not None:
+            self._pool.shutdown(wait=True, cancel_futures=True)
+            self._pool = None
+
+    def map[T, R](
+        self, fn: Callable[[T], R], items: Iterable[T], *, window: int | None = None
+    ) -> Iterator[R]:
+        """Like ``map`` across processes, preserving order, with at most ``window`` tasks in flight.
+
+        The bounded window keeps memory flat when the consumer is slower than the workers (the
+        stdlib ``Executor.map`` submits every item up front); with tasks bounded by bytes it bounds
+        the bytes in flight too.
+        """
+        if self.workers <= 1:
+            yield from map(fn, items)
+            return
+        if self._pool is None:
+            # spawn: safe with threads in the parent and identical on every platform.
+            ctx = multiprocessing.get_context("spawn")
+            self._pool = ProcessPoolExecutor(max_workers=self.workers, mp_context=ctx)
+        pool = self._pool
+        window = window or self.workers * 2
+        pending: deque[Future[R]] = deque()
+        try:
+            for item in items:
+                pending.append(pool.submit(fn, item))
+                if len(pending) >= window:
+                    yield pending.popleft().result()
+            while pending:
+                yield pending.popleft().result()
+        finally:
+            for f in pending:  # the consumer stopped early or a task failed: drop the rest
+                f.cancel()
+
+
 def ordered_parallel_map[T, R](
     fn: Callable[[T], R], items: Iterable[T], workers: int, *, window: int | None = None
 ) -> Iterator[R]:
-    """Like ``map`` across processes, preserving order, with at most ``window`` tasks in flight.
-
-    The bounded window keeps memory flat when the consumer is slower than the workers (the stdlib
-    ``Executor.map`` submits every item up front). ``workers <= 1`` runs inline.
-    """
-    if workers <= 1:
-        yield from map(fn, items)
-        return
-    window = window or workers * 2
-    # spawn: safe with threads in the parent and identical on every platform.
-    ctx = multiprocessing.get_context("spawn")
-    with ProcessPoolExecutor(max_workers=workers, mp_context=ctx) as pool:
-        pending: deque[Future[R]] = deque()
-        for item in items:
-            pending.append(pool.submit(fn, item))
-            if len(pending) >= window:
-                yield pending.popleft().result()
-        while pending:
-            yield pending.popleft().result()
+    """:meth:`WorkerPool.map` on a pool of its own (for one-off maps)."""
+    with WorkerPool(workers) as pool:
+        yield from pool.map(fn, items, window=window)
