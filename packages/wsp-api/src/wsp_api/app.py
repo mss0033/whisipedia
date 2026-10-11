@@ -9,6 +9,7 @@ in :mod:`wsp_api.browse`.
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
 from collections import Counter
 from collections.abc import AsyncIterator
@@ -61,6 +62,7 @@ from wsp_api.services import ApiSettings, Services
 from wsp_api.sse import change_events, format_event
 from wsp_api.summaries import CitationSplitter
 from wsp_api.views import Library, parse_doc
+from wsp_api.zim import ZimAssetStore
 from wsp_core.ids import parse_doc_id
 from wsp_core.model import GenerationStatus, SearchHit
 
@@ -141,6 +143,10 @@ def create_app(services: Services, settings: ApiSettings | None = None) -> FastA
     app.include_router(browse_router(lib))
     app.include_router(_go(services))
     _mount_navigator(app, settings)
+    if isinstance(lib.assets, ZimAssetStore):
+        # Open big single-book ZIMs in the background so the first page view does not wait on SMB.
+        zims = [x.id for x in services.sources if x.adapter == "kiwix-opds"]
+        threading.Thread(target=lib.assets.warm, args=(zims,), name="zim-warm", daemon=True).start()
     return app
 
 
