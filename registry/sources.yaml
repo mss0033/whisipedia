@@ -481,7 +481,7 @@ sources:
       origins: [www.govinfo.gov, training.fema.gov]
       discovery:
         - {kind: api, flavor: govinfo, collection: GOVPUB, package_prefix: [GOVPUB-HS5], api_key: govinfo}
-      filter: {distribution: {require: [public-release]}, default: review, allow_series_prefix: ["GOVPUB-HS5"]}
+      filter: {distribution: {require: [public-release]}, default: allow, allow_series_prefix: ["GOVPUB-HS5"]}
       mirrors:
         - {channel: "GovInfo GOVPUB (GPO), SuDoc class HS 5 = FEMA", url: "https://api.govinfo.gov/collections/GOVPUB", status: verified, verified: 2026-10-10, note: "search docclass:HS5 -> 143 packages incl. the National Response Framework (GOVPUB-HS5_100-PURL-gpo49580); partial: GPO deposits, not every FEMA release; needs an api.data.gov key"}
         - {channel: "training.fema.gov (EMI/NDEMU)", status: reachable, verified: 2026-10-10, note: "200; hosts IS course materials that reproduce NRF/NIMS/CPG content"}
@@ -532,7 +532,7 @@ sources:
       origins: [www.govinfo.gov]
       discovery:
         - {kind: api, flavor: govinfo, collection: GOVPUB, package_prefix: [GOVPUB-HS5], api_key: govinfo}
-      filter: {distribution: {require: [public-release]}, default: review}
+      filter: {distribution: {require: [public-release]}, default: allow}
       mirrors:
         - {channel: "GovInfo GOVPUB (GPO), SuDoc HS 5 (FEMA)", status: partial, verified: 2026-10-10, note: "same official channel as fema-preparedness-doctrine; building-science titles (P-361, P-320) to be confirmed in the listing with a key"}
         - {channel: "www.fema.gov", status: blocked, verified: 2026-10-10, note: "403 (WAF); not evaded"}
@@ -655,7 +655,7 @@ sources:
             - "\"surgical care at the district hospital\""
       # A UN health agency's guidance is about health: nouns such as chemical, pathogen or surveillance
       # are routine there, so the built-in noun review list is off; the deny list and screens still apply.
-      filter: {allow_all: true, builtin_review: false, review_keywords: [weapons, "deliberate use"]}
+      filter: {allow_all: true, builtin_review: false}
     update: {cadence: P3M, strategy: base-plus-incremental}
     size: {records: 277401, bytes: 70e9, measured: false, as_of: 2026-10-10}
     notes: Score 4.2. Record count measured (OAI completeListSize); bytes are an estimate for the selected subsets. Personal non-commercial offline use fits the licence; licence checked per item.
@@ -727,7 +727,7 @@ sources:
       key_prefix: osti
       origins: [www.osti.gov]
       discovery: [{kind: api, flavor: osti, query: "civil defense OR emergency power OR shelter OR microgrid"}]
-      filter: {default: review, distribution: {require: [public-release]}}
+      filter: {default: allow, distribution: {require: [public-release]}}
       currency: {historical_before: "1992-01-01"}
     update: {cadence: P3M, strategy: base-plus-incremental}
     size: {bytes: 50e9, measured: false, as_of: 2026-10-10}
@@ -861,7 +861,7 @@ sources:
       filter:
         rules: registry/filters/cisa-protective-security.yaml
         distribution: {require: [public-release]}
-        default: review
+        default: allow
     update: {cadence: P3M, strategy: snapshot-retention}
     size: {bytes: 2.5e9, measured: false, as_of: 2026-10-10}
     notes: Score 4.3. Public documents only; the ISC Design-Basis Threat and countermeasure appendices are restricted and excluded.
@@ -884,7 +884,7 @@ sources:
         - {<<: *apd, label: apd-fm, url: "https://armypubs.army.mil/ProductMaps/PubForm/FM.aspx"}
         - {<<: *apd, label: apd-atp, url: "https://armypubs.army.mil/ProductMaps/PubForm/ATP.aspx"}
         - {<<: *apd, label: apd-tc, url: "https://armypubs.army.mil/ProductMaps/PubForm/TC.aspx"}
-      filter: {distribution: {require: [A], read_from: pdf-front-matter}, rules: registry/filters/army-pubs-public.yaml, default: review}
+      filter: {distribution: {require: [A], read_from: pdf-front-matter}, rules: registry/filters/army-pubs-public.yaml, default: allow}
     update: {cadence: P3M, strategy: snapshot-retention}
     size: {bytes: 30e9, measured: false, as_of: 2026-10-10}
     notes: Score 4.3. The index has no distribution column, so the gate reads the PDF front matter (ADP 1 PDF measured at 8.2 MB). Series allow-list (planning, leadership, sustainment, engineering, medical, physical security, land navigation) and deny-list (fires, targeting, munitions, weapons, demolitions) per research doc §3.3 and §5.2; everything else goes to owner review. The rules file is created with the adapter.
@@ -903,7 +903,7 @@ sources:
       key_prefix: jcs
       origins: [www.jcs.mil]
       discovery: []
-      filter: {distribution: {require: [A]}, rules: registry/filters/joint-publications.yaml, default: review}
+      filter: {distribution: {require: [A]}, rules: registry/filters/joint-publications.yaml, default: allow}
       mirrors:
         - {channel: "www.jcs.mil Joint Electronic Library", status: blocked, verified: 2026-10-10, note: "403 to a plain client (WAF); JEL+ needs a CAC"}
         - {channel: "GovInfo GOVPUB, SuDoc D 5 (Joint Chiefs)", status: unverified, verified: 2026-10-10, note: "DEMO_KEY quota exhausted before this class could be counted; check with a key: api.govinfo.gov/collections/GOVPUB + package prefix GOVPUB-D5"}
@@ -926,7 +926,7 @@ sources:
       key_prefix: usmc
       origins: [www.marines.mil]
       discovery: []
-      filter: {distribution: {require: [A]}, allow_series_prefix: ["MCDP "], default: review}
+      filter: {distribution: {require: [A]}, allow_series_prefix: ["MCDP "], default: allow}
       mirrors:
         - {channel: "www.marines.mil MCPEL", status: blocked, verified: 2026-10-10, note: "403 (WAF)"}
         - {channel: "www.usmcu.edu (Marine Corps University)", status: blocked, verified: 2026-10-10, note: "403 (WAF)"}
@@ -966,7 +966,7 @@ sources:
     status: candidate
     license: LicenseRef-per-item
     legal_basis: public-domain
-    access: {adapter: oai-pmh, oai_endpoint: "https://calhoun.nps.edu/server/oai/request", metadata_prefix: dim, filter: {distribution: {require: [A], read_from: dc.rights}, default: review}}
+    access: {adapter: oai-pmh, oai_endpoint: "https://calhoun.nps.edu/server/oai/request", metadata_prefix: dim, filter: {distribution: {require: [A], read_from: dc.rights}, default: allow}}
     update: {cadence: P3M, strategy: base-plus-incremental}
     size: {records: 74327, bytes: 100e9, measured: false, as_of: 2026-10-10}
     notes: Score 3.9. Record count measured (OAI completeListSize). Only items stating "Approved for public release; distribution is unlimited", then the subject filter of research doc §3.3.
@@ -1098,7 +1098,7 @@ sources:
       key_prefix: doe-hdbk
       origins: [www.osti.gov]
       discovery: [{kind: api, flavor: osti, query: "", params: {title: "\"DOE fundamentals handbook\""}}]
-      filter: {allow_series_prefix: ["DOE-HDBK-101"], builtin_review: false, default: review, distribution: {require: [public-release]}}
+      filter: {allow_series_prefix: ["DOE-HDBK-101"], builtin_review: false, default: allow, distribution: {require: [public-release]}}
       mirrors:
         - {channel: "OSTI.GOV records API + purl full text (official DOE)", status: verified, verified: 2026-10-10, note: "the old standards.doe.gov URLs redirect to energy.gov pages that now 404; OSTI holds the handbooks"}
     update: {cadence: P1Y, strategy: snapshot-retention}

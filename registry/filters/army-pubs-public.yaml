@@ -32,57 +32,22 @@ allow_series_prefix:
   - "TC 4-02"     # medical training circulars
   - "TC 7-"       # training management
 deny_series_prefix:
-  - "FM 3-09"     # fires
-  - "ATP 3-09"
-  - "TC 3-09"
-  - "ATP 3-60"    # targeting
-  - "FM 3-60"
+  # Narrow content core only (owner decision 2026-10-11: public material is in scope unless it is
+  # weapons/munitions technical data, weapons employment or gunnery, explosives, or targeting).
   - "TM 9-"       # weapons and munitions technical manuals
   - "TM 43-"
-  - "ATP 3-11."   # CBRN operations (defense medical guidance comes from CHEMM/REMM instead)
-  - "ATP 3-34.210" # explosive hazards
-  - "ATP 3-34.20"  # countering explosive hazards
+  - "ATP 3-60"    # targeting
+  - "FM 3-60"
   - "TC 3-22."    # weapons and marksmanship
   - "TC 3-23."    # weapons, demolitions
-  - "TC 3-20."    # gunnery
-  - "ATP 3-20."   # armored formations
+  - "TC 3-20."    # gunnery (tank, Bradley, Stryker)
   - "FM 3-22"     # weapons qualification
-  - "ATP 3-01."   # air and missile defense employment
-  - "FM 3-01"
-  - "ATP 3-04.1"  # aviation tactical employment
-  - "ATP 3-18."   # special forces
-  - "ATP 3-05."   # special operations
-  - "FM 3-05"
-  - "ATP 3-12."   # cyberspace and electromagnetic warfare
-  - "FM 3-12"
-  - "ATP 3-13."   # information operations
-  - "FM 3-13"
-  - "ATP 3-21."   # infantry tactics
-  - "ATP 3-90."   # offense and defense tactics
-  - "FM 3-90"
-  - "ATP 3-96."   # brigade combat team
-  - "FM 3-96"
 deny_keywords:
   - demolition
-  - explosive ordnance
-  - weapon system
-  - weapons system
   - gunnery
-  - mortar
-  - artillery
   - sniper
-  - fire support
   - sabotage
-review_keywords:
-  - electronic warfare
-  - surveillance
-  - cyberspace operations
-  - information operations
-  - reconnaissance
-  - security cooperation
-neutral_phrases:
-  - surveillance detection
-  - field hygiene
+review_keywords: []
 allow_documents:  # owner review 2026-10-11 (Army publications review page): every offered title included
   - "ATP 1-0.1"
   - "ATP 1-02.1"
@@ -373,36 +338,23 @@ allow_documents:  # owner review 2026-10-11 (Army publications review page): eve
   - "TC 9-72"
   - "TC 90-1"
   - "TC 90-5"
-deny_documents:  # content boundary: weapons, munitions, explosives, mines/IED, targeting (not offered for review)
+deny_documents:  # content core: targeting, weapons/weapon-system employment, gunnery, munitions data, mines, demolitions
   - "ATP 2-01.4"
   - "ATP 3-22.40"
-  - "ATP 3-37.11"
   - "ATP 3-55.6"
-  - "ATP 4-35.1"
   - "TC 19-220"
-  - "TC 2-91.5"
-  - "TC 2-91.5A"
   - "TC 20-32-3"
   - "TC 20-32-4"
   - "TC 20-32-5"
-  - "TC 3-11.20"
   - "TC 3-19.5"
-  - "TC 3-34.14"
   - "TC 3-34.85"
-  - "TC 3-90.37"
   - "TC 4-11.46"
   - "TC 4-11.47"
   - "TC 44-117-11"
   - "TC 44-117-21"
-  - "TC 44-635-11"
-  - "TC 44-635-12"
   - "TC 44-635-13"
   - "TC 44-635-14"
   - "TC 44-635-15"
-  - "TC 44-646-15"
   - "TC 44-693-10"
   - "TC 44-693-11"
-  - "TC 7-21.10"
-  - "TC 9-10"
-  - "TC 9-21-01"
   - "TC 9-9"

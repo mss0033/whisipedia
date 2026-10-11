@@ -1,16 +1,9 @@
-# Document-level rules for joint-publications (research doc §3.3, §4.8). Deny-first; default review.
+# Document-level rules for joint-publications (research doc §3.3, §4.8). Deny-first; default allow (owner decision 2026-10-11).
 allow_series: ["JP 1", "JP 1-0", "JP 3-0", "JP 3-28", "JP 3-29", "JP 3-41", "JP 4-0", "JP 4-02", "JP 5-0"]
 allow_series_prefix: ["JP 1-", "JP 4-", "JP 5-"]
 deny_series_prefix:
+  # Narrow content core only (owner decision 2026-10-11): public doctrine is in scope except targeting.
   - "JP 3-60"   # joint targeting
-  - "JP 3-09"   # joint fire support
-  - "JP 3-01"   # countering air and missile threats
-  - "JP 3-03"   # joint interdiction
-  - "JP 3-12"   # cyberspace operations
-  - "JP 3-13"   # information operations
-  - "JP 3-85"   # electromagnetic spectrum operations
-  - "JP 3-05"   # special operations
-  - "JP 3-40"   # countering WMD
-review_keywords: [electronic warfare, information, cyberspace, special operations]
+review_keywords: []
 allow_documents: []
 deny_documents: []

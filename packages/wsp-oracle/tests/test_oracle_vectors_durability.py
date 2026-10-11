@@ -44,7 +44,9 @@ def test_codes_are_centered_on_the_stored_mean(tmp_path: Path) -> None:
     assert raw_constant >= 0
     ro = ChunkVectorStore(tmp_path / "v", DIMS, mode="view")
     assert ro.format == "2"
-    assert ro.search(m[5].tolist(), limit=1)[0][0] == "5"
+    # limit=10: 40 binary candidates; at limit=1 the approximate graph (multithreaded, nondeterministic
+    # build) offers only 4 and can miss the exact match under load, which is not what this test is about
+    assert ro.search(m[5].tolist(), limit=10)[0][0] == "5"
     ro.close()
 
 

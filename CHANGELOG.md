@@ -3,6 +3,24 @@
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Changed: document collections admit all public material outside a narrow content core (owner decision 2026-10-11)
+* Still excluded: classified or restricted documents; explosives and demolitions; weapons and munitions
+  technical data; weapons employment and gunnery; targeting and fire control; weapon-system crew drills;
+  CBRN weapons production; offensive cyber tooling.
+* `Rules.builtin_review` now defaults to off, so a document is no longer held just for mentioning
+  "chemical" or "combat". A source can opt back in.
+* `SAFETY_DENY` is narrowed: "munitions", "small arms", "mine warfare", "fire support", "field
+  artillery", "joint fires" and "close air support" are replaced by munitions manufacture and
+  effectiveness, mine laying and gunnery.
+* Registry: FEMA (x2), OSTI, DOE, CISA, Army, Joint Publications, MCDP and Calhoun now default to allow
+  instead of review. WHO IRIS drops its review keywords.
+* The Army filter keeps only the weapons, gunnery and targeting series and 19 core titles. The Joint
+  Publications filter denies only JP 3-60 (targeting).
+
+### Fixed
+* Vector search scans exactly once the candidate set covers the whole store. Before, a filtered search
+  over many near-ties could miss matches in the approximate graph (an intermittent test failure).
+
 ### Fixed: backend audit 2026-10-11 (docs/audits/2026-10-11/)
 - **Orchestrator.**
   - Heavy steps (refine, index, profile) run in capped child units, one at a time machine-wide (`HEAVY`/`INDEX` locks).

@@ -542,7 +542,9 @@ class ChunkVectorStore:
     def _rescored(
         self, q: F32, code: npt.NDArray[np.uint8], count: int, limit: int, allow: Callable[[str], bool] | None
     ) -> list[tuple[str, float]]:
-        matches: Any = self._index.search(code, count)
+        # Once the candidate set covers the whole store (a filter widened it, or the store is small), scan
+        # exactly: an approximate graph over many near-ties can miss nodes even at k == len(self).
+        matches: Any = self._index.search(code, count, exact=count >= len(self))
         keys = np.sort(np.asarray(matches.keys, dtype=np.int64))  # file order: fewer, closer page reads
         if keys.size == 0:
             return []

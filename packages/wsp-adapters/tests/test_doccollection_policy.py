@@ -25,7 +25,7 @@ from wsp_adapters.doccollection.policy import (
 from wsp_core.banners import HISTORICAL_BANNER
 
 REPO = Path(__file__).resolve().parents[3]
-APD = load_rules({"rules": "registry/filters/army-pubs-public.yaml", "default": "review"}, repo_root=REPO)
+APD = load_rules({"rules": "registry/filters/army-pubs-public.yaml", "default": "allow"}, repo_root=REPO)
 
 
 def decide(pub: str, title: str, rules: Rules = APD) -> str:
@@ -38,16 +38,21 @@ def decide(pub: str, title: str, rules: Rules = APD) -> str:
         ("FM 5-0", "Planning and Orders Production", "allow:series=FM 5-0"),
         ("ADP 6-22", "Army Leadership and the Profession", "allow:series=ADP"),
         ("TC 4-02.1", "First Aid", "allow:series=TC 4-02.1"),
-        ("FM 3-09", "Fire Support and Field Artillery Operations", "deny:safety=fire support"),
-        ("ATP 3-09.32", "Multi-Service TTP for Joint Application of Firepower", "deny:deny-series=ATP 3-09"),
+        (
+            "FM 3-09",
+            "Fire Support and Field Artillery Operations",
+            "allow:default",
+        ),  # doctrine, not targeting
+        ("TC 3-20.31", "Training and Qualification, Crew", "deny:deny-series=TC 3-20."),
         ("TC 3-22.9", "Rifle and Carbine", "deny:deny-series=TC 3-22."),
         ("ATP 3-60", "Targeting", "deny:deny-series=ATP 3-60"),
         ("", "Joint Targeting Process", "deny:safety=joint targeting"),
         ("FM 3-01.13", "(U) Air Defense Planning Data (S/Nf)", "deny:marking=classified-portion"),
         ("ATP 3-34.4", "Engineer Reference", "allow:series=ATP 3-34.4"),
-        ("ATP 9-99", "Unheard-Of Series", "review:default"),
+        ("ATP 9-99", "Unheard-Of Series", "allow:default"),
+        ("", "Fire Direction Center Procedures", "deny:safety=fire direction"),
         ("FM 6-27", "Commander's Handbook on the Law of Land Warfare", "allow:series=FM 6-27"),
-        ("ATP 4-02.2", "Medical Evacuation in a Chemical Environment", "review:keyword=chemical"),
+        ("ATP 4-02.2", "Medical Evacuation in a Chemical Environment", "allow:series=ATP 4-02"),
     ],
 )
 def test_army_series_rules(pub: str, title: str, expected: str) -> None:
@@ -67,7 +72,10 @@ def test_neutral_phrases_keep_defensive_documents_out_of_review() -> None:
     assert decide("", "Bomb Threat Guidance", rules) == "allow:collection=allow-all"
     assert decide("", "Radiological Emergency Medical Management", rules) == "allow:collection=allow-all"
     assert decide("", "Weaponization of Biological Agents", rules) == "deny:safety=weaponization"
-    assert decide("", "Improvised Explosive Device Awareness", rules) == "review:keyword=improvised explosive"
+    # The noun-level review list is off by default (owner decision 2026-10-11); a source may opt in.
+    assert decide("", "Improvised Explosive Device Awareness", rules) == "allow:collection=allow-all"
+    opted = Rules(allow_all=True, builtin_review=True)
+    assert decide("", "Improvised Explosive Device Awareness", opted) == "review:keyword=improvised explosive"
 
 
 def test_restricted_rights_field_is_denied_before_fetch() -> None:
@@ -149,10 +157,10 @@ def test_content_screen() -> None:
         is Verdict.ALLOW
     )
     assert classify_content("SNIPER TRAINING\nContents", rules).verdict is Verdict.DENY
-    body = "x" * 4000 + "\nAppendix: joint targeting\nAnnex: fire support\nAnnex: munitions"
-    assert classify_content(body, rules).rule == "safety=joint targeting+fire support+munitions"
+    body = "x" * 4000 + "\nAppendix: joint targeting\nAnnex: fire control\nAnnex: gunnery"
+    assert classify_content(body, rules).rule == "safety=joint targeting+fire control+gunnery"
     one = "x" * 4000 + "\nAppendix: munitions handling safety"
-    assert classify_content(one, rules).verdict is Verdict.REVIEW
+    assert classify_content(one, rules).verdict is Verdict.ALLOW  # handling safety is not munitions data
 
 
 def test_currency_superseded_chain_and_historical_rules() -> None:

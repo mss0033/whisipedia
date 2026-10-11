@@ -96,14 +96,20 @@ SAFETY_DENY: tuple[str, ...] = (
     "firearms manufacture",
     "gunsmithing",
     "ammunition reloading",
-    "munitions",
+    "munitions manufacture",
+    "manufacture of munitions",
+    "munitions effectiveness",
+    "munition effectiveness",
     "demolitions",
     "booby traps",
-    "mine warfare",
-    "small arms",
+    "mine laying",
+    "minelaying",
+    "mine emplacement",
+    "emplacing mines",
     "marksmanship",
     "sniper",
     "sniping",
+    "gunnery",
     # weapons guidance, targeting, fire control, effects for planning attacks
     "military targeting",
     "joint targeting",
@@ -114,11 +120,7 @@ SAFETY_DENY: tuple[str, ...] = (
     "target acquisition",
     "weaponeering",
     "fire control",
-    "fire support",
     "fire direction",
-    "joint fires",
-    "field artillery",
-    "close air support",
     "missile guidance",
     "weapons guidance",
     "kill chain",
@@ -360,9 +362,11 @@ class Rules:
     default: Verdict = Verdict.REVIEW
     require: tuple[str, ...] = ()  # distribution requirement: "A", "public-release", "license:<SPDX>"
     declassified_ok: bool = False  # FOIA/declassified sets: classification banners with a release stamp
-    # Built-in noun-level review list (SAFETY_REVIEW). Only official-history collections (CIA reading
-    # room, FRUS) turn it off; the built-in deny list and the front-matter screens always apply.
-    builtin_review: bool = True
+    # Built-in noun-level review list (SAFETY_REVIEW): off by default (owner decision 2026-10-11:
+    # publicly released material is in scope unless it falls in the narrow deny core above, so a
+    # document is never held just for mentioning "chemical" or "combat"). A source may opt in.
+    # The built-in deny list and the front-matter screens always apply.
+    builtin_review: bool = False
     safety: bool = True  # built-in §13 lists; never disabled in the registry (tests only)
     # A fetched file with no text to screen (a scanned PDF without a text layer) is held for review
     # unless the source is known to publish image-only scans and says so here. Unsupported formats
