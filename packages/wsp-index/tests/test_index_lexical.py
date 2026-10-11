@@ -209,8 +209,12 @@ def test_incremental_refresh_with_tombstones(tmp_path: Path) -> None:
 
 
 def test_stopwords_do_not_outrank_content_words(index: TantivyIndex) -> None:
+    # Function words reach BM25 (wsp_index.text.drop_stopwords); IDF discounts them in any corpus
+    # where they are common, which the filler pages make this one.
+    filler = [doc("s", f"f{i}", f"Page {i}", f"how do people work on topic {i}") for i in range(40)]
     index.upsert(
         [
+            *filler,
             doc("s", "how", "How Doctors Think", "how how how doctors think about how things work"),
             doc("s", "vax", "Vaccine", "a vaccine trains the immune system to recognise a pathogen"),
         ]

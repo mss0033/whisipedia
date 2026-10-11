@@ -23,7 +23,7 @@ from wsp_core.ports import Embedder, LexicalIndex, Reranker
 from wsp_index import FusionConfig, HybridSearcher
 from wsp_oracle.embedder import encode_queries
 from wsp_oracle.reranker import plain
-from wsp_oracle.router import Intent, Route, Router, content_terms
+from wsp_oracle.router import Intent, Route, Router
 from wsp_oracle.vectors import DocVectorIndex
 
 log = logging.getLogger("wsp_oracle")
@@ -164,14 +164,17 @@ class OracleSearcher:
         return pins
 
     def _boost(self, route: Route, fused: list[SearchHit]) -> list[SearchHit]:
-        if not route.prefer:
+        """Soft priors: hits from preferred sources (a site named without an identifier, dictionaries
+        for "define", maps for "where is") score ``PREFER_BOOST`` times higher."""
+        if not route.prefer and not route.prefer_sources:
             return fused
-        boosted = [
-            replace(h, score=h.score * PREFER_BOOST)
-            if any(p in (h.source_id or source_of(h.doc_id)) for p in route.prefer)
-            else h
-            for h in fused
-        ]
+        exact = frozenset(route.prefer_sources)
+
+        def preferred(h: SearchHit) -> bool:
+            src = h.source_id or source_of(h.doc_id)
+            return src in exact or any(p in src for p in route.prefer)
+
+        boosted = [replace(h, score=h.score * PREFER_BOOST) if preferred(h) else h for h in fused]
         return sorted(boosted, key=lambda h: -h.score)
 
     def _passages(self, hits: Sequence[SearchHit], best_chunk: Mapping[str, str]) -> dict[str, str]:
@@ -197,22 +200,23 @@ class OracleSearcher:
         return bool(self.lexical.search(query, limit=1, sources=sources))
 
     def scoped(self, query: str, sources: Sequence[str] | None) -> tuple[Route, Scope | None]:
-        """The route and, for a query naming a site, where to search.
+        """The route and, for a query naming a site and an identifier, where to search.
 
-        An explicit ``sources`` filter always wins. A named site with nothing for the query (not
-        indexed, or no match there) falls back to the whole library with the full query text, so
-        ``rfc 9110`` still finds pages about RFC 9110 when the RFC site is missing.
+        Only ``<site> <identifier>`` (``rfc 9110``) scopes; a site named with other words is a soft
+        prior (``Route.prefer_sources``). An explicit ``sources`` filter always wins. A named site
+        with nothing for the query (not indexed, or no match there) falls back to the whole library
+        with the full query text, so ``rfc 9110`` still finds pages about RFC 9110 when the RFC
+        site is missing.
         """
         route = self.router.route(query)
-        if not route.site or sources is not None:
+        if not route.site or not route.scoped or sources is not None:
             return route, None
         named = self.router.sources_for(route.site)
         if not named:
             return route, None
         if (route.lexical or route.dense) and self._any_hit(route.lexical or route.dense, named):
             return route, Scope(route.site, tuple(named))
-        whole = " ".join(content_terms(route.query)) or route.query
-        return replace(route, lexical=whole, dense=route.query), Scope(route.site, tuple(named), True)
+        return replace(route, lexical=route.query, dense=route.query), Scope(route.site, tuple(named), True)
 
     # --- the pipeline --------------------------------------------------------------------------
 

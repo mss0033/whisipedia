@@ -34,6 +34,34 @@ FALLBACK_LANG = "any"
 """Pseudo-language for documents whose language has no configured analyzer."""
 
 MAX_TOKEN_LEN = 40
+"""Longest indexed token, in characters (longer runs are identifiers, hashes and markup debris)."""
+
+ANALYZER_VERSION = 2
+"""Version of :func:`build_analyzer`'s token stream. 1: Tantivy's ``simple`` tokenizer with a
+40-*byte* limit (split Devanagari at the virama, kept CJK clauses as one token, dropped Cyrillic words
+over 20 letters). 2: :data:`TOKEN_PATTERN` for the fallback and Tamil, and a 40-*character* limit.
+Queries are analyzed with the current version, so an index built with another one must be rebuilt
+from the Refinery (remove ``<index>/lexical`` and run ``wsp index build``); the lexical index should
+record this number in its schema signature so a mismatch is refused instead of silently missing."""
+
+_NO_SPACE_SCRIPTS = r"\p{Han}\p{Hiragana}\p{Katakana}\p{Thai}\p{Lao}\p{Khmer}\p{Myanmar}\p{Tibetan}"
+TOKEN_PATTERN = rf"[{_NO_SPACE_SCRIPTS}]|[[\p{{Alphabetic}}\p{{N}}\p{{M}}]--[{_NO_SPACE_SCRIPTS}]]+"
+"""Tokens of the fallback analyzer: one character of a script written without spaces (Chinese,
+Japanese, Thai, ...), else a run of letters, digits and combining marks. Marks keep Devanagari,
+Bengali, Tamil, ... words whole (``नमस्ते`` was two tokens); CJK text becomes one token per character,
+and a multi-character query word becomes a phrase of them, i.e. an exact substring match (an n-gram
+tokenizer cannot be limited to CJK runs in Tantivy's API, and per-character postings need no
+dictionary). Tantivy's regex tokenizer is ~3x slower than ``simple`` (11-13 against 34-41 M chars/s
+on Wikipedia text), so languages written with spaces and without virama-style marks keep
+``simple`` (:data:`SIMPLE_TOKENIZER_LANGS`)."""
+
+SIMPLE_TOKENIZER_LANGS = frozenset(STEMMERS) - {"ta"}
+"""Languages whose words ``simple`` already keeps whole (Latin, Cyrillic, Greek and Arabic scripts)."""
+
+# UTF-8 bytes per character of each language's script (Tantivy's remove_long counts bytes).
+_SCRIPT_BYTES: dict[str, int] = {"ta": 3}
+_DEFAULT_SCRIPT_BYTES = 2  # Latin with diacritics, Cyrillic, Greek, Arabic, Hebrew
+_FALLBACK_SCRIPT_BYTES = 3  # any script of the Basic Multilingual Plane (Devanagari, Thai, Hangul)
 
 _WS = re.compile(r"\s+")
 
@@ -44,15 +72,29 @@ def primary_lang(lang: str) -> str:
     return code or FALLBACK_LANG
 
 
+def max_token_bytes(lang: str) -> int:
+    """Tantivy's byte limit that keeps tokens of up to :data:`MAX_TOKEN_LEN` characters of ``lang``
+    (``remove_long`` keeps tokens *shorter* than its limit, in bytes)."""
+    per_char = _SCRIPT_BYTES.get(lang, _DEFAULT_SCRIPT_BYTES) if lang in STEMMERS else _FALLBACK_SCRIPT_BYTES
+    return MAX_TOKEN_LEN * per_char + 1
+
+
 def build_analyzer(lang: str) -> tantivy.TextAnalyzer:
-    """Analyzer for ``lang``: simple tokenizer, lowercase, Snowball stemming if supported, ASCII folding.
+    """Analyzer for ``lang``: tokenizer (``simple`` or :data:`TOKEN_PATTERN`), a length limit of
+    :data:`MAX_TOKEN_LEN` characters, lowercase, Snowball stemming if supported, ASCII folding
+    (version :data:`ANALYZER_VERSION`).
 
     Stemming runs on the accented form (the Snowball rules expect it); folding afterwards makes
     ``café``/``cafe`` match. The same analyzer is applied to queries, so both sides agree.
     """
+    tokenizer = (
+        tantivy.Tokenizer.simple()
+        if lang in SIMPLE_TOKENIZER_LANGS
+        else tantivy.Tokenizer.regex(TOKEN_PATTERN)
+    )
     builder = (
-        tantivy.TextAnalyzerBuilder(tantivy.Tokenizer.simple())
-        .filter(tantivy.Filter.remove_long(MAX_TOKEN_LEN))
+        tantivy.TextAnalyzerBuilder(tokenizer)
+        .filter(tantivy.Filter.remove_long(max_token_bytes(lang)))
         .filter(tantivy.Filter.lowercase())
     )
     stemmer = STEMMERS.get(lang)
@@ -89,80 +131,33 @@ def sanitize_query(query: str) -> str:
     return " ".join(w for w in words if w)
 
 
-# Function words that dominate BM25 for natural-language questions ("how do vaccines work") without
-# telling documents apart. Dropped only when real terms remain and the query has no quoted phrase.
-STOPWORDS_EN = frozenset(
-    [
-        "a",
-        "an",
-        "and",
-        "are",
-        "as",
-        "at",
-        "be",
-        "but",
-        "by",
-        "can",
-        "could",
-        "did",
-        "do",
-        "does",
-        "for",
-        "from",
-        "had",
-        "has",
-        "have",
-        "how",
-        "i",
-        "if",
-        "in",
-        "into",
-        "is",
-        "it",
-        "its",
-        "me",
-        "my",
-        "of",
-        "on",
-        "or",
-        "our",
-        "should",
-        "so",
-        "than",
-        "that",
-        "the",
-        "their",
-        "them",
-        "then",
-        "there",
-        "these",
-        "they",
-        "this",
-        "those",
-        "to",
-        "was",
-        "we",
-        "were",
-        "what",
-        "when",
-        "where",
-        "which",
-        "who",
-        "whom",
-        "whose",
-        "why",
-        "will",
-        "with",
-        "would",
-        "you",
-        "your",
-    ]
+def _words(text: str) -> frozenset[str]:
+    return frozenset(text.split())
+
+
+# English function words, for callers that ask for them: the lexical index keeps them (drop_stopwords).
+STOPWORDS_EN = _words(
+    """
+        a an and are as at be but by can could did do does for from had has have how i if in into is
+        it its me my of on or our should so than that the their them then there these they this
+        those to was we were what when where which who whom whose why will with would you your
+        """
 )
 
 
-def drop_stopwords(query: str, stopwords: frozenset[str] = STOPWORDS_EN) -> str:
-    """Remove stopwords from a sanitized query, keeping it unchanged if nothing else would remain."""
-    if '"' in query:
+def drop_stopwords(query: str, stopwords: frozenset[str] | None = None) -> str:
+    """The query for BM25; function words are only removed when ``stopwords`` is given.
+
+    Default: every word is kept. Dropping English function words broke titles and phrases ("Doctor
+    Who" -> "Doctor", "To Be or Not to Be" -> "Not", "history of the internet"), and IDF already
+    discounts them. On 40 title and question queries over 0.95M English Wikipedia articles
+    (2026-10-11) keeping them raised MRR@10 from 0.483 to 0.761 and success@1 from 0.400 to 0.650
+    (the cost: 13 -> 23 ms per snippet-free query at that size; see the rank-oracle audit).
+
+    With ``stopwords``: those words are removed unless the query has a quoted phrase or nothing else
+    would remain.
+    """
+    if stopwords is None or '"' in query:
         return query
     words = query.split()
     kept = [w for w in words if w.casefold() not in stopwords]

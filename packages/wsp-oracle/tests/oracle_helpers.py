@@ -79,7 +79,7 @@ CORPUS: tuple[DocRecord, ...] = (
         "rfc",
         "9111",
         "HTTP Caching",
-        "This document defines HTTP caches and the header fields that control them.",
+        "RFC 9111 defines HTTP caches and the header fields that control them.",
     ),
 )
 
