@@ -703,7 +703,20 @@ def _segments(indeg: I32, chunk: int, window: int = 1 << 20) -> list[_Segment]:
     return out
 
 
-def _pull(src: I32, indeg: I32, segments: Sequence[_Segment], w: F32, acc: F32) -> None:
+class _EdgeFile:
+    """Chunked reads of a ``<kind>.src`` file with ``pread``: unlike a memory map, the pages read do
+    not stay in the process's resident set (2.5 GB at 632M edges), only in the reclaimable cache."""
+
+    def __init__(self, path: Path, edges: int) -> None:
+        self.path = path
+        self.edges = edges
+
+    def read(self, lo: int, n: int) -> I32:
+        with self.path.open("rb") as fh:
+            return np.fromfile(fh, dtype=np.int32, count=n, offset=4 * lo)
+
+
+def _pull(src: _EdgeFile, indeg: I32, segments: Sequence[_Segment], w: F32, acc: F32) -> None:
     """``acc[t] += sum(w[s] for s -> t)`` over one CSR, chunk by chunk (sums in float64)."""
     for seg in segments:
         if not seg.edges:
@@ -711,7 +724,7 @@ def _pull(src: I32, indeg: I32, segments: Sequence[_Segment], w: F32, acc: F32) 
         deg = indeg[seg.lo : seg.hi]
         nz = np.flatnonzero(deg)
         starts = (np.cumsum(deg, dtype=np.int64) - deg)[nz]
-        vals = w[src[seg.edge_lo : seg.edge_lo + seg.edges]]
+        vals = w[src.read(seg.edge_lo, seg.edges)]
         sums = np.add.reduceat(vals, starts, dtype=np.float64)
         acc[seg.lo + nz] += sums.astype(np.float32)
 
@@ -734,7 +747,11 @@ def pagerank(graph: LinkGraph, config: RankConfig = RankConfig()) -> tuple[F32, 
         return z, z, 0, 0.0, 0.0
     d = np.float32(config.damping)
     single = len(graph.groups) <= 1
-    src = {kind: graph.edge_src(kind) for kind in _KINDS}
+    indeg_sum = {
+        "intra": int(graph.indeg_intra.sum(dtype=np.int64)),
+        "cross": int(graph.indeg_cross.sum(dtype=np.int64)),
+    }
+    src = {kind: _EdgeFile(graph.workdir / f"{kind}.src", indeg_sum[kind]) for kind in _KINDS}
     indeg = {"intra": graph.indeg_intra, "cross": graph.indeg_cross}
     segs = {kind: _segments(indeg[kind], max(1, config.edge_chunk)) for kind in _KINDS}
     groups = graph.node_group

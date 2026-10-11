@@ -7,8 +7,17 @@ small JSON file per source on local disk::
         {"format": 1, "source_id", "generation_id", "doc_count",
          "scheme": "prefix" | "initial" | <provider name>,
          "categories": [{"slug", "name", "count", "docs": [doc ids, alphabetical by title]}],
-         "featured":   [doc ids of well-linked (or, without link data, long) articles],
+         "featured":   [doc ids of well-linked (or, without link data, long) articles of the
+                        default language],
+         "featured_by_lang": {lang: [doc ids, best first]},
          "on_this_day": {"MM-DD": [{"year", "text", "doc_id"}]}}
+
+Featured articles are chosen per language, from the link-analysis rank *within* the language
+(``pr_group`` of :mod:`wsp_index.linkrank`): mixing languages let Cebuano bot stubs, which link to
+each other, fill the start page. Without a rank, inbound links are counted over row groups spread
+evenly over every part, never over the first parts in storage order. A category lists its
+best-ranked documents (alphabetically), and titles are filed under their first letter or digit in
+any script, leading punctuation skipped.
 
 Serving (:class:`RefineryCatalog`) only reads those files (reloaded when they change), the Refinery's
 Parquet footers (for uniform random pages) and the change-feed tail, so every call stays well under
@@ -22,12 +31,14 @@ Library of Congress / LCC trees plug in as further providers (TODO: Phase 5+, th
 from __future__ import annotations
 
 import hashlib
+import heapq
 import json
 import os
 import random
 import re
 import threading
 import time
+import unicodedata
 from bisect import bisect_right
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -44,8 +55,9 @@ import pyarrow.parquet as pq
 from wsp_core.ids import DocId
 from wsp_core.model import Category, ChangeRecord, DayEvent, SourceSpec
 from wsp_core.ports import ChangeFeed
-from wsp_index.linkrank import StaticRank, top_documents
+from wsp_index.linkrank import StaticRank
 from wsp_index.refinery import RefineryReader, current_generation, generation_dir, is_sealed
+from wsp_index.text import primary_lang
 
 pc = cast(Any, _pc)  # pyarrow-stubs type compute kernels too narrowly for column arrays
 
@@ -134,18 +146,39 @@ class PrefixCategories:
         return slugify(head), _prefix_name(head)
 
 
+_SCRIPT_BUCKETS = {"CJK": "Han", "HIRAGANA": "Kana", "KATAKANA": "Kana", "THAI": "Thai", "LAO": "Lao"}
+
+
+def initial_of(title: str) -> tuple[str, str]:
+    """``(slug, display name)`` of a title's directory initial.
+
+    The first letter or digit (leading punctuation skipped), accents folded ("Émile" under E),
+    Hangul by its leading consonant, scripts of thousands of characters (Han, Kana, Thai) as one
+    bucket each, and any other alphabet by its own letter (Cyrillic, Greek, Arabic, Devanagari, ...).
+    """
+    first = next((ch for ch in title.strip() if ch.isalnum()), "")
+    if not first:
+        return "other", "Other"
+    if first.isdigit():
+        return "0-9", "0-9"
+    name = unicodedata.name(first, "")
+    script = name.split(" ", 1)[0] if name else ""
+    if script in _SCRIPT_BUCKETS:
+        label = _SCRIPT_BUCKETS[script]
+        return label.lower(), label
+    base = unicodedata.normalize("NFKD", first)[0].upper()  # accents and Hangul syllables decompose
+    if "A" <= base <= "Z":
+        return base.lower(), base
+    return f"u{ord(base):04x}", base
+
+
 class InitialCategories:
-    """A-Z by title (Yahoo-style index), digits under ``0-9``, everything else under ``Other``."""
+    """A-Z by title (Yahoo-style index) and the initials of other scripts, digits under ``0-9``."""
 
     name = "initial"
 
     def key(self, doc_id: str, native_id: str, title: str) -> tuple[str, str] | None:
-        first = title.strip()[:1].upper()
-        if "A" <= first <= "Z":
-            return first.lower(), first
-        if first.isdigit():
-            return "0-9", "0-9"
-        return "other", "Other"
+        return initial_of(title)
 
 
 # --- build ------------------------------------------------------------------------------------------
@@ -163,22 +196,33 @@ class CatalogConfig:
     max_prefixes: int = 200
 
 
+def _title_key(title: str) -> tuple[int, str]:
+    """Directory order: titles starting with a letter or digit first, leading punctuation ignored."""
+    folded = title.casefold()
+    start = next((i for i, ch in enumerate(folded) if ch.isalnum()), len(folded))
+    return (0 if start == 0 else 1, folded[start:])
+
+
+_Entry3 = tuple[float, tuple[int, str], str]
+
+
 @dataclass
 class _Bucket:
     name: str
     count: int = 0
-    docs: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])  # (title key, doc id)
+    docs: list[_Entry3] = field(default_factory=list[_Entry3])  # (-score, title key, doc id)
 
-    def add(self, title: str, doc_id: str, limit: int) -> None:
+    def add(self, title: str, doc_id: str, limit: int, score: float = 0.0) -> None:
         self.count += 1
-        self.docs.append((title.casefold(), doc_id))
+        self.docs.append((-score, _title_key(title), doc_id))
         if len(self.docs) > 2 * limit:
             self.docs.sort()
             del self.docs[limit:]
 
     def top(self, limit: int) -> list[str]:
+        """The ``limit`` best-ranked documents (by title among equals), listed alphabetically."""
         self.docs.sort()
-        return [d for _, d in self.docs[:limit]]
+        return [d for _, _, d in sorted(self.docs[:limit], key=lambda t: t[1])]
 
 
 class _Grouping:
@@ -190,7 +234,7 @@ class _Grouping:
         self.unkeyed = 0
         self.overflow = False
 
-    def add(self, doc_id: str, native_id: str, title: str) -> None:
+    def add(self, doc_id: str, native_id: str, title: str, score: float = 0.0) -> None:
         if self.overflow:
             return
         found = self.provider.key(doc_id, native_id, title)
@@ -204,7 +248,7 @@ class _Grouping:
                 self.overflow = True
                 return
             bucket = self.buckets[slug] = _Bucket(name)
-        bucket.add(title, doc_id, self.limit)
+        bucket.add(title, doc_id, self.limit, score)
 
     def usable(self, total: int) -> bool:
         if self.overflow or not self.buckets or total == 0:
@@ -247,13 +291,26 @@ def _top_k(values: npt.NDArray[np.int64], k: int) -> npt.NDArray[np.intp]:
     return idx[np.argsort(-values[idx], kind="stable")]
 
 
+def _spread_row_groups(reader: RefineryReader, max_docs: int) -> list[tuple[int, int]]:
+    """``(part, row group)`` pairs holding about ``max_docs`` rows, spread evenly over every part."""
+    groups: list[tuple[int, int, int]] = []
+    for part, path in enumerate(reader.parts):
+        meta = pq.ParquetFile(path).metadata
+        groups.extend((part, rg, meta.row_group(rg).num_rows) for rg in range(meta.num_row_groups))
+    total = sum(n for _, _, n in groups)
+    if total <= max_docs:
+        return [(p, rg) for p, rg, _ in groups]
+    want = max(1, round(len(groups) * max_docs / total))
+    return [(groups[i][0], groups[i][1]) for i in sorted({int(j * len(groups) / want) for j in range(want)})]
+
+
 def _inlink_ranking(reader: RefineryReader, source_id: str, max_docs: int) -> list[tuple[str, int]]:
-    """Inbound links per document of this source (counted over at most ``max_docs`` documents)."""
+    """Inbound links per document of this source, counted over about ``max_docs`` documents from
+    row groups spread evenly over the generation (never its first parts in storage order)."""
     prefix = f"wsp:{source_id}/"
     pending: list[pa.Table] = []
     pending_rows = 0
     acc: pa.Table | None = None
-    seen = 0
 
     def compact() -> None:
         nonlocal acc, pending, pending_rows
@@ -264,9 +321,12 @@ def _inlink_ranking(reader: RefineryReader, source_id: str, max_docs: int) -> li
             acc = agg.rename_columns(["v", "c"])
         pending, pending_rows = [], 0
 
-    for batch in reader.scan(["links"], batch_size=8192):
-        seen += batch.num_rows
-        flat = pc.list_flatten(batch.column(0))
+    open_part: tuple[int, pq.ParquetFile] | None = None
+    for part, rg in _spread_row_groups(reader, max_docs):
+        if open_part is None or open_part[0] != part:
+            open_part = (part, pq.ParquetFile(reader.parts[part]))
+        col = open_part[1].read_row_group(rg, columns=["links"]).column(0)  # pyright: ignore[reportUnknownMemberType]
+        flat = pc.list_flatten(col)
         flat = flat.filter(pc.starts_with(flat, prefix))
         if len(flat):
             vc = pc.value_counts(flat)
@@ -276,8 +336,6 @@ def _inlink_ranking(reader: RefineryReader, source_id: str, max_docs: int) -> li
             pending_rows += len(vc)
             if pending_rows > 4_000_000:
                 compact()
-        if seen >= max_docs:
-            break
     compact()
     if acc is None or acc.num_rows == 0:
         return []
@@ -302,27 +360,69 @@ def _length_ranking(reader: RefineryReader, k: int) -> list[tuple[str, int]]:
     return list(zip(best_ids, (int(x) for x in best_len), strict=True))
 
 
-def _featured(reader: RefineryReader, source_id: str, cfg: CatalogConfig) -> list[str]:
-    ranking: Sequence[tuple[str, float]] = []
-    if cfg.rank is not None:  # PageRank: the best-connected articles of this source
-        ranking = [(d, f) for d, f in top_documents(reader, cfg.rank, cfg.featured_candidates * 4) if f > 0]
+def rank_by_language(reader: RefineryReader, rank: StaticRank, k: int) -> dict[str, list[tuple[str, float]]]:
+    """The ``k`` documents with the highest PageRank *within their language* (the per-group rank of
+    :mod:`wsp_index.linkrank`), per language, best first."""
+    best: dict[str, list[tuple[float, str]]] = {}
+    for batch in reader.scan(["doc_id", "lang"], batch_size=65536):
+        ids = cast(list[str], batch.column(0).to_pylist())
+        langs = cast(list[str], batch.column(1).to_pylist())
+        found = rank.pageranks(ids)
+        if found is None:
+            return {}
+        per_group = np.nan_to_num(found[0], nan=0.0)
+        for i in cast(list[int], np.argsort(-per_group, kind="stable")[: k * 4].tolist()):
+            if per_group[i] <= 0:
+                break
+            heap = best.setdefault(primary_lang(langs[i]), [])
+            item = (float(per_group[i]), ids[i])
+            if len(heap) < k:
+                heapq.heappush(heap, item)
+            elif item > heap[0]:
+                heapq.heapreplace(heap, item)
+    return {lang: [(d, f) for f, d in sorted(heap, reverse=True)] for lang, heap in best.items()}
+
+
+def _featurable(reader: RefineryReader, doc_id: str, cfg: CatalogConfig) -> str | None:
+    """The document's language when it may be featured (long enough, not a list or date page)."""
+    native = doc_id.split("/", 1)[1] if "/" in doc_id else doc_id
+    leaf = native.rsplit("/", 1)[-1]
+    if _NOT_FEATURED.search(leaf) or _DATE_PAGE.match(leaf):
+        return None
+    row = reader.lookup(doc_id, ("text", "lang"))
+    if row is None or len(cast(str, row["text"])) < cfg.min_featured_chars:
+        return None
+    return primary_lang(cast(str, row["lang"]))
+
+
+def _featured(reader: RefineryReader, source_id: str, cfg: CatalogConfig) -> dict[str, list[str]]:
+    """Featured candidates per language, best first."""
+    want = cfg.featured_candidates
+    out: dict[str, list[str]] = {}
+    if cfg.rank is not None:  # PageRank inside each language
+        for lang, ranked in rank_by_language(reader, cfg.rank, want * 4).items():
+            for doc_id, _ in ranked:
+                if _featurable(reader, doc_id, cfg) is not None:
+                    out.setdefault(lang, []).append(doc_id)
+                    if len(out[lang]) >= want:
+                        break
+        if out:
+            return out
+    ranking: Sequence[tuple[str, float]] = _inlink_ranking(reader, source_id, cfg.max_link_docs)
     if not ranking:
-        ranking = _inlink_ranking(reader, source_id, cfg.max_link_docs)
-    if not ranking:
-        ranking = _length_ranking(reader, cfg.featured_candidates * 4)
-    out: list[str] = []
+        ranking = _length_ranking(reader, want * 4)
     for doc_id, _ in ranking:
-        native = doc_id.split("/", 1)[1] if "/" in doc_id else doc_id
-        leaf = native.rsplit("/", 1)[-1]
-        if _NOT_FEATURED.search(leaf) or _DATE_PAGE.match(leaf):
-            continue
-        row = reader.lookup(doc_id, ("text",))
-        if row is None or len(cast(str, row["text"])) < cfg.min_featured_chars:
-            continue
-        out.append(doc_id)
-        if len(out) >= cfg.featured_candidates:
-            break
-    return out
+        lang = _featurable(reader, doc_id, cfg)
+        if lang is not None and len(out.setdefault(lang, [])) < want:
+            out[lang].append(doc_id)
+    return {lang: ids for lang, ids in out.items() if ids}
+
+
+def _default_featured(by_lang: Mapping[str, Sequence[str]], prefer: str = "en") -> list[str]:
+    """The ``featured`` list of format 1 readers: English when present, else the longest list."""
+    if prefer in by_lang:
+        return list(by_lang[prefer])
+    return list(max(by_lang.values(), key=len)) if by_lang else []
 
 
 def _date_key(native_id: str) -> str | None:
@@ -361,10 +461,11 @@ def build_source_catalog(
         ids = cast(list[str], batch.column(0).to_pylist())
         natives = cast(list[str], batch.column(1).to_pylist())
         titles = cast(list[str], batch.column(2).to_pylist())
-        for doc_id, native, title in zip(ids, natives, titles, strict=True):
+        scores = cfg.rank.features(ids).tolist() if cfg.rank is not None else [0.0] * len(ids)
+        for doc_id, native, title, score in zip(ids, natives, titles, scores, strict=True):
             total += 1
             for g in groupings:
-                g.add(doc_id, native, title)
+                g.add(doc_id, native, title, score)
             if cfg.featured:
                 key = _date_key(native)
                 if key is not None:
@@ -376,6 +477,7 @@ def build_source_catalog(
         events = parse_date_page(cast(str, row["text"])) if row else []
         if events:
             on_this_day[key] = [{"year": y, "text": t, "doc_id": doc_id} for y, t in events]
+    by_lang = _featured(reader, source_id, cfg) if cfg.featured else {}
     payload: dict[str, object] = {
         "format": CATALOG_FORMAT,
         "source_id": source_id,
@@ -383,7 +485,8 @@ def build_source_catalog(
         "doc_count": total,
         "scheme": chosen.provider.name if chosen else None,
         "categories": chosen.to_json() if chosen else [],
-        "featured": _featured(reader, source_id, cfg) if cfg.featured else [],
+        "featured": _default_featured(by_lang),
+        "featured_by_lang": by_lang,
         "on_this_day": on_this_day,
     }
     out_root.mkdir(parents=True, exist_ok=True)
@@ -405,7 +508,9 @@ def refresh_featured(
     if payload.get("generation_id") != generation_id:
         return False
     reader = RefineryReader(generation_dir(refinery_root, source_id, generation_id))
-    payload["featured"] = _featured(reader, source_id, cfg)
+    by_lang = _featured(reader, source_id, cfg)
+    payload["featured"] = _default_featured(by_lang)
+    payload["featured_by_lang"] = by_lang
     tmp = path.with_name(path.name + ".partial")
     tmp.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n", encoding="utf-8")
     os.replace(tmp, path)
@@ -604,11 +709,18 @@ class RefineryCatalog:
 
     # --- PortalSource ---
 
-    def featured(self, day: date) -> DocId | None:
+    def featured(self, day: date, *, lang: str | None = None) -> DocId | None:
+        """The day's featured article: from ``lang``'s own candidates where a source has them
+        (``featured_by_lang``), else from each source's default-language list."""
         pool: list[str] = []
         for sid in self.featured_sources or self._known_sources():
             entry = self._entry(sid)
-            if entry is not None:
+            if entry is None:
+                continue
+            by_lang = cast(dict[str, list[str]], entry.data.get("featured_by_lang", {}))
+            if lang is not None and by_lang.get(primary_lang(lang)):
+                pool.extend(by_lang[primary_lang(lang)])
+            else:
                 pool.extend(cast(list[str], entry.data.get("featured", [])))
         if not pool:
             return None
