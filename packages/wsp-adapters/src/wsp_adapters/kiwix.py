@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import hashlib
 import itertools
-import json
 import re
 import tempfile
 import xml.etree.ElementTree as ET
@@ -30,7 +29,6 @@ from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
 from urllib.parse import urlencode
 
 from libzim.reader import Archive
@@ -44,7 +42,9 @@ from wsp_adapters._common import (
     default_workers,
     doc_from_row,
     doc_row,
+    earlier_generations,
     fetch_all,
+    holder_of,
     int_option,
     normalize_algorithm,
     parse_checksum_file,
@@ -356,8 +356,8 @@ def bundle_content(generation_dir: Path, *, single_book: bool = False) -> dict[s
     ``plan`` downloads only books the previous generation does not hold, so a bundle generation
     stores the new and changed books and reads the rest from earlier generations. The content set
     is built along the chain of the source's generations (directories with ``upstream/``) up to this
-    one, in release order (:func:`_order_key`): each generation's own files, plus its predecessor's
-    content set for books it does not hold itself.
+    one, in release order (:func:`~wsp_adapters._common.generation_order_key`): each generation's
+    own files, plus its predecessor's content set for books it does not hold itself.
     When a generation id carries the bundle digest (:func:`release_version`), the set must
     reproduce it; books dropped from the bundle since the predecessor (at most
     :data:`MAX_DROPPED_BOOKS`) are found by search. A set that cannot be reproduced raises
@@ -365,36 +365,11 @@ def bundle_content(generation_dir: Path, *, single_book: bool = False) -> dict[s
     A single-book source's content is its newest generation's file (a flavour change replaces the
     book rather than adding one).
     """
-    me = _order_key(generation_dir)
-    chain = sorted(
-        (p for p in generation_dir.parent.iterdir() if p != generation_dir and (p / "upstream").is_dir()),
-        key=_order_key,
-    )
-    chain = [p for p in chain if _order_key(p) < me]
+    chain = earlier_generations(generation_dir)
     content: dict[str, Path] = {}
     for gen in [*chain, generation_dir]:
         content = _next_content(gen, content, single_book=single_book)
     return content
-
-
-_DATE_PREFIX_RE = re.compile(r"^\d{4}-\d{2}[a-z]?")
-
-
-def _order_key(gen: Path) -> tuple[str, str, str]:
-    """Generations in release order: by date, then by when they were sealed, then by id.
-
-    Two bundle releases with the same newest book date differ only in their digest, which says
-    nothing about order; the vault's ``MANIFEST.json`` ``sealed_at`` does.
-    """
-    m = _DATE_PREFIX_RE.match(gen.name)
-    sealed = ""
-    try:
-        doc: object = json.loads((gen / "MANIFEST.json").read_bytes())
-        if isinstance(doc, dict):
-            sealed = str(cast(dict[str, object], doc).get("sealed_at") or "")
-    except (OSError, ValueError):
-        pass
-    return (m.group(0) if m else gen.name, sealed, gen.name)
 
 
 def _next_content(gen: Path, previous: Mapping[str, Path], *, single_book: bool) -> dict[str, Path]:
@@ -421,12 +396,6 @@ def _next_content(gen: Path, previous: Mapping[str, Path], *, single_book: bool)
         f"bundle digest {m.group('digest')} (a carried book is missing from earlier generations, or "
         f"more than {MAX_DROPPED_BOOKS} books were dropped at once)"
     )
-
-
-def _generation_of(path: Path) -> str:
-    """The generation directory a stored file belongs to (``<gen>/upstream/<file>`` or ``<gen>/<file>``)."""
-    parent = path.parent
-    return parent.parent.name if parent.name == "upstream" else parent.name
 
 
 def prefix_books(spec: SourceSpec) -> bool:
@@ -563,7 +532,7 @@ class KiwixOpdsAdapter:
 
     def depends_on(self, ctx: Ctx, generation_dir: Path) -> frozenset[str]:
         """Earlier generations holding ZIMs this generation reads (``GenerationDependencies``)."""
-        holders = {_generation_of(p) for p in self.content(ctx, generation_dir).values()}
+        holders = {holder_of(p) for p in self.content(ctx, generation_dir).values()}
         return frozenset(holders - {generation_dir.name})
 
     def entries(self, ctx: Ctx, generation_dir: Path) -> Iterator[Entry]:

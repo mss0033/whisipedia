@@ -43,11 +43,32 @@ from datetime import UTC, datetime
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
-from wsp_adapters._common import access, fetch_all, plan_missing, str_list, upstream_dir, verify_file
+from wsp_adapters._common import (
+    LAST_MODIFIED_META,
+    access,
+    fetch_all,
+    files_across_generations,
+    head_release,
+    head_version,
+    holder_of,
+    plan_by_head,
+    str_list,
+    upstream_dir,
+    verify_file,
+)
 from wsp_adapters._streams import open_bz2
 from wsp_core.ids import InvalidDocIdError, content_hash, make_doc_id
-from wsp_core.model import DocRecord, FetchPlan, FetchResult, Generation, ReleaseRef, RemoteFile, Verdict
-from wsp_core.ports import Ctx, SupportsHead
+from wsp_core.model import (
+    DocRecord,
+    FetchPlan,
+    FetchResult,
+    Generation,
+    ReleaseRef,
+    RemoteFile,
+    SourceSpec,
+    Verdict,
+)
+from wsp_core.ports import Ctx
 
 log = logging.getLogger(__name__)
 
@@ -222,30 +243,34 @@ class GutenbergAdapter:
         spec = ctx.source
         base = str(access(spec).get("catalog") or FEEDS_URL)
         base = base if base.endswith("/") else base + "/"
-        names = str_list(access(spec).get("files")) or FEED_FILES
-        files: list[RemoteFile] = []
-        newest: datetime | None = None
-        for name in names:
-            size: int | None = None
-            if isinstance(ctx.fetcher, SupportsHead):
-                head = ctx.fetcher.head(base + name)
-                size = head.size
-                if head.last_modified is not None:
-                    newest = max(newest or head.last_modified, head.last_modified)
-            files.append(RemoteFile(url=base + name, name=name, size=size))
-        stamp = newest or datetime.now(UTC)
+        files, meta = head_release(ctx.fetcher, [(base + n, n) for n in self.file_names(spec)])
+        stamps = [datetime.fromisoformat(v) for k, v in meta.items() if k.startswith(LAST_MODIFIED_META)]
+        # Identity from HEAD (name, size, ETag, Last-Modified): the same upstream bytes are the same
+        # version and are not fetched again (audit H3). Today's date only when HEAD says nothing.
+        version = head_version(files, meta) or datetime.now(UTC).strftime("%Y-%m-%d")
         return [
             ReleaseRef(
                 source_id=spec.id,
-                version=stamp.strftime("%Y-%m-%d"),
-                published=newest,
+                version=version,
+                published=max(stamps) if stamps else None,
                 files=tuple(files),
+                meta=meta,
                 format="gutenberg-feeds",
             )
         ]
 
+    @staticmethod
+    def file_names(spec: SourceSpec) -> tuple[str, ...]:
+        return str_list(access(spec).get("files")) or FEED_FILES
+
     def plan(self, ctx: Ctx, have: Generation | None, want: ReleaseRef) -> FetchPlan:
-        return plan_missing(have, want)
+        """Skip feed files the previous generation holds unchanged (no checksums upstream)."""
+        return plan_by_head(have, want)
+
+    def depends_on(self, ctx: Ctx, generation_dir: Path) -> frozenset[str]:
+        """Earlier generations holding feed files this one reads (``GenerationDependencies``)."""
+        files = files_across_generations(generation_dir, self.file_names(ctx.source))
+        return frozenset(holder_of(p) for p in files.values()) - {generation_dir.name}
 
     def fetch(self, ctx: Ctx, plan: FetchPlan) -> Iterable[FetchResult]:
         return fetch_all(ctx, plan)
@@ -255,10 +280,10 @@ class GutenbergAdapter:
 
     def documents(self, ctx: Ctx, generation_dir: Path) -> Iterator[DocRecord]:
         spec = ctx.source
-        up = upstream_dir(generation_dir)
-        books = load_catalog(up / CATALOG) if (up / CATALOG).is_file() else {}
-        if (up / RDF).is_file():
-            add_rdf(books, up / RDF)
+        feeds = files_across_generations(generation_dir, self.file_names(spec))
+        books = load_catalog(feeds[CATALOG]) if CATALOG in feeds else {}
+        if RDF in feeds:
+            add_rdf(books, feeds[RDF])
         zim_source = str(access(spec).get("reading_copy", "gutenberg-zim"))
         zim_paths: dict[int, str] = {}
         zim = reading_copy_zim(generation_dir, zim_source) if zim_source else None
@@ -266,8 +291,8 @@ class GutenbergAdapter:
             zim_paths = zim_book_paths(zim, ctx.workdir / f"{zim_source}-paths.json")
         render = _Renderer(spec.id, spec.license, zim_source, zim_paths)
         done: set[int] = set()
-        if (up / TEXTS).is_file():
-            for number, raw in iter_texts(up / TEXTS):
+        if TEXTS in feeds:
+            for number, raw in iter_texts(feeds[TEXTS]):
                 if number in done:
                     continue
                 done.add(number)

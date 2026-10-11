@@ -142,6 +142,22 @@ def test_books_with_texts_catalog_only_and_reading_copy(generation_dir: Path, tm
     assert (tmp_path / "work" / "gutenberg-zim-paths.json").is_file()
 
 
+def test_unchanged_feed_files_are_read_from_the_earlier_generation(
+    generation_dir: Path, tmp_path: Path
+) -> None:
+    """Audit 2026-10-11 C1/H3: the 11 GB text archive is not fetched again when only the catalog
+    changed; the new generation reads it from the one that holds it, and retention keeps that one."""
+    later = generation_dir.parent / "2026-10-11+0a1b2c3d" / "upstream"
+    later.mkdir(parents=True)
+    (later / "pg_catalog.csv.gz").write_bytes(feeds()["pg_catalog.csv.gz"])
+    ctx = make_ctx(SPEC, FakeFetcher(), tmp_path / "work")
+    adapter = GutenbergAdapter()
+    docs = {d.native_id: d for d in adapter.documents(ctx, later.parent)}
+    assert docs["1"].text.endswith("It was a dark night.")  # from txt-files.tar.zip of 2026-10-10
+    assert adapter.depends_on(ctx, later.parent) == frozenset({"2026-10-10"})
+    assert adapter.depends_on(ctx, generation_dir) == frozenset()
+
+
 def test_helpers() -> None:
     assert strip_boilerplate("no markers") == "no markers"
     summary, alternatives, pages = parse_rdf(rdf(5, "Short."))

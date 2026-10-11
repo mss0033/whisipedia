@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
+import json
 import multiprocessing
 import os
+import re
 from collections import deque
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from concurrent.futures import Future, ProcessPoolExecutor
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
@@ -24,7 +27,7 @@ from wsp_core.model import (
     Verdict,
     VerdictStatus,
 )
-from wsp_core.ports import Ctx
+from wsp_core.ports import Ctx, SupportsHead
 
 # Strongest first. Verification uses the strongest digest upstream published.
 HASH_PREFERENCE = ("sha512", "sha256", "sha1", "md5")
@@ -138,6 +141,144 @@ def plan_missing(have: Generation | None, want: ReleaseRef) -> FetchPlan:
         files=tuple(needed),
         previous_generation=have.generation_id if have is not None else None,
     )
+
+
+# --- generations as a chain (audit 2026-10-11 C1, H3) ----------------------------------------------
+
+_DIGEST_SUFFIX_RE = re.compile(r"^(?P<head>.+)[-+][0-9a-f]{8}$")
+_DATE_ID_RE = re.compile(r"^\d{4}-\d{2}(?:-\d{2})?[a-z]?$")
+
+
+def generation_order_key(gen: Path) -> tuple[str, str, str]:
+    """Generations of one source in release order: by the date their id starts with, then by when
+    the vault sealed them (``MANIFEST.json`` ``sealed_at``), then by id.
+
+    Ids that share a date (two bundle releases of one month, ``2026-08-<digest>``) differ only in a
+    digest, which says nothing about order; the seal time does.
+    """
+    d = _DIGEST_SUFFIX_RE.match(gen.name)
+    head = d.group("head") if d else gen.name
+    date = head if _DATE_ID_RE.match(head) else gen.name
+    sealed = ""
+    try:
+        doc: object = json.loads((gen / "MANIFEST.json").read_bytes())
+        if isinstance(doc, dict):
+            sealed = str(cast(dict[str, object], doc).get("sealed_at") or "")
+    except (OSError, ValueError):
+        pass
+    return (date, sealed, gen.name)
+
+
+def earlier_generations(generation_dir: Path) -> list[Path]:
+    """The source's other generations (directories with ``upstream/``) before this one, oldest first."""
+    me = generation_order_key(generation_dir)
+    others = (p for p in generation_dir.parent.iterdir() if p != generation_dir and (p / "upstream").is_dir())
+    return [p for p in sorted(others, key=generation_order_key) if generation_order_key(p) < me]
+
+
+def holder_of(path: Path) -> str:
+    """The generation a stored file belongs to (``<gen>/upstream/<file>`` or ``<gen>/<file>``)."""
+    parent = path.parent
+    return parent.parent.name if parent.name == "upstream" else parent.name
+
+
+def files_across_generations(generation_dir: Path, names: Iterable[str]) -> dict[str, Path]:
+    """Each named file from this generation, else from the newest earlier generation holding it.
+
+    For sources whose release is a fixed set of file names and whose :func:`plan_by_head` skips
+    files that did not change upstream. A name held nowhere raises
+    :class:`IncompleteGenerationError` (never refine part of a release).
+    """
+    chain = [generation_dir, *reversed(earlier_generations(generation_dir))]  # newest first
+    out: dict[str, Path] = {}
+    missing: list[str] = []
+    for name in names:
+        found = next((p for gen in chain if (p := upstream_dir(gen) / name).is_file()), None)
+        if found is None:
+            missing.append(name)
+        else:
+            out[name] = found
+    if missing:
+        raise IncompleteGenerationError(
+            f"{generation_dir.name}: {', '.join(missing)} not in it or any earlier generation"
+        )
+    return out
+
+
+LAST_MODIFIED_META = "last_modified:"  # ReleaseRef.meta key prefix: ISO Last-Modified per file name
+ETAG_META = "etag:"
+
+
+def head_release(fetcher: object, urls: Sequence[tuple[str, str]]) -> tuple[list[RemoteFile], dict[str, str]]:
+    """``RemoteFile``s for checksum-less ``(url, name)`` pairs plus their HEAD identity as meta.
+
+    ``meta`` holds ``last_modified:<name>`` and ``etag:<name>`` where the server sends them;
+    :func:`head_version` and :func:`plan_by_head` read it.
+    """
+    files: list[RemoteFile] = []
+    meta: dict[str, str] = {}
+    for url, name in urls:
+        size: int | None = None
+        if isinstance(fetcher, SupportsHead):
+            head = fetcher.head(url)
+            size = head.size
+            if head.last_modified is not None:
+                meta[LAST_MODIFIED_META + name] = head.last_modified.astimezone(UTC).isoformat()
+            if head.etag:
+                meta[ETAG_META + name] = head.etag
+        files.append(RemoteFile(url=url, name=name, size=size))
+    return files, meta
+
+
+def head_version(files: Sequence[RemoteFile], meta: Mapping[str, str]) -> str | None:
+    """``<newest Last-Modified date>+<digest of (name, size, ETag, Last-Modified)>``, or ``None``
+    when HEAD told nothing (no size, ETag or Last-Modified for any file).
+
+    The same upstream bytes give the same version, so an unchanged release is not fetched again;
+    any change to any file gives a new one (the date alone missed same-day changes).
+    """
+    rows = [
+        (
+            f.name,
+            str(f.size or ""),
+            meta.get(ETAG_META + f.name, ""),
+            meta.get(LAST_MODIFIED_META + f.name, ""),
+        )
+        for f in files
+    ]
+    if not any(r[1] or r[2] or r[3] for r in rows):
+        return None
+    newest = max((r[3][:10] for r in rows if r[3]), default="undated")
+    digest = hashlib.sha256(json.dumps(sorted(rows)).encode()).hexdigest()[:8]
+    return f"{newest}+{digest}"
+
+
+def plan_by_head(have: Generation | None, want: ReleaseRef) -> FetchPlan:
+    """:func:`plan_missing` for files upstream publishes without checksums.
+
+    A file is skipped when the previous generation holds it with the same size and upstream's
+    ``Last-Modified`` is older than that generation's seal: it has not changed since it was
+    fetched. Everything else (unknown size or date, no previous generation) is fetched. Adapters
+    that use this read their files with :func:`files_across_generations`.
+    """
+    base = plan_missing(have, want)
+    if have is None or have.sealed_at is None:
+        return base
+    held = {a.relpath.name: a.size for a in have.artifacts}
+    sealed = have.sealed_at if have.sealed_at.tzinfo else have.sealed_at.replace(tzinfo=UTC)
+    needed: list[RemoteFile] = []
+    for remote in base.files:
+        stamp = want.meta.get(LAST_MODIFIED_META + remote.name)
+        unchanged = (
+            remote.name in held
+            and remote.size is not None
+            and remote.size == held[remote.name]
+            and stamp is not None
+            and datetime.fromisoformat(stamp) < sealed
+        )
+        if not unchanged:
+            needed.append(remote)
+    return FetchPlan(release=want, files=tuple(needed), previous_generation=base.previous_generation)
 
 
 def fetch_all(ctx: Ctx, plan: FetchPlan) -> Iterator[FetchResult]:
