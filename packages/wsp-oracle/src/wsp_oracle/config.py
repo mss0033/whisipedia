@@ -72,8 +72,8 @@ class RerankerConfig:
     device: str = "auto"
     cpu_fallback: bool = False
     """Without a GPU the reranker is skipped unless this is true (a CPU cross-encoder misses 50 ms)."""
-    top_k: int = 50
-    max_tokens: int = 256
+    top_k: int = 30
+    max_tokens: int = 192
     batch_size: int = 64
 
 
@@ -83,7 +83,7 @@ class VectorConfig:
     """Vector store directory; ``""`` = ``<index.root>/vectors``. Local disk only (ADR-0002)."""
     mode: str = "load"
     """``load`` keeps the binary HNSW graph in RAM (writable); ``view`` memory-maps it read-only."""
-    oversample: int = 8
+    oversample: int = 16
     """Binary candidates per wanted result, rescored with the int8 vectors."""
     connectivity: int = 16
     expansion_add: int = 128
@@ -117,7 +117,7 @@ class OracleConfig:
     """Sources that get dense vectors (PLAN §9.4 priority corpora); the rest are lexical only."""
     rrf_k: int = 60
     lexical_weight: float = 1.0
-    dense_weight: float = 1.0
+    dense_weight: float = 2.0
     depth: int = 50
     source_priors: Mapping[str, float] = field(default_factory=dict[str, float])
     chunk_words: int = 200
@@ -181,14 +181,14 @@ class OracleConfig:
                 model=str(rr.get("model", DEFAULT_RERANK_MODEL)),
                 device=_device(rr.get("device", "auto")),
                 cpu_fallback=bool(rr.get("cpu_fallback", False)),
-                top_k=int(rr.get("top_k", 50)),
-                max_tokens=int(rr.get("max_tokens", 256)),
+                top_k=int(rr.get("top_k", 30)),
+                max_tokens=int(rr.get("max_tokens", 192)),
                 batch_size=int(rr.get("batch_size", 64)),
             )
             vectors = VectorConfig(
                 path=str(vec.get("path", "")),
                 mode=str(vec.get("mode", "load")),
-                oversample=int(vec.get("oversample", 8)),
+                oversample=int(vec.get("oversample", 16)),
                 connectivity=int(vec.get("connectivity", 16)),
                 expansion_add=int(vec.get("expansion_add", 128)),
                 expansion_search=int(vec.get("expansion_search", 96)),
@@ -213,7 +213,7 @@ class OracleConfig:
                 dense_sources=_strs(section.get("dense_sources", ()), "dense_sources"),
                 rrf_k=int(section.get("rrf_k", 60)),
                 lexical_weight=float(section.get("lexical_weight", 1.0)),
-                dense_weight=float(section.get("dense_weight", 1.0)),
+                dense_weight=float(section.get("dense_weight", 2.0)),
                 depth=int(section.get("depth", 50)),
                 source_priors=_floats(section.get("source_priors", {}), "source_priors"),
                 chunk_words=int(section.get("chunk_words", 200)),

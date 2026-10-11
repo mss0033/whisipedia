@@ -3,14 +3,14 @@
 Layout of a store directory (local disk only, ADR-0002)::
 
     meta.sqlite        chunk id <-> integer key, doc id, optional passage text; per-doc content hash
-    hnsw-b1.usearch    usearch HNSW graph over sign bits (hamming), 48 bytes per 384-d vector
+    hnsw-b1.usearch    usearch HNSW graph over sign bits (hamming), dimensions/8 bytes per vector
     int8.bin           int8 vectors, row = key (dimensions bytes per row), memory-mapped
     scale.f32          per-row dequantization scale (float32), memory-mapped
 
 Search: the query's sign bits find ``limit * oversample`` candidates in the binary graph, which are
 rescored exactly against their int8 vectors (dot product with the float query) and cut to ``limit``.
-For 25M chunks of 384 dimensions that is ~1.2 GB of binary codes plus the graph in RAM and ~9.6 GB
-of int8 rows on disk, of which only the candidates' pages are touched per query.
+For 27M passages of 768 dimensions that is ~6.5 GB of codes and graph links (memory-mapped in view
+mode) and ~21 GB of int8 rows on disk, of which only the candidates' pages are touched per query.
 
 Writes are append-only: an updated chunk gets a fresh key and the old key is removed from the graph
 (its int8 row becomes garbage until a rebuild). ``save()`` makes everything durable; a crash between

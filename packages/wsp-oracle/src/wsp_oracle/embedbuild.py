@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import queue
 import sys
 import threading
@@ -255,6 +256,12 @@ def embed_generation(
 # --- CLI ------------------------------------------------------------------------------------------
 
 
+def default_workers() -> int:
+    """Four chunking processes, fewer when ``WSP_MAX_WORKERS`` asks for it (the GPU is the bottleneck)."""
+    cap = os.environ.get("WSP_MAX_WORKERS", "")
+    return min(4, int(cap)) if cap.isdigit() and int(cap) > 0 else 4
+
+
 def _find_config_dir() -> Path:
     here = Path.cwd().resolve()
     for parent in (here, *here.parents):
@@ -282,7 +289,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     ap.add_argument("--limit", type=int, default=None, help="only the first N documents (benchmarks)")
     ap.add_argument("--batch-chunks", type=int, default=4096)
-    ap.add_argument("--workers", type=int, default=6, help="chunking processes (0 = in the producer thread)")
+    ap.add_argument(
+        "--workers",
+        type=int,
+        default=default_workers(),
+        help="chunking processes (0 = in the producer thread; default min(4, WSP_MAX_WORKERS))",
+    )
     ap.add_argument("--device", default="", help="override oracle.embedder.device")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
