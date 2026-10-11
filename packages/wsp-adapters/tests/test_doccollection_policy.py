@@ -78,6 +78,23 @@ def test_neutral_phrases_keep_defensive_documents_out_of_review() -> None:
     assert decide("", "Improvised Explosive Device Awareness", opted) == "review:keyword=improvised explosive"
 
 
+def test_published_by_the_issuer_is_the_release_but_restrictive_markings_still_deny() -> None:
+    need = ("public-release", "published")
+    plain = parse_markings(
+        "Items Prohibited in Federal Facilities\nAn Interagency Security Committee Standard"
+    )
+    assert str(check_distribution(plain, need)) == "allow:marking=published-by-issuer"
+    stamped = parse_markings("Approved for public release; distribution is unlimited.")
+    assert str(check_distribution(stamped, need)) == "allow:marking=public-release"
+    fouo = parse_markings("FOR OFFICIAL USE ONLY\nPlanning and Response to an Active Shooter")
+    assert check_distribution(fouo, need).verdict is Verdict.DENY
+    secret = parse_markings("SECRET\nCable traffic")
+    assert check_distribution(
+        secret, ("declassified", "public-release", "published"), declassified_ok=True
+    ).verdict is (Verdict.DENY)
+    assert check_distribution(plain, ("public-release",)).verdict is Verdict.REVIEW  # without it: held
+
+
 def test_restricted_rights_field_is_denied_before_fetch() -> None:
     rules = Rules(allow_all=True)
     got = classify_metadata(

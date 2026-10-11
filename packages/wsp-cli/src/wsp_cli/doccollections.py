@@ -426,7 +426,7 @@ class CollectionFetcher:
             source=coll, fetcher=self.fetcher, workdir=self.workdir / spec.id, user_agent=self.user_agent
         )
         env = self.adapter.env(ctx, max_pages=max_pages, partition=partition)
-        survey = self.adapter.survey(ctx, max_pages=max_pages, env=env)
+        survey = self.adapter.survey(ctx, max_pages=max_pages, env=env, progress=self._say)
         cfg = self.adapter.config(coll)
         for cand, decision in survey.decisions:
             if decision.verdict is Verdict.REVIEW:

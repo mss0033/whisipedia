@@ -17,6 +17,14 @@ All notable changes are documented here. The format follows [Keep a Changelog](h
 * The Army filter keeps only the weapons, gunnery and targeting series and 19 core titles. The Joint
   Publications filter denies only JP 3-60 (targeting).
 
+### Changed: issuer publication counts as release (owner decision 2026-10-11)
+* New distribution requirement `published`: a document the issuer posted openly is released even when
+  it prints no release line. 17 publisher-hosted sources use it. Restrictive markings still deny
+  first: classified without a release stamp, FOUO/CUI, export control, Distribution B-F. DoD
+  sources keep requiring Distribution A.
+* archive.org batches can be stable hashes of the identifier (`buckets: N`). The CIA reading room uses
+  100. Collection fetches report resolve progress every 500 items.
+
 ### Fixed
 * Vector search scans exactly once the candidate set covers the whole store. Before, a filtered search
   over many near-ties could miss matches in the approximate graph (an intermittent test failure).

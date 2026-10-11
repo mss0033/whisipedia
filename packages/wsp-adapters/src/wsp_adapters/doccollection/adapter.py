@@ -41,7 +41,7 @@ import hashlib
 import json
 import logging
 import re
-from collections.abc import Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -210,8 +210,14 @@ class DocCollectionAdapter:
         max_pages: int | None = None,
         resolve_limit: int | None = None,
         env: DiscoverEnv | None = None,
+        progress: Callable[[str], None] | None = None,
+        progress_every: int = 500,
     ) -> Survey:
-        """Discover, classify (metadata stage) and resolve allowed candidates to document URLs."""
+        """Discover, classify (metadata stage) and resolve allowed candidates to document URLs.
+
+        ``progress`` hears a line every ``progress_every`` resolved candidates: resolving is one request
+        per item at the source's polite rate, so a large partition is silent for hours without it.
+        """
         cfg = self.config(ctx.source)
         env = env or self.env(ctx, max_pages=max_pages)
         out = Survey(ctx.source.id)
@@ -236,6 +242,8 @@ class DocCollectionAdapter:
                 out.unresolved += 1
                 continue
             resolved += 1 if cand.resolve else 0
+            if progress is not None and cand.resolve and resolved % progress_every == 0:
+                progress(f"{ctx.source.id}: {resolved:,} resolved, {len(out.decisions):,} listed so far")
             out.allowed.extend(d for d in docs if origin_ok(d.url, cfg.origins) or d.resolve == "git")
         out.totals = dict(env.totals)
         out.scale = max(env.scale.values(), default=1.0)

@@ -682,6 +682,12 @@ def check_distribution(
     ``public-release`` an "approved for public release" statement, ``PD`` a public-domain
     statement, ``license:<SPDX>`` that licence named, ``declassified`` a release stamp. A
     requirement that is not met holds the document for review; nothing is allowed on trust.
+
+    ``published`` is the registry's explicit statement that the issuer posted the document openly (its
+    public site, or a verified one-to-one mirror of its release), which is the release: no printed
+    statement is needed (owner decision 2026-10-11; agency web PDFs rarely print one). Listed after the
+    marking requirements, so a printed statement still names the decision. The restrictive screens
+    above apply first either way.
     """
     st = Stage.DISTRIBUTION
     if marking.export_control:
@@ -704,6 +710,8 @@ def check_distribution(
             return Decision(Verdict.ALLOW, f"marking={req}", st)
         if req == "declassified" and marking.released:
             return Decision(Verdict.ALLOW, "marking=declassified", st)
+        if req == "published":
+            return Decision(Verdict.ALLOW, "marking=published-by-issuer", st)
     return Decision(Verdict.REVIEW, f"marking=missing-{'|'.join(require)}", st)
 
 

@@ -368,7 +368,7 @@ sources:
       key_prefix: nga
       origins: [msi.nga.mil]
       discovery: [{kind: api, flavor: nga-msi, url: "https://msi.nga.mil/api/publications/stored-pubs?output=json"}]
-      filter: {allow_all: true, distribution: {require: [public-release]}}
+      filter: {allow_all: true, distribution: {require: [public-release, published]}}
       mirrors:
         - {channel: "msi.nga.mil publications API (official): stored-pubs listing + /api/publications/download?key=<s3Key>", status: verified, verified: 2026-10-10, note: "listing 200 JSON with fileSize; download HEAD 200 application/pdf"}
     update: {cadence: P3M, strategy: snapshot-retention}
@@ -403,7 +403,7 @@ sources:
             - {pub_number: "Coast Pilot 8", url: "https://nauticalcharts.noaa.gov/publications/coast-pilot/files/cp8/CPB8_WEB.pdf"}
             - {pub_number: "Coast Pilot 9", url: "https://nauticalcharts.noaa.gov/publications/coast-pilot/files/cp9/CPB9_WEB.pdf"}
         - {kind: index-page, url: "https://nauticalcharts.noaa.gov/publications/coast-pilot/index.html", documents: "nauticalcharts\\.noaa\\.gov/publications/(docs|coast-pilot)/.+\\.pdf$"}
-      filter: {allow_all: true, distribution: {require: [public-release]}}
+      filter: {allow_all: true, distribution: {require: [public-release, published]}}
     update: {cadence: P3M, strategy: snapshot-retention}
     size: {enc_all_bytes: 829.4e6, measured: true, as_of: 2026-10-10}
     notes: Score 4.3. ENC zip is rebuilt daily upstream; a quarterly snapshot is enough offline. Coast Pilot ≈ 0.2 GB (volume 1 measured at 7.7 MB).
@@ -422,7 +422,7 @@ sources:
       key_prefix: faa
       origins: [www.faa.gov]
       discovery: [{kind: index-page, url: "https://www.faa.gov/regulations_policies/handbooks_manuals/aviation", pub_number: "(FAA-H-[0-9A-Z-]+)"}]
-      filter: {allow_all: true, distribution: {require: [public-release]}}
+      filter: {allow_all: true, distribution: {require: [public-release, published]}}
     update: {cadence: P3M, strategy: snapshot-retention}
     size: {bytes: 2e9, measured: false, as_of: 2026-10-10}
     notes: Score 4.3. Pilot's Handbook of Aeronautical Knowledge, Aviation Weather Handbook, Airplane Flying Handbook, AIM.
@@ -461,7 +461,7 @@ sources:
       key_prefix: cisa
       origins: [www.cisa.gov]
       discovery: [{kind: index-page, url: "https://www.cisa.gov/safecom/field-operations-guides"}]
-      filter: {allow_all: true, distribution: {require: [public-release]}}
+      filter: {allow_all: true, distribution: {require: [public-release, published]}}
     update: {cadence: P3M, strategy: snapshot-retention}
     size: {bytes: 0.1e9, measured: false, as_of: 2026-10-10}
     notes: Score 4.4.
@@ -481,7 +481,7 @@ sources:
       origins: [www.govinfo.gov, training.fema.gov]
       discovery:
         - {kind: api, flavor: govinfo, collection: GOVPUB, package_prefix: [GOVPUB-HS5], api_key: govinfo}
-      filter: {distribution: {require: [public-release]}, default: allow, allow_series_prefix: ["GOVPUB-HS5"]}
+      filter: {distribution: {require: [public-release, published]}, default: allow, allow_series_prefix: ["GOVPUB-HS5"]}
       mirrors:
         - {channel: "GovInfo GOVPUB (GPO), SuDoc class HS 5 = FEMA", url: "https://api.govinfo.gov/collections/GOVPUB", status: verified, verified: 2026-10-10, note: "search docclass:HS5 -> 143 packages incl. the National Response Framework (GOVPUB-HS5_100-PURL-gpo49580); partial: GPO deposits, not every FEMA release; needs an api.data.gov key"}
         - {channel: "training.fema.gov (EMI/NDEMU)", status: reachable, verified: 2026-10-10, note: "200; hosts IS course materials that reproduce NRF/NIMS/CPG content"}
@@ -512,7 +512,7 @@ sources:
           max_pages: 400
           documents: "training\\.fema\\.gov/.+\\.(pdf)$"
           pub_number: "(IS-\\d+(?:\\.[a-z])?)"
-      filter: {allow_all: true, distribution: {require: [public-release]}}
+      filter: {allow_all: true, distribution: {require: [public-release, published]}}
     update: {cadence: P3M, strategy: snapshot-retention}
     size: {bytes: 20e9, measured: false, as_of: 2026-10-10}
     notes: Score 4.3. Student manuals and job aids; the course list page is now titled NDEMU Independent Study.
@@ -532,7 +532,7 @@ sources:
       origins: [www.govinfo.gov]
       discovery:
         - {kind: api, flavor: govinfo, collection: GOVPUB, package_prefix: [GOVPUB-HS5], api_key: govinfo}
-      filter: {distribution: {require: [public-release]}, default: allow}
+      filter: {distribution: {require: [public-release, published]}, default: allow}
       mirrors:
         - {channel: "GovInfo GOVPUB (GPO), SuDoc HS 5 (FEMA)", status: partial, verified: 2026-10-10, note: "same official channel as fema-preparedness-doctrine; building-science titles (P-361, P-320) to be confirmed in the listing with a key"}
         - {channel: "www.fema.gov", status: blocked, verified: 2026-10-10, note: "403 (WAF); not evaded"}
@@ -606,7 +606,7 @@ sources:
       origins: [nchfp.uga.edu]
       discovery:
         - {kind: index-page, url: "https://nchfp.uga.edu/resources/category/usda-guide", follow: "/resources/entry/", depth: 1, max_pages: 40, documents: "\\.pdf$"}
-      filter: {allow_all: true, distribution: {require: [public-release]}}
+      filter: {allow_all: true, distribution: {require: [public-release, published]}}
     update: {cadence: P3M, strategy: snapshot-retention}
     size: {bytes: 0.2e9, measured: false, as_of: 2026-10-10}
     notes: Score 4.3. The USDA guide (AIB 539) is PD; NCHFP's own pages are (c) UGA, so take the USDA documents only unless UGA grants permission.
@@ -675,7 +675,7 @@ sources:
       origins: [jts.health.mil]
       discovery:
         - {kind: index-page, url: "https://jts.health.mil/index.cfm/CPGs/cpgs", documents: "/assets/docs/cpgs/.+\\.pdf$", pub_number: "_(ID\\d+)", dates: true}
-      filter: {allow_all: true, distribution: {require: [public-release]}, neutral_phrases: ["combat casualty care", "combat trauma", "combat wounded", "combat casualties"]}
+      filter: {allow_all: true, distribution: {require: [public-release, published]}, neutral_phrases: ["combat casualty care", "combat trauma", "combat wounded", "combat casualties"]}
     update: {cadence: P3M, strategy: snapshot-retention}
     size: {bytes: 1e9, measured: false, as_of: 2026-10-10}
     notes: Score 4.5. 157 guideline links on the index on 2026-10-10. Keep superseded editions.
@@ -727,7 +727,7 @@ sources:
       key_prefix: osti
       origins: [www.osti.gov]
       discovery: [{kind: api, flavor: osti, query: "civil defense OR emergency power OR shelter OR microgrid"}]
-      filter: {default: allow, distribution: {require: [public-release]}}
+      filter: {default: allow, distribution: {require: [public-release, published]}}
       currency: {historical_before: "1992-01-01"}
     update: {cadence: P3M, strategy: base-plus-incremental}
     size: {bytes: 50e9, measured: false, as_of: 2026-10-10}
@@ -778,7 +778,7 @@ sources:
           max_pages: 900
           documents: "nvlpubs\\.nist\\.gov/nistpubs/.+\\.pdf$"
           pub_number: "NIST\\.((?:SP|FIPS|CSWP)\\.[0-9A-Za-z.-]+?)\\.pdf"
-      filter: {allow_all: true, distribution: {require: [public-release]}}
+      filter: {allow_all: true, distribution: {require: [public-release, published]}}
     update: {cadence: P3M, strategy: snapshot-retention}
     size: {bytes: 15e9, measured: false, as_of: 2026-10-10}
     notes: Score 4.7. Keep withdrawn and superseded revisions (SP 800-53 rev 4 alongside rev 5).
@@ -823,7 +823,7 @@ sources:
       key_prefix: disa
       origins: [www.cyber.mil, dl.dod.cyber.mil]
       discovery: [{kind: index-page, url: "https://www.cyber.mil/stigs/downloads/", documents: "dl\\.dod\\.cyber\\.mil/.+\\.zip$"}]
-      filter: {allow_all: true, distribution: {require: [public-release]}}
+      filter: {allow_all: true, distribution: {require: [public-release, published]}}
       mirrors:
         - {channel: "www.cyber.mil + dl.dod.cyber.mil", status: reachable, verified: 2026-10-10, note: "both answered 200 to a plain client on 2026-10-10"}
     update: {cadence: P3M, strategy: snapshot-retention}
@@ -860,7 +860,7 @@ sources:
         - {kind: index-page, label: ntac, url: "https://www.secretservice.gov/protection/ntac", documents: "secretservice\\.gov/sites/default/files/reports/.+\\.pdf$"}
       filter:
         rules: registry/filters/cisa-protective-security.yaml
-        distribution: {require: [public-release]}
+        distribution: {require: [public-release, published]}
         default: allow
     update: {cadence: P3M, strategy: snapshot-retention}
     size: {bytes: 2.5e9, measured: false, as_of: 2026-10-10}
@@ -949,7 +949,7 @@ sources:
       key_prefix: cmh
       origins: [history.army.mil, www.govinfo.gov]
       discovery: []
-      filter: {allow_all: true, distribution: {require: [public-release]}}
+      filter: {allow_all: true, distribution: {require: [public-release, published]}}
       currency: {historical_before: "1990-01-01"}
       mirrors:
         - {channel: "history.army.mil", status: blocked, verified: 2026-10-10, note: "403 (WAF)"}
@@ -988,7 +988,7 @@ sources:
       discovery:
         - {kind: index-page, label: csi-books, url: "https://www.cia.gov/resources/csi/books-and-monographs/", documents: "www\\.cia\\.gov/resources/csi/static/.+\\.pdf$"}
         - {kind: index-page, label: csi-studies, url: "https://www.cia.gov/resources/csi/studies-in-intelligence/archives/title-index/", follow: "/resources/csi/studies-in-intelligence/(?!archives/)[^?#]+/$", depth: 1, max_pages: 3000, documents: "www\\.cia\\.gov/resources/csi/static/.+\\.pdf$"}
-      filter: {allow_all: true, declassified_ok: true, distribution: {require: [public-release]}}
+      filter: {allow_all: true, declassified_ok: true, distribution: {require: [public-release, published]}}
     update: {cadence: P3M, strategy: snapshot-retention}
     size: {bytes: 3e9, measured: false, as_of: 2026-10-10}
     notes: Score 4.5. Unclassified journal issues 1992 onward; Heuer's Psychology of Intelligence Analysis PDF is on the site.
@@ -1049,7 +1049,7 @@ sources:
           page_size: 10000
           buckets: 100  # stable batches b0001..b0100 (~9,850 items each), hashed from the identifier
           provenance: "Internet Archive's one-to-one mirror of foia.cia.gov (creator 'CIA Reading Room'; identifiers are the CIA document numbers, e.g. CIA-RDP84-00499R000900030045-6); spot-check bytes against www.cia.gov when deep links answer"
-      filter: {rules: registry/filters/cia-reading-room.yaml, declassified_ok: true, distribution: {require: [declassified, public-release]}, default: allow}
+      filter: {rules: registry/filters/cia-reading-room.yaml, declassified_ok: true, distribution: {require: [declassified, public-release, published]}, default: allow}
       mirrors:
         - {channel: "www.cia.gov/readingroom", status: degraded, verified: 2026-10-10, note: "home page 200, but document and collection deep links redirect to the home page for a plain client; robots.txt Crawl-delay 10, /readingroom/search/ disallowed"}
         - {channel: "archive.org collection ciareadingroom (mirror of the official release)", status: verified, verified: 2026-10-10, note: "984,230 items with item_size via the scrape API; one item per CIA document"}
@@ -1099,7 +1099,7 @@ sources:
       key_prefix: doe-hdbk
       origins: [www.osti.gov]
       discovery: [{kind: api, flavor: osti, query: "", params: {title: "\"DOE fundamentals handbook\""}}]
-      filter: {allow_series_prefix: ["DOE-HDBK-101"], builtin_review: false, default: allow, distribution: {require: [public-release]}}
+      filter: {allow_series_prefix: ["DOE-HDBK-101"], builtin_review: false, default: allow, distribution: {require: [public-release, published]}}
       mirrors:
         - {channel: "OSTI.GOV records API + purl full text (official DOE)", status: verified, verified: 2026-10-10, note: "the old standards.doe.gov URLs redirect to energy.gov pages that now 404; OSTI holds the handbooks"}
     update: {cadence: P1Y, strategy: snapshot-retention}
