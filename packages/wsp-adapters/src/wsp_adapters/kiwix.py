@@ -546,7 +546,7 @@ class KiwixOpdsAdapter:
             )
         with WorkerPool(int_option(spec, "workers", default_workers())) as pool:
             for _, zim in sorted(zims.items()):
-                params = zim_params(zim, spec.id, spec.license, prefix)
+                params = zim_params(zim, spec.id, spec.license, prefix, skip_pattern(spec))
                 yield from read_zim(zim, params, workdir=ctx.workdir, pool=pool)
 
 
@@ -560,6 +560,21 @@ class ZimParams:
     lang: str
     revision: str
     timestamp: datetime | None
+    skip: str = ""  # regex of entry paths that are not documents (listing pages)
+
+
+# Listing pages of Stack Exchange ZIMs ("questions_page=10", "users_page=3"): an index of other
+# pages, never content (audit 2026-10-11 M6). ``access.skip_paths`` replaces it per source.
+DEFAULT_SKIP_PATHS = (r"(?:questions|users|tags|badges|unanswered)_page=\d+",)
+
+
+def skip_pattern(spec: SourceSpec) -> str:
+    """One regex (full match) of the entry paths a source's refine leaves out."""
+    raw = access(spec).get("skip_paths")
+    patterns = DEFAULT_SKIP_PATHS if raw is None else str_list(raw)
+    for p in patterns:
+        re.compile(p)  # fail at configuration time, not in a worker
+    return "|".join(f"(?:{p})" for p in patterns)
 
 
 def book_name(archive: Archive, path: Path) -> str:
@@ -577,7 +592,7 @@ def _metadata(archive: Archive, key: str) -> str:
     return archive.get_metadata(key).decode("utf-8", errors="replace").strip()
 
 
-def zim_params(path: Path, source_id: str, license_: str, prefix_books: bool) -> ZimParams:
+def zim_params(path: Path, source_id: str, license_: str, prefix_books: bool, skip: str = "") -> ZimParams:
     archive = Archive(path)  # metadata only; entries are read by wsp_adapters.zimscan
     lang3 = _metadata(archive, "Language").split(",")[0]
     return ZimParams(
@@ -587,6 +602,7 @@ def zim_params(path: Path, source_id: str, license_: str, prefix_books: bool) ->
         lang=_LANG3TO1.get(lang3, lang3 or "und"),
         revision=path.stem,
         timestamp=_parse_dt(_metadata(archive, "Date")),
+        skip=skip,
     )
 
 
@@ -604,9 +620,10 @@ class _HtmlTask:
 def _read_html(task: _HtmlTask) -> list[DocRow]:
     """Worker: the documents of one run of clusters, as :func:`doc_row` tuples (separate process)."""
     p = task.params
+    skip = re.compile(p.skip) if p.skip else None
     out: list[DocRow] = []
     for blob in zimscan.read_clusters(task.clusters):
-        if not _stable(blob.path):
+        if not _stable(blob.path) or (skip is not None and skip.fullmatch(blob.path)):
             continue
         native_id = p.prefix + blob.path
         text = html_to_text(blob.content)

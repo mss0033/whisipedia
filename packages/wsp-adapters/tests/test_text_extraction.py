@@ -56,3 +56,19 @@ def test_html_to_text() -> None:
     )
     assert html_to_text(html) == "Title\nHello world.\na\nb & c"
     assert html_to_text(b"") == ""
+
+
+def test_html_to_text_drops_boilerplate_and_keeps_math_source() -> None:
+    """Audit 2026-10-11 M1: navigation, category lists, hatnotes and the ZIM footer are not prose."""
+    html = (
+        '<body><h1>Water</h1><div class="hatnote">For other uses, see Water (disambiguation).</div>'
+        '<table class="sidebar"><tr><td>Part of a series</td></tr></table>'
+        '<p>Water is <math alttext="{\\displaystyle H_{2}O}"><mi>H</mi><mn>2</mn><mi>O</mi>'
+        "<annotation>H_2O</annotation></math>.</p>"
+        '<p>Bare <math><mi>x</mi><annotation encoding="application/x-tex">x</annotation></math>.</p>'
+        '<div class="navbox">Chemistry topics</div>'
+        '<div id="catlinks"><ul><li>Chemical compounds</li></ul>'
+        '<div class="mw-hidden-catlinks">Articles with short description</div></div>'
+        '<div class="zim-footer">This page is issued from Wikipedia.</div></body>'
+    )
+    assert html_to_text(html) == "Water\nWater is {\\displaystyle H_{2}O} .\nBare x."

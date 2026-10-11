@@ -159,3 +159,16 @@ def test_unprefixed_ids_refuse_a_second_book(tmp_path: Path) -> None:
     )
     docs = [e for e in KiwixOpdsAdapter().entries(make_ctx(spec, FakeFetcher(), tmp_path / "w"), gen.parent)]
     assert sorted(d.native_id for d in docs if isinstance(d, DocRecord)) == ["v_en_all/A", "w_en_all/A"]
+
+
+def test_stack_exchange_listing_pages_are_not_documents(tmp_path: Path) -> None:
+    """Audit 2026-10-11 M6: ``questions_page=N`` and friends are indexes of other pages."""
+    gen = tmp_path / "src" / "2026-08" / "upstream"
+    pages = [("questions/1/q", "Q", "<p>question</p>"), ("questions_page=2", "Q", "<p>list</p>")]
+    build_zim(gen / "se_en_all_2026-08.zim", name="se", articles=[*pages, ("users_page=3", "U", "<p>u</p>")])
+    base = {"adapter": "kiwix-opds", "selector": {"name": "se"}, "workers": 1}
+    ctx = make_ctx(make_spec("se", base), FakeFetcher(), tmp_path / "w")
+    ids = [e.native_id for e in KiwixOpdsAdapter().documents(ctx, gen.parent)]
+    assert ids == ["questions/1/q"]
+    ctx = make_ctx(make_spec("se", {**base, "skip_paths": []}), FakeFetcher(), tmp_path / "w")
+    assert len(list(KiwixOpdsAdapter().documents(ctx, gen.parent))) == 3
