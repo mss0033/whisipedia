@@ -17,6 +17,8 @@ sources:
       adapter: wikimedia-dumps
       endpoints: ["https://dumps.wikimedia.org/", "https://dumps.wikimedia.org/other/incr/"]
       checksums: md5+sha1 (upstream)
+      # English pages render with the Kiwix ZIM's HTML (matched by title); text is indexed from the dump.
+      rendition: [{lang: en, source: wikipedia-en-zim}]
     update: {strategy: base-plus-incremental}
     size: {current_bytes: 68.4e9, history_7z_bytes: 456.5e9, weekly_incr_bytes: 11.0e9, measured: true, as_of: 2026-10-09}
     retention: {base: yearly, segments: P2Y}

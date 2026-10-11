@@ -25,6 +25,7 @@ from wsp_api.addresses import address_of, resolve
 from wsp_api.browse import browse_router
 from wsp_api.errors import ApiError, errors, install_error_handlers, streamed
 from wsp_api.htmlrewrite import rewrite_html
+from wsp_api.renditions import borrowed, zim_document
 from wsp_api.routing import RawSegmentRouting
 from wsp_api.schemas import (
     API_VERSION,
@@ -60,6 +61,7 @@ from wsp_api.services import ApiSettings, Services
 from wsp_api.sse import change_events, format_event
 from wsp_api.summaries import CitationSplitter
 from wsp_api.views import Library, parse_doc
+from wsp_core.ids import parse_doc_id
 from wsp_core.model import GenerationStatus, SearchHit
 
 _DESCRIPTION = """\
@@ -209,11 +211,17 @@ def _v1(lib: Library, settings: ApiSettings) -> APIRouter:
     ) -> Document:
         did = parse_doc(unquote(doc_id))
         doc = s.documents.get(did, at_generation=at)
+        if doc is None and at is None:
+            # Not refined (yet): Kiwix sources are browsable straight from their ZIM.
+            source_id, native_id = parse_doc_id(did)
+            doc = zim_document(s.source(source_id), native_id, s.vault, lib.assets)
         if doc is None:
             where = f" at generation {at}" if at else ""
             raise ApiError(404, "document_not_found", f"no such document{where}: {did}")
         introduced = lib.generation_of(did, doc.content_hash, at)
-        gen = lib.serving_generation(doc.source_id, introduced, at)
+        gen = lib.serving_generation(doc.source_id, introduced, at) or (
+            s.vault.current(doc.source_id) if doc.html_ref else None
+        )
         html: str | None = None
         if doc.html_ref and gen is not None:
             original = lib.assets.html(doc.source_id, gen.generation_id, doc.html_ref)
@@ -223,6 +231,16 @@ def _v1(lib: Library, settings: ApiSettings) -> APIRouter:
                     source_id=doc.source_id,
                     generation_id=gen.generation_id,
                     native_id=doc.native_id,
+                )
+        if html is None and at is None and (alt := borrowed(s.source(doc.source_id), doc, s.vault)):
+            # e.g. the Wikipedia dump (indexed text) rendered with the Kiwix ZIM's page for its title.
+            original = lib.assets.html(alt.source_id, alt.generation.generation_id, alt.html_ref)
+            if original is not None:
+                html = rewrite_html(
+                    original,
+                    source_id=alt.source_id,
+                    generation_id=alt.generation.generation_id,
+                    native_id=alt.html_ref.removeprefix("zim:"),
                 )
         return convert.document(
             doc,
