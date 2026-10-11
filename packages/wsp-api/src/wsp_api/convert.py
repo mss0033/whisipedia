@@ -26,6 +26,7 @@ from wsp_api.schemas import (
     SourceInfo,
     VaultLocation,
 )
+from wsp_core.banners import banner_for, currency_of
 from wsp_core.model import ChangeRecord, DocRecord, Generation, LedgerEvent, SearchHit, SourceSpec
 
 
@@ -110,6 +111,8 @@ def document(
         html=html,
         vault=vault,
         has_history=has_history,
+        currency=currency_of(doc.meta),
+        banner=banner_for(doc.meta),
     )
 
 

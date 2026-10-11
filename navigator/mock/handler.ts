@@ -375,6 +375,8 @@ export function document(
       blake3: hashOf(file, 'blake3'),
     },
     has_history: d.versions.length > 1,
+    currency: d.currency ?? null,
+    banner: d.banner ?? null,
   };
 }
 
