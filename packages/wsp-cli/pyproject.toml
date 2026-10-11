@@ -12,6 +12,7 @@ dependencies = [
   "wsp-adapters",
   "wsp-index",
   "wsp-orchestrator",
+  "wsp-oracle",
   "uvicorn>=0.30",
 ]
 
@@ -30,6 +31,7 @@ wsp-fetch = { workspace = true }
 wsp-adapters = { workspace = true }
 wsp-index = { workspace = true }
 wsp-orchestrator = { workspace = true }
+wsp-oracle = { workspace = true }
 
 [build-system]
 requires = ["hatchling>=1.25"]

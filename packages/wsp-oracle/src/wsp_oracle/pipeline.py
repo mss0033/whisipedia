@@ -13,6 +13,7 @@ import time
 from collections import OrderedDict
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
+from typing import cast
 
 import numpy as np
 
@@ -271,6 +272,19 @@ class OracleIndex:
 
     def suggest(self, prefix: str, *, limit: int = 10) -> Sequence[str]:
         return self.lexical.suggest(prefix, limit=limit)
+
+    def search_hits(
+        self, query: str, *, limit: int = 10, offset: int = 0, sources: Sequence[str] | None = None
+    ) -> Sequence[SearchHit]:
+        """Cheap, snippet-free lexical window for totals and facets (the ranked page uses :meth:`search`)."""
+        fast = getattr(self.lexical, "search_hits", None)
+        if callable(fast):
+            return cast(Sequence[SearchHit], fast(query, limit=limit, offset=offset, sources=sources))
+        return self.lexical.search(query, limit=limit, offset=offset, sources=sources)
+
+    def lookup(self, doc_id: str) -> SearchHit | None:
+        find = getattr(self.lexical, "lookup", None)
+        return cast(SearchHit | None, find(doc_id)) if callable(find) else None
 
     def _invalidate(self) -> None:
         with self._lock:

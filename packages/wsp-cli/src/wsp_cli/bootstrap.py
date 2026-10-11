@@ -384,14 +384,18 @@ def build_services(cfg: Mapping[str, Any], lay: Layout) -> Services:
         signer = load_signer(cfg, lay)
         vault = build_vault(cfg, specs, signer, ledger=False)
         changes = open_changes(cfg)
+        from wsp_oracle.services import build_oracle
+
+        live = [s for s in specs if s.status is not SourceStatus.EXCLUDED]
+        oracle = build_oracle(cfg, lexical=open_index(cfg, specs), sources=[s.id for s in live])
         return Services(
-            index=open_index(cfg, specs),
+            index=oracle.index,
             documents=open_documents(cfg),
             changes=changes,
             vault=vault,
             ledger=build_ledger(cfg, signer),
             sources=effective_sources([s for s in specs if s.status is not SourceStatus.EXCLUDED], cfg),
-            generator=None,  # TODO(integration): wsp_oracle.LocalGenerator (loopback only) when configured
+            generator=oracle.generator,  # loopback llama.cpp server when [oracle.generator] is enabled
             catalog=build_catalog(cfg, specs, changes),
             assets=ZimAssetStore(vault),  # original HTML and images from sealed ZIMs (read-only)
             gaps=JsonlGapLog(paths(cfg).gaps_log),  # local disk next to the index, never the vault
