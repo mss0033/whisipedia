@@ -1,9 +1,6 @@
-import json
 from datetime import UTC, datetime
-from typing import Any
 
 import httpx
-import pytest
 
 from wsp_api import Services, create_app
 from wsp_api.addresses import document_href
@@ -17,11 +14,10 @@ from wsp_api.schemas import (
     SourceInfo,
     SourcePage,
     Suggestions,
-    SummaryEvent,
     SystemStatus,
 )
 from wsp_api.testing import local_client
-from wsp_api.testing.fakes import SAMPLE_GEN_1, SAMPLE_GEN_2, EchoGenerator, sample_services
+from wsp_api.testing.fakes import SAMPLE_GEN_1, SAMPLE_GEN_2, sample_services
 
 TURING = "wsp:wikipedia-en-zim/A/Alan_Turing"
 
@@ -161,54 +157,8 @@ def test_system_flags_broken_ledger() -> None:
         assert c.get("/v1/system").json()["ledger_ok"] is False
 
 
-def _sse(r: httpx.Response) -> list[tuple[str, SummaryEvent]]:
-    out: list[tuple[str, SummaryEvent]] = []
-    for block in r.text.split("\n\n"):
-        lines = dict(line.split(": ", 1) for line in block.splitlines() if ": " in line)
-        if "data" in lines:
-            out.append((lines["event"], SummaryEvent.model_validate(json.loads(lines["data"]))))
-    return out
-
-
-def test_summarize_streams_sse_with_citation_events(services: Services) -> None:
-    with local_client(create_app(services)) as c:
-        r = c.post("/v1/summarize", json={"query": "who was turing", "doc_ids": [TURING, "wsp:rfc/9110"]})
-    assert r.status_code == 200
-    assert r.headers["content-type"].startswith("text/event-stream")
-    events = _sse(r)
-    assert all(name == ev.root.type for name, ev in events)
-    kinds = [ev.root.type for _, ev in events]
-    assert kinds[-1] == "done"
-    cites = [ev.root for _, ev in events if ev.root.type == "citation"]
-    assert [(c.index, c.doc_id) for c in cites] == [(1, TURING), (2, "wsp:rfc/9110")]  # type: ignore[union-attr]
-    text = "".join(ev.root.text for _, ev in events if ev.root.type == "token")  # type: ignore[union-attr]
-    assert "[1]" not in text  # markers became citation events
-    assert text.startswith("Summary of 2 results")
-    gen = services.generator
-    assert isinstance(gen, EchoGenerator)
-    assert "Question: who was turing" in gen.prompts[0]
-
-
-def test_summarize_without_generator_is_501() -> None:
-    with local_client(create_app(sample_services(with_generator=False))) as c:
-        r = c.post("/v1/summarize", json={"query": "x", "doc_ids": [TURING]})
-    assert r.status_code == 501
-    assert r.json() == {
-        "error": {"code": "not_configured", "message": "no local language model is configured"}
-    }
-
-
-@pytest.mark.parametrize(
-    ("body", "status", "code"),
-    [
-        ({"query": "x", "doc_ids": ["wsp:rfc/0"]}, 404, "document_not_found"),
-        ({"query": "x", "doc_ids": ["not-an-id"]}, 400, "invalid_doc_id"),
-        ({"query": "x", "doc_ids": []}, 422, "invalid_request"),
-    ],
-)
-def test_summarize_rejects_bad_input(
-    client: httpx.Client, body: dict[str, Any], status: int, code: str
-) -> None:
-    r = client.post("/v1/summarize", json=body)
-    assert r.status_code == status
-    assert r.json()["error"]["code"] == code
+def test_summarize_is_gone(client: httpx.Client) -> None:
+    """No generative features (ADR-0008): the old summary endpoint does not exist."""
+    r = client.post("/v1/summarize", json={"query": "x", "doc_ids": [TURING]})
+    assert r.status_code in (404, 405)
+    assert "/v1/summarize" not in client.get("/v1/openapi.json").json()["paths"]

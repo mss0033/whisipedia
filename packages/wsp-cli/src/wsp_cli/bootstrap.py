@@ -31,7 +31,6 @@ from wsp_api import ApiSettings, Services
 from wsp_api.services import LOOPBACK_HOSTS
 from wsp_api.testing.fakes import (
     SAMPLE_SOURCES,
-    EchoGenerator,
     InMemoryChangeFeed,
     InMemoryDocumentStore,
     InMemoryLedger,
@@ -397,7 +396,6 @@ def build_services(cfg: Mapping[str, Any], lay: Layout) -> Services:
             vault=vault,
             ledger=build_ledger(cfg, signer),
             sources=effective_sources([s for s in specs if s.status is not SourceStatus.EXCLUDED], cfg),
-            generator=oracle.generator,  # loopback llama.cpp server when [oracle.generator] is enabled
             catalog=build_catalog(cfg, specs, changes),
             assets=ZimAssetStore(vault),  # original HTML and images from sealed ZIMs (read-only)
             gaps=JsonlGapLog(paths(cfg).gaps_log),  # local disk next to the index, never the vault
@@ -409,7 +407,6 @@ def build_services(cfg: Mapping[str, Any], lay: Layout) -> Services:
 
     index, documents, changes = InMemoryLexicalIndex(), InMemoryDocumentStore(), InMemoryChangeFeed()
     vault, ledger = InMemoryVault(), InMemoryLedger()
-    generator = EchoGenerator() if section(cfg, "api").get("demo_generator", True) else None
     seed_sample_library(index=index, documents=documents, changes=changes, vault=vault, ledger=ledger)
     return Services(
         index=index,
@@ -418,7 +415,6 @@ def build_services(cfg: Mapping[str, Any], lay: Layout) -> Services:
         vault=vault,
         ledger=ledger,
         sources=effective_sources(specs, cfg) or SAMPLE_SOURCES,  # sample specs outside a checkout
-        generator=generator,
     )
 
 

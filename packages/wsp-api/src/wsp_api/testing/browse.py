@@ -76,9 +76,9 @@ and <a href="../A/Bombe#history">the Bombe</a>. See <a href="https://example.org
 </body></html>"""
 
 
-def browse_services(*, with_generator: bool = True) -> Services:
+def browse_services() -> Services:
     """The sample library plus an HTML (ZIM-style) document with an image, categories and a gap log."""
-    base = sample_services(with_generator=with_generator)
+    base = sample_services()
     text = "The Enigma machine was broken with help from Alan Turing and the Bombe."
     enigma = DocRecord(
         doc_id=ENIGMA,

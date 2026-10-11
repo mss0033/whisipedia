@@ -45,7 +45,6 @@ query_log = true                 # local-only search log (query + result count) 
 backend = "auto"                 # "auto" (real if vault.root exists) | "real" | "sample"
 static_dir = ""                  # "" = <repo>/navigator/dist
 allowed_hosts = []               # extra Host-header names (only with `wsp serve --allow-remote`)
-demo_generator = true            # sample backend only: echo summaries; the real backend has none yet
 
 [orchestrator]
 # All orchestrator state is on LOCAL disk, never the NAS (ADR-0002). Override in local.toml.

@@ -1,6 +1,7 @@
 # ADR-0007: Oracle models, vector index and LLM runtime
 
-- Status: Proposed
+- Status: Proposed; the LLM decision is superseded by [ADR-0008](0008-no-generative-ui.md) (no
+  generative features: summaries and the llama.cpp runtime were removed)
 - Date: 2026-10-10
 
 ## Context

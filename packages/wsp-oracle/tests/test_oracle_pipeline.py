@@ -6,7 +6,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from oracle_helpers import CORPUS, FIXTURE_GOLD, OverlapReranker, ScriptedLLM, doc
+from oracle_helpers import CORPUS, FIXTURE_GOLD, OverlapReranker, doc
 
 from wsp_core.model import DocRecord
 from wsp_index import HashingEmbedder, RefineryReader, RefineryWriter, TantivyConfig, TantivyIndex
@@ -15,16 +15,12 @@ from wsp_oracle.config import OracleConfig, OracleConfigError
 from wsp_oracle.embedbuild import EmbedStats, embed_generation
 from wsp_oracle.evaluation import (
     evaluate,
-    evaluate_summaries,
-    faithfulness,
-    lexical_judge,
     load_gold,
     ndcg_at,
     percentile,
     recall_at,
     replace_searcher,
 )
-from wsp_oracle.generator import Passage, Summarizer
 from wsp_oracle.pipeline import OracleIndex, OracleSearcher
 from wsp_oracle.router import Intent, Router
 from wsp_oracle.services import build_oracle
@@ -181,39 +177,13 @@ def test_metrics() -> None:
     assert percentile([], 95) == 0.0
 
 
-def test_faithfulness_scoring() -> None:
-    passages = {1: "Lisbon is the capital of Portugal.", 2: "Memory cells persist after infection."}
-    f = faithfulness(
-        "Lisbon is the capital of Portugal [1]. Memory cells persist [2]. Paris is in Spain [1]. Uncited.",
-        passages,
-        lexical_judge(),
-    )
-    assert (f.sentences, f.cited, f.supported) == (4, 3, 2)
-    assert f.score == 0.5
-
-
-def test_summary_evaluation_with_scripted_model() -> None:
-    llm = ScriptedLLM(["Lisbon is the capital of Portugal [1]."])
-    items = [("capital of Portugal", [Passage(1, "Lisbon", "Lisbon is the capital of Portugal.")])]
-    se = evaluate_summaries(Summarizer(llm), items, lexical_judge())
-    assert se.faithfulness == 1.0
-    assert se.refused == 0
-
-
 def test_build_oracle_lexical_only(tmp_path: Path, lexical: TantivyIndex) -> None:
     cfg = {"index": {"root": str(tmp_path)}, "oracle": {"reranker": {"enabled": False}}}
     oracle = build_oracle(cfg, lexical=lexical, sources=["encyclo"])
     assert oracle.vectors is None
-    assert oracle.generator is None
     assert oracle.index.search("Lisbon")[0].doc_id == "wsp:encyclo/Lisbon"
-
-    cfg_gen = {
-        "index": {"root": str(tmp_path)},
-        "oracle": {"reranker": {"enabled": False}, "generator": {"enabled": True}},
-    }
-    with_gen = build_oracle(cfg_gen, lexical=lexical)
-    assert with_gen.generator is not None
-    assert with_gen.summarizer is not None
+    with pytest.raises(OracleConfigError, match="generator"):  # removed by owner decision (ADR-0008)
+        OracleConfig.from_mapping({"generator": {"enabled": True}})
 
 
 def test_config_parsing() -> None:

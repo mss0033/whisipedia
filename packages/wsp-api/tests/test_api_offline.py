@@ -100,6 +100,5 @@ def test_full_api_surface_makes_no_outbound_connections(outbound: list[object]) 
             "/v1/does-not-exist",
         ]:
             assert c.get(path).status_code < 500, path
-        assert c.post("/v1/summarize", json={"query": "q", "doc_ids": [turing]}).status_code == 200
         assert c.post("/v1/gaps", json={"href": "https://example.org/"}).status_code == 204
     assert outbound == []

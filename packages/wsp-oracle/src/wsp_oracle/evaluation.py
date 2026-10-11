@@ -1,6 +1,6 @@
-"""Evaluation harness (PLAN §9.5): nDCG@10, Recall@50, latency percentiles, summary faithfulness.
+"""Evaluation harness (PLAN §9.5): nDCG@10, Recall@50, MRR, latency percentiles.
 
-    uv run --extra gpu wsp-oracle-eval --modes lexical,hybrid,full [--index-root DIR] [--summaries 30]
+    uv run --extra gpu wsp-oracle-eval --modes lexical,hybrid,full [--index-root DIR]
 
 Gold sets are JSON lines (``packages/wsp-oracle/eval/gold/queries.jsonl``)::
 
@@ -9,15 +9,12 @@ Gold sets are JSON lines (``packages/wsp-oracle/eval/gold/queries.jsonl``)::
 
 Grades: 2 = the answer, 1 = also relevant. nDCG uses gains ``2^g - 1``; Recall@50 counts every
 graded document. Documents missing from the index under test are still counted (a smaller index
-cannot score higher by forgetting the answer). Faithfulness is claim-level: each summary sentence
-must cite a passage, and the cited passage must support it (``lexical_judge`` for CI,
-``LlmJudge`` against the local model for the nightly run).
+cannot score higher by forgetting the answer).
 """
 
 from __future__ import annotations
 
 import argparse
-import asyncio
 import json
 import math
 import re
@@ -30,9 +27,7 @@ from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any, cast
 
-from wsp_oracle.generator import Passage, Summarizer
 from wsp_oracle.pipeline import OracleSearcher
-from wsp_oracle.router import content_terms
 
 Searcher = Callable[[str], Sequence[str]]
 Judge = Callable[[str, str], bool]
@@ -149,142 +144,6 @@ def evaluate(name: str, search: Searcher, gold: Sequence[GoldQuery], *, warmup: 
     )
 
 
-# --- faithfulness ---------------------------------------------------------------------------------
-
-
-def sentences(text: str) -> list[str]:
-    return [s.strip() for s in _SPLIT.split(text) if s and s.strip()]
-
-
-def lexical_judge(min_overlap: float = 0.5) -> Judge:
-    """Supported when at least ``min_overlap`` of the claim's content words occur in the passage.
-
-    Crude but deterministic (CI). Paraphrase and translation defeat it; use :class:`LlmJudge` for
-    the real number.
-    """
-
-    def judge(claim: str, passage: str) -> bool:
-        words = {w.casefold() for w in content_terms(_MARK.sub("", claim)) if len(w) > 2}
-        if not words:
-            return True
-        hay = passage.casefold()
-        return sum(1 for w in words if w[:6] in hay) / len(words) >= min_overlap
-
-    return judge
-
-
-@dataclass(frozen=True, slots=True)
-class Faithfulness:
-    sentences: int
-    cited: int
-    supported: int
-    unsupported: tuple[str, ...] = ()
-
-    @property
-    def score(self) -> float:
-        """Supported sentences over all sentences (uncited ones count as unsupported)."""
-        return self.supported / self.sentences if self.sentences else 1.0
-
-
-def faithfulness(summary: str, passages: Mapping[int, str], judge: Judge) -> Faithfulness:
-    total = cited = supported = 0
-    bad: list[str] = []
-    for s in sentences(summary):
-        total += 1
-        marks = [int(m) for m in _MARK.findall(s) if int(m) in passages]
-        if not marks:
-            bad.append(s)
-            continue
-        cited += 1
-        claim = _MARK.sub("", s).strip()
-        if any(judge(claim, passages[m]) for m in marks):
-            supported += 1
-        else:
-            bad.append(s)
-    return Faithfulness(total, cited, supported, tuple(bad))
-
-
-class LlmJudge:
-    """Asks the local model whether a passage supports a claim (yes/no), via llama-server."""
-
-    PROMPT = (
-        "Passage:\n{passage}\n\nClaim: {claim}\n\n"
-        "Is every fact in the claim stated or directly implied by the passage? Answer only yes or no."
-    )
-
-    def __init__(self, url: str) -> None:
-        from wsp_oracle.generator import LlamaServerGenerator
-
-        self.llm = LlamaServerGenerator(url, temperature=0.0, timeout_s=60)
-
-    async def ask(self, claim: str, passage: str) -> bool:
-        text = ""
-        msg = [{"role": "user", "content": self.PROMPT.format(passage=passage[:3000], claim=claim)}]
-        async for piece in self.llm.stream_chat(msg, max_tokens=4):
-            text += piece
-        return text.strip().casefold().startswith("yes")
-
-    def __call__(self, claim: str, passage: str) -> bool:
-        return asyncio.run(self.ask(claim, passage))
-
-
-@dataclass(frozen=True, slots=True)
-class SummaryEval:
-    queries: int
-    refused: int
-    faithfulness: float
-    cited_rate: float
-    first_token_p50_ms: float
-    first_token_p95_ms: float
-    unsupported: tuple[str, ...] = ()
-
-
-async def _summaries(
-    summarizer: Summarizer, items: Sequence[tuple[str, list[Passage]]], judge: Judge
-) -> SummaryEval:
-    firsts: list[float] = []
-    refused = 0
-    reports: list[Faithfulness] = []
-    for question, passages in items:
-        t0 = time.perf_counter()
-        first: float | None = None
-        text = ""
-        was_refused = False
-        async for ev in summarizer.events(question, passages):
-            kind = ev["type"]
-            if first is None and kind in ("token", "citation", "notice"):
-                first = (time.perf_counter() - t0) * 1000
-            if kind == "token":
-                text += str(ev["text"])
-            elif kind == "citation":
-                text += f"[{ev['index']}]"
-            elif kind == "notice" and "no summary" in str(ev["text"]):
-                was_refused = True
-        if first is not None:
-            firsts.append(first)
-        if was_refused:
-            refused += 1
-            continue
-        by_index = {p.index: p.text for p in passages}
-        reports.append(await asyncio.to_thread(faithfulness, text, by_index, judge))
-    total = sum(r.sentences for r in reports)
-    return SummaryEval(
-        queries=len(items),
-        refused=refused,
-        faithfulness=(sum(r.supported for r in reports) / total) if total else 1.0,
-        cited_rate=(sum(r.cited for r in reports) / total) if total else 1.0,
-        first_token_p50_ms=percentile(firsts, 50),
-        first_token_p95_ms=percentile(firsts, 95),
-        unsupported=tuple(s for r in reports for s in r.unsupported)[:20],
-    )
-
-
-def evaluate_summaries(
-    summarizer: Summarizer, items: Sequence[tuple[str, list[Passage]]], judge: Judge
-) -> SummaryEval:
-    return asyncio.run(_summaries(summarizer, items, judge))
-
-
 # --- CLI ------------------------------------------------------------------------------------------
 
 
@@ -302,18 +161,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     ap.add_argument(
         "--modes", default="lexical,hybrid,full", help="lexical, dense, hybrid, full (hybrid+rerank)"
     )
-    ap.add_argument("--summaries", type=int, default=0, help="also summarize the top results of N queries")
-    ap.add_argument("--judge", choices=("llm", "lexical"), default="llm")
     ap.add_argument("--out", type=Path, default=None, help="write the full JSON report here")
     args = ap.parse_args(argv)
 
     cfg: dict[str, Any] = dict(load_config(args.config_dir or _find_config_dir()))
     if args.index_root is not None:
         cfg["index"] = {**cast(dict[str, Any], cfg.get("index", {})), "root": str(args.index_root)}
-    if args.summaries:
-        oracle_cfg = dict(cast(dict[str, Any], cfg.get("oracle", {})))
-        oracle_cfg["generator"] = {**cast(dict[str, Any], oracle_cfg.get("generator", {})), "enabled": True}
-        cfg["oracle"] = oracle_cfg
     gold = load_gold(args.gold)
     oracle = build_oracle(cfg)
     base = oracle.searcher
@@ -333,23 +186,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         reports.append(rep)
         print(rep.summary())
     out: dict[str, Any] = {"gold": str(args.gold), "reports": [asdict(r) for r in reports]}
-    if args.summaries and oracle.summarizer is not None:
-        items: list[tuple[str, list[Passage]]] = []
-        for q in gold[: args.summaries]:
-            res = base.run(q.query)
-            passages = [
-                Passage(i, h.title, res.passages.get(h.doc_id, ""), h.doc_id)
-                for i, h in enumerate(res.hits[: oracle.config.generator.passages], start=1)
-            ]
-            items.append((q.query, passages))
-        judge: Judge = LlmJudge(oracle.config.generator.url) if args.judge == "llm" else lexical_judge()
-        se = evaluate_summaries(oracle.summarizer, items, judge)
-        print(
-            f"summaries n={se.queries} refused={se.refused} faithfulness={se.faithfulness:.3f} "
-            f"cited={se.cited_rate:.3f} first-token p50={se.first_token_p50_ms:.0f}ms "
-            f"p95={se.first_token_p95_ms:.0f}ms"
-        )
-        out["summaries"] = asdict(se)
     if args.out is not None:
         args.out.write_text(json.dumps(out, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     oracle.close()

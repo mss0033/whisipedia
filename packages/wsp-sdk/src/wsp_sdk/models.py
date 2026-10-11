@@ -12,9 +12,9 @@ from datetime import date, datetime
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, RootModel
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
-API_VERSION = "1.2.0"  # the server API version these models were written for
+API_VERSION = "1.3.0"  # the server API version these models were written for
 
 
 class _Wire(BaseModel):
@@ -558,61 +558,6 @@ class SystemStatus(_Wire):
     api_version: str = API_VERSION
     uptime_seconds: float = 0.0
     ops: OpsStatus | None = Field(default=None, description="Null without orchestrator data.")
-
-
-# --- Summaries ---------------------------------------------------------------------------------
-
-
-class SummarizeRequest(_Wire):
-    query: str = Field(min_length=1, max_length=1000)
-    doc_ids: list[str] = Field(min_length=1, max_length=20, description="Results to summarize, ranked.")
-    max_tokens: int = Field(default=512, ge=16, le=4096)
-
-
-class SummaryToken(_Wire):
-    type: Literal["token"] = "token"
-    text: str
-
-
-class SummaryCitation(_Wire):
-    type: Literal["citation"] = "citation"
-    index: int = Field(description="1-based position in the request's `doc_ids`.")
-    doc_id: str
-    title: str
-    address: str
-
-
-class SummaryNotice(_Wire):
-    type: Literal["notice"] = "notice"
-    text: str
-
-
-class SummaryDone(_Wire):
-    type: Literal["done"] = "done"
-
-
-class SummaryError(_Wire):
-    type: Literal["error"] = "error"
-    message: str
-
-
-class SummaryEvent(
-    RootModel[
-        Annotated[
-            SummaryToken | SummaryCitation | SummaryNotice | SummaryDone | SummaryError,
-            Field(discriminator="type"),
-        ]
-    ]
-):
-    """One server-sent event of ``POST /v1/summarize``: ``event: <type>``, ``data: <this JSON>``.
-
-    Order: ``notice``* then ``token``/``citation`` interleaved, then ``done`` (or ``error``).
-    """
-
-    model_config = ConfigDict(frozen=True)
-
-
-SummaryItem = SummaryToken | SummaryCitation | SummaryNotice | SummaryDone | SummaryError
 
 
 # --- Gaps --------------------------------------------------------------------------------------

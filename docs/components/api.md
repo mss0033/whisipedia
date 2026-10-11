@@ -12,8 +12,7 @@ Whisipedia has three public surfaces (PLAN §12.2). All three depend only on the
 ## Dependency injection
 
 `wsp_api.Services` is a dataclass of ports: `LexicalIndex`, `DocumentStore`, `ChangeFeed`, `Vault`,
-`Ledger`, the registry `SourceSpec`s and an optional `Generator`. Routes never import an
-implementation.
+`Ledger`, and the registry `SourceSpec`s. Routes never import an implementation.
 
 `wsp_cli.bootstrap.build_services(cfg, layout)` is the single place where implementations are
 chosen. With `[api] backend = "real"` (or `"auto"` and an existing `vault.root`) it builds `FileVault`,
@@ -51,7 +50,6 @@ an image and a few categories to the sample library.
 | `GET /v1/changes?since=`, `GET /v1/changes/stream` (SSE), `GET /v1/changes/recent` | Change feed; `recent` is newest first with the cursor to follow live |
 | `GET /v1/system` | System Monitor data: freshness and health, degraded generations, ledger tail and its integrity; `ops`: SLO lag, scrub progress, parity coverage, disks and domain budgets, download lanes, queue, alerts, bot runs, proposals |
 | `GET /v1/proposals?status=` | Curator proposals, newest first (deciding them is `wsp proposals accept/reject`) |
-| `POST /v1/summarize` | Cited summary as server-sent events (`token`, `citation`, `notice`, `done`, `error`). Returns `501 not_configured` if no `Generator` is set |
 | `GET /v1/portal` | Start page: featured page of the day, newest changes, a random page, every site |
 | `GET /v1/directory?path=` | Directory: Top › registry domain › site › category |
 | `GET /v1/random?source=&seed=` | A random page |
@@ -117,7 +115,7 @@ with WspClient() as wsp:  # http://127.0.0.1:8737
 ```
 
 The SDK mirrors every endpoint, with iterators for paginated results, change-feed draining, SSE
-following (`stream_changes`), summary streaming (SSE events) and the Navigator resources (`portal`,
+following (`stream_changes`) and the Navigator resources (`portal`,
 `directory`, `random`, `recent_changes`, `report_gap`). Errors are typed: `WspApiError`, `NotFoundError`
 and `NotConfiguredError`.
 

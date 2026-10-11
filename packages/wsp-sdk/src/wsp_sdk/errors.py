@@ -27,7 +27,7 @@ class NotFoundError(WspApiError):
 
 
 class NotConfiguredError(WspApiError):
-    """The feature needs a component that is not configured (e.g. no local LLM for summaries)."""
+    """The feature needs a component that is not configured (e.g. no gap log for ``POST /v1/gaps``)."""
 
 
 def raise_for_error(response: httpx.Response, body: bytes | None = None) -> None:

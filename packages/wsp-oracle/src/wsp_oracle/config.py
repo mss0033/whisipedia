@@ -1,7 +1,7 @@
 """The ``[oracle]`` configuration section (documented in ``docs/components/oracle.md``).
 
 Every key has a default, so an empty section gives a lexical-only Oracle with the router, the
-dense path switched on only when vectors exist, and no generator. Relative model paths resolve
+dense path switched on only when vectors exist. Relative model paths resolve
 against ``models_dir`` (default ``~/.cache/whisipedia/models``); weights never live in the repo.
 """
 
@@ -15,9 +15,6 @@ from typing import Any, cast
 DEFAULT_MODELS_DIR = "~/.cache/whisipedia/models"
 DEFAULT_EMBED_MODEL = "intfloat--multilingual-e5-base"
 DEFAULT_RERANK_MODEL = "BAAI--bge-reranker-v2-m3"
-DEFAULT_LLM_MODEL = "llm/Qwen3.5-9B-Q6_K.gguf"
-DEFAULT_LLM_URL = "http://127.0.0.1:8738"
-DEFAULT_LLAMA_SERVER = "~/.local/share/whisipedia/llama.cpp/current/llama-server"
 
 
 class OracleConfigError(ValueError):
@@ -93,23 +90,6 @@ class VectorConfig:
 
 
 @dataclass(frozen=True, slots=True)
-class GeneratorConfig:
-    enabled: bool = False
-    url: str = DEFAULT_LLM_URL
-    """llama.cpp server (OpenAI-compatible). Must be a loopback address (PLAN §10.5)."""
-    model: str = DEFAULT_LLM_MODEL
-    server_binary: str = DEFAULT_LLAMA_SERVER
-    context: int = 8192
-    gpu_layers: int = 999
-    timeout_s: float = 60.0
-    temperature: float = 0.2
-    min_confidence: float = 0.2
-    """Refuse to summarize when the best passage's relevance (reranker probability) is below this."""
-    passages: int = 8
-    passage_chars: int = 1500
-
-
-@dataclass(frozen=True, slots=True)
 class OracleConfig:
     enabled: bool = True
     models_dir: str = DEFAULT_MODELS_DIR
@@ -129,7 +109,6 @@ class OracleConfig:
     embedder: EmbedderConfig = field(default_factory=EmbedderConfig)
     reranker: RerankerConfig = field(default_factory=RerankerConfig)
     vectors: VectorConfig = field(default_factory=VectorConfig)
-    generator: GeneratorConfig = field(default_factory=GeneratorConfig)
 
     def model_path(self, name: str) -> Path:
         p = Path(name).expanduser()
@@ -161,12 +140,11 @@ class OracleConfig:
             "embedder",
             "reranker",
             "vectors",
-            "generator",
         }
         unknown = sorted(set(section) - known)
         if unknown:
             raise OracleConfigError(f"unknown [oracle] keys: {', '.join(unknown)}")
-        emb, rr, vec, gen = (_section(section, k) for k in ("embedder", "reranker", "vectors", "generator"))
+        emb, rr, vec = (_section(section, k) for k in ("embedder", "reranker", "vectors"))
         try:
             embedder = EmbedderConfig(
                 model=str(emb.get("model", DEFAULT_EMBED_MODEL)),
@@ -194,19 +172,6 @@ class OracleConfig:
                 expansion_search=int(vec.get("expansion_search", 96)),
                 store_text=bool(vec.get("store_text", True)),
             )
-            generator = GeneratorConfig(
-                enabled=bool(gen.get("enabled", False)),
-                url=str(gen.get("url", DEFAULT_LLM_URL)),
-                model=str(gen.get("model", DEFAULT_LLM_MODEL)),
-                server_binary=str(gen.get("server_binary", DEFAULT_LLAMA_SERVER)),
-                context=int(gen.get("context", 8192)),
-                gpu_layers=int(gen.get("gpu_layers", 999)),
-                timeout_s=float(gen.get("timeout_s", 60.0)),
-                temperature=float(gen.get("temperature", 0.2)),
-                min_confidence=float(gen.get("min_confidence", 0.2)),
-                passages=int(gen.get("passages", 8)),
-                passage_chars=int(gen.get("passage_chars", 1500)),
-            )
             cfg = cls(
                 enabled=bool(section.get("enabled", True)),
                 models_dir=str(section.get("models_dir", DEFAULT_MODELS_DIR)),
@@ -223,7 +188,6 @@ class OracleConfig:
                 embedder=embedder,
                 reranker=reranker,
                 vectors=vectors,
-                generator=generator,
             )
         except (TypeError, ValueError) as exc:
             if isinstance(exc, OracleConfigError):

@@ -13,7 +13,7 @@ import contextlib
 import threading
 import time
 from collections import Counter
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import Sequence
 from dataclasses import replace
 from typing import Annotated, Any, Literal, cast
 from urllib.parse import unquote
@@ -24,7 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.telemetry import TelemetryConfig
 
 from wsp_api import convert, search, sites
-from wsp_api.addresses import address_of, resolve
+from wsp_api.addresses import resolve
 from wsp_api.browse import browse_router
 from wsp_api.errors import ApiError, errors, install_error_handlers, streamed
 from wsp_api.htmlrewrite import rewrite_html
@@ -52,18 +52,11 @@ from wsp_api.schemas import (
     SourceInfo,
     SourcePage,
     Suggestions,
-    SummarizeRequest,
-    SummaryCitation,
-    SummaryDone,
-    SummaryError,
-    SummaryEvent,
-    SummaryNotice,
     SystemStatus,
 )
 from wsp_api.security import SecurityMiddleware
 from wsp_api.services import ApiSettings, Services
-from wsp_api.sse import change_events, format_event
-from wsp_api.summaries import CitationSplitter
+from wsp_api.sse import change_events
 from wsp_api.views import Library, parse_doc
 from wsp_api.zim import ZimAssetStore
 from wsp_core.ids import parse_doc_id
@@ -478,70 +471,6 @@ def _v1(lib: Library, settings: ApiSettings) -> APIRouter:
             ledger_ok=ledger_ok(),
             uptime_seconds=round(time.monotonic() - started, 3),
             ops=None if s.ops is None else s.ops.status(now),
-        )
-
-    # --- Summaries ------------------------------------------------------------------------------
-
-    @r.post(
-        "/summarize",
-        tags=["search"],
-        response_class=StreamingResponse,
-        responses=streamed(
-            SummaryEvent,
-            "text/event-stream",
-            "SSE stream: `event: <type>` and `data: <SummaryEvent JSON>` per event. "
-            "Without a local language model the endpoint answers 501.",
-        )
-        | errors(400, 404, 422, 501),
-    )
-    async def summarize(body: SummarizeRequest) -> StreamingResponse:
-        generator = s.generator
-        if generator is None:
-            raise ApiError(501, "not_configured", "no local language model is configured")
-        citations: dict[int, SummaryCitation] = {}
-        passages: list[str] = []
-        missing: list[str] = []
-        for n, raw in enumerate(body.doc_ids, start=1):
-            did = parse_doc(raw)
-            doc = await asyncio.to_thread(s.documents.get, did)
-            if doc is None:
-                missing.append(raw)
-                continue
-            citations[n] = SummaryCitation(
-                index=n, doc_id=doc.doc_id, title=doc.title, address=address_of(doc.source_id, doc.native_id)
-            )
-            passages.append(f"[{n}] {doc.title}\n{doc.text[:2000]}")
-        if not passages:
-            raise ApiError(404, "document_not_found", "none of the documents are in the library")
-        prompt = (
-            "Summarize the passages below to answer the question. Cite every sentence with [n]. "
-            "If the passages do not answer it, say so.\n\n"
-            f"Question: {body.query}\n\n" + "\n\n".join(passages)
-        )
-
-        def sse(ev: SummaryEvent) -> str:
-            return format_event(ev.model_dump_json(), event=ev.root.type)
-
-        async def events() -> AsyncIterator[str]:
-            if missing:
-                text = f"{len(missing)} result(s) are no longer in the library and were left out."
-                yield sse(SummaryEvent(SummaryNotice(text=text)))
-            splitter = CitationSplitter(citations)
-            try:
-                async for chunk in generator.stream(prompt, max_tokens=body.max_tokens):
-                    for ev in splitter.feed(chunk):
-                        yield sse(SummaryEvent(ev))
-            except Exception as exc:  # the model died mid-stream: tell the client, never leak internals
-                yield sse(SummaryEvent(SummaryError(message=f"summarizer failed ({type(exc).__name__})")))
-                return
-            for ev in splitter.flush():
-                yield sse(SummaryEvent(ev))
-            yield sse(SummaryEvent(SummaryDone()))
-
-        return StreamingResponse(
-            events(),
-            media_type="text/event-stream",
-            headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
         )
 
     return r

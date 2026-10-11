@@ -45,7 +45,7 @@ class OracleResult:
     route: Route
     hits: tuple[SearchHit, ...]
     passages: Mapping[str, str] = field(default_factory=dict[str, str])
-    """Best passage text per doc id (what the reranker scored; feeds summaries)."""
+    """Best passage text per doc id (what the reranker scored)."""
     confidence: float | None = None
     """Best reranker probability; None without a reranker."""
     low_confidence: bool = False

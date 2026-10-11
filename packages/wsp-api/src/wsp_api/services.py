@@ -15,7 +15,6 @@ from wsp_core.ports import (
     ChangeFeed,
     DocumentStore,
     GapLog,
-    Generator,
     Ledger,
     LexicalIndex,
     Vault,
@@ -36,7 +35,6 @@ class Services:
     vault: Vault
     ledger: Ledger
     sources: Sequence[SourceSpec]
-    generator: Generator | None = None  # None: /v1/summarize answers 501
     clock: Callable[[], datetime] = _utcnow
     # Browsing ports (wsp_core.ports, v0.2). None picks the default noted on each.
     catalog: Catalog | None = None  # None: wsp_api.catalog.FeedCatalog over the change feed

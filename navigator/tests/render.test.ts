@@ -75,12 +75,12 @@ describe('results page render budget', () => {
       { page: 'search' }
     >;
     // warm up (JIT), then take the median of several runs
-    for (let i = 0; i < 5; i += 1) renderResultsPage(resp, route, null, null);
+    for (let i = 0; i < 5; i += 1) renderResultsPage(resp, route, null);
     const times: number[] = [];
     let last: DocumentFragment | null = null;
     for (let i = 0; i < 15; i += 1) {
       const t0 = performance.now();
-      last = renderResultsPage(resp, route, null, null);
+      last = renderResultsPage(resp, route, null);
       times.push(performance.now() - t0);
     }
     times.sort((a, b) => a - b);
