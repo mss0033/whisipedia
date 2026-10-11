@@ -21,6 +21,7 @@ from wsp_core.model import (
     SourceSpec,
 )
 from wsp_orchestrator.clock import ManualClock
+from wsp_orchestrator.errors import ResourceBusyError
 from wsp_orchestrator.integrity import (
     Action,
     AnomalyThresholds,
@@ -442,7 +443,8 @@ def test_anomalous_generation_is_held_then_approved(tmp_path: Path) -> None:
     assert run(h, offer(h, "2026-11-01", DATA_2)) is Outcome.HELD
     rec = h.pipeline.get("wp", "2026-11-01")
     assert rec is not None
-    assert rec.state is ReleaseState.INDEXED
+    assert rec.state is ReleaseState.REFINED  # held before the index: never searchable (H2)
+    assert ("wp", "2026-11-01") not in h.refinery.indexed
     assert "deleted-fraction" in (rec.hold_reason or "")
     report = attest.docs[("wp", "2026-11-01", "PROMOTION.json")]
     assert (report["verdict"], report["baseline"]) == ("hold", "2026-10-01")
@@ -516,3 +518,54 @@ def test_a_failing_profiler_holds_instead_of_failing_the_release(tmp_path: Path)
     assert rec.attempts == 0
     assert "content could not be profiled" in (rec.hold_reason or "")
     assert attest.docs[("wp", "2026-10-01", "PROMOTION.json")]["verdict"] == "hold"
+
+
+def test_a_busy_or_oom_killed_profiler_is_retried_not_held(tmp_path: Path) -> None:
+    """Audit H1/C2: a profile unit that found the HEAVY lock held says nothing about the content."""
+    profiles = Profiles()
+    profiles.by_gen["2026-10-01"] = profile()
+    failures: list[Exception] = [ResourceBusyError("another 'heavy' is running")]
+
+    def flaky(spec: SourceSpec, generation: Generation, generation_dir: Path) -> ContentProfile:
+        if failures:
+            raise failures.pop(0)
+        return profiles(spec, generation, generation_dir)
+
+    attest = Attestations()
+    hooks = IntegrityHooks(attest=attest, profile=flaky)
+    h = PipelineHarness(tmp_path, sources=[make_spec("wp", adapter="kiwix-opds")], integrity=hooks)
+    result = run(h, offer(h, "2026-10-01", DATA_1))
+    assert result is Outcome.DEFERRED
+    rec = h.pipeline.get("wp", "2026-10-01")
+    assert rec is not None
+    assert (rec.state, rec.hold_reason, rec.attempts) == (ReleaseState.REFINED, None, 0)
+    assert ("wp", "2026-10-01", "PROMOTION.json") not in attest.docs
+    h.clock.advance(timedelta(minutes=11))
+    assert h.pipeline.run("wp", "2026-10-01").outcome is Outcome.PROMOTED
+
+
+def test_pins_are_staged_until_promotion_and_evidence_is_kept_per_release(tmp_path: Path) -> None:
+    """Audit M5/M3: a quarantined first release must not pin its hosts; its files stay as evidence
+    in a directory of their own."""
+    h, _ = setup(tmp_path)
+    bad = offer(h, "2026-10-01", DATA_1, channel_digest="0" * 64)
+    assert run(h, bad) is Outcome.QUARANTINED
+    assert h.store.origin_pins("wp") == []
+    name = bad.files[0].name
+    evidence = tmp_path / "work" / "_quarantine" / "wp" / "2026-10-01" / "evidence" / name
+    assert evidence.read_bytes() == DATA_1
+    assert not (tmp_path / "work" / "wp" / name).exists()
+
+    from wsp_orchestrator.pipeline import resume_source
+
+    resume_source(h.store, h.pipeline.ledger_outbox_writer, "wp", alerter=h.alerter)
+    good = offer(h, "2026-11-01", DATA_2)
+    h.pipeline.register(good)
+    h.pipeline.step("wp", "2026-11-01")  # PLANNED
+    h.pipeline.step("wp", "2026-11-01")  # FETCHING
+    h.pipeline.step("wp", "2026-11-01")  # FETCHED
+    h.pipeline.step("wp", "2026-11-01")  # VERIFIED: pins staged, not committed
+    assert h.store.origin_pins("wp") == []
+    assert h.pipeline.run("wp", "2026-11-01").outcome is Outcome.PROMOTED
+    assert {r["host"] for r in h.store.origin_pins("wp")} == {"download.kiwix.org", "mirror.example.org"}
+    assert evidence.read_bytes() == DATA_1, "a later release never overwrites earlier evidence"
