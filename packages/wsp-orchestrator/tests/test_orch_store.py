@@ -28,7 +28,7 @@ def test_schema_v1_is_migrated_to_current(tmp_path: Path) -> None:
     rec = store.get_release("s", "v")
     assert rec is not None
     assert rec.fetched == {}
-    assert store.get_meta("schema_version") == "4"
+    assert store.get_meta("schema_version") == "5"
     assert store.offers("s") is None
     store.close()
 

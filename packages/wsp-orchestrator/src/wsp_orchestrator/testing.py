@@ -13,7 +13,7 @@ import shutil
 import threading
 import time
 from collections import Counter
-from collections.abc import Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath
@@ -43,10 +43,13 @@ from wsp_core.model import (
 from wsp_core.partitions import current_set_ids, partition_of
 from wsp_core.ports import Ctx
 from wsp_orchestrator.alerts import Alert, Alerter
+from wsp_orchestrator.child import run as run_child
 from wsp_orchestrator.clock import Clock, ManualClock, SystemClock
 from wsp_orchestrator.integrity.guard import IntegrityGuard, IntegrityHooks
+from wsp_orchestrator.isolation import ChildExit, UnitLimits
 from wsp_orchestrator.orchestrator import Wiring
 from wsp_orchestrator.pipeline import (
+    DocumentScreenHook,
     RefineResult,
     ReleasePipeline,
     RetryPolicy,
@@ -54,7 +57,7 @@ from wsp_orchestrator.pipeline import (
     adapter_resolver,
 )
 from wsp_orchestrator.settings import OrchestratorSettings
-from wsp_orchestrator.store import StateStore
+from wsp_orchestrator.store import GenerationStats, StateStore
 
 
 class SimulatedCrash(BaseException):
@@ -267,6 +270,111 @@ class FakeAdapter:
                 license="CC0-1.0",
                 text=text,
             )
+
+
+@dataclass
+class ScreeningAdapter(FakeAdapter):
+    """An adapter with a document-policy ``screen()`` separate from ``verify`` (``DocumentScreen``).
+
+    ``policy`` is applied by :meth:`screen`; :meth:`verify` only checks digests.
+    """
+
+    def screen(self, ctx: Ctx, remote: RemoteFile, local: Path) -> Verdict:
+        self.calls["screen"] += 1
+        return self.policy.get(remote.name, Verdict(VerdictStatus.OK, "allowed"))
+
+    def verify(self, ctx: Ctx, remote: RemoteFile, local: Path) -> Verdict:
+        self._maybe_fail("verify")
+        if not local.is_file():
+            return Verdict(VerdictStatus.MISSING, str(local))
+        want = {c.algorithm: c.hexdigest for c in remote.checksums}
+        if "sha256" not in want:
+            return Verdict(VerdictStatus.UNVERIFIABLE)
+        got = sha256_hex(local.read_bytes())
+        return Verdict(VerdictStatus.OK) if got == want["sha256"] else Verdict(VerdictStatus.MISMATCH, got)
+
+
+class _EndedChild:
+    def __init__(self, exit_: ChildExit) -> None:
+        self.exit = exit_
+        self.stopped = False
+
+    def wait(self, timeout: float) -> ChildExit | None:
+        return self.exit
+
+    def stop(self) -> None:
+        self.stopped = True
+
+
+class _HangingChild:
+    """Runs until stopped (a refine that takes hours); ``stop()`` ends it like SIGTERM would."""
+
+    def __init__(self, started: threading.Event) -> None:
+        self.started = started
+        self.stopped = threading.Event()
+
+    def wait(self, timeout: float) -> ChildExit | None:
+        self.started.set()
+        if self.stopped.wait(timeout):
+            return ChildExit("signal", None, "TERM")
+        return None
+
+    def stop(self) -> None:
+        self.stopped.set()
+
+
+def child_echo(payload: Mapping[str, Any]) -> Any:
+    """A child target for tests: returns ``payload["value"]``."""
+    return payload.get("value")
+
+
+def child_raise(payload: Mapping[str, Any]) -> Any:
+    """A child target for tests: raises ``payload["error"]`` (``busy``, ``oserror`` or a message)."""
+    from wsp_orchestrator.errors import ResourceBusyError
+
+    match payload.get("error"):
+        case "busy":
+            raise ResourceBusyError("another 'heavy' is running")
+        case "memory":
+            raise MemoryError("no memory")
+        case message:
+            raise ValueError(str(message))
+
+
+@dataclass
+class FakeLauncher:
+    """Stand-in for ``systemd-run`` (tests never start real units).
+
+    Each start consumes the next scripted :class:`ChildExit` from ``exits`` (e.g. ``oom-kill``); with
+    none left it runs the child function in this process, exactly as ``wsp_orchestrator.child``
+    would. ``hang=True`` starts children that run until stopped.
+    """
+
+    exits: list[ChildExit] = field(default_factory=list[ChildExit])
+    hang: bool = False
+    started: list[tuple[str, list[str], dict[str, str]]] = field(
+        default_factory=list[tuple[str, list[str], dict[str, str]]]
+    )
+    children: list[_HangingChild | _EndedChild] = field(default_factory=list[_HangingChild | _EndedChild])
+    request_modes: list[int] = field(default_factory=list[int])  # permissions of each request file
+    running: threading.Event = field(default_factory=threading.Event)
+
+    def start(
+        self, unit: str, argv: Sequence[str], *, env: Mapping[str, str], cwd: Path, limits: UnitLimits
+    ) -> _HangingChild | _EndedChild:
+        self.started.append((unit, list(argv), dict(env)))
+        self.request_modes.append(Path(argv[-2]).stat().st_mode & 0o777)
+        child: _HangingChild | _EndedChild
+        if self.hang:
+            child = _HangingChild(self.running)
+        elif self.exits:
+            child = _EndedChild(self.exits.pop(0))
+        else:
+            target, request, result = argv[-3:]
+            code = run_child(target, Path(request), Path(result))
+            child = _EndedChild(ChildExit("success" if code == 0 else "exit-code", code, str(code)))
+        self.children.append(child)
+        return child
 
 
 @dataclass
@@ -558,15 +666,21 @@ class PipelineHarness:
         crash_at: int | None = None,
         integrity: IntegrityHooks | None = None,
         on_withheld: WithheldHook | None = None,
+        document_screen: DocumentScreenHook | None = None,
+        storage_available: Callable[[], bool] | None = None,
+        adapter_type: type[FakeAdapter] | None = None,
     ) -> None:
         self.root = root
         self.integrity_hooks = integrity
         self.on_withheld = on_withheld
+        self.document_screen = document_screen
+        self.storage_available = storage_available
         self.fetcher = FakeFetcher()
         self.guard: IntegrityGuard | None = None
         self.clock = clock or ManualClock(datetime(2026, 10, 15, tzinfo=UTC))
         self.sources = list(sources) or [make_spec("src")]
-        self.adapters = {s.adapter or s.id: FakeAdapter(s.adapter or s.id, s.id) for s in self.sources}
+        make = adapter_type or FakeAdapter
+        self.adapters = {s.adapter or s.id: make(s.adapter or s.id, s.id) for s in self.sources}
         self.vault = FakeVault(
             root / "vault", self.clock, partitioned=[s.id for s in self.sources if s.partitioned]
         )
@@ -617,12 +731,23 @@ class PipelineHarness:
             checkpoint=self.injector,
             integrity=self.guard,
             on_withheld=self.on_withheld,
+            document_screen=self.document_screen,
+            storage_available=self.storage_available,
         )
 
     def restart(self, *, crash_at: int | None = None) -> None:
+        """A daemon restart: reopen the state DB and run the startup crash accounting."""
         self.store.close()
         self.injector = CrashInjector(crash_at)
         self._open()
+        self.pipeline.recover_crashes()
+
+
+def record_promotions(store: StateStore, source_id: str, generation_ids: Sequence[str], at: datetime) -> None:
+    """Promotion history for generations a test put into the vault directly (retention needs it)."""
+    with store.tx() as c:
+        for gid in generation_ids:
+            store.add_generation_stats(GenerationStats(source_id, gid, None, None, at), c)
 
 
 def make_settings(root: Path, **overrides: Any) -> OrchestratorSettings:

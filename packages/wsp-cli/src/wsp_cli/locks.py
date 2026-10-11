@@ -8,9 +8,14 @@ Lock names shared by every process (CLI, orchestrator, timer, ``tools/wsp-bg``):
 * ``INDEX`` — the one writer of the Refinery, the Tantivy index, the suggest trie and the change feed;
 * ``HEAVY`` — at most one memory-heavy job on the machine at a time (refine, index, rank, spell, embed,
   profile), so their budgets never add up inside ``whisipedia-background.slice``;
-* ``INGEST`` — the one writer of vault staging and promotion from ``_incoming``.
+* ``INGEST`` — the one writer of vault staging and promotion from ``_incoming``;
+* ``SCRUB`` — the one scrub (and repair ladder) over the scrub state DB;
+* ``DRILL`` — one chaos drill at a time.
 
-A job that needs both takes ``HEAVY`` first, then ``INDEX`` (one global order, no deadlock).
+A job that needs both takes ``HEAVY`` first, then ``INDEX`` (one global order, no deadlock). The
+orchestrator's heavy steps take them *inside* their child unit (``wsp_cli.wiring``), so a child that
+outlives a crashed daemon still holds them and a restarted daemon defers instead of running a second
+writer. ``tools/wsp-bg --heavy`` takes ``HEAVY`` for ad-hoc jobs.
 """
 
 from __future__ import annotations
@@ -22,13 +27,29 @@ import time
 from collections.abc import Callable, Generator
 from pathlib import Path
 
+from wsp_orchestrator.errors import ResourceBusyError
+
 INDEX = "index"
 HEAVY = "heavy"
 INGEST = "ingest"
+SCRUB = "scrub"  # the one scrub/repair writer of the scrub state DB (orchestrator slices, wsp scrub)
+DRILL = "drill"  # one chaos drill at a time (orchestrator, wsp drill)
 
 
-class LockHeldError(RuntimeError):
-    """Another process holds the lock."""
+class LockHeldError(ResourceBusyError):
+    """Another process holds the lock.
+
+    A :class:`~wsp_orchestrator.errors.ResourceBusyError`: in the orchestrator a busy lock defers
+    the step (no attempt counted, audit H1); the CLI exits with :data:`EXIT_BUSY`.
+    """
+
+
+EXIT_BUSY = 3  # CLI exit code when a lock is held by another process
+
+
+def lock_dir_for(index_root: Path) -> Path:
+    """The machine's lock directory: local disk, next to the index root (ADR-0002)."""
+    return index_root.parent / "locks"
 
 
 @contextlib.contextmanager

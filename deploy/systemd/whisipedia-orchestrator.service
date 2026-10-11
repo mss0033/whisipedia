@@ -11,6 +11,10 @@ Description=Whisipedia orchestrator (discovery, downloads, scrub, parity, curato
 Documentation=file://@REPO@/docs/components/orchestrator.md
 After=network-online.target
 Wants=network-online.target
+# A crash loop stops after 4 starts in 2 hours (the unit stays failed; the orchestrator also raises a
+# "crash-loop" alert on its next start). Audit 2026-10-11 C1: six OOM kills restarted it all night.
+StartLimitIntervalSec=2h
+StartLimitBurst=4
 
 [Service]
 Type=simple
@@ -21,27 +25,40 @@ Environment=WSP_CONFIG_DIR=@CONFIG_DIR@
 # The NAS may not be mounted yet after a Windows/WSL start: fail fast and retry.
 ExecStartPre=@REPO@/.venv/bin/wsp --config-dir @CONFIG_DIR@ doctor --quiet --require vault
 ExecStart=@REPO@/.venv/bin/wsp-orchestrator --config-dir @CONFIG_DIR@
-# SIGTERM -> prompt shutdown: stop claiming jobs, cancel downloads/scrub/parity, exit within
-# orchestrator.shutdown_grace_seconds (10 s); unfinished work resumes on the next start.
+# SIGTERM -> prompt shutdown: stop claiming jobs, cancel downloads/scrub/parity and heavy step units,
+# exit within orchestrator.shutdown_grace_seconds (10 s); unfinished work resumes on the next start.
+# KillMode=mixed: SIGTERM goes to the main process only (not to aria2/par2/hash workers, whose
+# sudden death used to be recorded as a job failure); whatever is left gets SIGKILL after the timeout.
 KillSignal=SIGTERM
+KillMode=mixed
 TimeoutStopSec=120
 Restart=on-failure
 RestartSec=60
+# The kernel OOM-killing a child (aria2, par2) must not take the whole service down with it.
+OOMPolicy=continue
 # Logs are JSON lines on stderr -> journald (`journalctl --user -u whisipedia-orchestrator -o cat`).
 StandardOutput=journal
 StandardError=journal
 # Be a good neighbour to the browser and the NAS (scrub and parity are IO-heavy).
 Nice=19
 CPUWeight=20
-# Shared budget with every other background job (whisipedia-background.slice); the orchestrator's
-# own ceiling leaves room in the slice for an index build. OOMScoreAdjust: if the kernel must kill,
-# it kills background work before anything the owner is using.
+# Shared budget with every other background job (whisipedia-background.slice). The daemon is a small
+# control plane: refine, index and content profiles run as transient units
+# (whisipedia-step-*.service, systemd-run in the same slice, MemoryMax=6G each by default, one at a
+# time through the machine-wide "heavy" lock), so its own ceiling is small. OOMScoreAdjust: if the
+# kernel must kill, it kills background work before anything the owner is using.
 Slice=whisipedia-background.slice
-MemoryHigh=6G
-MemoryMax=8G
+MemoryHigh=1536M
+MemoryMax=2G
+MemorySwapMax=512M
+TasksMax=256
 OOMScoreAdjust=500
 Environment=WSP_MAX_WORKERS=4
-IOSchedulingClass=idle
+Environment=WSP_HEAVY_LAUNCHER=systemd
+# best-effort/7, not idle: an idle-class writer holding a lock or a long SQLite transaction starved
+# everything waiting for it (priority inversion).
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
 NoNewPrivileges=yes
 PrivateTmp=yes
 UMask=0027

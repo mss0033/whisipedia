@@ -13,7 +13,7 @@ from wsp_orchestrator.pipeline import (
     UnknownReleaseError,
     resume_source,
 )
-from wsp_orchestrator.testing import PipelineHarness, SimulatedCrash, fetch_result
+from wsp_orchestrator.testing import PipelineHarness, ScreeningAdapter, SimulatedCrash, fetch_result
 
 S = ReleaseState
 HAPPY = [
@@ -187,7 +187,8 @@ def test_doc_count_drop_holds_for_review_then_approve(tmp_path: Path) -> None:
     h.pipeline.register(h.adapter.add_release("2026-10-01", FILES))
     held = h.pipeline.run("src", "2026-10-01")
     assert held.outcome is Outcome.HELD
-    assert held.record.state is S.INDEXED
+    assert held.record.state is S.REFINED  # the gate runs before the index (audit H2)
+    assert ("src", "2026-10-01") not in h.refinery.indexed
     assert "document count dropped" in (held.record.hold_reason or "")
     assert "held:src/2026-10-01" in h.sink.alert_keys()
     current = h.vault.current("src")
@@ -303,7 +304,8 @@ def test_fetch_digests_are_persisted_and_forwarded_to_the_vault(tmp_path: Path) 
 
 
 def test_verified_fetch_skips_the_adapter_rehash(tmp_path: Path) -> None:
-    h = PipelineHarness(tmp_path)
+    """With a policy screen separate from ``verify``, a fetcher-verified file is not re-hashed."""
+    h = PipelineHarness(tmp_path, adapter_type=ScreeningAdapter)
     ref = h.adapter.add_release("2026-10-01", FILES)
     original = h.adapter.fetch
 
@@ -316,6 +318,7 @@ def test_verified_fetch_skips_the_adapter_rehash(tmp_path: Path) -> None:
     h.pipeline.register(ref)
     assert h.pipeline.run("src", "2026-10-01").outcome is Outcome.PROMOTED
     assert h.adapter.calls["verify"] == 0
+    assert h.adapter.calls["screen"] == len(FILES)  # the policy screen always runs (audit H3)
 
 
 def test_ledger_flush_is_idempotent_by_event_id(tmp_path: Path) -> None:
