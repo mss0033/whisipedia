@@ -8,12 +8,15 @@ Port revision v0.2 (ADR-0005): ``Fetcher.download`` returns a :class:`~wsp_core.
 separate :class:`Warden` port; ``Ledger`` gains ``tail`` and idempotent appends; ``LexicalIndex`` and
 ``ChangeFeed`` gain ``close``; typed errors live in :mod:`wsp_core.errors`; the API's read-side seams
 (``Catalog``, ``AssetStore``, ``GapLog``) moved here from ``wsp_api.seams``.
+
+Port revision v0.3 (ADR-0008): the ``Generator`` port (local LLM for summaries) is removed; the user
+experience has no generative features.
 """
 
 from __future__ import annotations
 
 import random
-from collections.abc import AsyncIterator, Iterable, Iterator, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -293,13 +296,6 @@ class Embedder(Protocol):
 @runtime_checkable
 class Reranker(Protocol):
     def rerank(self, query: str, hits: Sequence[SearchHit]) -> Sequence[SearchHit]: ...
-
-
-@runtime_checkable
-class Generator(Protocol):
-    """Local LLM used only for on-request, cited summaries (PLAN §9.3, §10.3)."""
-
-    def stream(self, prompt: str, *, max_tokens: int = 512) -> AsyncIterator[str]: ...
 
 
 # --- Documents & change feed ---------------------------------------------------------------------

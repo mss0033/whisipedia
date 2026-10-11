@@ -39,26 +39,8 @@ export function mockMiddleware(latencyMs = 25): Connect.NextHandleFunction {
         req.on('close', () => clearInterval(beat));
         return;
       }
-      if (!('json' in result) && !('stream' in result)) {
+      if (!('json' in result)) {
         res.writeHead(result.status, { 'Cache-Control': 'no-store' });
-        res.end();
-        return;
-      }
-      if ('stream' in result) {
-        res.writeHead(200, {
-          'Content-Type': 'text/event-stream',
-          'Cache-Control': 'no-store',
-          Connection: 'keep-alive',
-        });
-        let closed = false;
-        req.on('close', () => {
-          closed = true;
-        });
-        for (const { delayMs, event } of result.stream) {
-          if (closed) return;
-          await sleep(delayMs);
-          res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
-        }
         res.end();
         return;
       }

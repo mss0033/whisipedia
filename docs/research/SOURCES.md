@@ -161,6 +161,8 @@ News is the **weakest category for open bulk copying**. Most current journalism 
 | Paywalled news archives | No license for bulk copying |
 | Full Internet Archive / Wayback mirror | Petabyte scale, mixed rights. Only curated PD/CC subsets. |
 | Sites whose terms forbid bulk copying | Unless written permission is obtained (tracked as T3 "needs permission") |
+| Classified, leaked, export-controlled (ITAR/EAR), FOUO/CUI or Distribution B–F material; login-gated security products (OSAC, TRIPwire) | Not lawfully public. Firm exclusion, whatever mirror holds a copy ([PREPAREDNESS_AND_DEFENSE.md §3](PREPAREDNESS_AND_DEFENSE.md#3-boundaries-policy)). |
+| Material whose primary content is CBRN agent production or weaponisation, explosives or weapon manufacture, weapons guidance or targeting, or offensive tooling | Safety exclusion, even when publicly released ([§3.2](PREPAREDNESS_AND_DEFENSE.md#32-safety-exclusions-regardless-of-availability-or-license)). |
 
 ---
 
@@ -184,7 +186,23 @@ Recommendation: start with a curated list of about 1 TB (Wikipedia en maxi, Wikt
 
 ---
 
-## 13. Re-research cadence
+## 13. Preparedness and defensive collections
+
+Two collections are researched in their own document, [`PREPAREDNESS_AND_DEFENSE.md`](PREPAREDNESS_AND_DEFENSE.md) (2026-10-10, 104 sources across 11 domains, 81 of them T1/T2 candidates):
+
+- **Preparedness & resilience** (vault shelf `preparedness`): agriculture and food preservation, water and sanitation, austere medicine, shelter/energy/engineering, navigation and communications, emergency management and continuity of government. Issuers such as USDA, FAO, WHO, JTS, FEMA, CISA, NOAA, NGA, FAA, USGS and the UK Cabinet Office.
+- **Defensive & security literature** (vault shelf `defense`): electronics and radar fundamentals (NEETS, DOE handbooks), publicly released doctrine (Army, Joint, USMC), intelligence analysis and counterintelligence history (CIA CSI, FRUS, NSA history), protective security (CISA, ISC, USSS NTAC) and cybersecurity standards (NIST, DISA STIGs, MITRE).
+
+That document adds three things to this one: **issuer authority as a hard gate** next to the license gate, **currency labels** so superseded and historical guidance is kept but never outranks the current edition, and **binding boundaries** (lawfully public material only; safety exclusions for weapons and offensive content). Mixed collections are filtered per document by the new `doc-collection` adapter, with owner review of borderline items through `wsp proposals`. 30 candidate and 2 excluded entries are in the registry.
+
+| Collection | Top recommended first ingestions | ≈ Size |
+|---|---|---|
+| Preparedness | Bowditch + NGA pubs, NOAA ENC + Coast Pilot ✓ 0.8 GB, FAA handbooks, JTS CPGs, FEMA Independent Study, UK resilience guidance (OGL), USDA canning guide + Farmers' Bulletins, WHO IRIS WASH/clinical, NCVEC pools + SAFECOM guides | ≈ 0.15 TB |
+| Defense | NIST CSRC + OSCAL, FRUS ✓ 14.8 GB, CIA CSI, Army public doctrine (filtered), CISA protective security + ISC + NTAC, DOE handbooks + NEETS | ≈ 0.1 TB |
+
+---
+
+## 14. Re-research cadence
 
 - The **Curator** (PLAN §5) rescores every active source each quarter and runs the discovery bots weekly.
 - This document is regenerated from `registry/sources.yaml` plus the narrative notes each quarter, and the diffs are reviewed in a PR.

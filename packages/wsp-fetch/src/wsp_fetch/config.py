@@ -45,6 +45,8 @@ class FetchConfig:
     metalink_hosts: tuple[str, ...] = ("download.kiwix.org",)  # probe ``<url>.meta4`` on these hosts
     state_interval: float = 2.0  # seconds between durable resume checkpoints
     verify_readback: bool = False  # drop page cache and re-hash from disk before rename (SMB, ADR-0002)
+    spot_checks: int = 2  # random ranges re-read from every mirror and compared (ADR-0009); 0 = off
+    spot_check_bytes: int = 64 * 1024
 
     def connections_for(self, url_or_host: str) -> int:
         key = host_key(url_or_host) if "://" in url_or_host else url_or_host.lower()

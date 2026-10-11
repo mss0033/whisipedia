@@ -1,9 +1,9 @@
-import json
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
-from typing import Any
+from typing import ClassVar
 
 import httpx
-import pytest
 
 from wsp_api import Services, create_app
 from wsp_api.addresses import document_href
@@ -17,11 +17,11 @@ from wsp_api.schemas import (
     SourceInfo,
     SourcePage,
     Suggestions,
-    SummaryEvent,
     SystemStatus,
 )
 from wsp_api.testing import local_client
-from wsp_api.testing.fakes import SAMPLE_GEN_1, SAMPLE_GEN_2, EchoGenerator, sample_services
+from wsp_api.testing.fakes import SAMPLE_GEN_1, SAMPLE_GEN_2, InMemoryLexicalIndex, sample_services
+from wsp_core.model import SearchHit
 
 TURING = "wsp:wikipedia-en-zim/A/Alan_Turing"
 
@@ -161,54 +161,115 @@ def test_system_flags_broken_ledger() -> None:
         assert c.get("/v1/system").json()["ledger_ok"] is False
 
 
-def _sse(r: httpx.Response) -> list[tuple[str, SummaryEvent]]:
-    out: list[tuple[str, SummaryEvent]] = []
-    for block in r.text.split("\n\n"):
-        lines = dict(line.split(": ", 1) for line in block.splitlines() if ": " in line)
-        if "data" in lines:
-            out.append((lines["event"], SummaryEvent.model_validate(json.loads(lines["data"]))))
-    return out
+def test_summarize_is_gone(client: httpx.Client) -> None:
+    """No generative features (ADR-0008): the old summary endpoint does not exist."""
+    r = client.post("/v1/summarize", json={"query": "x", "doc_ids": [TURING]})
+    assert r.status_code in (404, 405)
+    assert "/v1/summarize" not in client.get("/v1/openapi.json").json()["paths"]
 
 
-def test_summarize_streams_sse_with_citation_events(services: Services) -> None:
-    with local_client(create_app(services)) as c:
-        r = c.post("/v1/summarize", json={"query": "who was turing", "doc_ids": [TURING, "wsp:rfc/9110"]})
-    assert r.status_code == 200
-    assert r.headers["content-type"].startswith("text/event-stream")
-    events = _sse(r)
-    assert all(name == ev.root.type for name, ev in events)
-    kinds = [ev.root.type for _, ev in events]
-    assert kinds[-1] == "done"
-    cites = [ev.root for _, ev in events if ev.root.type == "citation"]
-    assert [(c.index, c.doc_id) for c in cites] == [(1, TURING), (2, "wsp:rfc/9110")]  # type: ignore[union-attr]
-    text = "".join(ev.root.text for _, ev in events if ev.root.type == "token")  # type: ignore[union-attr]
-    assert "[1]" not in text  # markers became citation events
-    assert text.startswith("Summary of 2 results")
-    gen = services.generator
-    assert isinstance(gen, EchoGenerator)
-    assert "Question: who was turing" in gen.prompts[0]
+# --- did you mean, routed scope ------------------------------------------------------------------
 
 
-def test_summarize_without_generator_is_501() -> None:
-    with local_client(create_app(sample_services(with_generator=False))) as c:
-        r = c.post("/v1/summarize", json={"query": "x", "doc_ids": [TURING]})
-    assert r.status_code == 501
-    assert r.json() == {
-        "error": {"code": "not_configured", "message": "no local language model is configured"}
+class _Speller:
+    """Dictionary speller: enough to test when the API asks for a correction."""
+
+    FIX: ClassVar[dict[str, str]] = {
+        "turnig": "turing",
+        "vacine": "vaccine",
+        "imune": "immune",
+        "zebar": "zebra",
     }
+    KNOWN: ClassVar[set[str]] = {"turing", "vaccine", "immune", "system", "computer", "train", "the"}
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, list[str] | None]] = []
+
+    def correct(self, query: str, *, only: Iterable[str] | None = None) -> str | None:
+        allowed = None if only is None else list(only)
+        self.calls.append((query, allowed))
+        words = [
+            self.FIX.get(w, w) if allowed is None or w in allowed else w for w in query.casefold().split()
+        ]
+        out = " ".join(words)
+        return None if out == query.casefold() else out
+
+    def unknown(self, query: str) -> list[str]:
+        return [w for w in query.casefold().split() if len(w) >= 3 and w not in self.KNOWN]
 
 
-@pytest.mark.parametrize(
-    ("body", "status", "code"),
-    [
-        ({"query": "x", "doc_ids": ["wsp:rfc/0"]}, 404, "document_not_found"),
-        ({"query": "x", "doc_ids": ["not-an-id"]}, 400, "invalid_doc_id"),
-        ({"query": "x", "doc_ids": []}, 422, "invalid_request"),
-    ],
-)
-def test_summarize_rejects_bad_input(
-    client: httpx.Client, body: dict[str, Any], status: int, code: str
-) -> None:
-    r = client.post("/v1/summarize", json=body)
-    assert r.status_code == status
-    assert r.json()["error"]["code"] == code
+def test_did_you_mean_when_results_are_sparse() -> None:
+    speller = _Speller()
+    services = replace(sample_services(), speller=speller)
+    with local_client(create_app(services)) as c:
+        body = SearchResults.model_validate(c.get("/v1/search", params={"q": "turnig"}).json())
+        assert body.hits == []
+        assert body.did_you_mean == "turing"
+        assert speller.calls == [("turnig", None)]
+        # a word that matches nothing is "low score" even with plenty of other hits
+        body = SearchResults.model_validate(c.get("/v1/search", params={"q": "vacine the"}).json())
+        assert body.did_you_mean == "vaccine the"
+        # a well-spelled query gets no suggestion; later pages never ask
+        assert c.get("/v1/search", params={"q": "vaccine"}).json()["did_you_mean"] is None
+        speller.calls.clear()
+        assert c.get("/v1/search", params={"q": "turnig", "offset": 10}).json()["did_you_mean"] is None
+        assert speller.calls == []
+        # a correction that finds nothing is not offered
+        assert c.get("/v1/search", params={"q": "zebar"}).json()["did_you_mean"] is None
+
+
+def test_no_speller_no_suggestion(client: httpx.Client) -> None:
+    assert client.get("/v1/search", params={"q": "turnig"}).json()["did_you_mean"] is None
+
+
+@dataclass(frozen=True)
+class _Scope:
+    site: str
+    sources: tuple[str, ...]
+    fallback: bool
+
+
+class _RoutedIndex(InMemoryLexicalIndex):
+    """An index that routes ``rfc ...`` to the rfc site like the Oracle does, with a fallback."""
+
+    def _route(
+        self, query: str, sources: Sequence[str] | None
+    ) -> tuple[str, Sequence[str] | None, _Scope | None]:
+        head, _, rest = query.partition(" ")
+        if head != "rfc" or not rest or sources is not None:
+            return query, sources, None
+        if super().search(rest, limit=1, sources=["rfc"]):
+            return rest, ["rfc"], _Scope("rfc", ("rfc",), False)
+        return query, None, _Scope("rfc", ("rfc",), True)
+
+    def scope(self, query: str, sources: Sequence[str] | None = None) -> _Scope | None:
+        return self._route(query, sources)[2]
+
+    def search(
+        self, query: str, *, limit: int = 10, offset: int = 0, sources: Sequence[str] | None = None
+    ) -> Sequence[SearchHit]:
+        q, scoped, _ = self._route(query, sources)
+        return super().search(q, limit=limit, offset=offset, sources=scoped)
+
+
+def test_routed_scope_keeps_totals_and_facets_consistent() -> None:
+    base = sample_services()
+    index = _RoutedIndex()
+    index.upsert(base.documents.all_current())  # type: ignore[attr-defined]
+    index.commit()
+    with local_client(create_app(replace(base, index=index))) as c:
+        body = SearchResults.model_validate(c.get("/v1/search", params={"q": "rfc caching"}).json())
+        assert [h.doc_id for h in body.hits] == ["wsp:rfc/9110"]
+        assert body.total == 1
+        assert sum(f.count for f in body.facets) == body.total
+        assert body.scope is not None
+        assert (body.scope.site, body.scope.sources, body.scope.fallback) == ("rfc", ["rfc"], False)
+
+        fb = SearchResults.model_validate(c.get("/v1/search", params={"q": "rfc turing"}).json())
+        assert fb.scope is not None
+        assert fb.scope.fallback
+        assert TURING in {h.doc_id for h in fb.hits}
+        assert fb.total == len(fb.hits)
+        assert sum(f.count for f in fb.facets) == fb.total
+    with local_client(create_app(base)) as c:
+        assert c.get("/v1/search", params={"q": "rfc caching"}).json()["scope"] is None

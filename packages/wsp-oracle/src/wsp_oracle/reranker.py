@@ -3,7 +3,7 @@
 The port reranks ``SearchHit``s and scores ``title + snippet``. The Oracle pipeline puts the best
 matching passage into ``snippet`` before calling it (and restores the display snippet afterwards),
 so the cross-encoder judges the text that actually matched. Scores are probabilities
-(``sigmoid(logit)``), which also serve as the retrieval-confidence signal for summaries.
+(``sigmoid(logit)``), which also serve as the retrieval-confidence signal (``low_confidence``).
 """
 
 from __future__ import annotations

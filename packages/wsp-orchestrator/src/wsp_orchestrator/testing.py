@@ -10,12 +10,15 @@ import contextlib
 import hashlib
 import json
 import shutil
+import threading
+import time
 from collections import Counter
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath
 from typing import Any, cast
+from urllib.parse import urlsplit
 
 from wsp_core.errors import NotFoundError
 from wsp_core.ids import make_doc_id
@@ -40,6 +43,7 @@ from wsp_core.model import (
 from wsp_core.ports import Ctx
 from wsp_orchestrator.alerts import Alert, Alerter
 from wsp_orchestrator.clock import Clock, ManualClock, SystemClock
+from wsp_orchestrator.integrity.guard import IntegrityGuard, IntegrityHooks
 from wsp_orchestrator.orchestrator import Wiring
 from wsp_orchestrator.pipeline import RefineResult, ReleasePipeline, RetryPolicy, adapter_resolver
 from wsp_orchestrator.settings import OrchestratorSettings
@@ -71,6 +75,60 @@ def fetch_result(path: Path, verified: Sequence[Checksum] = ()) -> FetchResult:
     """A FetchResult for a file on disk (sha256 + a stand-in for blake3, like the fake vault)."""
     data = path.read_bytes()
     return FetchResult(path, len(data), sha256_hex(data), hashlib.blake2b(data).hexdigest(), tuple(verified))
+
+
+@dataclass(frozen=True, slots=True)
+class ProvenancedResult(FetchResult):
+    """A FetchResult carrying a fetcher provenance record, like ``wsp_fetch.FetchReport``."""
+
+    provenance: Mapping[str, Any] = field(default_factory=dict[str, Any])
+
+
+def mirror_provenance(
+    remote: RemoteFile,
+    size: int,
+    *,
+    mirrors: Mapping[str, str] | None = None,
+    issuer: str = "Test CA",
+    spot_check: str = "ok",
+    corrupt_pieces: int = 0,
+    rejected: Sequence[Mapping[str, Any]] = (),
+) -> dict[str, Any]:
+    """A fetch provenance record in the shape ``wsp_fetch`` produces: ``mirrors`` maps each byte
+    source URL to the host that served it (default: the file URL itself served everything)."""
+    srcs = dict(mirrors or {remote.url: urlsplit(remote.url).hostname or ""})
+    share = size // max(len(srcs), 1)
+    sources: list[dict[str, Any]] = []
+    for i, (url, host) in enumerate(srcs.items()):
+        start = i * share
+        end = size - 1 if i == len(srcs) - 1 else start + share - 1
+        sources.append(
+            {
+                "url": url,
+                "final_url": url,
+                "host": host,
+                "redirects": [],
+                "tls": {"sha256": f"cert-{host}", "issuer_family": issuer, "issuer": {"o": issuer}},
+                "etag": '"e"',
+                "last_modified": None,
+                "ranges": [[start, end]] if size else [],
+                "bytes": end - start + 1 if size else 0,
+                "corrupt_pieces": corrupt_pieces if i == len(srcs) - 1 else 0,
+                "disabled": False,
+                "spot_check": spot_check if i == len(srcs) - 1 else "ok",
+            }
+        )
+    return {
+        "format": "whisipedia-fetch-provenance/1",
+        "url": remote.url,
+        "size": size,
+        "metalink": None,
+        "checksums": {"declared": [], "metalink": [], "piece_hashes": None},
+        "sources": sources,
+        "rejected": [dict(r) for r in rejected],
+        "resumed_bytes": 0,
+        "fetched_at": "2026-10-15T00:00:00+00:00",
+    }
 
 
 def make_release(
@@ -116,6 +174,10 @@ class FakeAdapter:
     corrupt: set[tuple[str, str]] = field(default_factory=set[tuple[str, str]])
     failures: dict[str, list[BaseException]] = field(default_factory=dict[str, list[BaseException]])
     calls: Counter[str] = field(default_factory=Counter[str])
+    # (version, name) -> fetch provenance; fetch() then returns a ProvenancedResult
+    provenance: dict[tuple[str, str], Mapping[str, Any]] = field(
+        default_factory=dict[tuple[str, str], Mapping[str, Any]]
+    )
 
     def add_release(
         self,
@@ -158,7 +220,11 @@ class FakeAdapter:
             if (plan.release.version, remote.name) in self.corrupt:
                 data = b"corrupted:" + data
             dest.write_bytes(data)
-            out.append(fetch_result(dest))
+            res = fetch_result(dest)
+            prov = self.provenance.get((plan.release.version, remote.name))
+            if prov is not None:
+                res = ProvenancedResult(res.path, res.size, res.sha256, res.blake3, res.verified, prov)
+            out.append(res)
         return out
 
     def verify(self, ctx: Ctx, remote: RemoteFile, local: Path) -> Verdict:
@@ -188,11 +254,19 @@ class FakeAdapter:
 @dataclass
 class FakeFetcher:
     documents: dict[str, bytes] = field(default_factory=dict[str, bytes])
+    observations: dict[str, dict[str, Any]] = field(default_factory=dict[str, dict[str, Any]])
+    cancelled: bool = False
 
     def get_bytes(self, url: str, *, max_bytes: int = 64 * 1024 * 1024) -> bytes:
         if url not in self.documents:
             raise NotFoundError(url, "HTTP 404")
         return self.documents[url][:max_bytes]
+
+    def observation(self, url: str) -> dict[str, Any] | None:
+        return self.observations.get(url)
+
+    def cancel(self) -> None:
+        self.cancelled = True
 
     def download(self, remote: RemoteFile, dest: Path) -> FetchResult:
         dest.write_bytes(self.documents[remote.url])
@@ -447,8 +521,12 @@ class PipelineHarness:
         clock: ManualClock | None = None,
         retry: RetryPolicy | None = None,
         crash_at: int | None = None,
+        integrity: IntegrityHooks | None = None,
     ) -> None:
         self.root = root
+        self.integrity_hooks = integrity
+        self.fetcher = FakeFetcher()
+        self.guard: IntegrityGuard | None = None
         self.clock = clock or ManualClock(datetime(2026, 10, 15, tzinfo=UTC))
         self.sources = list(sources) or [make_spec("src")]
         self.adapters = {s.adapter or s.id: FakeAdapter(s.adapter or s.id, s.id) for s in self.sources}
@@ -474,11 +552,20 @@ class PipelineHarness:
     def _open(self) -> None:
         self.store = StateStore(self.db_path, check_local=False)
         self.alerter = Alerter(self.store, self.clock, [self.sink])
+        if self.integrity_hooks is not None:
+            self.guard = IntegrityGuard(
+                self.store,
+                self.fetcher,
+                self.integrity_hooks,
+                clock=self.clock,
+                alerter=self.alerter,
+                profiles_dir=self.root / "state" / "profiles",
+            )
         self.pipeline = ReleasePipeline(
             store=self.store,
             sources=self.sources,
             adapters=adapter_resolver(self.adapters),
-            fetcher=FakeFetcher(),
+            fetcher=self.fetcher,
             vault=self.vault,
             ledger=self.ledger,
             refine=self.refinery.refine,
@@ -489,6 +576,7 @@ class PipelineHarness:
             alerter=self.alerter,
             retry=self.retry,
             checkpoint=self.injector,
+            integrity=self.guard,
         )
 
     def restart(self, *, crash_at: int | None = None) -> None:
@@ -564,3 +652,24 @@ def demo_wiring(config: Mapping[str, Any]) -> Wiring:
     world = FakeWorld.build(root, SystemClock(), [make_spec("demo")])
     world.adapters["demo"].add_release("2026-10-01", {"demo.txt": b"hello offline world\n"})
     return world.wiring()
+
+
+def stubborn_wiring(config: Mapping[str, Any]) -> Wiring:
+    """``demo_wiring`` whose scrub ignores cancellation and leaves a non-daemon thread behind.
+
+    The worst case for shutdown latency (a library call that cannot be interrupted, an executor
+    the interpreter would join at exit); used by the shutdown test. The scrub touches
+    ``<workdir>/stubborn-started`` when it begins.
+    """
+    orch = cast(Mapping[str, Any], config.get("orchestrator", {}))
+    workdir = Path(str(orch["workdir"]))
+    wiring = demo_wiring(config)
+
+    def scrub(index: int, count: int) -> None:
+        workdir.mkdir(parents=True, exist_ok=True)
+        threading.Thread(target=time.sleep, args=(3600,), name="stubborn-non-daemon", daemon=False).start()
+        (workdir / "stubborn-started").touch()
+        time.sleep(3600)
+
+    wiring.scrub = scrub
+    return wiring

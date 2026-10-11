@@ -1,9 +1,9 @@
 /**
- * Whisipedia API v1.2.0: types generated from docs/api/openapi.json
+ * Whisipedia API v1.3.0: types generated from docs/api/openapi.json
  * by scripts/gen-api.mjs. Do not edit; run `npm run gen:api`.
  */
 
-export const API_VERSION = '1.2.0';
+export const API_VERSION = '1.3.0';
 
 /** Marks a `text/event-stream` response; `T` is the JSON in each `data:` line. */
 export type EventStream<T> = { readonly __events: T };
@@ -248,6 +248,13 @@ export interface Health {
   sources: number;
 }
 
+export interface HeldRelease {
+  source_id: string;
+  version: string;
+  state: string;
+  reason: string | null;
+}
+
 export interface HistoryPage {
   doc_id: string;
   /** Oldest first. */
@@ -271,6 +278,24 @@ export interface Hit {
   url_native: string | null;
   /** `[start, end)` ranges into `snippet`, in Unicode code points. */
   highlights: Array<[number, number]>;
+}
+
+/** Source integrity (ADR-0009): provenance, verification channels, holds and origin drift. */
+export interface IntegrityStatus {
+  /** Sealed generations checked for PROVENANCE.json. */
+  provenance_generations: number;
+  provenance_covered: number;
+  provenance_fraction: number;
+  /** Generations whose PROVENANCE.json fails its signature. */
+  provenance_invalid: Array<string>;
+  channels: Array<SourceIntegrity>;
+  /** Releases held for `wsp approve` / `wsp reject`. */
+  held: Array<HeldRelease>;
+  /** Releases quarantined as possibly compromised. */
+  quarantined: Array<HeldRelease>;
+  /** Open origin-drift and integrity alerts. */
+  drift_alerts: Array<AlertInfo>;
+  pinned_hosts: number;
 }
 
 export type JsonValue = unknown;
@@ -320,6 +345,8 @@ export interface OpsStatus {
   proposals: ProposalSummary;
   /** False until the orchestrator has created its state DB. */
   orchestrator_state: boolean;
+  /** Source integrity (ADR-0009). */
+  integrity: IntegrityStatus | null;
 }
 
 export interface ParityStatus {
@@ -437,9 +464,21 @@ export interface SearchResults {
   navigate_to: string | null;
   /** Instant-answer box (definition, fact, map). Reserved: not produced yet. */
   instant: DefinitionAnswer | FactAnswer | MapAnswer | null;
+  /** A spelling correction from the library's vocabulary, offered when results are sparse or a query word is unknown. */
   did_you_mean: string | null;
+  /** Set when the query named a site (`rfc 9110`): totals and facets count that scope. */
+  scope: SearchScope | null;
   /** True when retrieval found little or nothing. */
   low_confidence: boolean;
+}
+
+export interface SearchScope {
+  /** The site named in the query, as typed (`rfc` in `rfc 9110`). */
+  site: string;
+  /** Source ids that site names. */
+  sources: Array<string>;
+  /** True when those sources had nothing for the query and the whole library was searched. */
+  fallback: boolean;
 }
 
 export interface SourceFreshness {
@@ -492,6 +531,16 @@ export interface SourceInfo {
   related: Array<string>;
 }
 
+export interface SourceIntegrity {
+  source_id: string;
+  /** Weakest checksum-channel status of the last checked release: `independent`, `same-origin`, `unavailable`, `mismatch` or `never checked` (ADR-0009). */
+  channel: string;
+  version: string | null;
+  /** Strongest integrity action: info, alert, hold, quarantine. */
+  verdict: string | null;
+  checked_at: string | null;
+}
+
 export interface SourcePage {
   items: Array<SourceInfo>;
   /** Pass as `cursor` for the next page. */
@@ -517,48 +566,6 @@ export interface SourceSlo {
 export interface Suggestions {
   query: string;
   suggestions: Array<string>;
-}
-
-export interface SummarizeRequest {
-  query: string;
-  /** Results to summarize, ranked. */
-  doc_ids: Array<string>;
-  max_tokens?: number;
-}
-
-export interface SummaryCitation {
-  type: 'citation';
-  /** 1-based position in the request's `doc_ids`. */
-  index: number;
-  doc_id: string;
-  title: string;
-  address: string;
-}
-
-export interface SummaryDone {
-  type: 'done';
-}
-
-export interface SummaryError {
-  type: 'error';
-  message: string;
-}
-
-/**
- * One server-sent event of ``POST /v1/summarize``: ``event: <type>``, ``data: <this JSON>``.
- *
- * Order: ``notice``* then ``token``/``citation`` interleaved, then ``done`` (or ``error``).
- */
-export type SummaryEvent = SummaryToken | SummaryCitation | SummaryNotice | SummaryDone | SummaryError;
-
-export interface SummaryNotice {
-  type: 'notice';
-  text: string;
-}
-
-export interface SummaryToken {
-  type: 'token';
-  text: string;
 }
 
 export interface SystemStatus {
@@ -742,13 +749,6 @@ export interface Routes {
     };
     body: null;
     response: SystemStatus;
-  };
-  /** Summarize */
-  'POST /v1/summarize': {
-    path: Record<string, never>;
-    query: Record<string, never>;
-    body: SummarizeRequest;
-    response: EventStream<SummaryEvent>;
   };
   /** Portal */
   'GET /v1/portal': {

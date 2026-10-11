@@ -10,10 +10,12 @@ permissions:
 jobs:
   python:
     runs-on: ubuntu-latest
+    env:
+      UV_NO_SYNC: "1"  # keep the initial sync (no GPU group); `uv run` must not re-sync defaults
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
-      - run: uv sync --all-packages --locked
+      - run: uv sync --all-packages --locked --no-group gpu
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run pyright

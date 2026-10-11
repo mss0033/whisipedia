@@ -41,8 +41,6 @@ export type {
   SourceInfo,
   SourcePage,
   Suggestions,
-  SummarizeRequest,
-  SummaryEvent,
   SystemStatus,
   VaultLocation,
 } from './generated.ts';

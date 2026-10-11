@@ -10,7 +10,11 @@ Hard guarantees, whatever the policy says:
 * the newest sealed generation and the current (promoted) generation are never pruned;
 * a generation that ``holds_last_copy`` (it is the last copy of something gone from upstream) is
   never pruned;
-* only ``SEALED`` generations are ever pruned; staging and degraded ones are left alone.
+* only ``SEALED`` generations are ever pruned; staging and degraded ones are left alone;
+* **known-good anchoring** (ADR-0009): the newest generation that passed every pre-promotion check
+  (``known_good``: it was promoted) is never pruned, and neither is the newest one that is also
+  ``settled`` (promoted ``integrity.settle_days`` ago and fully verified by the scrub since). While
+  a new generation is still settling, the older anchor therefore stays.
 """
 
 from __future__ import annotations
@@ -64,10 +68,14 @@ class GenerationInfo:
     taken: date
     status: GenerationStatus = GenerationStatus.SEALED
     holds_last_copy: bool = False
+    known_good: bool = False  # passed every check before promotion (it was promoted)
+    settled: bool = False  # known good, old enough and verified by the scrub since
 
     @classmethod
-    def from_generation(cls, g: Generation, *, holds_last_copy: bool = False) -> GenerationInfo:
-        return cls(g.generation_id, generation_date(g), g.status, holds_last_copy)
+    def from_generation(
+        cls, g: Generation, *, holds_last_copy: bool = False, known_good: bool = False, settled: bool = False
+    ) -> GenerationInfo:
+        return cls(g.generation_id, generation_date(g), g.status, holds_last_copy, known_good, settled)
 
 
 def generation_date(g: Generation) -> date:
@@ -115,6 +123,12 @@ def plan_retention(
             keep(g.generation_id, "last copy of content gone upstream")
     for g in sealed[: policy.last]:
         keep(g.generation_id, f"last {policy.last}")
+    good = next((g for g in sealed if g.known_good), None)
+    if good is not None:
+        keep(good.generation_id, "newest known-good")
+    anchor = next((g for g in sealed if g.known_good and g.settled), None)
+    if anchor is not None:
+        keep(anchor.generation_id, "known-good anchor (settled and scrubbed)")
 
     seen_months: list[tuple[int, int]] = []
     seen_years: list[int] = []

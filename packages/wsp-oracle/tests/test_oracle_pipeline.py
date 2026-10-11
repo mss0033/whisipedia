@@ -6,7 +6,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from oracle_helpers import CORPUS, FIXTURE_GOLD, OverlapReranker, ScriptedLLM, doc
+from oracle_helpers import CORPUS, FIXTURE_GOLD, OverlapReranker, doc
 
 from wsp_core.model import DocRecord
 from wsp_index import HashingEmbedder, RefineryReader, RefineryWriter, TantivyConfig, TantivyIndex
@@ -14,17 +14,18 @@ from wsp_index.refinery import generation_dir
 from wsp_oracle.config import OracleConfig, OracleConfigError
 from wsp_oracle.embedbuild import EmbedStats, embed_generation
 from wsp_oracle.evaluation import (
+    corrected,
     evaluate,
-    evaluate_summaries,
-    faithfulness,
-    lexical_judge,
     load_gold,
     ndcg_at,
+    parse_weights,
     percentile,
+    rank_ablation,
     recall_at,
     replace_searcher,
+    spelling_ablation,
+    typo,
 )
-from wsp_oracle.generator import Passage, Summarizer
 from wsp_oracle.pipeline import OracleIndex, OracleSearcher
 from wsp_oracle.router import Intent, Router
 from wsp_oracle.services import build_oracle
@@ -181,39 +182,13 @@ def test_metrics() -> None:
     assert percentile([], 95) == 0.0
 
 
-def test_faithfulness_scoring() -> None:
-    passages = {1: "Lisbon is the capital of Portugal.", 2: "Memory cells persist after infection."}
-    f = faithfulness(
-        "Lisbon is the capital of Portugal [1]. Memory cells persist [2]. Paris is in Spain [1]. Uncited.",
-        passages,
-        lexical_judge(),
-    )
-    assert (f.sentences, f.cited, f.supported) == (4, 3, 2)
-    assert f.score == 0.5
-
-
-def test_summary_evaluation_with_scripted_model() -> None:
-    llm = ScriptedLLM(["Lisbon is the capital of Portugal [1]."])
-    items = [("capital of Portugal", [Passage(1, "Lisbon", "Lisbon is the capital of Portugal.")])]
-    se = evaluate_summaries(Summarizer(llm), items, lexical_judge())
-    assert se.faithfulness == 1.0
-    assert se.refused == 0
-
-
 def test_build_oracle_lexical_only(tmp_path: Path, lexical: TantivyIndex) -> None:
     cfg = {"index": {"root": str(tmp_path)}, "oracle": {"reranker": {"enabled": False}}}
     oracle = build_oracle(cfg, lexical=lexical, sources=["encyclo"])
     assert oracle.vectors is None
-    assert oracle.generator is None
     assert oracle.index.search("Lisbon")[0].doc_id == "wsp:encyclo/Lisbon"
-
-    cfg_gen = {
-        "index": {"root": str(tmp_path)},
-        "oracle": {"reranker": {"enabled": False}, "generator": {"enabled": True}},
-    }
-    with_gen = build_oracle(cfg_gen, lexical=lexical)
-    assert with_gen.generator is not None
-    assert with_gen.summarizer is not None
+    with pytest.raises(OracleConfigError, match="generator"):  # removed by owner decision (ADR-0008)
+        OracleConfig.from_mapping({"generator": {"enabled": True}})
 
 
 def test_config_parsing() -> None:
@@ -243,3 +218,70 @@ def test_config_parsing() -> None:
             OracleConfig.from_mapping(bad)
     with pytest.raises(OracleConfigError, match=r"index\.root"):
         OracleConfig().vector_path(None)
+
+
+def test_site_scope_is_consistent_and_falls_back(lexical: TantivyIndex) -> None:
+    router = Router.from_sources(["encyclo", "dictionary", "rfc", "gutenberg"])
+    searcher = OracleSearcher(lexical, router=router)
+    index = OracleIndex(searcher)
+    # the site has the answer: results, totals and facets all come from it
+    res = searcher.run("rfc http caching")
+    assert res.scope is not None
+    assert (res.scope.site, res.scope.sources, res.scope.fallback) == ("rfc", ("rfc",), False)
+    assert {h.source_id for h in res.hits} == {"rfc"}
+    window = index.search_hits("rfc http caching", limit=200)
+    assert {h.doc_id for h in window} == {h.doc_id for h in index.search("rfc http caching", limit=50)}
+    # the site has nothing for it (or nothing indexed): the whole library, flagged as a fallback
+    for q in ("rfc alan turing", "gutenberg alan turing"):
+        scope = index.scope(q)
+        assert scope is not None
+        assert scope.fallback, q
+        hits = index.search(q, limit=10)
+        assert "wsp:encyclo/Alan_Turing" in {h.doc_id for h in hits}
+        assert {h.doc_id for h in index.search_hits(q, limit=200)} >= {h.doc_id for h in hits}
+    # explicit filters win over the router; plain queries have no scope
+    assert index.scope("rfc alan turing", sources=["encyclo"]) is None
+    assert index.scope("alan turing") is None
+    assert index.search_hits("rfc http caching", sources=[]) == []
+
+
+def test_typos_are_deterministic_single_edits() -> None:
+    from wsp_index.spelling import osa_distance
+
+    q = "how do vaccines train the immune system"
+    variants = {typo(q, k) for k in range(6)}
+    assert len(variants) > 1
+    for v in variants:
+        assert v != q
+        assert v.split()[2][0] == "v"  # the longest word is edited, never its first letter
+        assert osa_distance(q, v, 2) == 1
+    assert typo("rfc 9110", 3) == "rfc 9110"  # nothing long enough to misspell
+    assert typo(q, 4) == typo(q, 4)
+    assert parse_weights("0/0, 1/0.1,2") == [(0.0, 0.0), (1.0, 0.1), (2.0, 2.0)]
+
+
+def test_rank_and_spelling_ablations_on_fixtures(tmp_path: Path, lexical: TantivyIndex) -> None:
+    from wsp_index.linkrank import compute_static_rank
+    from wsp_index.spelling import Speller
+
+    gold = load_gold(FIXTURE_GOLD)
+    root = tmp_path / "refinery"
+    write_generation(root, "g1", CORPUS)
+    readers = [(s, RefineryReader(generation_dir(root, s, "g1"))) for s in ("dictionary", "encyclo", "rfc")]
+    compute_static_rank(readers, lexical.rank_path, tmp_path / "work")
+    assert lexical.reload_static_rank() is not None
+    base = OracleSearcher(lexical, router=Router.from_sources(["encyclo", "dictionary", "rfc"]))
+    reports = rank_ablation("lexical", base, gold, [(0, 0), (1, 0.1)])
+    assert [r.name for r in reports] == ["lexical pr=0/0", "lexical pr=1/0.1"]
+    assert all(r.ndcg10 >= 0.8 for r in reports)
+    assert lexical.config.rank_weight == 1
+
+    speller = Speller.from_texts(f"{d.title} {d.text}" for d in CORPUS)
+    sp = spelling_ablation("lexical", lambda q: [h.doc_id for h in base.run(q).hits], gold, speller)
+    assert sp.changed_by_typo == len(gold) - 1  # "why is the sky blue" has no 5+ letter word
+    assert sp.restored >= sp.changed_by_typo - 2
+    assert sp.typos_corrected.ndcg10 >= sp.typos.ndcg10
+    assert sp.typos_corrected.ndcg10 >= 0.8
+    assert "restored=" in sp.summary()
+    assert corrected(speller, "alligatr vs crocodile") == "alligator vs crocodile"
+    assert corrected(speller, "alligator vs crocodile") == "alligator vs crocodile"

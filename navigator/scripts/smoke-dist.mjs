@@ -27,12 +27,6 @@ const server = createServer(async (req, res) => {
       body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
     }
     const r = handle(req.method ?? 'GET', url.pathname, url.searchParams, body);
-    if ('stream' in r) {
-      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
-      for (const { event } of r.stream) res.write(`data: ${JSON.stringify(event)}\n\n`);
-      res.end();
-      return;
-    }
     res.writeHead(r.status, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(r.json));
     return;
@@ -104,14 +98,8 @@ try {
     check(r.status === 200, `${p} status ${r.status}`);
     await r.json();
   }
-  const sum = await fetch(`${base}/v1/summarize`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query: 'x', doc_ids: ['wsp:rfc/9110'] }),
-  });
-  check((await sum.text()).includes('"type":"done"'), 'summarize stream did not finish');
   console.log(
-    `Smoke: index + ${assets.length} assets + ${api.length + 1} API routes served from ${base}`,
+    `Smoke: index + ${assets.length} assets + ${api.length} API routes served from ${base}`,
   );
 } catch (err) {
   failures.push(String(err));

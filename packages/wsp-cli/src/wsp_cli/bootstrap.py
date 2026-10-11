@@ -22,7 +22,7 @@ from __future__ import annotations
 import dataclasses
 import os
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -31,7 +31,6 @@ from wsp_api import ApiSettings, Services
 from wsp_api.services import LOOPBACK_HOSTS
 from wsp_api.testing.fakes import (
     SAMPLE_SOURCES,
-    EchoGenerator,
     InMemoryChangeFeed,
     InMemoryDocumentStore,
     InMemoryLedger,
@@ -47,6 +46,7 @@ from wsp_core.registry import load_registry
 if TYPE_CHECKING:  # heavy imports stay lazy so `wsp search --url ...` starts fast
     from wsp_cli.monitor import LibraryMonitor
     from wsp_index import ParquetDocumentStore, SqliteChangeFeed, TantivyIndex
+    from wsp_index.spelling import ReloadingSpeller
     from wsp_vault.ledger import JsonlLedger
     from wsp_vault.vault import FileVault
 
@@ -131,7 +131,15 @@ def api_settings(cfg: Mapping[str, Any], lay: Layout, *, static_dir: Path | None
     api = section(cfg, "api")
     static = static_dir or (Path(api["static_dir"]) if api.get("static_dir") else lay.navigator_dist)
     extra = tuple(str(h) for h in api.get("allowed_hosts", ()))
-    return ApiSettings(static_dir=static, allowed_hosts=(*LOOPBACK_HOSTS, *extra))
+    marker = activity_marker(cfg)
+    return ApiSettings(static_dir=static, allowed_hosts=(*LOOPBACK_HOSTS, *extra), activity_marker=marker)
+
+
+def activity_marker(cfg: Mapping[str, Any]) -> Path | None:
+    """``<state_dir>/last-interactive``: the API marks interactive use, the Warden yields to it."""
+    from wsp_core.activity import default_marker
+
+    return default_marker(paths(cfg).state_dir)
 
 
 # --- paths ------------------------------------------------------------------------------------------
@@ -397,7 +405,6 @@ def build_services(cfg: Mapping[str, Any], lay: Layout) -> Services:
             vault=vault,
             ledger=build_ledger(cfg, signer),
             sources=effective_sources([s for s in specs if s.status is not SourceStatus.EXCLUDED], cfg),
-            generator=oracle.generator,  # loopback llama.cpp server when [oracle.generator] is enabled
             catalog=build_catalog(cfg, specs, changes),
             assets=ZimAssetStore(vault),  # original HTML and images from sealed ZIMs (read-only)
             gaps=JsonlGapLog(paths(cfg).gaps_log),  # local disk next to the index, never the vault
@@ -405,11 +412,13 @@ def build_services(cfg: Mapping[str, Any], lay: Layout) -> Services:
             queries=JsonlQueryLog(paths(cfg).queries_log)
             if section(cfg, "api").get("query_log", True)
             else None,
+            speller=open_speller(cfg),
         )
+
+    from wsp_index.spelling import Speller
 
     index, documents, changes = InMemoryLexicalIndex(), InMemoryDocumentStore(), InMemoryChangeFeed()
     vault, ledger = InMemoryVault(), InMemoryLedger()
-    generator = EchoGenerator() if section(cfg, "api").get("demo_generator", True) else None
     seed_sample_library(index=index, documents=documents, changes=changes, vault=vault, ledger=ledger)
     return Services(
         index=index,
@@ -418,8 +427,19 @@ def build_services(cfg: Mapping[str, Any], lay: Layout) -> Services:
         vault=vault,
         ledger=ledger,
         sources=effective_sources(specs, cfg) or SAMPLE_SOURCES,  # sample specs outside a checkout
-        generator=generator,
+        speller=Speller.from_texts(f"{d.title} {d.text}" for d in documents.all_current()),
     )
+
+
+def open_speller(cfg: Mapping[str, Any]) -> ReloadingSpeller | None:
+    """Spelling corrections ("did you mean") from ``<index>/lexical/spelling.bin`` (``wsp index spell``).
+
+    Off with ``[oracle] spelling = false``. Picks up a rebuilt vocabulary without a restart."""
+    from wsp_index.spelling import SPELL_FILE, ReloadingSpeller
+
+    if not section(cfg, "oracle").get("spelling", True):
+        return None
+    return ReloadingSpeller(paths(cfg).lexical / SPELL_FILE)
 
 
 def build_catalog(cfg: Mapping[str, Any], specs: Sequence[SourceSpec], changes: ChangeFeed) -> Catalog:
@@ -468,7 +488,16 @@ def build_monitor(cfg: Mapping[str, Any], specs: Sequence[SourceSpec], vault: Fi
         coverage=coverage,
         domain_usage=lambda: domain_usage(vault),
         budgets={str(k): int(float(str(x)) * TB) for k, x in budgets.items()},
+        provenance_coverage=_provenance_coverage(vault, specs),
     )
+
+
+def _provenance_coverage(vault: FileVault, specs: Sequence[SourceSpec]) -> Callable[[], Any]:
+    """Signed PROVENANCE.json coverage of the sealed generations (slow: reads the vault)."""
+    from wsp_cli.integrity import provenance_coverage
+
+    ids = [s.id for s in specs]
+    return lambda: provenance_coverage(vault, ids)
 
 
 def backend_note(cfg: Mapping[str, Any]) -> str | None:

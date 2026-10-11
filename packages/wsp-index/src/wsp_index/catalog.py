@@ -44,6 +44,7 @@ import pyarrow.parquet as pq
 from wsp_core.ids import DocId
 from wsp_core.model import Category, ChangeRecord, DayEvent, SourceSpec
 from wsp_core.ports import ChangeFeed
+from wsp_index.linkrank import StaticRank, top_documents
 from wsp_index.refinery import RefineryReader, current_generation, generation_dir, is_sealed
 
 pc = cast(Any, _pc)  # pyarrow-stubs type compute kernels too narrowly for column arrays
@@ -156,6 +157,7 @@ class CatalogConfig:
     featured_candidates: int = 730  # two years of distinct daily picks
     min_featured_chars: int = 2_000
     max_link_docs: int = 1_000_000  # inbound links are counted over at most this many documents
+    rank: StaticRank | None = None  # link-analysis rank (wsp_index.linkrank); preferred over inlinks
     per_category: int = 200  # documents listed per category page
     providers: Sequence[CategoryProvider] | None = None  # None: prefix if the source has one, else A-Z
     max_prefixes: int = 200
@@ -301,7 +303,11 @@ def _length_ranking(reader: RefineryReader, k: int) -> list[tuple[str, int]]:
 
 
 def _featured(reader: RefineryReader, source_id: str, cfg: CatalogConfig) -> list[str]:
-    ranking = _inlink_ranking(reader, source_id, cfg.max_link_docs)
+    ranking: Sequence[tuple[str, float]] = []
+    if cfg.rank is not None:  # PageRank: the best-connected articles of this source
+        ranking = [(d, f) for d, f in top_documents(reader, cfg.rank, cfg.featured_candidates * 4) if f > 0]
+    if not ranking:
+        ranking = _inlink_ranking(reader, source_id, cfg.max_link_docs)
     if not ranking:
         ranking = _length_ranking(reader, cfg.featured_candidates * 4)
     out: list[str] = []
@@ -386,6 +392,24 @@ def build_source_catalog(
     tmp.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n", encoding="utf-8")
     os.replace(tmp, path)
     return path
+
+
+def refresh_featured(
+    refinery_root: Path, source_id: str, generation_id: str, out_root: Path, cfg: CatalogConfig
+) -> bool:
+    """Recompute only the ``featured`` list of an existing catalog file (after ``wsp index rank``)."""
+    path = out_root / f"{source_id}.json"
+    if not path.is_file():
+        return False
+    payload = cast(dict[str, object], json.loads(path.read_text(encoding="utf-8")))
+    if payload.get("generation_id") != generation_id:
+        return False
+    reader = RefineryReader(generation_dir(refinery_root, source_id, generation_id))
+    payload["featured"] = _featured(reader, source_id, cfg)
+    tmp = path.with_name(path.name + ".partial")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
+    return True
 
 
 # --- serve -----------------------------------------------------------------------------------------

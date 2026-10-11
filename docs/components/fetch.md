@@ -50,6 +50,25 @@ with HttpFetcher(cfg) as fetcher:
 - **Resume.** `<dest>.partial.state.json` lists the completed pieces and each piece's digest. It is written atomically and only *after* an `fdatasync` of the data file, so every piece it lists was durable when it was recorded. On restart, a recorded piece is read back once, re-verified against its stored digest and its Metalink hash, and fed to the in-order hasher. A torn or rotted piece is downloaded again. The state is discarded if the URL, size, piece geometry, checksums or ETag changed.
 - **aria2.** `Aria2Fetcher` hands aria2 a Metalink we generate. It contains all mirrors, the size, the digests and the piece hashes, and aria2 runs with `--realtime-chunk-checksum`. aria2 aborts on a bad piece instead of switching mirror. When that happens, the driver resumes it from its control file without the offending URI. After aria2 exits, the file is fsynced, **re-hashed by us** and passed through the same `finalize` step.
 
+## Provenance and mirror agreement (ADR-0009)
+
+`FetchReport.provenance` (JSON-safe, `wsp_fetch.provenance`) records for each file: the declared and
+Metalink digests and where the Metalink came from; per byte source the final URL, redirect chain,
+TLS peer certificate (SHA-256 of the DER, subject, issuer, issuer family, validity), `ETag` and
+`Last-Modified`, the **byte ranges it served**, corrupt pieces and the spot-check result; mirrors
+rejected at probe time and why (`size-disagreement`, unreachable, no Range support); bytes resumed
+from a previous run. `HttpFetcher.observation(url)` returns the same per-request record for small
+documents (checksum files), which the integrity guard uses for its independent channel.
+
+**Spot checks**: after a multi-mirror download is verified, `spot_checks` (2) random ranges of
+`spot_check_bytes` (64 KiB) are re-read from every mirror that was not dropped and compared with the
+verified file. A mirror serving other bytes is recorded as `mismatch`; the orchestrator treats that
+as a disagreement (quarantine by default). Errors are recorded as errors, not disagreements.
+
+**Cancellation**: `HttpFetcher.cancel()` makes running and future transfers, retries and backoff
+sleeps raise `FetchCancelledError` within about a second, keeping the resume state; `reset()`
+re-enables the fetcher. The orchestrator calls it on SIGTERM.
+
 ## Testing
 
 `wsp_core.testing.fetcher_contract.RangeServer` is an in-process HTTP/1.1 server on 127.0.0.1 with Range support. Each server instance can be set to inject latency, error statuses with `Retry-After`, corrupted bytes, ignored ranges or dropped connections. It also records every request and the peak concurrency. The wsp-fetch tests use it to prove:

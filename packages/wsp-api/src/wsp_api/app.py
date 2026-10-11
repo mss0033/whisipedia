@@ -13,7 +13,7 @@ import contextlib
 import threading
 import time
 from collections import Counter
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import Sequence
 from dataclasses import replace
 from typing import Annotated, Any, Literal, cast
 from urllib.parse import unquote
@@ -24,7 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.telemetry import TelemetryConfig
 
 from wsp_api import convert, search, sites
-from wsp_api.addresses import address_of, resolve
+from wsp_api.addresses import resolve
 from wsp_api.browse import browse_router
 from wsp_api.errors import ApiError, errors, install_error_handlers, streamed
 from wsp_api.htmlrewrite import rewrite_html
@@ -48,24 +48,19 @@ from wsp_api.schemas import (
     RecentChanges,
     Resolution,
     SearchResults,
+    SearchScope,
     SourceFreshness,
     SourceInfo,
     SourcePage,
     Suggestions,
-    SummarizeRequest,
-    SummaryCitation,
-    SummaryDone,
-    SummaryError,
-    SummaryEvent,
-    SummaryNotice,
     SystemStatus,
 )
 from wsp_api.security import SecurityMiddleware
 from wsp_api.services import ApiSettings, Services
-from wsp_api.sse import change_events, format_event
-from wsp_api.summaries import CitationSplitter
+from wsp_api.sse import change_events
 from wsp_api.views import Library, parse_doc
 from wsp_api.zim import ZimAssetStore
+from wsp_core.activity import ActivityMiddleware
 from wsp_core.ids import parse_doc_id
 from wsp_core.model import GenerationStatus, SearchHit
 
@@ -94,6 +89,7 @@ _TELEMETRY_OFF: TelemetryConfig = {
 
 # Search: facets and totals come from the top of the ranking; beyond it the index is paged directly.
 _WINDOW = 200
+_SPARSE = 5  # fewer hits than this: "did you mean" may correct any unknown or rare word
 
 Limit = Annotated[int, Query(ge=1, le=200, description="Page size.")]
 Cursor = Annotated[str | None, Query(description="Opaque cursor from a previous page's `next_cursor`.")]
@@ -142,6 +138,7 @@ def create_app(services: Services, settings: ApiSettings | None = None) -> FastA
     install_error_handlers(app)
     app.add_middleware(RawSegmentRouting)
     app.add_middleware(SecurityMiddleware, settings=settings)
+    app.add_middleware(ActivityMiddleware, path=settings.activity_marker)  # Warden yields (ADR-0009)
     app.include_router(_v1(lib, settings))
     app.include_router(browse_router(lib))
     app.include_router(_go(services))
@@ -299,6 +296,29 @@ def _v1(lib: Library, settings: ApiSettings) -> APIRouter:
             return list(cast(Sequence[SearchHit], hits_only(q, limit=_WINDOW, offset=0, sources=scope)))
         return _query(q, _WINDOW, 0, scope)
 
+    def _did_you_mean(q: str, scope: list[str] | None, window: Sequence[SearchHit]) -> str | None:
+        """A spelling correction, only when results are sparse or a query word matches nothing.
+
+        Sparse: fewer than ``_SPARSE`` hits; then every unknown or rare word may change. Low-score: a
+        word of the query is outside the vocabulary and matches no document, so no hit can contain it;
+        then only those words may change. The correction is offered only if it finds at least as
+        many documents as the query did.
+        """
+        speller = s.speller
+        if speller is None:
+            return None
+        only: list[str] | None = None
+        if len(window) >= _SPARSE:
+            dead = [w for w in speller.unknown(q) if not _query(w, 1, 0, None)]
+            if not dead:
+                return None
+            only = dead
+        fixed = speller.correct(q, only=only)
+        if fixed is None or fixed.casefold() == q.casefold():
+            return None
+        better = _window(fixed, scope)
+        return fixed if better and len(better) >= len(window) else None
+
     @r.get("/search", tags=["search"], responses=errors(422))
     def run_search(
         q: Annotated[str, Query(min_length=1, max_length=1000, description="Plain-language query.")],
@@ -334,7 +354,10 @@ def _v1(lib: Library, settings: ApiSettings) -> APIRouter:
                     highlights=search.highlights(plain, terms),
                 )
             )
+        scope_of = getattr(s.index, "scope", None)
+        routed = cast(Any, scope_of(q, scope)) if callable(scope_of) else None
         nav = search.navigate_to(s, q) if offset == 0 else None
+        did_you_mean = _did_you_mean(q, scope, window) if offset == 0 else None
         if s.queries is not None and offset == 0:
             s.queries.record(s.clock(), q, total, not window)
         return SearchResults(
@@ -352,7 +375,11 @@ def _v1(lib: Library, settings: ApiSettings) -> APIRouter:
                 KindFacet(kind=k, count=n) for k, n in sorted(counts.items(), key=lambda x: (-x[1], x[0]))
             ],
             navigate_to=nav,
+            did_you_mean=did_you_mean,
             low_confidence=not window,
+            scope=None
+            if routed is None
+            else SearchScope(site=routed.site, sources=list(routed.sources), fallback=routed.fallback),
         )
 
     @r.get("/suggest", tags=["search"], responses=errors(422))
@@ -478,70 +505,6 @@ def _v1(lib: Library, settings: ApiSettings) -> APIRouter:
             ledger_ok=ledger_ok(),
             uptime_seconds=round(time.monotonic() - started, 3),
             ops=None if s.ops is None else s.ops.status(now),
-        )
-
-    # --- Summaries ------------------------------------------------------------------------------
-
-    @r.post(
-        "/summarize",
-        tags=["search"],
-        response_class=StreamingResponse,
-        responses=streamed(
-            SummaryEvent,
-            "text/event-stream",
-            "SSE stream: `event: <type>` and `data: <SummaryEvent JSON>` per event. "
-            "Without a local language model the endpoint answers 501.",
-        )
-        | errors(400, 404, 422, 501),
-    )
-    async def summarize(body: SummarizeRequest) -> StreamingResponse:
-        generator = s.generator
-        if generator is None:
-            raise ApiError(501, "not_configured", "no local language model is configured")
-        citations: dict[int, SummaryCitation] = {}
-        passages: list[str] = []
-        missing: list[str] = []
-        for n, raw in enumerate(body.doc_ids, start=1):
-            did = parse_doc(raw)
-            doc = await asyncio.to_thread(s.documents.get, did)
-            if doc is None:
-                missing.append(raw)
-                continue
-            citations[n] = SummaryCitation(
-                index=n, doc_id=doc.doc_id, title=doc.title, address=address_of(doc.source_id, doc.native_id)
-            )
-            passages.append(f"[{n}] {doc.title}\n{doc.text[:2000]}")
-        if not passages:
-            raise ApiError(404, "document_not_found", "none of the documents are in the library")
-        prompt = (
-            "Summarize the passages below to answer the question. Cite every sentence with [n]. "
-            "If the passages do not answer it, say so.\n\n"
-            f"Question: {body.query}\n\n" + "\n\n".join(passages)
-        )
-
-        def sse(ev: SummaryEvent) -> str:
-            return format_event(ev.model_dump_json(), event=ev.root.type)
-
-        async def events() -> AsyncIterator[str]:
-            if missing:
-                text = f"{len(missing)} result(s) are no longer in the library and were left out."
-                yield sse(SummaryEvent(SummaryNotice(text=text)))
-            splitter = CitationSplitter(citations)
-            try:
-                async for chunk in generator.stream(prompt, max_tokens=body.max_tokens):
-                    for ev in splitter.feed(chunk):
-                        yield sse(SummaryEvent(ev))
-            except Exception as exc:  # the model died mid-stream: tell the client, never leak internals
-                yield sse(SummaryEvent(SummaryError(message=f"summarizer failed ({type(exc).__name__})")))
-                return
-            for ev in splitter.flush():
-                yield sse(SummaryEvent(ev))
-            yield sse(SummaryEvent(SummaryDone()))
-
-        return StreamingResponse(
-            events(),
-            media_type="text/event-stream",
-            headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
         )
 
     return r

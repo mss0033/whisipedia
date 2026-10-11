@@ -4,10 +4,30 @@ All notable changes are documented here. The format follows [Keep a Changelog](h
 
 ## [Unreleased]
 ### Added
+- Source integrity (ADR-0009): per-release provenance (URLs, redirect chains, TLS peer certificates,
+  HTTP validators, which mirror served which byte ranges, rejected mirrors, spot checks) stored as a
+  signed `PROVENANCE.json` next to the manifest; digests re-fetched through an independent channel
+  (Wikimedia checksum lists from the primary, Kiwix `.sha256` from `download.kiwix.org`, sidecars
+  from a second mirror); any channel or mirror disagreement quarantines the release and pauses the
+  source; origin pinning on first use with holds for unknown domains and alerts for new hosts or a
+  changed certificate issuer; content profiles compared before promotion (namespaces, size
+  distribution, changed/deleted fractions, new MIME types, `<script>` density, binary/executable
+  content) with a signed `PROMOTION.json` and owner holds; known-good anchoring in retention;
+  `ops.integrity` in `/v1/system` and an "integrity" check in `wsp doctor`; runbook "Investigating a
+  held release / possible compromise".
+- The API marks interactive use (`<state_dir>/last-interactive`); scrub and parity backfill pause
+  while it is recent (`vault.yield_to_interactive_seconds`).
+- Link-analysis static rank: per-source and cross-source PageRank over `DocRecord.links`, computed
+  offline in bounded memory (`wsp index rank`, also the last step of `wsp index build`), blended into
+  BM25 and fusion, and used for suggest priors and the portal's featured article.
+- "Did you mean": noisy-channel spelling correction over the index's own vocabulary (symmetric-delete
+  candidates), offered only for sparse or low-score results (`wsp index spell`).
+- `SearchResults.scope` (API 1.3.0): a query naming a site reports where it was searched; the
+  Navigator says quietly when it fell back to the whole library.
+- Eval harness: `--rank-weights` and `--typos` ablations.
 - `wsp-oracle` (Phase 3, ADR-0007): section-aware passages, a multilingual embedder on the GPU,
   a binary-HNSW + int8 vector store, a deterministic query router, hybrid retrieval with
-  cross-encoder reranking, cited summaries over a loopback llama.cpp server with sentence-level
-  citation checks and a low-confidence refusal, a resumable embedding job
+  cross-encoder reranking, a resumable embedding job
   (`scripts/embed_sources.py`), an evaluation harness with a 125-query gold set, `build_oracle()`
   for the composition root, and `VectorIndex`/`Embedder` contract suites.
 - The remaining T1 source adapters (`docs/components/adapters.md`):
@@ -37,7 +57,22 @@ All notable changes are documented here. The format follows [Keep a Changelog](h
   commands `wsp ingest`, `wsp index build`, `wsp scrub`, `wsp drill`, `wsp approve|reject|resume` and
   `wsp status`; an offline end-to-end test from `_incoming` to API search; `config/local.toml.example`.
 - Project plan, source research, source registry seed, initial ADRs, repository hygiene configuration.
+### Removed
+- **Generative summaries, by owner decision (ADR-0008):** the Navigator's "Summarize these results"
+  button, `POST /v1/summarize` and its `Summary*` schemas (API 1.3.0), `summarize` in the SDK, the
+  `Generator` port (port revision v0.3), the llama.cpp generator and `wsp-oracle-llm`,
+  `[oracle.generator]`, `[api] demo_generator` and the summary-faithfulness evaluation. The results
+  page is fully extractive; dense retrieval and reranking stay.
 ### Changed
+- par2 runs with `-t2` by default (`vault.parity_threads`, was 4) and `-m256` (`vault.parity_memory_mb`).
+- Orchestrator state schema v4 (`origin_pins`, `provenance`); `orchestrator.shutdown_grace_seconds`
+  defaults to 10 (was 60).
+- Search totals and facets now count the same routed scope as the results (`rfc 9110` showed 0 hits
+  with 28 in the facets).
 - A registry source without `update.cadence` follows `acquirer.cycle`; explicit cadences are always
   overrides (`acquirer.follow_cycle_cadences` removed). `pytest` is now the optional `wsp-core[testing]` extra.
 - Default update cycle is monthly instead of weekly, with quarterly as a single config option (PLAN §6.7).
+### Fixed
+- The orchestrator now stops within seconds of SIGTERM instead of being killed after systemd's
+  `TimeoutStopSec`: downloads, scrub, parity and par2 are cancelled, job threads are daemon threads
+  and a lingering non-daemon thread no longer keeps the process alive.

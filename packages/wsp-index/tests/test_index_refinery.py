@@ -11,7 +11,6 @@ from wsp_core.ids import content_hash, make_doc_id
 from wsp_core.model import ChangeKind, DocRecord
 from wsp_index import refinery
 from wsp_index.refinery import (
-    DuplicateDocIdError,
     RefineryError,
     RefineryReader,
     RefineryWriter,
@@ -72,19 +71,29 @@ def test_timestamps_normalized_to_utc(tmp_path: Path) -> None:
     assert rb.timestamp == datetime(2026, 5, 1, 12, 0, tzinfo=UTC)
 
 
-def test_duplicate_in_one_file_rejected(tmp_path: Path) -> None:
+def test_duplicate_in_one_file_keeps_last(tmp_path: Path) -> None:
     w = RefineryWriter(tmp_path, "src", "g1")
     w.write([doc("src", "a", "A"), doc("src", "a", "A2")])
-    with pytest.raises(DuplicateDocIdError):
-        w.close()
+    w.close()
+    r = RefineryReader(generation_dir(tmp_path, "src", "g1"))
+    got = r.get(make_doc_id("src", "a"))
+    assert got is not None
+    assert got.title == "A2"
+    assert [row["doc_id"] for b in r.scan(("doc_id",)) for row in b.to_pylist()] == [make_doc_id("src", "a")]
 
 
-def test_duplicate_across_files_rejected(tmp_path: Path) -> None:
+def test_duplicate_across_files_keeps_last_and_scan_skips_shadowed(tmp_path: Path) -> None:
     w = RefineryWriter(tmp_path, "src", "g1", docs_per_file=1)
     w.write([doc("src", "a", "A"), doc("src", "b", "B"), doc("src", "a", "A2")])
-    with pytest.raises(DuplicateDocIdError):
-        w.close()
-    assert sealed_generations(tmp_path, "src") == []
+    w.close()
+    r = RefineryReader(generation_dir(tmp_path, "src", "g1"))
+    assert len(r) == 2
+    got = r.get(make_doc_id("src", "a"))
+    assert got is not None
+    assert got.title == "A2"
+    titles = sorted(row["title"] for b in r.scan(("doc_id", "title")) for row in b.to_pylist())
+    assert titles == ["A2", "B"]
+    assert r.read_columns(("title",)).num_rows == 2
 
 
 def test_hash_collisions_resolved_by_stored_id(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

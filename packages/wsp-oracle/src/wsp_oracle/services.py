@@ -1,26 +1,26 @@
 """``build_oracle(config) -> OracleServices``: the Oracle's factory for the composition root.
 
 Everything degrades gracefully: no vector store (or no ``wsp-oracle[gpu]``) → lexical + router
-only; no GPU → no reranker unless ``reranker.cpu_fallback``; ``generator.enabled = false`` → no
-summaries. Each decision is logged once at startup. Nothing here opens a network connection:
-models load from local paths with the Hugging Face libraries in offline mode, and the generator
-only talks to a loopback llama.cpp server.
+only; no GPU → no reranker unless ``reranker.cpu_fallback``. Each decision is logged once at
+startup. Nothing here opens a network connection: models load from local paths with the Hugging
+Face libraries in offline mode. There is no generative model (ADR-0008).
 """
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
-from wsp_core.ports import Embedder, Generator, LexicalIndex, Reranker
+from wsp_core.ports import Embedder, LexicalIndex, Reranker
 from wsp_index import FusionConfig
+from wsp_index.hybrid import StaticFeatures
+from wsp_index.linkrank import StaticRank
 from wsp_oracle import devices
 from wsp_oracle.config import OracleConfig
 from wsp_oracle.embedder import TransformerEmbedder
-from wsp_oracle.generator import CitedGenerator, LlamaServerGenerator, Summarizer
 from wsp_oracle.pipeline import OracleIndex, OracleSearcher, Resolver
 from wsp_oracle.reranker import CrossEncoderReranker
 from wsp_oracle.router import Router
@@ -40,8 +40,6 @@ class OracleServices:
     embedder: Embedder | None
     vectors: ChunkVectorStore | None
     reranker: Reranker | None
-    generator: Generator | None
-    summarizer: Summarizer | None
 
     def close(self) -> None:
         if self.vectors is not None:
@@ -99,6 +97,19 @@ def _open_lexical(cfg: Mapping[str, Any], index_root: Path | None) -> LexicalInd
     return TantivyIndex(index_root / "lexical", TantivyConfig(languages=tuple(str(x) for x in langs)))
 
 
+def _static_features(lexical: LexicalIndex) -> StaticFeatures | None:
+    """Link-analysis features from the lexical index's static-rank sidecar (re-read when rebuilt)."""
+    current = getattr(lexical, "static_rank", None)
+    if not callable(current):
+        return None
+
+    def features(ids: Sequence[str]) -> Sequence[float]:
+        rank = cast(Callable[[], StaticRank | None], current)()
+        return [0.0] * len(ids) if rank is None else [float(x) for x in rank.features(ids)]
+
+    return features
+
+
 def build_oracle(
     cfg: Mapping[str, Any],
     *,
@@ -150,6 +161,8 @@ def build_oracle(
         dense_weight=ocfg.dense_weight,
         depth=ocfg.depth,
         source_priors=dict(ocfg.source_priors),
+        static_rank=_static_features(lexical),
+        static_weight=ocfg.static_rank_weight,
     )
     searcher = OracleSearcher(
         lexical,
@@ -163,19 +176,6 @@ def build_oracle(
         passage_text=store.texts if store is not None else None,
         budget_ms=ocfg.budget_ms,
     )
-    summarizer: Summarizer | None = None
-    generator: Generator | None = None
-    g = ocfg.generator
-    if ocfg.enabled and g.enabled:
-        llm = LlamaServerGenerator(g.url, timeout_s=g.timeout_s, temperature=g.temperature)
-        summarizer = Summarizer(
-            llm,
-            scorer=reranker.score if reranker is not None else None,
-            min_confidence=g.min_confidence,
-            passage_chars=g.passage_chars,
-            max_passages=g.passages,
-        )
-        generator = CitedGenerator(summarizer)
     return OracleServices(
         config=ocfg,
         index=OracleIndex(searcher, cache_size=ocfg.cache_size),
@@ -184,6 +184,4 @@ def build_oracle(
         embedder=embedder,
         vectors=store,
         reranker=reranker,
-        generator=generator,
-        summarizer=summarizer,
     )

@@ -7,6 +7,10 @@ readme = "README.md"
 
 [tool.uv]
 package = false
+default-groups = ["dev", "gpu"]
+
+[tool.uv.sources]
+wsp-oracle = { workspace = true }
 
 [tool.uv.workspace]
 members = ["packages/*"]
@@ -19,6 +23,9 @@ dev = [
   "pyright>=1.1.400",
   "pre-commit>=4",
 ]
+# Real embedding/reranking models for search (torch + transformers). Default on this machine so a plain
+# `uv sync` keeps them; CI skips them with `--no-group gpu`.
+gpu = ["wsp-oracle[gpu]"]
 
 [tool.ruff]
 line-length = 110

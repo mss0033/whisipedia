@@ -12,8 +12,7 @@ Whisipedia has three public surfaces (PLAN §12.2). All three depend only on the
 ## Dependency injection
 
 `wsp_api.Services` is a dataclass of ports: `LexicalIndex`, `DocumentStore`, `ChangeFeed`, `Vault`,
-`Ledger`, the registry `SourceSpec`s and an optional `Generator`. Routes never import an
-implementation.
+`Ledger`, and the registry `SourceSpec`s. Routes never import an implementation.
 
 `wsp_cli.bootstrap.build_services(cfg, layout)` is the single place where implementations are
 chosen. With `[api] backend = "real"` (or `"auto"` and an existing `vault.root`) it builds `FileVault`,
@@ -51,7 +50,6 @@ an image and a few categories to the sample library.
 | `GET /v1/changes?since=`, `GET /v1/changes/stream` (SSE), `GET /v1/changes/recent` | Change feed; `recent` is newest first with the cursor to follow live |
 | `GET /v1/system` | System Monitor data: freshness and health, degraded generations, ledger tail and its integrity; `ops`: SLO lag, scrub progress, parity coverage, disks and domain budgets, download lanes, queue, alerts, bot runs, proposals |
 | `GET /v1/proposals?status=` | Curator proposals, newest first (deciding them is `wsp proposals accept/reject`) |
-| `POST /v1/summarize` | Cited summary as server-sent events (`token`, `citation`, `notice`, `done`, `error`). Returns `501 not_configured` if no `Generator` is set |
 | `GET /v1/portal` | Start page: featured page of the day, newest changes, a random page, every site |
 | `GET /v1/directory?path=` | Directory: Top › registry domain › site › category |
 | `GET /v1/random?source=&seed=` | A random page |
@@ -80,6 +78,13 @@ and needs an ADR.
   percent-encoded segment (`encodeURIComponent`: `/v1/documents/wsp%3Arfc%2F9110`). The server routes
   on the raw path, so native ids ending in `/history` do not collide (ADR-0006,
   [addresses](../api/addresses.md)).
+- **Did you mean.** `did_you_mean` is set only on the first page, only when the results are sparse
+  (fewer than 5) or a query word matches no document, and only if the corrected query finds at
+  least as many documents. The corrector is the `SpellingCorrector` seam (`Services.speller`;
+  `wsp_index.spelling.ReloadingSpeller` in the real backend).
+- **Site scope.** When the index routes a query to a named site (`rfc 9110`), `scope` reports it
+  and `total`/`facets` count the same scope as `hits`. `scope.fallback` means the site had nothing
+  and the whole library was searched.
 - **Search** is navigational when the query names one page (`rfc 9110`, `wikipedia Alan Turing`,
   `wsp://rfc/9110`): exact native id or exact title within a named site, no fuzzy matching
   (`wsp_api.search`). `highlights` are `[start, end)` code-point ranges into `snippet`.
@@ -117,7 +122,7 @@ with WspClient() as wsp:  # http://127.0.0.1:8737
 ```
 
 The SDK mirrors every endpoint, with iterators for paginated results, change-feed draining, SSE
-following (`stream_changes`), summary streaming (SSE events) and the Navigator resources (`portal`,
+following (`stream_changes`) and the Navigator resources (`portal`,
 `directory`, `random`, `recent_changes`, `report_gap`). Errors are typed: `WspApiError`, `NotFoundError`
 and `NotConfiguredError`.
 
@@ -146,6 +151,8 @@ wsp approve|reject <source> [<version>] [--note TEXT]
 wsp resume <source>
 wsp status                            # sources, generations, degraded, orchestrator queue
 wsp index catalog [--source ID]       # rebuild the portal/directory/random catalog only
+wsp index rank [--damping D] [--mix M] # PageRank static rank, suggest priors, featured articles
+wsp index spell                       # "did you mean" vocabulary from the indexed text
 wsp parity status                     # parity coverage of sealed generations
 wsp proposals list|show|accept|reject # Curator proposals; accept edits registry/sources.yaml
 wsp service install|status|uninstall  # systemd user units from deploy/systemd

@@ -8,12 +8,6 @@ export function mockFetch(log: string[] = []): FetchLike {
     log.push(`${init?.method ?? 'GET'} ${url.pathname}${url.search}`);
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
     const r = handle(init?.method ?? 'GET', url.pathname, url.searchParams, body);
-    if ('stream' in r) {
-      const text = r.stream
-        .map((e) => `event: ${e.event.type}\ndata: ${JSON.stringify(e.event)}\n\n`)
-        .join('');
-      return new Response(text, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
-    }
     if ('hold' in r) {
       return new Response(`retry: ${r.retryMs}\n\n`, {
         status: 200,

@@ -247,8 +247,18 @@ def test_ingest_index_and_serve(library: dict[str, Any]) -> None:
     assert code == 0, text
     assert "wikipedia-en-zim: refined 2026-08 (2 docs)" in text
     assert "wikipedia-en: refined 2026-10-01 (2 docs)" in text
+    assert "rank: " in text  # PageRank and the spelling vocabulary are the last steps of a build
+    assert "spell: " in text
+    lexical = library["tmp"] / "index" / "lexical"
+    assert (lexical / "static_rank.bin").is_file()
+    assert (lexical / "spelling.bin").is_file()
     code, text = _cli("--config-dir", cfg_dir, "index", "build")
     assert "nothing new" in text
+    code, text = _cli("--config-dir", cfg_dir, "index", "rank")  # re-runnable on its own
+    assert code == 0, text
+    assert "nodes" in text
+    code, text = _cli("--config-dir", cfg_dir, "index", "spell")
+    assert code == 0, text
 
     # 5. The API (in-process) serves search, suggest, documents and the system view from real backends.
     services = bootstrap.build_services(cfg, lay)
@@ -260,6 +270,7 @@ def test_ingest_index_and_serve(library: dict[str, Any]) -> None:
             "wsp:wikipedia-en-zim/A/Alan_Turing",
             "wsp:wikipedia-en/Bletchley_Park",
         }
+        assert wsp.search("codebreeker").did_you_mean == "codebreaker"
         doc = wsp.document("wsp:wikipedia-en/Ada_Lovelace")
         assert "first algorithm" in doc.text
         assert doc.license == "CC-BY-SA-4.0"

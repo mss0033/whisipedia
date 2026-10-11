@@ -120,11 +120,6 @@ export async function renderHelp(ctx: PageContext): Promise<PageResult> {
         '.',
       ),
       h('li', null, "I'm Feeling Lucky opens the first result directly."),
-      h(
-        'li',
-        null,
-        'Summarize these results asks the local language model for a short cited summary. It never replaces the results.',
-      ),
     ),
     h('h2', null, 'Keyboard shortcuts'),
     h(

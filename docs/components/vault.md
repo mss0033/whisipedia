@@ -12,6 +12,7 @@ Write-once golden storage and its Warden: PLAN §7 (layout), §8 (integrity, scr
 │   └── <generation_id>/                        sealed, files chmod 0444
 │       ├── upstream/…  parity/  (PARITY.json + .sig, set-00001/…)
 │       ├── MANIFEST.json  MANIFEST.json.sig
+│       ├── PROVENANCE.json(.sig)  PROMOTION.json(.sig)   signed attestations (ADR-0009)
 │       └── DEGRADED.txt                        only if repair failed
 ├── staging/<domain>/<source_id>/<generation_id>/   being assembled; sealing = one dir rename
 ├── quarantine/…                                damaged files moved aside, never deleted
@@ -51,6 +52,26 @@ ladder's first rung repairs from the sets that hold a damaged file; damaged pari
 
 `JsonlLedger.verify(recent_days=N)` checks only the newest day files, anchored on the signed
 checkpoint before them (used by `wsp doctor`); the default is the full replay.
+
+## Attestations (`wsp_vault.attest`, ADR-0009)
+
+`PROVENANCE.json` (where every byte came from: URLs, redirects, TLS peers, mirrors and byte ranges,
+checksum channels, origin verdicts) and `PROMOTION.json` (the pre-promotion report: checks, verdict,
+the owner's decision) sit next to the manifest. Each is canonical JSON naming its generation, bound
+to the manifest by BLAKE3 and signed by the vault signer, with its own `.sig`, like the parity
+sidecar. `write_attestation` is idempotent; provenance is write-once, the promotion report may be
+replaced (a held release the owner approves); every write is a `vault.attest` ledger event. The
+names are reserved (nothing can be ingested over them). The scrub verifies their signatures and
+reports a bad one as a finding; it is evidence and is never re-signed or "repaired".
+
+## Being a good neighbour; stopping promptly
+
+* The scrub and the parity keeper take `should_stop` (daemon shutdown: an `Interrupted` raised from
+  inside the paced read ends a multi-GB hash within ~0.25 s; the file stays due) and `should_pause`
+  (the API touched `<state_dir>/last-interactive` within `vault.yield_to_interactive_seconds`, 300:
+  work waits between files and between parity sets).
+* `Par2Parity` runs par2 under `nice -n 19 ionice -c 3` with `-t<vault.parity_threads>` (default 2)
+  and `-m<vault.parity_memory_mb>` (256), in its own process group that is killed on shutdown.
 
 ## Scrub, repair, drill
 

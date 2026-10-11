@@ -86,13 +86,17 @@ def plan_from_json(d: Mapping[str, Any]) -> FetchPlan:
 
 
 def fetch_result_to_json(r: FetchResult) -> JsonObj:
-    return {
+    out: JsonObj = {
         "path": str(r.path),
         "size": r.size,
         "sha256": r.sha256,
         "blake3": r.blake3,
         "verified": [checksum_to_json(c) for c in r.verified],
     }
+    provenance = getattr(r, "provenance", None)  # wsp_fetch.FetchReport (ADR-0009); JSON-safe
+    if isinstance(provenance, Mapping) and provenance:
+        out["provenance"] = dict(cast(Mapping[str, Any], provenance))
+    return out
 
 
 def fetch_result_from_json(d: Mapping[str, Any]) -> FetchResult:

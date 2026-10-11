@@ -1,14 +1,14 @@
-# wsp-oracle: natural-language retrieval and cited summaries
+# wsp-oracle: natural-language retrieval and ranking
 
-Package `packages/wsp-oracle` (import `wsp_oracle`). Implements PLAN §9.3–9.5 and the summary
-rules of §10.3. Model choices, licences and the measurements behind them: [ADR-0007](../adr/0007-oracle-models.md).
+Package `packages/wsp-oracle` (import `wsp_oracle`). Implements PLAN §9.3–9.5. Model choices, licences
+and the measurements behind them: [ADR-0007](../adr/0007-oracle-models.md). There is no generative model:
+summaries were removed by owner decision ([ADR-0008](../adr/0008-no-generative-ui.md)).
 
 | Port (`wsp_core.ports`) | Implementation | Contract suite (`wsp_core.testing`) |
 |---|---|---|
 | `Embedder` | `TransformerEmbedder` (Hugging Face encoder, fp16 on CUDA, CPU fallback) | `embedder_contract.EmbedderContract` |
 | `VectorIndex` | `ChunkVectorStore` (passages), `DocVectorIndex` (documents over it) | `vector_index_contract.VectorIndexContract` |
 | `Reranker` | `CrossEncoderReranker`, `NullReranker` | (unit + GPU tests) |
-| `Generator` | `CitedGenerator` over `LlamaServerGenerator` | (unit tests with a mock server) |
 | `LexicalIndex` | `OracleIndex` (the whole pipeline, wrapping `TantivyIndex`) | used by the API unchanged |
 
 ## Query pipeline
@@ -35,8 +35,14 @@ query ─► Router ─┬─► lexical rewrite ─► TantivyIndex (BM25, top 
 * **Dense retrieval** works on ~200-word passages (`chunker.py`): sections are never mixed, the title
   and section head every passage, and reference sections are skipped. Ids are `<doc_id>#<n>`
   and depend only on the text. `DocVectorIndex` keeps each document's best passage, so fusion stays
-  at document level and the reranker and summaries see the passage that matched.
-* **Fusion** is `wsp_index.HybridSearcher` unchanged. Dense-only hits get titles from
+  at document level and the reranker sees the passage that matched.
+* **Site scope.** A site named in the query restricts the search to its sources only when that
+  site has a match; otherwise the whole library is searched with the full query text and
+  `OracleResult.scope.fallback` is set. `OracleIndex.search_hits` (the API's window for totals and
+  facets) is routed the same way, so totals, facets and results always describe one scope
+  (`rfc 9110` used to show 0 hits next to 28 in the facets).
+* **Fusion** is `wsp_index.HybridSearcher`, with the PageRank static rank as a multiplicative
+  boost (`static_rank_weight`; see `docs/components/index.md`). Dense-only hits get titles from
   `TantivyIndex.lookup`.
 * **Reranking** runs only with a GPU (or `reranker.cpu_fallback = true`). The best reranker
   probability is the retrieval confidence; below 0.05 the result is flagged `low_confidence`.
@@ -91,43 +97,7 @@ same command resumes after an interruption, and a monthly update costs only the 
 Reading and chunking run in a producer thread and `--workers` processes while the GPU embeds.
 Progress (throughput and ETA) is logged every 10 s. `--limit N` embeds a prefix for benchmarks.
 
-## Summaries (PLAN §10.3)
-
-```
-uv run wsp-oracle-llm          # llama-server on 127.0.0.1:8738 with the GGUF from [oracle.generator]
-```
-
-* `LlamaServerGenerator` streams from `llama-server`'s OpenAI-compatible endpoint. It refuses any
-  URL that is not loopback and ignores proxy environment variables. Thinking is switched off on
-  the server (`--reasoning off`) and per request; `reasoning_content` is never shown.
-* `Summarizer` refuses without calling the model when the best passage's reranker probability is
-  below `generator.min_confidence`. The model is told to cite with `[n]` and to answer `NO_ANSWER`
-  when the passages do not answer; that sentinel becomes a refusal too.
-* `CitationGuard` validates the stream sentence by sentence. A sentence passes only with at least
-  one `[n]` naming a passage that exists; unknown markers are removed; sentences left without a
-  valid marker are dropped. Markers after the full stop (`... end. [2]`) belong to that sentence;
-  abbreviations, initials and decimals do not end sentences.
-* `Summarizer.events()` emits the API's SSE types: `notice` (refusal; "N sentences without a valid
-  citation were left out"), `token`, `citation` (`index`, `doc_id`, `title`, `address`), `done`,
-  `error`.
-* `CitedGenerator` implements the `Generator` port for the existing `/v1/summarize` route: it
-  parses the route's numbered passages back out of its prompt and applies the gate and the guard.
-  The port carries text only, so a refusal arrives as one plain sentence and dropped sentences are
-  not announced; a route that calls `Summarizer.events()` gets the `notice` events.
-
-### Installing the generator
-
-The prebuilt CUDA build of llama.cpp is unpacked user-local, never in the repo:
-
-```
-mkdir -p ~/.local/share/whisipedia/llama.cpp && cd ~/.local/share/whisipedia/llama.cpp
-# from https://github.com/ggml-org/llama.cpp/releases (build b11541 was tested):
-#   llama-<build>-bin-ubuntu-cuda-12.8-x64.tar.gz and cudart-llama-<build>-bin-ubuntu-cuda-12.8-x64.tar.gz
-tar xzf llama-*.tar.gz && tar xzf cudart-*.tar.gz && cp cudart-*/lib* llama-*/ && ln -sfn llama-<build> current
-# model (sha256 91898433cf5ce0a8f45516a4cc3e9343b6e01d052d01f684309098c66a326c59):
-curl -L -o ~/.cache/whisipedia/models/llm/Qwen3.5-9B-Q6_K.gguf \
-  https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-Q6_K.gguf
-```
+### Model files
 
 Encoders and the reranker are Hugging Face snapshots under `~/.cache/whisipedia/models/<org>--<name>/`
 (`huggingface_hub.snapshot_download(repo, local_dir=...)`). At runtime the Oracle sets
@@ -145,6 +115,8 @@ Every key is optional; unknown keys are rejected.
 | `rrf_k`, `lexical_weight`, `dense_weight` | `60`, `1.0`, `2.0` | fusion (dense counts double: measured, ADR-0007) |
 | `depth` | `50` | candidates per retriever |
 | `source_priors` | `{}` | multiplicative prior per source id |
+| `static_rank_weight` | `0.1` | fusion boost `1 + w * feature` from PageRank (0 = off) |
+| `spelling` | `true` | "did you mean" from `lexical/spelling.bin` |
 | `chunk_words`, `max_chunks_per_doc` | `200`, `256` | chunker |
 | `cache_size` | `256` | result lists kept for paging and facets |
 | `budget_ms` | `100` | logged when a query exceeds it |
@@ -160,24 +132,17 @@ Every key is optional; unknown keys are rejected.
 | `vectors.mode` | `load` | `view` memory-maps the graph read-only (the factory always opens the API's store in view mode) |
 | `vectors.oversample` | `16` | binary candidates per result, rescored with int8 (recall@10 0.98) |
 | `vectors.connectivity`, `vectors.expansion_add`, `vectors.expansion_search` | `16`, `128`, `96` | HNSW |
-| `vectors.store_text` | `true` | keep passage text for reranking and summaries |
-| `generator.enabled` | `false` | summaries on |
-| `generator.url` | `http://127.0.0.1:8738` | loopback only |
-| `generator.model`, `generator.server_binary` | `llm/Qwen3.5-9B-Q6_K.gguf`, `~/.local/share/whisipedia/llama.cpp/current/llama-server` | used by `wsp-oracle-llm` |
-| `generator.context`, `generator.gpu_layers` | `8192`, `999` | per slot |
-| `generator.min_confidence` | `0.2` | refuse below this reranker probability |
-| `generator.passages`, `generator.passage_chars` | `8`, `1500` | prompt budget |
-| `generator.temperature`, `generator.timeout_s` | `0.2`, `60` | |
+| `vectors.store_text` | `true` | keep passage text for reranking |
 
 ## Wiring (composition root)
 
 `build_oracle(cfg, lexical=..., sources=...) -> OracleServices` returns `index` (an `OracleIndex`,
-which is a `LexicalIndex`), `generator`, `summarizer`, `searcher`, `router` and the open model
-objects. In `wsp_cli.bootstrap.build_services` (real backends):
+which is a `LexicalIndex`), `searcher`, `router` and the open model objects. In
+`wsp_cli.bootstrap.build_services` (real backends):
 
 ```python
 oracle = build_oracle(cfg, lexical=open_index(cfg), sources=[s.id for s in specs])
-Services(index=oracle.index, generator=oracle.generator, ...)
+Services(index=oracle.index, ...)
 ```
 
 With no vector store or without `wsp-oracle[gpu]` this degrades to the router + lexical search,
@@ -186,17 +151,39 @@ which is what the API serves today.
 ## Evaluation (PLAN §9.5)
 
 ```
-uv run --extra gpu wsp-oracle-eval --modes lexical,hybrid,full [--index-root DIR] [--summaries 30] --out report.json
+uv run wsp-oracle-eval --modes lexical,hybrid,full [--index-root DIR] \
+    [--rank-weights 0/0,1/0,0/0.1,1/0.1] [--typos] --out report.json
 ```
 
 The gold set `eval/gold/queries.jsonl` (125 hand-written queries across 14 domains, 10 of them
 non-English, graded `relevant` doc ids) is generated from `eval/gold/queries.src.tsv` by
 `eval/resolve_titles.py --zim <wikipedia ZIM>`, which follows redirects to the canonical article
 ids. Add lines to the TSV and re-run; the set is meant to grow toward 500. Metrics: nDCG@10 (gains
-`2^g - 1`), Recall@50, MRR, latency p50/p95/p99, per-domain nDCG; with `--summaries`, claim-level
-faithfulness (each sentence must cite a passage that supports it, judged by the local model or,
-in CI, by word overlap) and summary first-token latency. `tests/test_oracle_pipeline.py` runs the
+`2^g - 1`), Recall@50, MRR, latency p50/p95/p99, per-domain nDCG. `tests/test_oracle_pipeline.py` runs the
 same harness on `eval/gold/fixture.jsonl` in CI with deterministic fakes.
+
+Ablations (learning-to-rank ready: each feature is measured on the gold set before its default moves):
+
+* `--rank-weights lw/fw,...` reruns the first mode with the PageRank weight in the lexical index (`lw`)
+  and in fusion (`fw`); `0/0` is "no PageRank".
+* `--typos` makes one deterministic one-edit typo in the longest word of every gold query (first
+  letter kept) and reports nDCG@10 for the clean queries, the typo'd ones, and the typo'd ones after
+  the "did you mean" correction (unknown words corrected, as the search page does).
+
+Results on the 20,000-document English Wikipedia sample (lexical mode, `bench/wiki20k` copied to a
+scratch directory; 2026-10-10):
+
+| run | nDCG@10 | R@50 | MRR |
+|---|---|---|---|
+| lexical, no PageRank | 0.787 | 0.897 | 0.854 |
+| lexical, PageRank 0.5…4 / fusion 0.05…0.2 (10 settings) | 0.787 | 0.897 | 0.854 |
+| one-typo queries (121 of 125 changed) | 0.570 | | |
+| one-typo queries after "did you mean" (104 restored exactly) | **0.780** | | |
+
+The sample is drawn from the Kiwix ZIM, whose documents carry no links, so its static rank is flat
+and PageRank cannot change the order there; the PageRank effect has to be measured on an index
+that holds the `wikipedia-en` dump (which has links). Spelling recovers 0.21 of the 0.22 nDCG lost
+to typos.
 
 Benchmarks: `scripts/sample_zim.py` writes a sample Refinery generation from a ZIM (the gold
 documents, their linked articles as distractors, and random article runs);
@@ -204,11 +191,7 @@ documents, their linked articles as distractors, and random article runs);
 
 ## Known gaps
 
-* The `Generator` port carries text only: refusals and dropped-sentence counts reach the browser as
-  text, not `notice` events, until the summarize route calls `Summarizer.events()` and uses the
-  Oracle's best passages instead of `doc.text[:2000]`.
 * `low_confidence` is computed but `SearchResults.low_confidence` in the API still means "no hits";
   the route would need `OracleIndex.result(q).low_confidence`.
 * Dense retrieval cannot filter by source inside the ANN; filtered queries over-fetch 4×.
 * Updated passages leave garbage int8 rows; a periodic rebuild compacts them.
-* The faithfulness judge in CI is lexical; the nightly number needs the LLM judge.

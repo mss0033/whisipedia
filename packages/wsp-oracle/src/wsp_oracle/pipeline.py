@@ -23,7 +23,7 @@ from wsp_core.ports import Embedder, LexicalIndex, Reranker
 from wsp_index import FusionConfig, HybridSearcher
 from wsp_oracle.embedder import encode_queries
 from wsp_oracle.reranker import plain
-from wsp_oracle.router import Intent, Route, Router
+from wsp_oracle.router import Intent, Route, Router, content_terms
 from wsp_oracle.vectors import DocVectorIndex
 
 log = logging.getLogger("wsp_oracle")
@@ -40,16 +40,32 @@ def source_of(doc_id: str) -> str:
 
 
 @dataclass(frozen=True, slots=True)
+class Scope:
+    """Where a query that names a site was searched (``rfc 9110`` -> the ``rfc`` sources)."""
+
+    site: str
+    """The site word as the router read it (``rfc``)."""
+    sources: tuple[str, ...]
+    """The sources that word names."""
+    fallback: bool = False
+    """True when those sources had nothing for the query and the whole library was searched."""
+
+    def searched(self) -> tuple[str, ...] | None:
+        return None if self.fallback else self.sources
+
+
+@dataclass(frozen=True, slots=True)
 class OracleResult:
     query: str
     route: Route
     hits: tuple[SearchHit, ...]
     passages: Mapping[str, str] = field(default_factory=dict[str, str])
-    """Best passage text per doc id (what the reranker scored; feeds summaries)."""
+    """Best passage text per doc id (what the reranker scored)."""
     confidence: float | None = None
     """Best reranker probability; None without a reranker."""
     low_confidence: bool = False
     timings_ms: Mapping[str, float] = field(default_factory=dict[str, float])
+    scope: Scope | None = None
 
 
 class _StaticDense:
@@ -172,6 +188,32 @@ class OracleSearcher:
             out.setdefault(h.doc_id, plain(h.snippet))
         return out
 
+    # --- scope ---------------------------------------------------------------------------------
+
+    def _any_hit(self, query: str, sources: Sequence[str]) -> bool:
+        fast = getattr(self.lexical, "search_hits", None)
+        if callable(fast):
+            return bool(cast(Sequence[SearchHit], fast(query, limit=1, sources=sources)))
+        return bool(self.lexical.search(query, limit=1, sources=sources))
+
+    def scoped(self, query: str, sources: Sequence[str] | None) -> tuple[Route, Scope | None]:
+        """The route and, for a query naming a site, where to search.
+
+        An explicit ``sources`` filter always wins. A named site with nothing for the query (not
+        indexed, or no match there) falls back to the whole library with the full query text, so
+        ``rfc 9110`` still finds pages about RFC 9110 when the RFC site is missing.
+        """
+        route = self.router.route(query)
+        if not route.site or sources is not None:
+            return route, None
+        named = self.router.sources_for(route.site)
+        if not named:
+            return route, None
+        if (route.lexical or route.dense) and self._any_hit(route.lexical or route.dense, named):
+            return route, Scope(route.site, tuple(named))
+        whole = " ".join(content_terms(route.query)) or route.query
+        return replace(route, lexical=whole, dense=route.query), Scope(route.site, tuple(named), True)
+
     # --- the pipeline --------------------------------------------------------------------------
 
     def run(
@@ -185,12 +227,13 @@ class OracleSearcher:
             timings[name] = round((now - since) * 1000, 3)
             return now
 
-        route = self.router.route(query)
-        if route.site and sources is None and (named := self.router.sources_for(route.site)):
-            sources = list(named)
+        route, scope = self.scoped(query, sources)
+        if scope is not None:
+            searched = scope.searched()
+            sources = None if searched is None else list(searched)
         t = lap("route", t0)
         if not route.lexical and not route.dense:
-            return OracleResult(query, route, (), low_confidence=True, timings_ms=timings)
+            return OracleResult(query, route, (), low_confidence=True, timings_ms=timings, scope=scope)
         depth = max(depth or self.fusion.depth, self.rerank_top)
         dense, best_chunk = self._dense(route, depth, sources)
         t = lap("dense", t)
@@ -227,7 +270,7 @@ class OracleSearcher:
         if total > self.budget_ms:
             log.info("oracle query over budget: %.1f ms (%s)", total, timings)
         low = not hits or (confidence is not None and confidence < self.low_confidence)
-        return OracleResult(query, route, hits, passages, confidence, low, timings)
+        return OracleResult(query, route, hits, passages, confidence, low, timings, scope)
 
     def search(self, query: str, *, limit: int = 10, sources: Sequence[str] | None = None) -> list[SearchHit]:
         return list(self.run(query, sources=sources).hits[:limit])
@@ -273,14 +316,32 @@ class OracleIndex:
     def suggest(self, prefix: str, *, limit: int = 10) -> Sequence[str]:
         return self.lexical.suggest(prefix, limit=limit)
 
+    def scope(self, query: str, sources: Sequence[str] | None = None) -> Scope | None:
+        """Where :meth:`search` looks for this query (a named site, or the whole library)."""
+        return self.result(query, sources=sources).scope
+
     def search_hits(
         self, query: str, *, limit: int = 10, offset: int = 0, sources: Sequence[str] | None = None
     ) -> Sequence[SearchHit]:
-        """Cheap, snippet-free lexical window for totals and facets (the ranked page uses :meth:`search`)."""
+        """Cheap, snippet-free lexical window for totals and facets (the ranked page uses :meth:`search`).
+
+        It is routed exactly like :meth:`search`: a query naming a site counts that site's matches
+        for the rewritten query (or the whole library's, after a fallback), so totals and facets
+        agree with the results shown.
+        """
+        if limit <= 0 or offset < 0 or not query.strip() or (sources is not None and not sources):
+            return []
+        route, scope = self.searcher.scoped(query, sources)
+        if scope is not None:
+            searched = scope.searched()
+            sources = None if searched is None else list(searched)
+        text = route.lexical or route.dense
+        if not text:
+            return []
         fast = getattr(self.lexical, "search_hits", None)
         if callable(fast):
-            return cast(Sequence[SearchHit], fast(query, limit=limit, offset=offset, sources=sources))
-        return self.lexical.search(query, limit=limit, offset=offset, sources=sources)
+            return cast(Sequence[SearchHit], fast(text, limit=limit, offset=offset, sources=sources))
+        return self.lexical.search(text, limit=limit, offset=offset, sources=sources)
 
     def lookup(self, doc_id: str) -> SearchHit | None:
         find = getattr(self.lexical, "lookup", None)

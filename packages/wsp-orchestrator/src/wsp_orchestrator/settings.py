@@ -21,7 +21,8 @@ Keys (all optional except the paths in production)::
     max_workers = 4
     max_jobs_per_host = 1
     poll_interval_seconds = 30
-    shutdown_grace_seconds = 60
+    shutdown_grace_seconds = 10       # running work is cancelled first; must stay well under
+                                       # systemd's TimeoutStopSec
     job_retry_gap = "PT1H"
     log_level = "INFO"
     prune_dry_run = false              # true: retention records its plan but moves nothing
@@ -97,7 +98,7 @@ class OrchestratorSettings:
     job_limits: Mapping[JobKind, int] = field(default_factory=lambda: dict(DEFAULT_JOB_LIMITS))
     max_jobs_per_host: int = 1
     poll_interval_seconds: float = 30.0
-    shutdown_grace_seconds: float = 60.0
+    shutdown_grace_seconds: float = 10.0
     job_retry_gap: timedelta = timedelta(hours=1)
     lease: timedelta = timedelta(hours=24)
     retry: RetryPolicy = field(default_factory=RetryPolicy)
@@ -161,7 +162,7 @@ class OrchestratorSettings:
             job_limits=limits,
             max_jobs_per_host=int(orch.get("max_jobs_per_host", 1)),
             poll_interval_seconds=float(orch.get("poll_interval_seconds", 30)),
-            shutdown_grace_seconds=float(orch.get("shutdown_grace_seconds", 60)),
+            shutdown_grace_seconds=float(orch.get("shutdown_grace_seconds", 10)),
             job_retry_gap=IsoDuration.parse(str(orch.get("job_retry_gap", "PT1H"))).approx(),
             retry=retry,
             retention_windows={k: IsoDuration.parse(v) for k, v in windows.items()},

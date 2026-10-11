@@ -21,8 +21,8 @@ Environment=WSP_CONFIG_DIR=@CONFIG_DIR@
 # The NAS may not be mounted yet after a Windows/WSL start: fail fast and retry.
 ExecStartPre=@REPO@/.venv/bin/wsp --config-dir @CONFIG_DIR@ doctor --quiet --require vault
 ExecStart=@REPO@/.venv/bin/wsp-orchestrator --config-dir @CONFIG_DIR@
-# SIGTERM -> graceful shutdown: stop claiming jobs, pipelines stop between steps, unfinished work
-# resumes on the next start. Allow long enough for the in-flight step to finish.
+# SIGTERM -> prompt shutdown: stop claiming jobs, cancel downloads/scrub/parity, exit within
+# orchestrator.shutdown_grace_seconds (10 s); unfinished work resumes on the next start.
 KillSignal=SIGTERM
 TimeoutStopSec=120
 Restart=on-failure

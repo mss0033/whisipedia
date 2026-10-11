@@ -35,6 +35,7 @@ from typing import Any, cast
 
 from wsp_core.ports import Ledger, ParityProvider
 from wsp_vault.atomic import DEFAULT_RETRY, RetryPolicy, atomic_copy, atomic_write_bytes, fsync_dir, readback
+from wsp_vault.cancel import Interrupted, never
 from wsp_vault.manifest import PARITY_DIR, ROLE_PARITY, Manifest, ManifestEntry
 from wsp_vault.paritymeta import (
     SIDECAR_NAME,
@@ -118,6 +119,8 @@ class ParityKeeper:
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         monotonic: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
+        should_stop: Callable[[], bool] | None = None,
+        should_pause: Callable[[], bool] | None = None,
     ) -> None:
         for local in (state_dir, scratch):
             if local.resolve().is_relative_to(vault.root.resolve()):
@@ -135,7 +138,11 @@ class ParityKeeper:
         self.verified = verified
         self.retry = retry
         self.clock = clock
-        self.limiter = RateLimiter(bytes_per_sec, monotonic=monotonic, sleep=sleep)
+        self.should_stop = should_stop or never
+        self.should_pause = should_pause or never  # e.g. the owner is using the library right now
+        self.limiter = RateLimiter(
+            bytes_per_sec, monotonic=monotonic, sleep=sleep, should_stop=self.should_stop
+        )
 
     # --- state -----------------------------------------------------------------------------------
 
@@ -258,7 +265,8 @@ class ParityKeeper:
             name = f"set-{i:05d}"
             if name in done:
                 continue
-            if max_bytes is not None and processed >= max_bytes:
+            over = max_bytes is not None and processed >= max_bytes
+            if over or self.should_stop() or self.should_pause():
                 self._save_progress(source_id, generation_id, progress)
                 return False, processed, sets_done
             entries = [e for e in (manifest.entry(p) for p in files) if e is not None]
@@ -360,13 +368,16 @@ class ParityKeeper:
         processed = sets = 0
         for source_id, generation_id in targets:
             subject = f"{source_id}/{generation_id}"
-            if should_stop() or (max_bytes is not None and processed >= max_bytes):
+            if should_stop() or self.should_stop() or (max_bytes is not None and processed >= max_bytes):
                 break
             if self.state(source_id, generation_id) in COVERED:
                 continue
             budget = None if max_bytes is None else max_bytes - processed
             try:
                 complete, nbytes, nsets = self.create(source_id, generation_id, max_bytes=budget)
+            except Interrupted:  # shutdown mid-set: progress of finished sets is on disk
+                in_progress = subject
+                break
             except (ParityDataError, VaultError, OSError) as exc:
                 skipped.append(f"{subject}: {exc}")
                 self._log("parity.skipped", subject, {"reason": str(exc)})

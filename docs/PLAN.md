@@ -47,7 +47,7 @@ Measured on 2026-10-09:
 |---|---|---|
 | NAS `/mnt/z` | 153 TB total, **123 TB free**. SMB3 (`cifs`) from `192.168.1.169`, mounted **`soft`**. | A `soft` mount can return `EIO` on timeouts. Every write must be atomic and checked by reading it back (§8.2). Never put SQLite, LMDB or any lock-dependent database on SMB. |
 | NAS filesystem on the server side | **Unknown** (Open decision D1) | If it is ZFS or Btrfs, we turn on read-only snapshots and scheduled scrubs as a second integrity layer. |
-| Workstation | WSL2, 16 cores, **23 GiB RAM**, RTX 4090 (24 GB), 619 GB free on the local disk | Hot indexes go on local storage. RAM is the tight spot for vector search, so we use quantized or disk-backed ANN (§9.4). The 4090 runs embeddings, reranking and the local LLM. |
+| Workstation | WSL2, 16 cores, **23 GiB RAM**, RTX 4090 (24 GB), 619 GB free on the local disk | Hot indexes go on local storage. RAM is the tight spot for vector search, so we use quantized or disk-backed ANN (§9.4). The 4090 runs embeddings and reranking. |
 | Runtime host | WSL2 only runs while Windows is up | The scheduler must catch up on missed runs (§6.5). Moving the updater onto the NAS is Open decision D6. |
 | Network | Unknown ISP cap | The first download is about 20–35 TB (§4). Open decision D7. |
 | Tooling present | Python 3.12, uv, Rust/cargo, Node 24, Docker, git + LFS | Matches the chosen stack (ADR-0004). |
@@ -71,7 +71,7 @@ Measured on 2026-10-09:
 ├───────────────────────────────────────────────────────────────────────────────────────┤
 │ REFINERY      normalize → Parquet · entity-link (Wikidata) · chunk · embed            │
 │ INDEX         lexical (Tantivy) · title FST · vectors (ANN) · graph   (local NVMe)    │
-│ ORACLE        query router · hybrid retrieval · rerank · cited answers (local LLM)    │
+│ ORACLE        query router · hybrid retrieval · rerank · PageRank · did you mean      │
 ├───────────────────────────────────────────────────────────────────────────────────────┤
 │ API           HTTP /v1 (OpenAPI 3.1) · Python SDK · `wsp` CLI · change feed (SSE)     │
 │ NAVIGATOR     retro offline browser (web UI + TUI "BBS mode")                         │
@@ -98,6 +98,13 @@ The full research, scoring rubric and per-source notes are in [`research/SOURCES
 | **T2 High value** | Ingest in Phase 4 and later, within budget. | Kiwix catalog (Khan Academy, iFixit, Wikibooks, Wikivoyage, DevDocs, Arch Wiki, Survivor Library), MIT OCW, LibreTexts, Chronicling America OCR, OEIS, PlanetMath, Our World in Data, World Bank WDI, NASA NTRS / APOD, Smithsonian and Met open access, LoC catalog records |
 | **T3 Candidate** | Tracked. Needs a policy or budget decision. | Wikimedia Commons subsets, TED / CrashCourse video, arXiv source tarballs, Chronicling America page images, legislation from other countries |
 | **X Excluded** | Never ingested. | Shadow libraries, full Common Crawl / CC-NEWS (copyrighted, uncurated), paywalled news, content whose terms forbid bulk copying (unless permission is obtained) |
+
+**Preparedness and defensive collections.** Two curated collections are tracked separately in [`research/PREPAREDNESS_AND_DEFENSE.md`](research/PREPAREDNESS_AND_DEFENSE.md):
+
+- **Preparedness & resilience** (shelf `preparedness`): food, water, austere medicine, shelter and engineering, navigation and communications, emergency management and continuity of government, from authoritative issuers (USDA, FAO, WHO, FEMA, CISA, NOAA, NGA, FAA, USGS, UK Cabinet Office).
+- **Defensive & security literature** (shelf `defense`): electronics and radar fundamentals, publicly released doctrine, intelligence analysis and counterintelligence history, protective security, cybersecurity standards.
+
+Issuer authority is a hard gate next to the license gate. Only lawfully public material is admitted (public domain, open license or Distribution Statement A); weapons, CBRN-production, targeting and offensive-tooling content is excluded whatever its release status. Mixed collections are filtered per document by the `doc-collection` adapter (§6.2), with owner review through `wsp proposals`. Year-one cost ≈ 0.25–0.4 TB.
 
 **Storage budget for year one** (measured where marked ✓, otherwise estimated):
 
@@ -195,6 +202,7 @@ Adapters are Python packages registered through entry points (`whisipedia.adapte
 | `s3-bucket` | arXiv (requester pays), OpenAlex |
 | `git-mirror` | Standard Ebooks, OEIS data, Our World in Data, PlanetMath |
 | `oai-pmh` | arXiv metadata, institutional repositories |
+| `doc-collection` | Curated document sets published as index pages or APIs (FEMA, NIST CSRC, Army/Joint doctrine, CIA CSI…): per-document issuer, publication number, edition, distribution statement, supersession and checksum; document-level allow/deny filtering with owner review; superseded editions kept as history. Spec: [`research/PREPAREDNESS_AND_DEFENSE.md` §5](research/PREPAREDNESS_AND_DEFENSE.md#5-tracking-design) |
 | `osm-replication` | Planet PBF plus replication diffs |
 
 ### 6.3 Release state machine
@@ -359,12 +367,13 @@ Every rung writes a ledger event.
 | Fusion | Reciprocal rank fusion plus source-quality priors | < 2 ms |
 | Rerank top 50 | Cross-encoder on the GPU | < 50 ms |
 | **Results on screen** | | **p95 < 100 ms** |
-| "Summarize these results" (optional, on request, streamed) | Local LLM through a llama.cpp or vLLM server, RAG over the top passages, required citations | first token < 1 s |
+| Static rank (offline) | PageRank over the inter-document link graph, per source and across sources, computed at index-build time and blended into lexical scores and fusion | 0 ms at query time |
+| "Did you mean" (only for sparse or low-score results) | Noisy-channel spelling correction over the index's own vocabulary (symmetric-delete candidates) | < 5 ms |
 
-**Summary rules:**
-- The search engine is results-first, like a classic web search engine (§10.3).
-- An LLM summary appears only on request, and every sentence in it cites a result.
-- If retrieval confidence is low, the Oracle says so instead of guessing.
+**Results rules:**
+- The search engine is results-first, like a classic web search engine (§10.3). Everything on the results page is extractive: links, snippets, facets, "did you mean" and instant-answer boxes built from structured data.
+- **Summaries removed by owner decision (2026-10-10, ADR-0008):** there is no generative AI in the user experience. The "Summarize these results" feature, the `/v1/summarize` endpoint and the local LLM runtime are gone. Backend ranking may still use any modern technique (embeddings, cross-encoders, learned ranking).
+- If retrieval confidence is low, the results page says so instead of guessing.
 
 ### 9.4 Index sizing (where the bytes go)
 
@@ -418,7 +427,9 @@ A search site styled like a 1998–2000 search engine: sparse home page, one box
 
 - **Type anything, in plain language:** "how do vaccines train the immune system", "rfc about http caching", "map of Lisbon", "books by Mary Shelley", "define sesquipedalian".
 - **Results page:** a classic ten blue links list with title, snippet with highlighted terms, local address and source badge (license, "as of" date). Links are grouped or filterable by kind (Encyclopedia, Books, Papers, Law, Maps, Q&A), with "more from this site" and paging.
-- **Instant answers, kept small and optional:** a definition box (Wiktionary), a fact box (Wikidata), a map box. An optional **"Summarize these results"** button produces a short cited summary with the local LLM. It never replaces the results.
+- **Instant answers, kept small and optional:** a definition box (Wiktionary), a fact box (Wikidata), a map box. All of them are extracted from structured sources, never generated. **Summaries removed by owner decision (ADR-0008):** there is no "Summarize these results" button; the results are the answer.
+- **"Did you mean: …?"** appears when the results are sparse or a query word is not in the library's vocabulary, with a corrected query taken from the index's own words.
+- **Site scoping:** a query that names a site (`rfc 9110`) searches that site; totals and facets count the same scope. If the site has nothing for it, the whole library is searched and the page says so in one quiet line.
 - **The location bar is also a search box.** Typing something that isn't an address runs a search, like late-90s "keyword" browsing. Known navigational queries ("rfc 9110", "wikipedia Alan Turing") jump straight to the page, "I'm Feeling Lucky" style.
 - Speed targets are in §9.3: results on screen p95 < 100 ms, search-as-you-type suggestions < 10 ms.
 
@@ -495,7 +506,7 @@ materialized_doc(doc_id, at) = base(doc_id, golden generation) ⊕ accepted_patc
 
 ### 12.2 Architecture rules
 
-- **Hexagonal (ports and adapters).** Ports: `SourceAdapter`, `Fetcher`, `BlobStore`, `Signer`, `ParityProvider`, `LexicalIndex`, `VectorIndex`, `Embedder`, `Reranker`, `Generator`, `Renderer`, `Scheduler`, `EventBus`, `Ledger`.
+- **Hexagonal (ports and adapters).** Ports: `SourceAdapter`, `Fetcher`, `BlobStore`, `Signer`, `ParityProvider`, `LexicalIndex`, `VectorIndex`, `Embedder`, `Reranker`, `Renderer`, `Scheduler`, `EventBus`, `Ledger`.
 - Each port comes with a **reference implementation** and a **contract test suite**. Swapping a component means passing the same suite and changing one line of config.
 - **Public API surfaces:**
   - HTTP `/v1`, specified in OpenAPI 3.1.
@@ -569,7 +580,7 @@ Estimates assume one developer with heavy agent assistance. Each phase ends with
 | **0 Foundations** | 1–2 | Repo, CI, pre-commit, ADRs 1–6, config system, `wsp-core` domain and ports, ledger, manifest and signing, NAS layout and README generator, tooling installed. Decisions D1–D8 made. | CI green. `wsp ledger verify` works. A `wsp vault init` dry run works on the NAS. |
 | **1 Vault MVP** | 3–6 | Adapters `kiwix-opds` and `wikimedia-dumps` (current + snapshot diffs). Fetch, verify, seal, promote. Scrub, repair ladder, par2. CATALOG.html. First real data: Wikipedia en ZIM, top-10 current dumps, Wikidata. | One full corruption drill is repaired automatically. A full monthly update cycle runs end to end on its own. |
 | **2 Search core** | 6–10 | Refinery to Parquet, Tantivy index, title FST, `/v1` read API and SDK, Navigator v0: browser chrome, start page, ZIM site reader, `wsp://search` with lexical results, cross-source link rewriting. Offline CI test. | The offline test passes. Results p95 < 100 ms on English Wikipedia. |
-| **3 Natural language** | 10–14 | Embedder and ANN, hybrid fusion, reranker, router, instant-answer boxes, optional cited summaries, directory, eval harness and gold set, all themes, TUI. | nDCG@10 target set and met. Faithfulness ≥ 0.95 on the gold set. Summary first token < 1 s. |
+| **3 Natural language** | 10–14 | Embedder and ANN, hybrid fusion, reranker, router, instant-answer boxes, link-analysis static rank, "did you mean", directory, eval harness and gold set, all themes, TUI. | nDCG@10 target set and met. Results on screen p95 < 100 ms. |
 | **4 Breadth** | 14–22 | Adapters for OSM (plus map reader), Gutenberg, Standard Ebooks, arXiv, PubMed/PMC, OpenAlex, Stack Exchange, OpenStax, RFCs, US law, CourtListener, Open Library, MDWiki/MedlinePlus. Entity linking across sources. | All T1 sources are active and within their freshness SLOs. |
 | **5 Autonomy** | 18–26 | Discovery bots, scoring, policy gate with automatic PRs, health monitors, gap miner, Renovate auto-updates (merged when tests pass), monthly drills, time-machine UI. | 30 days unattended with all SLOs met and no manual repairs. |
 | **6 Living seed** | 24+ | Freeze the v1 Living contracts. Create the `whisipedia-living` repo. Overlay store, patch log, first worker (summaries and cross-links), eval gates, review queue. | Patches are accepted, reverted and rebased correctly in an end-to-end test. Golden storage is unchanged, verified against manifests. |
@@ -606,3 +617,8 @@ Estimates assume one developer with heavy agent assistance. Each phase ends with
 | D8 | Commit identity and project license | **Decided 2026-10-10:** keep the existing commit identity (private, single-user repo). License: none / all rights reserved while private. |
 | D9 | Include video (TED, Khan Academy, CrashCourse ≈ 0.3–1 TB)? | Yes for Khan Academy; TED as T3 |
 | D10 | Update cycle: monthly or quarterly (§6.7) | Monthly. It gives a margin to recover a missed cycle before upstream retention expires. Quarterly is a single config change. |
+| D11 | Sites that refuse automated downloads (most `.mil`, fema.gov, cdc.gov, congress.gov) | **Decided 2026-10-10:** find official mirrors (GovInfo, DTIC, NTRS, agency S3 buckets, official Internet Archive uploads by the issuing agency); never spoof a browser identity. |
+| D12 | Sources that need written permission (Hesperian, Sphere, MSB, MSF, UK MOD) | **Decided 2026-10-10:** deferred; no permission requests for now. |
+| D13 | Scope of the defensive collection | **Decided 2026-10-10:** as broad as possible within the law, Anthropic's usage policies and the §13 safety boundaries (no weapon/explosive/CBRN production, targeting or offensive tooling). Public-release engineering references such as NAWCWD TP 8347 are included. Outdated historical guidance is shown with a "historical, may be unsafe" banner rather than hidden. |
+| D14 | Very large public collections | **Decided 2026-10-10:** include the CIA FOIA reading room (≈5-10 TB) and USGS historical topographic maps (≈10-20 TB). |
+| D15 | Non-English material | **Decided 2026-10-10:** configurable budget; initially the best 300 GB in each of the top 10 non-English languages (3 TB total), chosen by source score per GB. |

@@ -68,15 +68,10 @@ def test_change_feed_iteration_and_stream(wsp: WspClient) -> None:
     assert exc.value.code == "invalid_cursor"
 
 
-def test_system_summarize_resolve(wsp: WspClient) -> None:
+def test_system_resolve(wsp: WspClient) -> None:
     status = wsp.system(ledger_tail=1)
     assert len(status.ledger_tail) == 1
     assert status.ledger_ok
-    events = list(wsp.summarize("who", [TURING]))
-    cites = [e for e in events if e.type == "citation"]
-    assert [c.doc_id for c in cites] == [TURING]  # type: ignore[union-attr]
-    assert events[0].type == "token"
-    assert events[-1].type == "done"
     assert wsp.resolve("wsp://rfc/9110").href == "/v1/documents/wsp%3Arfc%2F9110"
     assert wsp.resolve("wsp://search?q=turing").href == "/v1/search?q=turing"
 
@@ -100,10 +95,10 @@ def test_doc_ids_with_reserved_characters_are_escaped(wsp: WspClient) -> None:
     assert "what?is#this 100%" in exc.value.message
 
 
-def test_summarize_not_configured() -> None:
-    app = create_app(sample_services(with_generator=False))
+def test_gap_log_not_configured() -> None:
+    app = create_app(sample_services())
     with local_client(app) as http, WspClient(http=http) as wsp, pytest.raises(NotConfiguredError):
-        list(wsp.summarize("q", [TURING]))
+        wsp.report_gap("https://example.org/")
 
 
 def test_async_client_mirrors_sync() -> None:
@@ -129,7 +124,6 @@ def test_async_client_mirrors_sync() -> None:
             streamed = [s async for s in wsp.stream_changes(since="4", max_seconds=0.05)]
             assert [s.cursor for s in streamed] == ["5"]
             assert (await wsp.system()).ledger_ok
-            assert [c.type async for c in wsp.summarize("q", [TURING])][-1] == "done"
             assert (await wsp.resolve("home")).kind == "home"
             assert (await wsp.portal()).featured is not None
             assert (await wsp.directory()).name == "Top"

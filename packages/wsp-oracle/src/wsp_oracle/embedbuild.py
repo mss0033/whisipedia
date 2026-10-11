@@ -37,7 +37,7 @@ from wsp_oracle.vectors import ChunkVectorStore
 
 log = logging.getLogger("wsp_oracle.embed")
 
-_COLUMNS = ("doc_id", "source_id", "title", "text", "content_hash")
+_COLUMNS = ("doc_id", "source_id", "title", "text", "content_hash", "lang")
 
 
 @dataclass(slots=True)
@@ -103,16 +103,22 @@ def _produce(
     limit: int | None,
     pool: Executor | None,
     batch_docs: int,
+    langs: frozenset[str] | None = None,
 ) -> None:
     try:
         seen = 0
         for batch in reader.scan(_COLUMNS, batch_size=batch_docs):
             cols: dict[str, list[Any]] = {name: batch.column(name).to_pylist() for name in _COLUMNS}
+            if langs is not None:  # e.g. only the English part of a multi-language source
+                keep = [i for i, lang in enumerate(cols["lang"]) if str(lang) in langs]
+                cols = {name: [values[i] for i in keep] for name, values in cols.items()}
             ids = [str(x) for x in cols["doc_id"]]
             if limit is not None:
                 ids = ids[: max(0, limit - seen)]
             if not ids:
-                break
+                if limit is not None and seen >= limit:
+                    break
+                continue  # a batch with no documents in the wanted languages
             seen += len(ids)
             known = store.doc_hashes(ids)
             todo: list[int] = []
@@ -169,6 +175,7 @@ def embed_generation(
     batch_docs: int = 1024,
     save_every: int = 250_000,
     limit: int | None = None,
+    langs: frozenset[str] | None = None,
     workers: int = 0,
     progress: Callable[[EmbedStats], None] | None = None,
     progress_every_s: float = 10.0,
@@ -190,6 +197,7 @@ def embed_generation(
             "limit": limit,
             "pool": pool,
             "batch_docs": batch_docs,
+            "langs": langs,
         },
         daemon=True,
         name="embed-producer",
@@ -288,6 +296,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--vectors", type=Path, default=None, help="store directory (default: oracle.vectors.path)"
     )
     ap.add_argument("--limit", type=int, default=None, help="only the first N documents (benchmarks)")
+    ap.add_argument("--langs", default="", help="comma-separated language codes to embed (default: all)")
     ap.add_argument("--batch-chunks", type=int, default=4096)
     ap.add_argument(
         "--workers",
@@ -335,6 +344,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 max_chunks_per_doc=ocfg.max_chunks_per_doc,
                 batch_chunks=args.batch_chunks,
                 limit=args.limit,
+                langs=frozenset(x for x in args.langs.split(",") if x) or None,
                 workers=args.workers,
                 progress=lambda s: log.info(s.line()),
             )

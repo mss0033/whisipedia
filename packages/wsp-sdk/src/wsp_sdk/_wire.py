@@ -111,12 +111,6 @@ def proposals(status: str | None) -> Req:
     return Req("GET", "/v1/proposals", _p(status=status))
 
 
-def summarize(query: str, doc_ids: Sequence[str], max_tokens: int) -> Req:
-    return Req(
-        "POST", "/v1/summarize", json={"query": query, "doc_ids": list(doc_ids), "max_tokens": max_tokens}
-    )
-
-
 def resolve(address: str) -> Req:
     path, _, qs = address.strip().partition("?")
     return Req("GET", "/go/" + quote(path, safe="/:"), tuple(parse_qsl(qs)))

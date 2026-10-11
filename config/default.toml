@@ -13,7 +13,9 @@ parity_percent = 10
 parity_bytes_per_sec = 150000000 # parity work (verify + par2 input) rate limit
 parity_bytes_per_run = 200000000000  # one bounded parity job; the backfill continues in later runs
 parity_max_set_gb = 64           # data per par2 recovery set (a bigger file is a set of its own)
-parity_threads = 4               # par2 -t (leave CPU for the browser and the indexer)
+parity_threads = 2               # par2 -t (leave CPU for the browser and the indexer); 0 = par2 default
+parity_memory_mb = 256           # par2 -m (MB of memory par2 may use); 0 = par2 default
+yield_to_interactive_seconds = 300  # scrub/parity pause while the library was used this recently; 0 = never
 
 [acquirer]
 user_agent = "Whisipedia/0.0 (personal offline archive)"
@@ -40,12 +42,17 @@ books = 2.0
 education = 2.0
 howto = 2.0
 
+[curator.multilingual]
+# Non-English budget (PLAN D15): for each language, take the highest-value material (registry score
+# per GB, T1 first) until the per-language budget is spent. English is not limited by this table.
+languages = ["de", "fr", "es", "ru", "it", "pl", "ja", "zh", "pt", "ar"]
+budget_tb_per_language = 0.3
+
 [api]
 query_log = true                 # local-only search log (query + result count) for the gap miner; rotated
 backend = "auto"                 # "auto" (real if vault.root exists) | "real" | "sample"
 static_dir = ""                  # "" = <repo>/navigator/dist
 allowed_hosts = []               # extra Host-header names (only with `wsp serve --allow-remote`)
-demo_generator = true            # sample backend only: echo summaries; the real backend has none yet
 
 [orchestrator]
 # All orchestrator state is on LOCAL disk, never the NAS (ADR-0002). Override in local.toml.
@@ -61,10 +68,34 @@ max_jobs_per_host = 1
 prune_dry_run = false           # true: retention records its plan but moves nothing to pruned/
 offer_max_age = "P14D"          # upstream observations older than this prove nothing (last-copy oracle)
 parity_interval = "PT6H"        # parity backfill wake-up; it continues every few minutes while work remains
+shutdown_grace_seconds = 10     # on SIGTERM work is cancelled, then abandoned after this (systemd: 120 s)
 
 [orchestrator.retention_windows]  # upstream retention per adapter; alert at half (PLAN §6.5)
 wikimedia-dumps = "P60D"
 wikidata = "P60D"
+
+[integrity]
+# Supply-chain and compromise checks around each release (ADR-0009). Actions: info | alert | hold | quarantine.
+enabled = true
+mirror_disagreement = "quarantine"  # mirrors disagree on size or bytes (spot checks, corrupt pieces)
+channel_mismatch = "quarantine"     # the digest fetched through an independent channel disagrees
+unknown_origin = "hold"             # origin/checksum host on a domain never used by the source
+unverifiable = "alert"              # no digest from anywhere
+settle_days = 14                    # the older known-good generation stays until the new one is this old and scrubbed
+profile_sample_rate = 0.03125       # documents sampled for content comparison (same keys every generation)
+wikimedia_primary = "https://dumps.wikimedia.org/"
+kiwix_primary = "https://download.kiwix.org/"
+
+[integrity.anomaly]                 # before promotion; out of range = held for `wsp approve` / `wsp reject`
+max_namespace_change = 0.10
+max_histogram_distance = 0.10       # total-variation distance of the byte-size distributions
+max_changed_fraction = 0.35
+max_deleted_fraction = 0.02
+max_script_ratio = 1.5
+min_script_jump = 2.0               # <script> tags per MiB of HTML
+max_binary_jump = 0.01
+max_new_executables = 0
+mime_allowlist = []
 
 [curator]
 # Discovery bots (PLAN §5.3, §5.5). Network bots run in the orchestrator (the only networked service).

@@ -44,8 +44,6 @@ from wsp_sdk.models import (
     SourcePage,
     StreamedChange,
     Suggestions,
-    SummaryEvent,
-    SummaryItem,
     SystemStatus,
 )
 
@@ -55,10 +53,6 @@ DEFAULT_BASE_URL = w.DEFAULT_BASE_URL
 def _parse[M: BaseModel](model: type[M], response: httpx.Response) -> M:
     raise_for_error(response)
     return model.model_validate_json(response.content)
-
-
-def _summary_from(ev: w.SSEEvent) -> SummaryItem:
-    return SummaryEvent.model_validate_json(ev.data).root
 
 
 def _change_from(ev: w.SSEEvent) -> StreamedChange | None:
@@ -193,26 +187,13 @@ class WspClient:
                 if ev is not None and (item := _change_from(ev)) is not None:
                     yield item
 
-    # --- system, summaries, addresses ---
+    # --- system, addresses ---
 
     def system(self, *, ledger_tail: int | None = None) -> SystemStatus:
         return _parse(SystemStatus, self._send(w.system(ledger_tail)))
 
     def proposals(self, *, status: str | None = None) -> ProposalPage:
         return _parse(ProposalPage, self._send(w.proposals(status)))
-
-    def summarize(
-        self, query: str, doc_ids: Sequence[str], *, max_tokens: int = 512
-    ) -> Iterator[SummaryItem]:
-        """Stream a cited summary (SSE). Raises ``NotConfiguredError`` if the server has no local LLM."""
-        req = w.summarize(query, doc_ids, max_tokens)
-        with self._http.stream(req.method, req.path, json=req.json) as r:
-            if r.status_code >= 400:
-                raise_for_error(r, r.read())
-            parser = w.SSEParser()
-            for line in r.iter_lines():
-                if (ev := parser.feed(line)) is not None:
-                    yield _summary_from(ev)
 
     # --- Navigator resources ---
 
@@ -371,18 +352,6 @@ class AsyncWspClient:
 
     async def proposals(self, *, status: str | None = None) -> ProposalPage:
         return _parse(ProposalPage, await self._send(w.proposals(status)))
-
-    async def summarize(
-        self, query: str, doc_ids: Sequence[str], *, max_tokens: int = 512
-    ) -> AsyncIterator[SummaryItem]:
-        req = w.summarize(query, doc_ids, max_tokens)
-        async with self._http.stream(req.method, req.path, json=req.json) as r:
-            if r.status_code >= 400:
-                raise_for_error(r, await r.aread())
-            parser = w.SSEParser()
-            async for line in r.aiter_lines():
-                if (ev := parser.feed(line)) is not None:
-                    yield _summary_from(ev)
 
     async def recent_changes(self, *, limit: int = 50, source: str | None = None) -> RecentChanges:
         return _parse(RecentChanges, await self._send(w.recent_changes(limit, source)))

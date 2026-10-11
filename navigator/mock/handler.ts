@@ -11,8 +11,8 @@ import type {
   Hit,
   InstantAnswer,
   Routes,
+  SearchResults,
   SourceInfo,
-  SummaryEvent,
 } from '../src/api/types.ts';
 import { DESCRIPTIONS, DIRECTORY, DOCS, type FixtureDoc, GENERATION, SOURCES } from './data.ts';
 
@@ -21,7 +21,6 @@ type Response<K extends keyof Routes> = Routes[K]['response'];
 export type MockResult =
   | { status: number; json: unknown }
   | { status: 204 }
-  | { status: 200; stream: Array<{ delayMs: number; event: SummaryEvent }> }
   /** Server-sent events that stay open until the client leaves (the change feed). */
   | { status: 200; hold: true; retryMs: number };
 
@@ -299,7 +298,17 @@ export function search(params: URLSearchParams): Response<'GET /v1/search'> {
     instant: offset === 0 ? instantFor(q) : null,
     did_you_mean: /\bvacine/.test(lq) ? lq.replace(/vacine/g, 'vaccine') : null,
     low_confidence: filtered.length === 0,
+    scope: mockScope(lq),
   };
+}
+
+/** `gutenberg …` names a site the mock holds nothing for: the API's whole-library fallback. */
+function mockScope(lq: string): SearchResults['scope'] {
+  const site = lq.split(/\s+/)[0] ?? '';
+  if (site === 'rfc') return { site, sources: ['rfc'], fallback: false };
+  if (site === 'gutenberg' && !/^gutenberg\s+\d+$/.test(lq))
+    return { site, sources: ['gutenberg'], fallback: true };
+  return null;
 }
 
 export function suggest(params: URLSearchParams): Response<'GET /v1/suggest'> {
@@ -594,45 +603,6 @@ export function random(params: URLSearchParams): Response<'GET /v1/random'> | nu
     : null;
 }
 
-export function summarize(req: Routes['POST /v1/summarize']['body']): MockResult {
-  const ids = (req.doc_ids ?? []).slice(0, 5);
-  if (ids.length === 0)
-    return err(422, 'invalid_request', 'doc_ids: List should have at least 1 item');
-  const events: SummaryEvent[] = [];
-  const say = (text: string) => {
-    for (const w of text.split(/(?<= )/)) events.push({ type: 'token', text: w });
-  };
-  const cite = (index: number) => {
-    const id = ids[index - 1]!;
-    const d = byId.get(id);
-    events.push({
-      type: 'citation',
-      index,
-      doc_id: id,
-      title: d?.title ?? id,
-      address: d ? address(d) : `wsp://${id.slice(4)}`,
-    });
-  };
-  const titles = ids.map((id) => byId.get(id)?.title ?? id);
-  say(`Across the top results for “${req.query}”, the library's sources agree on the essentials. `);
-  say(`${titles[0]} gives the most direct account `);
-  cite(1);
-  if (ids[1]) {
-    say('. A second source adds supporting detail ');
-    cite(2);
-  }
-  if (ids[2]) {
-    say(', and a third covers it from a different angle ');
-    cite(3);
-  }
-  say('. (This is the mock summarizer: it shows streaming and citations, not real synthesis.)');
-  events.push({ type: 'done' });
-  return {
-    status: 200,
-    stream: events.map((event, i) => ({ delayMs: i === 0 ? 300 : 35, event })),
-  };
-}
-
 /** Route a request. `path` is the raw path (percent-encoding intact), without the query. */
 export function handle(
   method: string,
@@ -640,9 +610,6 @@ export function handle(
   params: URLSearchParams,
   body?: unknown,
 ): MockResult {
-  if (method === 'POST' && path === '/v1/summarize') {
-    return summarize(body as Routes['POST /v1/summarize']['body']);
-  }
   if (method === 'POST' && path === '/v1/gaps') {
     const gap = body as Routes['POST /v1/gaps']['body'] | undefined;
     if (!gap?.href) return err(422, 'invalid_request', 'href: Field required');

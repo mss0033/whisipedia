@@ -3,11 +3,13 @@
 Layout under ``index.root`` (local disk only, ADR-0002)::
 
     refinery/<source_id>/<generation_id>/   Refinery Parquet (wsp_index.refinery), CURRENT.txt per source
-    lexical/                                Tantivy + suggest tries (TantivyIndex)
+    lexical/                                Tantivy + suggest tries (TantivyIndex), static_rank.bin,
+                                            spelling.bin ("did you mean")
     changes.sqlite                          change feed (SqliteChangeFeed)
     index-state.json                        {source_id: generation indexed last}
     catalog/<source_id>.json                portal/directory/random data (wsp_index.catalog)
     work/<source_id>/<generation_id>/       redirects.sqlite (aliases), adapter scratch
+    work/_rank/                             edge list while ``rank`` runs (deleted afterwards)
 
 Every step is resumable: a refined generation is sealed by ``_SUCCESS.json`` and skipped next time
 (an unsealed one is rebuilt from scratch); indexing diffs the last indexed generation against the
@@ -25,7 +27,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TextIO
+from typing import TextIO, cast
 
 from wsp_adapters.entries import EntrySource, Redirect
 from wsp_core.errors import FetchError
@@ -33,8 +35,16 @@ from wsp_core.ids import InvalidDocIdError, make_doc_id
 from wsp_core.model import DocRecord, FetchResult, Generation, GenerationStatus, RemoteFile, SourceSpec
 from wsp_core.ports import ChangeFeed, Ctx, SourceAdapter, Vault
 from wsp_index import RefineryReader, RefineryWriter, TantivyIndex, ensure_local, refresh
-from wsp_index.catalog import CATALOG_DIR, CatalogConfig, build_source_catalog, is_featured_source
-from wsp_index.refinery import CURRENT_FILE, generation_dir, is_sealed
+from wsp_index.catalog import (
+    CATALOG_DIR,
+    CatalogConfig,
+    build_source_catalog,
+    is_featured_source,
+    refresh_featured,
+)
+from wsp_index.linkrank import RankConfig, RankStats, StaticRank, compute_static_rank
+from wsp_index.refinery import CURRENT_FILE, current_generation, generation_dir, is_sealed
+from wsp_index.spelling import SPELL_FILE, SpellConfig, VocabStats, build_vocabulary
 from wsp_orchestrator.pipeline import RefineResult
 
 PROGRESS_EVERY = 10_000
@@ -200,7 +210,7 @@ class Indexer:
     def build_catalog(self, spec: SourceSpec, generation_id: str) -> Path | None:
         """Precompute the portal/directory/random data of one indexed generation (derived, local)."""
         started = self.clock()
-        cfg = CatalogConfig(featured=is_featured_source(spec))
+        cfg = CatalogConfig(featured=is_featured_source(spec), rank=self.index.static_rank())
         try:
             path = build_source_catalog(self.refinery, spec.id, generation_id, self.root / CATALOG_DIR, cfg)
         except Exception as exc:  # derived data: never fail an index build over it
@@ -226,6 +236,69 @@ class Indexer:
                 batch.setdefault(doc_id, []).append(str(alias))
             if batch:
                 self.index.set_aliases(batch)
+
+    # --- static rank (PageRank) ---------------------------------------------------------------
+
+    def rank(self, config: RankConfig | None = None) -> RankStats | None:
+        """PageRank over every indexed source's current generation (``wsp index rank``).
+
+        Writes ``lexical/static_rank.bin``, then uses it for suggest priors and the portal's
+        featured articles. Re-runnable on its own; it reads only the Refinery and the index's aliases.
+        """
+        readers = self._current_readers()
+        if not readers:
+            self._say("rank: nothing indexed")
+            return None
+        started = self.clock()
+        stats = compute_static_rank(
+            readers,
+            self.index.rank_path,
+            self.work / "_rank",
+            aliases=self.index.iter_aliases(),
+            config=config or RankConfig(),
+            progress=self._say,
+        )
+        self._say(f"rank: {stats.line()}")
+        rank = self.index.reload_static_rank()
+        if rank is not None:
+            self._apply_priors(readers, rank)
+            for sid, reader in readers:
+                spec = self.specs[sid]
+                if is_featured_source(spec):
+                    cfg = CatalogConfig(featured=True, rank=rank)
+                    refresh_featured(self.refinery, sid, reader.generation_id, self.root / CATALOG_DIR, cfg)
+        self._say(f"rank: done in {self.clock() - started:.1f}s")
+        return stats
+
+    # --- "did you mean" vocabulary ------------------------------------------------------------
+
+    def _current_readers(self) -> list[tuple[str, RefineryReader]]:
+        readers: list[tuple[str, RefineryReader]] = []
+        for sid in sorted(self.specs):
+            gen = current_generation(self.refinery, sid)
+            if gen is not None and is_sealed(generation_dir(self.refinery, sid, gen)):
+                readers.append((sid, RefineryReader(generation_dir(self.refinery, sid, gen))))
+        return readers
+
+    def spell(self, config: SpellConfig | None = None) -> VocabStats | None:
+        """Rebuild the spelling vocabulary from every indexed source (``wsp index spell``)."""
+        readers = self._current_readers()
+        if not readers:
+            self._say("spell: nothing indexed")
+            return None
+        path = self.index.path / SPELL_FILE
+        stats = build_vocabulary(readers, path, config or SpellConfig(), progress=self._say)
+        self._say(f"spell: {stats.line()}")
+        return stats
+
+    def _apply_priors(self, readers: Sequence[tuple[str, RefineryReader]], rank: StaticRank) -> None:
+        """Suggest popularity priors from the static rank (streamed, 50k documents at a time)."""
+        for _, reader in readers:
+            for batch in reader.scan(["doc_id"], batch_size=50_000):
+                ids = cast(list[str], batch.column(0).to_pylist())
+                feats = rank.features(ids)
+                self.index.set_priors({d: float(f) for d, f in zip(ids, feats, strict=True)})
+        self.index.commit()
 
     # --- whole runs ----------------------------------------------------------------------------
 

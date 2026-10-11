@@ -26,7 +26,14 @@ STAGING_RECORD = ".wsp-staging.json"
 ROLE_DATA = "data"
 ROLE_PARITY = "parity"
 
-RESERVED_NAMES = frozenset({MANIFEST_NAME, SIGNATURE_NAME, DEGRADED_NAME, STAGING_RECORD, PARITY_DIR})
+# Signed attestations next to the manifest (wsp_vault.attest, ADR-0009).
+ATTESTATION_NAMES = frozenset(
+    {"PROVENANCE.json", "PROVENANCE.json.sig", "PROMOTION.json", "PROMOTION.json.sig"}
+)
+
+RESERVED_NAMES = frozenset(
+    {MANIFEST_NAME, SIGNATURE_NAME, DEGRADED_NAME, STAGING_RECORD, PARITY_DIR, *ATTESTATION_NAMES}
+)
 
 
 class ManifestError(ValueError):

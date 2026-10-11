@@ -245,6 +245,21 @@ def build_parser() -> argparse.ArgumentParser:
         ix_sub,
     )
     s.add_argument("--source", default=None, help="only this source id")
+    s.add_argument("--no-rank", action="store_true", help="skip the static rank (PageRank) step")
+    s = add(
+        "rank",
+        ops.cmd_index_rank,
+        "Recompute the link-analysis static rank (PageRank), suggest priors and featured articles.",
+        ix_sub,
+    )
+    s.add_argument("--damping", type=float, default=0.85, help="PageRank damping factor")
+    s.add_argument("--mix", type=float, default=0.5, help="weight of the cross-source rank (0-1)")
+    s = add(
+        "spell",
+        ops.cmd_index_spell,
+        'Rebuild the "did you mean" vocabulary from the indexed text (local disk).',
+        ix_sub,
+    )
     s = add(
         "catalog",
         ops.cmd_index_catalog,
@@ -263,7 +278,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--source", default=None, help="drill this source (default: smallest generation)")
 
     for name, help_ in (
-        ("approve", "Promote a release held by the sanity check."),
+        ("approve", "Continue a release held by the integrity or sanity checks."),
         ("reject", "Reject a held release (it is quarantined)."),
         ("resume", "Resume an auto-paused source."),
     ):
