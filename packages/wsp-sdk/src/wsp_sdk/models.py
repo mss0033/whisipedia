@@ -533,6 +533,42 @@ class ProposalSummary(_Wire):
     latest: list[ProposalInfo] = Field(default_factory=list[ProposalInfo], description="Newest open ones.")
 
 
+class SourceIntegrity(_Wire):
+    source_id: str
+    channel: str = Field(
+        description="Weakest checksum-channel status of the last checked release: `independent`,"
+        " `same-origin`, `unavailable`, `mismatch` or `never checked` (ADR-0009)."
+    )
+    version: str | None = None
+    verdict: str | None = Field(
+        default=None, description="Strongest integrity action: info, alert, hold, quarantine."
+    )
+    checked_at: datetime | None = None
+
+
+class HeldRelease(_Wire):
+    source_id: str
+    version: str
+    state: str
+    reason: str | None = None
+
+
+class IntegrityStatus(_Wire):
+    """Source integrity (ADR-0009): provenance, verification channels, holds and origin drift."""
+
+    provenance_generations: int = Field(description="Sealed generations checked for PROVENANCE.json.")
+    provenance_covered: int
+    provenance_fraction: float
+    provenance_invalid: list[str] = Field(
+        description="Generations whose PROVENANCE.json fails its signature."
+    )
+    channels: list[SourceIntegrity]
+    held: list[HeldRelease] = Field(description="Releases held for `wsp approve` / `wsp reject`.")
+    quarantined: list[HeldRelease] = Field(description="Releases quarantined as possibly compromised.")
+    drift_alerts: list[AlertInfo] = Field(description="Open origin-drift and integrity alerts.")
+    pinned_hosts: int = 0
+
+
 class OpsStatus(_Wire):
     """Operations data for the System Monitor (PLAN §12.6); every part tolerates missing state."""
 
@@ -547,6 +583,7 @@ class OpsStatus(_Wire):
     bots: list[BotRun]
     proposals: ProposalSummary
     orchestrator_state: bool = Field(description="False until the orchestrator has created its state DB.")
+    integrity: IntegrityStatus | None = Field(default=None, description="Source integrity (ADR-0009).")
 
 
 class SystemStatus(_Wire):

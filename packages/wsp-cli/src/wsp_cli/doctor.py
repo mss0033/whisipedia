@@ -87,6 +87,7 @@ class Doctor:
             ("key", self.key),
             ("ledger", self.ledger),
             ("orchestrator", self.orchestrator),
+            ("integrity", self.integrity),
         ]
         out: list[Check] = []
         for name, step in steps:
@@ -247,6 +248,48 @@ class Doctor:
         level = Level.FAIL if by.get("critical") else Level.WARN if by else Level.OK
         summary = ", ".join(f"{n} {s}" for s, n in sorted(by.items())) or "no open alerts"
         return Check("orchestrator", "Orchestrator state", level, f"{summary}; {jobs} queued job(s)")
+
+    def integrity(self) -> Check:
+        """Source integrity (ADR-0009): provenance coverage, checksum channels, holds, drift."""
+        from wsp_cli.integrity import channel_summary, read_integrity_state
+
+        raw = str(bootstrap.section(self.cfg, "orchestrator").get("state_db") or "")
+        state = read_integrity_state(Path(raw).expanduser() if raw else None)
+        specs = [s for s in bootstrap.load_sources(self.cfg, self.lay) if s.status.value == "active"]
+        channels = channel_summary(state, [s.id for s in specs])
+        counts: dict[str, int] = {}
+        for status in channels.values():
+            counts[status] = counts.get(status, 0) + 1
+        sealed = with_prov = 0
+        root = self.paths.vault_root
+        if root is not None and (root / "library").is_dir():
+            for manifest in (root / "library").glob("*/*/*/MANIFEST.json"):
+                sealed += 1
+                with_prov += (manifest.parent / "PROVENANCE.json").is_file()
+        parts = [
+            f"provenance {with_prov}/{sealed} generation(s)",
+            "channels " + (", ".join(f"{n} {k}" for k, n in sorted(counts.items())) or "none"),
+            f"{state.pinned_hosts} pinned host(s)",
+        ]
+        critical = [a for a in state.drift_alerts if a.get("severity") == "critical"]
+        drift = [a for a in state.drift_alerts if str(a.get("key", "")).startswith("origin-drift:")]
+        if state.held:
+            parts.append(
+                f"{len(state.held)} held: "
+                + ", ".join(f"{h['source_id']}/{h['version']}" for h in state.held)
+            )
+        if drift:
+            parts.append(f"{len(drift)} origin drift alert(s)")
+        if critical:
+            parts.append(f"{len(critical)} possible compromise(s): runbook held-release")
+        level = (
+            Level.FAIL
+            if critical
+            else Level.WARN
+            if (state.held or drift or counts.get("mismatch"))
+            else Level.OK
+        )
+        return Check("integrity", "Source integrity", level, "; ".join(parts))
 
 
 _ICON = {Level.OK: "[ OK ]", Level.WARN: "[WARN]", Level.FAIL: "[FAIL]"}
