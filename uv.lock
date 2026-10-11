@@ -2626,6 +2626,9 @@ dev = [
     { name = "pytest-cov" },
     { name = "ruff" },
 ]
+gpu = [
+    { name = "wsp-oracle", extra = ["gpu"] },
+]
 
 [package.metadata]
 
@@ -2637,6 +2640,7 @@ dev = [
     { name = "pytest-cov", specifier = ">=5" },
     { name = "ruff", specifier = ">=0.17" },
 ]
+gpu = [{ name = "wsp-oracle", extras = ["gpu"], editable = "packages/wsp-oracle" }]
 
 [[package]]
 name = "wsp-adapters"
