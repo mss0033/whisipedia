@@ -49,13 +49,21 @@ class ParquetDocumentStore:
         self, root: Path, *, max_open_generations: int = 16, memory_budget: int = 1536 * 1024 * 1024
     ) -> None:
         self.root = root
-        self._readers: OrderedDict[tuple[str, str], RefineryReader] = OrderedDict()
+        self._readers: OrderedDict[tuple[str, str, bool], RefineryReader] = OrderedDict()
         self._max = max_open_generations
         self._budget = memory_budget
         self._lock = threading.Lock()
 
-    def reader(self, source_id: str, generation_id: str) -> RefineryReader | None:
-        key = (source_id, generation_id)
+    def reader(
+        self, source_id: str, generation_id: str, *, current: bool | None = None
+    ) -> RefineryReader | None:
+        """A cached reader (``current``: whether ``generation_id`` is the source's current generation,
+        looked up when not given). Only the current generation gets an id-map sidecar: older ones are
+        read for history and dated requests, and wrote ~20 bytes a document each from a GET (audit
+        2026-10-12 #12)."""
+        if current is None:
+            current = generation_id == current_generation(self.root, source_id)
+        key = (source_id, generation_id, current)
         with self._lock:
             cached = self._readers.get(key)
             if cached is not None:
@@ -64,7 +72,7 @@ class ParquetDocumentStore:
         gen_dir = generation_dir(self.root, source_id, generation_id)
         if not is_sealed(gen_dir):
             return None
-        reader = RefineryReader(gen_dir)
+        reader = RefineryReader(gen_dir, map_ids=current)
         with self._lock:
             self._readers[key] = reader
             while len(self._readers) > 1 and (
@@ -90,7 +98,7 @@ class ParquetDocumentStore:
             gen = gens[i - 1] if i else None
         if gen is None:
             return None
-        reader = self.reader(source_id, gen)
+        reader = self.reader(source_id, gen, current=True if at_generation is None else None)
         return None if reader is None else reader.get(doc_id)
 
     def texts(self, doc_ids: Sequence[str]) -> dict[str, str]:
@@ -103,11 +111,28 @@ class ParquetDocumentStore:
             except InvalidDocIdError:
                 continue
             gen = current_generation(self.root, source_id)
-            reader = None if gen is None else self.reader(source_id, gen)
+            reader = None if gen is None else self.reader(source_id, gen, current=True)
             row = None if reader is None else reader.lookup(doc_id, ("text",))
             text = None if row is None else row.get("text")
             if isinstance(text, str):
                 out[doc_id] = text
+        return out
+
+    def content_hashes(self, doc_ids: Sequence[str]) -> dict[str, str]:
+        """Current content hash of each document that has one (tells duplicate records of one text from
+        distinct documents sharing a title). Reads only the ``content_hash`` column."""
+        out: dict[str, str] = {}
+        for doc_id in doc_ids:
+            try:
+                source_id, _ = parse_doc_id(DocId(doc_id))
+            except InvalidDocIdError:
+                continue
+            gen = current_generation(self.root, source_id)
+            reader = None if gen is None else self.reader(source_id, gen, current=True)
+            row = None if reader is None else reader.lookup(doc_id, ("content_hash",))
+            digest = None if row is None else row.get("content_hash")
+            if isinstance(digest, str):
+                out[doc_id] = digest
         return out
 
     def history(self, doc_id: DocId) -> Sequence[tuple[str, str]]:

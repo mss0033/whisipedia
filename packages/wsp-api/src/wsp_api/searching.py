@@ -76,7 +76,12 @@ def retrieve(index: object, q: str, wanted: Sequence[str] | None) -> Retrieval:
     if callable(oracle):  # the Oracle: hits, confidence and scope from one (cached) run
         res = cast(Any, oracle(q, sources=wanted, depth=WINDOW))
         hits = tuple(cast(Sequence[SearchHit], res.hits))
-        return Retrieval(hits[:WINDOW], len(hits) < WINDOW, bool(res.low_confidence) or not hits, res.scope)
+        # The Oracle says whether its list holds every match: collapsed duplicates and filtered hits make
+        # a list shorter than the window without making it complete (audit 2026-10-12 F10). An index that
+        # does not say: a list shorter than the window is all there is.
+        exhaustive = getattr(res, "exhaustive", None)
+        complete = len(hits) < WINDOW if exhaustive is None else bool(exhaustive) and len(hits) <= WINDOW
+        return Retrieval(hits[:WINDOW], complete, bool(res.low_confidence) or not hits, res.scope)
     lexical = cast(Any, index)
     hits = tuple(cast(Sequence[SearchHit], lexical.search(q, limit=WINDOW + 1, offset=0, sources=wanted)))
     scope_of = getattr(index, "scope", None)

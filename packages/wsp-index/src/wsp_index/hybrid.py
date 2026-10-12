@@ -4,6 +4,14 @@
 ranks, where ``static`` is the link-analysis feature (``wsp_index.linkrank``) when one is
 configured. RRF needs no score calibration between BM25 and cosine similarity and is robust to one
 retriever being absent, which keeps the dense path optional until Phase 3.
+
+The dense rank of a lexical hit is the better of its dense and its lexical rank: dense retrieval can
+lift a lexical hit (or add one BM25 missed), never sink it. Only some sources are embedded, and a
+document the dense side does not rank may simply have no vectors; counting that as a miss sank the
+embedded source's own best lexical match below 120 others (audit 2026-10-12 #5), and crediting only
+the sources without vectors (the previous rule) needed a list of embedded sources read from the
+vector store. Now a document without vectors and an embedded one the dense side missed are treated
+alike, as if the dense side agreed with BM25; demoting is left to the reranker, which sees the head.
 """
 
 from __future__ import annotations
@@ -15,6 +23,7 @@ from typing import Any, cast
 from wsp_core.ids import DocId, InvalidDocIdError, parse_doc_id
 from wsp_core.model import DocRecord, SearchHit
 from wsp_core.ports import Embedder, LexicalIndex, VectorIndex
+from wsp_index.lexical import LexicalWindow
 
 Resolver = Callable[[str], SearchHit | None]
 StaticFeatures = Callable[[Sequence[str]], Sequence[float]]
@@ -44,6 +53,18 @@ class FusionConfig:
     """``w_s`` above; 0 switches the static rank off in fusion."""
 
 
+@dataclass(frozen=True, slots=True)
+class Fused:
+    """One page of fused hits (:meth:`HybridSearcher.fuse`)."""
+
+    hits: Sequence[SearchHit]
+    exhaustive: bool
+    """``hits`` are every candidate of both retrievers: the lexical window held every match, dense
+    retrieval returned fewer than it was asked for, and nothing was cut at ``offset + limit``."""
+    lexical: Sequence[SearchHit] = ()
+    """The lexical window fused (before the cut at ``offset + limit``)."""
+
+
 class HybridSearcher:
     """Fuses a ``LexicalIndex`` with an optional ``VectorIndex`` + ``Embedder``.
 
@@ -64,7 +85,8 @@ class HybridSearcher:
         config: FusionConfig | None = None,
         resolve: Resolver | None = None,
         snippet_free: bool = False,
-        dense_sources: frozenset[str] | None = None,
+        partial: bool = True,
+        per_source: int | None = None,
     ) -> None:
         if (vector is None) != (embedder is None):
             raise ValueError("vector index and embedder must be given together")
@@ -74,10 +96,10 @@ class HybridSearcher:
         self.config = config or FusionConfig()
         self.resolve = resolve
         self.snippet_free = snippet_free  # rank lexical candidates without snippets (see search)
-        # Sources the vector index covers (None: all). A lexical hit from a source with no embeddings
-        # is credited its lexical rank on the dense side too: otherwise RRF hands every embedded source
-        # a second vote the others can never get (only mdwiki was embedded, and it won every query).
-        self.dense_sources = dense_sources
+        # False: a lexical window may end with the documents matching every word, when there are enough
+        # of them (``TantivyIndex.search_window``); the costly any-word query is then never run.
+        self.partial = partial
+        self.per_source = per_source  # places one source may take in a shared lexical window
 
     def prior(self, source_id: str) -> float:
         return self.config.source_priors.get(source_id, self.config.default_prior)
@@ -85,38 +107,57 @@ class HybridSearcher:
     def search(
         self, query: str, *, limit: int = 10, offset: int = 0, sources: Sequence[str] | None = None
     ) -> Sequence[SearchHit]:
-        if limit <= 0 or offset < 0 or not query.strip():
-            return []
-        cfg = self.config
-        depth = max(cfg.depth, offset + limit)
-        # Candidates without snippets when the index can (a window of ``depth`` is ranked, a page shown):
-        # the caller cuts snippets for what it shows (``snippets``), not for every candidate.
+        return self.fuse(query, limit=limit, offset=offset, sources=sources).hits
+
+    def _lexical(self, query: str, depth: int, sources: Sequence[str] | None) -> LexicalWindow:
+        """The lexical candidates: without snippets when the index can (a window of ``depth`` is ranked,
+        a page shown; the caller cuts snippets for what it shows, ``snippets``)."""
+        if self.snippet_free:
+            window = getattr(self.lexical, "search_window", None)
+            if callable(window):
+                found = window(
+                    query, limit=depth, sources=sources, partial=self.partial, per_source=self.per_source
+                )
+                return cast(LexicalWindow, found)
         cheap = getattr(self.lexical, "search_hits", None)
         run = cast(Any, cheap) if callable(cheap) and self.snippet_free else self.lexical.search
-        lexical = list(cast(Sequence[SearchHit], run(query, limit=depth, sources=sources)))
+        hits = list(cast(Sequence[SearchHit], run(query, limit=depth, sources=sources)))
+        return LexicalWindow(hits, len(hits) < depth)
+
+    def fuse(
+        self, query: str, *, limit: int = 10, offset: int = 0, sources: Sequence[str] | None = None
+    ) -> Fused:
+        """A page of fused hits, and whether they are every candidate (a total can be exact)."""
+        if limit <= 0 or offset < 0 or not query.strip():
+            return Fused([], True)
+        cfg = self.config
+        depth = max(cfg.depth, offset + limit)
+        window = self._lexical(query, depth, sources)
+        lexical = list(window.hits)
         dense: list[tuple[str, float]] = []
+        dense_all = True  # the dense side returned everything it had
         if self.vector is not None and self.embedder is not None:
             qvec = self.embedder.embed([query])[0]
             allowed = None if sources is None else frozenset(sources)
             # Over-fetch when filtering by source, since the ANN cannot filter.
             fetch = depth if allowed is None else depth * 4
-            dense = [
-                (d, s)
-                for d, s in self.vector.search(qvec, limit=fetch)
-                if allowed is None or _source_of(d) in allowed
-            ][:depth]
+            found = self.vector.search(qvec, limit=fetch)
+            kept = [(d, s) for d, s in found if allowed is None or _source_of(d) in allowed]
+            dense = kept[:depth]
+            dense_all = len(found) < fetch and len(kept) <= depth
 
         fused: dict[str, float] = {}
         info: dict[str, SearchHit] = {}
+        dense_rank = {doc_id: rank for rank, (doc_id, _sim) in enumerate(dense, start=1)}
         for rank, hit in enumerate(lexical, start=1):
             fused[hit.doc_id] = fused.get(hit.doc_id, 0.0) + cfg.lexical_weight / (cfg.k + rank)
             info[hit.doc_id] = hit
-        for rank, (doc_id, _sim) in enumerate(dense, start=1):
-            fused[doc_id] = fused.get(doc_id, 0.0) + cfg.dense_weight / (cfg.k + rank)
-        if dense and self.dense_sources is not None:
-            for rank, hit in enumerate(lexical, start=1):
-                if (hit.source_id or _source_of(hit.doc_id)) not in self.dense_sources:
-                    fused[hit.doc_id] += cfg.dense_weight / (cfg.k + rank)  # imputed: no embeddings
+            if dense:  # the better of its dense and its lexical rank (module docstring)
+                best = min(dense_rank.get(hit.doc_id, rank), rank)
+                fused[hit.doc_id] += cfg.dense_weight / (cfg.k + best)
+        for doc_id, rank in dense_rank.items():
+            if doc_id not in info:
+                fused[doc_id] = fused.get(doc_id, 0.0) + cfg.dense_weight / (cfg.k + rank)
 
         static: dict[str, float] = {}
         if cfg.static_rank is not None and cfg.static_weight > 0 and fused:
@@ -130,8 +171,10 @@ class HybridSearcher:
         scored.sort(key=lambda t: (-t[0], t[1]))
 
         out: list[SearchHit] = []
+        cut = False
         for score, doc_id in scored:
             if len(out) >= offset + limit:
+                cut = True
                 break
             hit = info.get(doc_id)
             if hit is None:
@@ -142,7 +185,7 @@ class HybridSearcher:
                 else:
                     hit = SearchHit(DocId(doc_id), 0.0, doc_id, "", _source_of(doc_id))
             out.append(replace(hit, score=score))
-        return out[offset:]
+        return Fused(out[offset:], window.exhaustive and dense_all and not cut, lexical)
 
 
 def embed_documents(

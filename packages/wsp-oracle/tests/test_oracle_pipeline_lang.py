@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from wsp_core.ids import make_doc_id
 from wsp_core.model import SearchHit
 from wsp_oracle.pipeline import _prefer_language  # pyright: ignore[reportPrivateUsage]
+from wsp_oracle.router import Intent
 
 
 def h(native: str, score: float, lang: str) -> SearchHit:
@@ -35,7 +38,7 @@ def test_without_a_reranker_scores_are_scaled_not_shifted() -> None:
     assert tail[0].score == 0.01 * 1.15
 
 
-def test_near_identical_titles_of_one_source_collapse_to_the_best() -> None:
+def test_duplicate_records_collapse_to_the_best() -> None:
     from wsp_oracle.pipeline import _collapse_duplicates  # pyright: ignore[reportPrivateUsage]
 
     hits = [
@@ -48,12 +51,67 @@ def test_near_identical_titles_of_one_source_collapse_to_the_best() -> None:
         SearchHit(make_doc_id("mdwiki", "3"), 0.7, "Snakebite", "", "mdwiki"),
         SearchHit(make_doc_id("wiki", "4"), 0.6, "Case of snake bite treated with strychnine", "", "wiki"),
     ]
-    out = _collapse_duplicates(hits)
+    asked: list[list[str]] = []
+
+    def hashes(ids: Sequence[str]) -> dict[str, str]:
+        asked.append(list(ids))
+        return dict.fromkeys(ids, "same note")
+
+    out = _collapse_duplicates(hits, hashes)
     assert [h.doc_id for h in out] == [
         make_doc_id("pubmed", "1"),
         make_doc_id("mdwiki", "3"),
         make_doc_id("wiki", "4"),
     ]
+    assert asked == [[make_doc_id("pubmed", "1"), make_doc_id("pubmed", "2")]]  # only titles that repeat
+
+
+def test_distinct_documents_sharing_a_title_are_all_kept() -> None:
+    # Audit 2026-10-12 #8: separate Stack Overflow questions (or Open Library works) with one title
+    # disappeared from results, totals and facets.
+    from wsp_core.ids import content_hash
+    from wsp_oracle.pipeline import _collapse_duplicates  # pyright: ignore[reportPrivateUsage]
+
+    hits = [
+        SearchHit(make_doc_id("so", str(i)), 1.0 - i / 10, "Python list comprehension", "", "so")
+        for i in range(3)
+    ]
+    texts: dict[str, str] = {
+        hits[0].doc_id: "question one",
+        hits[1].doc_id: "question two",
+        hits[2].doc_id: "",
+    }
+    assert _collapse_duplicates(hits, lambda ids: {i: content_hash(texts[i]) for i in ids}) == hits
+    assert _collapse_duplicates(hits, None) == hits  # without hashes nothing is proven a duplicate
+    empty: dict[str, str] = {h.doc_id: content_hash("") for h in hits}
+    assert _collapse_duplicates(hits, lambda ids: {i: empty[i] for i in ids}) == hits  # no text, no proof
+
+
+def test_language_tags_are_compared_by_their_primary_subtag() -> None:
+    # Audit 2026-10-12 #14: stored tags are full BCP-47 ("en-GB"); they never matched "en".
+    head = [h("es", 0.033, "es"), h("gb", 0.030, "en-GB")]
+    new_head, _ = _prefer_language("water", head, [], reranked=False)
+    assert new_head[0].lang == "en-GB"
+
+
+def test_preferences_name_projects_not_substrings() -> None:
+    # Audit 2026-10-12 #17: "osm" matched any source id containing it, a native id's text when it had
+    # no "/" (its "book"), and so on.
+    from typing import Any, cast
+
+    from wsp_oracle.pipeline import OracleSearcher
+    from wsp_oracle.router import Route
+
+    route = Route(Intent.LOCATE, "map of x", "x", "x", title="x", prefer=("osm", "maps", "wikibooks"))
+    fused = [
+        SearchHit(make_doc_id("cosmos", "1"), 1.0, "a", "", "cosmos"),
+        SearchHit(make_doc_id("enc", "Old_maps_of_Berlin"), 0.99, "b", "", "enc"),
+        SearchHit(make_doc_id("osm-planet", "node/1"), 0.9, "c", "", "osm-planet"),
+        SearchHit(make_doc_id("kiwix", "wikibooks_en_all/Maps"), 0.8, "d", "", "kiwix"),
+    ]
+    out = OracleSearcher._boost(cast(Any, None), route, fused)  # pyright: ignore[reportPrivateUsage]
+    boosted = {x.doc_id for x in out if x.score != next(f.score for f in fused if f.doc_id == x.doc_id)}
+    assert boosted == {make_doc_id("osm-planet", "node/1"), make_doc_id("kiwix", "wikibooks_en_all/Maps")}
 
 
 def test_how_to_prefers_books_inside_bundles() -> None:

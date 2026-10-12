@@ -24,7 +24,7 @@ from wsp_index.linkrank import StaticRank
 from wsp_oracle import devices
 from wsp_oracle.config import OracleConfig
 from wsp_oracle.embedder import TransformerEmbedder
-from wsp_oracle.pipeline import OracleIndex, OracleSearcher, Resolver
+from wsp_oracle.pipeline import ContentHashes, OracleIndex, OracleSearcher, Resolver
 from wsp_oracle.reranker import CrossEncoderReranker
 from wsp_oracle.router import Router
 from wsp_oracle.vectors import META_FILE, ChunkVectorStore, DocVectorIndex
@@ -131,17 +131,26 @@ def build_oracle(
     sources: Sequence[str] = (),
     resolve: Resolver | None = None,
     site_words: Mapping[str, Sequence[str]] | None = None,
+    content_hashes: ContentHashes | None = None,
 ) -> OracleServices:
     """Build the Oracle from the full layered config (reads ``[oracle]`` and ``[index]``).
 
     ``lexical`` is the already-open lexical index (opened from ``index.root`` when omitted);
     ``sources`` are the library's source ids and ``site_words`` their registry site words (source
     id -> words): together they name the sites the router recognizes (``Router.from_sources``).
+    ``content_hashes`` (``ParquetDocumentStore.content_hashes``) lets the Oracle collapse duplicate
+    records of one document (read from ``index.root``'s Refinery when the lexical index is opened here
+    too); without it no hit is collapsed.
     """
     section = cfg.get("oracle", {})
     ocfg = OracleConfig.from_mapping(cast(Mapping[str, Any], section) if isinstance(section, Mapping) else {})
     index_root = _index_root(cfg)
-    lexical = lexical or _open_lexical(cfg, index_root)
+    if lexical is None:
+        lexical = _open_lexical(cfg, index_root)
+        if content_hashes is None and index_root is not None and (index_root / "refinery").is_dir():
+            from wsp_index import ParquetDocumentStore
+
+            content_hashes = ParquetDocumentStore(index_root / "refinery").content_hashes
     if resolve is None:
         lookup = getattr(lexical, "lookup", None)
         resolve = cast(Resolver, lookup) if callable(lookup) else None
@@ -193,6 +202,7 @@ def build_oracle(
         resolve=resolve,
         passage_text=store.texts if store is not None else None,
         budget_ms=ocfg.budget_ms,
+        content_hashes=content_hashes,
     )
     return OracleServices(
         config=ocfg,

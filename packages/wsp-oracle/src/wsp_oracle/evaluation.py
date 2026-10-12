@@ -353,6 +353,7 @@ def replace_searcher(
         resolve=b.resolve,
         passage_text=b.passage_text,
         budget_ms=1e9,
+        content_hashes=b.content_hashes,
     )
 
 

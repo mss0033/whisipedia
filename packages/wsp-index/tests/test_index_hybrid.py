@@ -66,23 +66,24 @@ def hit(src: str, native: str) -> SearchHit:
 
 
 def test_rrf_fuses_and_resolves() -> None:
-    lexical = FakeLexical([hit("a", "x"), hit("a", "y")])
-    vector = FakeVector([(make_doc_id("b", "z"), 0.9), (make_doc_id("a", "y"), 0.8)])
+    lexical = FakeLexical([hit("a", "x"), hit("a", "w"), hit("a", "y")])
+    vector = FakeVector([(make_doc_id("a", "y"), 0.9), (make_doc_id("b", "z"), 0.8)])
     resolved: dict[str, SearchHit] = {
         make_doc_id("b", "z"): SearchHit(make_doc_id("b", "z"), 0.0, "Zed", "", "b")
     }
     hs = HybridSearcher(lexical, vector, HashingEmbedder(8), resolve=resolved.get)
     out = hs.search("q")
-    # y: 1/62 + 1/62 beats x: 1/61 and z: 1/61
-    assert [h.doc_id for h in out] == [make_doc_id("a", "y"), make_doc_id("a", "x"), make_doc_id("b", "z")]
-    assert out[0].score == pytest.approx(2 / 62)
-    assert out[2].title == "Zed"
+    # x: 2/61 (no dense rank: its lexical rank counts); y: 1/63 + 1/61 (lifted by its dense rank) beats
+    # w: 2/62; z (dense only): 1/62
+    assert [h.doc_id for h in out] == [make_doc_id("a", n) for n in ("x", "y", "w")] + [make_doc_id("b", "z")]
+    assert out[1].score == pytest.approx(1 / 63 + 1 / 61)
+    assert out[3].title == "Zed"
 
 
 def test_source_priors_and_unresolved_title() -> None:
     lexical = FakeLexical([hit("a", "x")])
     vector = FakeVector([(make_doc_id("b", "z"), 0.9)])
-    cfg = FusionConfig(source_priors={"b": 2.0})
+    cfg = FusionConfig(source_priors={"b": 3.0})
     out = HybridSearcher(lexical, vector, HashingEmbedder(8), config=cfg).search("q")
     assert out[0].doc_id == make_doc_id("b", "z")
     assert out[0].title == make_doc_id("b", "z")
@@ -159,8 +160,51 @@ def test_sources_without_embeddings_are_not_outvoted() -> None:
     # Lexical: wiki/best first, med/second. Only "med" is embedded and dense ranks med/second first.
     lexical = FakeLexical([hit("wiki", "best"), hit("med", "second")])
     vector = FakeVector([(make_doc_id("med", "second"), 0.9)])
-    unfair = HybridSearcher(lexical, vector, HashingEmbedder(8)).search("q")
-    assert unfair[0].doc_id == make_doc_id("med", "second")  # two votes against one
-    fair = HybridSearcher(lexical, vector, HashingEmbedder(8), dense_sources=frozenset({"med"})).search("q")
+    fair = HybridSearcher(lexical, vector, HashingEmbedder(8)).search("q")
     assert [h.doc_id for h in fair] == [make_doc_id("wiki", "best"), make_doc_id("med", "second")]
     assert fair[0].score == pytest.approx(2 / 61)  # its lexical rank, counted on the dense side too
+
+
+def test_the_embedded_source_is_not_penalised() -> None:
+    # Audit 2026-10-12 #5: mdwiki (the only embedded source) holds the best lexical match, which dense
+    # retrieval missed. Its missing dense vote sank it to rank 183, out of the reranked head of 50.
+    best = SearchHit(make_doc_id("mdwiki", "Snakebite"), 1.0, "Snakebite", "", "mdwiki")
+    lexical = FakeLexical([best, *(hit("pubmed", str(i)) for i in range(199))])
+    vector = FakeVector([(make_doc_id("mdwiki", f"other{i}"), 0.9 - i / 1000) for i in range(200)])
+    cfg = FusionConfig(depth=200, dense_weight=2.0)
+    out = HybridSearcher(lexical, vector, HashingEmbedder(8), config=cfg).search("snake bite", limit=200)
+    assert out[0].doc_id == best.doc_id  # as for any source: no dense rank, so its lexical rank counts
+    # and both sides are treated alike: the pubmed hits keep their lexical order behind it
+    pubmed = [h.doc_id for h in out if h.source_id == "pubmed"]
+    assert pubmed[:10] == [make_doc_id("pubmed", str(i)) for i in range(10)]
+
+
+def test_fusion_says_whether_it_holds_every_candidate() -> None:
+    few = FakeLexical([hit("a", str(i)) for i in range(5)])
+    assert HybridSearcher(few).fuse("q", limit=10).exhaustive
+    assert not HybridSearcher(few).fuse("q", limit=3).exhaustive  # cut at the page
+    full = FakeLexical([hit("a", str(i)) for i in range(60)])
+    assert not HybridSearcher(full, config=FusionConfig(depth=50)).fuse("q", limit=50).exhaustive
+    # dense retrieval filled its depth (the five lexical hits and 45 others): it may hold more
+    dense = FakeVector(
+        [(str(h.doc_id), 0.5) for h in few.hits] + [(make_doc_id("b", str(i)), 0.4) for i in range(45)]
+    )
+    fused = HybridSearcher(few, dense, HashingEmbedder(8), config=FusionConfig(depth=50)).fuse("q", limit=50)
+    assert len(fused.hits) == 50
+    assert not fused.exhaustive
+
+
+def test_a_lexical_window_cut_to_its_every_word_lead_is_not_exhaustive(tmp_path: Path) -> None:
+    from wsp_index.lexical import MIN_TIER_HITS
+
+    docs = [doc("s", f"both{i}", f"Tide {i}", "tide tables for the harbour") for i in range(MIN_TIER_HITS)]
+    docs += [doc("s", f"one{i}", f"Tide {i}", "tide only") for i in range(10)]
+    with TantivyIndex(tmp_path / "ix", TantivyConfig(writer_heap_bytes=20_000_000, writer_threads=1)) as idx:
+        idx.upsert(docs)
+        idx.commit()
+        lead = HybridSearcher(idx, snippet_free=True, partial=False).fuse("tide harbour", limit=100)
+        assert len(lead.hits) == MIN_TIER_HITS
+        assert not lead.exhaustive
+        every = HybridSearcher(idx, snippet_free=True).fuse("tide harbour", limit=100)
+        assert len(every.hits) == MIN_TIER_HITS + 10
+        assert every.exhaustive
