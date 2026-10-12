@@ -535,7 +535,7 @@ sources:
       origins: [www.govinfo.gov]
       discovery:
         - {kind: api, flavor: govinfo, collection: GOVPUB, package_prefix: [GOVPUB-HS5], api_key: govinfo}
-      filter: {distribution: {require: [public-release, published]}, default: allow}
+      filter: {distribution: {require: [public-release, published]}, allow_image_only: true, default: allow}  # posters and scans
       mirrors:
         - {channel: "GovInfo GOVPUB (GPO), SuDoc HS 5 (FEMA)", status: partial, verified: 2026-10-10, note: "same official channel as fema-preparedness-doctrine; building-science titles (P-361, P-320) to be confirmed in the listing with a key"}
         - {channel: "www.fema.gov", status: blocked, verified: 2026-10-10, note: "403 (WAF); not evaded"}
