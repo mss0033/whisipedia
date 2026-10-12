@@ -327,3 +327,17 @@ def test_planned_sources_with_nothing_downloaded_are_not_listed() -> None:
         top = DirectoryPage.model_validate(c.get("/v1/directory").json())
         assert "papers" not in {ch.path for ch in top.children}  # a category holding only planned sites
         assert c.get("/v1/sources/arxiv").status_code == 200  # its page still opens and says so
+
+
+def test_zim_listing_pages_are_never_results() -> None:
+    from wsp_api.searching import Searcher
+    from wsp_api.views import Library
+    from wsp_core.model import SearchHit
+
+    searcher = Searcher(Library(sample_services()))
+    tag_page = SearchHit(DocId("wsp:wikipedia-en-zim/se_en_all/questions/tagged/first-aid_page=3"), 1.0, "x")
+    question = SearchHit(DocId("wsp:wikipedia-en-zim/se_en_all/questions/13068/first-aid"), 1.0, "x")
+    other_site = SearchHit(DocId("wsp:gutenberg/questions/tagged/x"), 1.0, "x")
+    assert searcher.is_listing(tag_page)
+    assert not searcher.is_listing(question)
+    assert not searcher.is_listing(other_site)  # not a ZIM source: its ids mean something else

@@ -12,17 +12,20 @@ search per word) and runs one cheap lexical count only when it has a correction 
 
 from __future__ import annotations
 
+import re
 import threading
 import time
 from collections import Counter
-from collections.abc import Callable, Hashable, Sequence
+from collections.abc import Callable, Hashable, Mapping, Sequence
 from concurrent.futures import Future
 from dataclasses import dataclass, replace
 from typing import Any, cast
 
 from wsp_api import convert, search, sites
 from wsp_api.schemas import DocKind, Hit, KindFacet, SearchResults, SearchScope
+from wsp_api.snapshot import ZIM_ADAPTER
 from wsp_api.views import Library
+from wsp_core.listing import skip_paths, skip_regex
 from wsp_core.model import SearchHit
 
 WINDOW = 200  # hits ranked per query: the page, total and facets are all counted in them
@@ -94,6 +97,27 @@ class Searcher:
     def __init__(self, lib: Library) -> None:
         self.lib = lib
         self._flight: SingleFlight[tuple[str, tuple[str, ...] | None], Retrieval] = SingleFlight()
+        self._listing: dict[str, re.Pattern[str] | None] = {}  # source id -> listing-path regex
+
+    def is_listing(self, h: SearchHit) -> bool:
+        """A ZIM listing page (a tag's question list, ``users_page=3``) an older refine indexed: an index of
+        other pages, never a result (:mod:`wsp_core.listing`)."""
+        source_id, _, native = h.doc_id.removeprefix("wsp:").partition("/")
+        if source_id not in self._listing:
+            self._listing[source_id] = self._listing_regex(source_id)
+        rx = self._listing[source_id]
+        if rx is None:
+            return False
+        inner = native.partition("/")[2]  # a bundle's native id is "<book>/<entry path>"
+        return bool(rx.fullmatch(native) or (inner and rx.fullmatch(inner)))
+
+    def _listing_regex(self, source_id: str) -> re.Pattern[str] | None:
+        spec = self.lib.s.source(source_id)
+        if spec is None or spec.adapter != ZIM_ADAPTER:
+            return None
+        access: object = spec.raw.get("access")
+        raw: Mapping[str, object] = cast(Mapping[str, object], access) if isinstance(access, Mapping) else {}
+        return re.compile(skip_regex(skip_paths(raw)))
 
     def kind_of(self, h: SearchHit) -> DocKind:
         spec = self.lib.s.source(h.source_id or h.doc_id[4:].partition("/")[0])
@@ -132,8 +156,9 @@ class Searcher:
         t0 = time.perf_counter()
         lib, s = self.lib, self.lib.s
         found = self.retrieval(q, wanted)
-        kinds = [self.kind_of(h) for h in found.hits]
-        shown = [h for h, k in zip(found.hits, kinds, strict=True) if kind is None or k is kind]
+        content = [h for h in found.hits if not self.is_listing(h)]
+        kinds = [self.kind_of(h) for h in content]
+        shown = [h for h, k in zip(content, kinds, strict=True) if kind is None or k is kind]
         page = shown[offset : offset + limit]
         fill = getattr(s.index, "with_snippets", None)
         if callable(fill) and any(not h.snippet for h in page):  # ranked without them: cut for this page

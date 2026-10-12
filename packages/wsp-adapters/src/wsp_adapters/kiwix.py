@@ -56,6 +56,7 @@ from wsp_adapters.entries import Entry, Redirect
 from wsp_adapters.html_text import html_to_text
 from wsp_core.errors import FetchError
 from wsp_core.ids import content_hash, make_doc_id
+from wsp_core.listing import skip_paths, skip_regex
 from wsp_core.model import (
     Checksum,
     DocRecord,
@@ -563,18 +564,9 @@ class ZimParams:
     skip: str = ""  # regex of entry paths that are not documents (listing pages)
 
 
-# Listing pages of Stack Exchange ZIMs ("questions_page=10", "users_page=3"): an index of other
-# pages, never content (audit 2026-10-11 M6). ``access.skip_paths`` replaces it per source.
-DEFAULT_SKIP_PATHS = (r"(?:questions|users|tags|badges|unanswered)_page=\d+",)
-
-
 def skip_pattern(spec: SourceSpec) -> str:
-    """One regex (full match) of the entry paths a source's refine leaves out."""
-    raw = access(spec).get("skip_paths")
-    patterns = DEFAULT_SKIP_PATHS if raw is None else str_list(raw)
-    for p in patterns:
-        re.compile(p)  # fail at configuration time, not in a worker
-    return "|".join(f"(?:{p})" for p in patterns)
+    """One regex (full match) of the entry paths a source's refine leaves out (:mod:`wsp_core.listing`)."""
+    return skip_regex(skip_paths(access(spec)))
 
 
 def book_name(archive: Archive, path: Path) -> str:
