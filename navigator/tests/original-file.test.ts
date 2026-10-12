@@ -158,3 +158,15 @@ describe('text documents', () => {
     expect(withoutTitleLine('Chapter 1\nIt was', 'Moby Dick')).toBe('Chapter 1\nIt was');
   });
 });
+
+describe('an empty text document', () => {
+  it('says so instead of showing a blank page', async () => {
+    const { renderBody } = await import('../src/pages/document.ts');
+    const { mockFetch } = await import('./helpers.ts');
+    const { WspClient } = await import('../src/api/client.ts');
+    const doc = await new WspClient({ fetch: mockFetch() }).document('wsp:gutenberg/84');
+    const { node } = renderBody({ ...doc, format: 'text', html: null, text: '', original: null });
+    expect(node.textContent).toContain('no text of its own');
+    expect(node.querySelector('a')?.dataset.wsp).toContain('wsp://search?q=');
+  });
+});

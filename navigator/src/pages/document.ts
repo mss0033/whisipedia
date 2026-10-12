@@ -90,9 +90,21 @@ export function renderBody(doc: DocumentResponse): { node: HTMLElement; broken: 
     wrap.appendChild(fragment);
     return { node: wrap, broken: stats.broken };
   }
-  wrap.appendChild(
-    renderPlainText(withoutTitleLine(doc.text ?? '', doc.title), isPreformatted(doc)),
-  );
+  const text = withoutTitleLine(doc.text ?? '', doc.title);
+  if (!text.trim() && !doc.original) {
+    // e.g. a wiki page built only from templates: the dump's copy has no text of its own.
+    wrap.appendChild(
+      h(
+        'p',
+        { class: 'notice' },
+        'The library’s copy of this page has no text of its own (upstream it is assembled from other pages). ',
+        wspLink(searchAddress(doc.title.replace(/[_/]+/g, ' ')), 'Search the library for it'),
+        '.',
+      ),
+    );
+    return { node: wrap, broken: 0 };
+  }
+  wrap.appendChild(renderPlainText(text, isPreformatted(doc)));
   return { node: wrap, broken: wrap.querySelectorAll('.broken-link').length };
 }
 

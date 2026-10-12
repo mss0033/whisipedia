@@ -45,7 +45,9 @@ All notable changes are documented here. The format follows [Keep a Changelog](h
 * `/v1/suggest` describes what it matches; the Navigator drops suggestion fields the API never sends.
 * Open Library pages say they are catalog cards, not books, and link to a search of the library's
   books for the title and, for an edition, to its work record.
-* A text document whose first line repeats its title no longer prints it twice. Start Page site
+* A text document with no text of its own (a template-built wiki page) says so and offers a search,
+  instead of showing a blank page. A text document whose first line repeats its title no longer
+  prints it twice. Start Page site
   groups are alphabetical, with "Other" last. Site entries in What's New read "Name (Oct 12)": the
   badge already says new or updated.
 * Not changed: a trailing slash in an address is still dropped (F19). The only native ids that end in
