@@ -17,6 +17,22 @@ All notable changes are documented here. The format follows [Keep a Changelog](h
 * The Army filter keeps only the weapons, gunnery and targeting series and 19 core titles. The Joint
   Publications filter denies only JP 3-60 (targeting).
 
+### Fixed: collections and ranking, second pass (2026-10-12)
+* A partial listing (a timed-out page, a failed resolve) never becomes a generation and never marks
+  documents withdrawn: the fetch stops with exit 4 and lanes retry. archive.org listings are cached a
+  week; XML answers with stray control characters parse (OSTI had stopped at 600 of 51,881).
+* Sources that listed nothing now list: Borden (Gatsby page data; ~676 chapter PDFs), USGS
+  publications (one query per topic), Army CMH (GovInfo D 114, 236 books), DISA STIGs (the quarterly
+  SRG-STIG library zip; zips are screened by README and member names). JP and MCDP have no official
+  channel yet (GovInfo D 5 and D 214 hold other titles).
+* Screening: firefighting 'fire control' is not weapons fire control; a bare SECRET heading is not a
+  banner (only at a page edge); GOV.UK HTML publications are kept as HTML; Word (.docx) is read.
+* Fetch prints every rejection with its rule; resumed fetches keep MD5-verified downloads; per-source
+  concurrency (starts still 1/s) and archive.org connections.
+* Search: tiered lexical search (every word in the query's language first: 17 ms instead of 0.4-3 s on
+  130M documents); PubMed has no ranking bonus (rank_prior: 0); same-title duplicates collapse; how-to
+  queries prefer Wikibooks inside bundles and MDWiki; ZIM-only sites show page counts and random pages.
+
 ### Fixed: browsing and search on the live library (2026-10-12)
 * Pages failing at random: a site's recent changes scanned 200,000 feed rows under the GIL, and
   concurrent site pages starved the API's thread pool. The feed has a (source, seq) index now.
