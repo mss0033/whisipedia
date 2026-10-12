@@ -263,10 +263,10 @@ def cmd_index_rank(args: argparse.Namespace, out: TextIO) -> int:
     rc = RankConfig(damping=args.damping, mix=args.mix)
     try:
         with _index_writer(cfg), open_indexer(cfg, lay, specs, out) as ix:
-            stats = ix.rank(rc)
+            stats = ix.rank(rc, reuse=args.reuse)
     except LockHeldError as exc:
         return _busy(exc)
-    if stats is None:
+    if stats is None and not args.reuse:
         out.write("rank: nothing indexed\n")
     return 0
 

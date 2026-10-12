@@ -409,6 +409,48 @@ class TantivyIndex:
             self._stage_suggest(list(priors))
             return cur.rowcount
 
+    def set_priors_bulk(self, sources: Iterable[Iterable[Mapping[str, float]]]) -> int:
+        """Replace every suggest prior: zero the old ones, then load each source's batches into a
+        temporary table and apply them with one keyed UPDATE per source, committing per source.
+
+        :meth:`set_priors` updates one row at a time and keeps ``titles_prior`` (an index on the
+        prior) current on each update, for 256M rows a random index write each, in one transaction
+        whose WAL every reader of the index must scan: measured 2026-10-12, about 7,000 rows/s, so
+        12+ hours, with searches at 20+ s meanwhile. Here the index is dropped while loading and
+        rebuilt once, rows are applied in key order, and the suggest trie is rebuilt once at the
+        next :meth:`commit`. Only non-zero priors are written (the default is 0)."""
+        n = 0
+        with self._lock:
+            db = self._db
+            db.execute("UPDATE titles SET prior = 0 WHERE prior <> 0")  # uses titles_prior while it exists
+            db.execute("DROP INDEX IF EXISTS titles_prior")
+            db.commit()
+            db.execute(
+                "CREATE TEMP TABLE IF NOT EXISTS prior_load (doc_id TEXT PRIMARY KEY, prior REAL NOT NULL) "
+                "WITHOUT ROWID"
+            )
+            try:
+                for batches in sources:
+                    db.execute("DELETE FROM prior_load")
+                    for batch in batches:
+                        db.executemany(
+                            "INSERT OR REPLACE INTO prior_load (doc_id, prior) VALUES (?, ?)",
+                            [(k, float(v)) for k, v in batch.items() if v],
+                        )
+                    cur = db.execute(
+                        "UPDATE titles SET prior = prior_load.prior FROM prior_load "
+                        "WHERE titles.doc_id = prior_load.doc_id"
+                    )
+                    n += max(cur.rowcount, 0)
+                    db.execute("DELETE FROM prior_load")
+                    db.commit()
+            finally:
+                db.execute("CREATE INDEX IF NOT EXISTS titles_prior ON titles(prior)")
+                db.commit()
+            self._suggest_stale = True  # one trie rebuild at the next commit
+            self._pending_suggest.clear()
+        return n
+
     def set_aliases(self, aliases: Mapping[str, Sequence[str]]) -> None:
         """Replace the alias list of each given document (redirects, alternative names)."""
         with self._lock:

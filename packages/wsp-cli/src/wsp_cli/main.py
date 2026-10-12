@@ -345,6 +345,11 @@ def build_parser(argv: Sequence[str] | None = None) -> argparse.ArgumentParser:
     )
     s.add_argument("--damping", type=float, default=0.85, help="PageRank damping factor")
     s.add_argument("--mix", type=float, default=0.5, help="weight of the cross-source rank (0-1)")
+    s.add_argument(
+        "--reuse",
+        action="store_true",
+        help="keep the existing static rank file; only redo suggest priors and featured articles",
+    )
     s = add(
         "spell",
         _ops("cmd_index_spell"),

@@ -59,7 +59,7 @@ from wsp_index.catalog import (
     is_featured_source,
     refresh_featured,
 )
-from wsp_index.linkrank import RankConfig, RankStats, StaticRank, compute_static_rank
+from wsp_index.linkrank import RankConfig, RankStats, StaticRank, compute_static_rank, fence_path, write_fence
 from wsp_index.refinery import (
     CURRENT_FILE,
     SUCCESS_FILE,
@@ -433,7 +433,7 @@ class Indexer:
 
     # --- static rank (PageRank) ---------------------------------------------------------------
 
-    def rank(self, config: RankConfig | None = None) -> RankStats | None:
+    def rank(self, config: RankConfig | None = None, *, reuse: bool = False) -> RankStats | None:
         """PageRank over every indexed source's current generation (``wsp index rank``).
 
         Writes ``lexical/static_rank.bin``, then uses it for suggest priors and the portal's
@@ -444,15 +444,21 @@ class Indexer:
             self._say("rank: nothing indexed")
             return None
         started = self.clock()
-        stats = compute_static_rank(
-            readers,
-            self.index.rank_path,
-            self.work / "_rank",
-            aliases=self.index.iter_aliases(),
-            config=config or RankConfig(),
-            progress=self._say,
-        )
-        self._say(f"rank: {stats.line()}")
+        stats: RankStats | None = None
+        if reuse and self.index.rank_path.is_file():
+            self._say(f"rank: reusing {self.index.rank_path.name} (computed earlier)")
+            if not fence_path(self.index.rank_path).is_file():
+                write_fence(self.index.rank_path)
+        else:
+            stats = compute_static_rank(
+                readers,
+                self.index.rank_path,
+                self.work / "_rank",
+                aliases=self.index.iter_aliases(),
+                config=config or RankConfig(),
+                progress=self._say,
+            )
+            self._say(f"rank: {stats.line()}")
         rank = self.index.reload_static_rank()
         if rank is not None:
             self._apply_priors(readers, rank)
@@ -486,12 +492,21 @@ class Indexer:
         return stats
 
     def _apply_priors(self, readers: Sequence[tuple[str, RefineryReader]], rank: StaticRank) -> None:
-        """Suggest popularity priors from the static rank (streamed, 50k documents at a time)."""
-        for _, reader in readers:
+        """Suggest popularity priors from the static rank: one bulk load per source (streamed, 50k
+        documents at a time), then one suggest rebuild."""
+
+        def batches(reader: RefineryReader) -> Iterator[dict[str, float]]:
             for batch in reader.scan(["doc_id"], batch_size=50_000):
                 ids = cast(list[str], batch.column(0).to_pylist())
-                feats = rank.features(ids)
-                self.index.set_priors({d: float(f) for d, f in zip(ids, feats, strict=True)})
+                yield {d: float(f) for d, f in zip(ids, rank.features(ids), strict=True)}
+
+        def per_source() -> Iterator[Iterator[dict[str, float]]]:
+            for sid, reader in readers:
+                self._say(f"rank: priors for {sid}")
+                yield batches(reader)
+
+        n = self.index.set_priors_bulk(per_source())
+        self._say(f"rank: {n:,} suggest priors set")
         self.index.commit()
 
     # --- whole runs ----------------------------------------------------------------------------

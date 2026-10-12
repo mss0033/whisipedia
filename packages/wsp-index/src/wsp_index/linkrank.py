@@ -1192,6 +1192,7 @@ def _write_sidecar(
         fh.flush()
         os.fsync(fh.fileno())
     os.replace(tmp, path)
+    write_fence(path)
 
 
 def write_rank_file(path: Path, keys: U64, nodes: I32, feature: F32, per_group: F32, global_: F32) -> int:
@@ -1202,8 +1203,39 @@ def write_rank_file(path: Path, keys: U64, nodes: I32, feature: F32, per_group: 
     return n
 
 
+FENCE_STRIDE = 512
+"""Keys per fence entry: one 4 KiB page of the sidecar's key array."""
+
+
+def fence_path(path: Path) -> Path:
+    return path.with_name(path.name + ".fence.npy")
+
+
+def write_fence(path: Path, *, chunk: int = 1 << 22) -> Path:
+    """Every :data:`FENCE_STRIDE`-th key of the sidecar at ``path``, as a small ``.npy`` beside it.
+
+    A lookup then binary-searches the fence in RAM and reads one page of the key array, where a
+    binary search over the memory-mapped 2 GB key array (256M documents) faults in about 28 pages
+    (measured 2026-10-12: 1.6 s of a cold query's 4.7 s)."""
+    with path.open("rb") as fh:
+        head = fh.read(_HEADER)
+    n = int(np.frombuffer(head[len(MAGIC) :], dtype=np.uint64)[0])
+    keys = _mmap_array(path, np.dtype(np.uint64), n, offset=_HEADER, random=False)
+    parts = [
+        np.array(keys[lo:hi:FENCE_STRIDE])
+        for lo, hi in _steps(n, chunk - chunk % FENCE_STRIDE or FENCE_STRIDE)
+    ]
+    fence = np.concatenate(parts) if parts else np.zeros(0, dtype=np.uint64)
+    out = fence_path(path)
+    tmp = out.with_name(out.name + ".partial.npy")
+    np.save(tmp, fence)
+    os.replace(tmp, out)
+    return out
+
+
 class StaticRank:
-    """Read side of the sidecar: memory-mapped (``MADV_RANDOM``), binary search by doc-id key."""
+    """Read side of the sidecar: memory-mapped (``MADV_RANDOM``), binary search by doc-id key, through
+    an in-memory fence of every :data:`FENCE_STRIDE`-th key when the fence file matches the sidecar."""
 
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -1226,6 +1258,24 @@ class StaticRank:
         off += 4 * n
         self._global = cast(F32, _mmap_array(path, np.dtype(np.float32), n, offset=off, random=True))
         self.size = n
+        self._fence = self._load_fence()
+
+    def _load_fence(self) -> U64 | None:
+        """The fence if it belongs to this sidecar (as long as expected, newer, first and last keys
+        match); else None and lookups search the key array directly."""
+        fp = fence_path(self.path)
+        try:
+            if fp.stat().st_mtime_ns < self.path.stat().st_mtime_ns:
+                return None
+            fence = cast(U64, np.load(fp, mmap_mode=None, allow_pickle=False))
+        except (OSError, ValueError):
+            return None
+        want = -(-self.size // FENCE_STRIDE)
+        if fence.dtype != np.uint64 or len(fence) != want or not want:
+            return None
+        if fence[0] != self._keys[0] or fence[-1] != self._keys[(want - 1) * FENCE_STRIDE]:
+            return None
+        return fence
 
     @classmethod
     def open(cls, path: Path) -> StaticRank | None:
@@ -1245,10 +1295,26 @@ class StaticRank:
 
     def _rows(self, doc_ids: Sequence[str]) -> tuple[npt.NDArray[np.intp], npt.NDArray[np.bool_]]:
         h = self._key(doc_ids)
-        pos = np.searchsorted(self._keys, h)
+        pos = np.searchsorted(self._keys, h) if self._fence is None else self._fenced(h)
         pos = np.minimum(pos, max(0, self.size - 1))
         found = (self._keys[pos] == h) if self.size else np.zeros(len(h), dtype=bool)
         return pos, found
+
+    def _fenced(self, h: U64) -> npt.NDArray[np.intp]:
+        """``searchsorted(keys, h)`` reading one fence block (one page) of the key array per block."""
+        assert self._fence is not None
+        block = np.clip(np.searchsorted(self._fence, h, side="right") - 1, 0, len(self._fence) - 1)
+        pos = np.empty(len(h), dtype=np.intp)
+        order = np.argsort(block, kind="stable")
+        sorted_blocks = block[order]
+        starts = np.flatnonzero(np.r_[True, sorted_blocks[1:] != sorted_blocks[:-1]])
+        for i, a in enumerate(starts):
+            b = starts[i + 1] if i + 1 < len(starts) else len(order)
+            lo = int(sorted_blocks[a]) * FENCE_STRIDE
+            hi = min(lo + FENCE_STRIDE + 1, self.size)  # +1: a key past the block's last one
+            idx = order[a:b]
+            pos[idx] = lo + np.searchsorted(np.asarray(self._keys[lo:hi]), h[idx])
+        return pos
 
     def features(self, doc_ids: Sequence[str]) -> F32:
         """Feature per doc id in ``[0, 1]`` (0.0 for documents without a rank).

@@ -766,6 +766,7 @@ sources:
       issuer: US Department of Energy (OSTI)
       key_prefix: osti
       origins: [www.osti.gov]
+      rate: {requests_per_second: 1, concurrency: 3}  # 3 in flight: OSTI serves one 5 MB report in ~30 s (2026-10-12)
       discovery: [{kind: api, flavor: osti, query: "civil defense OR emergency power OR shelter OR microgrid"}]
       filter: {default: allow, distribution: {require: [public-release, published]}}
       currency: {historical_before: "1992-01-01"}

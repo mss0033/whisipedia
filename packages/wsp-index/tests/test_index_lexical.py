@@ -468,3 +468,24 @@ def test_a_query_reads_each_stored_document_once() -> None:
     assert memo.doc(Address(1, 1)) == "doc 1/1"  # type: ignore[arg-type]
     assert Searcher.reads == 2
     assert memo.num_docs == 7  # everything else goes to the searcher
+
+
+def test_bulk_priors_replace_every_prior_and_rebuild_suggest(index: TantivyIndex) -> None:
+    index.upsert([doc("s", "p", "Paris"), doc("s", "pc", "Paris Commune"), doc("t", "ph", "Paris Hilton")])
+    index.commit()
+    index.set_priors({make_doc_id("s", "p"): 9.0})  # an old prior the new rank no longer gives
+    index.commit()
+    assert index.suggest("paris")[0] == "Paris"
+    n = index.set_priors_bulk(
+        [
+            [{make_doc_id("s", "pc"): 5.0}, {make_doc_id("s", "p"): 0.0}],  # source s, two batches
+            [{make_doc_id("t", "ph"): 2.0, make_doc_id("t", "missing"): 1.0}],  # source t
+        ]
+    )
+    assert n == 2  # rows that exist and got a non-zero prior
+    index.commit()
+    assert index.suggest("paris") == ["Paris Commune", "Paris Hilton", "Paris"]
+    rows = dict(index._db.execute("SELECT doc_id, prior FROM titles").fetchall())  # pyright: ignore[reportPrivateUsage]
+    assert rows[make_doc_id("s", "p")] == 0.0  # the old prior was cleared
+    names = {r[0] for r in index._db.execute("SELECT name FROM sqlite_master WHERE type = 'index'")}  # pyright: ignore[reportPrivateUsage]
+    assert "titles_prior" in names  # rebuilt after the load

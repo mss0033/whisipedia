@@ -601,3 +601,34 @@ def test_featured_articles_follow_the_static_rank(tmp_path: Path) -> None:
     assert json.loads(path.read_text())["featured"][0] == "wsp:enc/P3"
     assert not refresh_featured(root, "enc", "other-generation", out_root, cfg)
     assert not refresh_featured(root, "nope", "g1", out_root, cfg)
+
+
+def test_the_fence_finds_exactly_what_a_full_binary_search_finds(tmp_path: Path) -> None:
+    """A lookup through the in-memory fence (one page of the key array per block) gives the same
+    positions as a binary search over the whole key array, for present and absent keys."""
+    import os
+
+    from wsp_index.linkrank import FENCE_STRIDE, fence_path, write_fence
+
+    rng = np.random.default_rng(7)
+    n = FENCE_STRIDE * 37 + 123  # a ragged last block
+    keys = np.unique(rng.integers(1, 2**63, size=n + 50, dtype=np.uint64))[:n]
+    f = rng.random(n).astype(np.float32)
+    out = tmp_path / "static_rank.bin"
+    write_rank_file(out, keys, np.arange(n, dtype=np.int32), f, f, f)
+    assert fence_path(out).is_file()  # written with the sidecar
+    fenced = StaticRank(out)
+    assert fenced._fence is not None  # pyright: ignore[reportPrivateUsage]
+    probes = np.concatenate(
+        [
+            keys[rng.integers(0, n, 3000)],
+            rng.integers(0, 2**63, 3000, dtype=np.uint64),
+            np.array([0, keys[0], keys[-1], np.uint64(2**64 - 1)], dtype=np.uint64),
+        ]
+    )
+    assert np.array_equal(fenced._fenced(probes), np.searchsorted(keys, probes))  # pyright: ignore[reportPrivateUsage]
+    # A stale fence (older than the sidecar) is ignored, not trusted.
+    os.utime(fence_path(out), ns=(1, 1))
+    assert StaticRank(out)._fence is None  # pyright: ignore[reportPrivateUsage]
+    write_fence(out)
+    assert StaticRank(out)._fence is not None  # pyright: ignore[reportPrivateUsage]

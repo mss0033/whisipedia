@@ -3,6 +3,18 @@
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Changed: faster suggest priors, rank lookups and OSTI downloads (2026-10-12)
+* `wsp index rank` writes suggest priors in bulk: the old ones are zeroed, each source's priors are loaded
+  into a temporary table and applied with one keyed UPDATE, the prior index is dropped during the load
+  and rebuilt once, the suggest trie is rebuilt once, and each source commits. Row-by-row updates had
+  run at about 7,000 rows/s (12+ hours for 256M documents) in one transaction whose WAL slowed every
+  search to 20+ s. `wsp index rank --reuse` redoes priors and featured articles from the existing rank
+  file without recomputing it.
+* Static rank lookups read one page of the rank file: a fence of every 512th key (4 MB for 256M
+  documents) is written beside the rank file and kept in memory; a binary search over the 2 GB key array
+  had faulted in about 28 pages per lookup (1.6 s of a cold search's 4.7 s).
+* OSTI downloads run three at a time (one request a second): one 5 MB report takes about 30 s to serve.
+
 ### Fixed: link rank runs in bounded memory (2026-10-12)
 * `wsp index rank` was killed at a 14.5 GB memory cap on the live library (255.6M documents, 640.7M
   edges): every per-node array (id keys, groups, degrees, ranks) and both key tables were held in
