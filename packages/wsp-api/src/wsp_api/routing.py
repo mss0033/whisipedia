@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-RAW_PREFIXES: tuple[str, ...] = ("/v1/documents/",)
+RAW_PREFIXES: tuple[str, ...] = ("/v1/documents/", "/v1/files/")
 
 
 class RawSegmentRouting:

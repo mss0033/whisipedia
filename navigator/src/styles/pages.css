@@ -732,3 +732,28 @@
 .site-actions a {
   text-decoration: none;
 }
+/* A collection document's stored original (PDF, map scan) above its extracted text. */
+.original {
+  margin: 6px 0 14px;
+}
+.original-links {
+  font-family: var(--ui-font);
+}
+.original-frame {
+  display: block;
+  width: 100%;
+  height: 80vh;
+  min-height: 420px;
+  border: 2px inset var(--rule);
+  background: #fff;
+}
+.original-preview img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--rule);
+}
+.original-text-heading {
+  margin-top: 14px;
+  font-size: 1.05rem;
+}

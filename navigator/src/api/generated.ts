@@ -151,6 +151,8 @@ export interface Document {
   currency: string | null;
   /** Reader warning to show above the document, e.g. 'Historical document — methods may be outdated or unsafe.' (PLAN D13). Absent when there is nothing to warn about. */
   banner: string | null;
+  /** The stored original file, for documents refined from one (PDFs, maps). */
+  original: OriginalFile | null;
 }
 
 export interface DocumentLink {
@@ -352,6 +354,19 @@ export interface OpsStatus {
   orchestrator_state: boolean;
   /** Source integrity (ADR-0009). */
   integrity: IntegrityStatus | null;
+}
+
+/** The stored file a collection document was refined from (a PDF, a scanned map, an archive). */
+export interface OriginalFile {
+  /** `/v1/files/{doc_id}`: the bytes. Supports `Range`. */
+  url: string;
+  /** File name as stored. */
+  name: string;
+  media_type: string;
+  /** True if a browser shows it itself (PDF, JPEG, PNG); else it downloads. */
+  inline: boolean;
+  /** A JPEG of an image or map scan (`/v1/files/{doc_id}/preview`). */
+  preview_url: string | null;
 }
 
 export interface ParityStatus {
@@ -759,6 +774,26 @@ export interface Routes {
     };
     body: null;
     response: SystemStatus;
+  };
+  /** Original */
+  'GET /v1/files/{doc_id}': {
+    path: {
+      /** `wsp:<source_id>/<native_id>`, percent-encoded as one segment. */
+      doc_id: string;
+    };
+    query: Record<string, never>;
+    body: null;
+    response: null;
+  };
+  /** Preview */
+  'GET /v1/files/{doc_id}/preview': {
+    path: {
+      /** `wsp:<source_id>/<native_id>`, percent-encoded as one segment. */
+      doc_id: string;
+    };
+    query: Record<string, never>;
+    body: null;
+    response: null;
   };
   /** Portal */
   'GET /v1/portal': {

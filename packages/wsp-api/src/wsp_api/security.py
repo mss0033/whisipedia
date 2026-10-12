@@ -13,6 +13,7 @@ from __future__ import annotations
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from wsp_api.errors import error_response
+from wsp_api.originals import files_csp
 from wsp_api.services import ApiSettings
 
 SECURITY_HEADERS: tuple[tuple[bytes, bytes], ...] = (
@@ -55,13 +56,21 @@ class SecurityMiddleware:
             await self.app(scope, receive, send)
             return
 
-        extra = (ASSET_CSP,) if str(scope.get("path", "")).startswith(ASSET_PREFIX) else ()
+        path = str(scope.get("path", ""))
+        extra = (ASSET_CSP,) if path.startswith(ASSET_PREFIX) else ()
 
         async def send_with_headers(message: Message) -> None:
             if message["type"] == "http.response.start":
                 drop = {k for k, _ in SECURITY_HEADERS}
                 headers = [(k, v) for k, v in message.get("headers", []) if k.lower() not in drop]
-                message["headers"] = [*headers, *SECURITY_HEADERS, *extra]
+                base = SECURITY_HEADERS
+                ctype = next((v for k, v in headers if k.lower() == b"content-type"), b"")
+                own = files_csp(path, ctype)
+                if own is not None:  # a stored original: its own policy replaces the page policy
+                    base = tuple(
+                        (k, own if k == b"content-security-policy" else v) for k, v in SECURITY_HEADERS
+                    )
+                message["headers"] = [*headers, *base, *extra]
             await send(message)
 
         if _host_of(scope) not in self.settings.allowed_hosts:

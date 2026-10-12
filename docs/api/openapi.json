@@ -1169,6 +1169,152 @@
         }
       }
     },
+    "/v1/files/{doc_id}": {
+      "get": {
+        "tags": [
+          "documents"
+        ],
+        "summary": "Original",
+        "description": "The document's stored original file (PDF, map scan, archive). Supports ``Range``.",
+        "operationId": "original_v1_files__doc_id__get",
+        "parameters": [
+          {
+            "name": "doc_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "`wsp:<source_id>/<native_id>`, percent-encoded as one segment.",
+              "title": "Doc Id"
+            },
+            "description": "`wsp:<source_id>/<native_id>`, percent-encoded as one segment."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "bad_request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid_request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/files/{doc_id}/preview": {
+      "get": {
+        "tags": [
+          "documents"
+        ],
+        "summary": "Preview",
+        "description": "A JPEG of a scanned map or image, at most 2000 pixels on its long side (cached).",
+        "operationId": "preview_v1_files__doc_id__preview_get",
+        "parameters": [
+          {
+            "name": "doc_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "`wsp:<source_id>/<native_id>`, percent-encoded as one segment.",
+              "title": "Doc Id"
+            },
+            "description": "`wsp:<source_id>/<native_id>`, percent-encoded as one segment."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid_request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/portal": {
       "get": {
         "tags": [
@@ -2327,6 +2473,17 @@
             ],
             "title": "Banner",
             "description": "Reader warning to show above the document, e.g. 'Historical document — methods may be outdated or unsafe.' (PLAN D13). Absent when there is nothing to warn about."
+          },
+          "original": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OriginalFile"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The stored original file, for documents refined from one (PDFs, maps)."
           }
         },
         "type": "object",
@@ -2354,7 +2511,8 @@
           "vault",
           "has_history",
           "currency",
-          "banner"
+          "banner",
+          "original"
         ],
         "title": "Document"
       },
@@ -3343,6 +3501,51 @@
         ],
         "title": "OpsStatus",
         "description": "Operations data for the System Monitor (PLAN §12.6); every part tolerates missing state."
+      },
+      "OriginalFile": {
+        "properties": {
+          "url": {
+            "type": "string",
+            "title": "Url",
+            "description": "`/v1/files/{doc_id}`: the bytes. Supports `Range`."
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "File name as stored."
+          },
+          "media_type": {
+            "type": "string",
+            "title": "Media Type"
+          },
+          "inline": {
+            "type": "boolean",
+            "title": "Inline",
+            "description": "True if a browser shows it itself (PDF, JPEG, PNG); else it downloads."
+          },
+          "preview_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preview Url",
+            "description": "A JPEG of an image or map scan (`/v1/files/{doc_id}/preview`)."
+          }
+        },
+        "type": "object",
+        "required": [
+          "url",
+          "name",
+          "media_type",
+          "inline",
+          "preview_url"
+        ],
+        "title": "OriginalFile",
+        "description": "The stored file a collection document was refined from (a PDF, a scanned map, an archive)."
       },
       "ParityStatus": {
         "properties": {

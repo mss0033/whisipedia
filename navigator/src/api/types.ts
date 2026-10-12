@@ -32,6 +32,7 @@ export type {
   Hit,
   KindFacet,
   MapAnswer,
+  OriginalFile,
   Portal,
   QueryIntent,
   RecentChanges,

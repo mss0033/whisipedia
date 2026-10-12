@@ -34,6 +34,7 @@ from wsp_api import convert, sites
 from wsp_api.addresses import resolve
 from wsp_api.browse import browse_router
 from wsp_api.errors import ApiError, error_response, errors, install_error_handlers, streamed
+from wsp_api.files import files_router
 from wsp_api.offload import RETRY_AFTER
 from wsp_api.routing import RawSegmentRouting
 from wsp_api.schemas import (
@@ -163,6 +164,7 @@ def create_app(services: Services, settings: ApiSettings | None = None) -> FastA
     app.add_middleware(ActivityMiddleware, path=settings.activity_marker)  # Warden yields (ADR-0009)
     app.add_middleware(SlowRequestLog, slow_seconds=settings.slow_request_seconds)
     app.include_router(_v1(lib, settings))
+    app.include_router(files_router(lib))
     app.include_router(browse_router(lib))
     app.include_router(_go(lib))
     _mount_navigator(app, settings)

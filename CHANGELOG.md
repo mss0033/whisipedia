@@ -3,6 +3,21 @@
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Added: read a collection document's original file (2026-10-12)
+* `GET /v1/files/{doc_id}` serves the PDF, map scan or archive a collection document was refined from,
+  read from that document's own generation (paths that leave it are refused). PDFs and web images open
+  inline, with `Range` support; anything else downloads. The download name drops the fetcher's prefix
+  and hash.
+* `GET /v1/files/{doc_id}/preview` is a JPEG at most 2000 px on its long side: page 1 of a PDF
+  (pypdfium2) or a downscaled TIFF or image (Pillow). It is cached under the API cache directory and
+  rendered one at a time, in its own pool, so a 100-megapixel map does not hold up document reads.
+* `Document.original` (API, SDK and generated TypeScript) tells a client where the file is.
+* The file routes carry their own CSP: a PDF may be framed by the Navigator (`frame-ancestors 'self'`,
+  not sandboxed, because Chrome's viewer refuses to run sandboxed); every other type is sandboxed.
+* Navigator: an "Original file" panel above the extracted text. A map shows its rendered sheet, which
+  opens the full map. Other PDFs open in the browser's viewer. Every original has Open and Download
+  links. The panel is hidden in the Time Machine, which shows text only.
+
 ### Changed: document collections admit all public material outside a narrow content core (owner decision 2026-10-11)
 * Still excluded: classified or restricted documents; explosives and demolitions; weapons and munitions
   technical data; weapons employment and gunnery; targeting and fire control; weapon-system crew drills;

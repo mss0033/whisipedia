@@ -391,6 +391,7 @@ export function document(
     has_history: d.versions.length > 1,
     currency: d.currency ?? null,
     banner: d.banner ?? null,
+    original: d.original ?? null,
   };
 }
 

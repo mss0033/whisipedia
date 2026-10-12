@@ -161,6 +161,14 @@ class VaultLocation(_Wire):
     blake3: str | None = Field(default=None, description="Manifest entry hash of the file.")
 
 
+class OriginalFile(_Wire):
+    url: str
+    name: str
+    media_type: str
+    inline: bool
+    preview_url: str | None = None
+
+
 class Document(_Wire):
     doc_id: str = Field(description="Stable id `wsp:<source_id>/<native_id>` (PLAN §9.2).")
     source_id: str
@@ -202,6 +210,7 @@ class Document(_Wire):
     banner: str | None = Field(
         default=None, description="Reader warning to show above the document (PLAN D13)."
     )
+    original: OriginalFile | None = None
 
 
 class DocumentVersion(_Wire):

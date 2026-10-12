@@ -14,6 +14,7 @@ from pydantic import JsonValue
 from wsp_api import sites
 from wsp_api.addresses import address_of
 from wsp_api.errors import ApiError
+from wsp_api.originals import original_of
 from wsp_api.schemas import (
     Change,
     DocKind,
@@ -121,6 +122,7 @@ def document(
         has_history=has_history,
         currency=currency_of(doc.meta),
         banner=banner_for(doc.meta),
+        original=original_of(doc),
     )
 
 

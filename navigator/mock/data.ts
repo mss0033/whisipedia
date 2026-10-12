@@ -3,7 +3,7 @@
  * (or is public-domain text) so the fixtures are license-clean. The handler
  * (mock/handler.ts) turns these into responses typed by the generated spec.
  */
-import type { DocKind, DocumentLink, SourceHealth } from '../src/api/types.ts';
+import type { DocKind, DocumentLink, OriginalFile, SourceHealth } from '../src/api/types.ts';
 
 /** Generation ids are the sealing date (PLAN §7). */
 export const GENERATION = '2026-10-01';
@@ -51,6 +51,8 @@ export interface FixtureDoc {
   /** Edition status and reader warning (document collections, PLAN D13). */
   currency?: string;
   banner?: string;
+  /** The stored file a collection document was refined from. */
+  original?: OriginalFile;
 }
 
 const T = (d: string) => `${d}T00:00:00Z`;

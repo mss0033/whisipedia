@@ -139,6 +139,72 @@ export function documentWarning(
   );
 }
 
+/** "PDF document", "TIFF image"…: what the stored file is, in words. */
+function fileKind(media: string, name: string): string {
+  if (media === 'application/pdf') return 'PDF document';
+  if (media.startsWith('image/')) return `${media.slice(6).toUpperCase()} image`;
+  const ext = name.includes('.') ? name.slice(name.lastIndexOf('.') + 1).toUpperCase() : '';
+  return ext ? `${ext} file` : 'file';
+}
+
+/**
+ * The stored original a collection document was refined from (a PDF, a
+ * scanned map, an archive): shown above the extracted text, so a map is a
+ * picture and a handbook keeps its figures. PDFs open in the browser's own
+ * viewer; map scans show a server-made JPEG preview.
+ */
+export function originalPanel(
+  doc: Pick<DocumentResponse, 'original' | 'title' | 'kind'>,
+  urlOf: (path: string) => string = (path) => path,
+): HTMLElement | null {
+  const o = doc.original;
+  if (!o) return null;
+  const url = urlOf(o.url);
+  const kind = fileKind(o.media_type, o.name);
+  const links = h(
+    'p',
+    { class: 'original-links' },
+    h('b', null, 'Original file: '),
+    h('code', null, o.name),
+    ` (${kind}) · `,
+    o.inline || o.preview_url
+      ? [h('a', { href: url, target: '_blank', rel: 'noopener' }, 'Open in a new window'), ' · ']
+      : null,
+    h('a', { href: url, download: o.name }, 'Download'),
+  );
+  // A map is a picture: show the rendered sheet (it opens the full file); other PDFs read in the viewer.
+  const picture = o.preview_url && (doc.kind === 'maps' || o.media_type !== 'application/pdf');
+  let view: HTMLElement | null = null;
+  if (picture && o.preview_url) {
+    view = h(
+      'a',
+      { class: 'original-preview', href: url, target: '_blank', rel: 'noopener' },
+      h('img', { src: urlOf(o.preview_url), alt: `Preview of ${doc.title}`, loading: 'lazy' }),
+    );
+  } else if (o.media_type === 'application/pdf') {
+    view = h('iframe', {
+      class: 'original-frame',
+      src: url,
+      title: `${doc.title} (${kind})`,
+      loading: 'lazy',
+    });
+  }
+  return h(
+    'section',
+    { class: 'original', 'aria-label': 'Original file' },
+    links,
+    view,
+    view
+      ? null
+      : h(
+          'p',
+          { class: 'fineprint' },
+          'Your browser cannot show this kind of file here; download it to open it.',
+        ),
+    h('h2', { class: 'original-text-heading' }, 'Text extracted from the file'),
+  );
+}
+
 function siteBanner(doc: DocumentResponse): HTMLElement {
   return h(
     'div',
@@ -381,6 +447,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
     documentWarning(doc),
     // Original pages (ZIM HTML) carry their own <h1>; don't print the title twice.
     content instanceof Element && content.querySelector('h1') ? null : pageHeading(doc.title),
+    route.at ? null : originalPanel(doc, (path) => ctx.app.api.url(path)),
     content,
     broken
       ? h(

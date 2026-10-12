@@ -165,6 +165,18 @@ class VaultLocation(_Wire):
     blake3: str | None = Field(default=None, description="Manifest entry hash of the file.")
 
 
+class OriginalFile(_Wire):
+    """The stored file a collection document was refined from (a PDF, a scanned map, an archive)."""
+
+    url: str = Field(description="`/v1/files/{doc_id}`: the bytes. Supports `Range`.")
+    name: str = Field(description="File name as stored.")
+    media_type: str
+    inline: bool = Field(description="True if a browser shows it itself (PDF, JPEG, PNG); else it downloads.")
+    preview_url: str | None = Field(
+        default=None, description="A JPEG of an image or map scan (`/v1/files/{doc_id}/preview`)."
+    )
+
+
 class Document(_Wire):
     doc_id: str = Field(description="Stable id `wsp:<source_id>/<native_id>` (PLAN §9.2).")
     source_id: str
@@ -208,6 +220,9 @@ class Document(_Wire):
         default=None,
         description="Reader warning to show above the document, e.g. 'Historical document — methods may be "
         "outdated or unsafe.' (PLAN D13). Absent when there is nothing to warn about.",
+    )
+    original: OriginalFile | None = Field(
+        default=None, description="The stored original file, for documents refined from one (PDFs, maps)."
     )
 
 
