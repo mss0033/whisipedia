@@ -134,6 +134,8 @@ class ZimAssetStore:
         self._layouts: OrderedDict[tuple[str, str], ZimLayout] = OrderedDict()
         self._building: dict[tuple[str, str], Future[dict[str, str] | None]] = {}
         self._warm_seen: set[tuple[str, str]] = set()
+        # Articles per generation (sum of each archive's article count), once all are open.
+        self.article_counts: dict[tuple[str, str], int] = {}
         self._warm_queue: list[tuple[str, str]] = []
         self._warmer: threading.Thread | None = None
         self._lock = threading.Lock()
@@ -259,11 +261,20 @@ class ZimAssetStore:
                 except OSError:
                     sized.append((0, f))
             t0 = time.monotonic()
+            total, known = 0, True
             for _, f in sorted(sized, reverse=True):
                 try:
-                    self.reader.warm(f)
+                    n = self.reader.warm(f)
                 except Exception as exc:  # a bad archive must not stop the others
                     log.warning("could not open %s ahead of time: %s", f, exc)
+                    n = None
+                if n is None:
+                    known = False
+                else:
+                    total += n
+            if known:
+                with self._lock:
+                    self.article_counts[(source_id, generation_id)] = total
             log.info(
                 "opened %d archive(s) of %s/%s in %.0f s",
                 len(sized),

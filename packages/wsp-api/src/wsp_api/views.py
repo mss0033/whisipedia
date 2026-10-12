@@ -162,11 +162,17 @@ class Library:
             st.current,
             specs=self.s.sources,
             now=self.s.clock(),
-            doc_count=snap.doc_counts.get(spec.id),
+            doc_count=snap.doc_counts.get(spec.id) or self._zim_count(spec.id, st.current),
             home_doc_id=self.state.home_doc_id(spec, st.current),
             members=st.members if spec.partitioned else (),
         )
         return info.model_copy(update={"readable": self.is_readable(info)})
+
+    def _zim_count(self, source_id: str, current: Generation | None) -> int | None:
+        """Articles of a ZIM-served generation (counted when its archives were opened), else None."""
+        if self.zim is None or current is None:
+            return None
+        return self.zim.article_counts.get((source_id, current.generation_id))
 
     def source_infos(self, snap: LibrarySnapshot | None = None) -> list[SourceInfo]:
         snap = snap or self.state.snapshot()

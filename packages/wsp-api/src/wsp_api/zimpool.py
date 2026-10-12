@@ -245,9 +245,9 @@ class ZimProcessPool:
         found = cast(list[str] | None, self.call("random", (file, str(time.monotonic_ns())), file))
         return None if found is None else (found[0], found[1])
 
-    def warm(self, file: str) -> None:
-        """Open ``file`` in its worker (the main page entry, no bytes) and wait as long as that takes."""
-        self.call("read", (file, "", "none"), file, timeout=WARM_TIMEOUT)
+    def warm(self, file: str) -> int | None:
+        """Open ``file`` in its worker, waiting as long as that takes; its article count."""
+        return cast(int | None, self.call("count", (file,), file, timeout=WARM_TIMEOUT))
 
     def book_name(self, file: str) -> str:
         """Only used to build a bundle's book index, off the request path: a cold open of an archive

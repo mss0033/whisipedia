@@ -69,6 +69,8 @@ class _Server:
         if op == "book":
             file = str(args[0])
             return book_name_of(open_archive(file), file)  # not cached: bundles have hundreds of books
+        if op == "count":  # opens the archive (kept open) and answers its article count
+            return int(self.cache.get(str(args[0])).article_count)
         if op == "random":
             found = random_article(self.cache.get(str(args[0])))
             return None if found is None else list(found)

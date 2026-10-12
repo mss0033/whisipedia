@@ -70,9 +70,9 @@ class ZimReader(Protocol):
         """``(path, title)`` of a random article of ``file`` (:func:`random_article`)."""
         ...
 
-    def warm(self, file: str) -> None:
+    def warm(self, file: str) -> int | None:
         """Open ``file`` and keep it open (no request waits for it; a cold open over SMB can take
-        minutes for the largest archives)."""
+        minutes for the largest archives). Returns its article count."""
         ...
 
     def close(self) -> None: ...
@@ -192,8 +192,8 @@ class InProcessZimReader:
         # Not cached: a bundle has hundreds of books and only their names are needed here.
         return book_name_of(self._opener(file), file)
 
-    def warm(self, file: str) -> None:
-        self._cache.get(file)
+    def warm(self, file: str) -> int | None:
+        return int(self._cache.get(file).article_count)
 
     def random(self, file: str) -> tuple[str, str] | None:
         return random_article(self._cache.get(file))

@@ -24,7 +24,7 @@ class _Reader:
     def book_name(self, file: str) -> str:
         return Path(file).stem
 
-    def warm(self, file: str) -> None:
+    def warm(self, file: str) -> int | None:
         with self.lock:
             self.active += 1
             self.max_active = max(self.max_active, self.active)
@@ -34,6 +34,7 @@ class _Reader:
             self.warmed.append(Path(file).name)
         if file.endswith("bad.zim"):
             raise OSError("unreadable")
+        return 10
 
     def close(self) -> None: ...
 
@@ -64,3 +65,17 @@ def test_every_archive_of_a_generation_is_opened_largest_first(tmp_path: Path) -
         time.sleep(0.01)
     assert reader.warmed == ["big.zim", "bad.zim", "mid.zim", "small.zim"]  # a failure does not stop it
     assert reader.max_active == 1
+    assert ("se", "g1") not in store.article_counts  # one archive could not be read: no total
+
+
+def test_article_counts_are_summed_once_every_archive_is_open(tmp_path: Path) -> None:
+    up = tmp_path / "upstream"
+    up.mkdir()
+    for name in ("a.zim", "b.zim"):
+        (up / name).write_bytes(b"x")
+    store = ZimAssetStore(_Vault(tmp_path, []), _Reader())  # pyright: ignore[reportArgumentType]
+    store.warm_soon("se", "g1")
+    deadline = time.monotonic() + 5
+    while ("se", "g1") not in store.article_counts and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert store.article_counts[("se", "g1")] == 20
