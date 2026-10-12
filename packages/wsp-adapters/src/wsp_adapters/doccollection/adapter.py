@@ -41,6 +41,8 @@ import hashlib
 import json
 import logging
 import re
+import sqlite3
+import time
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -222,6 +224,7 @@ class DocCollectionAdapter:
         env = env or self.env(ctx, max_pages=max_pages)
         out = Survey(ctx.source.id)
         resolved = 0
+        cache = ResolveCache.open(ctx.workdir)
         for cand in discover_all(cfg.discovery, env):
             decision = classify_metadata(cand.facts, cfg.rules)
             out.decisions.append((cand, decision))
@@ -235,16 +238,24 @@ class DocCollectionAdapter:
             ):
                 out.unresolved += 1
                 continue
-            try:
-                docs = resolve(cand, env)
-            except Exception as exc:
-                out.notes.append(f"resolve {cand.key}: {type(exc).__name__}: {exc}")
-                out.unresolved += 1
-                continue
+            cached = cache.get(cand) if cache is not None and cand.resolve else None
+            if cached is not None:
+                docs = cached
+            else:
+                try:
+                    docs = resolve(cand, env)
+                except Exception as exc:
+                    out.notes.append(f"resolve {cand.key}: {type(exc).__name__}: {exc}")
+                    out.unresolved += 1
+                    continue
+                if cache is not None and cand.resolve and cand.resolve != "git":
+                    cache.put(cand, docs)
             resolved += 1 if cand.resolve else 0
             if progress is not None and cand.resolve and resolved % progress_every == 0:
                 progress(f"{ctx.source.id}: {resolved:,} resolved, {len(out.decisions):,} listed so far")
             out.allowed.extend(d for d in docs if origin_ok(d.url, cfg.origins) or d.resolve == "git")
+        if cache is not None:
+            cache.close()
         out.totals = dict(env.totals)
         out.scale = max(env.scale.values(), default=1.0)
         out.notes.extend(env.notes)
@@ -420,6 +431,67 @@ def remote_for(cand: Candidate) -> RemoteFile:
     return RemoteFile(
         url=cand.url, name=cand.file_name, size=cand.size, checksums=tuple(checksums), mirrors=cand.mirrors
     )
+
+
+class ResolveCache:
+    """Resolved document candidates by listing candidate (local SQLite in the source's workdir).
+
+    Resolving is one request per item at the source's polite rate: ~11 days for the CIA reading room's
+    985k items. A run interrupted by a reboot kept none of it, so every restart began again. Entries are
+    keyed by the candidate's whole listing record (a changed title, date or URL misses) and expire after
+    ``ttl`` seconds, so a quarterly refresh still sees new files.
+    """
+
+    TTL = 45 * 86400.0
+
+    def __init__(self, path: Path, *, ttl: float = TTL, clock: Callable[[], float] = time.time) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self._db = sqlite3.connect(path, isolation_level=None)
+        self._db.execute("PRAGMA journal_mode=WAL")
+        self._db.execute(
+            "CREATE TABLE IF NOT EXISTS resolved (k TEXT PRIMARY KEY, at REAL NOT NULL, docs TEXT NOT NULL)"
+        )
+        self._ttl = ttl
+        self._clock = clock
+        self._pending = 0
+
+    @classmethod
+    def open(cls, workdir: Path) -> ResolveCache | None:
+        try:
+            return cls(workdir / "resolve-cache.sqlite")
+        except (OSError, sqlite3.Error) as exc:
+            log.warning("resolve cache unavailable in %s: %s", workdir, exc)
+            return None
+
+    @staticmethod
+    def _key(cand: Candidate) -> str:
+        return hashlib.sha256(json.dumps(cand.to_json(), sort_keys=True).encode("utf-8")).hexdigest()
+
+    def get(self, cand: Candidate) -> list[Candidate] | None:
+        row = self._db.execute("SELECT at, docs FROM resolved WHERE k = ?", (self._key(cand),)).fetchone()
+        if row is None or self._clock() - float(row[0]) > self._ttl:
+            return None
+        return [Candidate.from_json(d) for d in json.loads(row[1])]
+
+    def put(self, cand: Candidate, docs: Sequence[Candidate]) -> None:
+        if self._pending == 0:
+            self._db.execute("BEGIN")
+        self._db.execute(
+            "INSERT OR REPLACE INTO resolved VALUES (?, ?, ?)",
+            (self._key(cand), self._clock(), json.dumps([d.to_json() for d in docs])),
+        )
+        self._pending += 1
+        if self._pending >= 50:  # at 1 request/s: lose at most a minute of resolving to a crash
+            self.flush()
+
+    def flush(self) -> None:
+        if self._pending:
+            self._db.execute("COMMIT")
+            self._pending = 0
+
+    def close(self) -> None:
+        self.flush()
+        self._db.close()
 
 
 def write_audit(path: Path, decisions: Sequence[tuple[Candidate, Decision]]) -> None:

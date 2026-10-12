@@ -682,3 +682,22 @@ def test_candidate_round_trip_and_file_names_are_flat() -> None:
     assert "/" not in c.file_name
     assert c.file_name.endswith(".pdf")
     assert c.file_name.startswith("army__FM-5-0__2022-11-04-")
+
+
+def test_resolve_cache_survives_a_restart_and_misses_on_changed_listings(tmp_path: Path) -> None:
+    from wsp_adapters.doccollection.adapter import ResolveCache
+
+    now = [1000.0]
+    cand = Candidate(
+        key="t:a", url="https://archive.org/metadata/a/files", title="A", issuer="T", resolve="archive-org"
+    )
+    doc = cand.with_url("https://archive.org/download/a/a.pdf", size=5, md5="abc")
+    first = ResolveCache(tmp_path / "c.sqlite", ttl=100, clock=lambda: now[0])
+    first.put(cand, [doc])
+    first.close()  # a restart
+    again = ResolveCache(tmp_path / "c.sqlite", ttl=100, clock=lambda: now[0])
+    assert again.get(cand) == [doc]
+    assert again.get(replace(cand, title="A, revised")) is None  # the listing changed
+    now[0] += 101
+    assert again.get(cand) is None  # expired: a later cycle resolves again
+    again.close()
