@@ -579,10 +579,9 @@ _RESTRICTED: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("law-enforcement-sensitive", re.compile(r"law\s+enforcement\s+sensitive", _I)),
     ("noforn", re.compile(r"\bNOFORN\b")),
     ("mod-use-only", re.compile(r"for\s+uk\s+government\s+and\s+mod\s+use\s+only", _I)),
-    (
-        "classified",
-        re.compile(r"\b(?:TOP SECRET|SECRET|CONFIDENTIAL)\s*//|(?m:^\s*(?:TOP SECRET|SECRET)\s*$)"),
-    ),
+    # "SECRET//NOFORN" anywhere; a bare "SECRET" line only at a page edge (_edge_banner): guidance
+    # *about* classification ("Government Security Classifications") has SECRET as a heading.
+    ("classified", re.compile(r"\b(?:TOP SECRET|SECRET|CONFIDENTIAL)\s*//")),
     # portion markings in titles, as index pages print them: "(S/NF)", "(S//NF)", "(C/REL)", "(TS)"
     ("classified-portion", re.compile(r"\((?:TS|S|C)\s*/{1,2}\s*(?:NF|NOFORN|REL[^)]*)\)|\(TS\)", _I)),
 )
@@ -640,6 +639,19 @@ def _public_domain(text: str) -> bool:
     )
 
 
+_BARE_BANNER_RE = re.compile(r"(?:TOP SECRET|SECRET)")
+
+
+def _edge_banner(text: str) -> bool:
+    """A bare classification banner as the first or last line of a page (pages split on form feed, as
+    :func:`wsp_adapters.doccollection.adapter.pdf_text` joins them): where banners are printed."""
+    for page in text.split("\f"):
+        lines = [ln.strip() for ln in page.splitlines() if ln.strip()]
+        if lines and (_BARE_BANNER_RE.fullmatch(lines[0]) or _BARE_BANNER_RE.fullmatch(lines[-1])):
+            return True
+    return False
+
+
 def parse_markings(text: str) -> Marking:
     """Find distribution, handling and export markings in front-matter text (deterministic).
 
@@ -658,6 +670,8 @@ def parse_markings(text: str) -> Marking:
     if public and not excerpt:
         excerpt = _sentence(words, public.start())
     restricted = tuple(name for name, rx in _RESTRICTED if rx.search(words))
+    if "classified" not in restricted and _edge_banner(normalize_text(text)):
+        restricted = (*restricted, "classified")
     export = tuple(name for name, rx in _EXPORT if rx.search(words))
     if statement is None and public is not None and "distribution-limited" not in restricted:
         statement = "A" if re.search(r"unlimited", public.group(0), _I) else None

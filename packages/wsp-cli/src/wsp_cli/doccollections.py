@@ -51,6 +51,7 @@ from wsp_adapters.doccollection.adapter import (
     download_from_origins,
     screen_file,
     screen_text,
+    true_suffix,
     well_formed,
 )
 from wsp_adapters.doccollection.catalog import FetchedDoc, build_catalog, read_catalog_file, write_catalog
@@ -602,6 +603,7 @@ class CollectionFetcher:
         import hashlib
 
         if path.suffix != ".bundle":
+            path = true_suffix(path)
             problem = well_formed(path)
             if problem:
                 report.failed.append((cand.key, problem))

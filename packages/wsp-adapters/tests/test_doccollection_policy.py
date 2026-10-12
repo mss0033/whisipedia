@@ -230,3 +230,29 @@ def test_builtin_review_can_be_switched_off_for_official_histories_only() -> Non
     held = decide("", "Weapons design handbook", rules.merged({"review_keywords": ["weapons design"]}))
     assert held == "review:keyword=weapons design"
     assert decide("", "Weaponization of agents", rules) == "deny:safety=weaponization"
+
+
+def test_a_bare_classification_banner_counts_only_at_a_page_edge() -> None:
+    guidance = (
+        "Government Security Classifications\nThere are three levels.\nOFFICIAL\nText.\n"
+        "SECRET\nText about it.\nTOP SECRET\nMore text."
+    )
+    assert "classified" not in parse_markings(guidance).restricted
+    banner_top = "Introduction\nUnclassified text.\n\f\nSECRET\nCable traffic follows.\nEnd of page."
+    assert "classified" in parse_markings(banner_top).restricted
+    banner_bottom = "Cable traffic.\nSECRET\n\f\nNext page."
+    assert "classified" in parse_markings(banner_bottom).restricted
+    assert "classified" in parse_markings("Body text with SECRET//NOFORN in it.").restricted
+
+
+def test_an_html_page_named_pdf_is_kept_as_html(tmp_path: Path) -> None:
+    from wsp_adapters.doccollection.adapter import true_suffix, well_formed
+
+    misnamed = tmp_path / "guidance.pdf"
+    misnamed.write_bytes(b"<!DOCTYPE html><html><body><h1>Guidance</h1></body></html>")
+    fixed = true_suffix(misnamed)
+    assert fixed.name == "guidance.html"
+    assert well_formed(fixed) is None
+    real = tmp_path / "real.pdf"
+    real.write_bytes(b"%PDF-1.4 ...")
+    assert true_suffix(real) == real

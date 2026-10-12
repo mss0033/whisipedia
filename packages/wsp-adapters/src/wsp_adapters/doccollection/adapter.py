@@ -547,6 +547,23 @@ def write_audit(path: Path, decisions: Sequence[tuple[Candidate, Decision]]) -> 
     tmp.replace(path)
 
 
+def true_suffix(path: Path) -> Path:
+    """``path`` renamed to the format its bytes are, when its name guessed wrong: a GOV.UK "HTML
+    publication" linked without an extension was named ``.pdf`` and then failed the PDF check."""
+    if path.suffix.lower() != ".pdf":
+        return path
+    with path.open("rb") as fh:
+        head = fh.read(1024)
+    if head.lstrip().startswith(b"%PDF-"):
+        return path
+    lowered = head.lower()
+    if b"<html" in lowered or b"<!doctype html" in lowered:
+        target = path.with_suffix(".html")
+        path.replace(target)
+        return target
+    return path
+
+
 def well_formed(path: Path) -> str | None:
     """A cheap format check: PDFs must start with ``%PDF-``; HTML must look like HTML."""
     with path.open("rb") as fh:
@@ -576,7 +593,7 @@ def pdf_text(path: Path, max_pages: int) -> str:
                 textpage.close()
             finally:
                 page.close()
-        return "\n".join(out)
+        return "\n\f\n".join(out)  # a form feed between pages: policy._edge_banner reads page edges
     finally:
         pdf.close()
 
