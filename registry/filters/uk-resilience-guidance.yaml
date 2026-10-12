@@ -1,0 +1,4 @@
+# Document-level rules for uk-resilience-guidance. The source filter in registry/sources.yaml (allow_all) decides;
+# this file exists so owner review decisions (registry/filters/decisions/uk-resilience-guidance.yaml) are loaded.
+allow_documents: []
+deny_documents: []

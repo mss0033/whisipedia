@@ -1,0 +1,15 @@
+# Owner review decisions for who-iris (machine-owned; written by `wsp proposals accept|reject`).
+# One entry per document the owner decided, keyed by document key (one edition). The hand-written
+# rules, with their comments, are in registry/filters/who-iris.yaml; this file is loaded next to it (policy.load_rules).
+# Remove an entry to undo a decision; anything else is rewritten by the next decision.
+allow_documents:
+- who:10665-370667
+allow_content_review:
+- who:10665-370667
+deny_documents: []
+log:
+- key: who:10665-370667
+  decision: allow
+  rule: review:safety=booby traps
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 88

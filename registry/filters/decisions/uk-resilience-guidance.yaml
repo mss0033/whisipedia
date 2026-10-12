@@ -1,0 +1,555 @@
+# Owner review decisions for uk-resilience-guidance (machine-owned; written by `wsp proposals accept|reject`).
+# One entry per document the owner decided, keyed by document key (one edition). The hand-written
+# rules, with their comments, are in registry/filters/uk-resilience-guidance.yaml; this file is loaded next to it (policy.load_rules).
+# Remove an entry to undo a decision; anything else is rewritten by the next decision.
+allow_documents:
+- uk-co:government-publications-a-human-centred-approach-to-scaling-and-de-risking-ai-tools-4
+- uk-co:government-publications-a-human-centred-approach-to-scaling-and-de-risking-ai-tools-5
+- uk-co:government-publications-achieving-results-in-the-context-of-fiscal-restraint-real-time-lessons-from-the-british-experience-manion-lecture-2011-2
+- uk-co:government-publications-arms-length-body-sponsorship-code-of-good-practice-5
+- uk-co:government-publications-arms-length-body-sponsorship-code-of-good-practice-6
+- uk-co:government-publications-arms-length-body-sponsorship-code-of-good-practice-8
+- uk-co:government-publications-business-appointment-rules-for-crown-servants-2
+- uk-co:government-publications-business-appointment-rules-for-crown-servants-3
+- uk-co:government-publications-business-appointment-rules-for-ministers-2
+- uk-co:government-publications-business-appointment-rules-for-ministers-3
+- uk-co:government-publications-civil-service-diversity-inclusion-dashboard-1
+- uk-co:government-publications-civil-service-employee-policy-guide-to-job-sharing
+- uk-co:government-publications-civil-service-employee-policy-shared-parental-leave-1
+- uk-co:government-publications-civil-service-employee-policy-shared-parental-leave-4
+- uk-co:government-publications-civil-service-settlement-agreements-special-severance-payments-and-confidentiality-clauses-1
+- uk-co:government-publications-community-resilience-case-study-library-7
+- uk-co:government-publications-community-resilience-resources-and-tools-1
+- uk-co:government-publications-community-resilience-resources-and-tools-3
+- uk-co:government-publications-community-resilience-resources-and-tools-5
+- uk-co:government-publications-continuous-improvement-assessment-framework
+- uk-co:government-publications-emergency-responder-interoperability-lexicon
+- uk-co:government-publications-ethics-transparency-and-accountability-framework-for-automated-decision-making-1
+- uk-co:government-publications-government-baseline-personnel-security-standard-2
+- uk-co:government-publications-government-baseline-personnel-security-standard-3
+- uk-co:government-publications-government-functional-standard-govs-003-human-resources-4
+- uk-co:government-publications-government-security-classifications-18
+- uk-co:government-publications-guidance-for-civil-servants-how-to-move-jobs-between-departments-and-agencies-11
+- uk-co:government-publications-guidance-for-civil-servants-how-to-move-jobs-between-departments-and-agencies-4
+- uk-co:government-publications-guidance-on-the-senior-civil-service-pay-award-202324-1
+- uk-co:government-publications-how-to-appeal-to-the-civil-service-appeal-board-1
+- uk-co:government-publications-human-aspects-in-emergency-management-2
+- uk-co:government-publications-identity-proofing-and-verification-of-an-individual-1
+- uk-co:government-publications-identity-proofing-and-verification-of-an-individual-3
+- uk-co:government-publications-multi-agency-strategic-holding-areas-a-guide-1
+- uk-co:government-publications-multi-agency-strategic-holding-areas-a-guide-2
+- uk-co:government-publications-national-recovery-guidance-additional-document-downloads-44
+- uk-co:government-publications-national-recovery-guidance-additional-document-downloads-45
+- uk-co:government-publications-national-recovery-guidance-additional-document-downloads-46
+- uk-co:government-publications-national-recovery-guidance-additional-document-downloads-47
+- uk-co:government-publications-national-recovery-guidance-additional-document-downloads-48
+- uk-co:government-publications-national-recovery-guidance-additional-document-downloads-49
+- uk-co:government-publications-ppn-006-taking-account-of-carbon-reduction-plans-in-the-procurement-of-major-government-contracts-6
+- uk-co:government-publications-ppn-009-tackling-modern-slavery-in-government-supply-chains-5
+- uk-co:government-publications-ppn-0124-carbon-reduction-contract-schedule-3
+- uk-co:government-publications-ppn-021-payment-spot-checks-in-public-sub-contracts-4
+- uk-co:government-publications-ppn-021-payment-spot-checks-in-public-sub-contracts-5
+- uk-co:government-publications-ppn-022-procuring-steel-in-government-contracts-11
+- uk-co:government-publications-ppn-022-procuring-steel-in-government-contracts-5
+- uk-co:government-publications-ppn-0423-procuring-steel-in-government-contracts-8
+- uk-co:government-publications-property-spend-controls-1
+- uk-co:government-publications-public-bodies-review-programme-2
+- uk-co:government-publications-public-bodies-review-programme-4
+- uk-co:government-publications-public-bodies-review-programme-5
+- uk-co:government-publications-public-bodies-review-programme-7
+- uk-co:government-publications-reservoir-flood-preparedness-warning-and-informing-material-1
+- uk-co:government-publications-reservoir-flood-preparedness-warning-and-informing-material-2
+- uk-co:government-publications-reservoir-off-site-plans-documents
+- uk-co:government-publications-reservoir-off-site-plans-documents-1
+- uk-co:government-publications-reservoir-off-site-plans-documents-2
+- uk-co:government-publications-standardisation-of-lease-terms-preferred-terms-1
+- uk-co:government-publications-telecommunication-sub-group-birmingham-workshop-1
+- uk-co:government-publications-telecommunication-sub-group-birmingham-workshop-3
+- uk-co:government-publications-telecommunication-sub-group-birmingham-workshop-4
+- uk-co:government-publications-the-no10-innovation-fellowship-programme
+- uk-co:guidance-national-recovery-guidance
+- uk-co:guidance-national-recovery-guidance-1
+- uk-co:guidance-national-recovery-guidance-2
+- uk-co:guidance-national-recovery-guidance-common-issues
+- uk-co:guidance-national-recovery-guidance-common-issues-45
+- uk-co:guidance-national-recovery-guidance-common-issues-46
+- uk-co:guidance-national-recovery-guidance-common-issues-47
+- uk-co:guidance-national-security-and-investment-act-guidance-on-acquisitions
+allow_content_review: []
+deny_documents: []
+log:
+- key: uk-co:guidance-national-recovery-guidance-common-issues
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:24+00:00'
+  proposal: 86
+- key: uk-co:guidance-national-recovery-guidance-common-issues-45
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:24+00:00'
+  proposal: 86
+- key: uk-co:guidance-national-recovery-guidance-common-issues-46
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:24+00:00'
+  proposal: 86
+- key: uk-co:guidance-national-recovery-guidance-common-issues-47
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:24+00:00'
+  proposal: 86
+- key: uk-co:guidance-national-recovery-guidance
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:24+00:00'
+  proposal: 86
+- key: uk-co:guidance-national-recovery-guidance-1
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:24+00:00'
+  proposal: 86
+- key: uk-co:guidance-national-recovery-guidance-2
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:24+00:00'
+  proposal: 86
+- key: uk-co:government-publications-multi-agency-strategic-holding-areas-a-guide-1
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:24+00:00'
+  proposal: 86
+- key: uk-co:government-publications-multi-agency-strategic-holding-areas-a-guide-2
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:24+00:00'
+  proposal: 86
+- key: uk-co:government-publications-national-recovery-guidance-additional-document-downloads-44
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:24+00:00'
+  proposal: 86
+- key: uk-co:government-publications-national-recovery-guidance-additional-document-downloads-45
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:24+00:00'
+  proposal: 86
+- key: uk-co:government-publications-national-recovery-guidance-additional-document-downloads-46
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:24+00:00'
+  proposal: 86
+- key: uk-co:government-publications-national-recovery-guidance-additional-document-downloads-48
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:24+00:00'
+  proposal: 86
+- key: uk-co:government-publications-community-resilience-resources-and-tools-1
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:24+00:00'
+  proposal: 86
+- key: uk-co:government-publications-community-resilience-resources-and-tools-3
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:24+00:00'
+  proposal: 86
+- key: uk-co:government-publications-community-resilience-resources-and-tools-5
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:24+00:00'
+  proposal: 86
+- key: uk-co:government-publications-community-resilience-case-study-library-7
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:24+00:00'
+  proposal: 86
+- key: uk-co:government-publications-reservoir-off-site-plans-documents
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:24+00:00'
+  proposal: 86
+- key: uk-co:government-publications-reservoir-off-site-plans-documents-1
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:24+00:00'
+  proposal: 86
+- key: uk-co:government-publications-reservoir-off-site-plans-documents-2
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:24+00:00'
+  proposal: 86
+- key: uk-co:government-publications-reservoir-flood-preparedness-warning-and-informing-material-1
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:24+00:00'
+  proposal: 86
+- key: uk-co:government-publications-reservoir-flood-preparedness-warning-and-informing-material-2
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:24+00:00'
+  proposal: 86
+- key: uk-co:government-publications-human-aspects-in-emergency-management-2
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:24+00:00'
+  proposal: 86
+- key: uk-co:guidance-national-recovery-guidance-common-issues
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:guidance-national-recovery-guidance-common-issues-45
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:guidance-national-recovery-guidance-common-issues-46
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:guidance-national-recovery-guidance-common-issues-47
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:guidance-national-recovery-guidance
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:guidance-national-recovery-guidance-1
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:guidance-national-recovery-guidance-2
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-multi-agency-strategic-holding-areas-a-guide-1
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-multi-agency-strategic-holding-areas-a-guide-2
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:guidance-national-security-and-investment-act-guidance-on-acquisitions
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-government-functional-standard-govs-003-human-resources-4
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-arms-length-body-sponsorship-code-of-good-practice-5
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-arms-length-body-sponsorship-code-of-good-practice-6
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-arms-length-body-sponsorship-code-of-good-practice-8
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-ethics-transparency-and-accountability-framework-for-automated-decision-making-1
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-government-security-classifications-18
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-national-recovery-guidance-additional-document-downloads-44
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-national-recovery-guidance-additional-document-downloads-45
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-national-recovery-guidance-additional-document-downloads-46
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-national-recovery-guidance-additional-document-downloads-47
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-national-recovery-guidance-additional-document-downloads-48
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-national-recovery-guidance-additional-document-downloads-49
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-continuous-improvement-assessment-framework
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-public-bodies-review-programme-2
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-public-bodies-review-programme-4
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-public-bodies-review-programme-5
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-public-bodies-review-programme-7
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-community-resilience-resources-and-tools-1
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-community-resilience-resources-and-tools-3
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-community-resilience-resources-and-tools-5
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-community-resilience-case-study-library-7
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-reservoir-off-site-plans-documents
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-reservoir-off-site-plans-documents-1
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-reservoir-off-site-plans-documents-2
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-guidance-for-civil-servants-how-to-move-jobs-between-departments-and-agencies-4
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-guidance-for-civil-servants-how-to-move-jobs-between-departments-and-agencies-11
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-reservoir-flood-preparedness-warning-and-informing-material-1
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-reservoir-flood-preparedness-warning-and-informing-material-2
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-ppn-009-tackling-modern-slavery-in-government-supply-chains-5
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-human-aspects-in-emergency-management-2
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-how-to-appeal-to-the-civil-service-appeal-board-1
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-government-baseline-personnel-security-standard-2
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-government-baseline-personnel-security-standard-3
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-property-spend-controls-1
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-civil-service-employee-policy-shared-parental-leave-1
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-civil-service-employee-policy-shared-parental-leave-4
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-civil-service-diversity-inclusion-dashboard-1
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-business-appointment-rules-for-crown-servants-2
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-business-appointment-rules-for-crown-servants-3
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-guidance-on-the-senior-civil-service-pay-award-202324-1
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-civil-service-employee-policy-guide-to-job-sharing
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-civil-service-settlement-agreements-special-severance-payments-and-confidentiality-clauses-1
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-standardisation-of-lease-terms-preferred-terms-1
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-business-appointment-rules-for-ministers-2
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-business-appointment-rules-for-ministers-3
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-ppn-0423-procuring-steel-in-government-contracts-8
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-a-human-centred-approach-to-scaling-and-de-risking-ai-tools-4
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-a-human-centred-approach-to-scaling-and-de-risking-ai-tools-5
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-ppn-022-procuring-steel-in-government-contracts-5
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-ppn-022-procuring-steel-in-government-contracts-11
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-the-no10-innovation-fellowship-programme
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-ppn-021-payment-spot-checks-in-public-sub-contracts-4
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-ppn-021-payment-spot-checks-in-public-sub-contracts-5
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-ppn-0124-carbon-reduction-contract-schedule-3
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-ppn-006-taking-account-of-carbon-reduction-plans-in-the-procurement-of-major-government-contracts-6
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-identity-proofing-and-verification-of-an-individual-1
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-identity-proofing-and-verification-of-an-individual-3
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:25+00:00'
+  proposal: 87
+- key: uk-co:government-publications-emergency-responder-interoperability-lexicon
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:26+00:00'
+  proposal: 89
+- key: uk-co:government-publications-telecommunication-sub-group-birmingham-workshop-1
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:26+00:00'
+  proposal: 89
+- key: uk-co:government-publications-telecommunication-sub-group-birmingham-workshop-3
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:26+00:00'
+  proposal: 89
+- key: uk-co:government-publications-telecommunication-sub-group-birmingham-workshop-4
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:26+00:00'
+  proposal: 89
+- key: uk-co:government-publications-achieving-results-in-the-context-of-fiscal-restraint-real-time-lessons-from-the-british-experience-manion-lecture-2011-2
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-12T16:41:26+00:00'
+  proposal: 89

@@ -568,7 +568,7 @@ sources:
           flavor: govuk-search
           url: "https://www.gov.uk/api/search.json"
           params: {filter_organisations: cabinet-office, filter_content_purpose_supergroup: guidance_and_regulation, q: "resilience emergency preparedness civil contingencies"}
-      filter: {allow_all: true, allow_image_only: true, distribution: {require: ["license:OGL-UK-3.0", published]}}  # GOV.UK content is OGL v3 unless it says otherwise
+      filter: {allow_all: true, allow_image_only: true, distribution: {require: ["license:OGL-UK-3.0", published]}, rules: registry/filters/uk-resilience-guidance.yaml}  # GOV.UK content is OGL v3 unless it says otherwise
     update: {cadence: P3M, strategy: snapshot-retention}
     size: {bytes: 1e9, measured: false, as_of: 2026-10-10}
     notes: Score 4.3. OGL v3 applies to GOV.UK content unless a page says otherwise; check per document (MOD doctrine on GOV.UK is not OGL, see uk-mod-doctrine).
@@ -665,7 +665,7 @@ sources:
             - "\"surgical care at the district hospital\""
       # A UN health agency's guidance is about health: nouns such as chemical, pathogen or surveillance
       # are routine there, so the built-in noun review list is off; the deny list and screens still apply.
-      filter: {allow_all: true, builtin_review: false, allow_image_only: true}  # older guidance is scanned
+      filter: {allow_all: true, builtin_review: false, allow_image_only: true, rules: registry/filters/who-iris.yaml}  # older guidance is scanned
     update: {cadence: P3M, strategy: base-plus-incremental}
     size: {records: 277401, bytes: 70e9, measured: false, as_of: 2026-10-10}
     notes: Score 4.2. Record count measured (OAI completeListSize); bytes are an estimate for the selected subsets. Personal non-commercial offline use fits the licence; licence checked per item.
@@ -1404,3 +1404,1317 @@ sources:
     license: LicenseRef-restricted
     legal_basis: none
     notes: Firm exclusion (research doc §3). Includes FOUO/CUI, ITAR/EAR technical data, DHS TRIPwire and any mirror of such material. CBRN, explosives, weapons, targeting and offensive-tooling content is excluded regardless of release status (§3.2).
+
+  - id: kiwix-medlineplus-gov-en-all
+    name: MedlinePlus (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: medlineplus.gov_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 1944841216, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-nhs-uk-en-medicines
+    name: NHS' Medicines A to Z (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: nhs.uk_en_medicines}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 15323136, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-wwwnc-cdc-gov-en-all
+    name: Travelers' Health (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: wwwnc.cdc.gov_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 178327552, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-irp-fas-org-en-military-medicine
+    name: Military Medicine (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: irp.fas.org_en_military-medicine}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 75875328, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-www-ready-gov-en
+    name: Ready.gov (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: www.ready.gov_en}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 2429922304, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-www-ready-gov-es
+    name: Ready.gov (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: www.ready.gov_es}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 2579337216, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-cd3wdproject-org-en-all
+    name: CD3WD Project (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: cd3wdproject.org_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 581166080, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-trueprepper-com-en-all
+    name: True prepper (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: trueprepper.com_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 1423585280, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-solar-lowtechmagazine-com-mul-all
+    name: Solar Powered LowTech Magazine (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: solar.lowtechmagazine.com_mul_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 700556288, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-permacomputing-net-en-all
+    name: Permacomputing (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: permacomputing.net_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 1038336, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-100r-co-en-all
+    name: Hundred Rabbits (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: 100r.co_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 177187840, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-rabbitwaves-ca-en-all
+    name: Rabbit waves (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: rabbitwaves.ca_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 71122944, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-based-cooking-en-all
+    name: based.cooking LukeSmith (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: based.cooking_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 15775744, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-foss-cooking-en-all
+    name: FOSS cooking (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: foss.cooking_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 24239104, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-grimgrains-en-all
+    name: GrimGrains Recipes (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: grimgrains_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 26030080, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-publicdomainrecipes-com-en-all
+    name: Public Domain Recipes (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: publicdomainrecipes.com_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 16972800, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-wikipedia-en-simple-all
+    name: Wikipedia in simple English (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [encyclopedia]
+    tier: T2
+    status: active
+    license: CC-BY-SA-4.0
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: wikipedia_en-simple_all, flavour: maxi}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 3121061888, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 5, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'wikipedia'.
+
+  - id: kiwix-wiktionary-en-simple-all
+    name: Wiktionary in Simple English (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [dictionary]
+    tier: T2
+    status: active
+    license: CC-BY-SA-4.0
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: wiktionary_en-simple_all, flavour: nopic}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 26535936, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 5, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'wiktionary'.
+
+  - id: kiwix-citizensinformation-ie-en-all
+    name: Citizens Information (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: citizensinformation.ie_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 116882432, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-internet-encyclopedia-philosophy-en-all
+    name: Encyclopedia of Philosophy (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: internet-encyclopedia-philosophy_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 125831168, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-encyclopedie-environnement-org-en-all
+    name: Environment Encyclopedia (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: encyclopedie-environnement.org_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 4117032960, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-planetmath-org-en-all
+    name: Planet Math (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: planetmath.org_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 21542912, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-stacks-math-columbia-edu-en-all
+    name: The Stacks project (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: stacks.math.columbia.edu_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 154074112, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-jeffe-cs-illinois-edu-en-all
+    name: Algorithms (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: jeffe.cs.illinois.edu_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 516538368, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-opendatastructures-org-en-all
+    name: Open Data Structures (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: opendatastructures.org_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 116369408, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-milneopentextbooks-org-en-all
+    name: Milne Open Textbooks (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: milneopentextbooks.org_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 422804480, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-ethanweed-en-all
+    name: Learning statistics - Python (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: ethanweed_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 8382464, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-learningstatistics-en-all
+    name: Learning Statistics - CogStat (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: learningstatistics_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 33333248, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-learningstatisticswithr-com-en-all
+    name: Learning Statistics with R (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: learningstatisticswithr.com_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 18523136, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-lost-stats-github-io-en-all
+    name: Statistical techniques Library (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: lost-stats.github.io_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 36017152, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-mspeekenbrink-en-all
+    name: Data Analysis and Modelling (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: mspeekenbrink_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 6079488, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-htdp-org-en-all
+    name: How to Design Programs (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: htdp.org_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 1986560, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-openmusictheory-com-en-all
+    name: Open Music Theory (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: openmusictheory.com_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 76967936, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-ncert-audiobooks-en-all
+    name: CIET Audiobooks (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: ncert-audiobooks_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 11097088, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-ghana-bece-past-questions-en-all
+    name: Ghana's BECE past questions (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: ghana-bece-past-questions_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 8341504, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-docs-python-org-en-all
+    name: Python Documentation (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: docs.python.org_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 3959219200, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-peps-python-en-all
+    name: Python PEPs (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: peps.python_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 9095168, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-php-net-en-all
+    name: PHP Manual (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: php.net_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 32847872, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-lua-org-en-all
+    name: Lua.org (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: lua.org_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 379923456, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-dart-dev-en-all
+    name: dart.dev (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: dart.dev_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 133380096, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-gobyexample-com-en-all
+    name: Go by example (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: gobyexample.com_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 330752, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-getbootstrap-com-en-all
+    name: Bootstrap (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: getbootstrap.com_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 49137664, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-lesscss-org-en-all
+    name: Less CSS (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: lesscss.org_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 1453056, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-devhints-io-en-all
+    name: DevHints - Rico's cheatsheets (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: devhints.io_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 3655680, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-www-mankier-com-en-all
+    name: ManKier - Linux man pages (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: www.mankier.com_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 190124032, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-openwrt-org-en-all
+    name: OpenWRT (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: openwrt.org_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 519895040, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-cloudflare-com-en-learning-center
+    name: CloudFlare Learning Center (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: cloudflare.com_en_learning-center}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 190723072, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-anonymousplanet-org-en-all
+    name: The Guide to Online Anonymity (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: anonymousplanet.org_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 27886592, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-privacydefence-org-en-opsecbible
+    name: The OpSec Bible (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: privacydefence.org_en_opsecbible}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 173583360, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-incognitocat-me-en-all
+    name: Incognito cat (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: incognitocat.me_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 9281536, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-cheatography-com-en-all
+    name: Cheatography (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: cheatography.com_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 11439513600, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-noted-lol-en-all
+    name: Noted.lol (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: noted.lol_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 2399033344, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-thalesdoc-en-all
+    name: Thales CPL Documentation Hub (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: thalesdoc_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 3105813504, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-sh1-org-en-all
+    name: sh1.org (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: sh1.org_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 36063232, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-chopin-lib-uchicago-edu-en-all
+    name: Chopin Sheet Music (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: chopin.lib.uchicago.edu_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 8834036736, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-mutopiaproject-org-en-all
+    name: Mutopia Project (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: mutopiaproject.org_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 6632476672, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-music-dalitio-de-en-all
+    name: Music by Christoph Dalitz (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: music.dalitio.de_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 39953408, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-celticscores-com-en-all
+    name: Breizh partitions (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: celticscores.com_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 5669663744, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-fretmap-app-en-all
+    name: FretMap.app (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: fretmap.app_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 52843520, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-tonedear-com-en-all
+    name: Toned Ear.com (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: tonedear.com_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 1720320, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-tomlehrersongs-com-en-all
+    name: Tom Lehrer’s Songs (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: tomlehrersongs.com_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 1329568768, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-ragajunglism-org-en-all
+    name: RagaGunglism (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: ragajunglism.org_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 8738987008, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-booksdash-en-all
+    name: Bookdash (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: booksdash_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 11704392704, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-folgerpedia-folger-edu-en-all
+    name: Folgerpedia (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: folgerpedia.folger.edu_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 4201535488, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-womenshistory-si-edu-en-all
+    name: American Women’s History (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: womenshistory.si.edu_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 4960311296, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-ncase-me-en-all
+    name: Nicky Case (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: ncase.me_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 1834116096, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-gotquestions-org-en-all
+    name: Got Questions? (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: gotquestions.org_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 15182660608, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-wiktionary-en-all
+    name: Wiktionary (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [dictionary]
+    tier: T2
+    status: active
+    license: CC-BY-SA-4.0
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: wiktionary_en_all, flavour: nopic}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 9156425728, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 5, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'wiktionary'.
+
+  - id: kiwix-xkcd-com-en-all
+    name: xkcd (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: xkcd.com_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 451607552, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-smbc-comics-com-en-all
+    name: SMBC COVID-19 Book Pack (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: smbc-comics.com_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 112859136, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-footballdatabase-com-en-all
+    name: Football Database (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: footballdatabase.com_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 112897024, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-alexandria-dk-en-all
+    name: Alexandria boardgames (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: alexandria.dk_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 43048123392, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-armypubs-en-all
+    name: Army Publishing Directorate (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: armypubs_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 8232397824, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: "Found by the kiwix-opds bot on 2026-10-11 in category 'other'. Owner decision 2026-10-12 (review desk, asked and confirmed) - included unfiltered, a deliberate exception to the content line. Unlike army-pubs-public, this copy carries the weapons, gunnery, demolitions and targeting manuals."
