@@ -4284,6 +4284,12 @@
             "title": "Home Doc Id",
             "description": "Landing document of the site, if any."
           },
+          "readable": {
+            "type": "boolean",
+            "title": "Readable",
+            "description": "The site has something to read (held, with documents or served from ZIM archives); planned sources and raw data are not linked as sites.",
+            "default": false
+          },
           "related": {
             "items": {
               "type": "string"
@@ -4316,6 +4322,7 @@
           "bytes",
           "as_of",
           "home_doc_id",
+          "readable",
           "related"
         ],
         "title": "SourceInfo"

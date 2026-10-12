@@ -2,7 +2,9 @@
  * Plain-text documents (RFCs, Gutenberg books): DOM rendering with
  * cross-source autolinks ("RFC 9110", "wsp:gutenberg/1342", URLs).
  */
+
 import { makeAddress, normalizeAddress } from './address.ts';
+import { interwikiAddress } from './interwiki.ts';
 
 const TOKEN_RE =
   /\b(RFC)[ -]?(\d{1,5})\b|\b(wsp:(?:\/\/)?[a-z0-9.-]+\/[^\s<>"')\]]+)|\b((?:https?|ftp):\/\/[^\s<>"')\]]+)/gi;
@@ -21,6 +23,10 @@ export function linkify(text: string): DocumentFragment {
       a.dataset.wsp = addr;
     } else if (m[3]) {
       const addr = normalizeAddress(m[3]) ?? makeAddress('offline', '', { url: m[3] });
+      a.href = `#${addr}`;
+      a.dataset.wsp = addr;
+    } else if (interwikiAddress(m[4] ?? m[0])) {
+      const addr = interwikiAddress(m[4] ?? m[0]) as string; // a Wikimedia page the library holds
       a.href = `#${addr}`;
       a.dataset.wsp = addr;
     } else {

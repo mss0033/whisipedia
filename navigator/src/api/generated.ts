@@ -532,6 +532,8 @@ export interface SourceInfo {
   as_of: string | null;
   /** Landing document of the site, if any. */
   home_doc_id: string | null;
+  /** The site has something to read (held, with documents or served from ZIM archives); planned sources and raw data are not linked as sites. */
+  readable: boolean;
   /** Source ids sharing a domain (webring bar). */
   related: Array<string>;
 }

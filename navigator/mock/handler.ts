@@ -62,6 +62,7 @@ function sourceInfo(id: string): SourceInfo | null {
     bytes: s.bytes,
     as_of: s.as_of,
     home_doc_id: s.home_doc_id ?? null,
+    readable: s.health !== 'offline' && (s.doc_count > 0 || !!s.home_doc_id),
     related: s.related,
   };
 }

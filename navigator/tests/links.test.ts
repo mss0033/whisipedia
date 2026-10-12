@@ -153,3 +153,14 @@ describe('links to mirrored Wikimedia projects', () => {
     }
   });
 });
+
+describe('plain-text documents', () => {
+  it('link Wikimedia URLs to the library copy and others to the offline page', () => {
+    const div = document.createElement('div');
+    div.append(linkify('See https://en.wikipedia.org/wiki/Allah and https://x.example/y.'));
+    const [wiki, other] = [...div.querySelectorAll('a')];
+    expect(wiki?.dataset.wsp).toBe('wsp://wikipedia-en-zim/Allah');
+    expect(wiki?.dataset.missing).toBeUndefined();
+    expect(other?.dataset.wsp?.startsWith('wsp://offline')).toBe(true);
+  });
+});

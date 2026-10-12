@@ -157,7 +157,7 @@ class Library:
         """A site's card, from the snapshot (no NAS read in the server, audit #4/#11)."""
         snap = snap or self.state.snapshot()
         st = snap.source(spec.id)
-        return convert.source_info(
+        info = convert.source_info(
             spec,
             st.current,
             specs=self.s.sources,
@@ -166,6 +166,7 @@ class Library:
             home_doc_id=self.state.home_doc_id(spec, st.current),
             members=st.members if spec.partitioned else (),
         )
+        return info.model_copy(update={"readable": self.is_readable(info)})
 
     def source_infos(self, snap: LibrarySnapshot | None = None) -> list[SourceInfo]:
         snap = snap or self.state.snapshot()

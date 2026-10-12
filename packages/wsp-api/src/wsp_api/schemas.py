@@ -125,6 +125,11 @@ class SourceInfo(_Wire):
     bytes: int | None = Field(default=None, description="Size of the current generation.")
     as_of: datetime | None = Field(default=None, description="When the current generation was sealed.")
     home_doc_id: str | None = Field(default=None, description="Landing document of the site, if any.")
+    readable: bool = Field(
+        default=False,
+        description="The site has something to read (held, with documents or served from ZIM archives); "
+        "planned sources and raw data are not linked as sites.",
+    )
     related: list[str] = Field(
         default_factory=list[str], description="Source ids sharing a domain (webring bar)."
     )

@@ -1,4 +1,6 @@
 /** wsp://<source> — a source's own "site" front page. */
+
+import type { SourceInfo } from '../api/types.ts';
 import { makeAddress, searchAddress } from '../core/address.ts';
 import { h } from '../core/dom.ts';
 import { formatBytes, formatNumber } from '../core/format.ts';
@@ -43,7 +45,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
   const held = src.current_generation !== null;
   const related = src.related
     .map((r) => sources.find((s) => s.id === r))
-    .filter((s) => s !== undefined);
+    .filter((s): s is SourceInfo => s !== undefined && s.readable);
 
   const body = h(
     'div',

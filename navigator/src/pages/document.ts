@@ -87,7 +87,9 @@ export function renderBody(doc: DocumentResponse): { node: HTMLElement; broken: 
   return { node: wrap, broken: wrap.querySelectorAll('.broken-link').length };
 }
 
-function webring(source: SourceInfo | undefined, all: SourceInfo[]): HTMLElement | null {
+function webring(source: SourceInfo | undefined, everything: SourceInfo[]): HTMLElement | null {
+  // Only sites with something to read: a planned source is never a neighbour on the ring.
+  const all = everything.filter((s) => s.readable || s.id === source?.id);
   if (!source || all.length === 0) return null;
   const i = all.findIndex((s) => s.id === source.id);
   const prev = all[(i - 1 + all.length) % all.length]!;
