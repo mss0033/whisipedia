@@ -75,6 +75,22 @@ type Mode = 'push' | 'replace' | 'none';
 export interface AppOptions {
   api?: WspClient;
   storage?: SafeStorage;
+  /** Delay before a transiently failed page (503 while warming up) loads again by itself. */
+  transientRetryMs?: number;
+}
+
+const TRANSIENT_RETRIES = 15;
+const TRANSIENT_RETRY_MS = 8000;
+const TRANSIENT_CODES: ReadonlySet<string> = new Set([
+  'zim_unavailable',
+  'warming_up',
+  'busy',
+  'timeout',
+  'unavailable',
+]);
+
+function isTransient(err: ApiRequestError): boolean {
+  return err.status === 503 && TRANSIENT_CODES.has(err.code);
 }
 
 export class App implements AppServices {
@@ -98,6 +114,9 @@ export class App implements AppServices {
 
   private controller: AbortController | null = null;
   private seq = 0;
+  /** Automatic retries of a page whose last load failed transiently (503 while warming up). */
+  private readonly transientTries = new Map<string, number>();
+  private readonly transientRetryMs: number;
   private loading = false;
   private defaultStatus = 'Document: Done.';
   private statusTimer: ReturnType<typeof setTimeout> | undefined;
@@ -113,6 +132,7 @@ export class App implements AppServices {
     this.history = new GlobalHistory(storage);
     this.hotlist = new Hotlist(storage);
     this.theme = new ThemeManager(storage, document.documentElement);
+    this.transientRetryMs = opts.transientRetryMs ?? TRANSIENT_RETRY_MS;
     this.build();
   }
 
@@ -254,7 +274,7 @@ export class App implements AppServices {
       clearTimeout(waiting);
     } catch (err) {
       if (ac.signal.aborted || seq !== this.seq) return;
-      result = this.failurePage(err, address);
+      result = this.failurePage(err, address, seq);
     }
     if (seq !== this.seq) return;
 
@@ -294,6 +314,7 @@ export class App implements AppServices {
     } else {
       this.stack.setTitle(title);
     }
+    if (result.title !== 'Still loading') this.transientTries.delete(address);
     this.currentDoc = this.pendingDoc;
     this.currentTitle = title;
     this.history.record(address, title);
@@ -327,9 +348,31 @@ export class App implements AppServices {
     this.live.textContent = `Loaded: ${title}`;
   }
 
-  private failurePage(err: unknown, address: string): PageResult {
+  private failurePage(err: unknown, address: string, seq: number): PageResult {
     const retry = h('button', { type: 'button', class: 'btn' }, 'Try Again');
     retry.addEventListener('click', () => this.reload());
+    if (err instanceof ApiRequestError && isTransient(err)) {
+      // A large archive still opening after a restart, or the library still loading: retry on our own.
+      const tries = (this.transientTries.get(address) ?? 0) + 1;
+      if (tries <= TRANSIENT_RETRIES) {
+        this.transientTries.set(address, tries);
+        setTimeout(() => {
+          if (this.seq === seq) this.reload();
+        }, this.transientRetryMs);
+        return {
+          title: 'Still loading',
+          body: errorPage({
+            title: 'Still loading',
+            heading: 'This page is still loading',
+            message:
+              'The library is opening a large archive or is still starting up, which can take a minute or two after a restart. This page will try again by itself.',
+            address,
+            suggestions: [retry],
+          }),
+        };
+      }
+    }
+    this.transientTries.delete(address);
     if (err instanceof ApiRequestError) {
       return {
         title: `Error ${err.status}`,

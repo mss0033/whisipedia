@@ -221,6 +221,14 @@ class ZimAssetStore:
             with self._lock:
                 del self._building[key]
 
+    def random(self, source_id: str, generation_id: str) -> tuple[str, str] | None:
+        """``(native id, title)`` of a random article of a single-archive generation (bundles have a
+        Refinery catalog to pick from)."""
+        layout = self.layout(source_id, generation_id)
+        if layout is None or layout.single is None:
+            return None
+        return self.reader.random(layout.single)
+
     def warm_soon(self, source_id: str, generation_id: str) -> None:
         """Open every archive of a generation in the background, largest first, one at a time (a single
         thread for all generations: the NAS serves one cold open well, many badly)."""

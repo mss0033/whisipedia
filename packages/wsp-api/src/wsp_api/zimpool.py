@@ -241,6 +241,10 @@ class ZimProcessPool:
     def read(self, file: str, path: str, want: Want) -> EntryData | None:
         return cast(EntryData | None, self.call("read", (file, path, want.value), file))
 
+    def random(self, file: str) -> tuple[str, str] | None:
+        found = cast(list[str] | None, self.call("random", (file, str(time.monotonic_ns())), file))
+        return None if found is None else (found[0], found[1])
+
     def warm(self, file: str) -> None:
         """Open ``file`` in its worker (the main page entry, no bytes) and wait as long as that takes."""
         self.call("read", (file, "", "none"), file, timeout=WARM_TIMEOUT)

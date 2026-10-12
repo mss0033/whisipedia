@@ -12,6 +12,7 @@ from pathlib import Path, PurePosixPath
 from typing import cast
 
 from wsp_api import convert
+from wsp_api.addresses import address_of
 from wsp_api.catalog import FeedCatalog
 from wsp_api.errors import ApiError
 from wsp_api.htmlrewrite import VERSION as REWRITE_VERSION
@@ -19,7 +20,7 @@ from wsp_api.htmlrewrite import rewrite_html
 from wsp_api.offload import Offload
 from wsp_api.pages import ByteLRU, Rendered, render
 from wsp_api.renditions import borrowed
-from wsp_api.schemas import Change, DocumentLink, SourceInfo, VaultLocation
+from wsp_api.schemas import Change, DocRef, DocumentLink, SourceInfo, VaultLocation
 from wsp_api.seams import DocumentFields, VaultView
 from wsp_api.services import ApiSettings, Services
 from wsp_api.snapshot import LibrarySnapshot, LibraryState, StateSettings
@@ -173,6 +174,25 @@ class Library:
     def source_name(self, source_id: str) -> str:
         spec = self.s.source(source_id)
         return source_id if spec is None else spec.name
+
+    def random_zim_page(self, source_id: str) -> DocRef | None:
+        """A random article of a single-archive ZIM site (no Refinery catalog to pick from)."""
+        spec = self.s.source(source_id)
+        if self.zim is None or spec is None or spec.adapter != ZIM_ADAPTER:
+            return None
+        current = self.state.snapshot().source(source_id).current
+        if current is None:
+            return None
+        found = self.zim.random(source_id, current.generation_id)
+        if found is None:
+            return None
+        native, title = found
+        return DocRef(
+            doc_id=make_doc_id(source_id, native),
+            source_id=source_id,
+            title=title or native,
+            address=address_of(source_id, native),
+        )
 
     def readable_sources(self) -> frozenset[str]:
         """Sites a reader can open: held (a current generation) and either served from ZIM archives or

@@ -22,7 +22,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 from multiprocessing.connection import Connection
 
-from wsp_api.zimread import ArchiveCache, Want, book_name_of, open_archive, read_entry
+from wsp_api.zimread import ArchiveCache, Want, book_name_of, open_archive, random_article, read_entry
 
 _PR_SET_DUMPABLE = 4
 
@@ -69,6 +69,9 @@ class _Server:
         if op == "book":
             file = str(args[0])
             return book_name_of(open_archive(file), file)  # not cached: bundles have hundreds of books
+        if op == "random":
+            found = random_article(self.cache.get(str(args[0])))
+            return None if found is None else list(found)
         if op == "ping":
             return os.getpid()
         if self.test_ops and op == "_sleep":

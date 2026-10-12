@@ -193,3 +193,16 @@ def test_workers_never_write_core_dumps(pool: ZimProcessPool, zim: str) -> None:
     pid = _worker_pid(pool, zim)
     assert os.stat(f"/proc/{pid}/environ").st_uid == 0
     assert os.stat(f"/proc/{os.getpid()}/environ").st_uid == os.getuid()
+
+
+def test_random_articles_and_warm_opens(pool: ZimProcessPool, zim: str) -> None:
+    pool.warm(zim)
+    seen: set[str] = set()
+    for _ in range(30):
+        found = pool.random(zim)
+        assert found is not None
+        path, _title = found
+        assert path.startswith("A/")  # HTML articles only: never the image, never the redirect
+        assert path != "A/Old"
+        seen.add(path)
+    assert len(seen) > 5  # identical calls in flight are not coalesced into one pick

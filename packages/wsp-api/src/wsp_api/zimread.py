@@ -66,6 +66,10 @@ class ZimReader(Protocol):
         """The book's ``Name`` metadata, else the dated file name (``wsp_adapters.kiwix.book_name``)."""
         ...
 
+    def random(self, file: str) -> tuple[str, str] | None:
+        """``(path, title)`` of a random article of ``file`` (:func:`random_article`)."""
+        ...
+
     def warm(self, file: str) -> None:
         """Open ``file`` and keep it open (no request waits for it; a cold open over SMB can take
         minutes for the largest archives)."""
@@ -111,6 +115,20 @@ def read_entry(archive: Archive, path: str, want: Want) -> EntryData | None:
         mimetype = str(item.mimetype)
         send = want is Want.ANY or (want is Want.HTML and mimetype.startswith("text/html"))
         return EntryData(entry.path, mimetype, bytes(item.content) if send else None)
+    return None
+
+
+RANDOM_TRIES = 20  # random entries drawn until one is an article (most are, after the front matter)
+
+
+def random_article(archive: Archive) -> tuple[str, str] | None:
+    """``(path, title)`` of a random HTML entry that is not a redirect, or ``None`` after a few tries."""
+    for _ in range(RANDOM_TRIES):
+        entry = archive.get_random_entry()
+        if entry.is_redirect:
+            continue
+        if str(entry.get_item().mimetype).startswith("text/html"):
+            return entry.path, entry.title
     return None
 
 
@@ -176,6 +194,9 @@ class InProcessZimReader:
 
     def warm(self, file: str) -> None:
         self._cache.get(file)
+
+    def random(self, file: str) -> tuple[str, str] | None:
+        return random_article(self._cache.get(file))
 
     def close(self) -> None:
         pass

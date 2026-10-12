@@ -210,6 +210,8 @@ def browse_router(lib: Library) -> APIRouter:
             lib.source(source)
         rng = random.Random(secrets.randbits(64) if seed is None else seed)  # noqa: S311 - not security
         ref = doc_ref(lib.catalog.random_doc(sources=[source] if source else None, rng=rng))
+        if ref is None and source is not None:
+            ref = lib.random_zim_page(source)  # a site served straight from its ZIM archive
         if ref is None:
             raise ApiError(404, "empty", "no pages to pick from")
         return ref

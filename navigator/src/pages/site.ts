@@ -105,7 +105,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
       src.home_doc_id
         ? [docLink(src.home_doc_id, h('span', { class: 'btn-like' }, 'Enter site')), ' ']
         : null,
-      src.doc_count
+      src.doc_count || src.home_doc_id
         ? wspLink(
             makeAddress('random', '', { source: src.id }),
             h('span', { class: 'btn-like' }, 'Random page'),
