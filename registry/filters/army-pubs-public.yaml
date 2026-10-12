@@ -42,6 +42,15 @@ deny_series_prefix:
   - "TC 3-23."    # weapons, demolitions
   - "TC 3-20."    # gunnery (tank, Bradley, Stryker)
   - "FM 3-22"     # weapons qualification
+  # Fires, air and missile defence, mortars: targeting, fire control and weapons employment
+  # (2026-10-12 audit, CA-3: FM 3-09, ATP 3-09.30/.32/.34/.50/.60/.70, TC 3-09.8, ATP 3-01.18
+  # Stinger, ATP 3-01.85/.87 Patriot and ATP 3-21.90 mortars were listed as allow:default).
+  - "FM 3-09"     # fire support and field artillery operations
+  - "ATP 3-09"    # observed fires, JFIRE, kill boxes, cannon/MLRS/Paladin batteries
+  - "TC 3-09"     # field artillery certification and qualification
+  - "FM 3-01"     # air and missile defence employment
+  - "ATP 3-01."   # air and missile defence weapon-system techniques (Stinger, Patriot, ...)
+  - "ATP 3-21.90" # tactical employment of mortars
 deny_keywords:
   - demolition
   - gunnery

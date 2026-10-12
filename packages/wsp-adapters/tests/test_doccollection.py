@@ -254,7 +254,7 @@ def test_screen_file_stages(tmp_path: Path) -> None:
             [["SNIPER TRAINING AND EMPLOYMENT", "Approved for public release; distribution is unlimited."]]
         )
     )
-    assert str(screen_file(weapon, rules).decision) == "deny:safety=sniper"
+    assert str(screen_file(weapon, rules).decision) == "deny:safety=sniper training"
     bad = tmp_path / "x.pdf"
     bad.write_bytes(b"<html>not a pdf</html>")
     from wsp_adapters.doccollection.adapter import well_formed
@@ -685,7 +685,7 @@ def test_candidate_round_trip_and_file_names_are_flat() -> None:
 
 
 def test_resolve_cache_survives_a_restart_and_misses_on_changed_listings(tmp_path: Path) -> None:
-    from wsp_adapters.doccollection.adapter import ResolveCache
+    from wsp_adapters.doccollection.adapter import ResolveCache, Resolved
 
     now = [1000.0]
     cand = Candidate(
@@ -696,7 +696,7 @@ def test_resolve_cache_survives_a_restart_and_misses_on_changed_listings(tmp_pat
     first.put(cand, [doc])
     first.close()  # a restart
     again = ResolveCache(tmp_path / "c.sqlite", ttl=100, clock=lambda: now[0])
-    assert again.get(cand) == [doc]
+    assert again.get(cand) == Resolved([doc])
     assert again.get(replace(cand, title="A, revised")) is None  # the listing changed
     now[0] += 101
     assert again.get(cand) is None  # expired: a later cycle resolves again

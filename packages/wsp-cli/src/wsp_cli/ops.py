@@ -508,7 +508,7 @@ def cmd_proposals_show(args: argparse.Namespace, out: TextIO) -> int:
 
 def cmd_proposals_decide(args: argparse.Namespace, out: TextIO) -> int:
     """Accept (write the drafted entry into registry/sources.yaml) or reject a proposal."""
-    lay, cfg, _ = _context(args)
+    lay, cfg, specs = _context(args)
     files = _proposal_files(cfg)
     path = files.find(args.id)
     if path is None:
@@ -519,9 +519,32 @@ def cmd_proposals_decide(args: argparse.Namespace, out: TextIO) -> int:
         print(f"error: proposal {args.id} is already {doc.get('status')}", file=sys.stderr)
         return 2
     now = datetime.now(UTC)
-    if doc.get("doc_review") and lay.root is not None:  # per-document review (doc-collection, D13)
-        rules = doccollections.apply_review_decision(lay.root, doc, accept=args.decision == "accept")
-        out.write(f"{rules}: recorded the decision for every listed document; review and commit it\n")
+    chosen = cast(list[str] | None, getattr(args, "only" if args.decision == "accept" else "deny", None))
+    if doc.get("doc_review"):  # per-document review (doc-collection, D13): decisions per row
+        if lay.root is None:
+            print("error: run document reviews from inside the Whisipedia checkout", file=sys.stderr)
+            return 2
+        if args.decision == "accept" or chosen:
+            try:
+                decided = doccollections.apply_review_decision(
+                    lay.root,
+                    specs,
+                    doc,
+                    allow=args.decision == "accept",
+                    keys=chosen,
+                    proposal=args.id,
+                    at=now,
+                )
+            except doccollections.ReviewDecisionError as exc:
+                print(f"error: {exc}", file=sys.stderr)
+                return 2
+            verb = "allowed" if args.decision == "accept" else "denied"
+            out.write(f"{decided.path}: {verb} {len(decided.keys)} document(s); review and commit it\n")
+        else:
+            out.write("closing the review without a decision on any document (deny rows with --deny KEY)\n")
+    elif chosen:
+        print("error: --only/--deny apply to document reviews only", file=sys.stderr)
+        return 2
     if args.decision == "reject":
         files.decide(args.id, "rejected", at=now, note=args.note)
         _mark_state(cfg, args.id, "rejected")

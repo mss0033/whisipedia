@@ -11,6 +11,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 HISTORICAL_BANNER = "Historical document — methods may be outdated or unsafe."
+# A document the issuer no longer lists ("withdrawn-from-index" names the issuer's index): kept, but
+# the reader is told it may have been withdrawn (2026-10-12 audit, CA-8).
+WITHDRAWN_BANNER = "No longer listed by the issuer — it may have been withdrawn or replaced."
 CURRENCIES = ("current", "superseded", "historical", "rescinded", "withdrawn-from-index")
 
 
@@ -25,13 +28,16 @@ def currency_of(meta: Mapping[str, str]) -> str | None:
 
 def banner_for(meta: Mapping[str, str]) -> str | None:
     """The banner text for a document, or ``None`` for a current document without a warning."""
+    withdrawn = meta.get("currency") == "withdrawn-from-index"
     if is_historical(meta):
-        return HISTORICAL_BANNER
+        return f"{HISTORICAL_BANNER} {WITHDRAWN_BANNER}" if withdrawn else HISTORICAL_BANNER
     explicit = meta.get("banner", "").strip()
     if explicit:
-        return explicit
+        return f"{explicit} {WITHDRAWN_BANNER}" if withdrawn else explicit
     if meta.get("currency") == "superseded":
         return "Superseded edition — a newer edition exists."
     if meta.get("currency") == "rescinded":
         return "Rescinded by the issuer — do not follow."
+    if withdrawn:
+        return WITHDRAWN_BANNER
     return None

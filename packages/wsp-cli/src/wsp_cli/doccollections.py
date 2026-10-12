@@ -34,8 +34,8 @@ import tempfile
 from collections import deque
 from collections.abc import Mapping, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
-from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, TextIO, cast
 
@@ -47,17 +47,32 @@ from wsp_adapters.doccollection.adapter import (
     Extracted,
     Screen,
     Survey,
+    WrongBodyError,
     checked_front_matter,
     download_from_origins,
-    screen_file,
+    fetched_doc,
+    screen_document,
     screen_text,
     true_suffix,
-    well_formed,
 )
-from wsp_adapters.doccollection.catalog import FetchedDoc, build_catalog, read_catalog_file, write_catalog
+from wsp_adapters.doccollection.catalog import (
+    FetchedDoc,
+    build_catalog,
+    catalog_bytes,
+    read_catalog_file,
+    write_catalog,
+)
 from wsp_adapters.doccollection.discovery import Throttle
-from wsp_adapters.doccollection.model import Candidate
-from wsp_adapters.doccollection.policy import Decision, Marking, Rules, Stage, Verdict
+from wsp_adapters.doccollection.model import Candidate, DocumentMeta
+from wsp_adapters.doccollection.policy import (
+    DECISION_KEYS,
+    Decision,
+    Marking,
+    Rules,
+    Stage,
+    Verdict,
+    decisions_path,
+)
 from wsp_cli import bootstrap
 from wsp_core.errors import FetchError
 from wsp_core.model import RemoteFile, SourceSpec, SourceStatus
@@ -128,6 +143,7 @@ def api_keys(cfg: Mapping[str, Any]) -> dict[str, str]:
 
 
 EXIT_LISTING_INCOMPLETE = 4  # `wsp collections fetch`: a listing failed; nothing fetched, retry later
+EXIT_INGEST_PENDING = 5  # `wsp collections fetch`: an earlier fetch of the source awaits `wsp ingest`
 
 
 @dataclass
@@ -372,6 +388,8 @@ class FetchReport:
     incomplete: list[str] = field(default_factory=list[str])  # the listing failed: nothing was fetched
     skipped: int = 0
     alerts: list[str] = field(default_factory=list[str])
+    pending: list[str] = field(default_factory=list[str])  # earlier versions not yet ingested: refused
+    planned: bool = False  # an ingest plan was written (new documents, or a changed catalog)
 
 
 class CollectionFetcher:
@@ -433,7 +451,13 @@ class CollectionFetcher:
         coll = collection_spec(spec)
         if coll is None:
             raise bootstrap.ConfigError(f"{spec.id} is not a document collection")
+        own_partition = partition if spec.partitioned else None
+        if not dry_run:
+            version = self.free_version(spec, version, own_partition)
         report = FetchReport(spec.id, version)
+        if not dry_run and (pending := self.pending_plans(spec, own_partition)):
+            report.pending = pending  # a fetch now would build its catalog without their documents
+            return report
         ctx = Ctx(
             source=coll, fetcher=self.fetcher, workdir=self.workdir / spec.id, user_agent=self.user_agent
         )
@@ -443,8 +467,9 @@ class CollectionFetcher:
         for cand, decision in survey.decisions:
             if decision.verdict is Verdict.REVIEW:
                 report.review.append(_review_row(cand, str(decision)))
-        prev_gen, prev_catalog = self.previous_catalog(spec, partition if spec.partitioned else None)
+        prev_gen, prev_catalog = self.previous_catalog(spec, own_partition)
         held_sha = {m.doc_key: m.sha256 for m in prev_catalog}
+        held_meta = {m.doc_key: m for m in prev_catalog}
         dest_dir = self.incoming / spec.id / version
         docs = survey.allowed[:limit] if limit else survey.allowed
         self._say(
@@ -480,8 +505,8 @@ class CollectionFetcher:
 
         try:
             for cand in docs:
-                if cand.key in held_sha and not cand.size:
-                    report.skipped += 1  # same key held by an earlier generation; size unknown, keep it
+                if unchanged(cand, held_meta.get(cand.key)):
+                    report.skipped += 1  # held, and the listing says the same bytes: not downloaded again
                     continue
                 if pool is not None and cand.resolve != "git":
                     inflight.append(
@@ -600,16 +625,16 @@ class CollectionFetcher:
         *,
         screen: Screen | None = None,
     ) -> None:
-        import hashlib
-
         if path.suffix != ".bundle":
-            path = true_suffix(path)
-            problem = well_formed(path)
-            if problem:
-                report.failed.append((cand.key, problem))
+            try:
+                # A name guessed ".pdf" gets its real office/zip/text suffix; an error or landing page
+                # in its place is a failed download, retried next run (CA-2).
+                path = true_suffix(path)
+                screen = screen_document(path, rules, keys=(cand.key, cand.pub_number))
+            except WrongBodyError as exc:
+                report.failed.append((cand.key, str(exc)))
                 path.unlink(missing_ok=True)
                 return
-            screen = screen_file(path, rules, keys=(cand.key, cand.pub_number))
         elif screen is None:  # a bundle is never kept unscreened
             screen = Screen(Decision(Verdict.REVIEW, "git=unscreened", Stage.CONTENT), Marking(), False)
         if screen.decision.verdict is Verdict.DENY:
@@ -628,29 +653,12 @@ class CollectionFetcher:
             row["quarantined"] = str(target)
             report.held.append(row)
             return
-        digest = hashlib.sha256()
-        with path.open("rb") as fh:
-            while chunk := fh.read(8 << 20):
-                digest.update(chunk)
-        sha = digest.hexdigest()
-        if held_sha.get(cand.key) == sha:
+        doc = fetched_doc(cand, path, screen, file=f"upstream/{path.name}")
+        if held_sha.get(cand.key) == doc.sha256:
             path.unlink()  # byte-identical to the stored edition: nothing new
             report.skipped += 1
             return
-        marking = screen.marking
-        report.fetched.append(
-            FetchedDoc(
-                cand=cand,
-                file=f"upstream/{path.name}",
-                sha256=sha,
-                bytes=path.stat().st_size,
-                decision=str(screen.decision),
-                distribution=marking.distribution or _rights_basis(cand),
-                distribution_text=marking.text,
-                fetched_at=datetime.now(UTC).isoformat(timespec="seconds"),
-                license=cand.rights.removeprefix("license:") if cand.rights.startswith("license:") else "",
-            )
-        )
+        report.fetched.append(doc)
 
     def _finish(
         self,
@@ -658,18 +666,39 @@ class CollectionFetcher:
         coll: SourceSpec,
         report: FetchReport,
         prev_gen: str | None,
-        prev_catalog: Sequence[Any],
+        prev_catalog: Sequence[DocumentMeta],
         survey: Survey,
         dest_dir: Path,
     ) -> None:
         cfg = self.adapter.config(coll)
-        # Items whose resolve failed are still upstream, but their documents' keys are unknown this run:
-        # nothing may be called withdrawn then (the fetch itself goes ahead; a later run resolves them).
-        listed = None if survey.unresolved else {c.key for c in survey.allowed}
-        catalog = build_catalog(prev_catalog, prev_gen, report.fetched, cfg.currency, listed=listed)
+        # Withdrawal is inferred only from a complete listing, and never for an item whose documents are
+        # unknown this run (its resolve failed) or that is listed but held (CA-9, CA-10).
+        listed = (
+            {c.key for c in survey.allowed} | {c.key for c, _d in survey.decisions}
+            if survey.listing_complete
+            else None
+        )
+        catalog = build_catalog(
+            prev_catalog,
+            prev_gen,
+            report.fetched,
+            cfg.currency,
+            listed=listed,
+            protected=survey.protected_keys(),
+            listing={c.key: c for c in survey.allowed},
+            policy=cfg.rules,
+            formats=cfg.formats,
+        )
         if not report.fetched:
-            self._say(f"{spec.id}: nothing new to ingest")
-            return
+            before = catalog_bytes(
+                replace(m, generation=m.generation or (prev_gen or "")) for m in prev_catalog
+            )
+            if catalog_bytes(catalog) == before:
+                self._say(f"{spec.id}: nothing new to ingest")
+                return
+            # Nothing new to fetch, but labels changed (a withdrawal, a rescission, an owner deny, an
+            # edition relabelled): a catalog-only generation records them (CA-14).
+            self._say(f"{spec.id}: no new documents; the catalog changed")
         catalog_path = dest_dir / CATALOG
         sha = write_catalog(catalog_path, catalog)
         targets = [
@@ -697,12 +726,58 @@ class CollectionFetcher:
                 "meta": {"relpath": CATALOG},
             }
         )
-        plan = self.incoming / "_plans" / PLANS_SUBDIR / f"{spec.id}-{report.version}.json"
+        plan = self.plan_path(spec.id, report.version)
         plan.parent.mkdir(parents=True, exist_ok=True)
         tmp = plan.with_name(plan.name + ".partial")
         tmp.write_text(json.dumps(targets, indent=1), encoding="utf-8")
         tmp.replace(plan)
+        report.planned = True
         self._say(f"{spec.id}: {len(report.fetched)} documents ready; plan {plan}")
+
+    # --- versions (CA-15) ------------------------------------------------------------------------
+
+    def plan_path(self, source_id: str, version: str) -> Path:
+        return self.incoming / "_plans" / PLANS_SUBDIR / f"{source_id}-{version}.json"
+
+    def sealed(self, spec: SourceSpec, version: str) -> bool:
+        return (
+            self.vault_root / "library" / spec.vault_domain / spec.id / version / "MANIFEST.json"
+        ).is_file()
+
+    def free_version(self, spec: SourceSpec, version: str, partition: str | None) -> str:
+        """``version``, or the next ``-rN`` cycle when that generation is already sealed: a second fetch
+        on the same day must not overwrite the plan of a sealed generation, whose ingest would then
+        report "already sealed" and drop the new documents silently."""
+        cycle = version[: -len(partition) - 1] if partition and version.endswith(f".{partition}") else version
+        m = re.fullmatch(r"(.+)-r(\d+)", cycle)
+        root, n = (m.group(1), int(m.group(2))) if m else (cycle, 1)
+        current = version
+        while self.sealed(spec, current):
+            n += 1
+            nxt = f"{root}-r{n}"
+            current = partition_generation_id(nxt, partition) if partition else nxt
+        return current
+
+    def pending_plans(self, spec: SourceSpec, partition: str | None) -> list[str]:
+        """Versions of this source (this partition) fetched but not yet sealed. A new fetch builds its
+        catalog from the current generation, so it must wait for them: it would leave their documents
+        out of the newer catalog."""
+        plans = self.incoming / "_plans" / PLANS_SUBDIR
+        if not plans.is_dir():
+            return []
+        pending: list[str] = []
+        for path in sorted(plans.glob(f"{spec.id}-*.json")):
+            try:
+                targets = cast(list[Mapping[str, Any]], json.loads(path.read_text(encoding="utf-8")))
+            except (OSError, ValueError):
+                continue
+            versions = {str(t.get("version")) for t in targets if t.get("source_id") == spec.id}
+            for version in sorted(versions):
+                if partition is not None and partition_of(version) != partition:
+                    continue
+                if not self.sealed(spec, version):
+                    pending.append(version)
+        return pending
 
 
 # Clone and fetch over HTTPS only, refuse redirects (the origin is the URL the registry names), and
@@ -744,8 +819,28 @@ def _pointer(path: Path) -> str | None:
     return value or None
 
 
-def _rights_basis(cand: Candidate) -> str:
-    return cand.rights if cand.rights.startswith("license:") else ""
+REFETCH_AFTER = timedelta(days=180)  # a held document with no listed size or checksum is re-checked
+
+
+def unchanged(cand: Candidate, held: DocumentMeta | None, *, now: datetime | None = None) -> bool:
+    """The listing says ``held`` already has this candidate's bytes, so it is not downloaded again
+    (2026-10-12 audit, CA-13): the listing's MD5 matches the stored bytes' MD5, else its size matches.
+    A listing that gives neither is trusted for :data:`REFETCH_AFTER` after the last fetch, then the
+    document is fetched again, so an issuer's quiet correction is not missed forever. The catalog
+    refreshes a skipped document's metadata from the listing either way."""
+    if held is None or cand.resolve == "git" or not held.sha256:
+        return False
+    if cand.md5 and held.md5:
+        return cand.md5.lower() == held.md5.lower() and (cand.size is None or cand.size == held.bytes)
+    if cand.size is not None:
+        return cand.size == held.bytes
+    try:
+        fetched = datetime.fromisoformat(held.fetched_at)
+    except ValueError:
+        return False
+    if fetched.tzinfo is None:
+        fetched = fetched.replace(tzinfo=UTC)
+    return (now or datetime.now(UTC)) - fetched < REFETCH_AFTER
 
 
 def _review_row(cand: Candidate, rule: str) -> dict[str, str]:
@@ -766,6 +861,32 @@ def withheld_review_row(name: str, url: str, rule: str) -> dict[str, str]:
     return {"key": key, "pub_number": "", "title": key, "url": url, "rule": rule.removeprefix("policy ")}
 
 
+def unproposed_rows(
+    cfg: Mapping[str, Any], source_id: str, rows: Sequence[Mapping[str, str]]
+) -> list[dict[str, str]]:
+    """``rows`` without repeats and without documents an open review proposal of the source already
+    lists (2026-10-12 audit, CA-16): a held document is proposed once, not again every run."""
+    from wsp_orchestrator.curator.proposals import ProposalFiles
+
+    try:
+        root: Path | None = bootstrap.paths(cfg).proposals
+    except bootstrap.ConfigError:  # no index root: no proposal files either
+        root = None
+    listed: set[str] = set()
+    if root is not None and root.is_dir():
+        for doc in ProposalFiles(root).list(status="open"):
+            review = cast(Mapping[str, Any], doc.get("doc_review") or {})
+            if review.get("source_id") == source_id:
+                listed |= {
+                    str(r.get("key")) for r in cast(list[Mapping[str, Any]], review.get("documents") or [])
+                }
+    out: dict[str, dict[str, str]] = {}
+    for row in rows:
+        if row["key"] not in listed:
+            out.setdefault(row["key"], dict(row))
+    return list(out.values())
+
+
 def write_review_proposal(
     cfg: Mapping[str, Any], spec: SourceSpec, version: str, rows: Sequence[Mapping[str, str]]
 ) -> Path | None:
@@ -779,9 +900,18 @@ def write_review_proposal(
 
     paths = bootstrap.paths(cfg)
     key = f"doc-review:{spec.id}:{version}"
+    more = (
+        ["", f"... and {len(rows) - 200} more (every row is under `doc_review`)."] if len(rows) > 200 else []
+    )
     body = "\n".join(
         [f"{len(rows)} document(s) of `{spec.id}` need owner review (research doc §5.5).", ""]
-        + [f"- `{r.get('pub_number') or r['key']}` {r['title']} ({r['rule']})" for r in rows[:200]]
+        + [f"- `{r['key']}` {r['title']} ({r['rule']})" for r in rows[:200]]
+        + more
+        + [
+            "",
+            "Decide per row: `wsp proposals accept ID [--only KEY ...]` allows rows; "
+            "`wsp proposals reject ID [--deny KEY ...]` closes the proposal and denies only the named rows.",
+        ]
     )
     proposal = Proposal(
         candidate=PolicyCandidate(
@@ -819,28 +949,119 @@ def write_review_proposal(
     return path
 
 
-def apply_review_decision(repo_root: Path, doc: Mapping[str, Any], *, accept: bool) -> Path | None:
-    """Record an owner decision in ``registry/filters/<source>.yaml`` so it is never asked again."""
+class ReviewDecisionError(ValueError):
+    """A review decision that cannot be recorded (no rules file, unknown rows)."""
+
+
+@dataclass(frozen=True, slots=True)
+class ReviewDecision:
+    path: Path  # the machine-owned decisions file written
+    keys: tuple[str, ...]  # document keys decided
+
+
+DECISIONS_HEADER = """\
+# Owner review decisions for {source} (machine-owned; written by `wsp proposals accept|reject`).
+# One entry per document the owner decided, keyed by document key (one edition). The hand-written
+# rules, with their comments, are in {rules}; this file is loaded next to it (policy.load_rules).
+# Remove an entry to undo a decision; anything else is rewritten by the next decision.
+"""
+
+
+def apply_review_decision(
+    repo_root: Path,
+    specs: Sequence[SourceSpec],
+    doc: Mapping[str, Any],
+    *,
+    allow: bool,
+    keys: Sequence[str] | None = None,
+    proposal: int | None = None,
+    at: datetime | None = None,
+) -> ReviewDecision:
+    """Record the owner's decision on rows of a document-review proposal (2026-10-12 audit, CA-1).
+
+    ``allow``: the rows named by ``keys`` (every row when ``None``) are allowed. Otherwise only the
+    rows named by ``keys`` are denied; denying needs explicit keys, so closing a proposal never
+    denies a batch. Decisions are keyed by document key (one edition, CA-16): an allowed FM 5-0 does
+    not allow its next edition. A row the content screen held (``review:safety=...``) is released
+    with ``allow_content_review``; nothing here lifts a deny.
+
+    Decisions go to the machine-owned :func:`~wsp_adapters.doccollection.policy.decisions_path` of
+    the source's ``filter.rules`` file, never into the hand-written rules file, and a source without
+    a rules file is refused: a decision written where nothing loads it would wait to deny or allow
+    documents the day someone wires it.
+    """
     review = cast(Mapping[str, Any], doc.get("doc_review") or {})
     source_id = str(review.get("source_id") or "")
-    if not source_id:
-        return None
-    rows = cast(list[Mapping[str, str]], review.get("documents") or [])
-    keys = sorted(
-        {str(r.get("pub_number") or r.get("key")) for r in rows if r.get("pub_number") or r.get("key")}
-    )
-    path = repo_root / "registry" / "filters" / f"{source_id}.yaml"
-    data = cast(
-        dict[str, Any], (yaml.safe_load(path.read_text(encoding="utf-8")) if path.is_file() else None) or {}
-    )
-    field_name = "allow_documents" if accept else "deny_documents"
-    current = [str(x) for x in cast(list[object], data.get(field_name) or [])]
-    data[field_name] = sorted(set(current) | set(keys))
+    spec = next((s for s in specs if s.id == source_id), None)
+    if spec is None:
+        raise ReviewDecisionError(f"source {source_id!r} of this review is not in the registry")
+    acc = cast(Mapping[str, Any], spec.raw.get("access") or {})
+    rules_name = cast(Mapping[str, Any], acc.get("filter") or {}).get("rules")
+    if not rules_name:
+        raise ReviewDecisionError(
+            f"{source_id} has no filter.rules file in the registry: a decision would not be loaded. "
+            f"Add `rules: registry/filters/{source_id}.yaml` to its filter first."
+        )
+    rules_file = Path(str(rules_name))
+    rules_file = rules_file if rules_file.is_absolute() else repo_root / rules_file
+    if not rules_file.is_file():
+        raise ReviewDecisionError(f"{rules_file} (filter.rules of {source_id}) does not exist")
+    rows = {
+        str(r.get("key")): r
+        for r in cast(list[Mapping[str, str]], review.get("documents") or [])
+        if r.get("key")
+    }
+    if keys is None:
+        if not allow:
+            raise ReviewDecisionError("name the rows to deny (--deny KEY); a rejection alone denies nothing")
+        chosen = list(rows)
+    else:
+        unknown = sorted(set(keys) - set(rows))
+        if unknown:
+            raise ReviewDecisionError(f"not rows of this review: {', '.join(unknown)}")
+        chosen = list(dict.fromkeys(keys))
+    if not chosen:
+        raise ReviewDecisionError("the review lists no documents")
+    path = decisions_path(rules_file)
+    data: dict[str, Any] = {}
+    if path.is_file():
+        data = dict(cast(Mapping[str, Any], yaml.safe_load(path.read_text(encoding="utf-8")) or {}))
+    lists = {k: [str(x) for x in cast(list[object], data.get(k) or [])] for k in DECISION_KEYS}
+    log = list(cast(list[Mapping[str, Any]], data.get("log") or []))
+    when = (at or datetime.now(UTC)).isoformat(timespec="seconds")
+    for key in chosen:
+        rule = str(rows[key].get("rule") or "")
+        content_hold = rule.startswith(
+            "review:safety="
+        )  # the content screen's hold, not the metadata stage's
+        wanted = (
+            {"allow_documents", *(("allow_content_review",) if content_hold else ())}
+            if allow
+            else {"deny_documents"}
+        )
+        for name in DECISION_KEYS:  # a later decision on a document replaces the earlier one
+            present = key in lists[name]
+            if name in wanted and not present:
+                lists[name].append(key)
+            elif name not in wanted and present:
+                lists[name].remove(key)
+        entry = {"key": key, "decision": "allow" if allow else "deny", "rule": rule, "at": when}
+        log.append({**entry, **({"proposal": proposal} if proposal is not None else {})})
+    body: dict[str, Any] = {k: sorted(v) for k, v in lists.items()}
+    body["log"] = log
     path.parent.mkdir(parents=True, exist_ok=True)
+    header = DECISIONS_HEADER.format(
+        source=source_id,
+        rules=rules_file.relative_to(repo_root).as_posix()
+        if rules_file.is_relative_to(repo_root)
+        else str(rules_file),
+    )
     tmp = path.with_name(path.name + ".partial")
-    tmp.write_text(yaml.safe_dump(data, sort_keys=False, allow_unicode=True, width=110), encoding="utf-8")
+    tmp.write_text(
+        header + yaml.safe_dump(body, sort_keys=False, allow_unicode=True, width=110), encoding="utf-8"
+    )
     tmp.replace(path)
-    return path
+    return ReviewDecision(path, tuple(chosen))
 
 
 def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
@@ -886,12 +1107,25 @@ def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
         dry_run=args.dry_run,
         partition=partition,
     )
+    if report.pending:
+        out.write(
+            f"{spec.id}: fetched but not ingested yet: {', '.join(report.pending)}; "
+            f"run `wsp ingest --source {spec.id}` first (nothing fetched)\n"
+        )
+        return EXIT_INGEST_PENDING
+    if report.version != version:
+        out.write(f"{spec.id}: {version} is already sealed; fetching as {report.version}\n")
+        version = report.version
     if report.incomplete:
         out.write(f"{spec.id}/{version}: the listing is incomplete; nothing fetched (try again later):\n")
         for why in report.incomplete[:20]:
             out.write(f"  {why}\n")
         return EXIT_LISTING_INCOMPLETE
-    rows = [*report.review, *report.held]
+    rows = (
+        [*report.review, *report.held]
+        if args.dry_run
+        else unproposed_rows(cfg, spec.id, [*report.review, *report.held])
+    )
     proposal = None if args.dry_run else write_review_proposal(cfg, spec, version, rows)
     out.write(
         f"{spec.id}/{version}: fetched {len(report.fetched)}, skipped {report.skipped}, "
@@ -911,7 +1145,7 @@ def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
         side.parent.mkdir(parents=True, exist_ok=True)
         side.write_text(json.dumps(rows, indent=1), encoding="utf-8")
         out.write(f"review list (no orchestrator state DB for proposals): {side}\n")
-    if report.fetched:
+    if report.planned:
         out.write(f"next: wsp ingest --source {spec.id}\n")
     return 1 if report.alerts else 0
 

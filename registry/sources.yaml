@@ -128,6 +128,7 @@ sources:
     license: CC0-1.0
     legal_basis: public-domain
     access: {adapter: git-mirror}
+    index: false  # stored as a git bundle; no refine adapter reads bundles yet (2026-10-12 audit, CA-12)
     update: {strategy: mirror}
     size: {bytes: 15e9, measured: false, as_of: 2026-10-09}
 
@@ -152,6 +153,7 @@ sources:
     license: CC-BY-4.0
     legal_basis: open-license
     access: {adapter: git-mirror}
+    index: false  # stored as a git bundle; no refine adapter reads bundles yet (2026-10-12 audit, CA-12)
     update: {strategy: mirror}
     size: {bytes: 8e9, measured: false, as_of: 2026-10-09}
 
@@ -829,6 +831,7 @@ sources:
     license: LicenseRef-US-Gov-PD
     legal_basis: public-domain
     access: {adapter: git-mirror, endpoints: ["https://github.com/usnistgov/oscal-content"]}
+    index: false  # stored as a git bundle; no refine adapter reads bundles yet (2026-10-12 audit, CA-12)
     update: {cadence: P3M, strategy: mirror}
     size: {bytes: 93.7e6, measured: true, as_of: 2026-10-10}
     notes: Score 4.4. Size is the GitHub repository size.
@@ -842,6 +845,7 @@ sources:
     license: LicenseRef-MITRE-terms-of-use
     legal_basis: open-license
     access: {adapter: git-mirror, endpoints: ["https://github.com/mitre-attack/attack-stix-data", "https://cwe.mitre.org/data/downloads.html"]}
+    index: false  # stored as a git bundle; no refine adapter reads bundles yet (2026-10-12 audit, CA-12)
     update: {cadence: P3M, strategy: mirror}
     size: {attack_repo_bytes: 132.4e6, measured: true, as_of: 2026-10-10}
     notes: Score 4.2. Royalty-free licence with attribution. Defender taxonomies only; no exploit code (boundary §3.2).
@@ -929,10 +933,10 @@ sources:
         - {<<: *apd, label: apd-fm, url: "https://armypubs.army.mil/ProductMaps/PubForm/FM.aspx"}
         - {<<: *apd, label: apd-atp, url: "https://armypubs.army.mil/ProductMaps/PubForm/ATP.aspx"}
         - {<<: *apd, label: apd-tc, url: "https://armypubs.army.mil/ProductMaps/PubForm/TC.aspx"}
-      filter: {distribution: {require: [A], read_from: pdf-front-matter}, rules: registry/filters/army-pubs-public.yaml, default: allow}
+      filter: {distribution: {require: [A]}, rules: registry/filters/army-pubs-public.yaml, default: allow}
     update: {cadence: P3M, strategy: snapshot-retention}
     size: {bytes: 30e9, measured: false, as_of: 2026-10-10}
-    notes: Score 4.3. The index has no distribution column, so the gate reads the PDF front matter (ADP 1 PDF measured at 8.2 MB). Series allow-list (planning, leadership, sustainment, engineering, medical, physical security, land navigation) and deny-list (fires, targeting, munitions, weapons, demolitions) per research doc §3.3 and §5.2; everything else goes to owner review. The rules file is created with the adapter.
+    notes: Score 4.3. The index has no distribution column, so the gate reads the PDF front matter (ADP 1 PDF measured at 8.2 MB). Series allow-list (planning, leadership, sustainment, engineering, medical, physical security, land navigation) and deny-list (fires, targeting, munitions, weapons, demolitions) per research doc §3.3 and §5.2; everything else goes to owner review. The rules file is created with the adapter. PDF downloads from armypubs.army.mil/epubs failed TLS verification on 2026-10-12 (CERTIFICATE_VERIFY_FAILED) while the listing pages loaded (2026-10-12 audit, CA-20), so document fetches fail until the certificate chain verifies.
 
   - id: joint-publications
     name: Joint Publications (Joint Electronic Library, public set)
@@ -1048,6 +1052,7 @@ sources:
     license: LicenseRef-US-Gov-PD
     legal_basis: public-domain
     access: {adapter: git-mirror, endpoints: ["https://github.com/HistoryAtState/frus"]}
+    index: false  # stored as a git bundle; no refine adapter reads bundles yet (2026-10-12 audit, CA-12)
     update: {cadence: P3M, strategy: mirror}
     size: {bytes: 14.83e9, measured: true, as_of: 2026-10-10}
     notes: Score 4.6. The repository README states the files are in the public domain. Size is the GitHub repository size.
@@ -1123,10 +1128,12 @@ sources:
       origins: [prd-tnm.s3.amazonaws.com, thor-f5.er.usgs.gov]
       discovery:
         - {kind: s3-listing, label: htmc-geopdf, bucket_url: "https://prd-tnm.s3.amazonaws.com", prefix: "StagedProducts/Maps/HistoricalTopo/PDF/", key_pattern: "\\.pdf$", partition: "HistoricalTopo/PDF/([A-Z]{2})/", partition_in_prefix: true}
-        - {kind: s3-listing, label: htmc-geotiff, bucket_url: "https://prd-tnm.s3.amazonaws.com", prefix: "StagedProducts/Maps/HistoricalTopo/GeoTIFF/", key_pattern: "\\.(tif|zip)$", partition: "HistoricalTopo/GeoTIFF/([A-Z]{2})/", partition_in_prefix: true}
       filter: {allow_all: true, allow_image_only: true}  # scanned maps: no text layer to screen
       currency: {collection: historical}
-      formats: {geopdf: true, geotiff: optional}
+      # GeoPDF only (2026-10-12 audit, CA-11): the GeoTIFF of each sheet is the same map without a text
+      # layer; it doubled every download and was held. Stored .tif/.zip files leave the index (catalog
+      # "excluded: format=tif") at the next refine.
+      formats: [pdf]
       mirrors:
         - {channel: "USGS prd-tnm S3 bucket (agency-owned, public)", status: verified, verified: 2026-10-10, note: "ListObjects 200: StagedProducts/Maps/HistoricalTopo/{GeoTIFF,PDF}/; ETag = MD5 for single-part objects"}
         - {channel: "TNM Access API", status: verified, verified: 2026-10-10, note: "186,061 'Historical Topographic Maps' products with sizeInBytes"}
