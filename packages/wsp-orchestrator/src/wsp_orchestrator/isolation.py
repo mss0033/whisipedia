@@ -5,7 +5,7 @@ libzim) never run inside it. :class:`IsolatedRunner` starts ``python -m wsp_orch
 <module:function>`` as a **transient systemd unit** in ``whisipedia-background.slice``::
 
     systemd-run --user --wait --collect --slice=whisipedia-background.slice
-      -p MemoryHigh=5G -p MemoryMax=6G -p MemorySwapMax=512M -p KillMode=mixed -p TimeoutStopSec=60 ...
+      -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M -p KillMode=mixed -p TimeoutStopSec=60 ...
 
 and reads how it ended:
 
@@ -66,8 +66,10 @@ class ChildStepError(RuntimeError):
 class UnitLimits:
     """Resource properties of a transient step unit."""
 
-    memory_high: str = "5G"
-    memory_max: str = "6G"
+    # One heavy step at a time (the HEAVY lock); sized into whisipedia-background.slice next to the
+    # orchestrator and the fetch lanes (deploy/systemd/whisipedia-background.slice, audit 2026-10-12 H1).
+    memory_high: str = "3G"
+    memory_max: str = "4G"
     memory_swap_max: str = "512M"
     timeout_stop_sec: int = 60
     cpu_weight: int = 20

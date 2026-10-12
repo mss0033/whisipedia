@@ -41,6 +41,27 @@ NAS share is not mounted yet (WSL just started), the unit fails and systemd retr
   the Navigator.
 * Stop: `systemctl --user stop whisipedia-orchestrator` (graceful: in-flight steps finish, the rest
   resumes on the next start).
+* A stalled API's Python stacks: `systemctl --user kill --kill-whom=main -s USR1 whisipedia-api`
+  (stacks go to the journal). Without `--kill-whom=main` the signal also reaches the ZIM worker
+  processes, which have no handler for it and die.
+
+## Memory budget and background jobs
+
+Background work shares `whisipedia-background.slice`; the slice file explains the budget for a 16 GiB
+WSL (API 5 GiB, slice 8 GiB, 3 GiB for the kernel and the desktop). Inside it, the orchestrator,
+the download lanes (`whisipedia-background-fetch.slice`) and one heavy job at a time each have their
+share, and the shares fit under the slice's MemoryHigh, so one job cannot throttle the others.
+
+* Ad-hoc jobs: `tools/wsp-bg NAME [MEMORY_MAX] -- COMMAND...` (heavy lock, default 4G) or
+  `tools/wsp-bg --fetch NAME -- COMMAND...` (downloads, default 1G). It refuses a MEMORY_MAX at or
+  above the slice's MemoryHigh. SIGTERM (`systemctl --user stop whisipedia-job-NAME`) reaches the job.
+* Collection lanes: `tools/lanes/lane-run.sh` (see the document-collections runbook, "Exit codes").
+* A rebuild that needs more than 4G: stop the lanes, then
+  `tools/wsp-bg --wait index-rebuild 6G -- tools/lanes/rebuild-resume.sh <done file> SOURCE...`;
+  it holds the heavy lock for the whole rebuild.
+* Resuming after a reboot: `tools/lanes/whisipedia-resume.service` (install by hand, see the file)
+  runs `tools/lanes/resume-after-reboot.sh`, which waits up to 15 minutes for the NAS and restarts
+  the lanes in `~/.local/state/whisipedia/lanes.conf` and a rebuild in `index/rebuild.conf`.
 
 ## Uninstall
 

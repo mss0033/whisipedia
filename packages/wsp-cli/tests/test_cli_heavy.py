@@ -191,7 +191,7 @@ def test_heavy_settings_from_config() -> None:
     assert (s.limits.memory_max, s.limits.memory_high, s.limits.memory_swap_max) == ("4G", "3G", "512M")
     assert s.refine_timeout == 7200
     assert s.index_timeout is None
-    assert HeavySettings.from_config({}).limits.memory_max == "6G"
+    assert HeavySettings.from_config({}).limits.memory_max == "4G"
 
 
 def test_storage_probe(tmp_path: Path) -> None:
@@ -290,6 +290,7 @@ def test_orchestrator_unit_hygiene() -> None:
     assert u["IOSchedulingClass"] == ["best-effort"]
     assert "WSP_HEAVY_LAUNCHER=systemd" in u["Environment"]
     assert u["MemoryMax"] == ["2G"], "a control plane: heavy work runs in its own units"
+    assert u["MemoryLow"] == ["256M"], "the control plane is not swapped out under pressure (H1)"
     idx = _unit("whisipedia-index.service")
     assert idx["SuccessExitStatus"] == ["3"]  # busy lock: skipped, not failed
     assert idx["KillMode"] == ["mixed"]
@@ -314,7 +315,7 @@ def test_uninstall_leaves_the_owners_own_units_alone(tmp_path: Path) -> None:
     assert own.exists()
 
 
-def _wsp_bg(tmp_path: Path, *args: str) -> list[str]:
+def _run_wsp_bg(tmp_path: Path, *args: str) -> tuple[int, list[str], str]:
     """Run tools/wsp-bg with a fake systemd-run that prints its argv (no unit is started)."""
     import subprocess
 
@@ -325,23 +326,144 @@ def _wsp_bg(tmp_path: Path, *args: str) -> list[str]:
     fake = fakebin / "systemd-run"
     fake.write_text('#!/bin/sh\nfor a in "$@"; do printf "%s\\n" "$a"; done\n')
     fake.chmod(0o755)
-    env = {"PATH": f"{fakebin}:/usr/bin:/bin", "WSP_LOCK_DIR": str(tmp_path / "locks"), "HOME": str(tmp_path)}
+    env = {
+        "PATH": f"{fakebin}:/usr/bin:/bin",
+        "WSP_LOCK_DIR": str(tmp_path / "locks"),
+        "HOME": str(tmp_path),
+        "WSP_BG_SLICE_HIGH": "7G",  # the template's MemoryHigh, whatever the test machine runs
+    }
     done = subprocess.run(
-        [str(ROOT / "tools" / "wsp-bg"), *args], capture_output=True, text=True, env=env, check=True
+        [str(ROOT / "tools" / "wsp-bg"), *args], capture_output=True, text=True, env=env, check=False
     )
-    return done.stdout.splitlines()
+    return done.returncode, done.stdout.splitlines(), done.stderr
+
+
+def _wsp_bg(tmp_path: Path, *args: str) -> list[str]:
+    code, argv, err = _run_wsp_bg(tmp_path, *args)
+    assert code == 0, err
+    return argv
 
 
 def test_wsp_bg_holds_the_heavy_lock(tmp_path: Path) -> None:
     argv = _wsp_bg(tmp_path, "embed", "6G", "--", "python", "job.py")
     lock = str(tmp_path / "locks" / "heavy.lock")
-    tail = argv[argv.index("flock") :]
-    assert tail == ["flock", "--nonblock", "--conflict-exit-code", "75", lock, "python", "job.py"]
+    shell = argv.index("/bin/sh")
+    assert argv[shell + 1] == "-c"
+    take, *rest = argv[shell + 2 :]
+    assert "flock --nonblock 9 || exit 75" in take
+    assert take.endswith('exec "$@"'), "the job replaces the shell: it is the unit's main process (M5)"
+    assert rest == [lock, "python", "job.py"]
+    assert "WSP_INHERITED_LOCKS=heavy:9" in argv, "steps inside the job run under its lock (M2)"
     assert "--slice=whisipedia-background.slice" in argv
     assert "MemoryMax=6G" in argv
+    assert "MemoryHigh=4608M" in argv
+    assert "KillMode=control-group" in argv, "SIGTERM reaches the real job (M5)"
+    assert "TimeoutStopSec=120" in argv
     assert "IOSchedulingClass=best-effort" in argv
     waiting = _wsp_bg(tmp_path, "--wait", "embed", "--", "python", "job.py")
-    assert waiting[waiting.index("flock") :] == ["flock", lock, "python", "job.py"]
+    take = waiting[waiting.index("/bin/sh") + 2]
+    assert "flock 9 &&" in take
+    assert "--nonblock" not in take
+    assert "MemoryMax=4G" in waiting
+    assert "MemoryHigh=3072M" in waiting
     light = _wsp_bg(tmp_path, "--no-heavy-lock", "small", "--", "python", "job.py")
-    assert "flock" not in light
+    assert "/bin/sh" not in light
+    assert not any("WSP_INHERITED_LOCKS" in a for a in light)
     assert light[-2:] == ["python", "job.py"]
+
+
+def test_wsp_bg_fetch_jobs_have_their_own_sub_budget(tmp_path: Path) -> None:
+    argv = _wsp_bg(tmp_path, "--fetch", "lane-cia", "--", "tools/lanes/lane-run.sh", "lane-cia", "-", "x")
+    assert "--slice=whisipedia-background-fetch.slice" in argv
+    assert "MemoryMax=1G" in argv
+    assert "/bin/sh" not in argv, "a download job never takes the heavy lock"
+
+
+@pytest.mark.parametrize("size", ["7G", "8G", "7168M", "lots"])
+def test_wsp_bg_refuses_a_job_as_big_as_the_whole_slice(tmp_path: Path, size: str) -> None:
+    """Audit 2026-10-12 H1: a job at the slice's MemoryHigh throttles every other background job."""
+    code, argv, err = _run_wsp_bg(tmp_path, "rebuild", size, "--", "python", "job.py")
+    assert code == 2
+    assert argv == []
+    assert "MemoryHigh" in err or "a size" in err
+
+
+def test_the_job_inherits_the_heavy_lock_and_nobody_else_can_forge_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """What wsp-bg runs inside the unit: the job holds HEAVY through fd 9, and ``exclusive(HEAVY)`` in it
+    (a `wsp index build` step of a rebuild) accepts that lock; anyone else still finds it held."""
+    import subprocess
+    import sys
+
+    from wsp_cli.locks import LockHeldError
+
+    argv = _wsp_bg(tmp_path, "rebuild", "6G", "--", "python", "job.py")
+    shell = argv.index("/bin/sh")
+    take, lock = argv[shell + 2], argv[shell + 3]
+    probe = (
+        "import sys; from pathlib import Path; from wsp_cli.locks import HEAVY, exclusive\n"
+        "with exclusive(Path(sys.argv[1]), HEAVY): print('inherited')\n"
+    )
+    child = [sys.executable, "-c", probe, str(tmp_path / "locks")]
+    env = {"PATH": "/usr/bin:/bin", "WSP_INHERITED_LOCKS": "heavy:9"}
+    done = subprocess.run(["/bin/sh", "-c", take, lock, *child], capture_output=True, text=True, env=env)
+    assert (done.returncode, done.stdout.strip()) == (0, "inherited"), done.stderr
+    with exclusive(tmp_path / "locks", HEAVY):  # held elsewhere: the job does not start
+        busy = subprocess.run(["/bin/sh", "-c", take, lock, *child], capture_output=True, text=True, env=env)
+        assert (busy.returncode, busy.stdout) == (75, "")
+        # A variable naming some other descriptor never stands in for the lock.
+        monkeypatch.setenv("WSP_INHERITED_LOCKS", "heavy:0")
+        with pytest.raises(LockHeldError), exclusive(tmp_path / "locks", HEAVY):
+            pass
+
+
+def _api_health(tmp_path: Path, *, started: str, full_avg60: str) -> tuple[str, list[str]]:
+    """Run tools/wsp-api-health against a fake systemctl and an API that never answers."""
+    import subprocess
+
+    from test_cli_autonomy import ROOT
+
+    fakebin = tmp_path / "bin"
+    fakebin.mkdir(parents=True, exist_ok=True)
+    calls = tmp_path / "calls"
+    scripts = {
+        "systemctl": f'#!/bin/sh\necho "$*" >> {calls}\ncase "$*" in *show*) echo "{started}" ;; esac\n',
+        "curl": "#!/bin/sh\nprintf 000\n",
+        "sleep": "#!/bin/sh\n",
+    }
+    for name, text in scripts.items():
+        (fakebin / name).write_text(text)
+        (fakebin / name).chmod(0o755)
+    pressure = tmp_path / "memory"
+    pressure.write_text(
+        "some avg10=1.00 avg60=1.00 avg300=1.00 total=1\n"
+        f"full avg10=0.50 avg60={full_avg60} avg300=0.50 total=1\n"
+    )
+    env = {"PATH": f"{fakebin}:/usr/bin:/bin", "WSP_API_HEALTH_PRESSURE": str(pressure), "TZ": "UTC"}
+    done = subprocess.run(
+        [str(ROOT / "tools" / "wsp-api-health")], capture_output=True, text=True, env=env, check=True
+    )
+    return done.stdout, calls.read_text().splitlines() if calls.exists() else []
+
+
+def test_api_health_restarts_a_silent_api_but_not_under_machine_wide_pressure(tmp_path: Path) -> None:
+    """Audit 2026-10-12 L3: no restart storm while the whole machine waits for memory."""
+    from datetime import UTC, datetime, timedelta
+
+    hour_ago = (datetime.now(UTC) - timedelta(hours=1)).strftime("%a %Y-%m-%d %H:%M:%S UTC")
+    out, calls = _api_health(tmp_path, started=hour_ago, full_avg60="3.10")
+    assert "restarting whisipedia-api.service" in out
+    assert calls[-1] == "--user restart whisipedia-api.service"
+    out, calls = _api_health(tmp_path / "p", started=hour_ago, full_avg60="64.60")
+    assert "memory pressure" in out
+    assert "not restarting" in out
+    assert not any("restart" in c for c in calls)
+
+
+@pytest.mark.parametrize("started", ["", "n/a"])
+def test_api_health_waits_when_the_start_time_is_unknown(tmp_path: Path, started: str) -> None:
+    """An empty ActiveEnterTimestamp used to break the shell arithmetic: the check errored out."""
+    out, calls = _api_health(tmp_path, started=started, full_avg60="0.00")
+    assert out == ""
+    assert not any("restart" in c for c in calls)
