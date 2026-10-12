@@ -773,6 +773,13 @@ class RefineryReader:
             i += 1
         return None
 
+    def doc_id_at(self, i: int) -> str:
+        """The doc id of the ``i``-th live document (``0 <= i < len(self)``, in id-hash order: a uniform
+        ``i`` is a uniform document). One row group read; the id index is memory-mapped."""
+        _, parts, rgs, rows = self._id_index()
+        table = self._row_group(int(parts[i]), int(rgs[i]), ("doc_id",))
+        return cast(str, table.column(0)[int(rows[i])].as_py())
+
     def get(self, doc_id: str) -> DocRecord | None:
         row = self.lookup(doc_id)
         return None if row is None else record_from_row(row)

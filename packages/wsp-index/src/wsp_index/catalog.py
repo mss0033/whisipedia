@@ -39,7 +39,6 @@ import re
 import threading
 import time
 import unicodedata
-from bisect import bisect_right
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date
@@ -533,36 +532,6 @@ class _Entry:
     categories: tuple[Category, ...]
 
 
-@dataclass(frozen=True, slots=True)
-class _RowIndex:
-    """Cumulative row counts of every row group of a Refinery generation (from Parquet footers)."""
-
-    parts: tuple[Path, ...]
-    starts: tuple[int, ...]  # global first row of each (part, row group)
-    groups: tuple[tuple[int, int], ...]  # (part index, row group index)
-    total: int
-
-    @classmethod
-    def load(cls, reader: RefineryReader) -> _RowIndex:
-        starts: list[int] = []
-        groups: list[tuple[int, int]] = []
-        n = 0
-        parts = tuple(reader.parts)
-        for i, path in enumerate(parts):
-            meta = pq.ParquetFile(path).metadata
-            for rg in range(meta.num_row_groups):
-                starts.append(n)
-                groups.append((i, rg))
-                n += meta.row_group(rg).num_rows
-        return cls(parts, tuple(starts), tuple(groups), n)
-
-    def doc_id(self, row: int) -> DocId:
-        g = bisect_right(self.starts, row) - 1
-        part, rg = self.groups[g]
-        table = pq.ParquetFile(self.parts[part]).read_row_group(rg, columns=["doc_id"])  # pyright: ignore[reportUnknownMemberType]
-        return DocId(cast(str, table.column(0)[row - self.starts[g]].as_py()))
-
-
 def _stable_index(day: date, n: int, salt: str = "") -> int:
     digest = hashlib.blake2b(f"{salt}{day.isoformat()}".encode(), digest_size=8).digest()
     return int.from_bytes(digest, "little") % n
@@ -591,7 +560,7 @@ class RefineryCatalog:
         self._monotonic = monotonic
         self._lock = threading.Lock()
         self._entries: dict[str, tuple[float, _Entry | None]] = {}
-        self._rows: dict[tuple[str, str], _RowIndex] = {}
+        self._readers: dict[tuple[str, str], RefineryReader] = {}  # current generation of each source
 
     # --- precomputed data ---
 
@@ -635,45 +604,47 @@ class RefineryCatalog:
             found.update(p.name for p in self.refinery_root.iterdir() if p.is_dir())
         return sorted(found)
 
-    def _row_index(self, source_id: str) -> _RowIndex | None:
+    def _reader(self, source_id: str) -> RefineryReader | None:
+        """The current generation's reader (cheap until a random pick memory-maps its id index)."""
         gen = current_generation(self.refinery_root, source_id)
         if gen is None:
             return None
         key = (source_id, gen)
         with self._lock:
-            cached = self._rows.get(key)
+            cached = self._readers.get(key)
         if cached is not None:
             return cached
         gen_dir = generation_dir(self.refinery_root, source_id, gen)
         if not is_sealed(gen_dir):
             return None
-        idx = _RowIndex.load(RefineryReader(gen_dir))
+        reader = RefineryReader(gen_dir, cache_row_groups=2)
         with self._lock:
-            for old in [k for k in self._rows if k[0] == source_id]:
-                del self._rows[old]
-            self._rows[key] = idx
-        return idx
+            for old in [k for k in self._readers if k[0] == source_id]:
+                del self._readers[old]
+            self._readers[key] = reader
+        return reader
 
     # --- Catalog ---
 
     def doc_count(self, source_id: str) -> int | None:
-        idx = self._row_index(source_id)
-        if idx is not None:
-            return idx.total
+        reader = self._reader(source_id)
+        if reader is not None:
+            return len(reader)  # from _SUCCESS.json: no Parquet footer is read
         entry = self._entry(source_id)
         return None if entry is None else int(entry.data.get("doc_count", 0))
 
     def random_doc(self, *, sources: Sequence[str] | None, rng: random.Random) -> DocId | None:
-        pools = [(s, self._row_index(s)) for s in (sorted(sources) if sources else self._known_sources())]
-        sized = [(s, idx) for s, idx in pools if idx is not None and idx.total > 0]
-        total = sum(idx.total for _, idx in sized)
+        """A uniformly random live document of ``sources`` (all known sources by default)."""
+        pools = [(s, self._reader(s)) for s in (sorted(sources) if sources else self._known_sources())]
+        sized = [(r, len(r)) for _, r in pools if r is not None and len(r) > 0]
+        total = sum(n for _, n in sized)
         if total == 0:
             return None
-        n = rng.randrange(total)
-        for _, idx in sized:
-            if n < idx.total:
-                return idx.doc_id(n)
-            n -= idx.total
+        k = rng.randrange(total)
+        for reader, n in sized:
+            if k < n:
+                return DocId(reader.doc_id_at(k))
+            k -= n
         return None  # pragma: no cover - unreachable
 
     def recent(
