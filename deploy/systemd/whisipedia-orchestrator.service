@@ -44,10 +44,13 @@ Nice=19
 CPUWeight=20
 # Shared budget with every other background job (whisipedia-background.slice). The daemon is a small
 # control plane: refine, index and content profiles run as transient units
-# (whisipedia-step-*.service, systemd-run in the same slice, MemoryMax=6G each by default, one at a
+# (whisipedia-step-*.service, systemd-run in the same slice, MemoryMax=4G each by default, one at a
 # time through the machine-wide "heavy" lock), so its own ceiling is small. OOMScoreAdjust: if the
-# kernel must kill, it kills background work before anything the owner is using.
+# kernel must kill, it kills background work before anything the owner is using. MemoryLow: under
+# pressure the kernel reclaims the other background units first, so the control plane is not swapped
+# out (audit 2026-10-12 H1: it was 5 MB resident and 204 MB in swap while a rebuild ran).
 Slice=whisipedia-background.slice
+MemoryLow=256M
 MemoryHigh=1536M
 MemoryMax=2G
 MemorySwapMax=512M

@@ -82,6 +82,7 @@ from wsp_core.model import (
 from wsp_core.partitions import current_set_ids as set_ids_from_pointers
 from wsp_core.partitions import partition_of
 from wsp_core.ports import Ledger, ParityProvider, Signer
+from wsp_core.versions import is_newer
 from wsp_vault.atomic import (
     DEFAULT_RETRY,
     PARTIAL_SUFFIX,
@@ -456,6 +457,7 @@ class FileVault:
         *,
         upstream: Sequence[Checksum] = (),
         expected: Digests | None = None,
+        replace_staged: bool = False,
     ) -> Artifact:
         """Move a file already on the vault filesystem (e.g. ``<root>/_incoming/...``) into staging.
 
@@ -464,11 +466,27 @@ class FileVault:
         ``expected`` and ``upstream``, checked unchanged (size, mtime, inode) across the hash, and
         only then published under ``relpath``. A failed check renames it back. Resumes cleanly after
         a crash at any step.
+
+        A file already staged under ``relpath`` (an earlier ingest was interrupted before the seal,
+        and the file was fetched again) is compared by content: the same bytes are nothing to do. By
+        default different bytes are refused. With ``replace_staged``, different bytes replace the
+        staged file when they verify against ``expected`` or ``upstream`` (the current download
+        plan's checksum; unverifiable bytes are still refused): the staging is unsealed and unsigned,
+        so the newer plan's file wins. A per-run field in a catalog (``fetched_at``) used to block a
+        re-fetched version forever (audit 2026-10-12, H2). Recorded as a ``vault.restaged`` event.
         """
         with self._locks.generation(source_id, generation_id, exclusive=False):
             staging = self.stage(source_id, generation_id)
             self._check_case(source_id, generation_id, staging, relpath)
-            rel, digests = self._adopt_file(staging, path, relpath, upstream, expected)
+            rel, digests, replaced = self._adopt_file(
+                staging, path, relpath, upstream, expected, replace_staged=replace_staged
+            )
+            if replaced is not None:
+                self._log(
+                    "vault.restaged",
+                    f"{source_id}/{generation_id}",
+                    {"path": rel, "old_sha256": replaced.sha256, "sha256": digests.sha256},
+                )
             return self._record(source_id, generation_id, staging, rel, digests, upstream, "adopt")
 
     def _adopt_file(
@@ -478,10 +496,14 @@ class FileVault:
         relpath: str,
         upstream: Sequence[Checksum],
         expected: Digests | None = None,
-    ) -> tuple[str, Digests]:
+        *,
+        replace_staged: bool = False,
+    ) -> tuple[str, Digests, Digests | None]:
         """Move ``path`` aside into staging, hash it, check it, publish it as ``staging/relpath``.
 
-        No staging record (the caller records). The caller holds the generation lock (shared).
+        Returns ``(relpath, digests, replaced)``: ``replaced`` is the digests of a different staged
+        file that ``replace_staged`` replaced, else ``None``. No staging record (the caller records).
+        The caller holds the generation lock (shared).
         """
         rel = check_relpath(relpath)
         dest = staging / rel
@@ -494,33 +516,31 @@ class FileVault:
                 raise IntegrityError(f"{path}: {d.sha256} does not match expected {expected.sha256}")
             check_upstream(d, upstream)
 
+        # A crash between the link and the unlink of publish_noreplace's fallback (no renameat2, e.g.
+        # some SMB mounts) leaves the same file under both names: finish that move (audit 2026-10-12, M1).
+        with suppress(FileNotFoundError):
+            if os.path.samefile(moving, dest):
+                os.unlink(moving)
+                fsync_dir(moving.parent)
         if not path.exists() and not moving.exists() and dest.exists():  # adopted before a crash
             digests = readback(dest, extra=extra)
             validate(digests)
-            return rel.as_posix(), digests
+            return rel.as_posix(), digests, None
         if path.exists():
             _require_regular(path)
-            if dest.exists():
-                # Staged by an earlier, interrupted ingest and fetched again since: the same bytes are
-                # nothing to do (drop the incoming copy); different bytes are never replaced.
-                have = readback(dest, extra=extra)
-                if readback(path, extra=extra) != have:
-                    raise VaultError(
-                        f"{relpath} is already staged with different content; refusing to replace it"
-                    )
-                validate(have)
-                path.unlink()
-                fsync_dir(path.parent)
-                return rel.as_posix(), have
             if moving.exists():
                 raise VaultError(f"an interrupted adoption left {moving}; inspect it and {path} by hand")
             if os.stat(dest.parent).st_dev != os.stat(path).st_dev:
                 raise VaultError(f"{path} is on a different filesystem; use ingest() to copy it")
+            # Always under the private name first, also when the same path is staged already: a
+            # concurrent fetch that renames new bytes onto ``path`` meanwhile keeps them (audit
+            # 2026-10-12, L6; the old compare-then-unlink of ``path`` could delete them).
             os.rename(path, moving)
             fsync_dir(path.parent)
             fsync_dir(moving.parent)
         elif not moving.exists():
             raise FileNotFoundError(path)
+        replaced: Digests | None = None
         try:
             before = os.stat(moving)
             digests = readback(moving, extra=extra)
@@ -530,15 +550,36 @@ class FileVault:
                 raise VaultError(
                     f"{path} changed while it was being hashed; adopt it again when it is complete"
                 )
+            if dest.exists():
+                # Staged by an earlier, interrupted ingest and fetched again since.
+                have = readback(dest, extra=extra)
+                if have == digests:  # the same bytes: nothing to do, drop the incoming copy
+                    validate(have)
+                    os.unlink(moving)
+                    fsync_dir(moving.parent)
+                    return rel.as_posix(), have, None
+                if not replace_staged:
+                    raise VaultError(
+                        f"{relpath} is already staged with different content; refusing to replace it"
+                    )
+                if expected is None and not upstream:
+                    raise VaultError(
+                        f"{relpath} is already staged with different content, and the new bytes are "
+                        "unverifiable; refusing to replace it"
+                    )
+                replaced = have
             validate(digests)
         except BaseException:
             with suppress(OSError):
                 if not path.exists():  # give the file back where it came from
                     os.rename(moving, path)
             raise
-        publish_noreplace(moving, dest)
+        if replaced is not None:
+            os.replace(moving, dest)  # staging is unsealed and unsigned: the verified new bytes win
+        else:
+            publish_noreplace(moving, dest)
         fsync_dir(dest.parent)
-        return rel.as_posix(), digests
+        return rel.as_posix(), digests, replaced
 
     def adopt_many(
         self,
@@ -581,7 +622,7 @@ class FileVault:
 
             def one(item: tuple[Path, str, Sequence[Checksum]]) -> tuple[str, Digests, Sequence[Checksum]]:
                 path, relpath, upstream = item
-                rel, digests = self._adopt_file(staging, path, relpath, upstream)
+                rel, digests, _ = self._adopt_file(staging, path, relpath, upstream)
                 return rel, digests, upstream
 
             with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
@@ -815,11 +856,40 @@ class FileVault:
         lock and the generation's lock (shared), so a concurrent ``mark_degraded`` cannot slip in
         between the DEGRADED check and the pointer write.
         """
+        self._promote(source_id, generation_id, only_if_newer=False)
+
+    def promote_if_newer(self, source_id: str, generation_id: str) -> bool:
+        """:meth:`promote` unless the current generation is newer; returns whether it promoted.
+
+        "Current" is the partition's own generation for a partitioned source (ADR-0010); "newer" is
+        natural version order (:func:`wsp_core.versions.is_newer`: ``-r10`` after ``-r4``). The
+        check and the pointer write happen under the source's pointer lock, so a concurrent promoter
+        (an ingest and an orchestrator release of the same source) can never move ``CURRENT``
+        backwards (audit 2026-10-12, M3). Re-promoting the current generation is a no-op success.
+        """
+        return self._promote(source_id, generation_id, only_if_newer=True)
+
+    def _current_in_partition(self, source_id: str, generation_id: str) -> str | None:
+        """The current generation the candidate competes with: its partition's, or the source's."""
+        current = self._read_current(source_id)
+        if not self.is_partitioned(source_id):
+            return current
+        partition = partition_of(generation_id)
+        own = None if partition is None else self._read_pointers(source_id).get(partition)
+        if own is not None:
+            return own
+        return current if current is not None and partition_of(current) == partition else None
+
+    def _promote(self, source_id: str, generation_id: str, *, only_if_newer: bool) -> bool:
         self.check_signer()
         with (
             self._locks.source(source_id),
             self._locks.generation(source_id, generation_id, exclusive=False),
         ):
+            if only_if_newer:
+                current = self._current_in_partition(source_id, generation_id)
+                if current is not None and is_newer(current, generation_id):
+                    return False
             lib = self.library_path(source_id, generation_id)
             self.manifest(source_id, generation_id, fresh=True)
             if (lib / DEGRADED_NAME).exists():
@@ -844,6 +914,7 @@ class FileVault:
                 retry=self._retry,
             )
             self._log("vault.promote", f"{source_id}/{generation_id}", data)
+        return True
 
     def is_partitioned(self, source_id: str) -> bool:
         """Configured as partitioned, or already has per-partition pointers on disk."""

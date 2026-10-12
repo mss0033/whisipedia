@@ -5,19 +5,39 @@
 # start-page request took 3.8 hours while systemd still reported it "active". This probes the start page
 # (a thread-pool route, so a starved pool counts too) and restarts the unit when it does not answer.
 # Grace: no restart in the first 5 minutes after a start (models and indexes are still loading).
+#
+# Not while the whole machine is short of memory (/proc/pressure/memory "full" over
+# WSP_API_HEALTH_MAX_PSI percent, default 20, averaged over 60 s): then a slow answer is the machine's
+# fault, and a restart (reloading the models) only adds load. It is logged as a warning instead
+# (audit 2026-10-12, L3).
 URL="${WSP_API_HEALTH_URL:-http://127.0.0.1:8737/v1/portal}"
 TIMEOUT="${WSP_API_HEALTH_TIMEOUT:-60}"
+MAX_PSI="${WSP_API_HEALTH_MAX_PSI:-20}"
+PRESSURE="${WSP_API_HEALTH_PRESSURE:-/proc/pressure/memory}"
 UNIT=whisipedia-api.service
 
 systemctl --user is-active -q "$UNIT" || exit 0  # stopped on purpose, or systemd is already restarting it
-started=$(systemctl --user show "$UNIT" -p ActiveEnterTimestampMonotonic --value)
-now=$(awk '{printf "%d", $1 * 1000000}' /proc/uptime)
-[ $((now - started)) -lt 300000000 ] && exit 0
+# Wall-clock seconds since the unit became active. (ActiveEnterTimestampMonotonic is CLOCK_MONOTONIC,
+# which stops while the host sleeps, and /proc/uptime is CLOCK_BOOTTIME, which does not: after a sleep
+# the grace shrank or vanished.) An empty or unparsable value means "just started": wait.
+started=$(systemctl --user show "$UNIT" -p ActiveEnterTimestamp --value)
+[ -n "$started" ] || exit 0  # (`date -d ""` would answer "today, midnight")
+started_s=$(date -d "$started" +%s 2>/dev/null) || started_s=""
+[ -n "$started_s" ] || exit 0
+[ $(( $(date +%s) - started_s )) -lt 300 ] && exit 0
 
 for try in 1 2; do
   code=$(curl -s -o /dev/null -m "$TIMEOUT" -w "%{http_code}" "$URL")
   [ "$code" = 200 ] && exit 0
-  sleep 5
+  [ "$try" = 2 ] || sleep 5
 done
+# "full avg60=12.34": the share of the last minute in which every task waited for memory.
+full=$(awk '$1 == "full" { for (i = 2; i <= NF; i++) if ($i ~ /^avg60=/) { sub(/^avg60=/, "", $i); printf "%d", $i } }' \
+  "$PRESSURE" 2>/dev/null)
+if [ -n "$full" ] && [ "$full" -ge "$MAX_PSI" ]; then
+  echo "<4>API did not answer $URL within ${TIMEOUT}s twice (last status $code), but the machine is under" \
+    "memory pressure (full avg60=${full}% >= ${MAX_PSI}%); not restarting $UNIT"
+  exit 0
+fi
 echo "API did not answer $URL within ${TIMEOUT}s twice (last status $code); restarting $UNIT"
 systemctl --user restart "$UNIT"

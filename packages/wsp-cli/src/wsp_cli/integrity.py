@@ -181,15 +181,16 @@ def profile_child(payload: Mapping[str, Any]) -> dict[str, Any]:
     """Child unit: profile one sealed generation (HEAVY lock; reads the Refinery and the vault)."""
     from wsp_cli.wiring import child_context
 
-    ctx = child_context(payload)
-    assert ctx.generation is not None
-    p = bootstrap.paths(ctx.cfg)
-    sec = bootstrap.section(ctx.cfg, "integrity")
-    profiler = Profiler(
-        p.index_root / "refinery" if p.index_root is not None else None,
-        float(sec.get("profile_sample_rate", DEFAULT_SAMPLE_RATE)),
-    )
+    p = bootstrap.paths(cast(Mapping[str, Any], payload["config"]))
+    # The lock first, then the registry and manifest reads (audit 2026-10-12, L1).
     with exclusive(lock_dir_for(p.require_index()), HEAVY):
+        ctx = child_context(payload)
+        assert ctx.generation is not None
+        sec = bootstrap.section(ctx.cfg, "integrity")
+        profiler = Profiler(
+            p.index_root / "refinery" if p.index_root is not None else None,
+            float(sec.get("profile_sample_rate", DEFAULT_SAMPLE_RATE)),
+        )
         prof = profiler(
             ctx.spec, ctx.generation, ctx.vault.generation_path(ctx.spec.id, ctx.generation.generation_id)
         )

@@ -2,12 +2,31 @@
 # one shared memory, swap, CPU and IO budget, so that however many jobs run at once, the desktop keeps
 # the rest of the machine. The API is not in this slice; it has its own small limits.
 #
-# Budget for a 16 GiB WSL (the workstation's .wslconfig since 2026-10-11; the API takes up to 5 GiB of
-# the rest): MemoryHigh throttles (reclaims) the slice before
-# MemoryMax is reached; MemoryMax makes the kernel OOM-kill inside the slice only, never the desktop
-# or the API. MemorySwapMax keeps a runaway job from pushing the whole machine into swap (the
-# 2026-10-11 index build reached 21 GB RSS and 41 GB of swap). Override per machine with a drop-in:
+# MemoryHigh throttles (reclaims) the slice before MemoryMax is reached; MemoryMax makes the kernel
+# OOM-kill inside the slice only, never the desktop or the API. MemorySwapMax keeps a runaway job from
+# pushing the whole machine into swap (the 2026-10-11 index build reached 21 GB RSS and 41 GB of swap).
+# Override per machine with a drop-in:
 #   systemctl --user edit whisipedia-background.slice
+#
+# Budget for a 16 GiB WSL (.wslconfig memory=16GB), audit 2026-10-12 H1. The members' own ceilings
+# must fit inside this slice's MemoryHigh, or one job keeps the whole slice over it and the kernel
+# throttles every member (the 8G rebuild did: lanes, orchestrator and step units stalled for hours):
+#
+#   machine                     16 GiB
+#   API (own unit)             - 5 GiB   MemoryMax
+#   kernel, page cache, shell  - 3 GiB
+#   this slice                   8 GiB   MemoryMax (MemoryHigh 7 GiB)
+#
+#   members at once (MemoryHigh / MemoryMax):
+#   orchestrator                1.5 / 2   GiB  (MemoryLow 256M: the control plane is reclaimed last)
+#   fetch lanes, all together   1   / 1.5 GiB  whisipedia-background-fetch.slice (tools/wsp-bg --fetch)
+#   one heavy job               3   / 4   GiB  step units, whisipedia-index.service, tools/wsp-bg
+#                               ---------
+#                               5.5 / 7.5 GiB  highs below the slice's 7 GiB high, maxima below its 8
+#
+# Only one heavy job runs at a time (the machine-wide "heavy" lock). tools/wsp-bg refuses a job whose
+# MemoryMax reaches this MemoryHigh. A rebuild that needs more than 4 GiB runs with the lanes stopped:
+# then up to 6G fits (2 + 6 = 8).
 #
 # Template: `wsp service install` renders this file (docs/runbooks/install-services.md).
 
@@ -16,7 +35,7 @@ Description=Whisipedia background work (shared memory, CPU and IO budget)
 
 [Slice]
 MemoryHigh=7G
-MemoryMax=9G
+MemoryMax=8G
 MemorySwapMax=2G
 CPUWeight=20
 IOWeight=20

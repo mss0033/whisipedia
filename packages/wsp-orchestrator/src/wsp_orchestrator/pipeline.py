@@ -83,7 +83,7 @@ from wsp_core.model import (
     searchable,
 )
 from wsp_core.partitions import partition_of, same_partition
-from wsp_core.ports import Ctx, Fetcher, Ledger, SourceAdapter, Vault
+from wsp_core.ports import Ctx, Fetcher, Ledger, SourceAdapter, SupportsGuardedPromote, Vault
 from wsp_orchestrator.alerts import Alert, Alerter, Severity
 from wsp_orchestrator.clock import Clock
 from wsp_orchestrator.codec import (
@@ -649,9 +649,10 @@ class ReleasePipeline:
                 gen = self._require_sealed(rec)
                 if not self._is_current(rec):
                     stopped = self._promotion_gate(spec, rec)
+                    if stopped is None:
+                        stopped = self._promote(rec)
                     if stopped is not None:
                         return stopped
-                    self.vault.promote(rec.source_id, rec.generation_id)
                     self.checkpoint("vault:promoted")
                 if searchable(spec):
                     self.index(spec, gen)
@@ -660,9 +661,10 @@ class ReleasePipeline:
             case ReleaseState.INDEXED:
                 if not self._is_current(rec):  # indexed by an older daemon before its gate, or legacy
                     stopped = self._promotion_gate(spec, rec)
+                    if stopped is None:
+                        stopped = self._promote(rec)
                     if stopped is not None:
                         return stopped
-                    self.vault.promote(rec.source_id, rec.generation_id)
                     self.checkpoint("vault:promoted")
                 return self._finish(spec, rec)
             case ReleaseState.PROMOTED | ReleaseState.QUARANTINED:
@@ -903,6 +905,22 @@ class ReleasePipeline:
         if spec is not None and spec.partitioned:
             current = [g for g in current if partition_of(g) == partition_of(rec.generation_id)]
         return newest(g for g in current if is_newer(g, rec.generation_id))
+
+    def _promote(self, rec: ReleaseRecord) -> ReleaseRecord | None:
+        """Make the generation current; ``None`` on success, else the superseded record.
+
+        The gate's "is a newer generation current?" is checked again *inside* the vault's pointer lock
+        (:class:`~wsp_core.ports.SupportsGuardedPromote`): a CLI ingest of the same source may have
+        promoted a newer generation since the gate ran (audit 2026-10-12, M3). An owner-forced older
+        release (``force_older``) is promoted as asked.
+        """
+        if rec.force_older or not isinstance(self.vault, SupportsGuardedPromote):
+            self.vault.promote(rec.source_id, rec.generation_id)
+            return None
+        if self.vault.promote_if_newer(rec.source_id, rec.generation_id):
+            return None
+        newer = self._newer_current(rec) or "a newer generation"
+        return self._supersede(rec, f"generation {newer} is current and newer")
 
     def _promotion_gate(self, spec: SourceSpec, rec: ReleaseRecord) -> ReleaseRecord | None:
         """``None`` if the generation may become current; else the held or superseded record."""

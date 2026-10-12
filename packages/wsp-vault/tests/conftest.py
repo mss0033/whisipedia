@@ -33,9 +33,18 @@ def fake_parity() -> FakeParity:
 
 
 @pytest.fixture
-def vault(tmp_path: Path, signer: Ed25519Signer, ledger: JsonlLedger, fake_parity: FakeParity) -> FileVault:
+def vault(
+    tmp_path: Path, signer: Ed25519Signer, ledger: JsonlLedger, fake_parity: FakeParity, clock: Clock
+) -> FileVault:
+    # The test clock, so seal times follow `clock.advance` (with the wall clock, seals a test meant to be
+    # hours apart could share a timestamp and a rollback found no earlier generation).
     return FileVault(
-        tmp_path / "vault", signer, domains={SOURCE: "reference"}, ledger=ledger, parity=fake_parity
+        tmp_path / "vault",
+        signer,
+        domains={SOURCE: "reference"},
+        ledger=ledger,
+        parity=fake_parity,
+        clock=clock,
     )
 
 

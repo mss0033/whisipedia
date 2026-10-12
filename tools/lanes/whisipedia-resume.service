@@ -1,0 +1,17 @@
+# Restarts the long background jobs (collection lanes, a lexical rebuild) on every start of the user
+# manager: tools/lanes/resume-after-reboot.sh. Not installed by `wsp service install` (the jobs are the
+# owner's own); install by hand, replacing @REPO@ with the checkout:
+#   sed "s|@REPO@|$PWD|g" tools/lanes/whisipedia-resume.service > ~/.config/systemd/user/whisipedia-resume.service
+#   systemctl --user daemon-reload && systemctl --user enable whisipedia-resume.service
+[Unit]
+Description=Whisipedia: resume long background jobs
+After=default.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh @REPO@/tools/lanes/resume-after-reboot.sh
+# Waits up to 15 minutes for the NAS (WSP_NAS_WAIT), then a minute for the services to settle.
+TimeoutStartSec=30min
+
+[Install]
+WantedBy=default.target

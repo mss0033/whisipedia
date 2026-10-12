@@ -445,11 +445,20 @@ def _locks(lock_dir: Path, *names: str) -> Generator[None]:
         yield
 
 
+def _payload_lock_dir(payload: Mapping[str, Any]) -> Path:
+    """The lock directory, from the config alone (no registry, no vault reads)."""
+    return lock_dir_for(bootstrap.paths(cast(Mapping[str, Any], payload["config"])).require_index())
+
+
 def refine_child(payload: Mapping[str, Any]) -> dict[str, Any]:
-    """Child unit: refine one sealed generation into Refinery Parquet (never opens Tantivy)."""
-    ctx = child_context(payload)
-    assert ctx.generation is not None
-    with _locks(ctx.lock_dir, HEAVY, INDEX):
+    """Child unit: refine one sealed generation into Refinery Parquet (never opens Tantivy).
+
+    The locks come first: while a rebuild holds HEAVY, a deferred step must cost nothing but a unit
+    start, not a registry load and a manifest read over the NAS every retry (audit 2026-10-12, L1).
+    """
+    with _locks(_payload_lock_dir(payload), HEAVY, INDEX):
+        ctx = child_context(payload)
+        assert ctx.generation is not None
         ix = ctx.indexer()
         try:
             result = ix.refine(
@@ -461,10 +470,11 @@ def refine_child(payload: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def index_child(payload: Mapping[str, Any]) -> dict[str, Any]:
-    """Child unit: bring the search index to one generation (the union of partitions, ADR-0010)."""
-    ctx = child_context(payload)
-    assert ctx.generation is not None
-    with _locks(ctx.lock_dir, HEAVY, INDEX):
+    """Child unit: bring the search index to one generation (the union of partitions, ADR-0010).
+    Locks before the context, as :func:`refine_child`."""
+    with _locks(_payload_lock_dir(payload), HEAVY, INDEX):
+        ctx = child_context(payload)
+        assert ctx.generation is not None
         ix = ctx.indexer()
         try:
             if ctx.spec.partitioned:

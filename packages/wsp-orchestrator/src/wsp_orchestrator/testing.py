@@ -42,6 +42,7 @@ from wsp_core.model import (
 )
 from wsp_core.partitions import current_set_ids, partition_of
 from wsp_core.ports import Ctx
+from wsp_core.versions import is_newer
 from wsp_orchestrator.alerts import Alert, Alerter
 from wsp_orchestrator.child import run as run_child
 from wsp_orchestrator.clock import Clock, ManualClock, SystemClock
@@ -493,6 +494,18 @@ class FakeVault:
         if gen is None or gen.status is not GenerationStatus.SEALED:
             raise VaultError(f"{source_id}/{generation_id} is not sealed")
         self._set_current(source_id, generation_id)
+
+    def promote_if_newer(self, source_id: str, generation_id: str) -> bool:
+        """:class:`~wsp_core.ports.SupportsGuardedPromote`: not over a newer current generation."""
+        if source_id in self.partitioned:
+            part = partition_of(generation_id)
+            current = None if part is None else self._pointers.get(source_id, {}).get(part)
+        else:
+            current = self._current.get(source_id)
+        if current is not None and is_newer(current, generation_id):
+            return False
+        self.promote(source_id, generation_id)
+        return True
 
     def _set_current(self, source_id: str, generation_id: str) -> None:
         part = partition_of(generation_id) if source_id in self.partitioned else None

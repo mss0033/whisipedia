@@ -1,0 +1,18 @@
+# Whisipedia download lanes (`tools/wsp-bg --fetch`, tools/lanes/lane-run.sh): their share of
+# whisipedia-background.slice (systemd nests it there by its name). However many lanes run, together
+# they never take more than this, so a heavy job and the orchestrator keep theirs (audit 2026-10-12
+# H1; the arithmetic is in whisipedia-background.slice). Lanes wait on the network, not on memory:
+# throttling them costs little.
+#
+# Template: `wsp service install` renders this file (docs/runbooks/install-services.md).
+
+[Unit]
+Description=Whisipedia download lanes (share of the background budget)
+
+[Slice]
+MemoryHigh=1G
+MemoryMax=1536M
+MemorySwapMax=512M
+CPUWeight=20
+IOWeight=10
+TasksMax=256

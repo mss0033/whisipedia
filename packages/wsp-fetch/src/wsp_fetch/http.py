@@ -51,7 +51,7 @@ import tempfile
 import threading
 import time
 from collections.abc import Callable, Generator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -388,7 +388,14 @@ class HttpFetcher:
 
     @contextmanager
     def destination_lock(self, dest: Path) -> Generator[None]:
-        """Hold the local lock of ``dest``; :class:`FetchLockedError` if another fetch holds it."""
+        """Hold the local lock of ``dest``; :class:`FetchLockedError` if another fetch holds it.
+
+        Every process must use the same directory (``config.lock_dir``; the CLI sets the machine's
+        lock directory, audit 2026-10-12 M4). The lock file is removed when the fetch ends, so the
+        directory does not grow by one file per download: a holder unlinks its file while still
+        holding the lock, and a taker that locked a file unlinked meanwhile (its inode no longer at
+        the path) closes it and tries again.
+        """
         directory = (
             Path(self.config.lock_dir)
             if self.config.lock_dir
@@ -396,14 +403,26 @@ class HttpFetcher:
         )
         directory.mkdir(parents=True, exist_ok=True)
         name = hashlib.sha256(str(dest.resolve()).encode()).hexdigest()[:32]
-        fd = os.open(directory / f"{name}.lock", os.O_RDWR | os.O_CREAT | os.O_CLOEXEC, 0o644)
-        try:
+        path = directory / f"{name}.lock"
+        while True:
+            fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_CLOEXEC, 0o644)
             try:
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
+                os.close(fd)
                 raise FetchLockedError(f"{dest} is already being downloaded by another fetch") from None
+            try:
+                current = os.stat(path)
+            except FileNotFoundError:
+                current = None
+            if current is not None and current.st_ino == os.fstat(fd).st_ino:
+                break
+            os.close(fd)  # the previous holder removed this file after we opened it: take a fresh one
+        try:
             yield
         finally:
+            with suppress(OSError):
+                os.unlink(path)
             os.close(fd)
 
     def fetch_target(self, target: Target, dest: Path, *, t0: float | None = None) -> FetchReport:

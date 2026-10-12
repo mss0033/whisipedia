@@ -104,8 +104,11 @@ def cmd_serve(args: argparse.Namespace, out: TextIO) -> int:
 
     import uvicorn  # local import: only `serve` needs the ASGI server
 
-    # `systemctl --user kill -s USR1 whisipedia-api` prints every thread's stack to the journal: the
-    # only way to see a stalled server's Python stacks (ptrace is not allowed for the user's processes).
+    # `systemctl --user kill --kill-whom=main -s USR1 whisipedia-api` prints every thread's stack to the
+    # journal: the only way to see a stalled server's Python stacks (ptrace is not allowed for the
+    # user's processes). `--kill-whom=main` matters: the default signals every process of the unit, and
+    # a ZIM worker (no SIGUSR1 handler) would die of it, failing its in-flight requests (audit
+    # 2026-10-12, L2).
     faulthandler.register(signal.SIGUSR1, all_threads=True)
 
     from wsp_api import create_app
@@ -294,10 +297,23 @@ def build_parser(argv: Sequence[str] | None = None) -> argparse.ArgumentParser:
     s = add(
         "ingest",
         _ops("cmd_ingest"),
-        "Adopt completed bulk downloads from <vault>/_incoming into the vault "
-        "(exit 0 done, 1 a version failed, 3 another ingest runs, 4 files still missing or downloading).",
+        "Adopt completed bulk downloads from <vault>/_incoming into the vault. Exit codes, for every "
+        "planned version (with --version: for that version only): 0 ingested or already sealed, "
+        "1 a version failed, 2 usage, 3 another ingest runs, 4 files still missing or downloading, "
+        "8 (--version only) no download plan names that version.",
     )
     s.add_argument("--source", default=None, help="only this source id")
+    s.add_argument(
+        "--version",
+        default=None,
+        help="with --source: only this incoming version (the cycle label given to `wsp collections "
+        "fetch --version`); the exit code then reports on it alone",
+    )
+    s.add_argument(
+        "--partition",
+        default=None,
+        help="with --version, for a partitioned source: the version <cycle>.<partition> (as fetched)",
+    )
     s.add_argument("--dry-run", action="store_true", help="report what would happen; change nothing")
     s.add_argument("--offline", action="store_true", help="do not fetch Kiwix .sha256 files")
     s.add_argument(

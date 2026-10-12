@@ -24,8 +24,10 @@ TimeoutStopSec=120
 Nice=19
 CPUWeight=20
 Slice=whisipedia-background.slice
-MemoryHigh=7G
-MemoryMax=9G
+# The heavy job's share of the slice (deploy/systemd/whisipedia-background.slice): the same as a step
+# unit. A larger rebuild runs by hand with the lanes stopped (tools/wsp-bg, up to 6G).
+MemoryHigh=3G
+MemoryMax=4G
 OOMScoreAdjust=500
 Environment=WSP_MAX_WORKERS=4
 # best-effort/7, not idle: the build holds the index lock for hours (priority inversion).

@@ -23,8 +23,11 @@ only when every planned file is complete (or already staged by an earlier, inter
    (for a partitioned source, ADR-0010: a newer generation *of the same partition*);
 4. ``README.txt``/``CATALOG.*`` are regenerated.
 
-Idempotent and resumable: sealed generations are skipped, staged files are recognised. Nothing is
-ever deleted; files that fail verification stay where they are. Kiwix multi-book sources (a bundle
+Idempotent and resumable: sealed generations are skipped, staged files are recognised (a staged file
+that differs from a re-fetched one is replaced only by bytes that verify against the plan's checksum).
+Nothing is ever deleted; files that fail verification stay where they are. ``run(version=...)`` (``wsp
+ingest --source S --version V``) plans and ingests that one incoming version, so a lane learns whether
+*its* cycle landed and one stuck version cannot fail the others. Kiwix multi-book sources (a bundle
 selector) are one generation across all their version folders, named after the newest version.
 ``_incoming/gutenberg/mirror/`` (an rsync tree) is only ingested with ``--source gutenberg
 --allow-mirror`` while no rsync process runs, by copy so the mirror stays usable for the next rsync.
@@ -64,7 +67,6 @@ from typing import Any, TextIO, cast
 
 from wsp_adapters.kiwix import KiwixOpdsAdapter, Selector
 from wsp_core.model import Checksum, Generation, SourceSpec, SourceStatus
-from wsp_core.partitions import partition_of
 from wsp_core.ports import Ctx, Fetcher
 from wsp_vault.atomic import IntegrityError
 from wsp_vault.docs import write_library_docs
@@ -290,15 +292,26 @@ class Ingestor:
 
     # --- planning (read-only) ------------------------------------------------------------------
 
-    def plan(self, source_id: str | None = None) -> IngestReport:
+    def plan(self, source_id: str | None = None, version: str | None = None) -> IngestReport:
+        """Read-only plan. ``version`` (with ``source_id``): only that incoming version folder, the
+        one a lane just fetched; other versions of the source are neither reported nor touched, so
+        one stuck version cannot fail them (audit 2026-10-12, H3)."""
+        if version is not None and source_id is None:
+            raise ValueError("a version needs its source")
         report = IngestReport(dry_run=True)
         targets_path = self.incoming / PLANS_DIR / TARGETS_FILE
         extra_plans = sorted((self.incoming / PLANS_DIR / TARGETS_DIR).glob("*.json"))
         targets: list[Target] = []
         for path in ([targets_path] if targets_path.is_file() else []) + extra_plans:
-            targets += [t for t in load_targets(path) if source_id in (None, t.source_id)]
+            targets += [
+                t
+                for t in load_targets(path)
+                if source_id in (None, t.source_id) and version in (None, t.version)
+            ]
         if not targets_path.is_file() and not extra_plans:
             report.notes.append(f"no download plan at {targets_path}")
+        elif version is not None and not targets:
+            report.notes.append(f"{source_id}/{version}: nothing planned (no download plan names it)")
         groups: dict[tuple[str, str], list[Target]] = {}
         for t in targets:
             spec = self.specs.get(t.source_id)
@@ -312,13 +325,15 @@ class Ingestor:
                 if source_id not in (None, src.name):
                     continue
                 for ver in sorted(p for p in src.iterdir() if p.is_dir()):
+                    if version not in (None, ver.name):
+                        continue
                     if (
                         (src.name, ver.name) not in planned_dirs
                         and not (src.name == MIRROR_SOURCE and ver.name == MIRROR_DIR)
                         and src.name != ARXIV_SOURCE
                     ):
                         report.notes.append(f"{src.name}/{ver.name}: folder has no entries in targets.json")
-        if source_id in (None, ARXIV_SOURCE) and ARXIV_SOURCE in self.specs:
+        if source_id in (None, ARXIV_SOURCE) and version is None and ARXIV_SOURCE in self.specs:
             arxiv_root = self.incoming / ARXIV_SOURCE
             report.versions.extend(plan_arxiv(self.vault, arxiv_root, self.arxiv_state_dir))
         return report
@@ -430,8 +445,10 @@ class Ingestor:
 
     # --- execution -----------------------------------------------------------------------------
 
-    def run(self, *, source_id: str | None = None, dry_run: bool = False) -> IngestReport:
-        report = self.plan(source_id)
+    def run(
+        self, *, source_id: str | None = None, version: str | None = None, dry_run: bool = False
+    ) -> IngestReport:
+        report = self.plan(source_id, version)
         report.dry_run = dry_run
         changed = False
         for vp in report.versions:
@@ -455,7 +472,11 @@ class Ingestor:
             self.vault.stage(sid, gid)
             for f in vp.files:
                 started = time.monotonic()
-                self.vault.adopt(sid, gid, f.path, f.target.relpath, upstream=f.checksums)
+                # A verified file replaces a different one staged by an interrupted ingest of the same
+                # version (re-fetched since: the plan is the newer truth, H2); unverifiable ones never.
+                self.vault.adopt(
+                    sid, gid, f.path, f.target.relpath, upstream=f.checksums, replace_staged=f.verifiable
+                )
                 f.state = FileState.STAGED
                 how = "verified" if f.verifiable else "unverifiable"
                 self._say(f"  {f.target.name}: {how} ({time.monotonic() - started:.1f}s)")
@@ -517,18 +538,11 @@ class Ingestor:
         return sealed > 0
 
     def _maybe_promote(self, gen: Generation) -> bool:
-        current = self.vault.current(gen.source_id)
-        spec = self.specs.get(gen.source_id)
-        if spec is not None and spec.partitioned:  # ADR-0010: only the same partition can be newer
-            part = partition_of(gen.generation_id)
-            current = next(
-                (g for g in self.vault.current_set(gen.source_id) if partition_of(g.generation_id) == part),
-                None,
-            )
-        if current is not None and current.generation_id > gen.generation_id:
-            return False  # an older backfill must not replace a newer current generation
-        self.vault.promote(gen.source_id, gen.generation_id)
-        return True
+        """Promote unless a newer generation is current (for a partitioned source, ADR-0010: a newer
+        generation *of the same partition*): an older backfill must not replace it. Natural order
+        (``-r10`` after ``-r4``), checked under the pointer lock with the write (audit 2026-10-12, M3).
+        """
+        return self.vault.promote_if_newer(gen.source_id, gen.generation_id)
 
     # --- rsync mirror (Gutenberg) --------------------------------------------------------------
 

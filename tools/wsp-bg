@@ -2,39 +2,78 @@
 # Run a Whisipedia job in the background budget: whisipedia-background.slice (shared memory, swap,
 # CPU and IO limits), lowest CPU priority, its own memory ceiling, logs in the journal.
 #
-#   tools/wsp-bg [--no-heavy-lock] [--wait] NAME [MEMORY_MAX] -- COMMAND...
-#   tools/wsp-bg embed-en 6G -- .venv/bin/python packages/wsp-oracle/scripts/embed_sources.py ...
+#   tools/wsp-bg [--no-heavy-lock] [--wait] [--fetch] NAME [MEMORY_MAX] -- COMMAND...
+#   tools/wsp-bg embed-en 3G -- .venv/bin/python packages/wsp-oracle/scripts/embed_sources.py ...
+#   tools/wsp-bg --fetch collections-cia -- tools/lanes/lane-run.sh lane-cia cia-reading-room b0001
 #
 # The unit is whisipedia-job-NAME (journalctl --user -u whisipedia-job-NAME); a second start with the
-# same NAME is refused while the first runs. MEMORY_MAX defaults to 4G; MemoryHigh is set 1G lower so
-# the job is slowed down (reclaim) before it is killed.
+# same NAME is refused while the first runs. MEMORY_MAX defaults to 4G (1G with --fetch); MemoryHigh is
+# set lower so the job is slowed down (reclaim) before it is killed. A MEMORY_MAX at or above the
+# slice's MemoryHigh is refused: one job alone would throttle every other job in the slice (audit
+# 2026-10-12, H1). Budgets: deploy/systemd/whisipedia-background.slice.
+#
+# --fetch: a download job (collection lanes): runs in whisipedia-background-fetch.slice, the fetch
+# sub-budget, and never takes the heavy lock.
 #
 # The job holds the machine-wide "heavy" lock (<lock dir>/heavy.lock, the lock the orchestrator's
 # refine/index/profile units and `wsp index build|rank|spell|catalog` take), so heavy jobs never run
 # at the same time and their budgets never add up. If it is held the job exits 75 at once; --wait
 # queues behind it instead; --no-heavy-lock is for light jobs. The lock directory is
-# $WSP_LOCK_DIR, else <index.root>/../locks from the config.
+# $WSP_LOCK_DIR, else <index.root>/../locks from the config. The lock is held on descriptor 9 for the
+# job's whole life and passed down ($WSP_INHERITED_LOCKS=heavy:9), so `wsp index build|rank|spell`
+# steps inside the job (a rebuild script) run under it instead of finding it busy (audit M2).
+#
+# Stopping: the job's command is the unit's main process (the lock is taken by a shell that then
+# execs it), and KillMode=control-group sends SIGTERM to every process of the job, so the real job
+# gets a graceful stop; whatever still runs after TimeoutStopSec (120 s) is killed (audit M5).
 set -eu
-usage() { echo "usage: $0 [--no-heavy-lock] [--wait] NAME [MEMORY_MAX] -- COMMAND..." >&2; exit 2; }
+usage() { echo "usage: $0 [--no-heavy-lock] [--wait] [--fetch] NAME [MEMORY_MAX] -- COMMAND..." >&2; exit 2; }
 lock=1
 wait=0
+slice=whisipedia-background.slice
+max=4G
 while [ $# -gt 0 ]; do
   case $1 in
     --no-heavy-lock) lock=0; shift ;;
     --wait) wait=1; shift ;;
+    --fetch) lock=0; slice=whisipedia-background-fetch.slice; max=1G; shift ;;
     *) break ;;
   esac
 done
 [ $# -ge 3 ] || usage
 name=$1; shift
-max=4G
 if [ "$1" != "--" ]; then max=$1; shift; fi
 [ "$1" = "--" ] || usage
 shift
-case $max in
-  *G) high="$(( ${max%G} - 1 ))G"; [ "${max%G}" -gt 1 ] || high=768M ;;
-  *) high=$max ;;
+
+# bytes VALUE: a systemd size (1536M, 4G, 512K, 1073741824) in bytes; empty if it is not one.
+bytes() {
+  case $1 in
+    *[!0-9KMGT]* | '' | [KMGT]*) echo "" ;;
+    *K) echo $(( ${1%K} * 1024 )) ;;
+    *M) echo $(( ${1%M} * 1024 * 1024 )) ;;
+    *G) echo $(( ${1%G} * 1024 * 1024 * 1024 )) ;;
+    *T) echo $(( ${1%T} * 1024 * 1024 * 1024 * 1024 )) ;;
+    *) echo "$1" ;;
+  esac
+}
+max_bytes=$(bytes "$max")
+[ -n "$max_bytes" ] || { echo "wsp-bg: MEMORY_MAX must be a size such as 1536M or 4G, not '$max'" >&2; exit 2; }
+# MemoryHigh three quarters of the way up: reclaim starts well before the kill.
+high="$(( max_bytes * 3 / 4 / 1048576 ))M"
+
+# The background slice's MemoryHigh, from the running manager (the template's value if it cannot say).
+slice_high=${WSP_BG_SLICE_HIGH:-$(systemctl --user show whisipedia-background.slice -p MemoryHigh --value 2>/dev/null || true)}
+case $slice_high in
+  '' | infinity) slice_high=$(bytes 7G) ;;
+  *) slice_high=$(bytes "$slice_high"); [ -n "$slice_high" ] || slice_high=$(bytes 7G) ;;
 esac
+if [ "$max_bytes" -ge "$slice_high" ]; then
+  echo "wsp-bg: MEMORY_MAX $max is not below whisipedia-background.slice MemoryHigh ($((slice_high / 1048576))M):" \
+    "this job alone would throttle every background job. Use less, or raise the slice (a drop-in)." >&2
+  exit 2
+fi
+
 repo=$(cd "$(dirname "$0")/.." && pwd)
 if [ "$lock" = 1 ]; then
   command -v flock >/dev/null 2>&1 || { echo "wsp-bg: flock (util-linux) not found; use --no-heavy-lock" >&2; exit 2; }
@@ -43,20 +82,27 @@ if [ "$lock" = 1 ]; then
 print(lock_dir_for(bootstrap.paths(bootstrap.load(bootstrap.layout())).require_index()))')}
   [ -n "$lockdir" ] || { echo "wsp-bg: cannot find the lock directory (set WSP_LOCK_DIR)" >&2; exit 2; }
   mkdir -p "$lockdir"
+  # Inside the unit: open the lock on fd 9, take it (or exit 75), then exec the job, which keeps fd 9.
+  # shellcheck disable=SC2016  # expanded by the shell inside the unit, not here
   if [ "$wait" = 1 ]; then
-    set -- flock "$lockdir/heavy.lock" "$@"
+    take='exec 9>>"$0" && flock 9 && exec "$@"'
   else
-    set -- flock --nonblock --conflict-exit-code 75 "$lockdir/heavy.lock" "$@"
+    take='exec 9>>"$0" && { flock --nonblock 9 || exit 75; } && exec "$@"'
   fi
+  set -- /bin/sh -c "$take" "$lockdir/heavy.lock" "$@"
+  inherited="-E WSP_INHERITED_LOCKS=heavy:9"
+else
+  inherited=""
 fi
+# shellcheck disable=SC2086  # $inherited is one optional "-E NAME=VALUE" pair, split on purpose
 exec systemd-run --user --collect --quiet \
   --unit="whisipedia-job-$name" \
-  --slice=whisipedia-background.slice \
+  --slice="$slice" \
   --working-directory="$repo" \
   -p MemoryHigh="$high" -p MemoryMax="$max" -p MemorySwapMax=1G \
   -p OOMScoreAdjust=500 -p Nice=19 -p IOSchedulingClass=best-effort -p IOSchedulingPriority=7 \
-  -p CPUWeight=20 -p KillMode=mixed \
+  -p CPUWeight=20 -p KillMode=control-group -p TimeoutStopSec=120 \
   -E WSP_MAX_WORKERS="${WSP_MAX_WORKERS:-4}" -E OMP_NUM_THREADS=4 -E MKL_NUM_THREADS=4 \
   -E TOKENIZERS_PARALLELISM=false -E PYTHONUNBUFFERED=1 \
-  -E WSP_CONFIG_DIR="$repo/config" \
+  -E WSP_CONFIG_DIR="$repo/config" $inherited \
   "$@"

@@ -241,6 +241,66 @@ def test_a_destination_is_fetched_by_one_fetch_at_a_time(servers: Servers, tmp_p
     assert dest.read_bytes() == data
 
 
+def test_destination_locks_live_in_the_configured_directory_and_are_removed(
+    servers: Servers, tmp_path: Path
+) -> None:
+    """Audit 2026-10-12 M4: every process must share one lock directory (the orchestrator's /tmp is
+    private), and a lock file per download used to stay forever (18,489 of them)."""
+    data = payload(4 * PIECE, seed=3)
+    a = servers()
+    remote = RemoteFile(a.add("y.bin", data), "y.bin", len(data), (sha256_checksum(data),))
+    locks = tmp_path / "locks" / "fetch"
+    cfg = replace(CFG, lock_dir=str(locks))
+    with HttpFetcher(cfg) as f:
+        seen: list[list[str]] = []
+        with f.destination_lock(tmp_path / "y.bin"):
+            seen.append(sorted(p.name for p in locks.iterdir()))
+            other = HttpFetcher(cfg)
+            try:
+                with pytest.raises(FetchLockedError), other.destination_lock(tmp_path / "y.bin"):
+                    pass  # a second fetch of the same file, from any process
+            finally:
+                other.close()
+        assert len(seen[0]) == 1
+        assert list(locks.iterdir()) == []  # removed when the fetch ends
+        f.fetch(remote, tmp_path / "y.bin")
+    assert (tmp_path / "y.bin").read_bytes() == data
+    assert list(locks.iterdir()) == []
+
+
+def test_a_lock_file_removed_by_its_last_holder_is_not_trusted(tmp_path: Path) -> None:
+    """A taker that opened the lock file just before the holder removed it would lock a dead inode
+    while a third fetch locks the new file: the inode is checked after locking, and retried."""
+    import os
+
+    locks = tmp_path / "locks"
+    cfg = replace(CFG, lock_dir=str(locks))
+    dest = tmp_path / "z.bin"
+    real_open = os.open
+    raced = {"done": False}
+
+    def open_then_lose_the_file(path: object, flags: int, mode: int = 0o777) -> int:
+        fd = real_open(path, flags, mode)  # type: ignore[arg-type]
+        if not raced["done"] and str(path).endswith(".lock"):
+            raced["done"] = True
+            os.unlink(str(path))  # the previous holder finished and removed it, after our open
+        return fd
+
+    with HttpFetcher(cfg) as f:
+        os_open = os.open
+        try:
+            os.open = open_then_lose_the_file  # type: ignore[assignment]
+            with f.destination_lock(dest):
+                os.open = os_open  # type: ignore[assignment]
+                (name,) = [p.name for p in locks.iterdir()]  # holding the file that is at the path
+                with pytest.raises(FetchLockedError), HttpFetcher(cfg) as other, other.destination_lock(dest):
+                    pass
+        finally:
+            os.open = os_open  # type: ignore[assignment]
+    assert name.endswith(".lock")
+    assert list(locks.iterdir()) == []
+
+
 def test_user_agent_with_an_email_address_is_refused() -> None:
     with pytest.raises(ValueError, match="@"):
         FetchConfig(user_agent="Whisipedia/1.0 (contact: someone@example.org)")

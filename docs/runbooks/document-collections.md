@@ -31,20 +31,73 @@ rules and examples. The JSON report goes to `~/.local/state/whisipedia/collectio
 ## 2. Fetch, then ingest
 
 ```sh
-nice -n 19 wsp collections fetch --source nga-nautical-pubs      # writes <vault>/_incoming/<id>/<YYYY-MM-DD>/
-wsp ingest --source nga-nautical-pubs --dry-run                  # check
-wsp ingest --source nga-nautical-pubs                            # adopt + seal + promote
+nice -n 19 wsp collections fetch --source nga-nautical-pubs --version 2026-10-12   # <vault>/_incoming/<id>/<cycle>/
+wsp ingest --source nga-nautical-pubs --version 2026-10-12 --dry-run              # check
+wsp ingest --source nga-nautical-pubs --version 2026-10-12                        # adopt + seal + promote
 wsp index build --source nga-nautical-pubs
 ```
 
-`fetch` is resumable per cycle (`--version YYYY-MM-DD` to continue an earlier cycle); documents
-already held byte-identically are skipped. `--limit N` fetches a first batch. It exits 1 and prints
-`ALERT` when an issuer listed a restricted document: the file was deleted, nothing was kept.
+`fetch` is resumable per cycle (`--version` names the cycle, default today in UTC; give the same one
+to continue an earlier cycle); documents already held byte-identically are skipped. `--limit N`
+fetches a first batch. It prints `ALERT` when an issuer listed a restricted document: the file was
+deleted, nothing was kept. `wsp ingest --version` takes the same cycle label and works on that
+version alone; without it, `wsp ingest --source` works on (and its exit code answers for) every
+planned version of the source.
 
-Run sources one after another (or in separate shells per host); long ones belong in `tmux`/`nohup`:
+### Exit codes
+
+Scripts and lanes decide by these codes, never by reading the output (audit 2026-10-12, C1).
+
+`wsp collections fetch`:
+
+| code | outcome | ingest? | item done? |
+|---|---|---|---|
+| 0 | complete: every listed document fetched, unchanged, rejected or held; plan written | yes | after the ingest succeeds |
+| 1 | crashed (a traceback) | no | no |
+| 2 | refused (excluded source, no legal basis, wrong or missing `--partition`) | no | no: fix the command |
+| 4 | a listing was incomplete: nothing fetched | no | no: retry the **same** cycle later |
+| 6 | partial: some or all downloads failed (or another fetch held the file); the rest is planned | yes, what came | no: fetch again later, in a **new** cycle |
+| 7 | complete, with alerts (restricted documents listed and deleted) | yes | after the ingest succeeds |
+| 8 | complete, nothing new: no plan | (nothing planned) | yes |
+| 137, 143 | killed (OOM, SIGTERM) | no | no |
+
+`wsp ingest` (for every planned version; with `--source S --version V [--partition P]`, for that
+version only):
+
+| code | meaning |
+|---|---|
+| 0 | ingested, or already sealed |
+| 1 | a version failed (verification, or the vault refused it) |
+| 2 | usage (`--version` without `--source`, `--partition` on an unpartitioned source, ...) |
+| 3 | another ingest runs (the `ingest` lock); retry |
+| 4 | files still missing or downloading |
+| 8 | `--version` only: no download plan names that version (nothing was fetched for it) |
+
+A version sealed after a partial fetch (6) cannot take more files: the next fetch uses a new cycle
+label (`2026-10-12-r2`, ...; ordered naturally, so `-r10` is newer than `-r4`). A re-fetch of a cycle
+whose ingest was interrupted before the seal is fine: a staged file is replaced only by bytes that
+verify against the newer plan's checksum (ledger event `vault.restaged`).
+
+### Lanes: `tools/lanes/lane-run.sh`
+
+Long runs of many sources or partitions go through the lane runner, under `tools/wsp-bg`:
 
 ```sh
-nohup nice -n 19 wsp collections fetch --source cia-csi > ~/.local/state/whisipedia/collections/cia-csi.log 2>&1 &
+tools/wsp-bg --no-heavy-lock collections-small 2G -- tools/lanes/lane-run.sh lane-small - neets cia-csi
+tools/wsp-bg --no-heavy-lock collections-cia 2G -- tools/lanes/lane-run.sh lane-cia cia-reading-room b0001 b0002
+```
+
+It marks an item done (`<state>/collections/<lane>.done`, skipped by every later run) only when the
+fetch was complete (0, 7, 8) **and** `wsp ingest --version <cycle>` ingested that cycle (0, or 8 after
+a fetch that found nothing new). An incomplete listing (4) is retried in the same cycle; a partial
+fetch (6) is ingested, and the item is fetched again in a new cycle. An item whose fetch completed but
+whose ingest was interrupted resumes at the ingest. A lane takes a lock per source, so two lanes never
+fetch the same source at once; the second one leaves the item for its next run.
+
+Run sources one after another (or in separate shells per host); long ones belong in `tools/wsp-bg`:
+
+```sh
+tools/wsp-bg --no-heavy-lock fetch-cia-csi 2G -- .venv/bin/wsp collections fetch --source cia-csi
 ```
 
 ## 3. Owner review
@@ -71,12 +124,12 @@ fetched one partition at a time, so a cycle never holds the whole set in one pla
 
 ```sh
 # USGS Historical Topographic Map Collection: one state per run (GeoPDF and GeoTIFF of that state)
-nice -n 19 wsp collections fetch --source usgs-historical-topo --partition hi
-wsp ingest --source usgs-historical-topo
+nice -n 19 wsp collections fetch --source usgs-historical-topo --partition hi --version 2026-10-12
+wsp ingest --source usgs-historical-topo --partition hi --version 2026-10-12
 wsp index build --source usgs-historical-topo
 # CIA reading room (archive.org mirror of foia.cia.gov): batches of 10,000 items, b0001 … b0090
-nice -n 19 wsp collections fetch --source cia-reading-room --partition b0001
-wsp ingest --source cia-reading-room
+nice -n 19 wsp collections fetch --source cia-reading-room --partition b0001 --version 2026-10-12
+wsp ingest --source cia-reading-room --partition b0001 --version 2026-10-12
 wsp index build --source cia-reading-room
 ```
 

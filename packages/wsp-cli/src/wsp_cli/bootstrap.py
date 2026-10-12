@@ -402,6 +402,13 @@ def build_fetcher(cfg: Mapping[str, Any]) -> Fetcher:
     fc = FetchConfig.from_mapping(acq)
     catalog = load_wikimedia_catalog()
     fc = dataclasses.replace(fc, host_connections={**catalog.host_connections(), **fc.host_connections})
+    if not fc.lock_dir and (index_root := paths(cfg).index_root) is not None:
+        # Per-destination fetch locks in the machine's lock directory, like every other lock: the
+        # orchestrator runs with PrivateTmp, so locks in /tmp never excluded a CLI fetch or a lane
+        # fetching the same file (audit 2026-10-12, M4).
+        from wsp_cli.locks import lock_dir_for
+
+        fc = dataclasses.replace(fc, lock_dir=str(lock_dir_for(index_root) / "fetch"))
     if str(acq.get("fetcher", "http")) == "aria2":
         if find_aria2c() is None:
             raise ConfigError("acquirer.fetcher = 'aria2' but aria2c is not on PATH")

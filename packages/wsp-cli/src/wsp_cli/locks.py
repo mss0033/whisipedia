@@ -52,6 +52,27 @@ def lock_dir_for(index_root: Path) -> Path:
     return index_root.parent / "locks"
 
 
+INHERITED_ENV = "WSP_INHERITED_LOCKS"  # "name:fd[,name:fd]": locks a parent holds on our behalf
+
+
+def _holds_inherited(name: str, path: Path) -> bool:
+    """True if ``$WSP_INHERITED_LOCKS`` names an open descriptor of ``path`` that holds its lock."""
+    for item in os.environ.get(INHERITED_ENV, "").split(","):
+        lock, _, raw = item.strip().partition(":")
+        if lock != name or not raw.isdigit():
+            continue
+        fd = int(raw)
+        try:
+            mine, there = os.fstat(fd), os.stat(path)
+            if (mine.st_dev, mine.st_ino) != (there.st_dev, there.st_ino):
+                return False
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)  # a no-op on the description that holds it
+        except OSError:  # not open, not this file, or another process holds the lock
+            return False
+        return True
+    return False
+
+
 @contextlib.contextmanager
 def exclusive(
     lock_dir: Path,
@@ -67,9 +88,17 @@ def exclusive(
     ``wait=seconds`` keeps trying every ``poll`` seconds for that long (``float("inf")``: forever)
     and stops early when ``cancel()`` turns true. ``flock`` locks are released by the kernel when the
     process exits, so a crash never leaves a stale lock behind. The file records the holder's pid.
+
+    A lock already held by a parent (``tools/wsp-bg`` holding ``HEAVY`` across a whole rebuild) is
+    passed down as an open descriptor named in ``$WSP_INHERITED_LOCKS`` (``heavy:9``); it is used as
+    is, never released here (audit 2026-10-12, M2). It is trusted only if that descriptor is this very
+    lock file and holds the lock: ``flock`` on the inherited open file description succeeds only then.
     """
     lock_dir.mkdir(parents=True, exist_ok=True)
     path = lock_dir / f"{name}.lock"
+    if _holds_inherited(name, path):
+        yield path
+        return
     fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
     try:
         deadline = None if wait is None else time.monotonic() + wait

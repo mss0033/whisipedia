@@ -24,6 +24,7 @@ UNITS = (
     "whisipedia-index.service",
     "whisipedia-index.timer",
     "whisipedia-background.slice",  # shared memory/CPU/IO budget of the background units
+    "whisipedia-background-fetch.slice",  # the download lanes' share of it (tools/wsp-bg --fetch)
 )
 ENABLE = (
     "whisipedia-orchestrator.service",

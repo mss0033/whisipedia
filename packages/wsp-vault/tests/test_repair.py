@@ -89,6 +89,7 @@ def test_degraded_rolls_back_current(
     vault: FileVault, seal: SealFn, ledger: JsonlLedger, clock: Clock, tmp_path: Path
 ) -> None:
     seal("2026-09-01")
+    clock.advance(hours=1)  # sealed later: the rollback target is the one sealed before
     lib = seal(GEN)
     corrupt(lib / TARGET)
     result = RepairLadder(vault, ledger).repair(SOURCE, GEN, [TARGET])

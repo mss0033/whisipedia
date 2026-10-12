@@ -208,6 +208,19 @@ class Vault(Protocol):
     def generation_path(self, source_id: str, generation_id: str) -> Path: ...
 
 
+@runtime_checkable
+class SupportsGuardedPromote(Protocol):
+    """Optional ``Vault`` capability: check-and-promote as one step under the pointer lock.
+
+    ``promote_if_newer`` promotes unless the current generation (of the same partition, ADR-0010) is
+    newer in natural version order (``-r10`` after ``-r4``); it returns whether it promoted. Two
+    promoters of one source (a CLI ingest and an orchestrator release) can then never move
+    ``CURRENT`` backwards (audit 2026-10-12, M3).
+    """
+
+    def promote_if_newer(self, source_id: str, generation_id: str) -> bool: ...
+
+
 class ManifestView(Protocol):
     """Read-only view of a sealed generation's signed manifest."""
 
