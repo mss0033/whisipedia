@@ -29,6 +29,7 @@ if [ "$code" = hang ]; then
   echo started > "$FAKE/hanging"
   while :; do sleep 0.1; done
 fi
+case $code in *:*) echo "${code#*:}"; code=${code%%:*} ;; esac  # "CODE:LINE" also prints LINE
 exit "${code:-98}"
 """
 
@@ -124,6 +125,31 @@ def test_a_partial_fetch_is_ingested_then_fetched_again_in_a_new_cycle(lane: Lan
     ]
     assert lane.done() == ["b0001"]
     assert lane.cycle("b0001") == f"{first}r2"
+
+
+def test_a_sealed_cycle_is_followed_to_the_one_the_fetch_used(lane: Lane) -> None:
+    # The fetch moves off a sealed cycle by itself and says so; the ingest must name the version fetched.
+    lane.script(
+        fetch=["0:cia-reading-room: 2026-10-12.b0001 is already sealed; fetching as 2026-10-12r2.b0001"],
+        ingest=[0],
+    )
+    assert lane.run("b0001", source="cia-reading-room") == 0
+    assert lane.calls()[-1].endswith("--partition b0001 --version 2026-10-12r2")
+    assert lane.cycle("b0001") == "2026-10-12r2"
+    assert lane.done() == ["b0001"]
+
+
+def test_an_earlier_fetch_awaiting_ingest_is_ingested_by_name_first(lane: Lane) -> None:
+    waiting = (
+        "cia-reading-room: fetched but not ingested yet: 2026-10-01.b0001; "
+        "run `wsp ingest --source cia-reading-room` first (nothing fetched)"
+    )
+    lane.script(fetch=[f"5:{waiting}", 0], ingest=[0, 0])
+    assert lane.run("b0001", source="cia-reading-room") == 0
+    calls = lane.calls()
+    assert calls[1] == "ingest --source cia-reading-room --partition b0001 --version 2026-10-01"
+    assert calls[2].startswith("collections fetch --source cia-reading-room --partition b0001")
+    assert lane.done() == ["b0001"]
 
 
 def test_downloads_that_keep_failing_leave_the_item_for_later(lane: Lane) -> None:

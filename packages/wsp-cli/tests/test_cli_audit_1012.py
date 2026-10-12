@@ -149,6 +149,7 @@ class _Paths:
     def __init__(self, vault_root: Path, workdir: Path) -> None:
         self.vault_root = vault_root
         self.workdir = workdir
+        self.proposals = workdir / "proposals"
 
     def require_vault(self) -> Path:
         return self.vault_root
@@ -182,8 +183,9 @@ def _plan_missing_file(vault: FileVault, version: str) -> None:
 
 
 def test_ingest_of_one_version_ignores_a_stuck_one(vault: FileVault, tmp_path: Path) -> None:
-    _plan_missing_file(vault, "2026-10-01")
+    # (A fetch waits while another version is pending, so the stuck plan comes after this cycle's fetch.)
     fetch(vault, tmp_path, OBJECTS, "2026-10-12")
+    _plan_missing_file(vault, "2026-10-01")
     assert ingest(vault, "2026-10-12") == [("2026-10-12", VersionStatus.INGESTED, True)]
     assert ingest(vault, "2026-10-01") == [("2026-10-01", VersionStatus.INCOMPLETE, False)]
     assert ingest(vault, "2026-10-30") == []  # nothing planned for that cycle
@@ -207,8 +209,8 @@ def _ingest_args(**kw: Any) -> argparse.Namespace:
 def test_ingest_exit_codes_with_a_version(
     vault: FileVault, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _plan_missing_file(vault, "2026-10-01")
     fetch(vault, tmp_path, OBJECTS, "2026-10-12")
+    _plan_missing_file(vault, "2026-10-01")
 
     def same_vault(*a: object, **kw: object) -> FileVault:
         return vault

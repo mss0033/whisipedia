@@ -150,7 +150,7 @@ def _screen_file(tmp_path: Path, name: str, data: bytes, source: SourceSpec) -> 
 def test_doc_collection_screen_withholds_restricted_documents(tmp_path: Path) -> None:
     base = spec()
     access = dict(cast(Mapping[str, Any], base.raw["access"]))
-    access["filter"] = {"require": ["distribution"]}
+    access["filter"] = {"distribution": {"require": ["A"]}}  # was {"require": ...}: silently ignored (CA-20)
     gated = dataclasses.replace(base, raw={**base.raw, "access": access})
     restricted = _screen_file(tmp_path, "r.pdf", make_pdf([RESTRICTED_C]), gated)
     assert restricted.status in (VerdictStatus.REJECTED, VerdictStatus.HELD)

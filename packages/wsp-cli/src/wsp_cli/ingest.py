@@ -369,7 +369,13 @@ class Ingestor:
             self._classify(vp, group, staged_dir=lib)
             leftovers = sum(f.path.exists() for f in vp.files)
             if leftovers:
-                vp.reason = f"{leftovers} file(s) still in _incoming were left untouched"
+                # Adoption renames files out of _incoming, so a file still there after the seal was
+                # fetched again for a sealed version: it was never ingested (2026-10-12 audit, CA-15).
+                vp.status = VersionStatus.FAILED
+                vp.reason = (
+                    f"{leftovers} file(s) in _incoming were fetched after {gid} was sealed and are not "
+                    f"ingested; fetch again under a new version (wsp collections fetch picks one)"
+                )
             return vp
         self._classify(vp, group, staged_dir=self.vault.staging_path(sid, gid))
         if vp.complete:

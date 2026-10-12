@@ -43,8 +43,56 @@
         {
           "if": {"properties": {"status": {"const": "active"}}},
           "then": {"properties": {"legal_basis": {"not": {"const": "none"}}, "tier": {"not": {"const": "X"}}}}
+        },
+        {
+          "if": {"required": ["access"], "properties": {"access": {"required": ["adapter"], "properties": {"adapter": {"const": "doc-collection"}}}}},
+          "then": {"properties": {"access": {"$ref": "#/$defs/docCollectionAccess"}}}
         }
       ]
+    },
+    "docCollectionAccess": {
+      "description": "access block of a doc-collection source (wsp_adapters.doccollection); a misspelled key would be ignored, so unknown keys are refused.",
+      "type": "object",
+      "required": ["adapter", "discovery"],
+      "additionalProperties": false,
+      "properties": {
+        "adapter": {"const": "doc-collection"},
+        "issuer": {"type": "string"},
+        "key_prefix": {"type": "string"},
+        "origins": {"type": "array", "items": {"type": "string"}},
+        "discovery": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["kind"],
+            "properties": {"kind": {"enum": ["index-page", "api", "oai-pmh", "archive-org", "s3-listing", "git", "list", "document", "latest-dated"]}}
+          }
+        },
+        "filter": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "rules": {"type": "string"},
+            "allow_series": {}, "allow_series_prefix": {}, "deny_series": {}, "deny_series_prefix": {},
+            "deny_keywords": {}, "review_keywords": {}, "neutral_phrases": {},
+            "allow_documents": {}, "deny_documents": {}, "allow_content_review": {}, "override_safety": {"type": "object"},
+            "allow_all": {"type": "boolean"}, "default": {"enum": ["allow", "deny", "review"]},
+            "declassified_ok": {"type": "boolean"}, "builtin_review": {"type": "boolean"}, "allow_image_only": {"type": "boolean"},
+            "distribution": {"type": "object", "additionalProperties": false, "properties": {"require": {"type": "array", "items": {"type": "string"}}}}
+          }
+        },
+        "formats": {"type": "array", "items": {"type": "string"}, "description": "file extensions the source takes (e.g. [pdf]); others are not fetched and leave the index"},
+        "currency": {},
+        "rate": {"type": "object"},
+        "partitioned": {"type": "boolean"},
+        "pdf_max_pages": {"type": "integer", "minimum": 1},
+        "keep_superseded": {"type": "boolean"},
+        "mirrors": {"type": "array"},
+        "mirrors_required": {},
+        "endpoints": {"type": "array"},
+        "oai_endpoint": {"type": "string"},
+        "decode_url_keys": {"type": "boolean", "description": "decode %XX escapes before a URL becomes a document key; changes keys, so only for sources with no stored documents"}
+      }
     }
   }
 }

@@ -83,7 +83,15 @@ from wsp_core.model import (
     searchable,
 )
 from wsp_core.partitions import partition_of, same_partition
-from wsp_core.ports import Ctx, Fetcher, Ledger, SourceAdapter, SupportsGuardedPromote, Vault
+from wsp_core.ports import (
+    Ctx,
+    Fetcher,
+    GenerationFinalizer,
+    Ledger,
+    SourceAdapter,
+    SupportsGuardedPromote,
+    Vault,
+)
 from wsp_orchestrator.alerts import Alert, Alerter, Severity
 from wsp_orchestrator.clock import Clock
 from wsp_orchestrator.codec import (
@@ -875,7 +883,8 @@ class ReleasePipeline:
             return existing
         self.vault.stage(rec.source_id, rec.generation_id)
         fetched = self._fetched(rec)
-        for remote in self._plan(rec).files:
+        plan = self._plan(rec)
+        for remote in plan.files:
             local = self._local_for(rec, remote.name)
             self.vault.ingest(
                 rec.source_id,
@@ -886,6 +895,20 @@ class ReleasePipeline:
                 expected=fetched.get(remote.name),
             )
             self.checkpoint("vault:ingested")
+        spec = self.sources.get(rec.source_id)
+        adapter = self.resolve_adapter(spec) if spec is not None else None
+        if spec is not None and isinstance(adapter, GenerationFinalizer):
+            # Release-wide files (the doc-collection catalog, CA-7 of the 2026-10-12 audit): built from
+            # the files policy kept and the previous generation, staged before the seal.
+            previous = (
+                self.vault.generation_path(rec.source_id, plan.previous_generation)
+                if plan.previous_generation
+                else None
+            )
+            kept = {r.name: self._local_for(rec, r.name) for r in plan.files}
+            for relpath, local in adapter.finalize(self.ctx(spec), plan, previous, kept):
+                self.vault.ingest(rec.source_id, rec.generation_id, local, relpath)
+            self.checkpoint("adapter:finalized")
         gen = self.vault.seal(rec.source_id, rec.generation_id)
         self.checkpoint("vault:sealed")
         return gen

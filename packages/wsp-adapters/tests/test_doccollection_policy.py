@@ -38,11 +38,12 @@ def decide(pub: str, title: str, rules: Rules = APD) -> str:
         ("FM 5-0", "Planning and Orders Production", "allow:series=FM 5-0"),
         ("ADP 6-22", "Army Leadership and the Profession", "allow:series=ADP"),
         ("TC 4-02.1", "First Aid", "allow:series=TC 4-02.1"),
+        # fires are targeting and fire control (2026-10-12 audit, CA-3): the series rule names it
         (
             "FM 3-09",
             "Fire Support and Field Artillery Operations",
-            "allow:default",
-        ),  # doctrine, not targeting
+            "deny:safety=fire support and field artillery",
+        ),
         ("TC 3-20.31", "Training and Qualification, Crew", "deny:deny-series=TC 3-20."),
         ("TC 3-22.9", "Rifle and Carbine", "deny:deny-series=TC 3-22."),
         ("ATP 3-60", "Targeting", "deny:deny-series=ATP 3-60"),
@@ -50,7 +51,7 @@ def decide(pub: str, title: str, rules: Rules = APD) -> str:
         ("FM 3-01.13", "(U) Air Defense Planning Data (S/Nf)", "deny:marking=classified-portion"),
         ("ATP 3-34.4", "Engineer Reference", "allow:series=ATP 3-34.4"),
         ("ATP 9-99", "Unheard-Of Series", "allow:default"),
-        ("", "Fire Direction Center Procedures", "deny:safety=fire direction"),
+        ("", "Mortar Fire Direction Procedures", "deny:safety=mortar fire direction"),
         ("FM 6-27", "Commander's Handbook on the Law of Land Warfare", "allow:series=FM 6-27"),
         ("ATP 4-02.2", "Medical Evacuation in a Chemical Environment", "allow:series=ATP 4-02"),
     ],
@@ -71,7 +72,10 @@ def test_neutral_phrases_keep_defensive_documents_out_of_review() -> None:
     rules = Rules(allow_all=True)
     assert decide("", "Bomb Threat Guidance", rules) == "allow:collection=allow-all"
     assert decide("", "Radiological Emergency Medical Management", rules) == "allow:collection=allow-all"
-    assert decide("", "Weaponization of Biological Agents", rules) == "deny:safety=weaponization"
+    assert (
+        decide("", "Weaponization of Biological Agents", rules)
+        == "deny:safety=weaponization of biological agents"
+    )
     # The noun-level review list is off by default (owner decision 2026-10-11); a source may opt in.
     assert decide("", "Improvised Explosive Device Awareness", rules) == "allow:collection=allow-all"
     opted = Rules(allow_all=True, builtin_review=True)
@@ -128,7 +132,7 @@ def test_normalize_pub_number() -> None:
             "This document contains technical data whose export is restricted (ITAR)",
             None,
             (),
-            ("itar", "export-warning"),
+            ("export-warning",),
         ),
         ("Protecting Controlled Unclassified Information in Nonfederal Systems", None, (), ()),
     ],
@@ -229,7 +233,7 @@ def test_builtin_review_can_be_switched_off_for_official_histories_only() -> Non
     assert decide("", "Soviet Nuclear Weapons Programme, 1962", rules) == "allow:collection=allow-all"
     held = decide("", "Weapons design handbook", rules.merged({"review_keywords": ["weapons design"]}))
     assert held == "review:keyword=weapons design"
-    assert decide("", "Weaponization of agents", rules) == "deny:safety=weaponization"
+    assert decide("", "Weaponization of agents", rules) == "deny:safety=weaponization of agents"
 
 
 def test_a_bare_classification_banner_counts_only_at_a_page_edge() -> None:
@@ -245,14 +249,13 @@ def test_a_bare_classification_banner_counts_only_at_a_page_edge() -> None:
     assert "classified" in parse_markings("Body text with SECRET//NOFORN in it.").restricted
 
 
-def test_an_html_page_named_pdf_is_kept_as_html(tmp_path: Path) -> None:
-    from wsp_adapters.doccollection.adapter import true_suffix, well_formed
+def test_an_html_page_named_pdf_is_a_failed_download(tmp_path: Path) -> None:
+    from wsp_adapters.doccollection.adapter import WrongBodyError, true_suffix
 
     misnamed = tmp_path / "guidance.pdf"
     misnamed.write_bytes(b"<!DOCTYPE html><html><body><h1>Guidance</h1></body></html>")
-    fixed = true_suffix(misnamed)
-    assert fixed.name == "guidance.html"
-    assert well_formed(fixed) is None
+    with pytest.raises(WrongBodyError, match="html"):
+        true_suffix(misnamed)  # an HTML publication is named .html by its discoverer, not renamed here
     real = tmp_path / "real.pdf"
     real.write_bytes(b"%PDF-1.4 ...")
     assert true_suffix(real) == real

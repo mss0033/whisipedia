@@ -47,21 +47,32 @@ import zipfile
 from collections import deque
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, NamedTuple, cast
+from urllib.parse import urlsplit
 
 from wsp_adapters._common import access, upstream_dir, verify_file
+from wsp_adapters.doccollection.catalog import FetchedDoc, build_catalog, excluded_by, write_catalog
 from wsp_adapters.doccollection.discovery import (
     DiscoverEnv,
+    NoDocuments,
     Throttle,
     discover_all,
     off_origin_hops,
     origin_ok,
     resolve,
 )
-from wsp_adapters.doccollection.model import Candidate, DocumentMeta, title_from_url
+from wsp_adapters.doccollection.model import (
+    Candidate,
+    DocumentMeta,
+    clean_title,
+    display_title,
+    is_filename_title,
+    is_fragment,
+    title_from_url,
+)
 from wsp_adapters.doccollection.policy import (
     CurrencyRules,
     Decision,
@@ -77,6 +88,7 @@ from wsp_adapters.doccollection.policy import (
     parse_markings,
 )
 from wsp_adapters.html_text import html_to_text
+from wsp_core.banners import banner_for
 from wsp_core.ids import content_hash, make_doc_id
 from wsp_core.model import (
     Checksum,
@@ -118,6 +130,10 @@ class CollectionConfig:
     # Requests in flight at once (``rate.concurrency``, 1-8). Starts stay ``interval`` apart per host:
     # this only stops a 2-3 s round trip from cutting a 1 request/s budget to 0.3/s.
     concurrency: int = 1
+    # File formats the source takes (``access.formats``, extensions such as ``[pdf]``); empty: any.
+    # Documents in other formats are not fetched, and stored ones leave the index (CA-11).
+    formats: tuple[str, ...] = ()
+    decode_url_keys: bool = False  # access.decode_url_keys (see DiscoverEnv)
 
     @staticmethod
     def from_spec(spec: SourceSpec, repo_root: Path = REPO_ROOT) -> CollectionConfig:
@@ -126,7 +142,12 @@ class CollectionConfig:
         rps = float(rate.get("requests_per_second", 1.0) or 1.0)
         discovery = cast(list[Mapping[str, Any]], acc.get("discovery") or [])
         origins: object = acc.get("origins") or []
+        formats: object = acc.get("formats") or []
+        if not isinstance(formats, list):
+            raise ValueError(f"{spec.id}: access.formats must be a list of file extensions, got {formats!r}")
         return CollectionConfig(
+            formats=tuple(str(f).lower().lstrip(".") for f in cast(list[object], formats)),
+            decode_url_keys=bool(acc.get("decode_url_keys", False)),
             issuer=str(acc.get("issuer") or spec.raw.get("publisher") or spec.name),
             prefix=str(acc.get("key_prefix") or spec.id),
             origins=tuple(str(o).lower() for o in cast(list[object], origins)),
@@ -157,9 +178,25 @@ class Survey:
     notes: list[str] = field(default_factory=list[str])
     requests: dict[str, int] = field(default_factory=dict[str, int])
     incomplete: list[str] = field(default_factory=list[str])  # see DiscoverEnv.incomplete; + failed resolves
+    sampled: list[str] = field(default_factory=list[str])  # see DiscoverEnv.sampled (--max-pages)
+    # Listing keys of allowed items whose resolve failed or was skipped: their documents' keys are
+    # unknown this run, so none of them may be inferred withdrawn (CA-10).
+    unresolved_keys: list[str] = field(default_factory=list[str])
+    skipped_formats: int = 0  # resolved documents in a format outside ``access.formats``
 
     def count(self, verdict: Verdict) -> int:
         return sum(d.verdict is verdict for _c, d in self.decisions)
+
+    @property
+    def listing_complete(self) -> bool:
+        """Every page of every listing was read: absence from it means something."""
+        return not self.incomplete and not self.sampled
+
+    def protected_keys(self) -> frozenset[str]:
+        """Listing keys whose documents must not be inferred withdrawn this run: items not resolved,
+        and items listed but not allowed (held for review or denied: still listed by the issuer)."""
+        held = {c.key for c, d in self.decisions if d.verdict is not Verdict.ALLOW}
+        return frozenset(self.unresolved_keys) | held
 
 
 @dataclass(frozen=True, slots=True)
@@ -210,6 +247,7 @@ class DocCollectionAdapter:
             partition=partition,
             allow_demo_key=self.allow_demo_key,
             cache_dir=ctx.workdir,
+            decode_url_keys=cfg.decode_url_keys,
         )
 
     # --- discovery ---------------------------------------------------------------------------------
@@ -228,6 +266,9 @@ class DocCollectionAdapter:
 
         ``progress`` hears a line every ``progress_every`` resolved candidates: resolving is one request
         per item at the source's polite rate, so a large partition is silent for hours without it.
+
+        A resolve that raises, or returns no document without saying so (:class:`NoDocuments`), leaves
+        its item *unresolved*: noted, never cached, and its documents are never inferred withdrawn.
         """
         cfg = self.config(ctx.source)
         env = env or self.env(ctx, max_pages=max_pages)
@@ -239,28 +280,49 @@ class DocCollectionAdapter:
         )
         inflight: deque[tuple[Candidate, Future[list[Candidate]]]] = deque()
 
-        def accept(cand: Candidate, docs: list[Candidate], *, fresh: bool) -> None:
+        def unresolved(cand: Candidate, why: str) -> None:
+            out.notes.append(f"resolve {cand.key}: {why}")
+            out.unresolved += 1
+            out.unresolved_keys.append(cand.key)
+
+        def accept(cand: Candidate, docs: list[Candidate], *, fresh: bool, none: str = "") -> None:
             nonlocal resolved
+            if cand.resolve and cand.resolve != "git" and not docs and not none:
+                unresolved(cand, "no document found (an empty answer is retried, never cached)")
+                return
             if fresh and cache is not None and cand.resolve and cand.resolve != "git":
-                cache.put(cand, docs)  # the cache is only touched from this thread
+                cache.put(cand, docs, none=none)  # the cache is only touched from this thread
+            if none:
+                out.notes.append(f"resolve {cand.key}: no documents ({none})")
             resolved += 1 if cand.resolve else 0
             if progress is not None and cand.resolve and resolved % progress_every == 0:
                 progress(f"{ctx.source.id}: {resolved:,} resolved, {len(out.decisions):,} listed so far")
-            out.allowed.extend(d for d in docs if origin_ok(d.url, cfg.origins) or d.resolve == "git")
+            for d in docs:
+                if not (origin_ok(d.url, cfg.origins) or d.resolve == "git"):
+                    continue
+                if (
+                    cfg.formats
+                    and d.resolve != "git"
+                    and d.file_name.rsplit(".", 1)[-1].lower() not in cfg.formats
+                ):
+                    out.skipped_formats += 1  # access.formats: a format the source does not take
+                    continue
+                out.allowed.append(d)
 
-        def failed(cand: Candidate, exc: BaseException) -> None:
-            out.notes.append(f"resolve {cand.key}: {type(exc).__name__}: {exc}")
-            out.unresolved += 1
+        def settle(cand: Candidate, run: Callable[[], list[Candidate]]) -> None:
+            try:
+                docs = run()
+            except NoDocuments as exc:
+                accept(cand, [], fresh=True, none=str(exc))
+            except Exception as exc:
+                unresolved(cand, f"{type(exc).__name__}: {exc}")
+            else:
+                accept(cand, docs, fresh=True)
 
         def drain(keep: int) -> None:
             while len(inflight) > keep:
                 cand, fut = inflight.popleft()
-                try:
-                    docs = fut.result()
-                except Exception as exc:
-                    failed(cand, exc)
-                    continue
-                accept(cand, docs, fresh=True)
+                settle(cand, fut.result)
 
         try:
             for cand in discover_all(cfg.discovery, env):
@@ -275,46 +337,55 @@ class DocCollectionAdapter:
                     and resolved + len(inflight) >= resolve_limit
                 ):
                     out.unresolved += 1
+                    out.unresolved_keys.append(cand.key)
                     continue
                 cached = cache.get(cand) if cache is not None and cand.resolve else None
                 if cached is not None:
-                    accept(cand, cached, fresh=False)
+                    accept(cand, cached.docs, fresh=False, none=cached.none)
                 elif pool is not None and cand.resolve:
                     inflight.append((cand, pool.submit(resolve, cand, env)))
                     drain(4 * cfg.concurrency)  # bounded: never more than a few dozen waiting
                 else:
-                    try:
-                        docs = resolve(cand, env)
-                    except Exception as exc:
-                        failed(cand, exc)
-                        continue
-                    accept(cand, docs, fresh=True)
+                    settle(cand, lambda cand=cand: resolve(cand, env))
             drain(0)
         finally:
             if pool is not None:
                 pool.shutdown(wait=True, cancel_futures=True)
-        if cache is not None:
-            cache.close()
+            if cache is not None:
+                cache.close()  # an exception must not lose the resolves of the last minute
         out.totals = dict(env.totals)
         out.scale = max(env.scale.values(), default=1.0)
         out.notes.extend(env.notes)
         out.incomplete.extend(env.incomplete)
+        out.sampled.extend(env.sampled)
+        if out.skipped_formats:
+            out.notes.append(
+                f"{out.skipped_formats} document(s) in formats outside access.formats {cfg.formats}"
+            )
 
         if isinstance(env.fetcher, Throttle):
             out.requests = dict(env.fetcher.requests)
         return out
 
     def discover(self, ctx: Ctx) -> Iterable[ReleaseRef]:
+        """The release the issuer lists now (the orchestrator's path; ``wsp collections fetch`` is the
+        other). Writes the audit of every decision and the *discovery record* next to it: the resolved
+        candidates by file name and what the listing proved (:meth:`finalize` builds the catalog from
+        it, :meth:`screen` reads publication numbers from it)."""
         survey = self.survey(ctx)
         version = datetime.now(UTC).strftime("%Y-%m-%d")
-        write_audit(ctx.workdir / "doc-collection" / version / "candidates.jsonl", survey.decisions)
+        record_dir = ctx.workdir / "doc-collection" / version
+        write_audit(record_dir / "candidates.jsonl", survey.decisions)
         files: list[RemoteFile] = []
         names: set[str] = set()
+        kept: list[Candidate] = []
         for cand in survey.allowed:
             if cand.resolve == "git" or cand.file_name in names:
                 continue  # git repositories are bundled by `wsp collections fetch`
             names.add(cand.file_name)
             files.append(remote_for(cand))
+            kept.append(cand)
+        write_discovery_record(record_dir, kept, survey)
         if not files:
             return []
         digest = hashlib.sha256("\n".join(sorted(f.url for f in files)).encode()).hexdigest()
@@ -374,19 +445,71 @@ class DocCollectionAdapter:
 
         ``mismatch`` when the file is not what it claims (an HTML page named ``.pdf``), ``rejected``
         when a marking or the safety list denies it, ``held`` when it needs the owner (including a
-        file with no text to screen), else ``ok``.
+        file with no text to screen), else ``ok``. The same :func:`screen_document` as
+        ``wsp collections fetch``, with the publication number from the discovery record, so owner
+        decisions by number apply on both paths.
         """
         if not local.is_file():
             return FileVerdict(VerdictStatus.MISSING, f"{local.name} not found")
-        problem = well_formed(local)
-        if problem:
-            return FileVerdict(VerdictStatus.MISMATCH, problem)
-        screen = screen_file(local, self.config(ctx.source).rules, keys=(key_of_file_name(remote.name),))
+        cand = discovery_candidate(ctx.workdir, remote.name)
+        keys = (cand.key, cand.pub_number) if cand is not None else (key_of_file_name(remote.name),)
+        try:
+            screen = screen_document(local, self.config(ctx.source).rules, keys=keys)
+        except WrongBodyError as exc:
+            return FileVerdict(VerdictStatus.MISMATCH, str(exc))
         if screen.decision.verdict is Verdict.DENY:
             return FileVerdict(VerdictStatus.REJECTED, f"policy {screen.decision}")
         if screen.decision.verdict is Verdict.REVIEW:
             return FileVerdict(VerdictStatus.HELD, f"policy {screen.decision}")
         return FileVerdict(VerdictStatus.OK, f"policy {screen.decision}")
+
+    def finalize(
+        self, ctx: Ctx, plan: FetchPlan, previous_dir: Path | None, kept: Mapping[str, Path]
+    ) -> list[tuple[str, Path]]:
+        """The generation's catalog, built as ``wsp collections fetch`` builds it (``GenerationFinalizer``;
+        2026-10-12 audit, CA-7): the previous generation's catalog carried over (documents it and
+        earlier generations hold stay listed, with their titles, editions and banners), this cycle's
+        documents added, editions labelled, policy applied, and withdrawals inferred only from a
+        complete listing. Raises when the discovery record is missing: a generation is never sealed
+        without its catalog.
+        """
+        cfg = self.config(ctx.source)
+        record = read_discovery_record(ctx.workdir / "doc-collection" / plan.release.version)
+        if record is None:
+            raise FileNotFoundError(
+                f"{ctx.source.id} {plan.release.version}: no discovery record; discover again before sealing"
+            )
+        missing = sorted(name for name in kept if name not in record.candidates)
+        if missing:
+            raise ValueError(f"{ctx.source.id}: files not in the discovery record: {missing[:5]}")
+        fetched = [
+            fetched_doc(
+                record.candidates[name],
+                local,
+                screen_document(
+                    local, cfg.rules, keys=(record.candidates[name].key, record.candidates[name].pub_number)
+                ),
+                file=f"upstream/{name}",
+            )
+            for name, local in sorted(kept.items())
+        ]
+        previous = (
+            list(read_catalog(previous_dir)) if previous_dir is not None and previous_dir.is_dir() else []
+        )
+        catalog = build_catalog(
+            previous,
+            plan.previous_generation,
+            fetched,
+            cfg.currency,
+            listed=record.listed,
+            protected=record.protected,
+            listing={c.key: c for c in record.candidates.values()},
+            policy=cfg.rules,
+            formats=cfg.formats,
+        )
+        out = ctx.workdir / "doc-collection" / plan.release.version / "generation" / CATALOG
+        write_catalog(out, catalog)
+        return [(CATALOG, out)]
 
     def depends_on(self, ctx: Ctx, generation_dir: Path) -> frozenset[str]:
         """Earlier generations whose files this generation's catalog lists (``GenerationDependencies``)."""
@@ -400,21 +523,34 @@ class DocCollectionAdapter:
     # --- documents ---------------------------------------------------------------------------------
 
     def documents(self, ctx: Ctx, generation_dir: Path) -> Iterator[DocRecord]:
+        """Every catalogued document that policy still admits (2026-10-12 audit, CA-8).
+
+        A document the catalog marks ``excluded``, or that the source's *current* rules deny by its
+        metadata (an owner deny, a deny-core title, a marking in the title, a format the source no
+        longer takes), is left out, so the index run of this generation removes it; the reader never
+        sees it again. Documents the issuer stopped listing stay, with a banner (``banner_for``).
+        """
         spec = ctx.source
         cfg = self.config(spec)
         for meta in read_catalog(generation_dir):
+            why = meta.excluded or excluded_by(meta, cfg.rules, cfg.formats)
+            if why:
+                log.info("%s: %s left out of the index (%s)", spec.id, meta.doc_key, why)
+                continue
             path = resolve_file(generation_dir, meta)
             if path is None:
                 log.warning("%s: %s not found in any generation", spec.id, meta.file)
                 continue
             body = document_text(path, max_pages=cfg.pdf_max_pages)
-            text = catalog_header(meta) + ("\n\n" + body if body else "")
+            title = reader_title(meta, path, body)
+            text = catalog_header(meta, title=title) + ("\n\n" + body if body else "")
             license_ = meta.license or spec.license
+            listed_as = clean_title(meta.title) if meta.title else ""
             yield DocRecord(
                 doc_id=make_doc_id(spec.id, meta.doc_key),
                 source_id=spec.id,
                 native_id=meta.doc_key,
-                title=meta.title or meta.pub_number or meta.doc_key,
+                title=title,
                 lang=meta.language or "en",
                 license=license_,
                 text=text,
@@ -422,12 +558,124 @@ class DocCollectionAdapter:
                 url_native=meta.origin_url or None,
                 html_ref=f"file:{meta.generation or generation_dir.name}/{meta.file}",
                 content_hash=content_hash(text),
-                aliases=tuple(a for a in (meta.pub_number,) if a and a != meta.title),
+                aliases=tuple(dict.fromkeys(a for a in (meta.pub_number, listed_as) if a and a != title)),
                 meta=meta.record_meta(),
             )
 
 
 # --- helpers ---------------------------------------------------------------------------------------
+
+DISCOVERY_CANDIDATES = "documents.jsonl"
+DISCOVERY_LISTING = "listing.json"
+
+
+@dataclass(frozen=True, slots=True)
+class DiscoveryRecord:
+    """What :meth:`DocCollectionAdapter.discover` learned, kept for the release's later steps."""
+
+    candidates: Mapping[str, Candidate]  # by file name
+    listed: frozenset[str] | None  # every listed document key; None: the listing was not complete
+    protected: frozenset[str]  # listing keys whose documents must not be inferred withdrawn
+
+
+def write_discovery_record(directory: Path, candidates: Sequence[Candidate], survey: Survey) -> None:
+    directory.mkdir(parents=True, exist_ok=True)
+    rows = directory / DISCOVERY_CANDIDATES
+    tmp = rows.with_name(rows.name + ".partial")
+    with tmp.open("w", encoding="utf-8") as fh:
+        for cand in candidates:
+            fh.write(json.dumps(cand.to_json(), sort_keys=True) + "\n")
+    tmp.replace(rows)
+    listed = sorted({c.key for c in survey.allowed} | {c.key for c, _d in survey.decisions})
+    listing = {
+        "complete": survey.listing_complete,
+        "listed": listed if survey.listing_complete else None,
+        "protected": sorted(survey.protected_keys()),
+    }
+    out = directory / DISCOVERY_LISTING
+    tmp = out.with_name(out.name + ".partial")
+    tmp.write_text(json.dumps(listing), encoding="utf-8")
+    tmp.replace(out)
+
+
+def read_discovery_record(directory: Path) -> DiscoveryRecord | None:
+    rows, listing = directory / DISCOVERY_CANDIDATES, directory / DISCOVERY_LISTING
+    if not rows.is_file() or not listing.is_file():
+        return None
+    candidates: dict[str, Candidate] = {}
+    with rows.open(encoding="utf-8") as fh:
+        for line in fh:
+            if line.strip():
+                cand = Candidate.from_json(cast(Mapping[str, Any], json.loads(line)))
+                candidates[cand.file_name] = cand
+    data = cast(Mapping[str, Any], json.loads(listing.read_text(encoding="utf-8")))
+    listed = data.get("listed")
+    return DiscoveryRecord(
+        candidates=candidates,
+        listed=frozenset(str(k) for k in cast(list[object], listed)) if isinstance(listed, list) else None,
+        protected=frozenset(str(k) for k in cast(list[object], data.get("protected") or [])),
+    )
+
+
+def discovery_candidate(workdir: Path, name: str) -> Candidate | None:
+    """The candidate a stored file name came from, from the newest discovery record that has it."""
+    root = workdir / "doc-collection"
+    if not root.is_dir():
+        return None
+    for directory in sorted((p for p in root.iterdir() if p.is_dir()), reverse=True):
+        record = _cached_record(directory / DISCOVERY_CANDIDATES)
+        if name in record:
+            return record[name]
+    return None
+
+
+_RECORDS: dict[tuple[Path, float], dict[str, Candidate]] = {}
+
+
+def _cached_record(path: Path) -> dict[str, Candidate]:
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        return {}
+    key = (path, mtime)
+    if key not in _RECORDS:
+        record = read_discovery_record(path.parent)
+        if len(_RECORDS) > 8:
+            _RECORDS.clear()
+        _RECORDS[key] = dict(record.candidates) if record is not None else {}
+    return _RECORDS[key]
+
+
+def screen_document(path: Path, rules: Rules, *, keys: Iterable[str] = ()) -> Screen:
+    """The one document screen of both acquisition paths: the bytes must be what the name says
+    (:func:`well_formed`; :class:`WrongBodyError` otherwise: a failed download, not a document), then
+    the distribution gate and content screen (:func:`screen_file`)."""
+    problem = well_formed(path)
+    if problem:
+        raise WrongBodyError(problem)
+    return screen_file(path, rules, keys=keys)
+
+
+def fetched_doc(cand: Candidate, path: Path, screen: Screen, *, file: str) -> FetchedDoc:
+    """The catalog's record of a screened, allowed download (SHA-256 and MD5 in one read)."""
+    sha, md5 = hashlib.sha256(), hashlib.md5(usedforsecurity=False)
+    with path.open("rb") as fh:
+        while chunk := fh.read(8 << 20):
+            sha.update(chunk)
+            md5.update(chunk)
+    rights = cand.rights
+    return FetchedDoc(
+        cand=cand,
+        file=file,
+        sha256=sha.hexdigest(),
+        bytes=path.stat().st_size,
+        decision=str(screen.decision),
+        distribution=screen.marking.distribution or (rights if rights.startswith("license:") else ""),
+        distribution_text=screen.marking.text,
+        fetched_at=datetime.now(UTC).isoformat(timespec="seconds"),
+        license=rights.removeprefix("license:") if rights.startswith("license:") else "",
+        md5=md5.hexdigest(),
+    )
 
 
 def key_of_file_name(name: str) -> str:
@@ -474,6 +722,13 @@ def remote_for(cand: Candidate) -> RemoteFile:
     )
 
 
+class Resolved(NamedTuple):
+    """A cached resolve: its documents, or why there are none (the resolver said so)."""
+
+    docs: list[Candidate]
+    none: str = ""
+
+
 class ResolveCache:
     """Resolved document candidates by listing candidate (local SQLite in the source's workdir).
 
@@ -508,18 +763,29 @@ class ResolveCache:
     def _key(cand: Candidate) -> str:
         return hashlib.sha256(json.dumps(cand.to_json(), sort_keys=True).encode("utf-8")).hexdigest()
 
-    def get(self, cand: Candidate) -> list[Candidate] | None:
+    def get(self, cand: Candidate) -> Resolved | None:
+        """The cached resolve, or ``None``. A bare empty list (what earlier versions cached for a failed
+        resolve) is a miss: only a resolver's positive "no documents" is remembered empty."""
         row = self._db.execute("SELECT at, docs FROM resolved WHERE k = ?", (self._key(cand),)).fetchone()
         if row is None or self._clock() - float(row[0]) > self._ttl:
             return None
-        return [Candidate.from_json(d) for d in json.loads(row[1])]
+        data: object = json.loads(row[1])
+        if isinstance(data, Mapping):
+            return Resolved([], str(cast(Mapping[str, object], data).get("none") or "no documents"))
+        docs = [Candidate.from_json(d) for d in cast(list[Mapping[str, Any]], data)]
+        return Resolved(docs) if docs else None
 
-    def put(self, cand: Candidate, docs: Sequence[Candidate]) -> None:
+    def put(self, cand: Candidate, docs: Sequence[Candidate], *, none: str = "") -> None:
+        """Remember a resolve: documents, or the resolver's positive ``none`` (a reason). An empty
+        result without a reason is a failure and is never stored."""
+        if not docs and not none:
+            return
         if self._pending == 0:
             self._db.execute("BEGIN")
+        payload: object = {"none": none} if not docs else [d.to_json() for d in docs]
         self._db.execute(
             "INSERT OR REPLACE INTO resolved VALUES (?, ?, ?)",
-            (self._key(cand), self._clock(), json.dumps([d.to_json() for d in docs])),
+            (self._key(cand), self._clock(), json.dumps(payload)),
         )
         self._pending += 1
         if self._pending >= 50:  # at 1 request/s: lose at most a minute of resolving to a crash
@@ -546,27 +812,84 @@ def write_audit(path: Path, decisions: Sequence[tuple[Candidate, Decision]]) -> 
     tmp.replace(path)
 
 
+class WrongBodyError(ValueError):
+    """The bytes are not the document the link named: an HTML landing, login or home page, or an
+    error body (JSON, XML, a few words of text) where a PDF was expected. A failed download, to be
+    retried later; never a document (2026-10-12 audit, CA-2)."""
+
+
+_SNIFF_BYTES = 4096
+# A short text body that says this is an error, not a document.
+_ERROR_BODY_MAX = 2048
+_ERROR_WORDS_RE = re.compile(
+    rb"error|exception|not\s+found|no\s+such\s+key|access\s*denied|forbidden|unauthori[sz]ed|"
+    rb"bad\s+(?:request|gateway)|service\s+unavailable|too\s+many\s+requests|rate\s+limit|"
+    rb"temporarily\s+unavailable|sign\s?in|log\s?in",
+    re.IGNORECASE,
+)
+_HTML_RE = re.compile(rb"<html|<!doctype\s+html|<head[\s>]|<body[\s>]", re.IGNORECASE)
+_OFFICE_SUFFIXES = (".docx", ".xlsx", ".pptx", ".odt", ".ods", ".odp", ".zip", ".epub")
+_TEXT_DOC_SUFFIXES = (".txt", ".csv", ".md")
+
+
+def _head(path: Path, n: int = _SNIFF_BYTES) -> bytes:
+    with path.open("rb") as fh:
+        return fh.read(n)
+
+
+def _error_text(head: bytes, size: int) -> bool:
+    """A short text body that reads like an error message."""
+    return size <= _ERROR_BODY_MAX and _ERROR_WORDS_RE.search(head) is not None
+
+
+def body_kind(path: Path) -> str:
+    """What a downloaded file's bytes are: ``pdf``, ``zip``, ``html``, ``json``, ``xml``, ``text``,
+    ``empty`` or ``binary`` (by content, never by name)."""
+    head = _head(path)
+    stripped = head.lstrip()
+    if not stripped:
+        return "empty"
+    if stripped.startswith(b"%PDF-"):
+        return "pdf"
+    if head.startswith(b"PK\x03\x04"):
+        return "zip"
+    if _HTML_RE.search(head[:1024]):
+        return "html"
+    if b"\x00" in head:
+        return "binary"
+    try:
+        head.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        if exc.start < len(head) - 4:  # not merely a character cut at the end of the sample
+            return "binary"
+    if stripped[:1] in (b"{", b"["):
+        return "json"
+    if stripped[:1] == b"<":
+        return "xml"
+    return "text"
+
+
 def true_suffix(path: Path) -> Path:
-    """``path`` renamed to the format its bytes are, when its name guessed wrong: a GOV.UK "HTML
-    publication" linked without an extension was named ``.pdf`` and then failed the PDF check."""
+    """``path`` renamed to the format its bytes are, when a link named it ``.pdf`` by guess: a GOV.UK
+    attachment linked without an extension turns out to be a Word, Excel or ODF file, a zip or a CSV.
+
+    Only genuine documents are renamed. An HTML page, a JSON or XML body, or a short text that reads
+    like an error, where a PDF was expected, raises :class:`WrongBodyError`: a server's error or landing
+    page is a failed download, never a document (HTML publications are named ``.html`` by the
+    discoverer that finds them, see ``Candidate.extra['suffix']``).
+    """
     if path.suffix.lower() != ".pdf":
         return path
-    with path.open("rb") as fh:
-        head = fh.read(1024)
-    if head.lstrip().startswith(b"%PDF-"):
-        return path
-    lowered = head.lower()
+    kind = body_kind(path)
+    if kind in ("pdf", "binary", "empty"):
+        return path  # a PDF, or something well_formed refuses as one
     suffix = ""
-    if b"<html" in lowered or b"<!doctype html" in lowered:
-        suffix = ".html"
-    elif head.startswith(b"PK\x03\x04"):
+    if kind == "zip":
         suffix = _zip_kind(path)
-    elif head and b"\x00" not in head:
-        try:
-            head.decode("utf-8")
-            suffix = ".txt"  # CSV and plain text attachments
-        except UnicodeDecodeError:
-            suffix = ""
+    elif kind == "text" and not _error_text(_head(path), path.stat().st_size):
+        suffix = ".txt"  # CSV and plain text attachments
+    else:
+        raise WrongBodyError(f"expected a PDF, got {kind if kind != 'text' else 'an error message'}")
     if not suffix:
         return path
     target = path.with_suffix(suffix)
@@ -586,7 +909,8 @@ def _zip_kind(path: Path) -> str:
             if any(n.startswith("ppt/") for n in names):
                 return ".pptx"
             if "mimetype" in names:
-                mime = zf.read("mimetype").decode("ascii", "replace")
+                info = zf.getinfo("mimetype")
+                mime = _read_member(zf, info, 200).decode("ascii", "replace")
                 for kind, ext in (("text", ".odt"), ("spreadsheet", ".ods"), ("presentation", ".odp")):
                     if kind in mime:
                         return ext
@@ -595,17 +919,56 @@ def _zip_kind(path: Path) -> str:
     return ".zip"
 
 
+_TITLE_RE = re.compile(rb"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
+_CANONICAL_RE = re.compile(
+    rb"<link[^>]+rel=[\"']?canonical[\"']?[^>]*href=[\"']?([^\"'\s>]+)|"
+    rb"<link[^>]+href=[\"']?([^\"'\s>]+)[\"']?[^>]*rel=[\"']?canonical",
+    re.IGNORECASE,
+)
+_LANDING_TITLE_RE = re.compile(
+    rb"\b(?:sign\s?in|log\s?in|login|access\s+denied|page\s+not\s+found|not\s+found|404|403|error)\b",
+    re.IGNORECASE,
+)
+
+
+def landing_page(head: bytes) -> str | None:
+    """Why an HTML body is a landing, login, error or home page rather than a document, or ``None``."""
+    title = _TITLE_RE.search(head)
+    if title is not None and _LANDING_TITLE_RE.search(title.group(1)):
+        return f"a login or error page ({title.group(1).decode('utf-8', 'replace').strip()[:60]!r})"
+    canonical = _CANONICAL_RE.search(head)
+    if canonical is not None:
+        href = (canonical.group(1) or canonical.group(2) or b"").decode("utf-8", "replace")
+        parts = urlsplit(href)
+        if parts.netloc and parts.path in ("", "/") and not parts.query:
+            return f"the site's home page ({href})"
+    return None
+
+
 def well_formed(path: Path) -> str | None:
-    """A cheap format check: PDFs must start with ``%PDF-``; HTML must look like HTML."""
-    with path.open("rb") as fh:
-        head = fh.read(1024)
+    """A cheap format check by name: PDFs start with ``%PDF-``; office files and zips are zip
+    containers; text is text, not an error message; HTML is a document, not a landing page."""
+    head = _head(path, 64 * 1024)
     name = path.name.lower()
     if name.endswith(".pdf") and not head.lstrip().startswith(b"%PDF-"):
         return "not a PDF (missing %PDF- header)"
-    if name.endswith((".html", ".htm")) and b"<" not in head:
-        return "not HTML"
-    if name.endswith(".zip") and not head.startswith(b"PK\x03\x04"):
-        return "not a zip archive"
+    if name.endswith(_OFFICE_SUFFIXES) and not head.startswith(b"PK\x03\x04"):
+        return (
+            "not a zip archive"
+            if name.endswith(".zip")
+            else f"not a {Path(name).suffix} file (no zip container)"
+        )
+    if name.endswith(_TEXT_DOC_SUFFIXES):
+        kind = body_kind(path)
+        if kind not in ("text", "empty"):
+            return f"not text ({kind})"
+        if _error_text(head, path.stat().st_size):
+            return "an error message, not a document"
+    if name.endswith((".html", ".htm")):
+        if b"<" not in head[:1024]:
+            return "not HTML"
+        if why := landing_page(head):
+            return f"not a document: {why}"
     return None
 
 
@@ -665,34 +1028,110 @@ def extract_text(path: Path, *, max_pages: int) -> Extracted:
 
 
 ZIP_SCREEN_CHARS = 60_000
+# Bounds on what the gate reads inside an archive (2026-10-12 audit, CA-17): members are streamed,
+# never read whole; a member larger than this is named but not read; a member that inflates more
+# than ZIP_MAX_RATIO times is a zip bomb and the archive is held.
+ZIP_MEMBER_MAX_BYTES = 64 * 1024 * 1024
+ZIP_MAX_RATIO = 200
+ZIP_MEMBERS_SCREENED = 40
+ZIP_MEMBER_CHARS = 20_000
+ZIP_DOCUMENT_SUFFIXES = (".pdf", ".docx", ".txt", ".md", ".html", ".htm", ".xml")
+
+
+class ArchiveError(ValueError):
+    """A zip member the gate refuses to inflate (compression ratio of a zip bomb)."""
 
 
 _W_NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 
 
-def docx_text(path: Path) -> str:
-    """The text of a Word (.docx) document: its paragraphs from ``word/document.xml``, in order."""
+def _readable_member(info: zipfile.ZipInfo) -> bool:
+    """``False`` for a member too large to read; :class:`ArchiveError` for a zip bomb."""
+    if info.file_size and (info.compress_size == 0 or info.file_size / info.compress_size > ZIP_MAX_RATIO):
+        raise ArchiveError(f"{info.filename}: compression ratio beyond {ZIP_MAX_RATIO}")
+    return info.file_size <= ZIP_MEMBER_MAX_BYTES
+
+
+def _read_member(zf: zipfile.ZipFile, info: zipfile.ZipInfo, limit: int) -> bytes:
+    """At most ``limit`` bytes of a member, streamed (a lying header cannot make it read more)."""
+    with zf.open(info) as fh:
+        return fh.read(limit)
+
+
+def _docx_paragraphs(zf: zipfile.ZipFile) -> str:
     import xml.etree.ElementTree as ET
 
-    with zipfile.ZipFile(path) as zf:
-        root = ET.fromstring(zf.read("word/document.xml"))  # noqa: S314 - expat rejects external entities
+    info = zf.getinfo("word/document.xml")
+    if not _readable_member(info):
+        raise ArchiveError(f"word/document.xml is {info.file_size:,} bytes")
+    data = _read_member(zf, info, ZIP_MEMBER_MAX_BYTES)
+    root = ET.fromstring(data)  # noqa: S314 - expat rejects external entities
     paragraphs = ("".join(t.text or "" for t in p.iter(f"{_W_NS}t")) for p in root.iter(f"{_W_NS}p"))
     return "\n".join(p for p in paragraphs if p.strip())
 
 
+def docx_text(path: Path) -> str:
+    """The text of a Word (.docx) document: its paragraphs from ``word/document.xml``, in order."""
+    with zipfile.ZipFile(path) as zf:
+        return _docx_paragraphs(zf)
+
+
 def zip_screen_text(path: Path) -> str:
-    """What the gate reads of a zip archive: its README-like members, then its member names (nested
-    zips' names too). A list of names reads like a table of contents ("U_Windows_10_V3R1_STIG.zip"), so
-    the content screen's title-page and three-phrase rules apply to it, as for git bundles."""
+    """What the gate reads of a zip archive as a whole: its README-like members, then its member names
+    (nested zips' names too). A list of names reads like a table of contents ("U_Windows_10_V3R1_STIG.zip"),
+    so the content screen's title-page and three-phrase rules apply to it, as for git bundles. The
+    member documents themselves are screened one by one (:func:`screen_zip`)."""
     parts: list[str] = []
     with zipfile.ZipFile(path) as zf:
-        names = zf.namelist()
-        for name in names:
-            low = name.lower().rsplit("/", 1)[-1]
-            if low.startswith("readme") and low.endswith((".txt", ".md", "")) and not name.endswith("/"):
-                parts.append(zf.read(name)[:20_000].decode("utf-8", "replace"))
-        parts.extend(n.replace("/", " / ").replace("_", " ") for n in names)
+        infos = zf.infolist()
+        for info in infos:
+            low = info.filename.lower().rsplit("/", 1)[-1]
+            readme = low.startswith("readme") and low.endswith((".txt", ".md", "")) and not info.is_dir()
+            if readme and _readable_member(info):
+                parts.append(_read_member(zf, info, ZIP_MEMBER_CHARS).decode("utf-8", "replace"))
+        parts.extend(i.filename.replace("/", " / ").replace("_", " ") for i in infos)
     return "\n".join(parts)[:ZIP_SCREEN_CHARS]
+
+
+def zip_member_texts(path: Path) -> list[tuple[str, Extracted]]:
+    """Front matter of the first :data:`ZIP_MEMBERS_SCREENED` documents in an archive (PDF, Word,
+    text, HTML, XML), each read within the bounds above. Raises :class:`ArchiveError` for a bomb."""
+    import io
+    import tempfile
+
+    out: list[tuple[str, Extracted]] = []
+    with zipfile.ZipFile(path) as zf:
+        members = [
+            i for i in zf.infolist() if not i.is_dir() and i.filename.lower().endswith(ZIP_DOCUMENT_SUFFIXES)
+        ]
+        for info in members[:ZIP_MEMBERS_SCREENED]:
+            name = info.filename
+            if not _readable_member(info):
+                out.append((name, Extracted("", "unsupported-format")))
+                continue
+            suffix = Path(name).suffix.lower()
+            try:
+                if suffix == ".pdf":
+                    with tempfile.TemporaryDirectory(prefix="wsp-zip-") as tmp:
+                        member = Path(tmp) / "member.pdf"
+                        member.write_bytes(_read_member(zf, info, ZIP_MEMBER_MAX_BYTES))
+                        text = pdf_text(member, FRONT_MATTER_PAGES)
+                elif suffix == ".docx":
+                    data = _read_member(zf, info, ZIP_MEMBER_MAX_BYTES)
+                    with zipfile.ZipFile(io.BytesIO(data)) as inner:
+                        text = _docx_paragraphs(inner)
+                elif suffix in (".html", ".htm"):
+                    text = html_to_text(_read_member(zf, info, 4 * ZIP_MEMBER_CHARS))
+                else:
+                    text = _read_member(zf, info, ZIP_MEMBER_CHARS).decode("utf-8", "replace")
+            except ArchiveError:
+                raise
+            except Exception as exc:
+                log.warning("%s: cannot read member %s: %s", path.name, name, exc)
+                out.append((name, Extracted("", "extraction-error")))
+                continue
+            out.append((name, checked_front_matter(text[: 4 * ZIP_MEMBER_CHARS])))
+    return out
 
 
 def document_text(path: Path, *, max_pages: int) -> str:
@@ -721,21 +1160,28 @@ def screen_file(path: Path, rules: Rules, *, keys: Iterable[str] = ()) -> Screen
     that hold only where the registry sets ``filter.allow_image_only``. ``keys`` (document key and
     publication number) let an owner ``allow_documents`` decision release a document from the two
     holds that are about missing evidence (no text, a required marking not found); it never
-    overrides a deny or a content review.
+    overrides a deny. A content review is released only by ``allow_content_review`` and a
+    deny-core hit only by ``override_safety`` (with its reason in the rules file).
+
+    A zip archive is screened member by member as well (:func:`screen_zip`).
     """
+    if path.suffix.lower() == ".zip":
+        return screen_zip(path, rules, keys=keys)
     return screen_text(front_matter(path), rules, keys=keys)
 
 
 def screen_text(got: Extracted, rules: Rules, *, keys: Iterable[str] = ()) -> Screen:
     """:func:`screen_file` on already extracted front matter (also used for git bundles)."""
     text_found = not got.problem
-    # allow_documents holds normalized numbers and keys (Rules.merged), so normalize to compare.
-    owner_allowed = bool({normalize_pub_number(k) for k in keys if k} & rules.allow_documents)
+    # Owner decisions hold normalized numbers and keys (Rules.merged), so normalize to compare.
+    ids = {normalize_pub_number(k) for k in keys if k}
+    owner_allowed = bool(ids & rules.allow_documents)
+    content_released = bool(ids & rules.allow_content_review)
     marking = parse_markings(got.text)
     gate = check_distribution(marking, rules.require, declassified_ok=rules.declassified_ok)
     if gate.verdict is Verdict.DENY:
         return Screen(gate, marking, text_found)
-    content = classify_content(got.text, rules)
+    content = classify_content(got.text, rules, overridden=bool(ids & rules.override_safety))
     if content.verdict is Verdict.DENY:
         return Screen(content, marking, text_found)
     if gate.verdict is Verdict.REVIEW and not owner_allowed:
@@ -743,14 +1189,47 @@ def screen_text(got: Extracted, rules: Rules, *, keys: Iterable[str] = ()) -> Sc
     image_only_ok = got.problem == "no-text-layer" and rules.allow_image_only
     if not text_found and not owner_allowed and not image_only_ok:
         return Screen(Decision(Verdict.REVIEW, f"text={got.problem}", Stage.CONTENT), marking, text_found)
-    if content.verdict is Verdict.REVIEW:
+    if content.verdict is Verdict.REVIEW and not content_released:
         return Screen(content, marking, text_found)
     rule = gate.rule
     if gate.verdict is Verdict.REVIEW:
         rule = f"owner=allow+{gate.rule}"
+    if content.verdict is Verdict.REVIEW:
+        rule += f"+owner=allow-content:{content.rule}"
     if not text_found:
         rule += f"+text={got.problem}" + ("" if image_only_ok else "+owner=allow")
     return Screen(Decision(Verdict.ALLOW, rule, Stage.DISTRIBUTION), marking, text_found)
+
+
+def screen_zip(path: Path, rules: Rules, *, keys: Iterable[str] = ()) -> Screen:
+    """An archive is as restricted as its most restricted member (2026-10-12 audit, CA-17).
+
+    The archive's README and member names are screened as a whole (:func:`zip_screen_text`), then
+    the front matter of each member document (:func:`zip_member_texts`): a member a marking or the
+    deny core rejects rejects the archive, and a member the content screen holds holds it. Members'
+    missing-evidence holds (no text, no printed release statement) are the archive's business, not
+    each member's. A zip bomb holds the archive.
+    """
+    archive = screen_text(front_matter(path), rules, keys=keys)
+    if archive.decision.verdict is Verdict.DENY or not archive.text_found:  # unreadable: the hold stands
+        return archive
+    try:
+        members = zip_member_texts(path)
+    except (ArchiveError, zipfile.BadZipFile, OSError) as exc:
+        held = Decision(Verdict.REVIEW, f"text=extraction-error:{type(exc).__name__}", Stage.CONTENT)
+        return Screen(held, archive.marking, archive.text_found)
+    review: Screen | None = None
+    for name, got in members:
+        member = screen_text(got, rules, keys=keys)
+        named = replace(member.decision, rule=f"{member.decision.rule}@{name}")
+        if member.decision.verdict is Verdict.DENY:
+            return Screen(named, member.marking, archive.text_found)
+        held_for_content = member.decision.rule.startswith(("safety=", "marking=export-mention"))
+        if member.decision.verdict is Verdict.REVIEW and held_for_content and review is None:
+            review = Screen(named, member.marking, archive.text_found)
+    if review is not None and archive.decision.verdict is Verdict.ALLOW:
+        return review
+    return archive
 
 
 def read_catalog(generation_dir: Path) -> Iterator[DocumentMeta]:
@@ -781,9 +1260,69 @@ def resolve_file(generation_dir: Path, meta: DocumentMeta) -> Path | None:
     return None
 
 
-def catalog_header(meta: DocumentMeta) -> str:
+_JUNK_PDF_TITLES = frozenset(
+    {"untitled", "document", "title", "pdf", "slide 1", "powerpoint presentation", "microsoft word"}
+)
+_WORD_PREFIX_RE = re.compile(r"^microsoft (?:word|powerpoint|excel)\s*-\s*", re.IGNORECASE)
+
+
+def _meaningful(title: str) -> str:
+    """``title`` when it can name a document, else ``""`` (a file name, a template's placeholder, a
+    sentence fragment)."""
+    t = re.sub(r"\s+", " ", _WORD_PREFIX_RE.sub("", title)).strip()
+    if len(t) < 4 or len(t) > 200 or t.casefold() in _JUNK_PDF_TITLES:
+        return ""
+    if is_filename_title(t) or is_fragment(t):
+        return ""
+    return t
+
+
+def pdf_metadata_title(path: Path) -> str:
+    """The PDF's own ``/Title``, when it is meaningful."""
+    if path.suffix.lower() != ".pdf":
+        return ""
+    try:
+        import pypdfium2
+
+        pdf = pypdfium2.PdfDocument(str(path))
+        try:
+            raw = str(pdf.get_metadata_dict().get("Title") or "")
+        finally:
+            pdf.close()
+    except Exception as exc:  # a damaged PDF has no title to offer; its text may still be read
+        log.debug("no PDF metadata for %s: %s", path.name, exc)
+        return ""
+    return _meaningful(raw)
+
+
+def heading_line(body: str, *, scan_chars: int = 3000) -> str:
+    """The first heading-like line of a document's text: a few words, mostly letters, not a fragment."""
+    for line in body[:scan_chars].splitlines():
+        t = re.sub(r"\s+", " ", line).strip()
+        words = t.split()
+        if len(words) < 2 or not 8 <= len(t) <= 150:
+            continue
+        letters = sum(c.isalpha() for c in t)
+        if letters < 0.6 * len(t.replace(" ", "")):
+            continue
+        if found := _meaningful(t):
+            return found
+    return ""
+
+
+def reader_title(meta: DocumentMeta, path: Path, body: str) -> str:
+    """The title readers see. The catalog's title, cleaned (no extension or URL escapes; a USGS sheet
+    named in words); when that is a file name or a sentence fragment, the PDF's own title, else the
+    document's first heading-like line, else the cleaned file name."""
+    shown = display_title(meta.title) if meta.title else ""
+    if not shown or is_fragment(shown) or is_filename_title(meta.title):
+        shown = pdf_metadata_title(path) or heading_line(body) or shown
+    return shown or meta.pub_number or meta.doc_key
+
+
+def catalog_header(meta: DocumentMeta, *, title: str = "") -> str:
     """A short, human-readable header so search and readers see what the document is."""
-    lines = [meta.title or meta.doc_key]
+    lines = [title or meta.title or meta.doc_key]
     facts = [
         f"Issuer: {meta.issuer}" if meta.issuer else "",
         f"Publication: {meta.pub_number}" if meta.pub_number else "",
@@ -791,6 +1330,6 @@ def catalog_header(meta: DocumentMeta) -> str:
         f"Status: {meta.currency}" if meta.currency and meta.currency != "current" else "",
     ]
     lines += [f for f in facts if f]
-    if meta.banner:
-        lines.append(meta.banner)
+    if banner := banner_for(meta.record_meta()):
+        lines.append(banner)
     return "\n".join(lines)

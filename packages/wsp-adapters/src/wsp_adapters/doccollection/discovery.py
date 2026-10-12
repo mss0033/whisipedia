@@ -53,7 +53,10 @@ from selectolax.lexbor import LexborHTMLParser, LexborNode
 
 from wsp_adapters.doccollection.model import (
     Candidate,
+    display_title,
+    is_fragment,
     is_generic_title,
+    key_stem_from_url,
     make_key,
     pub_key,
     title_from_url,
@@ -70,6 +73,13 @@ Json = dict[str, Any]
 
 class DiscoveryError(RuntimeError):
     pass
+
+
+class NoDocuments(Exception):  # noqa: N818 - an answer, not a failure
+    """A resolver's positive answer that a listed item has no document to fetch (a news page without
+    attachments, a repository item without a PDF). An empty list from a resolver is a *failure* (the
+    page changed, the item is dark): it is retried, never cached, and never read as a withdrawal
+    (2026-10-12 audit, CA-10)."""
 
 
 # --- politeness ----------------------------------------------------------------------------------
@@ -114,19 +124,64 @@ class Throttle:
         if start > now:
             self.sleep(start - now)
 
+    def _charge(self, url: str, extra: int) -> None:
+        """Count ``extra`` more requests a call made to ``url``'s host (a probe, redirect hops, retries)
+        and push the host's next start back by as many intervals, so the budget is per HTTP request,
+        not per call (2026-10-12 audit, CA-21)."""
+        if extra <= 0:
+            return
+        host = urlsplit(url).netloc.lower()
+        gap = max(self.interval, self.per_host.get(host, 0.0))
+        with self._lock:
+            self._last[host] = max(self._last.get(host, self.clock()), self.clock()) + extra * gap
+            self.requests[host] = self.requests.get(host, 0) + extra
+
     def get_bytes(self, url: str, *, max_bytes: int = 64 * 1024 * 1024) -> bytes:
         self._wait(url)
-        return self.inner.get_bytes(url, max_bytes=max_bytes)
+        try:
+            return self.inner.get_bytes(url, max_bytes=max_bytes)
+        except FetchError as exc:
+            self._charge(url, _attempts(exc) - 1)
+            raise
 
     def download(self, remote: RemoteFile, dest: Any) -> FetchResult:
         self._wait(remote.url)
-        return self.inner.download(remote, dest)
+        try:
+            result = self.inner.download(remote, dest)
+        except FetchError as exc:
+            self._charge(remote.url, _attempts(exc) - 1)
+            raise
+        self._charge(remote.url, _requests_made(result) - 1)
+        return result
 
     def head(self, url: str) -> RemoteHead:
         if not isinstance(self.inner, SupportsHead):
             raise FetchError(f"HEAD not supported by {type(self.inner).__name__}")
         self._wait(url)
         return self.inner.head(url)
+
+
+_ATTEMPTS_RE = re.compile(r"after (\d+) attempt")
+
+
+def _attempts(exc: BaseException) -> int:
+    """Requests a failed call made: ``wsp_fetch`` says "... failed after N attempt(s)"."""
+    m = _ATTEMPTS_RE.search(str(exc))
+    return int(m.group(1)) if m else 1
+
+
+def _requests_made(result: object) -> int:
+    """HTTP requests a download made, from the hops ``wsp_fetch`` recorded: per source a probe and a
+    GET plus each redirect hop. A result without provenance (a non-HTTP fetcher) counts one."""
+    prov = getattr(result, "provenance", None)
+    sources = cast(Mapping[str, object], prov).get("sources") if isinstance(prov, Mapping) else None
+    if not isinstance(sources, list) or not sources:
+        return 1
+    total = 0
+    for src in cast(list[object], sources):
+        redirects = cast(Mapping[str, object], src).get("redirects") if isinstance(src, Mapping) else None
+        total += 2 + (len(cast(list[object], redirects)) if isinstance(redirects, list) else 0)
+    return total
 
 
 # --- environment ----------------------------------------------------------------------------------
@@ -150,7 +205,26 @@ class DiscoverEnv:
     # sampled crawl). A listing with any is incomplete: nothing may be inferred from what it lacks
     # (no "withdrawn" labels) and a fetch stops before downloading (see CollectionFetcher.run).
     incomplete: list[str] = field(default_factory=list[str])
+    # Listings cut short on purpose (``max_pages``, a dry run or a sampled fetch): fetching may go on,
+    # but nothing may be inferred from what the sample lacks.
+    sampled: list[str] = field(default_factory=list[str])
     cache_dir: Path | None = None  # local disk for listings worth keeping between runs (archive.org)
+    # Registry ``access.decode_url_keys``: decode every %XX of a URL before a key is made from it. Off
+    # by default because it changes the key (and doc id) of a document already stored; see
+    # model.key_stem_from_url.
+    decode_url_keys: bool = False
+
+    def listing_end(self, label: str, *, stopped: bool, seen: int, total: int | None = None) -> None:
+        """Record how a paged listing ended (2026-10-12 audit, CA-9). ``stopped``: pages remained when
+        the loop hit its page limit; ``seen``: raw records read; ``total``: what the API stated. A
+        listing that ended early or read under 98 % of its stated total is not complete."""
+        if stopped:
+            if self.max_pages is not None:
+                self.sampled.append(f"{label}: stopped after {self.max_pages} page(s) (max_pages): a sample")
+            else:
+                self.incomplete.append(f"{label}: stopped at the page limit with pages left to read")
+        elif total and seen < 0.98 * total:
+            self.incomplete.append(f"{label}: listed {seen:,} of the {total:,} records the API states")
 
     def get_json(self, url: str) -> Any:
         return json.loads(self.fetcher.get_bytes(url, max_bytes=256 * 1024 * 1024))
@@ -354,16 +428,29 @@ def index_page(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
                 seen_docs.add(url)
                 if strip_rx is not None:
                     text = strip_rx.sub("", text).strip()
-                title = inherited.get("title") if is_generic_title(text) else text
-                title = title or title_from_url(url)
-                if key_from_text and inherited.get("title") and title != inherited["title"]:
-                    title = f"{inherited['title']}: {title}"  # a chapter, named with its book
-                pub = inherited.get("pub_number") or _pub_number(pub_rx, text, title, url)
+                # The key keeps its historical spelling (doc ids never change); the title shown to
+                # readers is cleaned: no file extension or URL escapes, and never a sentence fragment
+                # taken from a link inside running text (then the page's title or the file name).
+                key_title = inherited.get("title") if is_generic_title(text) else text
+                key_title = key_title or key_stem_from_url(url)
+                linked = display_title(text) if text else ""
+                title = (
+                    linked
+                    if linked and not is_generic_title(linked) and not is_fragment(linked)
+                    else display_title(inherited.get("title") or "") or title_from_url(url)
+                )
+                if key_from_text and inherited.get("title"):
+                    if key_title != inherited["title"]:
+                        key_title = f"{inherited['title']}: {key_title}"  # a chapter, named with its book
+                    if title != display_title(inherited["title"]):
+                        title = f"{display_title(inherited['title'])}: {title}"
+                pub = inherited.get("pub_number") or _pub_number(pub_rx, text, key_title, url)
                 edition = inherited.get("edition_date") or (
                     iso_date(f"{text} {url}") if cfg.get("dates") else ""
                 )
+                stem = key_title if key_from_text else key_stem_from_url(url, decode=env.decode_url_keys)
                 yield Candidate(
-                    key=pub_key(env.prefix, pub, edition, title if key_from_text else title_from_url(url)),
+                    key=pub_key(env.prefix, pub, edition, stem),
                     url=url,
                     title=title,
                     issuer=env.issuer,
@@ -431,8 +518,10 @@ def _rows(
         title = fields.get("title", "") or pub
         edition = iso_date(fields.get("date", ""))
         cand = Candidate(
-            key=pub_key(env.prefix, pub, edition, title_from_url(href)),
+            key=pub_key(env.prefix, pub, edition, key_stem_from_url(href, decode=env.decode_url_keys)),
             url=href,
+            # An all-capitals title is recased for display only; the screens read it as printed, where
+            # "(CUI)" and "(FOUO)" are markings ("(Cui)" is not; 2026-10-12 audit, CA-5).
             title=title.title() if title.isupper() else title,
             issuer=env.issuer,
             pub_number=pub,
@@ -441,7 +530,10 @@ def _rows(
             status=fields.get("status", ""),
             discovered_by=_s(cfg.get("label")) or "index-page:rows",
             resolve="detail-page" if detail_docs else "",
-            extra={"detail_documents": detail_docs} if detail_docs else {},
+            extra={
+                **({"detail_documents": detail_docs} if detail_docs else {}),
+                **({"raw_title": title} if title.isupper() else {}),
+            },
         )
         if origin_ok(href, env.origins):
             yield cand
@@ -473,9 +565,13 @@ def nga_msi(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
     base = _s(cfg.get("url")) or "https://msi.nga.mil/api/publications/stored-pubs?output=json"
     items = cast(list[Json], env.get_json(base))
     env.totals["nga-msi"] = len(items)
-    by_pub: dict[int, list[Json]] = {}
-    for it in items:
-        by_pub.setdefault(int(it.get("pubDownloadId") or 0), []).append(it)
+    # Sections of one publication share a pubDownloadId; the full-publication file replaces them. An
+    # item without an id is a publication of its own (grouping them all under 0 let one full file hide
+    # every other id-less item; 2026-10-12 audit, CA-22).
+    by_pub: dict[object, list[Json]] = {}
+    for i, it in enumerate(items):
+        pub_id = it.get("pubDownloadId")
+        by_pub.setdefault(int(pub_id) if pub_id else ("item", i), []).append(it)
     for group in by_pub.values():
         full = [it for it in group if it.get("fullPubFlag")]
         for it in full or group:
@@ -509,12 +605,17 @@ def govinfo(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
     url: str | None = f"https://api.govinfo.gov/collections/{collection}/{since}?" + urlencode(
         {"pageSize": 1000, "offsetMark": "*", "api_key": key}
     )
-    pages = 0
+    pages = seen = 0
     while url and pages < env.pages():
         data = cast(Json, env.get_json(url))
         pages += 1
         env.totals[f"govinfo:{collection}"] = int(data.get("count") or 0)
-        for pkg in cast(list[Json], data.get("packages") or []):
+        packages = cast(list[Json], data.get("packages") or [])
+        seen += len(packages)
+        if not packages:
+            url = None
+            break
+        for pkg in packages:
             pid = _s(pkg.get("packageId"))
             if prefixes and not pid.startswith(prefixes):
                 continue
@@ -530,12 +631,18 @@ def govinfo(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
             )
         nxt = _s(data.get("nextPage"))
         url = f"{nxt}&api_key={key}" if nxt and "api_key=" not in nxt else (nxt or None)
+    env.listing_end(
+        f"govinfo:{collection}",
+        stopped=url is not None,
+        seen=seen,
+        total=env.totals.get(f"govinfo:{collection}"),
+    )
 
 
 def congress_crs(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
     """CRS reports listed by the official Congress.gov API (metadata; PDFs live on congress.gov)."""
     key = env.key(_s(cfg.get("api_key")) or "congress")
-    offset, pages = 0, 0
+    offset, pages, more = 0, 0, True
     while pages < env.pages():
         data = cast(
             Json,
@@ -548,6 +655,7 @@ def congress_crs(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate
         env.totals["congress-crs"] = int(cast(Json, data.get("pagination") or {}).get("count") or 0)
         reports = cast(list[Json], data.get("CRSReports") or [])
         if not reports:
+            more = False
             break
         for r in reports:
             rid = _s(r.get("id"))
@@ -563,11 +671,16 @@ def congress_crs(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate
                 discovered_by="api:congress-crs",
             )
         offset += len(reports)
+        total = env.totals["congress-crs"]
+        if total and offset >= total:
+            more = False
+            break
+    env.listing_end("congress-crs", stopped=more, seen=offset, total=env.totals.get("congress-crs"))
 
 
 def ntrs(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
     """NASA Technical Reports Server search API (``query``; public records with a PDF only)."""
-    size, start, pages = 100, 0, 0
+    size, start, pages, more = 100, 0, 0, True
     while pages < env.pages():
         params = {"q": _s(cfg.get("query")), "page.size": size, "page.from": start}
         if cfg.get("filters"):
@@ -577,6 +690,7 @@ def ntrs(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
         env.totals["ntrs"] = int(cast(Json, data.get("stats") or {}).get("total") or 0)
         results = cast(list[Json], data.get("results") or [])
         if not results:
+            more = False
             break
         for r in results:
             pdf = next(
@@ -609,6 +723,12 @@ def ntrs(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
                 discovered_by="api:ntrs",
             )
         start += size
+        if env.totals["ntrs"] and start >= env.totals["ntrs"]:
+            more = False
+            break
+    env.listing_end(
+        "ntrs", stopped=more, seen=min(start, env.totals.get("ntrs") or start), total=env.totals.get("ntrs")
+    )
 
 
 def _first_publication_date(pubs: object) -> str:
@@ -644,7 +764,7 @@ def _osti_records(body: bytes) -> list[Json]:
 
 def osti(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
     """OSTI.GOV records API (``query`` and optional ``params``); full text through the OSTI purl."""
-    page, pages = 1, 0
+    page, pages, more = 1, 0, True
     while pages < env.pages():
         params: dict[str, Any] = {"rows": 100, "page": page}
         if _s(cfg.get("query")):
@@ -654,6 +774,7 @@ def osti(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
         pages += 1
         records = _osti_records(body)
         if not records:
+            more = False
             break
         for r in records:
             oid = _s(r.get("osti_id"))
@@ -672,11 +793,12 @@ def osti(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
                 discovered_by="api:osti",
             )
         page += 1
+    env.listing_end("osti", stopped=more, seen=0)
 
 
 def usgs_pubs(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
     """USGS Publications Warehouse API (``query`` / ``params``); document links only."""
-    page, pages = 1, 0
+    page, pages, seen, more = 1, 0, 0, True
     while pages < env.pages():
         params: dict[str, Any] = {"page_size": 100, "page_number": page}
         if cfg.get("query"):
@@ -689,7 +811,9 @@ def usgs_pubs(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
         env.totals["usgs-pubs"] = int(data.get("recordCount") or 0)
         records = cast(list[Json], data.get("records") or [])
         if not records:
+            more = False
             break
+        seen += len(records)
         for r in records:
             docs = [
                 link
@@ -716,11 +840,15 @@ def usgs_pubs(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
                     discovered_by="api:usgs-pubs",
                 )
         page += 1
+        if seen >= env.totals["usgs-pubs"]:
+            more = False
+            break
+    env.listing_end("usgs-pubs", stopped=more, seen=seen, total=env.totals.get("usgs-pubs"))
 
 
 def govuk_search(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
     """GOV.UK search API; each result's attachments are resolved through the content API."""
-    start, count, pages = 0, 100, 0
+    start, count, pages, seen, more = 0, 100, 0, 0, True
     base = _s(cfg.get("url")) or "https://www.gov.uk/api/search.json"
     while pages < env.pages():
         params: dict[str, Any] = {"count": count, "start": start, "fields": "link,title,public_timestamp"}
@@ -731,7 +859,9 @@ def govuk_search(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate
         env.totals["govuk-search"] = int(data.get("total") or 0)
         results = cast(list[Json], data.get("results") or [])
         if not results:
+            more = False
             break
+        seen += len(results)
         for r in results:
             link = _s(r.get("link"))
             if not link.startswith("/"):
@@ -747,6 +877,10 @@ def govuk_search(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate
                 resolve="govuk-content",
             )
         start += count
+        if seen >= env.totals["govuk-search"]:
+            more = False
+            break
+    env.listing_end("govuk-search", stopped=more, seen=seen, total=env.totals.get("govuk-search"))
 
 
 def resolve_govuk_content(cand: Candidate, env: DiscoverEnv) -> list[Candidate]:
@@ -770,8 +904,11 @@ def resolve_govuk_content(cand: Candidate, env: DiscoverEnv) -> list[Candidate]:
             )
         )
     if not out and _s(data.get("document_type")) in ("guidance", "detailed_guide"):
-        # HTML-only guidance: store the rendered page itself.
-        out.append(cand.with_url(cand.landing_url, rights=f"license:{licence}"))
+        # HTML-only guidance: store the rendered page itself, named as the HTML it is.
+        page = cand.with_url(cand.landing_url, rights=f"license:{licence}")
+        out.append(replace(page, extra={**page.extra, "suffix": ".html"}))
+    if not out and _s(data.get("document_type")):
+        raise NoDocuments(f"{cand.landing_url}: a {_s(data.get('document_type'))} without attachments")
     return out
 
 
@@ -779,7 +916,7 @@ def dspace7(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
     """DSpace 7 discovery search (WHO IRIS, FAO): ``base``, ``queries``; bitstreams resolved later."""
     base = _s(cfg.get("base")).rstrip("/")
     for query in _strs(cfg.get("queries")) or ("*",):
-        page, pages = 0, 0
+        page, pages, seen, more = 0, 0, 0, True
         while pages < env.pages():
             params = {"query": query, "dsoType": "ITEM", "size": 100, "page": page}
             data = cast(Json, env.get_json(f"{base}/server/api/discover/search/objects?" + urlencode(params)))
@@ -788,7 +925,9 @@ def dspace7(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
             env.totals[f"dspace7:{query}"] = int(cast(Json, sr.get("page") or {}).get("totalElements") or 0)
             objects = cast(list[Json], cast(Json, sr.get("_embedded") or {}).get("objects") or [])
             if not objects:
+                more = False
                 break
+            seen += len(objects)
             for obj in objects:
                 item = cast(Json, cast(Json, obj.get("_embedded") or {}).get("indexableObject") or {})
                 meta = cast(Json, item.get("metadata") or {})
@@ -817,21 +956,31 @@ def dspace7(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
                     resolve="dspace7",
                 )
             page += 1
+            if seen >= env.totals[f"dspace7:{query}"]:
+                more = False
+                break
+        env.listing_end(f"dspace7:{query}", stopped=more, seen=seen, total=env.totals.get(f"dspace7:{query}"))
 
 
 def resolve_dspace7(cand: Candidate, env: DiscoverEnv) -> list[Candidate]:
+    """The item's PDFs in its ORIGINAL bundle. An answer without a bundle list is a failure (``[]``);
+    an item whose bundles hold no PDF is :class:`NoDocuments`."""
     bundles = cast(Json, env.get_json(cand.url))
-    for b in cast(list[Json], cast(Json, bundles.get("_embedded") or {}).get("bundles") or []):
+    listed = cast(Json, bundles.get("_embedded") or {}).get("bundles")
+    if not isinstance(listed, list):
+        return []
+    for b in cast(list[Json], listed):
         if _s(b.get("name")) != "ORIGINAL":
             continue
         link = _s(cast(Json, cast(Json, b.get("_links") or {}).get("bitstreams") or {}).get("href"))
         if not link:
-            continue
+            return []
         streams = cast(Json, env.get_json(link))
+        bitstreams = cast(Json, streams.get("_embedded") or {}).get("bitstreams")
+        if not isinstance(bitstreams, list):
+            return []
         out: list[Candidate] = []
-        for i, bs in enumerate(
-            cast(list[Json], cast(Json, streams.get("_embedded") or {}).get("bitstreams") or [])
-        ):
+        for i, bs in enumerate(cast(list[Json], bitstreams)):
             name = _s(bs.get("name"))
             if not name.lower().endswith(".pdf"):
                 continue
@@ -850,13 +999,15 @@ def resolve_dspace7(cand: Candidate, env: DiscoverEnv) -> list[Candidate]:
                     language=cand.language,
                 )
             )
+        if not out:
+            raise NoDocuments(f"{cand.landing_url or cand.url}: no PDF in the ORIGINAL bundle")
         return out
-    return []
+    raise NoDocuments(f"{cand.landing_url or cand.url}: no ORIGINAL bundle")
 
 
 def tnm(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
     """USGS TNM Access API (``datasets``, ``prod_formats``): one map sheet per candidate."""
-    offset, pages, size = 0, 0, 1000
+    offset, pages, size, more = 0, 0, 1000, True
     dataset = _s(cfg.get("datasets")) or "Historical Topographic Maps"
     while pages < env.pages():
         params: dict[str, Any] = {"datasets": dataset, "max": size, "offset": offset, "outputFormat": "JSON"}
@@ -870,6 +1021,7 @@ def tnm(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
         env.totals[f"tnm:{dataset}"] = int(data.get("total") or 0)
         items = cast(list[Json], data.get("items") or [])
         if not items:
+            more = False
             break
         for it in items:
             url = _s(it.get("downloadURL"))
@@ -878,7 +1030,9 @@ def tnm(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
             title = _s(it.get("title"))
             state = m.group(1) if (m := re.search(r",\s*([A-Z]{2})\b", title)) else "XX"
             yield Candidate(
-                key=make_key(env.prefix, _s(it.get("sourceId")) or title_from_url(url)),
+                key=make_key(
+                    env.prefix, _s(it.get("sourceId")) or key_stem_from_url(url, decode=env.decode_url_keys)
+                ),
                 url=url,
                 title=title,
                 issuer=env.issuer,
@@ -890,6 +1044,10 @@ def tnm(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
                 discovered_by=f"api:tnm:{dataset}",
             )
         offset += len(items)
+        if offset >= env.totals[f"tnm:{dataset}"]:
+            more = False
+            break
+    env.listing_end(f"tnm:{dataset}", stopped=more, seen=offset, total=env.totals.get(f"tnm:{dataset}"))
 
 
 _API: dict[str, Discoverer] = {
@@ -919,11 +1077,19 @@ def oai_pmh(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
     if cfg.get("from"):
         params["from"] = _s(cfg.get("from"))
     url: str | None = f"{endpoint}?{urlencode(params)}"
-    pages = 0
+    pages = seen = 0
     while url and pages < env.pages():
         root = xml_root(env.fetcher.get_bytes(url))
         pages += 1
+        error = root.find(f"{_OAI}error")
+        if error is not None:
+            code = error.get("code") or "error"
+            if code != "noRecordsMatch":  # an expired resumption token, a bad argument: not the end
+                env.incomplete.append(f"oai-pmh: page {pages}: {code}: {(error.text or '').strip()[:200]}")
+            url = None
+            break
         for rec in root.iter(f"{_OAI}record"):
+            seen += 1
             header = rec.find(f"{_OAI}header")
             if header is None or header.get("status") == "deleted":
                 continue
@@ -956,6 +1122,7 @@ def oai_pmh(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
             if token is not None and token.text
             else None
         )
+    env.listing_end("oai-pmh", stopped=url is not None, seen=seen, total=env.totals.get("oai-pmh"))
 
 
 # --- archive.org -----------------------------------------------------------------------------------
@@ -1037,7 +1204,7 @@ def _archive_items(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[tuple[i
                 tmp.parent.mkdir(parents=True, exist_ok=True)
                 out = stack.enter_context(gzip.open(tmp, "wt", encoding="utf-8"))
             cursor: str | None = None
-            pages = 0
+            pages = seen = 0
             while pages < env.pages():
                 params = {"q": query, "fields": fields, "count": count}
                 if cursor:
@@ -1047,13 +1214,18 @@ def _archive_items(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[tuple[i
                 pages += 1
                 env.totals["archive-org"] = int(data.get("total") or 0)
                 for it in cast(list[Json], data.get("items") or []):
+                    seen += 1
                     if out is not None:
                         out.write(json.dumps([pages, it]) + "\n")
                     yield pages, it
                 cursor = _s(data.get("cursor")) or None
                 if not cursor:
-                    complete = True  # every page read (a max_pages stop is a sample, never cached)
                     break
+            env.listing_end(
+                "archive-org", stopped=cursor is not None, seen=seen, total=env.totals["archive-org"]
+            )
+            # every page read, and as many items as the API states: only then is a listing kept
+            complete = cursor is None and seen >= 0.98 * env.totals.get("archive-org", 0)
         if complete and tmp is not None and cache is not None:
             tmp.replace(cache)
     finally:
@@ -1071,11 +1243,14 @@ def resolve_archive_org(cand: Candidate, env: DiscoverEnv) -> list[Candidate]:
     """Pick the item's original PDF (``source: original``) with its MD5 and size."""
     data = cast(Json, env.get_json(cand.url))
     ident = cand.landing_url.rsplit("/", 1)[-1]
-    files = cast(list[Json], data.get("result") or [])
+    listed = data.get("result")
+    if not isinstance(listed, list) or not listed:
+        return []  # "{}": a dark or unavailable item, or a failed answer; never "no documents"
+    files = cast(list[Json], listed)
     pdfs = [f for f in files if _s(f.get("name")).lower().endswith(".pdf")]
     pdfs.sort(key=lambda f: (_s(f.get("source")) != "original", -int(_s(f.get("size")) or 0)))
     if not pdfs:
-        return []
+        raise NoDocuments(f"{cand.landing_url}: the item holds no PDF")
     f = pdfs[0]
     if cand.extra.get("prefer") == "text-pdf":
         # The Archive's OCR copy of an image-only original ("Additional Text PDF", <name>_text.pdf):
@@ -1106,7 +1281,7 @@ def s3_listing(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
     key_rx = re.compile(_s(cfg.get("key_pattern")) or r".", re.IGNORECASE)
     part_rx = re.compile(_s(cfg["partition"])) if cfg.get("partition") else None
     marker = ""
-    pages = 0
+    pages, more = 0, True
     while pages < env.pages():
         params = {"prefix": prefix, "max-keys": 1000}
         if marker:
@@ -1124,17 +1299,23 @@ def s3_listing(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
             yield Candidate(
                 key=make_key(env.prefix, key.removeprefix(prefix)),
                 url=f"{bucket}/{quote(key)}",
-                title=title_from_url(key),
+                title=display_title(title_from_url(key)),
                 issuer=env.issuer,
-                edition_date=iso_date(title_from_url(key)),
+                edition_date=iso_date(key_stem_from_url(key)),
                 size=size,
                 md5=etag if re.fullmatch(r"[0-9a-f]{32}", etag) else None,
                 partition=part,
                 discovered_by="s3-listing",
             )
-        if root.findtext(f"{_S3}IsTruncated") != "true" or not contents:
+        if root.findtext(f"{_S3}IsTruncated") != "true":
+            more = False
+            break
+        if not contents:  # "more to come" with nothing on the page: the listing cannot go on
+            env.incomplete.append(f"s3-listing: {bucket} {prefix}: truncated page without keys")
+            more = False
             break
         marker = contents[-1].findtext(f"{_S3}Key") or ""
+    env.listing_end(f"s3-listing:{prefix}", stopped=more, seen=0)
 
 
 def git_repo(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
@@ -1171,7 +1352,7 @@ def fixed_list(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
         title = _s(it.get("title")) or pub or title_from_url(urls[0])
         edition = _s(it.get("edition_date"))
         yield Candidate(
-            key=pub_key(env.prefix, pub, edition, title_from_url(urls[0])),
+            key=pub_key(env.prefix, pub, edition, key_stem_from_url(urls[0], decode=env.decode_url_keys)),
             url=urls[0],
             title=title,
             issuer=env.issuer,
@@ -1271,4 +1452,8 @@ def resolve(cand: Candidate, env: DiscoverEnv) -> list[Candidate]:
     impl = RESOLVERS.get(cand.resolve)
     if impl is None:
         raise DiscoveryError(f"unknown resolver {cand.resolve!r}")
-    return [c for c in impl(cand, env) if origin_ok(c.url, env.origins)]
+    found = impl(cand, env)
+    docs = [c for c in found if origin_ok(c.url, env.origins)]
+    if found and not docs:
+        raise NoDocuments(f"{cand.key}: documents only on hosts outside {tuple(env.origins)}")
+    return docs

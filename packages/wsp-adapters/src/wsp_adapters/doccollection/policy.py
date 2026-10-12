@@ -65,82 +65,157 @@ class Decision:
 
 
 # --- built-in safety lists (PLAN §13; research doc §3.2) ------------------------------------------
+#
+# The owner's line (2026-10-11): publicly published material is in scope. The deny core below is what
+# stays out regardless of release status, one entry per excluded category (classified and restricted
+# material is the marking screen's job, below). Each entry is a *pattern*: a space is a word gap
+# (spaces or hyphens: ``mine field``, ``mine-field``), ``~`` an optional one (``booby~trap``: booby
+# trap, booby-trap, boobytrap); the rest is regular-expression syntax, matched case-insensitively
+# between word boundaries, so word forms are spelled out (``snipers?``, ``weaponi[sz](?:e|ed|ing)``).
+# A pattern names a *technique* (``tank gunnery``, ``call for fire``), never a bare noun: histories,
+# defensive guidance and health reports use the nouns too (2026-10-12 audit, CA-3/CA-4).
+# ``tests/test_doccollection_policy.py`` holds must-deny and must-allow titles for every category.
 
-SAFETY_DENY: tuple[str, ...] = (
-    # CBRN production, enhancement, dissemination, weaponisation
-    "chemical agent production",
-    "chemical weapons production",
-    "chemical weapon production",
-    "nerve agent synthesis",
-    "synthesis of nerve agents",
-    "biological weapons production",
-    "biological weapon production",
-    "weaponization",
-    "weaponisation",
-    "weaponizing",
-    "weaponising",
-    "agent dissemination",
-    "nuclear weapon design",
-    "nuclear weapons design",
-    "warhead design",
-    # explosives, improvised munitions, weapon manufacture and modification
-    "explosives manufacture",
-    "manufacture of explosives",
-    "explosive formulation",
-    "explosive formulations",
-    "improvised munitions",
-    "improvised weapons",
-    "weapon manufacture",
-    "weapons manufacture",
-    "firearm manufacture",
-    "firearms manufacture",
-    "gunsmithing",
-    "ammunition reloading",
-    "munitions manufacture",
-    "manufacture of munitions",
-    "munitions effectiveness",
-    "munition effectiveness",
-    "demolitions",
-    "booby traps",
-    "mine laying",
-    "minelaying",
-    "mine emplacement",
-    "emplacing mines",
-    "marksmanship",
-    "sniper",
-    "sniping",
-    "gunnery",
-    # weapons guidance, targeting, fire control, effects for planning attacks
-    "military targeting",
-    "joint targeting",
-    "targeting process",
-    "targeting cycle",
-    "target development",
-    "lethal targeting",
-    "target acquisition",
-    "weaponeering",
-    # weapons fire control only: "fire control" alone is firefighting in FEMA and WHO documents
-    "fire control system",
-    "fire control systems",
-    "fire control radar",
-    "fire control computer",
-    "fire control solution",
-    "fire control orders",
-    "gun fire control",
-    "weapons fire control",
-    "fire direction",
-    "missile guidance",
-    "weapons guidance",
-    "kill chain",
-    "weapons employment",
-    "weapon employment",
-    "weapons effects",
-    # offensive tooling against computer systems or people
-    "exploit development",
-    "exploit code",
-    "malware development",
-    "offensive cyberspace operations",
-    "cyberspace attack",
+_WEAPON = (
+    r"(?:machine~guns?|mortars?|howitzers?|cannons?|rifles?|carbines?|pistols?|grenade launchers?|"
+    r"rocket launchers?|anti~tank (?:weapons?|missiles?|guided missiles?)|guided missiles?|"
+    r"missile systems?|weapons? systems?|crew~served weapons?|small arms|tank main guns?|artillery)"
+)
+_CBRN_AGENT = (
+    r"(?:nerve agents?|chemical (?:warfare )?agents?|chemical weapons?|biological (?:warfare )?agents?|"
+    r"biological weapons?|sarin|soman|tabun|vx|mustard (?:gas|agent)|ricin|anthrax|botulinum toxin)"
+)
+_WEAPONIZABLE = (
+    r"(?:anthrax|pathogens?|agents?|toxins?|viruses|virus|bacteria|bacillus|spores|smallpox|plague|"
+    r"ricin|sarin|biological|chemical)"
+)
+
+# Owner category -> patterns. The category names are the owner's list (PLAN §13, 2026-10-11).
+DENY_CORE: Mapping[str, tuple[str, ...]] = {
+    "explosives and demolitions": (
+        r"explosives? (?:manufactur\w*|production|formulations?|synthesis|fabrication)",
+        r"(?:manufactur\w*|making|producing|production|synthesi[sz]\w*|fabricat\w*) (?:of )?"
+        r"(?:high |improvised |home~made )?explosives?",
+        r"home~made explosives?",
+        r"improvised explosives? (?:devices? )?(?:construction|fabrication|assembly|manufactur\w*|making|"
+        r"design)",
+        r"(?:construct\w*|fabricat\w*|assembl\w*|building|making) (?:an? |of )?"
+        r"(?:improvised explosive devices?|ieds?|pipe bombs?|car bombs?)",
+        r"ieds? (?:construction|fabrication|assembly|making)",
+        r"improvised munitions?",
+        r"shaped charges?",
+        r"(?:detonators?|blasting caps?) (?:assembly|construction|fabrication|manufactur\w*|making)",
+        r"(?:military|combat|engineer|tactical|field) demolitions?",
+        r"demolition (?:charges?|munitions?|kits?|blocks?|calculations?|firing systems?)",
+        r"demolition materials? and (?:charges|explosives)",
+        r"demolitions (?:handbook|manual)",
+        r"(?:explosives|obstacles|mines) and demolitions?",
+        r"demolitions? and (?:explosives|obstacles|mines|breaching)",
+        r"breaching charges?",
+        r"booby~trap(?:s|ped|ping)? (?:construction|fabrication|making|devices?|techniques?|emplacement|"
+        r"assembly|employment)",
+        r"(?:construct\w*|making|fabricat\w*|emplac\w*|setting|rigging) (?:of )?booby~traps?",
+        r"(?:laying|emplac\w*|placing|planting) (?:of )?(?:land~)?(?:mine~fields?|mines)",
+        r"mine~fields? (?:laying|emplacement)",
+        r"mine emplacement",
+    ),
+    "weapons and munitions technical data": (
+        r"(?:weapons?|firearms?|munitions?) manufacture",
+        r"manufacture of (?:firearms|weapons|munitions|ammunition)",
+        r"gunsmith\w*",
+        r"ammunition (?:reloading|hand~loading)",
+        r"(?:re|hand~)loading ammunition",
+        r"munitions? effectiveness",
+        r"(?:weapons?|munitions?|ammunition) technical (?:data|manuals?)",
+        r"(?:technical|operator['\u2019]?s) manual (?:for )?(?:the )?(?:\w+ ){0,3}" + _WEAPON,
+        r"firing tables?",
+        r"(?:nuclear )?warhead design",
+    ),
+    "weapons employment and gunnery": (
+        r"weapons? employment",
+        _WEAPON + r" employment",
+        r"employment of (?:the )?(?:\w+ ){0,2}" + _WEAPON,
+        r"(?:tank|bradley|stryker|crew|vehicle|aerial|helicopter|artillery|mortar|weapons?|machine~gun) "
+        r"gunnery",
+        r"gunnery (?:tables?|training|qualification|manuals?|skills?|procedures?|techniques?|ranges?)",
+        r"(?:rifle|pistol|carbine|machine~gun|weapons?|combat|precision|advanced|sniper) marksmanship",
+        r"marksmanship (?:training|programs?|fundamentals|qualification|manuals?|guide)",
+        r"counter~snipers?",
+        r"sniping",
+        r"sniper (?:training|employment|operations|techniques?|teams?|manuals?|handbook|rifles?|tactics|"
+        r"courses?|skills)",
+        r"close air support",
+    ),
+    "targeting and fire control": (
+        r"(?:military|joint|lethal|dynamic|deliberate) targeting",
+        r"targeting (?:process|cycle|methodology)",
+        r"(?:military|joint|lethal|artillery|weapons?) target (?:development|acquisition|nomination|"
+        r"engagement)",
+        r"target acquisition (?:radars?|systems?|and (?:fire|weapons?|surveillance))",
+        r"(?:laser )?target designat\w*",
+        r"laser designat\w*",
+        r"weaponeering",
+        r"kill box(?:es)?",
+        r"calls? for fire",
+        r"fire control (?:systems?|radars?|computers?|solutions?|orders|equipment|instruments?)",
+        r"(?:gun|weapons?|naval|artillery|tank|missile) fire control",
+        r"(?:artillery|mortar|battery|cannon|field artillery) fire direction",
+        r"fire direction (?:procedures|computations?|computers?|officers?|data)",
+        r"fire support (?:coordinat\w*|planning|officers?|teams?|operations|plans?|elements?)",
+        r"(?:joint|indirect|naval|artillery|close|lethal) fire support",
+        r"fire support and field artillery",
+        r"field artillery (?:operations|gunnery|manual|techniques|tactics|survey|cannon batter(?:y|ies)|"
+        r"batter(?:y|ies))",
+        r"forward observers?",
+        r"observed fires?",
+        r"(?:missile|weapons?|bomb) guidance",
+        r"counter~battery fire",
+        r"indirect fire (?:procedures|techniques|computations?)",
+    ),
+    "weapon-system crew drills": (
+        r"crew drills? (?:for )?(?:the )?(?:\w+ ){0,3}" + _WEAPON,
+        _WEAPON + r" (?:\w+ ){0,2}crew drills?",
+        r"(?:gun|weapons?|tank|howitzer|mortar|missile|launcher) crew drills?",
+        r"battle drills?",
+    ),
+    "CBRN weapons production": (
+        r"(?:chemical|biological|bacteriological|toxin|nuclear|radiological) weapons? "
+        r"(?:production|manufactur\w*|design|synthesis)",
+        r"(?:production|manufactur\w*|synthesis|preparation) of (?:\w+ ){0,2}" + _CBRN_AGENT,
+        _CBRN_AGENT + r" (?:production|synthesis|manufactur\w*|preparation)",
+        r"weaponi[sz](?:e|ed|es|ing|ation) (?:of )?(?:an? |the )?(?:\w+ ){0,2}" + _WEAPONIZABLE,
+        r"(?:chemical|biological) agent dissemination",
+        r"(?:uranium|plutonium) (?:enrichment|production|separation|reprocessing) for (?:nuclear )?weapons?",
+        r"weapons~grade (?:uranium|plutonium) production",
+    ),
+    "offensive cyber tooling": (
+        r"exploit (?:development|writing|kits?|builders?)",
+        r"(?:malware|ransomware|rootkits?|botnets?|trojans?|keyloggers?) "
+        r"(?:development|authoring|writing|builders?|kits?|construction|source code)",
+        r"writing (?:shellcode|exploits?|malware|ransomware|viruses|rootkits?)",
+        r"shellcode (?:development|writing|engineering|encoders?)",
+        r"offensive cyber(?:space)? (?:operations|tools?|tooling|capabilities)",
+        r"cyberspace attacks?",
+        r"(?:computer network|cyber) attack (?:tools?|techniques?|tooling)",
+    ),
+}
+SAFETY_DENY: tuple[str, ...] = tuple(p for patterns in DENY_CORE.values() for p in patterns)
+
+# History-prone nouns of the deny core. In histories, health reports and civil guidance they name
+# events, not techniques ("Booby Traps in Vietnam", "armed groups plant booby traps on roads"), so
+# alone they decide nothing; next to a core hit they count (:func:`classify_content`).
+SAFETY_CONTEXT: tuple[str, ...] = (
+    r"snipers?",
+    r"gunnery",
+    r"booby~trap(?:s|ped|ping)?",
+    r"mine~lay(?:ing|ers?)",
+    r"mine~fields?",
+    r"mine warfare",
+    r"marksmanship",
+    r"demolitions?",
+    r"weaponi[sz](?:e|ed|es|ing|ation)",
+    r"shellcode",
+    r"munitions",
 )
 
 SAFETY_REVIEW: tuple[str, ...] = (
@@ -277,42 +352,82 @@ def screen_variants(text: str) -> tuple[str, str]:
     return "\n\n".join(parts), squeezed
 
 
-def _squeeze(phrase: str) -> str:
-    return re.sub(r"[\s\-]+", "", phrase)
+_GAP = r"[\s\-]+"  # a word gap: spaces, tabs, newlines or hyphens (every dash is "-" after normalize_text)
+_OPT_GAP = r"[\s\-]*"
+
+
+def _hit_name(text: str) -> str:
+    return re.sub(r"[\s\-]+", " ", text.casefold()).strip()
 
 
 @dataclass(frozen=True, slots=True)
 class PhraseList:
-    """A phrase list compiled for matching: word-bounded on text, boundary-free on squeezed runs."""
+    """Phrases or patterns compiled for matching: word-bounded on text, boundary-free on squeezed runs.
+
+    ``loose`` has one named group per entry that can match without word gaps (``p<i>``); ``names``
+    gives the entry's name for a hit there (``None``: report the matched text).
+    """
 
     words: re.Pattern[str] | None
     loose: re.Pattern[str] | None
-    names: Mapping[str, str]  # squeezed phrase -> phrase (to report a squeezed hit by its name)
+    names: tuple[str | None, ...]
 
     def hits(self, text: Screened) -> list[str]:
-        """Distinct phrases found (casefolded, single-spaced), in order of first appearance."""
+        """Distinct hits (casefolded, single-spaced), in order of first appearance."""
         seen: dict[str, None] = {}
         if self.words is not None:
             for m in self.words.finditer(text.words):
-                seen.setdefault(re.sub(r"[\s\-]+", " ", m.group(0).casefold()))
+                seen.setdefault(_hit_name(m.group(0)))
         if self.loose is not None and text.squeezed:
             for m in self.loose.finditer(text.squeezed):
-                seen.setdefault(self.names[m.group(0).casefold()])
+                name = self.names[int((m.lastgroup or "p0")[1:])]
+                seen.setdefault(name if name is not None else _hit_name(m.group(0)))
         return list(seen)
+
+
+def _compile(items: Sequence[tuple[str, str | None, str | None]]) -> PhraseList:
+    """``(word pattern, gap-free pattern or None, name or None)`` entries, longest first."""
+    if not items:
+        return PhraseList(None, None, ())
+    ordered = sorted(items, key=lambda it: len(it[0]), reverse=True)
+    words = re.compile(rf"(?<![\w-])(?:{'|'.join(w for w, _l, _n in ordered)})(?![\w-])", re.IGNORECASE)
+    loose_items = [(lo, name) for _w, lo, name in ordered if lo is not None]
+    loose = (
+        re.compile("|".join(f"(?P<p{i}>{lo})" for i, (lo, _n) in enumerate(loose_items)), re.IGNORECASE)
+        if loose_items
+        else None
+    )
+    return PhraseList(words, loose, tuple(name for _lo, name in loose_items))
 
 
 @functools.lru_cache(maxsize=512)
 def phrase_list(phrases: tuple[str, ...]) -> PhraseList:
-    items = sorted(
-        {normalize_text(p).casefold().strip() for p in phrases if p.strip()}, key=len, reverse=True
-    )
-    if not items:
-        return PhraseList(None, None, {})
-    body = "|".join(re.escape(p).replace(r"\ ", r"[\s\-]+") for p in items)
-    words = re.compile(rf"(?<![\w-])(?:{body})(?![\w-])", re.IGNORECASE)
-    names = {_squeeze(p): re.sub(r"[\s\-]+", " ", p) for p in items}
-    loose = re.compile("|".join(re.escape(k) for k in sorted(names, key=len, reverse=True)), re.IGNORECASE)
-    return PhraseList(words, loose, names)
+    """Plain phrases (registry keywords): words in order, any gap between them, the last word in its
+    singular or plural (``demolition`` also matches ``demolitions``)."""
+    items: dict[str, tuple[str, str | None, str | None]] = {}
+    for p in phrases:
+        text = normalize_text(p).casefold().strip()
+        tokens = [re.escape(t) for t in re.split(r"[\s\-]+", text) if t]
+        if not tokens:
+            continue
+        plural = r"(?:e?s)?"
+        items[text] = (_GAP.join(tokens) + plural, "".join(tokens) + plural, _hit_name(text))
+    return _compile(list(items.values()))
+
+
+@functools.lru_cache(maxsize=64)
+def pattern_list(patterns: tuple[str, ...]) -> PhraseList:
+    """Deny-core patterns (see :data:`DENY_CORE`): a space is a word gap, ``~`` an optional one.
+
+    A pattern with a free word slot (``\\w``) has no gap-free form: a squeezed letter-spaced run has
+    no word gaps left to count words by.
+    """
+    items: list[tuple[str, str | None, str | None]] = []
+    for p in dict.fromkeys(patterns):
+        words = p.replace(" ", _GAP).replace("~", _OPT_GAP)
+        loose = None if "\\w" in p else p.replace(" ", "").replace("~", "")
+        items.append((words, loose, None))
+    return _compile(items)
 
 
 def _neutralize(text: str, extra: tuple[str, ...]) -> str:
@@ -366,6 +481,12 @@ class Rules:
     neutral_phrases: tuple[str, ...] = ()
     allow_documents: frozenset[str] = frozenset()  # owner decisions (pub numbers or document keys)
     deny_documents: frozenset[str] = frozenset()
+    # Owner released a content-screen hold (``review:safety=...``) for these documents. A content
+    # *deny* stays a deny: only ``override_safety`` lifts a deny-core hit.
+    allow_content_review: frozenset[str] = frozenset()
+    # Owner decision that a document the deny core names is in scope after all; a mapping of key to
+    # reason in the rules file (a reason is required, so the exception is never silent).
+    override_safety: frozenset[str] = frozenset()
     allow_all: bool = False  # single-purpose collection: everything not denied or reviewed is in scope
     default: Verdict = Verdict.REVIEW
     require: tuple[str, ...] = ()  # distribution requirement: "A", "public-release", "license:<SPDX>"
@@ -383,11 +504,47 @@ class Rules:
 
     @property
     def deny_phrases(self) -> PhraseList:
-        return phrase_list(SAFETY_DENY if self.safety else ())
+        return pattern_list(SAFETY_DENY if self.safety else ())
+
+    @property
+    def context_phrases(self) -> PhraseList:
+        return pattern_list(SAFETY_CONTEXT if self.safety else ())
 
     def merged(self, other: Mapping[str, Any]) -> Rules:
         """These rules plus a mapping (registry filter block or rules file); lists are unioned."""
         return replace(self, **_rules_kwargs(other, base=self))
+
+
+# Every key a filter block or rules file may hold; anything else is a typo that would be ignored.
+RULE_KEYS = frozenset(
+    {
+        "allow_series",
+        "allow_series_prefix",
+        "deny_series",
+        "deny_series_prefix",
+        "deny_keywords",
+        "review_keywords",
+        "neutral_phrases",
+        "allow_documents",
+        "deny_documents",
+        "allow_content_review",
+        "override_safety",
+        "allow_all",
+        "default",
+        "distribution",
+        "declassified_ok",
+        "builtin_review",
+        "allow_image_only",
+    }
+)
+# What `wsp proposals decide` records, in the machine-owned file next to the rules file.
+DECISION_KEYS = ("allow_documents", "allow_content_review", "deny_documents")
+DECISIONS_DIR = "decisions"
+
+
+def decisions_path(rules_file: Path) -> Path:
+    """The machine-owned decisions file of a hand-written rules file: ``<dir>/decisions/<name>``."""
+    return rules_file.parent / DECISIONS_DIR / rules_file.name
 
 
 def _strs(value: object) -> tuple[str, ...]:
@@ -408,12 +565,25 @@ def _normalize_prefix(value: str) -> str:
 
 
 def _rules_kwargs(data: Mapping[str, Any], *, base: Rules) -> dict[str, Any]:
+    unknown = sorted(str(k) for k in data if k not in RULE_KEYS)
+    if unknown:
+        raise ValueError(f"unknown filter key(s) {unknown}; known: {sorted(RULE_KEYS)}")
     out: dict[str, Any] = {}
-    sets = ("allow_series", "deny_series", "allow_documents", "deny_documents")
+    sets = ("allow_series", "deny_series", "allow_documents", "deny_documents", "allow_content_review")
     for key in sets:
         if key in data:
             norm = {normalize_pub_number(s) for s in _strs(data[key])}
             out[key] = frozenset(getattr(base, key) | norm)
+    if "override_safety" in data:
+        raw: object = data["override_safety"] or {}
+        if not isinstance(raw, Mapping):
+            raise ValueError("override_safety: expected a mapping of document key to reason")
+        reasons = cast(Mapping[object, object], raw)
+        silent = sorted(str(k) for k, why in reasons.items() if not str(why or "").strip())
+        if silent:
+            raise ValueError(f"override_safety: a reason is required for {silent}")
+        keys = {normalize_pub_number(str(k)) for k in reasons}
+        out["override_safety"] = frozenset(base.override_safety | keys)
     for key in ("allow_series_prefix", "deny_series_prefix"):
         if key in data:
             prefixes = (_normalize_prefix(s) for s in _strs(data[key]))
@@ -433,15 +603,30 @@ def _rules_kwargs(data: Mapping[str, Any], *, base: Rules) -> dict[str, Any]:
         out["default"] = Verdict(str(data["default"]))
     dist = data.get("distribution")
     if isinstance(dist, Mapping):
-        out["require"] = _strs(cast(Mapping[str, object], dist).get("require"))
+        dist_block = cast(Mapping[str, object], dist)
+        extra = sorted(str(k) for k in dist_block if k != "require")
+        if extra:
+            raise ValueError(f"unknown distribution key(s) {extra}; known: ['require']")
+        out["require"] = _strs(dist_block.get("require"))
     return out
+
+
+def _yaml_mapping(path: Path) -> Mapping[str, Any]:
+    data: object = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    if not isinstance(data, Mapping):
+        raise ValueError(f"{path}: expected a mapping")
+    return cast(Mapping[str, Any], data)
 
 
 def load_rules(filter_block: Mapping[str, Any] | None, *, repo_root: Path | None = None) -> Rules:
     """Rules for one source: the registry ``access.filter`` block plus its ``rules:`` file, if any.
 
-    The rules file (``registry/filters/<source>.yaml``) holds the long series and keyword lists and
-    the owner's per-document decisions, reviewed in pull requests like the registry itself.
+    The rules file (``registry/filters/<source>.yaml``) holds the long series and keyword lists,
+    written and commented by hand and reviewed in pull requests like the registry itself. The owner's
+    per-document review decisions live beside it in the machine-owned :func:`decisions_path` file
+    (``wsp proposals decide`` writes it); only :data:`DECISION_KEYS` are read from there. A source
+    without a rules file has no place for decisions: the review tool refuses to record them.
+    Unknown keys in any of them raise ``ValueError``.
     """
     rules = Rules()
     block = dict(filter_block or {})
@@ -450,11 +635,13 @@ def load_rules(filter_block: Mapping[str, Any] | None, *, repo_root: Path | None
         path = Path(str(rules_file))
         if not path.is_absolute() and repo_root is not None:
             path = repo_root / path
-        if path.is_file():
-            data: object = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-            if not isinstance(data, Mapping):
-                raise ValueError(f"{path}: expected a mapping")
-            rules = rules.merged(cast(Mapping[str, Any], data))
+        if not path.is_file():
+            raise ValueError(f"filter.rules names {path}, which does not exist")
+        rules = rules.merged(_yaml_mapping(path))
+        decided = decisions_path(path)
+        if decided.is_file():
+            data = _yaml_mapping(decided)
+            rules = rules.merged({k: data[k] for k in DECISION_KEYS if k in data})
     return rules.merged(block)
 
 
@@ -496,6 +683,8 @@ def classify_metadata(doc: DocFacts, rules: Rules) -> Decision:
 
     The safety deny list decides on the heading (number, title, subjects): that is what names a
     document's primary content. A deny phrase only in an abstract holds the document for review.
+    An owner ``allow_documents`` decision does not lift a deny-core hit on the heading (a future
+    edition of an allowed publication may be retitled into the core); ``override_safety`` does.
     """
     pub = normalize_pub_number(doc.pub_number) if doc.pub_number else ""
     keys = {pub, doc.key, normalize_pub_number(doc.key)} - {""}
@@ -509,11 +698,12 @@ def classify_metadata(doc: DocFacts, rules: Rules) -> Decision:
         if gate.verdict is Verdict.DENY:
             return replace(gate, stage=Stage.METADATA)
     owner_allowed = bool(keys & rules.allow_documents)
+    overridden = bool(keys & rules.override_safety)
     heading = Screened.of(doc.heading, rules.neutral_phrases)
     text = Screened.of(doc.text, rules.neutral_phrases)
-    if not owner_allowed and (hits := rules.deny_phrases.hits(heading)):
+    if not overridden and (hits := rules.deny_phrases.hits(heading)):
         return Decision(Verdict.DENY, f"safety={hits[0]}")
-    if not owner_allowed and (hits := rules.deny_phrases.hits(text)):
+    if not (owner_allowed or overridden) and (hits := rules.deny_phrases.hits(text)):
         return Decision(Verdict.REVIEW, f"safety-abstract={hits[0]}")
     if hit := _series_matches(pub, rules.deny_series, rules.deny_series_prefix):
         return Decision(Verdict.DENY, f"deny-series={hit.strip()}")
@@ -540,14 +730,18 @@ class Marking:
     """Distribution and handling markings found in a document's front matter or rights field."""
 
     statement: str | None = None  # the most restrictive "A".."F" of every "DISTRIBUTION STATEMENT X"
-    public_release: bool = False  # "approved for public release" (distribution unlimited)
+    public_release: bool = False  # "approved for public release" (distribution unlimited), not negated
     restricted: tuple[str, ...] = ()  # FOUO, CUI, classification banners, limited distribution ...
-    export_control: tuple[str, ...] = ()  # ITAR, EAR, export warnings
-    released: bool = False  # declassification / FOIA release stamp
+    export_control: tuple[str, ...] = ()  # export warnings ("subject to the ITAR", "whose export is ...")
+    released: bool = False  # a declassification / FOIA release stamp (not a bare "declassified")
     text: str = ""  # the verbatim distribution sentence, for audit
     public_domain: bool = False  # "public domain" / "not subject to copyright" (not negated)
     # The normalized text the marking was read from, kept to test ``license:<SPDX>`` requirements.
     screened: str = field(default="", repr=False, compare=False)
+    # Restrictive markings on a page that carries no release stamp: what a stamp cannot lift.
+    unreleased: tuple[str, ...] = ()
+    # Export-control regimes the text only *mentions* (a CRS report about the EAR): held for review.
+    export_mentions: tuple[str, ...] = ()
 
     @property
     def distribution(self) -> str:
@@ -563,39 +757,103 @@ class Marking:
 
 
 _I = re.IGNORECASE
-_STATEMENT_RE = re.compile(r"distribution\s+statement\s*[:\-]?\s*([A-F])\b", _I)
+_STATEMENT_RE = re.compile(r"distribution\s+statement\s*[:\-]?\s*['\"\u2018\u201c]?([A-F])\b", _I)
 _PUBLIC_RE = re.compile(
     r"approved\s+for\s+public\s+release[\s;,.:]*(?:its\s+)?(?:distribution\s+(?:is\s+)?unlimited)?", _I
 )
+# Every restrictive pattern is case-insensitive unless the marking is only a marking in capitals
+# (a "CUI" line, "NOFORN", "OFFICIAL-SENSITIVE" at the start of a line): in running text the same
+# words are guidance *about* the scheme.
 _RESTRICTED: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
         "distribution-limited",
-        re.compile(r"distribution\s+authori[sz]ed\s+to\s+(?:u\.?\s?s\.?|dod|department)", _I),
+        re.compile(r"distribution\s+(?:is\s+)?(?:authori[sz]ed|limited|restricted)\s+to\b", _I),
     ),
-    ("fouo", re.compile(r"\bFOR OFFICIAL USE ONLY\b|\(FOUO\)|\bFOUO\b")),
-    ("cui", re.compile(r"\bCONTROLLED UNCLASSIFIED INFORMATION\b|(?m:^\s*CUI\s*(?://.*)?$)|\bCUI//")),
-    ("not-for-public-release", re.compile(r"not\s+(?:approved\s+)?for\s+public\s+release", _I)),
+    (
+        "fouo",
+        re.compile(
+            r"\bfor\s+official\s+(?:government\s+)?use\s+only\b|\(\s*(?:u\s*//\s*)?fouo\s*\)|\bfouo\b", _I
+        ),
+    ),
+    ("government-use-only", re.compile(r"\bfor\s+(?:u\.?\s?s\.?\s+)?government\s+use\s+only\b", _I)),
+    (
+        "cui",
+        re.compile(
+            r"\bCONTROLLED UNCLASSIFIED INFORMATION\b|(?m:^\s*CUI\s*(?://.*)?$)|\bCUI\s*//|"
+            r"(?i:\(\s*(?:u\s*//\s*)?cui\s*\))"
+        ),
+    ),
+    (
+        "not-for-public-release",
+        re.compile(
+            r"not\s+(?:yet\s+)?(?:been\s+)?(?:approved\s+|cleared\s+)?for\s+public\s+release|"
+            r"pending\s+(?:approval\s+for\s+)?public\s+release|not\s+releasable\s+to\s+the\s+public",
+            _I,
+        ),
+    ),
     ("limited-distribution", re.compile(r"\bLIMITED DISTRIBUTION\b|\bLIMDIS\b")),
     ("law-enforcement-sensitive", re.compile(r"law\s+enforcement\s+sensitive", _I)),
+    ("sbu", re.compile(r"(?i:\(\s*(?:u\s*//\s*)?sbu\s*\))|\bSBU\s*//|(?m:^\s*SENSITIVE BUT UNCLASSIFIED\b)")),
     ("noforn", re.compile(r"\bNOFORN\b")),
     ("mod-use-only", re.compile(r"for\s+uk\s+government\s+and\s+mod\s+use\s+only", _I)),
+    # UK Government Security Classifications: the handling caveat as a banner (a line that starts
+    # with it, or with its descriptor), and the old RESTRICTED level with a national prefix.
+    (
+        "official-sensitive",
+        re.compile(
+            r"(?m:^[ \t]*OFFICIAL[ \t]*-?[ \t]*SENSITIVE\b)|\bOFFICIAL[ \t]*-?[ \t]*SENSITIVE\s*(?::|//)"
+        ),
+    ),
+    ("restricted", re.compile(r"\b(?:NATO|UK|EU)\s+RESTRICTED\b")),
     # "SECRET//NOFORN" anywhere; a bare "SECRET" line only at a page edge (_edge_banner): guidance
     # *about* classification ("Government Security Classifications") has SECRET as a heading.
     ("classified", re.compile(r"\b(?:TOP SECRET|SECRET|CONFIDENTIAL)\s*//")),
     # portion markings in titles, as index pages print them: "(S/NF)", "(S//NF)", "(C/REL)", "(TS)"
     ("classified-portion", re.compile(r"\((?:TS|S|C)\s*/{1,2}\s*(?:NF|NOFORN|REL[^)]*)\)|\(TS\)", _I)),
 )
+# Export control. A *warning* printed on a document restricts it (deny, alert); a document that only
+# *names* a regime (a CRS overview of the EAR, NIST guidance on export-controlled data) is held.
 _EXPORT: tuple[tuple[str, re.Pattern[str]], ...] = (
+    (
+        "itar",
+        re.compile(
+            r"subject\s+to\s+(?:the\s+)?(?:international\s+traffic\s+in\s+arms\s+regulations?|itar)\b", _I
+        ),
+    ),
+    (
+        "ear",
+        re.compile(
+            r"subject\s+to\s+(?:the\s+)?(?:u\.?\s?s\.?\s+)?(?:export\s+administration\s+regulations?|ear)\b|"
+            r"\bEAR99\b|\bECCN\s*:?\s*\d[A-E]\d{3}\b",
+            _I,
+        ),
+    ),
+    (
+        "export-warning",
+        re.compile(
+            r"(?:contains|includes)\s+technical\s+data\s+whose\s+export|"
+            r"export\s+of\s+this\s+(?:document|information|data|publication|report)\s+is\s+"
+            r"(?:restricted|controlled|prohibited)|"
+            r"this\s+(?:document|publication|report)\s+(?:is|contains)\s+(?:\w+\s+){0,2}export[\s-]+controlled",
+            _I,
+        ),
+    ),
+)
+_EXPORT_MENTIONS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("itar", re.compile(r"\bITAR\b|international\s+traffic\s+in\s+arms\s+regulations?", _I)),
-    ("ear", re.compile(r"export\s+administration\s+regulations?|\bEAR99\b", _I)),
+    ("ear", re.compile(r"export\s+administration\s+regulations?", _I)),
     ("arms-export-control-act", re.compile(r"arms\s+export\s+control\s+act", _I)),
-    ("export-warning", re.compile(r"(?:contains|includes)\s+technical\s+data\s+whose\s+export", _I)),
     ("export-controlled", re.compile(r"\bexport[\s-]+controlled\b", _I)),
 )
+# A release *stamp* (CA-6): the CIA CREST footer, a sanitized-copy stamp, a NARA or E.O.
+# declassification stamp, a FOIA release line. A bare "declassified" ("will not be declassified",
+# "a declassified cable of 1962") is not one.
 _RELEASE_RE = re.compile(
-    r"approved\s+for\s+release\s*:?\s*\d{4}|sanitized\s+copy\s+approved\s+for\s+release|"
-    r"declassified\s+(?:and\s+approved\s+for\s+release|under\s+authority|per\b)|"
-    r"\bdeclassified\b|released\s+under\s+the\s+(?:freedom\s+of\s+information\s+act|foia)",
+    r"approved\s+for\s+release\s*:?\s*\d{4}\s*/\s*\d{1,2}\s*/\s*\d{1,2}|"
+    r"sanitized\s+copy\s+approved\s+for\s+release|"
+    r"declassified\s*(?:and\s+approved\s+for\s+release|under\s+(?:the\s+)?authority|per\s+e\.?\s*o\.?|"
+    r"by\s+authority|[:\-]?\s*authority\b)|"
+    r"released\s+under\s+the\s+(?:freedom\s+of\s+information\s+act|foia)",
     _I,
 )
 
@@ -606,6 +864,10 @@ _PD_RE = re.compile(
     _I,
 )
 _NEGATION_RE = re.compile(r"\b(?:not|never|no\s+longer)\b(?:\s+\w+){0,3}\s*$", _I)
+# Before "approved for public release": "has not (yet) been", "pending", "prior to", "before".
+_RELEASE_NEGATION_RE = re.compile(
+    r"\b(?:not|never|no\s+longer|pending|awaiting|prior\s+to|before|until)\b(?:\s+\w+){0,3}\s*$", _I
+)
 _CC_PARTS = {"BY": "attribution", "NC": "non-?commercial", "SA": "share-?alike", "ND": "no-?deriv\\w*"}
 _LICENSE_NAMES: dict[str, str] = {
     "OGL-UK-3.0": r"open\s+government\s+licen[cs]e(?:\s+for\s+public\s+sector\s+information)?[\s,]*"
@@ -632,24 +894,54 @@ def license_pattern(spdx: str) -> re.Pattern[str]:
     return re.compile("|".join(f"(?:{a})" for a in alts), _I)
 
 
+def _unnegated(
+    rx: re.Pattern[str], text: str, negation: re.Pattern[str] = _NEGATION_RE
+) -> list[re.Match[str]]:
+    """Matches of ``rx`` whose preceding 40 characters do not negate them ("has not been ...")."""
+    return [m for m in rx.finditer(text) if not negation.search(text[max(0, m.start() - 40) : m.start()])]
+
+
 def _public_domain(text: str) -> bool:
     """A public-domain statement that is not negated ("is not in the public domain")."""
-    return any(
-        not _NEGATION_RE.search(text[max(0, m.start() - 40) : m.start()]) for m in _PD_RE.finditer(text)
-    )
+    return bool(_unnegated(_PD_RE, text))
 
 
-_BARE_BANNER_RE = re.compile(r"(?:TOP SECRET|SECRET)")
+_BARE_BANNER_RE = re.compile(r"(?:TOP SECRET|SECRET|CONFIDENTIAL)(?:\s*//.*)?")
+# "RESTRICTED" opening a page edge line, followed by nothing or by ordinary text: a banner. Followed
+# by another word in capitals ("RESTRICTED AREA") it is a sign, not a marking.
+_RESTRICTED_EDGE_RE = re.compile(r"RESTRICTED(?:\s*$|\s+(?![A-Z]{2,}\b))")
+_LETTER_SPACED_RE = re.compile(r"(?:\w[ \t]{1,3}){2,}\w")
 
 
-def _edge_banner(text: str) -> bool:
-    """A bare classification banner as the first or last line of a page (pages split on form feed, as
+def _banner_line(line: str) -> str | None:
+    """The marking a page-edge line is (``classified`` / ``restricted``), or ``None``."""
+    text = line.strip()
+    if _LETTER_SPACED_RE.fullmatch(text):  # "S E C R E T"
+        text = re.sub(r"\s+", "", text)
+    if _BARE_BANNER_RE.fullmatch(text):
+        return "classified"
+    if _RESTRICTED_EDGE_RE.match(text):
+        return "restricted"
+    return None
+
+
+def _edge_banners(page: str) -> list[str]:
+    """Bare banners as the first or last line of a page (pages split on form feed, as
     :func:`wsp_adapters.doccollection.adapter.pdf_text` joins them): where banners are printed."""
-    for page in text.split("\f"):
-        lines = [ln.strip() for ln in page.splitlines() if ln.strip()]
-        if lines and (_BARE_BANNER_RE.fullmatch(lines[0]) or _BARE_BANNER_RE.fullmatch(lines[-1])):
-            return True
-    return False
+    lines = [ln for ln in page.splitlines() if ln.strip()]
+    if not lines:
+        return []
+    found = (_banner_line(lines[0]), _banner_line(lines[-1]))
+    return [name for name in dict.fromkeys(found) if name is not None]
+
+
+def _page_restrictions(page: str) -> tuple[list[str], bool]:
+    """``(restrictive markings, carries a release stamp)`` for one page of normalized text."""
+    words, _squeezed = screen_variants(page)
+    names = [name for name, rx in _RESTRICTED if rx.search(words)]
+    names += [b for b in _edge_banners(page) if b not in names]
+    stamped = bool(_unnegated(_RELEASE_RE, words))
+    return names, stamped
 
 
 def parse_markings(text: str) -> Marking:
@@ -657,33 +949,45 @@ def parse_markings(text: str) -> Marking:
 
     The text is normalized first, and its joined and de-spaced copies are read as well
     (:func:`screen_variants`). Every ``DISTRIBUTION STATEMENT`` is read and the most restrictive
-    one wins: a page that says "A" and later "D" is a "D" document.
+    one wins: a page that says "A" and later "D" is a "D" document. Restrictive markings are read
+    page by page (form feeds), so a release stamp lifts only the banners on its own page.
     """
-    words, _squeezed = screen_variants(normalize_text(text))
+    normalized = normalize_text(text)
+    words, _squeezed = screen_variants(normalized)
     statements = sorted({m.group(1).upper() for m in _STATEMENT_RE.finditer(words)})
     statement = statements[-1] if statements else None  # "A" < "B" < ... < "F" (most restrictive)
     excerpt = ""
     if statement is not None:
         first = next(m for m in _STATEMENT_RE.finditer(words) if m.group(1).upper() == statement)
         excerpt = _sentence(words, first.start())
-    public = _PUBLIC_RE.search(words)
+    publics = _unnegated(_PUBLIC_RE, words, _RELEASE_NEGATION_RE)
+    public = publics[0] if publics else None
     if public and not excerpt:
         excerpt = _sentence(words, public.start())
-    restricted = tuple(name for name, rx in _RESTRICTED if rx.search(words))
-    if "classified" not in restricted and _edge_banner(normalize_text(text)):
-        restricted = (*restricted, "classified")
+    restricted: dict[str, None] = {}
+    unreleased: dict[str, None] = {}
+    released = False
+    for page in normalized.split("\f"):
+        names, stamped = _page_restrictions(page)
+        restricted.update(dict.fromkeys(names))
+        released = released or stamped
+        if not stamped:
+            unreleased.update(dict.fromkeys(names))
     export = tuple(name for name, rx in _EXPORT if rx.search(words))
+    mentions = tuple(name for name, rx in _EXPORT_MENTIONS if rx.search(words)) if not export else ()
     if statement is None and public is not None and "distribution-limited" not in restricted:
         statement = "A" if re.search(r"unlimited", public.group(0), _I) else None
     return Marking(
         statement=statement,
         public_release=public is not None,
-        restricted=restricted,
+        restricted=tuple(restricted),
         export_control=export,
-        released=_RELEASE_RE.search(words) is not None,
+        released=released,
         text=excerpt,
         public_domain=_public_domain(words),
         screened=words,
+        unreleased=tuple(unreleased),
+        export_mentions=mentions,
     )
 
 
@@ -705,6 +1009,10 @@ def check_distribution(
     statement, ``license:<SPDX>`` that licence named, ``declassified`` a release stamp. A
     requirement that is not met holds the document for review; nothing is allowed on trust.
 
+    ``declassified_ok`` (FOIA and declassified collections) lifts the restrictive markings on pages
+    that carry a release stamp, never those on other pages. A document that only names an export
+    regime is held for review.
+
     ``published`` is the registry's explicit statement that the issuer posted the document openly (its
     public site, or a verified one-to-one mirror of its release), which is the release: no printed
     statement is needed (owner decision 2026-10-11; agency web PDFs rarely print one). Listed after the
@@ -716,9 +1024,11 @@ def check_distribution(
         return Decision(Verdict.DENY, f"marking=export-control:{marking.export_control[0]}", st, alert=True)
     if marking.statement in {"B", "C", "D", "E", "F"}:
         return Decision(Verdict.DENY, f"marking=distribution-{marking.statement}", st, alert=True)
-    restricted = [r for r in marking.restricted if not (declassified_ok and marking.released)]
+    restricted = marking.unreleased if declassified_ok else marking.restricted
     if restricted:
         return Decision(Verdict.DENY, f"marking={restricted[0]}", st, alert=True)
+    if marking.export_mentions:
+        return Decision(Verdict.REVIEW, f"marking=export-mention:{marking.export_mentions[0]}", st)
     if not require:
         return Decision(Verdict.ALLOW, "marking=none-restrictive", st)
     for req in require:
@@ -737,23 +1047,33 @@ def check_distribution(
     return Decision(Verdict.REVIEW, f"marking=missing-{'|'.join(require)}", st)
 
 
-def classify_content(front_matter: str, rules: Rules, *, title_page_chars: int = 3000) -> Decision:
+def classify_content(
+    front_matter: str, rules: Rules, *, title_page_chars: int = 3000, overridden: bool = False
+) -> Decision:
     """Content-stage screen over the front matter (title page, contents, preface).
 
-    A safety phrase on the title page, or three or more distinct safety phrases anywhere in the
-    front matter, mean the document's primary content is out of scope: deny. Fewer hits: review.
+    A deny-core pattern on the title page means the document's primary content is out of scope:
+    deny. So do a core hit anywhere together with a history-prone noun (:data:`SAFETY_CONTEXT`) on
+    the title page, or three distinct hits in the front matter of which at least one is a core hit.
+    Fewer: review. History-prone nouns alone decide nothing (a situation report that mentions booby
+    traps, a history of sniping). ``overridden``: the owner's ``override_safety`` for this document.
     """
     st = Stage.CONTENT
     normalized = normalize_text(front_matter)
     title = Screened.of(normalized[:title_page_chars], rules.neutral_phrases)
     full = Screened.of(normalized, rules.neutral_phrases)
-    deny = rules.deny_phrases
-    title_hits = deny.hits(title)
-    all_hits = deny.hits(full)
-    if title_hits:
-        return Decision(Verdict.DENY, f"safety={title_hits[0]}", st)
-    if len(all_hits) >= 3:
-        return Decision(Verdict.DENY, f"safety={'+'.join(all_hits[:3])}", st)
+    if not overridden:
+        deny, context = rules.deny_phrases, rules.context_phrases
+        title_hits, all_hits = deny.hits(title), deny.hits(full)
+        if title_hits:
+            return Decision(Verdict.DENY, f"safety={title_hits[0]}", st)
+        if all_hits and (title_context := context.hits(title)):
+            return Decision(Verdict.DENY, f"safety={title_context[0]}+{all_hits[0]}", st)
+        combined = [*all_hits, *(h for h in context.hits(full) if h not in all_hits)]
+        if all_hits and len(combined) >= 3:
+            return Decision(Verdict.DENY, f"safety={'+'.join(combined[:3])}", st)
+    else:
+        all_hits = []
     source_deny = phrase_list(rules.deny_keywords).hits(title)
     if source_deny:
         return Decision(Verdict.DENY, f"keyword={source_deny[0]}", st)
@@ -796,6 +1116,23 @@ class Edition:
     key: str
     pub_number: str
     edition_date: str  # ISO date or "" when unknown
+    fetched_at: str = ""  # when the library fetched it (ISO timestamp): places an undated edition
+
+
+def edition_order(editions: Sequence[Edition]) -> list[Edition]:
+    """Oldest first. Dated editions go by date. An undated edition is newer than every dated one the
+    library fetched no later than it, and older than those fetched after it (2026-10-12 audit, CA-19):
+    an issuer's newest listing often has no date, and a 2014 edition must not supersede it."""
+    ordered = sorted(
+        (e for e in editions if e.edition_date), key=lambda e: (e.edition_date, e.fetched_at, e.key)
+    )
+    for undated in sorted((e for e in editions if not e.edition_date), key=lambda e: (e.fetched_at, e.key)):
+        at = 0
+        for i, ed in enumerate(ordered):
+            if ed.fetched_at <= undated.fetched_at:
+                at = i + 1
+        ordered.insert(at, undated)
+    return ordered
 
 
 @dataclass(frozen=True, slots=True)
@@ -819,7 +1156,7 @@ def assign_currency(editions: Sequence[Edition], rules: CurrencyRules) -> dict[s
         groups.setdefault(normalize_pub_number(ed.pub_number) or ed.key, []).append(ed)
     out: dict[str, CurrencyLabel] = {}
     for pub, eds in groups.items():
-        ordered = sorted(eds, key=lambda e: (e.edition_date, e.key))
+        ordered = edition_order(eds)
         for i, ed in enumerate(ordered):
             newer = ordered[i + 1] if i + 1 < len(ordered) else None
             older = ordered[i - 1] if i > 0 else None

@@ -1,63 +1,24 @@
+# Document-level rules for cisa-protective-security (research doc §4.10). Defender-side guidance only.
+# The ISC Design-Basis Threat and countermeasure appendices are restricted and must never be fetched.
+# 2026-10-12: restored as it was before a bulk "reject" rewrote it (43 wrong denies, comments lost;
+# audit CA-1). Owner review decisions now go to decisions/cisa-protective-security.yaml.
 allow_series_prefix: []
 deny_keywords:
-- design-basis threat
-- design basis threat
-- countermeasures appendix
-review_keywords: []
+  - design-basis threat
+  - design basis threat
+  - countermeasures appendix
+review_keywords: []  # owner decision 2026-10-11: all public CISA/ISC/NTAC documents approved
 neutral_phrases:
-- bomb threat
-- bomb threats
-- active shooter
-- behavioral threat assessment
-- targeted violence
-- mass attacks
-- insider threat
-- unmanned aircraft systems
-- prohibited items
-- violence in the federal workplace
+  - bomb threat
+  - bomb threats
+  - active shooter
+  - behavioral threat assessment
+  - targeted violence
+  - mass attacks
+  - insider threat
+  - unmanned aircraft systems
+  - prohibited items
+  - violence in the federal workplace
 allow_all: true
 allow_documents: []
-deny_documents:
-- cisa-ps:052622-Items-Prohibited-in-Federal-Facilities-508c-FINAL
-- cisa-ps:Aligning-Behavioral-Threat-Assessment-And-Management-With-A-Multi-Tiered-System-Of-Support
-- cisa-ps:Armed-Contract-Security-Officers-Federal-Facilities-ISC-Best-Practice-2019-2
-- cisa-ps:Behavioral-Threat-Assessment-Units-A-Guide-for-State-and-Local-Law-Enforcement-to-Prevent-Targeted-Violence
-- cisa-ps:CISA-AASB-Security-Planning-Workbook-508-Compliant-20230929
-- cisa-ps:CISA-Pathway-to-Violence-Fact-Sheet-508-20250319
-- cisa-ps:CISA-Workplace-Violence-Prevention-Placemat-508
-- cisa-ps:Facility-Access-Control-An-Interagency-Security-Committee-Best-Practice-02-20
-- cisa-ps:Federal-Mobile-Workplace-Security-508-2024-08-14
-- cisa-ps:Fillable-Request-Form-Prohibited-Items-in-Federal-Facilities-508-05.17.22
-- cisa-ps:First-Baptist-Church-of-Sutherland-Springs-A-Case-Study-on-the-Link-Between-Domestic-Violence-and-Mass-Attacks
-- cisa-ps:IRMPE-Assessment-v1-2021-10-12
-- cisa-ps:ISC-Best-Practices-for-Working-with-Lessors-1st-Edition-508
-- cisa-ps:ISC-Compliance-Benchmarks-2024-12-12-FINAL
-- cisa-ps:ISC-Facility-Security-Plan-Guide-2015-508
-- cisa-ps:ISC-Managing-Risk-of-Adverse-Involuntary-Employee-Separations-508-2024-05-30
-- cisa-ps:Instructional-Guide-to-the-CISA-EAP-Template-20250204-508
-- cisa-ps:Occupant-Emergency-Programs-2024-09-11-508c
-- cisa-ps:Physical-Security-Considerations-for-Temporary-Facilities-20250915-508
-- cisa-ps:Protecting-Against-the-Threat-of-Unmanned-Aircraft-Systems-November-2020-508c
-- cisa-ps:Protecting-Infrastructure-During-Public-Demonstrations-v508-20250702
-- cisa-ps:Protecting-Patrons-At-Outdoor-Eating-Venues-508-20250630-0
-- cisa-ps:Protecting-Patrons-at-Public-Gathering-Locations-508-20250805
-- cisa-ps:Security-Convergence-Achieving-Integrated-Security-2022-Edition.final
-- cisa-ps:Security-Specialist-Career-Progression-Ladder-2025-02-07
-- cisa-ps:The-Risk-Management-Process-2024-Edition
-- cisa-ps:cisa-insider-threat-mitigation-guide-2026
-- cisa-ps:irmpe-one-pager-07-29-2024-508
-- cisa-ps:irmpe-one-pager-07-29-2024-508-ES
-- cisa-ps:isc-best-practices-security-office-staffing-final-508
-- cisa-ps:isc-making-a-business-case-for-security-2023-edition-508c
-- cisa-ps:isc-planning-managing-physical-security-resources-dec-2015-508
-- cisa-ps:isc-security-specialist-competencies-2017-508
-- cisa-ps:isc-workplace-violence-guide-2019-0
-- cisa-ps:personal-security-considerations-action-guide-critical-infrastructure-workers-06-07-2024-508
-- cisa-ps:personal-security-considerations-action-guide-critical-infrastructure-workers-06-07-2024-508-AR
-- cisa-ps:personal-security-considerations-action-guide-critical-infrastructure-workers-06-07-2024-508-ES
-- cisa-ps:personal-security-considerations-action-guide-critical-infrastructure-workers-06-07-2024-508-FR
-- cisa-ps:personal-security-considerations-action-guide-critical-infrastructure-workers-06-07-2024-508-HE
-- cisa-ps:personal-security-considerations-action-guide-critical-infrastructure-workers-06-07-2024-508-HI
-- cisa-ps:personal-security-considerations-action-guide-critical-infrastructure-workers-06-07-2024-508-PA
-- cisa-ps:personal-security-considerations-action-guide-critical-infrastructure-workers-06-07-2024-508-ZHS
-- cisa-ps:personal-security-considerations-action-guide-critical-infrastructure-workers-06-07-2024-508-ZHT
+deny_documents: []

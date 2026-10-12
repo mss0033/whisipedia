@@ -130,6 +130,25 @@ class GenerationDependencies(Protocol):
         ...
 
 
+@runtime_checkable
+class GenerationFinalizer(Protocol):
+    """Optional adapter capability: files derived from the whole release, sealed with it.
+
+    ``doc-collection`` builds its catalog (``meta/documents.jsonl``) here: the previous generation's
+    documents carried over, this release's added. The pipeline calls it after the fetched files are
+    staged and before sealing, and stages what it returns; an exception fails the step, so a
+    generation is never sealed without them.
+    """
+
+    def finalize(
+        self, ctx: Ctx, plan: FetchPlan, previous_dir: Path | None, kept: Mapping[str, Path]
+    ) -> Sequence[tuple[str, Path]]:
+        """``(relpath in the generation, local file)`` pairs to stage. ``kept``: the plan's files that
+        document policy kept, by name, at their local paths; ``previous_dir``: the vault directory of
+        ``plan.previous_generation``, if any."""
+        ...
+
+
 # --- Vault ---------------------------------------------------------------------------------------
 
 

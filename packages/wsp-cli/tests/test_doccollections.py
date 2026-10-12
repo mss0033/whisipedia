@@ -17,10 +17,11 @@ from wsp_adapters.doccollection import DocCollectionAdapter
 from wsp_adapters.doccollection.adapter import CATALOG, screen_text
 from wsp_adapters.doccollection.catalog import read_catalog_file
 from wsp_adapters.doccollection.model import Candidate
-from wsp_adapters.doccollection.policy import Rules
+from wsp_adapters.doccollection.policy import Rules, load_rules
 from wsp_adapters.doccollection.testing import PUBLIC_A, RESTRICTED_C, make_pdf, s3_listing
 from wsp_cli.doccollections import (
     CollectionFetcher,
+    ReviewDecisionError,
     apply_review_decision,
     collection_spec,
     dry_run,
@@ -85,6 +86,13 @@ def vault(tmp_path: Path) -> FileVault:
     return FileVault(
         root, signer, domains={"test-pubs": "preparedness"}, ledger=JsonlLedger(root / "ledger", signer)
     )
+
+
+def ingest(vault: FileVault, s: SourceSpec) -> None:
+    result = Ingestor(vault, [s], out=io.StringIO()).run(source_id=s.id)
+    statuses = {vp.status for vp in result.versions}
+    assert VersionStatus.INGESTED in statuses, result.versions
+    assert VersionStatus.FAILED not in statuses, result.versions
 
 
 def runner(vault: FileVault, objects: list[tuple[str, bytes]], tmp_path: Path) -> CollectionFetcher:
@@ -179,29 +187,79 @@ def test_git_mirror_sources_are_surveyed_as_bundles() -> None:
     assert access["discovery"] == [{"kind": "git", "repos": ["https://github.com/HistoryAtState/frus"]}]
 
 
-def test_review_decisions_are_remembered_in_the_rules_file(tmp_path: Path) -> None:
-    doc = {
+RULES_TEXT = """\
+# Hand-written rules: this comment must survive every review decision (CA-1).
+# The ISC Design-Basis Threat appendices are restricted and must never be fetched.
+deny_keywords:
+  - design-basis threat  # inline note
+allow_all: true
+"""
+
+
+def _review_spec(rules: str | None) -> SourceSpec:
+    filt: dict[str, Any] = {"allow_all": True}
+    if rules is not None:
+        filt["rules"] = rules
+    return dataclasses.replace(
+        spec([]), raw={"id": "test-pubs", "access": {"adapter": "doc-collection", "filter": filt}}
+    )
+
+
+def _review(*rows: tuple[str, str]) -> dict[str, Any]:
+    return {
         "doc_review": {
-            "source_id": "army-pubs-public",
-            "documents": [{"key": "army:ATP-9-99", "pub_number": "ATP 9-99"}],
+            "source_id": "test-pubs",
+            "documents": [{"key": k, "pub_number": "", "title": k, "rule": r} for k, r in rows],
         }
     }
-    path = apply_review_decision(tmp_path, doc, accept=True)
-    assert path is not None
-    assert yaml.safe_load(path.read_text())["allow_documents"] == ["ATP 9-99"]
-    apply_review_decision(
-        tmp_path,
-        {
-            "doc_review": {
-                "source_id": "army-pubs-public",
-                "documents": [{"key": "k", "pub_number": "TC 9-1"}],
-            }
-        },
-        accept=False,
-    )
-    data = yaml.safe_load(path.read_text())
-    assert data["deny_documents"] == ["TC 9-1"]
-    assert data["allow_documents"] == ["ATP 9-99"]
+
+
+def test_a_rejected_review_denies_only_the_named_rows_and_never_rewrites_the_rules_file(
+    tmp_path: Path,
+) -> None:
+    rules = tmp_path / "registry" / "filters" / "test-pubs.yaml"
+    rules.parent.mkdir(parents=True)
+    rules.write_text(RULES_TEXT, encoding="utf-8")
+    specs = [_review_spec("registry/filters/test-pubs.yaml")]
+    doc = _review(("t:a", "review:marking=missing-public-release"), ("t:b", "review:text=no-text-layer"))
+    with pytest.raises(ReviewDecisionError, match="--deny"):
+        apply_review_decision(tmp_path, specs, doc, allow=False)  # a rejection alone denies nothing
+    with pytest.raises(ReviewDecisionError, match="not rows"):
+        apply_review_decision(tmp_path, specs, doc, allow=False, keys=["t:zzz"])
+    denied = apply_review_decision(tmp_path, specs, doc, allow=False, keys=["t:b"], proposal=7)
+    assert denied.keys == ("t:b",)
+    assert rules.read_text(encoding="utf-8") == RULES_TEXT  # comments and all: untouched
+    assert denied.path == tmp_path / "registry" / "filters" / "decisions" / "test-pubs.yaml"
+    data = yaml.safe_load(denied.path.read_text(encoding="utf-8"))
+    assert data["deny_documents"] == ["t:b"]
+    assert data["allow_documents"] == []
+    assert data["log"][0]["proposal"] == 7
+    loaded = load_rules({"rules": "registry/filters/test-pubs.yaml"}, repo_root=tmp_path)
+    assert loaded.deny_documents == {"T:B"}  # keys are compared normalized (policy.normalize_pub_number)
+    assert loaded.deny_keywords == ("design-basis threat",)  # the hand-written rules still load
+
+
+def test_an_accepted_review_allows_rows_by_document_key_and_releases_content_holds(tmp_path: Path) -> None:
+    rules = tmp_path / "rules.yaml"
+    rules.write_text(RULES_TEXT, encoding="utf-8")
+    specs = [_review_spec(str(rules))]
+    doc = _review(("t:a", "review:safety=booby traps"), ("t:b", "review:marking=missing-A"))
+    first = apply_review_decision(tmp_path, specs, doc, allow=True, keys=["t:a"])
+    data = yaml.safe_load(first.path.read_text(encoding="utf-8"))
+    assert data["allow_documents"] == ["t:a"]
+    assert data["allow_content_review"] == ["t:a"]  # a content hold needs the explicit release
+    apply_review_decision(tmp_path, specs, doc, allow=False, keys=["t:a"])  # changed mind: replaces it
+    data = yaml.safe_load(first.path.read_text(encoding="utf-8"))
+    assert data["allow_documents"] == []
+    assert data["deny_documents"] == ["t:a"]
+    assert rules.read_text(encoding="utf-8") == RULES_TEXT
+
+
+def test_a_review_decision_without_a_rules_file_is_refused(tmp_path: Path) -> None:
+    doc = _review(("t:a", "review:marking=missing-A"))
+    with pytest.raises(ReviewDecisionError, match=r"no filter\.rules"):
+        apply_review_decision(tmp_path, [_review_spec(None)], doc, allow=True)
+    assert not any(tmp_path.rglob("*.yaml"))  # nothing written where nothing would load it
 
 
 def test_api_keys_come_from_local_config_and_environment(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -371,6 +429,7 @@ def test_an_incomplete_listing_fetches_nothing_and_withdraws_nothing(
     s = spec(OBJECTS)
     first = runner(vault, OBJECTS, tmp_path).run(s, version="2026-10-10")
     assert first.fetched
+    ingest(vault, s)
     flaky = CollectionFetcher(
         vault.root,
         Flaky(routes(OBJECTS)),
@@ -403,12 +462,16 @@ def test_an_unresolved_item_withdraws_nothing_but_does_not_stop_the_fetch(
 
     s = spec(OBJECTS)
     assert runner(vault, OBJECTS, tmp_path).run(s, version="2026-10-10").fetched
+    ingest(vault, s)
     real = DocCollectionAdapter.survey
 
     def one_unresolved(self: DocCollectionAdapter, *args: object, **kwargs: object) -> object:
         out = real(self, *args, **kwargs)  # type: ignore[arg-type]
+        gone = [c for c in out.allowed if "FM-5-0" in c.key]
         out.allowed = [c for c in out.allowed if "FM-5-0" not in c.key]  # its resolve failed this run
+        out.decisions = [(c, d) for c, d in out.decisions if "FM-5-0" not in c.key]
         out.unresolved = 1
+        out.unresolved_keys = [c.key for c in gone]
         return out
 
     monkeypatch.setattr(DocCollectionAdapter, "survey", one_unresolved)
@@ -418,3 +481,114 @@ def test_an_unresolved_item_withdraws_nothing_but_does_not_stop_the_fetch(
     assert [d.cand.title for d in again.fetched] == ["FM 6 0 2022"]
     catalog = read_catalog_file(vault.root / "_incoming" / "test-pubs" / "2026-11-10" / CATALOG)
     assert all(m.currency != "withdrawn" for m in catalog)  # FM 5-0 was not listed, yet not withdrawn
+
+
+# --- 2026-10-12 audit (collections-adapters): CA-12, CA-13, CA-14, CA-15, CA-16 ---------------------------
+
+
+def test_a_second_fetch_waits_for_ingest_then_takes_a_new_version(vault: FileVault, tmp_path: Path) -> None:
+    from wsp_cli.doccollections import EXIT_INGEST_PENDING
+
+    s = spec(OBJECTS)
+    first = runner(vault, OBJECTS, tmp_path).run(s, version="2026-10-10")
+    assert first.planned
+    pending = runner(vault, OBJECTS, tmp_path).run(s, version="2026-10-11")
+    assert pending.pending == ["2026-10-10"]  # another cycle waits: its catalog would miss 10-10's documents
+    assert not pending.fetched
+    # The same cycle again is allowed: it repairs an interrupted ingest (vault audit H2).
+    assert runner(vault, OBJECTS, tmp_path).run(s, version="2026-10-10").pending == []
+    assert EXIT_INGEST_PENDING == 5
+    ingest(vault, s)
+    more = [*OBJECTS, ("FM-6-0_2022.pdf", GOOD)]
+    again = runner(vault, more, tmp_path).run(s, version="2026-10-10")
+    assert again.version == "2026-10-10r2"  # the sealed version is never fetched into again
+    assert [d.cand.key for d in again.fetched] == ["test:FM-6-0_2022.pdf"]
+    assert again.skipped == 1  # unchanged by listing MD5: not downloaded
+    ingest(vault, s)
+    assert runner(vault, more, tmp_path).free_version(s, "2026-10-10", None) == "2026-10-10r3"
+
+
+def test_a_changed_catalog_without_new_documents_is_still_recorded(vault: FileVault, tmp_path: Path) -> None:
+    s = spec(OBJECTS)
+    runner(vault, OBJECTS, tmp_path).run(s, version="2026-10-10")
+    ingest(vault, s)
+    gone = [o for o in OBJECTS if not o[0].startswith("FM-5-0")]
+    report = runner(vault, gone, tmp_path).run(s, version="2026-11-10")
+    assert not report.fetched
+    assert report.planned  # a catalog-only generation (CA-14)
+    catalog = read_catalog_file(vault.root / "_incoming" / "test-pubs" / "2026-11-10" / CATALOG)
+    assert [m.currency for m in catalog] == ["withdrawn-from-index"]
+    ingest(vault, s)
+    quiet = runner(vault, gone, tmp_path).run(s, version="2026-12-10")
+    assert not quiet.planned  # nothing changed: nothing to ingest
+
+
+def test_unchanged_compares_the_listing_with_the_stored_bytes() -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from wsp_adapters.doccollection.model import DocumentMeta
+    from wsp_cli.doccollections import REFETCH_AFTER, unchanged
+
+    now = datetime(2026, 10, 12, tzinfo=UTC)
+    held = DocumentMeta(
+        doc_key="k",
+        file="f",
+        issuer="i",
+        title="t",
+        sha256="s",
+        bytes=10,
+        md5="aa",
+        fetched_at=(now - timedelta(days=10)).isoformat(),
+    )
+    cand = Candidate(key="k", url="https://x/f.pdf", title="t", issuer="i")
+    assert unchanged(dataclasses.replace(cand, md5="AA", size=10), held, now=now)
+    assert not unchanged(dataclasses.replace(cand, md5="bb", size=10), held, now=now)
+    assert not unchanged(dataclasses.replace(cand, size=11), held, now=now)
+    assert unchanged(cand, held, now=now)  # no size, no checksum: trusted for a while
+    assert not unchanged(cand, held, now=now + REFETCH_AFTER)  # then re-checked
+    assert not unchanged(cand, None, now=now)
+
+
+def test_held_documents_are_proposed_once(tmp_path: Path) -> None:
+    from wsp_cli.doccollections import unproposed_rows
+
+    root = tmp_path / "proposals"
+    root.mkdir()
+    doc = {"id": 1, "status": "open", "doc_review": {"source_id": "test-pubs", "documents": [{"key": "t:a"}]}}
+    (root / "00001-doc-review-test-pubs.yaml").write_text(yaml.safe_dump(doc), encoding="utf-8")
+    cfg = {"curator": {"proposals_dir": str(root)}}
+    rows = [
+        {"key": "t:a", "title": "A", "rule": "r"},
+        {"key": "t:b", "title": "B", "rule": "r"},
+        {"key": "t:b", "title": "B", "rule": "r"},
+    ]
+    assert [r["key"] for r in unproposed_rows(cfg, "test-pubs", rows)] == ["t:b"]
+
+
+def test_collection_sources_are_never_indexed_without_a_refine_adapter() -> None:
+    from wsp_adapters import available_adapters
+    from wsp_cli.doccollections import COLLECTION_ADAPTERS
+
+    repo = Path(__file__).resolve().parents[3]
+    data: Any = yaml.safe_load((repo / "registry" / "sources.yaml").read_text(encoding="utf-8"))
+    installed = set(available_adapters())
+    for raw in data["sources"]:
+        access: dict[str, Any] = raw.get("access") or {}
+        adapter = access.get("adapter")
+        if adapter in COLLECTION_ADAPTERS and raw.get("index", True) is not False:
+            assert adapter in installed, f"{raw['id']}: indexed but no {adapter!r} refine adapter"
+
+
+def test_files_fetched_again_for_a_sealed_version_are_a_failure_not_sealed(
+    vault: FileVault, tmp_path: Path
+) -> None:
+    s = spec(OBJECTS)
+    first = runner(vault, OBJECTS, tmp_path).run(s, version="2026-10-10")
+    ingest(vault, s)
+    name = first.fetched[0].file.removeprefix("upstream/")
+    leftover = vault.root / "_incoming" / "test-pubs" / "2026-10-10" / name
+    leftover.write_bytes(GOOD)  # what a same-version re-fetch used to leave behind
+    result = Ingestor(vault, [s], out=io.StringIO()).run(source_id="test-pubs")
+    (vp,) = [v for v in result.versions if v.generation_id == "2026-10-10"]
+    assert vp.status is VersionStatus.FAILED
+    assert "not ingested" in vp.reason

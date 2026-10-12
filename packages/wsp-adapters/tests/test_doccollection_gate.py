@@ -46,7 +46,7 @@ RULES = Rules()
         "\uff26\uff49\uff52\uff45 \uff43\uff4f\uff4e\uff54\uff52\uff4f\uff4c radar",  # fullwidth
         "F I R E  C O N T R O L  R A D A R",  # letter-spaced, double space between words
         "F I R E C O N T R O L R A D A R",  # letter-spaced, uniform: only the squeezed copy can match
-        "Kill\u2013chain analysis",  # en dash between the words
+        "Call\u2013for\u2013fire procedures",  # en dashes between the words
         "MISSILE\u00a0GUIDANCE",  # no-break space
     ],
 )
@@ -57,7 +57,7 @@ def test_content_screen_normalizes_before_matching(text: str) -> None:
 
 @pytest.mark.parametrize(
     "title",
-    ["\ufb01re control system", "Weapon\u00adization", "S N I P E R  T R A I N I N G"],
+    ["\ufb01re control system", "Weapon\u00adization of anthrax", "S N I P E R  T R A I N I N G"],
 )
 def test_metadata_screen_normalizes_titles(title: str) -> None:
     decision = classify_metadata(DocFacts(key="k", title=title), Rules(allow_all=True))

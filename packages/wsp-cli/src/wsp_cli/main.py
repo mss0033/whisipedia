@@ -426,6 +426,23 @@ def build_parser(argv: Sequence[str] | None = None) -> argparse.ArgumentParser:
         s.set_defaults(decision=name)
         s.add_argument("id", type=int)
         s.add_argument("--note", default=None)
+        if name == "accept":
+            s.add_argument(
+                "--only",
+                action="append",
+                default=None,
+                metavar="KEY",
+                help="document review: allow only these rows (document keys; repeatable); default every row",
+            )
+        else:
+            s.add_argument(
+                "--deny",
+                action="append",
+                default=None,
+                metavar="KEY",
+                help="document review: deny these rows (document keys; repeatable). Without it a "
+                "rejection only closes the proposal and denies nothing",
+            )
 
     for group, module in LAZY_GROUPS.items():
         if wants_help or command == group or command not in builtin:

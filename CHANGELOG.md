@@ -95,6 +95,56 @@ All notable changes are documented here. The format follows [Keep a Changelog](h
   step, resume after reboot that waits for the NAS and fails loudly). The API health check survives
   host sleep and does not restart the API while the whole machine is short of memory. The USR1 stack
   dump is documented with `--kill-whom=main`.
+### Fixed: collections and policy audit (2026-10-12)
+See `docs/audits/2026-10-12/collections-adapters.md`.
+* **Review decisions (CA-1, CA-16).** Rejecting a review proposal now only closes it.
+  `wsp proposals reject ID --deny KEY` denies the named rows and nothing else, and
+  `wsp proposals accept ID [--only KEY]` allows rows. Decisions are keyed by document key (one edition) and
+  go to a machine-owned `registry/filters/decisions/<source>.yaml`. The hand-written rules file is never
+  rewritten. A source without `filter.rules` is refused. A content-screen hold needs
+  `allow_content_review`, and an owner allow never lifts a deny-core title; `override_safety: {key: reason}`
+  does that. Open proposals are not filed again for the same documents.
+* **Registry repairs (CA-1).** `cisa-protective-security.yaml` is restored with its comments, including the
+  Design-Basis Threat note. That removes the 43 denies a bulk reject wrote. The five unwired files (jts,
+  nga, uk, who, fema) are deleted: all 1,090 entries came from closing superseded proposals
+  ("superseded: re-fetched under the owner's rules"), and none was a reviewer's decision.
+* **Deny core (CA-3, CA-4).** The deny core is grouped by the owner's categories and written as patterns
+  that match word forms and hyphen/space variants. It names techniques, not bare nouns. History-prone
+  nouns ("sniper", "gunnery", "booby traps", "minelaying") count only next to a core hit. "Kill chain",
+  "exploit code" and "weapons effects" no longer deny. The Army rules deny the fires, air and missile
+  defence and mortar series (FM/ATP/TC 3-09, FM 3-01, ATP 3-01., ATP 3-21.90).
+* **Markings (CA-5, CA-6, CA-18).** The screen now catches "has not been approved for public release",
+  FOUO in any case, "Distribution authorized/limited to …", UK OFFICIAL-SENSITIVE and RESTRICTED, a bare
+  CONFIDENTIAL or letter-spaced banner, SBU, and "(CUI)". Army titles are screened as printed.
+  `declassified_ok` needs a real release stamp on the same page as the banner. A document that only
+  mentions the EAR or ITAR is held, and only an export warning denies.
+* **Downloads (CA-2, CA-17, CA-21).** An HTML page, a JSON or XML body, or an error message where a PDF
+  was expected is a failed download, not a document. Office, zip and text files are still renamed to
+  their real format. Zip members are streamed within size and ratio caps, each member's front matter is
+  screened, and a restricted member rejects its archive. The throttle charges probes, redirect hops and
+  retries.
+* **Catalogs and the index (CA-7, CA-8, CA-11, CA-13, CA-14, CA-19).** The orchestrator path builds the
+  catalog the way `wsp collections fetch` does, through the new `GenerationFinalizer` port. A document that
+  current policy denies, or whose format the source no longer takes (`access.formats`; USGS topo is
+  GeoPDF only), is left out at refine time, so the index drops it. Withdrawn documents get a banner,
+  historical ones too. Unchanged files are skipped by listing MD5 or size, and carried metadata is
+  refreshed. A changed catalog with no new files still becomes a generation. An undated newer edition is
+  no longer superseded by an older dated one.
+* **Listings and versions (CA-9, CA-10, CA-15, CA-22).** Every paged discoverer flags a short or capped
+  listing, and an OAI-PMH error is an incomplete listing. An empty resolve is retried and never cached or
+  read as a withdrawal. Only a resolver's explicit "no documents" is cached. A fetch for a sealed version
+  takes the next `<cycle>rN` version (the lanes' form: `-rN` sorts before the cycle once a partition
+  suffix follows, and would never be promoted). A fetch while *another* version of the source (the same
+  partition) awaits ingest exits 5; the same version may be fetched again, which is how an interrupted
+  ingest is repaired. The lane runner ingests the waiting versions by name, then fetches again, and
+  follows the cycle a fetch moved to. `wsp ingest`
+  reports files left in `_incoming` for a sealed version as failed. NGA items without an id are kept,
+  and the resolve cache is closed on errors.
+* **Readers (CA-12; coordinator findings).** The git-mirror sources are `index: false` until a bundle
+  refine exists. Titles have no file extensions or `%20` debris, sentence fragments fall back to the PDF
+  title or its first heading, and USGS sheets read "East Greenwich, RI (1942) — 1:24,000 topographic map".
+  Document keys keep their spelling; `access.decode_url_keys` decodes escapes for new sources only.
+* **Registry (CA-20).** A `doc-collection` sub-schema is added, and unknown filter keys raise.
 
 ### Changed: document collections admit all public material outside a narrow content core (owner decision 2026-10-11)
 * Still excluded: classified or restricted documents; explosives and demolitions; weapons and munitions

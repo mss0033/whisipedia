@@ -18,6 +18,10 @@
 # docs/runbooks/document-collections.md, "Exit codes". Per fetch outcome:
 #   0, 7, 8   complete: ingest this cycle; done when it is in
 #   4         a listing failed, nothing fetched: retry the same cycle after LANE_LISTING_WAIT seconds
+#   5         an earlier fetch of the source is not ingested yet: ingest it (`wsp ingest --source`), then
+#             fetch again
+# When the cycle asked for is already sealed, the fetch uses the next one ("CYCLE rN") and says so; the
+# lane follows it (the ingest must name the version that was fetched).
 #   6         partial: ingest what came; once sealed, the next fetch uses a new cycle (CYCLE r2, r3...:
 #             a sealed generation takes no more files); retry after LANE_PARTIAL_WAIT seconds
 #   anything else (1 crash, 2 refused, 137/143 killed): not done, nothing ingested; the next run retries
@@ -138,17 +142,26 @@ for item in "$@"; do
     continue
   fi
 
-  listing=0 partial=0 done_item=0
+  listing=0 partial=0 pending=0 done_item=0
   while :; do
     frc=$(fetched_code "$item" "$cyc")
     case $frc in
       0 | 7 | 8) say "=== $item: cycle $cyc already fetched (exit $frc); ingesting" ;;
       *)
         say "=== $item: fetch, cycle $cyc"
+        start=$(wc -c < "$out" 2>/dev/null || echo 0)
         # shellcheck disable=SC2086
         run "$out" "$WSP" collections fetch --source "$src" $part --version "$cyc"
         frc=$?
         say "fetch exit $frc"
+        # "<v> is already sealed; fetching as <v'>": follow the cycle the fetch used (partition suffix off).
+        moved=$(tail -c +"$((start + 1))" "$out" | sed -n 's/.* is already sealed; fetching as \([^ ]*\)$/\1/p' | tail -n 1)
+        if [ -n "$moved" ]; then
+          [ -n "$part" ] && moved=${moved%".$item"}
+          say "$item: cycle $cyc is sealed; the fetch used $moved"
+          cyc=$moved
+          set_cycle "$item" "$cyc"
+        fi
         ;;
     esac
     case $frc in
@@ -163,6 +176,19 @@ for item in "$@"; do
           forget_fetched "$item" "$cyc"
         fi
         break
+        ;;
+      5)
+        pending=$((pending + 1))
+        [ "$pending" -ge 3 ] && { say "earlier fetch still not ingested; $item left for a later run"; break; }
+        # "<src>: fetched but not ingested yet: V1, V2; run ..." names the versions: ingest each by name
+        # (a partition's ingest needs --version), then fetch again.
+        waiting=$(tail -c +"$((start + 1))" "$out" | sed -n 's/.*: fetched but not ingested yet: \(.*\); run .*/\1/p' | tail -n 1 | tr -d ',')
+        for v in $waiting; do
+          [ -n "$part" ] && v=${v%".$item"}
+          # shellcheck disable=SC2086
+          run "$out" "$WSP" ingest --source "$src" $part --version "$v"
+          say "ingest of the pending $src $part --version $v: exit $?"
+        done
         ;;
       4)
         listing=$((listing + 1))
