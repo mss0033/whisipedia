@@ -66,6 +66,11 @@ class ZimReader(Protocol):
         """The book's ``Name`` metadata, else the dated file name (``wsp_adapters.kiwix.book_name``)."""
         ...
 
+    def warm(self, file: str) -> None:
+        """Open ``file`` and keep it open (no request waits for it; a cold open over SMB can take
+        minutes for the largest archives)."""
+        ...
+
     def close(self) -> None: ...
 
 
@@ -168,6 +173,9 @@ class InProcessZimReader:
     def book_name(self, file: str) -> str:
         # Not cached: a bundle has hundreds of books and only their names are needed here.
         return book_name_of(self._opener(file), file)
+
+    def warm(self, file: str) -> None:
+        self._cache.get(file)
 
     def close(self) -> None:
         pass

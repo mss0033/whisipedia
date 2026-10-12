@@ -22,6 +22,7 @@ import json
 import logging
 import os
 import threading
+import time
 from collections import OrderedDict
 from collections.abc import Mapping
 from concurrent.futures import Future
@@ -132,6 +133,9 @@ class ZimAssetStore:
         self.names: dict[str, str] = {}  # source id -> display name, for generated pages
         self._layouts: OrderedDict[tuple[str, str], ZimLayout] = OrderedDict()
         self._building: dict[tuple[str, str], Future[dict[str, str] | None]] = {}
+        self._warm_seen: set[tuple[str, str]] = set()
+        self._warm_queue: list[tuple[str, str]] = []
+        self._warmer: threading.Thread | None = None
         self._lock = threading.Lock()
 
     # --- where things are ---
@@ -216,6 +220,49 @@ class ZimAssetStore:
         finally:
             with self._lock:
                 del self._building[key]
+
+    def warm_soon(self, source_id: str, generation_id: str) -> None:
+        """Open every archive of a generation in the background, largest first, one at a time (a single
+        thread for all generations: the NAS serves one cold open well, many badly)."""
+        with self._lock:
+            if (source_id, generation_id) in self._warm_seen:
+                return
+            self._warm_seen.add((source_id, generation_id))
+            self._warm_queue.append((source_id, generation_id))
+            if self._warmer is not None and self._warmer.is_alive():
+                return
+            self._warmer = threading.Thread(target=self._warm_loop, name="zim-warm", daemon=True)
+            self._warmer.start()
+
+    def _warm_loop(self) -> None:
+        while True:
+            with self._lock:
+                if not self._warm_queue:
+                    self._warmer = None
+                    return
+                source_id, generation_id = self._warm_queue.pop(0)
+            layout = self.layout(source_id, generation_id)
+            if layout is None:
+                continue
+            sized: list[tuple[int, str]] = []
+            for f in layout.files:
+                try:
+                    sized.append((os.stat(f).st_size, f))
+                except OSError:
+                    sized.append((0, f))
+            t0 = time.monotonic()
+            for _, f in sorted(sized, reverse=True):
+                try:
+                    self.reader.warm(f)
+                except Exception as exc:  # a bad archive must not stop the others
+                    log.warning("could not open %s ahead of time: %s", f, exc)
+            log.info(
+                "opened %d archive(s) of %s/%s in %.0f s",
+                len(sized),
+                source_id,
+                generation_id,
+                time.monotonic() - t0,
+            )
 
     def build_books_soon(self, source_id: str, generation_id: str) -> None:
         with self._lock:

@@ -120,3 +120,36 @@ describe('plain text', () => {
     expect(renderPlainText('  x\n  y', true).tagName).toBe('PRE');
   });
 });
+
+describe('links to mirrored Wikimedia projects', () => {
+  const ctx = { sourceId: 'wikipedia-top10', nativeId: 'en/October_12' };
+  it('opens the library copy', () => {
+    expect(resolveHref('https://en.wiktionary.org/wiki/calli', ctx)).toEqual({
+      kind: 'local',
+      address: 'wsp://wiktionary-en/calli',
+    });
+    expect(resolveHref('https://en.m.wikipedia.org/wiki/Alan%20Turing#Early_life', ctx)).toEqual({
+      kind: 'local',
+      address: 'wsp://wikipedia-en-zim/Alan_Turing#Early_life',
+    });
+    expect(resolveHref('https://de.wikipedia.org/w/index.php?title=Berlin', ctx)).toEqual({
+      kind: 'local',
+      address: 'wsp://wikipedia-top10/de/Berlin',
+    });
+    expect(resolveHref('https://mdwiki.org/wiki/Diabetes', ctx)).toEqual({
+      kind: 'local',
+      address: 'wsp://mdwiki/Diabetes',
+    });
+  });
+  it('leaves what the library does not hold offline', () => {
+    for (const href of [
+      'https://ja.wikipedia.org/wiki/東京',
+      'https://fr.wiktionary.org/wiki/chat',
+      'https://en.wikipedia.org/wiki/Special:Random',
+      'https://en.wikipedia.org/w/index.php?search=x',
+      'https://www.britannica.com/topic/Columbus-Day',
+    ]) {
+      expect(resolveHref(href, ctx).kind).toBe('missing');
+    }
+  });
+});

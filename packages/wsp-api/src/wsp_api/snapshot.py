@@ -350,6 +350,9 @@ class LibraryState:
                 if key in self._homes:
                     continue
             native = self._home(*key)
+            warm = getattr(self.home_finder, "warm_soon", None)
+            if callable(warm):
+                warm(*key)  # every archive of the generation, in the background
             if isinstance(native, _Failed):
                 continue
             with self._homes_lock:

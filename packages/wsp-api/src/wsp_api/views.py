@@ -58,11 +58,16 @@ class DocumentView:
     has_history: bool
 
 
+DEFAULT_ZIM_MAX_OPEN = 512
+
+
 def _zim_reader(settings: ApiSettings, services: Services) -> ZimReader:
     if settings.zim_workers <= 0:
         return InProcessZimReader()
-    zims = sum(1 for x in services.sources if x.adapter == ZIM_ADAPTER)
-    max_open = settings.zim_max_open or max(4, zims)
+    # Every archive stays open: an open archive costs ~0.2 MB of anonymous memory (the rest is page
+    # cache), while a cold open of a large one over SMB takes up to minutes. One open per Kiwix *source*
+    # (the old default) let stackexchange's 181 archives evict each other on every page.
+    max_open = settings.zim_max_open or DEFAULT_ZIM_MAX_OPEN
     return ZimProcessPool(
         workers=settings.zim_workers, max_open=max_open, timeout=settings.zim_timeout_seconds
     )
@@ -167,11 +172,14 @@ class Library:
         spec = self.s.source(source_id)
         return source_id if spec is None else spec.name
 
-    def held_sources(self) -> frozenset[str]:
-        """Sources with a current generation in the library (from the snapshot)."""
-        snap = self.state.snapshot()
+    def readable_sources(self) -> frozenset[str]:
+        """Sites a reader can open: held (a current generation) with documents or a home page.
+
+        A planned source with nothing downloaded, or raw data the reader cannot show (a map tile
+        planet, a Wikidata dump) until it is refined, is not listed on the portal or in the directory.
+        """
         return frozenset(
-            x.id for x in self.s.sources if snap.source(x.id).current is not None or snap.source(x.id).members
+            i.id for i in self.source_infos() if i.current_generation and (i.doc_count or i.home_doc_id)
         )
 
     def has_docs(self, sources: Sequence[str]) -> list[str]:

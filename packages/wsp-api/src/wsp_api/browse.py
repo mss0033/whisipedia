@@ -115,7 +115,7 @@ def browse_router(lib: Library) -> APIRouter:
             newest=(news := _site_news(infos, limit=6)) + [lib.change(c) for c in newest][: 8 - len(news)],
             random=doc_ref(lib.catalog.random_doc(sources=None, rng=rng)),
             random_sources=[i.id for i in infos if i.doc_count],
-            sites=[i for i in infos if i.current_generation],  # planned sources with nothing yet: not listed
+            sites=[i for i in infos if i.current_generation and (i.doc_count or i.home_doc_id)],  # readable
         )
 
     # --- Directory ------------------------------------------------------------------------------
@@ -127,9 +127,9 @@ def browse_router(lib: Library) -> APIRouter:
         ] = "",
     ) -> DirectoryPage:
         parts = [p for p in path.strip("/").split("/") if p]
-        # Only sites the library holds: a planned source with nothing downloaded is not listed (its
-        # address still opens a page saying so). A path to it still resolves, for old bookmarks.
-        held = lib.held_sources()
+        # Only sites a reader can open (Library.readable_sources); a planned source's address still
+        # opens a page saying so, and a directory path to it still resolves, for old bookmarks.
+        held = lib.readable_sources()
         specs = sorted(s.sources, key=lambda x: x.name.casefold())
         listed = [x for x in specs if x.id in held]
         domains = sorted({d for x in specs for d in x.domain})

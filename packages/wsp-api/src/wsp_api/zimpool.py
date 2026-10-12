@@ -37,6 +37,7 @@ from wsp_api.zimread import EntryData, Want, ZimError, ZimUnavailable
 
 log = logging.getLogger(__name__)
 
+WARM_TIMEOUT = 900.0  # a background open of the largest archive (115 GB) took 99 s over SMB
 STRIKES = 3  # deaths with a file in flight before it is refused for a while
 STRIKE_WINDOW = 600.0
 RESTART_BURST = 5  # restarts within RESTART_WINDOW before backing off
@@ -239,6 +240,10 @@ class ZimProcessPool:
 
     def read(self, file: str, path: str, want: Want) -> EntryData | None:
         return cast(EntryData | None, self.call("read", (file, path, want.value), file))
+
+    def warm(self, file: str) -> None:
+        """Open ``file`` in its worker (the main page entry, no bytes) and wait as long as that takes."""
+        self.call("read", (file, "", "none"), file, timeout=WARM_TIMEOUT)
 
     def book_name(self, file: str) -> str:
         """Only used to build a bundle's book index, off the request path: a cold open of an archive

@@ -9,6 +9,7 @@
  */
 import type { DocumentLink } from '../api/types.ts';
 import { docIdToAddress, encodePath, makeAddress, normalizeAddress } from './address.ts';
+import { interwikiAddress } from './interwiki.ts';
 
 export type LinkTarget =
   | { kind: 'local'; address: string }
@@ -56,6 +57,10 @@ export function resolveHref(rawHref: string, ctx: LinkContext): LinkTarget {
   if (scheme === 'wsp') {
     const n = normalizeAddress(href);
     return n ? { kind: 'local', address: n } : missing(href, ctx);
+  }
+  if (scheme === 'http' || scheme === 'https') {
+    const mirrored = interwikiAddress(href); // a Wikimedia page the library holds
+    if (mirrored) return { kind: 'local', address: mirrored };
   }
   if (scheme) return missing(href, ctx); // http, mailto, javascript, data, ...
   if (href.startsWith('//')) return missing(href, ctx); // protocol-relative = remote
