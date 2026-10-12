@@ -1042,7 +1042,7 @@ sources:
       key_prefix: cia-rr
       partitioned: true  # fetch one batch per run: wsp collections fetch --partition b0001 (..b0100)
       origins: [archive.org, www.cia.gov]
-      rate: {requests_per_second: 1, concurrency: 3, per_host: {www.cia.gov: 10}}  # 3 in flight: archive.org round trips take 2-3 s
+      rate: {requests_per_second: 1, concurrency: 4, per_host: {www.cia.gov: 10}}  # 4 in flight: archive.org metadata replies take ~4 s
       discovery:
         - kind: archive-org
           query: "collection:ciareadingroom"
