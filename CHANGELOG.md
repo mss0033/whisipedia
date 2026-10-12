@@ -3,6 +3,11 @@
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Changed: search latency (2026-10-12)
+* The source cap re-runs a crowded query at most twice (was three times), and a query reads each stored
+  document once (the cap and the hit list shared none of their reads). Measured on the live index: the
+  third round cost 0.3-1.5 s per query and brought no title into the window that two did not.
+
 ### Fixed: API and Navigator audit (2026-10-12)
 * View Source Data names the file that holds the page:
   * the archive a multi-ZIM page is in (it named the source's first archive);

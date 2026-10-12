@@ -446,3 +446,25 @@ def test_suggest_titles_are_shared_by_the_sources(tmp_path: Path) -> None:
         assert by_source == {"wsp:encyc": 40, "wsp:books": 10, "wsp:words": 10}
         assert idx.suggest("huckle")
         assert idx.suggest("dog")
+
+
+def test_a_query_reads_each_stored_document_once() -> None:
+    from wsp_index.lexical import _DocMemo  # pyright: ignore[reportPrivateUsage]
+
+    class Address:
+        def __init__(self, seg: int, doc: int) -> None:
+            self.segment_ord, self.doc = seg, doc
+
+    class Searcher:
+        reads = 0
+        num_docs = 7
+
+        def doc(self, address: Address) -> str:
+            Searcher.reads += 1
+            return f"doc {address.segment_ord}/{address.doc}"
+
+    memo = _DocMemo(Searcher())  # type: ignore[arg-type]
+    assert memo.doc(Address(0, 1)) == memo.doc(Address(0, 1)) == "doc 0/1"  # type: ignore[arg-type]
+    assert memo.doc(Address(1, 1)) == "doc 1/1"  # type: ignore[arg-type]
+    assert Searcher.reads == 2
+    assert memo.num_docs == 7  # everything else goes to the searcher

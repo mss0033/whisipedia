@@ -47,7 +47,7 @@ from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import TracebackType
-from typing import Self
+from typing import Any, Self, cast
 
 import tantivy
 
@@ -93,8 +93,37 @@ MIN_TIER_HITS = 30
 """Every-word matches enough to lead the result list on their own (module docstring)."""
 SUGGEST_TURN = 1_000
 """Unranked titles a source adds to the suggest trie per turn (``_all_entries``)."""
-DIVERSE_ROUNDS = 3
-"""Queries run again at most this many times to share a window among sources (``per_source``)."""
+DIVERSE_ROUNDS = 2
+"""Queries run again at most this many times to share a window among sources (``per_source``). Each
+round reads the stored source of up to a window of new hits (1-3 ms each from a cold disk). Two rounds
+cover one crowding source after another (Open Library's editions, then Stack Exchange users named
+"Huckleberry Finn"); measured on the live index (2026-10-12), a third cost 0.3-1.5 s more per query and
+brought no title into the window that two did not."""
+
+
+class _DocMemo:
+    """A searcher whose ``doc`` reads each stored document once for one query: the source cap reads a
+    window's sources and the hits are then built from the same documents (each read is 1-3 ms from a
+    cold disk). Everything else goes to the searcher."""
+
+    def __init__(self, searcher: tantivy.Searcher) -> None:
+        self._searcher = searcher
+        self._docs: dict[tuple[int, int], tantivy.Document] = {}
+
+    def doc(self, address: tantivy.DocAddress) -> tantivy.Document:
+        key = (address.segment_ord, address.doc)
+        found = self._docs.get(key)
+        if found is None:
+            found = self._docs[key] = self._searcher.doc(address)
+        return found
+
+    @property
+    def native(self) -> tantivy.Searcher:
+        """The searcher itself, for Tantivy functions that take one (``SnippetGenerator.create``)."""
+        return self._searcher
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._searcher, name)
 
 
 @dataclass(frozen=True, slots=True)
@@ -853,7 +882,7 @@ class TantivyIndex:
     ) -> LexicalWindow:
         if limit <= 0 or offset < 0 or (sources is not None and not sources):
             return LexicalWindow([], True)
-        searcher = self._index.searcher()
+        searcher = cast(tantivy.Searcher, _DocMemo(self._index.searcher()))  # each document read once
         rank = self.static_rank() if self.config.rank_weight > 0 else None
         depth = self.config.rank_depth
         ranked = not (rank is None or depth <= 0 or offset >= depth)
@@ -926,7 +955,8 @@ class TantivyIndex:
                 source_doc = tantivy.Document(**{f"text_{route}": text})
             gen = generators.get(route)
             if gen is None:
-                gen = tantivy.SnippetGenerator.create(searcher, parsed, self._schema, f"text_{route}")
+                native = searcher.native if isinstance(searcher, _DocMemo) else searcher  # Rust wants its own
+                gen = tantivy.SnippetGenerator.create(native, parsed, self._schema, f"text_{route}")
                 gen.set_max_num_chars(self.config.snippet_chars)
                 generators[route] = gen
             snippet = gen.snippet_from_doc(source_doc).to_html()
