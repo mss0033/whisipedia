@@ -309,6 +309,11 @@ def build_parser(argv: Sequence[str] | None = None) -> argparse.ArgumentParser:
     )
     s.add_argument("--source", default=None, help="only this source id")
     s.add_argument("--no-rank", action="store_true", help="skip the static rank (PageRank) step")
+    s.add_argument(
+        "--no-spell",
+        action="store_true",
+        help="skip the spelling vocabulary (run `wsp index spell` after a batch)",
+    )
     s = add(
         "rank",
         _ops("cmd_index_rank"),

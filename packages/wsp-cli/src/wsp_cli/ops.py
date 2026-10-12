@@ -177,7 +177,9 @@ def cmd_index_build(args: argparse.Namespace, out: TextIO) -> int:
             changed = any(r.upserted or r.deleted or r.refined for r in reports)
             if not getattr(args, "no_rank", False) and (changed or not ix.index.rank_path.is_file()):
                 ix.rank()
-            if changed or not (ix.index.path / SPELL_FILE).is_file():
+            if not getattr(args, "no_spell", False) and (
+                changed or not (ix.index.path / SPELL_FILE).is_file()
+            ):
                 ix.spell()
     except LockHeldError as exc:
         return _busy(exc)
