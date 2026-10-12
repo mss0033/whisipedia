@@ -17,6 +17,29 @@ All notable changes are documented here. The format follows [Keep a Changelog](h
 * The Army filter keeps only the weapons, gunnery and targeting series and 19 core titles. The Joint
   Publications filter denies only JP 3-60 (targeting).
 
+### Fixed: browsing and search on the live library (2026-10-12)
+* Pages failing at random: a site's recent changes scanned 200,000 feed rows under the GIL, and
+  concurrent site pages starved the API's thread pool. The feed has a (source, seq) index now.
+* Stack Exchange documents timed out (503): the ZIM pool kept one open archive per Kiwix source, and the
+  115 GB Stack Overflow archive takes 99 s to open over SMB. All archives stay open and are opened ahead
+  of time; the Navigator retries a 503 by itself ("This page is still loading").
+* A restart answered 503 for a minute or more: the last library snapshot is saved and loaded at start.
+  The first portal request read every Parquet footer of every source (13.5 s): catalog counts come
+  from _SUCCESS.json and random picks from the memory-mapped id index (0.34 s cold).
+* Planned sources with nothing downloaded, and raw data, are no longer listed as sites (portal,
+  directory, webring, Related). Random page works on ZIM-only sites.
+* Wikimedia links (HTML and plain text) open the library's copy. Stack Exchange tag listings are not
+  documents and never results.
+* Ranking: mdwiki (the only source with passage embeddings) won almost every query; sources without
+  embeddings now get their lexical rank on the dense side too. Near-ties prefer the query's language.
+  Snippets are cut only for the page shown, and come from the Refinery (Tantivy no longer stores text:
+  -105 GB).
+* Collections: a re-fetch of an interrupted ingest failed on identical staged files; resumed fetches
+  re-downloaded everything; restarts after midnight UTC started a new generation; archive.org round
+  trips held the CIA reading room to 0.3 requests/s (now up to 4 in flight, starts still 1/s).
+* API memory: the Refinery id index is memory-mapped; model staging memory is trimmed; a health timer
+  restarts an API that stops answering.
+
 ### Changed: issuer publication counts as release (owner decision 2026-10-11)
 * New distribution requirement `published`: a document the issuer posted openly is released even when
   it prints no release line. 17 publisher-hosted sources use it. Restrictive markings still deny
