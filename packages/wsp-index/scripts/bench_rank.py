@@ -33,7 +33,9 @@ from pathlib import Path
 from typing import Any, cast
 
 import numpy as np
+import numpy.typing as npt
 import pyarrow as pa
+import pyarrow.compute as _pc
 import pyarrow.parquet as pq
 
 from wsp_core.model import DocRecord
@@ -44,9 +46,13 @@ from wsp_index.linkrank import (
     StaticRank,
     build_graph,
     compute_static_rank,
+    graph_file,
     pagerank,
 )
 from wsp_index.refinery import generation_dir
+
+pc: Any = _pc
+pa_: Any = pa  # the array constructors' stubs reject numpy inputs
 
 
 def rss_mb() -> float:
@@ -173,7 +179,7 @@ def synthetic_csr(out: Path, nodes: int, edges: int, groups: int, seed: int = 1)
     rng.shuffle(weights)
     indeg = rng.multinomial(edges, weights / weights.sum()).astype(np.int32)
     out_deg = np.zeros(nodes, dtype=np.int32)
-    with (out / "intra.src").open("wb") as fh:
+    with graph_file(out, "intra").open("wb") as fh:
         step = 1 << 22
         for lo in range(0, nodes, step):
             hi = min(nodes, lo + step)
@@ -185,19 +191,21 @@ def synthetic_csr(out: Path, nodes: int, edges: int, groups: int, seed: int = 1)
             s = (g_lo + (rng.random(m) * (g_hi - g_lo)).astype(np.int64)).astype(np.int32)
             out_deg += np.bincount(s, minlength=nodes).astype(np.int32)
             fh.write(s.tobytes())
-    (out / "cross.src").write_bytes(b"")
+    graph_file(out, "cross").write_bytes(b"")
     zero = np.zeros(nodes, dtype=np.int32)
+    for name, values in (
+        ("node_group", node_group),
+        ("out_intra", out_deg),
+        ("out_cross", zero),
+        ("indeg_intra", indeg),
+        ("indeg_cross", zero),
+    ):
+        values.tofile(graph_file(out, name))
     return LinkGraph(
         n=nodes,
         sources=("syn",),
         groups=tuple(("syn", f"l{i}") for i in range(groups)),
-        node_group=node_group,
-        out_intra=out_deg,
-        out_cross=zero,
-        indeg_intra=indeg,
-        indeg_cross=zero.copy(),
-        id_keys=np.zeros(0, dtype=np.uint64),
-        id_nodes=np.zeros(0, dtype=np.int32),
+        group_sizes=tuple(int(c) for c in np.bincount(node_group, minlength=groups)),
         workdir=out,
         edges=edges,
         intra_edges=edges,
@@ -285,6 +293,130 @@ def cmd_graph(args: argparse.Namespace) -> dict[str, object]:
     }
 
 
+class SyntheticLibrary:
+    """A library generated batch by batch, nothing written: ``docs`` documents ``wsp:syn/<lang>/P<i>``
+    in ``langs`` contiguous language blocks, a Poisson number of links each (mean ``links``) to
+    power-law targets. Of the links, 8% point outside the library, 4% use another case and a
+    ``#fragment`` (resolved by loose id) and 4% a redirect ``Alias_<t>`` (the targets below
+    ``redirects`` have one). Duck-types the two members of a reader that the rank build uses."""
+
+    def __init__(self, docs: int, links: float, langs: int, redirects: int, seed: int = 3) -> None:
+        self.docs = docs
+        self.links = links
+        self.langs = [f"l{i}" for i in range(langs)]
+        self.redirects = min(redirects, docs)
+        self.seed = seed
+
+    def __len__(self) -> int:
+        return self.docs
+
+    def _lang(self, nodes: npt.NDArray[np.int64]) -> npt.NDArray[np.int32]:
+        return np.minimum(nodes * len(self.langs) // max(1, self.docs), len(self.langs) - 1).astype(np.int32)
+
+    def _ids(
+        self, nodes: npt.NDArray[np.int64], variant: npt.NDArray[np.int32] | None = None
+    ) -> pa.Array[Any]:
+        """``wsp:syn/<lang>/<P|p|Alias_><node>[#x]`` (variant 0, 1 and 2)."""
+        var = np.zeros(len(nodes), dtype=np.int32) if variant is None else variant
+        heads = [f"wsp:syn/{lang}/{v}" for lang in self.langs for v in ("P", "p", "Alias_")]
+        head = pa_.DictionaryArray.from_arrays(pa.array(self._lang(nodes) * 3 + var), pa.array(heads))
+        tail = pa_.DictionaryArray.from_arrays(pa.array((var == 1).astype(np.int32)), pa.array(["", "#x"]))
+        num = pc.cast(pa.array(nodes), pa.string())
+        joined = pc.binary_join_element_wise(head.cast(pa.string()), num, tail.cast(pa.string()), "")
+        return cast("pa.Array[Any]", joined)
+
+    def aliases(self) -> Iterator[tuple[str, str]]:
+        for t in range(self.redirects):
+            yield f"wsp:syn/{self.langs[int(self._lang(np.array([t]))[0])]}/P{t}", f"Alias {t}"
+
+    def scan(self, columns: Any = ("doc_id",), *, batch_size: int = 4096) -> Iterator[pa.RecordBatch]:
+        for lo in range(0, self.docs, batch_size):
+            nodes = np.arange(lo, min(self.docs, lo + batch_size), dtype=np.int64)
+            out: list[pa.Array[Any]] = []
+            for name in columns:
+                if name == "doc_id":
+                    out.append(self._ids(nodes))
+                elif name == "native_id":
+                    out.append(
+                        pc.replace_substring_regex(self._ids(nodes), pattern="^wsp:syn/", replacement="")
+                    )
+                elif name == "title":
+                    out.append(pc.binary_join_element_wise("P", pc.cast(pa.array(nodes), pa.string()), ""))
+                elif name == "lang":
+                    out.append(
+                        pa_.DictionaryArray.from_arrays(
+                            pa.array(self._lang(nodes)), pa.array(self.langs)
+                        ).cast(pa.string())
+                    )
+                elif name == "links":
+                    out.append(self._links(lo, len(nodes)))
+                else:
+                    raise KeyError(name)
+            yield pa_.RecordBatch.from_arrays(out, names=list(columns))
+
+    def _links(self, lo: int, rows: int) -> pa.Array[Any]:
+        rng = np.random.default_rng(self.seed + lo)
+        counts = rng.poisson(self.links, rows)
+        m = int(counts.sum())
+        target = np.minimum((self.docs * rng.random(m) ** 3).astype(np.int64), self.docs - 1)
+        kind = rng.random(m)
+        variant = np.zeros(m, dtype=np.int32)
+        variant[(kind >= 0.08) & (kind < 0.12)] = 1
+        alias = (kind >= 0.12) & (kind < 0.16) & (target < self.redirects)
+        variant[alias] = 2
+        target[kind < 0.08] += self.docs  # outside the library
+        offsets = np.zeros(rows + 1, dtype=np.int32)
+        np.cumsum(counts, out=offsets[1:])
+        return pa_.ListArray.from_arrays(pa.array(offsets), self._ids(target, variant))
+
+
+def cmd_build(args: argparse.Namespace) -> dict[str, object]:
+    """The whole rank build on a :class:`SyntheticLibrary` (with its redirects), scratch in ``--out``."""
+    out: Path = args.out
+    shutil.rmtree(out, ignore_errors=True)
+    out.mkdir(parents=True)
+    lib = SyntheticLibrary(int(args.docs), float(args.links), int(args.langs), int(args.redirects))
+    t0 = time.monotonic()
+    scratch = 0
+
+    def say(msg: str) -> None:
+        nonlocal scratch
+        used = sum(p.stat().st_size for p in (out / "work").glob("*") if p.is_file())
+        scratch = max(scratch, used)
+        clock = time.monotonic() - t0
+        line = (
+            f"[{clock:7.1f}s rss {current_mb():6.0f} MB peak {rss_mb():6.0f} disk {used / 2**20:6.0f}] {msg}"
+        )
+        print(line, file=sys.stderr, flush=True)
+
+    cfg = RankConfig(max_iterations=args.iterations)
+    stats = compute_static_rank(
+        [("syn", cast(RefineryReader, lib))],
+        out / "static_rank.bin",
+        out / "work",
+        aliases=lib.aliases(),
+        config=cfg,
+        progress=say,
+    )
+    result: dict[str, object] = {
+        "nodes": stats.nodes,
+        "edges": stats.edges,
+        "intra_edges": stats.intra_edges,
+        "resolved": [stats.resolved_exact, stats.resolved_loose, stats.resolved_alias],
+        "unresolved": stats.unresolved_links,
+        "aliases": stats.aliases,
+        "iterations": stats.iterations,
+        "graph_s": round(stats.seconds_graph, 1),
+        "iterate_s": round(stats.seconds_iterate, 1),
+        "total_s": round(time.monotonic() - t0, 1),
+        "peak_rss_mb": round(rss_mb()),
+        "peak_scratch_mb_at_log_lines": round(scratch / 2**20),
+    }
+    if not args.keep:
+        shutil.rmtree(out, ignore_errors=True)
+    return result
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -304,11 +436,19 @@ def main(argv: list[str] | None = None) -> int:
     gr = sub.add_parser("graph")
     gr.add_argument("--docs", type=int, default=300_000)
     gr.add_argument("--links", type=int, default=20)
-    for p in (rf, it, gr):
+    bd = sub.add_parser("build")
+    bd.add_argument("--docs", type=int, default=1_000_000)
+    bd.add_argument("--links", type=float, default=3.3)
+    bd.add_argument("--langs", type=int, default=4)
+    bd.add_argument("--redirects", type=int, default=100_000)
+    bd.add_argument("--iterations", type=int, default=RankConfig().max_iterations)
+    for p in (rf, it, gr, bd):
         p.add_argument("--out", type=Path, required=True)
         p.add_argument("--keep", action="store_true")
     args = ap.parse_args(argv)
-    run = {"refinery": cmd_refinery, "iterate": cmd_iterate, "graph": cmd_graph}[cast(str, args.cmd)]
+    run = {"refinery": cmd_refinery, "iterate": cmd_iterate, "graph": cmd_graph, "build": cmd_build}[
+        cast(str, args.cmd)
+    ]
     json.dump(run(args), sys.stdout, indent=1)
     sys.stdout.write("\n")
     return 0

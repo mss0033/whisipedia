@@ -16,17 +16,26 @@ The feature is a blend of *percentiles*, ``(1 - mix) * pct_group + mix * pct_glo
 the best page of each group scores near 1 and every unlinked page 0, whatever the group's size, so
 the boost a ranker derives from it is capped (``1 + w * feature``) and comparable across languages.
 
-Scale (wikipedia-top10: 32M nodes; target 41M nodes and ~1B edges in about 3 GB):
+Scale (live library: 256M nodes, 641M edges; memory about 8 bytes a node plus bounded chunks):
 
 1. every document id is reduced to two 64-bit keys, computed vectorized from Arrow's string buffers
    (:func:`key64`): one of the exact id, one of the *loose* id (no ``#fragment``, ``_`` as space,
    lower case). Ids are never held as Python or Arrow strings;
 2. aliases (redirects) become loose keys of the doc id the redirect would have, *with* the target's
    language/book prefix (``wsp:wikipedia-top10/en/AC_DC``), pointing at the target node;
-3. each link is resolved by binary search: exact id, then loose id, then alias. Edges go to
-   per-destination-range bucket files, which are then sorted into a CSR by destination;
-4. power iteration pulls float32 weights through the CSR in bounded chunks and sums them in float64
-   (``np.add.reduceat``), so no node-sized temporary is allocated per chunk.
+3. node keys, aliases and links are spilled to *key partitions* on disk, cut by the top bits of the
+   key (a hash, so the partitions are even, ``node_chunk / 2`` nodes each). Each partition of links is
+   joined against the same partition of node keys, sorted in memory: exact id first; the misses move
+   to the loose-key partitions and are joined against the loose ids, then the aliases. No table of
+   all keys is ever held in memory;
+4. resolved edges go to per-destination-range bucket files, each sorted and de-duplicated on its own
+   into a CSR by destination; out-degrees are counted from the CSR afterwards;
+5. every per-node array (groups, degrees, ranks, the sorted id table) is a file in the work directory,
+   read and written in slices. Power iteration holds only the weight vectors ``rank / out-degree``
+   (gathered at random by the edges, 4 bytes a node each), pulls them through the CSR in bounded
+   chunks and sums in float64 (``np.add.reduceat``).
+
+Scratch on disk peaks at about 20 bytes a library link plus 24 bytes a node.
 
 Sidecar format (``<index>/lexical/static_rank.bin``, little endian, replaced atomically)::
 
@@ -46,8 +55,10 @@ import json
 import math
 import mmap
 import os
+import resource
 import time
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from contextlib import ExitStack
 from dataclasses import asdict, dataclass, field
 from functools import cache
 from pathlib import Path
@@ -215,6 +226,8 @@ class KeyTable:
 
 # --- configuration and statistics --------------------------------------------------------------------
 
+_NODE_CHUNK = 1 << 22
+
 
 @dataclass(frozen=True, slots=True)
 class RankConfig:
@@ -228,12 +241,15 @@ class RankConfig:
     """Weight of the global percentile in the feature; the rest is the per-group percentile."""
     edge_chunk: int = 16_000_000
     """Edges gathered per step of the power iteration (temporaries ~200 MB)."""
+    node_chunk: int = _NODE_CHUNK
+    """Nodes per slice of a per-node file, and link records per step of the link resolution (~0.4 GB
+    of temporaries); key partitions hold about half as many nodes."""
     batch_size: int = 4_096
     """Documents per Refinery batch while reading ids and links (~150k links of Wikipedia)."""
     bucket_nodes: int = 1 << 18
     """Destination nodes per edge bucket (the CSR is sorted one bucket at a time)."""
     buffer_bytes: int = 64 * 1024 * 1024
-    """Edge pairs buffered in memory before they are appended to the bucket files."""
+    """Records buffered in memory before they are appended to the partition and bucket files."""
     resolve_aliases: bool = True
     """Resolve links through loose ids (case, ``_`` vs space, ``#fragment``) and redirects."""
 
@@ -269,59 +285,186 @@ class RankStats:
         )
 
 
-# --- the graph -----------------------------------------------------------------------------------------
+# --- files in the work directory -----------------------------------------------------------------------
 
 _KINDS = ("intra", "cross")
 
+_GRAPH_FILES = {
+    "node_group": "node_group.i32",
+    "out_intra": "out_intra.i32",
+    "out_cross": "out_cross.i32",
+    "indeg_intra": "indeg_intra.i32",
+    "indeg_cross": "indeg_cross.i32",
+    "id_keys": "ids.keys",
+    "id_nodes": "ids.nodes",
+    "intra": "intra.src",
+    "cross": "cross.src",
+    "rank_group": "rank_group.f32",
+    "rank_global": "rank_global.f32",
+}
 
-@dataclass(slots=True)
-class LinkGraph:
-    """Nodes in scan order plus CSR edge lists (by destination) under ``workdir``.
 
-    ``intra`` holds the edges inside one (source, language) group, ``cross`` the rest; per kind,
-    ``<kind>.src`` lists the source node of every edge sorted by destination and ``indeg_<kind>``
-    counts them per destination. ``id_keys``/``id_nodes`` (exact id key -> node, sorted by key) are
-    what the sidecar is written from.
-    """
+def graph_file(workdir: Path, name: str) -> Path:
+    """The file of one of a :class:`LinkGraph`'s arrays (``node_group``, ``out_intra``, ``intra`` ...)."""
+    return workdir / _GRAPH_FILES[name]
 
-    n: int
-    sources: tuple[str, ...]
-    groups: tuple[tuple[str, str], ...]
-    """``(source_id, primary language)`` of each group."""
-    node_group: I32
-    out_intra: I32
-    out_cross: I32
-    indeg_intra: I32
-    indeg_cross: I32
-    id_keys: U64
-    id_nodes: I32
-    workdir: Path
-    edges: int
-    intra_edges: int
-    unresolved: int
-    seconds: float
-    resolved: dict[str, int] = field(default_factory=dict[str, int])
-    aliases: int = 0
 
-    @property
-    def node_source(self) -> npt.NDArray[np.int16]:
-        group_source = np.array([self.sources.index(s) for s, _ in self.groups], dtype=np.int16)
-        return group_source[self.node_group] if len(group_source) else np.zeros(0, np.int16)
+def _clear(workdir: Path) -> None:
+    """Remove every scratch file of a graph (and the ``*.pairs`` buckets of older versions)."""
+    for name in _GRAPH_FILES.values():
+        (workdir / name).unlink(missing_ok=True)
+    for pattern in ("*.part", "*.pairs"):
+        for path in workdir.glob(pattern):
+            path.unlink(missing_ok=True)
 
-    def edge_src(self, kind: str) -> I32:
-        """Source node of each edge of ``kind``, sorted by destination (memory-mapped, read-only)."""
-        m = int(
-            self.indeg_intra.sum(dtype=np.int64) if kind == "intra" else self.indeg_cross.sum(dtype=np.int64)
-        )
-        if m == 0:
-            return np.zeros(0, dtype=np.int32)
-        return cast(I32, _mmap_array(self.workdir / f"{kind}.src", np.dtype(np.int32), m, random=False))
 
-    def remove_edges(self) -> None:
-        for p in self.workdir.glob("*.src"):
-            p.unlink(missing_ok=True)
-        for p in self.workdir.glob("*.pairs"):
-            p.unlink(missing_ok=True)
+type _Read = Callable[[int, int], npt.NDArray[Any]]
+"""``read(lo, hi)``: rows ``[lo, hi)`` of a per-node array, in memory or in a file."""
+
+
+def _steps(n: int, step: int) -> Iterator[tuple[int, int]]:
+    for lo in range(0, n, step):
+        yield lo, min(n, lo + step)
+
+
+class _Vec:
+    """A per-node vector in a file, read and written in slices with plain file I/O: unlike a memory
+    map, the pages read do not stay in the process's resident set, only in the reclaimable cache."""
+
+    __slots__ = ("dtype", "n", "path")
+
+    def __init__(self, path: Path, dtype: npt.DTypeLike, n: int) -> None:
+        self.path = path
+        self.dtype = np.dtype(dtype)
+        self.n = n
+
+    @classmethod
+    def create(cls, path: Path, dtype: npt.DTypeLike, n: int) -> _Vec:
+        """A new vector of zeros (a sparse file)."""
+        vec = cls(path, dtype, n)
+        with path.open("wb") as fh:
+            fh.truncate(n * vec.dtype.itemsize)
+        return vec
+
+    def read(self, lo: int, hi: int) -> npt.NDArray[Any]:
+        out = np.empty(hi - lo, dtype=self.dtype)
+        if hi > lo:
+            with self.path.open("rb") as fh:
+                fh.seek(lo * self.dtype.itemsize)
+                got = fh.readinto(memoryview(out).cast("B"))
+            if got != out.nbytes:
+                raise RuntimeError(f"{self.path}: short read at row {lo} (the work directory changed?)")
+        return out
+
+    def write(self, lo: int, values: npt.NDArray[Any]) -> None:
+        with self.path.open("r+b") as fh:
+            fh.seek(lo * self.dtype.itemsize)
+            fh.write(memoryview(np.ascontiguousarray(values, dtype=self.dtype)).cast("B"))
+
+    def load(self) -> npt.NDArray[Any]:
+        """The whole vector in memory."""
+        return self.read(0, self.n)
+
+
+class _Spill:
+    """Records of one dtype spilled to partition files ``<name>.<p>.part``, buffered in memory up to
+    ``limit`` bytes. A partition is read back whole (:meth:`take`) or in chunks (:meth:`chunks`), and
+    its file is removed once read."""
+
+    def __init__(self, workdir: Path, name: str, dtype: np.dtype[Any], limit: int) -> None:
+        self.workdir = workdir
+        self.name = name
+        self.dtype = dtype
+        self.limit = limit
+        self.pending: dict[int, list[npt.NDArray[Any]]] = {}
+        self.bytes = 0
+        self.count = 0
+
+    def path(self, part: int) -> Path:
+        return self.workdir / f"{self.name}.{part:05d}.part"
+
+    def add(self, part: I64, records: npt.NDArray[Any]) -> None:
+        if not len(records):
+            return
+        order = np.argsort(part, kind="stable")
+        part, records = part[order], records[order]
+        cuts = (np.flatnonzero(np.diff(part)) + 1).tolist()
+        for lo, hi in zip([0, *cuts], [*cuts, len(part)], strict=True):
+            self.pending.setdefault(int(part[lo]), []).append(records[lo:hi])
+        self.bytes += records.nbytes
+        self.count += len(records)
+        if self.bytes >= self.limit:
+            self.flush()
+
+    def flush(self) -> None:
+        for part, chunks in self.pending.items():
+            with self.path(part).open("ab") as fh:
+                for c in chunks:
+                    fh.write(c.tobytes())
+        self.pending.clear()
+        self.bytes = 0
+
+    def size(self, part: int) -> int:
+        """Records in partition ``part`` (after :meth:`flush`)."""
+        path = self.path(part)
+        return path.stat().st_size // self.dtype.itemsize if path.is_file() else 0
+
+    def take(self, part: int) -> npt.NDArray[Any]:
+        path = self.path(part)
+        if not path.is_file():
+            return np.zeros(0, dtype=self.dtype)
+        out = np.fromfile(path, dtype=self.dtype)
+        path.unlink()
+        return out
+
+    def chunks(self, part: int, count: int) -> Iterator[npt.NDArray[Any]]:
+        path = self.path(part)
+        if not path.is_file():
+            return
+        with path.open("rb") as fh:
+            while data := fh.read(max(1, count) * self.dtype.itemsize):
+                yield np.frombuffer(data, dtype=self.dtype)
+        path.unlink()
+
+
+# Spilled records (packed, little endian).
+_KEY = np.dtype([("key", "<u8"), ("node", "<i4")])
+"""A node's exact or loose id key."""
+_LINK = np.dtype([("key", "<u8"), ("loose", "<u8"), ("src", "<i4")])
+"""A library link: exact and loose key of its target, its source node."""
+_MISS = np.dtype([("key", "<u8"), ("src", "<i4")])
+"""A link by one key of its target: the loose key after an exact miss (the exact key without aliases)."""
+_ALIAS = np.dtype([("key", "<u8"), ("loose", "<u8"), ("seq", "<i8")])
+"""A redirect: exact key of its target, loose key of the alias's doc id, input order (first wins)."""
+_ALIAS_NODE = np.dtype([("key", "<u8"), ("node", "<i4"), ("seq", "<i8")])
+"""A resolved redirect: loose key of the alias's doc id, its target node, input order."""
+_EDGE = np.dtype([("src", "<i4"), ("dst", "<i4")])
+
+_MAX_PART_BITS = 12
+
+
+def _partition_bits(n: int, chunk: int) -> int:
+    """Key partitions (by the top bits of the key) of about ``chunk / 2`` nodes each."""
+    want = max(1, -(-2 * n // max(1, chunk)))
+    return min(_MAX_PART_BITS, (want - 1).bit_length())
+
+
+def _part(keys: U64, bits: int) -> I64:
+    if bits == 0:
+        return np.zeros(len(keys), dtype=np.int64)
+    return (keys >> np.uint64(64 - bits)).astype(np.int64)
+
+
+def _records(dtype: np.dtype[Any], **columns: npt.NDArray[Any]) -> npt.NDArray[Any]:
+    out = np.empty(len(next(iter(columns.values()))), dtype=dtype)
+    for name, values in columns.items():
+        out[name] = values
+    return out
+
+
+def _key_table(records: npt.NDArray[Any]) -> KeyTable:
+    """A partition's node keys (in node order, so the first node wins among equal keys)."""
+    return KeyTable(records["key"], records["node"])
 
 
 def _mmap_array(
@@ -335,6 +478,85 @@ def _mmap_array(
     if random and hasattr(mmap, "MADV_RANDOM"):
         mm.madvise(mmap.MADV_RANDOM)
     return np.frombuffer(mm, dtype=dtype, count=count, offset=offset)
+
+
+# --- the graph -----------------------------------------------------------------------------------------
+
+
+@dataclass(slots=True)
+class LinkGraph:
+    """Nodes in scan order plus CSR edge lists (by destination), all in files under ``workdir``.
+
+    ``intra`` holds the edges inside one (source, language) group, ``cross`` the rest; per kind,
+    ``<kind>.src`` lists the source node of every edge sorted by destination and ``indeg_<kind>``
+    counts them per destination. ``id_keys``/``id_nodes`` (exact id key -> node, sorted by key) are
+    what the sidecar is written from. The array properties map a whole file (read-only), for small
+    graphs, tests and benchmarks; the build itself streams the files (:func:`graph_file`).
+    """
+
+    n: int
+    sources: tuple[str, ...]
+    groups: tuple[tuple[str, str], ...]
+    """``(source_id, primary language)`` of each group."""
+    group_sizes: tuple[int, ...]
+    """Documents per group."""
+    workdir: Path
+    edges: int
+    intra_edges: int
+    unresolved: int
+    seconds: float
+    resolved: dict[str, int] = field(default_factory=dict[str, int])
+    aliases: int = 0
+
+    def _array(self, name: str, dtype: npt.DTypeLike) -> npt.NDArray[Any]:
+        path = graph_file(self.workdir, name)
+        dt = np.dtype(dtype)
+        count = path.stat().st_size // dt.itemsize if path.is_file() else 0
+        return _mmap_array(path, dt, count, random=False)
+
+    def vector(self, name: str, dtype: npt.DTypeLike) -> _Vec:
+        return _Vec(graph_file(self.workdir, name), dtype, self.n)
+
+    @property
+    def node_group(self) -> I32:
+        return cast(I32, self._array("node_group", np.int32))
+
+    @property
+    def out_intra(self) -> I32:
+        return cast(I32, self._array("out_intra", np.int32))
+
+    @property
+    def out_cross(self) -> I32:
+        return cast(I32, self._array("out_cross", np.int32))
+
+    @property
+    def indeg_intra(self) -> I32:
+        return cast(I32, self._array("indeg_intra", np.int32))
+
+    @property
+    def indeg_cross(self) -> I32:
+        return cast(I32, self._array("indeg_cross", np.int32))
+
+    @property
+    def id_keys(self) -> U64:
+        return cast(U64, self._array("id_keys", np.uint64))
+
+    @property
+    def id_nodes(self) -> I32:
+        return cast(I32, self._array("id_nodes", np.int32))
+
+    @property
+    def node_source(self) -> npt.NDArray[np.int16]:
+        group_source = np.array([self.sources.index(s) for s, _ in self.groups], dtype=np.int16)
+        return group_source[self.node_group] if len(group_source) else np.zeros(0, np.int16)
+
+    def edge_src(self, kind: str) -> I32:
+        """Source node of each edge of ``kind``, sorted by destination (memory-mapped, read-only)."""
+        return cast(I32, self._array(kind, np.int32))
+
+    def remove_edges(self) -> None:
+        """Remove every scratch file of the graph (edge lists, per-node arrays, ranks)."""
+        _clear(self.workdir)
 
 
 def _prefix_mode(reader: RefineryReader) -> bool:
@@ -379,44 +601,6 @@ def _alias_ids(targets: pa.Array[Any], names: pa.Array[Any], prefixed: pa.Array[
     return cast("pa.Array[Any]", pc.binary_join_element_wise(head, tail, ""))
 
 
-class _Buckets:
-    """Edge pairs bucketed by destination range, buffered and appended to ``<kind>.<b>.pairs``."""
-
-    def __init__(self, workdir: Path, n_buckets: int, shift: int, limit: int) -> None:
-        self.workdir = workdir
-        self.shift = shift
-        self.limit = limit
-        self.pending: dict[tuple[str, int], list[npt.NDArray[np.int32]]] = {}
-        self.bytes = 0
-        self.n_buckets = n_buckets
-
-    def path(self, kind: str, b: int) -> Path:
-        return self.workdir / f"{kind}.{b:05d}.pairs"
-
-    def add(self, kind: str, s: I32, d: I32) -> None:
-        if not len(s):
-            return
-        b = d >> self.shift
-        order = np.argsort(b, kind="stable")
-        s, d, b = s[order], d[order], b[order]
-        cuts = np.flatnonzero(np.diff(b)) + 1
-        for ss, dd in zip(np.split(s, cuts), np.split(d, cuts), strict=True):
-            pair = np.empty(2 * len(ss), dtype=np.int32)
-            pair[0::2], pair[1::2] = ss, dd
-            self.pending.setdefault((kind, int(dd[0]) >> self.shift), []).append(pair)
-            self.bytes += pair.nbytes
-        if self.bytes >= self.limit:
-            self.flush()
-
-    def flush(self) -> None:
-        for (kind, b), chunks in self.pending.items():
-            with self.path(kind, b).open("ab") as fh:
-                for c in chunks:
-                    fh.write(c.tobytes())
-        self.pending.clear()
-        self.bytes = 0
-
-
 def _groups_of(
     langs: pa.Array[Any], source: int, index: dict[tuple[int, str], int], groups: list[tuple[int, str]]
 ) -> I32:
@@ -445,11 +629,13 @@ def build_graph(
 
     ``readers`` are ``(source_id, reader)`` of the current generation of each source; ``aliases`` are
     ``(target doc id, alias title)`` pairs (redirects), used to resolve links to alternative names.
+    Everything node- or link-sized goes to files under ``workdir`` (local disk); memory holds chunks
+    of ``config``'s sizes, plus 4 bytes a node while the edge buckets are sorted and the out-degrees
+    counted.
     """
     t0 = time.monotonic()
     workdir.mkdir(parents=True, exist_ok=True)
-    for stale in (*workdir.glob("*.pairs"), *workdir.glob("*.src")):
-        stale.unlink()
+    _clear(workdir)
     sources = tuple(s for s, _ in readers)
     n = sum(len(r) for _, r in readers)
     if n >= 2**31 - 1:
@@ -460,174 +646,218 @@ def build_graph(
             progress(msg)
 
     _release()
-    say(f"rank: {n:,} nodes in {len(sources)} source(s)")
+    bits = _partition_bits(n, config.node_chunk)
+    step = max(1, config.node_chunk)
+    resolve = config.resolve_aliases
+    limit = config.buffer_bytes
+    say(f"rank: {n:,} nodes in {len(sources)} source(s), {1 << bits:,} key partition(s)")
 
     # 1. node keys and groups ------------------------------------------------------------------
-    exact = np.empty(n, dtype=np.uint64)
-    loose = np.empty(n, dtype=np.uint64) if config.resolve_aliases else np.zeros(0, dtype=np.uint64)
-    node_group = np.empty(n, dtype=np.int32)
+    exact_keys = _Spill(workdir, "exact", _KEY, limit)
+    loose_keys = _Spill(workdir, "loose", _KEY, limit)
     group_index: dict[tuple[int, str], int] = {}
     group_list: list[tuple[int, str]] = []
+    sizes = np.zeros(0, dtype=np.int64)
     prefixed: list[str] = []
     base = 0
-    for si, (sid, reader) in enumerate(readers):
-        if _prefix_mode(reader):
-            prefixed.append(sid)
-        for batch in reader.scan(["doc_id", "lang"], batch_size=config.batch_size):
-            ids = cast("pa.Array[Any]", batch.column(0))
-            k = len(ids)
-            if base + k > n:
-                raise RuntimeError("the Refinery changed while rank was reading it")
-            exact[base : base + k] = key64(ids)
-            if config.resolve_aliases:
-                loose[base : base + k] = key64(loose_ids(ids))
-            node_group[base : base + k] = _groups_of(
-                cast("pa.Array[Any]", batch.column(1)), si, group_index, group_list
-            )
-            base += k
+    with graph_file(workdir, "node_group").open("wb") as group_out:
+        for si, (sid, reader) in enumerate(readers):
+            if _prefix_mode(reader):
+                prefixed.append(sid)
+            for batch in reader.scan(["doc_id", "lang"], batch_size=config.batch_size):
+                ids = cast("pa.Array[Any]", batch.column(0))
+                k = len(ids)
+                if base + k > n:
+                    raise RuntimeError("the Refinery changed while rank was reading it")
+                nodes = np.arange(base, base + k, dtype=np.int32)
+                exact = key64(ids)
+                exact_keys.add(_part(exact, bits), _records(_KEY, key=exact, node=nodes))
+                if resolve:
+                    loose = key64(loose_ids(ids))
+                    loose_keys.add(_part(loose, bits), _records(_KEY, key=loose, node=nodes))
+                g = _groups_of(cast("pa.Array[Any]", batch.column(1)), si, group_index, group_list)
+                group_out.write(g.tobytes())
+                counts = np.bincount(g, minlength=len(group_list))
+                sizes = np.pad(sizes, (0, len(counts) - len(sizes))) + counts
+                base += k
+    exact_keys.flush()
+    loose_keys.flush()
     if base != n:
         raise RuntimeError(f"id scan saw {base} rows, the readers report {n}; Refinery changed?")
-    by_id = KeyTable(exact, np.arange(n, dtype=np.int32))
-    del exact
-    by_loose = KeyTable(loose, np.arange(n, dtype=np.int32)) if config.resolve_aliases else KeyTable.empty()
-    del loose
-    say(
-        f"rank: {len(group_list):,} source/language group(s); "
-        f"key tables {(by_id.nbytes + by_loose.nbytes) / 2**20:,.0f} MiB"
-    )
+    say(f"rank: {len(group_list):,} source/language group(s)")
 
-    # 2. aliases -------------------------------------------------------------------------------
-    _release()
-    by_alias = KeyTable.empty()
-    n_alias = 0
-    if config.resolve_aliases:
+    # 2. aliases: the loose key of the doc id each would have, by the exact key of its target ---
+    alias_keys = _Spill(workdir, "alias", _ALIAS, limit)
+    if resolve:
+        _release()
         prefixed_set = pa.array(prefixed, type=pa.string())
-        a_keys: list[U64] = []
-        a_nodes: list[I32] = []
+        seq = 0
         for chunk in _batched(aliases, 500_000):
             targets = pa.array([t for t, _ in chunk], type=pa.string())
             names = pa.array([a for _, a in chunk], type=pa.string())
-            node = by_id.find(key64(targets))
-            ok = node >= 0
-            if not ok.any():
-                continue
-            mask = pa.array(ok)
-            targets, names = targets.filter(mask), names.filter(mask)
             src = pc.replace_substring_regex(targets, pattern=r"^wsp:([^/]*)/.*$", replacement=r"\1")
             is_prefixed = pc.is_in(src, value_set=prefixed_set)
-            a_keys.append(key64(loose_ids(_alias_ids(targets, names, is_prefixed))))
-            a_nodes.append(node[ok].astype(np.int32))
-            n_alias += int(ok.sum())
-        if a_keys:
-            by_alias = KeyTable(np.concatenate(a_keys), np.concatenate(a_nodes))
-        del a_keys, a_nodes
-        say(f"rank: {n_alias:,} aliases resolved to documents")
+            target = key64(targets)
+            alias = key64(loose_ids(_alias_ids(targets, names, is_prefixed)))
+            order = np.arange(seq, seq + len(chunk), dtype=np.int64)
+            alias_keys.add(_part(target, bits), _records(_ALIAS, key=target, loose=alias, seq=order))
+            seq += len(chunk)
+        alias_keys.flush()
 
-    # 3. links -> bucketed edges ---------------------------------------------------------------
-    shift = max(0, math.ceil(math.log2(max(1, config.bucket_nodes))))
-    n_buckets = max(1, (n + (1 << shift) - 1) >> shift)
-    buckets = _Buckets(workdir, n_buckets, shift, config.buffer_bytes)
-    out_intra = np.zeros(n, dtype=np.int32)
-    out_cross = np.zeros(n, dtype=np.int32)
-    resolved = {"exact": 0, "loose": 0, "alias": 0}
-    edges = intra = unresolved = batches = 0
-    base = 0
+    # 3. links, by the exact key of their target ------------------------------------------------
+    links = _Spill(workdir, "links", _LINK if resolve else _MISS, limit)
+    base = batches = 0
     for _sid, reader in readers:
         for batch in reader.scan(["links"], batch_size=config.batch_size):
-            links = cast("pa.Array[Any]", batch.column(0))
-            rows = len(links)
-            flat = cast("pa.Array[Any]", pc.list_flatten(links))
+            column = cast("pa.Array[Any]", batch.column(0))
+            rows = len(column)
+            flat = cast("pa.Array[Any]", pc.list_flatten(column))
             if len(flat):
-                parents = cast(I64, pc.list_parent_indices(links).to_numpy(zero_copy_only=False)).astype(
+                parents = cast(I64, pc.list_parent_indices(column).to_numpy(zero_copy_only=False)).astype(
                     np.int64
                 )
                 local = cast("pa.Array[Any]", pc.starts_with(flat, pattern="wsp:"))
                 keep = local.to_numpy(zero_copy_only=False).astype(bool)
                 flat = flat.filter(local)
-                parents = parents[keep]
-                tgt = by_id.find(key64(flat))
-                resolved["exact"] += int((tgt >= 0).sum())
-                missing = tgt < 0
-                if config.resolve_aliases and missing.any():
-                    rest_keys = key64(loose_ids(flat.filter(pa.array(missing))))
-                    found = by_loose.find(rest_keys)
-                    resolved["loose"] += int((found >= 0).sum())
-                    still = found < 0
-                    if still.any() and len(by_alias):
-                        via = by_alias.find(rest_keys[still])
-                        resolved["alias"] += int((via >= 0).sum())
-                        found[still] = via
-                    tgt[missing] = found
-                ok = tgt >= 0
-                unresolved += int((~ok).sum())
-                s = parents[ok] + base
-                d = tgt[ok]
-                loops = s != d
-                s, d = s[loops], d[loops]
-                if len(s):
-                    pair = np.unique((s << 32) | d)
-                    s32 = (pair >> 32).astype(np.int32)
-                    d32 = (pair & 0xFFFFFFFF).astype(np.int32)
-                    same = node_group[s32] == node_group[d32]
-                    buckets.add("intra", s32[same], d32[same])
-                    buckets.add("cross", s32[~same], d32[~same])
-                    local_s = s32 - base
-                    out_intra[base : base + rows] += np.bincount(local_s[same], minlength=rows).astype(
-                        np.int32
-                    )
-                    out_cross[base : base + rows] += np.bincount(local_s[~same], minlength=rows).astype(
-                        np.int32
-                    )
-                    edges += len(s32)
-                    intra += int(same.sum())
+                if len(flat):
+                    target = key64(flat)
+                    rec = np.empty(len(flat), dtype=links.dtype)
+                    rec["key"] = target
+                    rec["src"] = parents[keep] + base
+                    if resolve:
+                        rec["loose"] = key64(loose_ids(flat))
+                    links.add(_part(target, bits), rec)
             base += rows
             batches += 1
             if batches % 16 == 0:
                 _release()
             if base % (config.batch_size * 64) < rows:
-                say(f"rank: {base:,}/{n:,} documents scanned, {edges:,} edges")
-    buckets.flush()
+                say(f"rank: {base:,}/{n:,} documents scanned, {links.count:,} library links")
+    links.flush()
     if base != n:
         raise RuntimeError(f"link scan saw {base} rows but the id scan saw {n}; Refinery changed?")
-    del by_loose, by_alias
+    _release()
+
+    # 4. resolve by exact id, partition by partition; write the key-sorted id table -------------
+    shift = max(0, math.ceil(math.log2(max(1, config.bucket_nodes))))
+    n_buckets = max(1, (n + (1 << shift) - 1) >> shift)
+    found_edges = _Spill(workdir, "edges", _EDGE, limit)
+    misses = _Spill(workdir, "miss", _MISS, limit)
+    alias_nodes = _Spill(workdir, "aliasnode", _ALIAS_NODE, limit)
+    resolved = {"exact": 0, "loose": 0, "alias": 0}
+    unresolved = n_alias = 0
+
+    def emit(src: npt.NDArray[Any], dst: I64) -> None:
+        found_edges.add(dst >> shift, _records(_EDGE, src=src, dst=dst))
+
+    with (
+        graph_file(workdir, "id_keys").open("wb") as keys_out,
+        graph_file(workdir, "id_nodes").open("wb") as nodes_out,
+    ):
+        for p in range(1 << bits):
+            by_id = _key_table(exact_keys.take(p))
+            keys_out.write(by_id.keys.tobytes())
+            nodes_out.write(by_id.nodes.tobytes())
+            for rec in alias_keys.chunks(p, step):
+                node = by_id.find(rec["key"])
+                ok = node >= 0
+                n_alias += int(ok.sum())
+                loose = rec["loose"][ok]
+                alias_nodes.add(
+                    _part(loose, bits), _records(_ALIAS_NODE, key=loose, node=node[ok], seq=rec["seq"][ok])
+                )
+            for rec in links.chunks(p, step):
+                tgt = by_id.find(rec["key"])
+                hit = tgt >= 0
+                resolved["exact"] += int(hit.sum())
+                emit(rec["src"][hit], tgt[hit])
+                miss = ~hit
+                if resolve:
+                    loose = rec["loose"][miss]
+                    misses.add(_part(loose, bits), _records(_MISS, key=loose, src=rec["src"][miss]))
+                else:
+                    unresolved += int(miss.sum())
+            del by_id
+    misses.flush()
+    alias_nodes.flush()
+    say(
+        f"rank: {resolved['exact']:,} of {links.count:,} library links resolved by id"
+        + (f", {n_alias:,} aliases resolved to documents" if resolve else "")
+    )
+
+    # 5. the misses by loose id, then by alias ----------------------------------------------------
+    if resolve:
+        for q in range(1 << bits):
+            by_loose = _key_table(loose_keys.take(q))
+            named = alias_nodes.take(q)
+            named = named[np.argsort(named["seq"], kind="stable")]
+            by_alias = KeyTable(named["key"], named["node"])
+            del named
+            for rec in misses.chunks(q, step):
+                found = by_loose.find(rec["key"])
+                resolved["loose"] += int((found >= 0).sum())
+                still = found < 0
+                if still.any() and len(by_alias):
+                    via = by_alias.find(rec["key"][still])
+                    resolved["alias"] += int((via >= 0).sum())
+                    found[still] = via
+                ok = found >= 0
+                unresolved += int((~ok).sum())
+                emit(rec["src"][ok], found[ok])
+            del by_loose, by_alias
+        say(f"rank: {resolved['loose']:,} links resolved by loose id, {resolved['alias']:,} by alias")
+    found_edges.flush()
+    _release()
+
+    # 6. CSR by destination: each bucket sorted by (destination, source), duplicates dropped -----
+    node_group = cast(I32, _Vec(graph_file(workdir, "node_group"), np.int32, n).load())
+    edges = intra = 0
+    with ExitStack() as stack:
+        src_out = {kind: stack.enter_context(graph_file(workdir, kind).open("wb")) for kind in _KINDS}
+        deg_out = {
+            kind: stack.enter_context(graph_file(workdir, f"indeg_{kind}").open("wb")) for kind in _KINDS
+        }
+        # sorting a piece costs ~70 bytes an edge: pieces of a quarter of edge_chunk (~300 MB)
+        piece_edges = max(1, config.edge_chunk // 4)
+        buckets = (
+            piece
+            for b in range(n_buckets)
+            for piece in _bucket(found_edges, b, b << shift, n, shift, piece_edges)
+        )
+        for lo, hi, pairs in buckets:
+            pairs = pairs[pairs["src"] != pairs["dst"]]
+            pair = np.unique(
+                (pairs["dst"].astype(np.uint64) << np.uint64(32)) | pairs["src"].astype(np.uint64)
+            )
+            del pairs
+            d = (pair >> np.uint64(32)).astype(np.int32)
+            s = (pair & np.uint64(0xFFFFFFFF)).astype(np.int32)
+            del pair
+            same = node_group[s] == node_group[d]
+            for kind, mask in (("intra", same), ("cross", ~same)):
+                src_out[kind].write(s[mask].tobytes())
+                deg_out[kind].write(np.bincount(d[mask] - lo, minlength=hi - lo).astype(np.int32).tobytes())
+            edges += len(s)
+            intra += int(same.sum())
+    del node_group
     _release()
     say(f"rank: {edges:,} edges ({intra:,} within a group), {unresolved:,} links outside the library")
-
-    # The id table is only needed again for the sidecar: keep it on disk from here on.
-    id_keys = _spill(workdir / "ids.keys.src", by_id.keys)
-    id_nodes = _spill(workdir / "ids.nodes.src", by_id.nodes)
-    del by_id
-
-    # 4. CSR by destination --------------------------------------------------------------------
-    indeg = {kind: np.zeros(n, dtype=np.int32) for kind in _KINDS}
-    for kind in _KINDS:
-        with (workdir / f"{kind}.src").open("wb") as out:
-            for b in range(n_buckets):
-                path = buckets.path(kind, b)
-                if not path.is_file():
-                    continue
-                pairs = np.fromfile(path, dtype=np.int32)
-                path.unlink()
-                s, d = pairs[0::2], pairs[1::2]
-                order = np.argsort(d, kind="stable")
-                out.write(s[order].tobytes())
-                lo = b << shift
-                hi = min(n, lo + (1 << shift))
-                indeg[kind][lo:hi] = np.bincount(d - lo, minlength=hi - lo).astype(np.int32)
-                del pairs, s, d, order
     say("rank: edge lists sorted by destination")
+
+    # 7. out-degrees, one kind at a time ---------------------------------------------------------
+    for kind in _KINDS:
+        out = np.zeros(n, dtype=np.int32)
+        for src in _EdgeFile(graph_file(workdir, kind)).chunks(max(1, config.edge_chunk)):
+            nodes_, counts_ = np.unique(src, return_counts=True)
+            out[nodes_] += counts_.astype(np.int32)
+        out.tofile(graph_file(workdir, f"out_{kind}"))
+        del out
     groups = tuple((sources[si], lang) for si, lang in group_list)
     return LinkGraph(
         n=n,
         sources=sources,
         groups=groups,
-        node_group=node_group,
-        out_intra=out_intra,
-        out_cross=out_cross,
-        indeg_intra=indeg["intra"],
-        indeg_cross=indeg["cross"],
-        id_keys=cast(U64, id_keys),
-        id_nodes=cast(I32, id_nodes),
+        group_sizes=tuple(int(c) for c in sizes),
         workdir=workdir,
         edges=edges,
         intra_edges=intra,
@@ -638,10 +868,27 @@ def build_graph(
     )
 
 
-def _spill(path: Path, arr: npt.NDArray[Any]) -> npt.NDArray[Any]:
-    """Write ``arr`` to ``path`` and return a read-only memory map of it (frees the RAM copy)."""
-    arr.tofile(path)
-    return _mmap_array(path, arr.dtype, len(arr), random=False)
+def _bucket(
+    spill: _Spill, part: int, lo: int, n: int, width: int, limit: int
+) -> Iterator[tuple[int, int, npt.NDArray[Any]]]:
+    """The edges of bucket ``part`` (destinations ``[lo, lo + 2**width)``) as ``(lo, hi, pairs)``
+    pieces of at most about ``limit`` edges: a bucket over the limit (in-links concentrate on some
+    destinations) is split by destination into sub-buckets, recursively, down to single nodes."""
+    hi = min(n, lo + (1 << width))
+    count = spill.size(part)
+    if count <= limit or width == 0:
+        yield lo, hi, spill.take(part)
+        return
+    bits = min(width, max(1, math.ceil(math.log2(2 * count / limit))))
+    sub = _Spill(spill.workdir, f"{spill.name}.{part:05d}", spill.dtype, spill.limit)
+    for rec in spill.chunks(part, limit):
+        sub.add((rec["dst"].astype(np.int64) - lo) >> (width - bits), rec)
+    sub.flush()
+    for j in range(1 << bits):
+        sub_lo = lo + (j << (width - bits))
+        if sub_lo >= hi:
+            break
+        yield from _bucket(sub, j, sub_lo, n, width - bits, limit)
 
 
 @cache
@@ -664,6 +911,11 @@ def _release() -> None:
         trim(0)
 
 
+def peak_rss_mib() -> float:
+    """This process's peak resident set size so far (MiB)."""
+    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+
+
 def _batched[T](items: Iterable[T], size: int) -> Iterator[list[T]]:
     chunk: list[T] = []
     for item in items:
@@ -679,27 +931,35 @@ def _batched[T](items: Iterable[T], size: int) -> Iterator[list[T]]:
 
 
 @dataclass(frozen=True, slots=True)
-class _Segment:
+class _Range:
+    """Destination nodes ``[lo, hi)`` and their in-edges in both CSRs (``*_lo``: first edge)."""
+
     lo: int
     hi: int
-    edge_lo: int
-    edges: int
+    intra_lo: int
+    intra: int
+    cross_lo: int
+    cross: int
 
 
-def _segments(indeg: I32, chunk: int, window: int = 1 << 20) -> list[_Segment]:
-    """Node ranges whose in-edges fit ``chunk`` (a single node may exceed it)."""
-    out: list[_Segment] = []
-    n = len(indeg)
-    lo = e = 0
+def _ranges(indeg_intra: _Vec, indeg_cross: _Vec, chunk: int, window: int) -> list[_Range]:
+    """Node ranges of at most ``window`` nodes whose in-edges fit ``chunk`` (a single node may
+    exceed it)."""
+    out: list[_Range] = []
+    n = indeg_intra.n
+    lo = e_intra = e_cross = 0
     while lo < n:
         hi = min(n, lo + window)
-        c = np.cumsum(indeg[lo:hi], dtype=np.int64)
+        a = cast(I32, indeg_intra.read(lo, hi))
+        b = cast(I32, indeg_cross.read(lo, hi))
+        c = np.cumsum(a, dtype=np.int64) + np.cumsum(b, dtype=np.int64)
         if c[-1] > chunk:
             hi = lo + max(1, int(np.searchsorted(c, chunk, side="right")))
-            c = c[: hi - lo]
-        m = int(c[-1])
-        out.append(_Segment(lo, hi, e, m))
-        e += m
+        m_intra = int(a[: hi - lo].sum(dtype=np.int64))
+        m_cross = int(b[: hi - lo].sum(dtype=np.int64))
+        out.append(_Range(lo, hi, e_intra, m_intra, e_cross, m_cross))
+        e_intra += m_intra
+        e_cross += m_cross
         lo = hi
     return out
 
@@ -708,26 +968,25 @@ class _EdgeFile:
     """Chunked reads of a ``<kind>.src`` file with ``pread``: unlike a memory map, the pages read do
     not stay in the process's resident set (2.5 GB at 632M edges), only in the reclaimable cache."""
 
-    def __init__(self, path: Path, edges: int) -> None:
+    def __init__(self, path: Path) -> None:
         self.path = path
-        self.edges = edges
+        self.edges = path.stat().st_size // 4 if path.is_file() else 0
 
     def read(self, lo: int, n: int) -> I32:
         with self.path.open("rb") as fh:
             return np.fromfile(fh, dtype=np.int32, count=n, offset=4 * lo)
 
+    def chunks(self, step: int) -> Iterator[I32]:
+        for lo, hi in _steps(self.edges, step):
+            yield self.read(lo, hi - lo)
 
-def _pull(src: _EdgeFile, indeg: I32, segments: Sequence[_Segment], w: F32, acc: F32) -> None:
-    """``acc[t] += sum(w[s] for s -> t)`` over one CSR, chunk by chunk (sums in float64)."""
-    for seg in segments:
-        if not seg.edges:
-            continue
-        deg = indeg[seg.lo : seg.hi]
-        nz = np.flatnonzero(deg)
-        starts = (np.cumsum(deg, dtype=np.int64) - deg)[nz]
-        vals = w[src.read(seg.edge_lo, seg.edges)]
-        sums = np.add.reduceat(vals, starts, dtype=np.float64)
-        acc[seg.lo + nz] += sums.astype(np.float32)
+
+def _pull(src: I32, deg: I32, w: F32, acc: F32) -> None:
+    """``acc[t] += sum(w[s] for s -> t)`` for one range's in-edges ``src`` (sums in float64)."""
+    nz = np.flatnonzero(deg)
+    starts = (np.cumsum(deg, dtype=np.int64) - deg)[nz]
+    sums = np.add.reduceat(w[src], starts, dtype=np.float64)
+    acc[nz] += sums.astype(np.float32)
 
 
 def _inverse(counts: I32) -> F32:
@@ -736,110 +995,210 @@ def _inverse(counts: I32) -> F32:
     return out
 
 
-def pagerank(graph: LinkGraph, config: RankConfig = RankConfig()) -> tuple[F32, F32, int, float, float]:  # noqa: B008
-    """``(per_group, global, iterations, residual_group, residual_global)`` by power iteration.
+def _pagerank(graph: LinkGraph, config: RankConfig) -> tuple[_Vec, _Vec, int, float, float]:
+    """:func:`pagerank` into ``rank_group.f32`` / ``rank_global.f32`` of the work directory (one
+    file, returned twice, with a single group).
 
-    Vectors are float32 (8 of them: ~1.3 GB at 41M nodes); in-link sums and residuals are float64.
-    With a single group the two ranks are identical and only the global one is computed.
+    Memory holds the weight vectors ``rank / out-degree`` (float32, 4 bytes a node each: gathered at
+    random by the edges); the ranks, degrees and groups are read and written in slices of
+    ``config.node_chunk``, and the edges in ranges of ``config.edge_chunk``.
     """
     n = graph.n
-    if n == 0:
-        z = np.zeros(0, dtype=np.float32)
-        return z, z, 0, 0.0, 0.0
-    d = np.float32(config.damping)
     single = len(graph.groups) <= 1
-    indeg_sum = {
-        "intra": int(graph.indeg_intra.sum(dtype=np.int64)),
-        "cross": int(graph.indeg_cross.sum(dtype=np.int64)),
-    }
-    src = {kind: _EdgeFile(graph.workdir / f"{kind}.src", indeg_sum[kind]) for kind in _KINDS}
-    indeg = {"intra": graph.indeg_intra, "cross": graph.indeg_cross}
-    segs = {kind: _segments(indeg[kind], max(1, config.edge_chunk)) for kind in _KINDS}
-    groups = graph.node_group
-    sizes = np.bincount(groups, minlength=len(graph.groups)).astype(np.float64)
+    step = max(1, config.node_chunk)
+    out_intra = graph.vector("out_intra", np.int32)
+    out_cross = graph.vector("out_cross", np.int32)
+    groups = graph.vector("node_group", np.int32)
+    src = {kind: _EdgeFile(graph_file(graph.workdir, kind)) for kind in _KINDS}
+    indeg = {kind: graph.vector(f"indeg_{kind}", np.int32) for kind in _KINDS}
+    ranges = _ranges(indeg["intra"], indeg["cross"], max(1, config.edge_chunk), min(step, 1 << 20))
+    sizes = np.asarray(graph.group_sizes, dtype=np.float64)
 
-    out_g = graph.out_intra.astype(np.int64) + graph.out_cross
-    inv_g = _inverse(out_g.astype(np.int32))
-    dangling_g = np.flatnonzero(out_g == 0)
-    del out_g
-    inv_s = _inverse(graph.out_intra)
-    dangling_s = np.flatnonzero(graph.out_intra == 0)
+    r_g = _Vec.create(graph_file(graph.workdir, "rank_global"), np.float32, n)
+    r_s = r_g if single else _Vec.create(graph_file(graph.workdir, "rank_group"), np.float32, n)
+    for lo, hi in _steps(n, step):
+        r_g.write(lo, np.full(hi - lo, 1.0 / n, dtype=np.float32))
+        if not single:
+            r_s.write(lo, (1.0 / sizes[groups.read(lo, hi)]).astype(np.float32))
+    if n == 0:
+        return r_s, r_g, 0, 0.0, 0.0
 
-    r_g = np.full(n, 1.0 / n, dtype=np.float32)
-    r_s = r_g if single else (1.0 / sizes[groups]).astype(np.float32)
-    acc_g = np.empty(n, dtype=np.float32)
-    acc_s = None if single else np.empty(n, dtype=np.float32)
+    d = np.float32(config.damping)
+    w_g = np.empty(n, dtype=np.float32)
+    w_s = None if single else np.empty(n, dtype=np.float32)
     res_g = res_s = math.inf
     it = 0
     while it < config.max_iterations and max(res_g, res_s) > config.tolerance:
         it += 1
-        w = r_g * inv_g
-        acc_g.fill(0.0)
-        _pull(src["intra"], indeg["intra"], segs["intra"], w, acc_g)
-        _pull(src["cross"], indeg["cross"], segs["cross"], w, acc_g)
-        leak_g = float(r_g[dangling_g].sum(dtype=np.float64))
-        acc_g *= d
-        acc_g += np.float32((float(d) * leak_g + (1.0 - float(d))) / n)
-        res_g = float(np.abs(acc_g - r_g).sum(dtype=np.float64))
-        r_g, acc_g = acc_g, r_g
-        if acc_s is None:
-            r_s, res_s = r_g, res_g
-            continue
-        w = r_s * inv_s
-        acc_s.fill(0.0)
-        _pull(src["intra"], indeg["intra"], segs["intra"], w, acc_s)
-        leak_s = np.bincount(groups[dangling_s], weights=r_s[dangling_s], minlength=len(sizes))
-        tele = ((float(d) * leak_s + (1.0 - float(d))) / np.maximum(sizes, 1.0)).astype(np.float32)
-        acc_s *= d
-        acc_s += tele[groups]
-        res_s = float(np.abs(acc_s - r_s).sum(dtype=np.float64)) / max(1, len(sizes))
-        r_s, acc_s = acc_s, r_s
+        # weights, and the rank mass of dangling nodes (spread by teleportation)
+        leak_g = 0.0
+        leak_s = np.zeros(len(sizes), dtype=np.float64)
+        for lo, hi in _steps(n, step):
+            o_intra = cast(I32, out_intra.read(lo, hi))
+            out_g = o_intra.astype(np.int64) + cast(I32, out_cross.read(lo, hi))
+            rank = cast(F32, r_g.read(lo, hi))
+            w_g[lo:hi] = rank * _inverse(out_g.astype(np.int32))
+            leak_g += float(rank[out_g == 0].sum(dtype=np.float64))
+            if w_s is not None:
+                rank = cast(F32, r_s.read(lo, hi))
+                w_s[lo:hi] = rank * _inverse(o_intra)
+                dangling = o_intra == 0
+                g = cast(I32, groups.read(lo, hi))
+                leak_s += np.bincount(g[dangling], weights=rank[dangling], minlength=len(sizes))
+        tele_g = np.float32((float(d) * leak_g + (1.0 - float(d))) / n)
+        tele_s = ((float(d) * leak_s + (1.0 - float(d))) / np.maximum(sizes, 1.0)).astype(np.float32)
+        res_g = res_s = 0.0
+        for rng in ranges:
+            acc_g = np.zeros(rng.hi - rng.lo, dtype=np.float32)
+            acc_s = None if w_s is None else np.zeros(rng.hi - rng.lo, dtype=np.float32)
+            if rng.intra:
+                edges = src["intra"].read(rng.intra_lo, rng.intra)
+                deg = cast(I32, indeg["intra"].read(rng.lo, rng.hi))
+                _pull(edges, deg, w_g, acc_g)
+                if w_s is not None and acc_s is not None:
+                    _pull(edges, deg, w_s, acc_s)
+            if rng.cross:
+                edges = src["cross"].read(rng.cross_lo, rng.cross)
+                _pull(edges, cast(I32, indeg["cross"].read(rng.lo, rng.hi)), w_g, acc_g)
+            acc_g *= d
+            acc_g += tele_g
+            res_g += float(np.abs(acc_g - r_g.read(rng.lo, rng.hi)).sum(dtype=np.float64))
+            r_g.write(rng.lo, acc_g)
+            if acc_s is not None:
+                acc_s *= d
+                acc_s += tele_s[groups.read(rng.lo, rng.hi)]
+                res_s += float(np.abs(acc_s - r_s.read(rng.lo, rng.hi)).sum(dtype=np.float64))
+                r_s.write(rng.lo, acc_s)
+        res_s = res_g if single else res_s / max(1, len(sizes))
     return r_s, r_g, it, res_s, res_g
+
+
+def pagerank(graph: LinkGraph, config: RankConfig = RankConfig()) -> tuple[F32, F32, int, float, float]:  # noqa: B008
+    """``(per_group, global, iterations, residual_group, residual_global)`` by power iteration.
+
+    Ranks are float32, in-link sums and residuals float64. With a single group the two ranks are
+    identical and only the global one is computed. The ranks are returned in memory (tests and
+    benchmarks); :func:`compute_static_rank` streams them from their files instead.
+    """
+    per_group, global_, it, res_s, res_g = _pagerank(graph, config)
+    r_g = cast(F32, global_.load())
+    r_s = r_g if per_group is global_ else cast(F32, per_group.load())
+    return r_s, r_g, it, res_s, res_g
+
+
+def _runs(groups: I32) -> Iterator[tuple[int, I64]]:
+    """``(group, positions)`` of each group present in ``groups``."""
+    order = np.argsort(groups, kind="stable")
+    cuts = np.flatnonzero(np.diff(groups[order])) + 1
+    for idx in np.split(order, cuts):
+        if len(idx):
+            yield int(groups[idx[0]]), idx
+
+
+def _percentile_chunks(
+    values: _Read, groups: _Read | None, sizes: I64, n: int, step: int
+) -> Iterator[tuple[int, F32]]:
+    """:func:`percentiles` in slices ``(lo, out[lo:lo + step])``.
+
+    The values are sorted group by group into one float32 array of ``n`` (the only node-sized
+    allocation); each slice is then ranked by binary search in its groups' runs of it.
+    """
+    sorted_v = np.empty(n, dtype=np.float32)
+    start = np.zeros(len(sizes) + 1, dtype=np.int64)
+    np.cumsum(sizes, out=start[1:])
+    if groups is None:
+        for lo, hi in _steps(n, step):
+            sorted_v[lo:hi] = values(lo, hi)
+        sorted_v.sort()
+    else:
+        fill = start[:-1].copy()
+        for lo, hi in _steps(n, step):
+            v = values(lo, hi)
+            for g, idx in _runs(cast(I32, groups(lo, hi))):
+                sorted_v[fill[g] : fill[g] + len(idx)] = v[idx]
+                fill[g] += len(idx)
+        for g in range(len(sizes)):
+            sorted_v[start[g] : start[g + 1]].sort()
+    for lo, hi in _steps(n, step):
+        v = values(lo, hi)
+        out = np.empty(hi - lo, dtype=np.float32)
+        if groups is None:
+            out[:] = np.searchsorted(sorted_v, v, side="left") / max(1, n - 1)
+        else:
+            for g, idx in _runs(cast(I32, groups(lo, hi))):
+                run = sorted_v[start[g] : start[g + 1]]
+                out[idx] = np.searchsorted(run, v[idx], side="left") / max(1, len(run) - 1)
+        yield lo, out
 
 
 def percentiles(values: F32, groups: I32 | None = None) -> F32:
     """Rank of each value among its group as a fraction in ``[0, 1)`` (ties share the lowest)."""
     out = np.zeros(len(values), dtype=np.float32)
-    if groups is None:
-        sorted_v = np.sort(values)
-        out[:] = np.searchsorted(sorted_v, values, side="left") / max(1, len(values) - 1)
-        return out
-    order = np.argsort(groups, kind="stable")
-    cuts = np.flatnonzero(np.diff(groups[order])) + 1
-    for idx in np.split(order, cuts):
-        if not len(idx):
-            continue
-        v = values[idx]
-        out[idx] = np.searchsorted(np.sort(v), v, side="left") / max(1, len(v) - 1)
+    sizes = np.bincount(groups) if groups is not None else np.array([len(values)], dtype=np.int64)
+    by_group = None if groups is None else _slicer(groups)
+    for lo, pct in _percentile_chunks(_slicer(values), by_group, sizes, len(values), _NODE_CHUNK):
+        out[lo : lo + len(pct)] = pct
     return out
+
+
+def _slicer(arr: npt.NDArray[Any]) -> _Read:
+    return lambda lo, hi: arr[lo:hi]
+
+
+def _blend(per_group: _Read, global_: _Read, groups: _Read, sizes: I64, n: int, mix: float, step: int) -> F32:
+    feature = np.empty(n, dtype=np.float32)
+    for lo, pct in _percentile_chunks(per_group, groups, sizes, n, step):
+        feature[lo : lo + len(pct)] = (1.0 - mix) * pct
+    for lo, pct in _percentile_chunks(global_, None, np.array([n], dtype=np.int64), n, step):
+        feature[lo : lo + len(pct)] += mix * pct
+    return feature
 
 
 def blend(per_group: F32, global_: F32, node_group: I32, mix: float) -> F32:
     """The static-rank feature: ``(1 - mix) * pct_group + mix * pct_global``, in ``[0, 1]``."""
     if not len(global_):
         return np.zeros(0, dtype=np.float32)
-    feature = (1.0 - mix) * percentiles(per_group, node_group) + mix * percentiles(global_)
-    return feature.astype(np.float32)
+    sizes = np.bincount(node_group)
+    return _blend(
+        _slicer(per_group),
+        _slicer(global_),
+        _slicer(node_group),
+        sizes,
+        len(global_),
+        mix,
+        _NODE_CHUNK,
+    )
 
 
 # --- sidecar ------------------------------------------------------------------------------------------
 
 
-def write_rank_file(path: Path, keys: U64, nodes: I32, feature: F32, per_group: F32, global_: F32) -> int:
-    """Write the sidecar atomically from key-sorted ``keys`` and their ``nodes``; returns its size."""
-    n = len(keys)
+def _write_sidecar(
+    path: Path, n: int, keys: _Read, nodes: _Read, columns: Iterable[Callable[[], F32]], step: int
+) -> None:
+    """Write the sidecar atomically: key-sorted ``keys``, then each column (loaded one at a time,
+    indexed by node) gathered in key order through ``nodes``."""
     tmp = path.with_name(path.name + ".partial")
-    step = 1 << 22
     with tmp.open("wb") as fh:
         fh.write(MAGIC)
         fh.write(np.uint64(n).tobytes())
-        fh.write(np.ascontiguousarray(keys, dtype=np.uint64).tobytes())
-        for column in (feature, per_group, global_):
-            for i in range(0, n, step):
-                fh.write(column[nodes[i : i + step]].astype(np.float32).tobytes())
+        for lo, hi in _steps(n, step):
+            fh.write(np.ascontiguousarray(keys(lo, hi), dtype=np.uint64).tobytes())
+        for load in columns:
+            column = load()
+            for lo, hi in _steps(n, step):
+                fh.write(column[nodes(lo, hi)].astype(np.float32).tobytes())
+            del column
         fh.flush()
         os.fsync(fh.fileno())
     os.replace(tmp, path)
+
+
+def write_rank_file(path: Path, keys: U64, nodes: I32, feature: F32, per_group: F32, global_: F32) -> int:
+    """Write the sidecar atomically from key-sorted ``keys`` and their ``nodes``; returns its size."""
+    n = len(keys)
+    columns = (lambda: feature, lambda: per_group, lambda: global_)
+    _write_sidecar(path, n, _slicer(keys), _slicer(nodes), columns, 1 << 22)
     return n
 
 
@@ -932,23 +1291,39 @@ def compute_static_rank(
     config: RankConfig = RankConfig(),  # noqa: B008 - immutable
     progress: Callable[[str], None] | None = None,
 ) -> RankStats:
-    """Build the graph, run PageRank, write the sidecar (``out_path``) and its stats next to it."""
+    """Build the graph, run PageRank, write the sidecar (``out_path``) and its stats next to it.
+
+    ``workdir`` holds the scratch files (local disk; removed at the end). Memory peaks at about 8
+    bytes a node (the two weight vectors of the power iteration, then the percentile sort and the
+    feature) plus the chunks of ``config``.
+    """
     graph = build_graph(readers, workdir, aliases=aliases, config=config, progress=progress)
     try:
         t1 = time.monotonic()
-        per_group, global_, iters, res_s, res_g = pagerank(graph, config)
+        per_group, global_, iters, res_s, res_g = _pagerank(graph, config)
         if progress:
             progress(f"rank: {iters} iterations, residual {res_g:.2e} (global) / {res_s:.2e} (per group)")
-        feature = blend(per_group, global_, graph.node_group, config.mix)
-        seconds_iterate = time.monotonic() - t1
+        n = graph.n
+        step = max(1, config.node_chunk)
+        groups = graph.vector("node_group", np.int32)
+        sizes = np.asarray(graph.group_sizes, dtype=np.int64)
+
+        def feature() -> F32:
+            return _blend(per_group.read, global_.read, groups.read, sizes, n, config.mix, step)
+
+        def ranks(vec: _Vec) -> Callable[[], F32]:
+            return lambda: cast(F32, vec.load())
+
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        write_rank_file(out_path, graph.id_keys, graph.id_nodes, feature, per_group, global_)
+        keys = graph.vector("id_keys", np.uint64)
+        nodes = graph.vector("id_nodes", np.int32)
+        _write_sidecar(out_path, n, keys.read, nodes.read, (feature, ranks(per_group), ranks(global_)), step)
+        seconds_iterate = time.monotonic() - t1
     finally:
         graph.remove_edges()
-    counts = np.bincount(graph.node_group, minlength=len(graph.groups))
     by_source: dict[str, int] = {}
-    for (sid, _), c in zip(graph.groups, counts, strict=True):
-        by_source[sid] = by_source.get(sid, 0) + int(c)
+    for (sid, _), c in zip(graph.groups, graph.group_sizes, strict=True):
+        by_source[sid] = by_source.get(sid, 0) + c
     stats = RankStats(
         nodes=graph.n,
         edges=graph.edges,
@@ -960,7 +1335,7 @@ def compute_static_rank(
         seconds_graph=graph.seconds,
         seconds_iterate=seconds_iterate,
         sources=by_source,
-        groups={f"{s}/{lang}": int(c) for (s, lang), c in zip(graph.groups, counts, strict=True)},
+        groups={f"{s}/{lang}": c for (s, lang), c in zip(graph.groups, graph.group_sizes, strict=True)},
         resolved_exact=graph.resolved.get("exact", 0),
         resolved_loose=graph.resolved.get("loose", 0),
         resolved_alias=graph.resolved.get("alias", 0),
@@ -972,6 +1347,8 @@ def compute_static_rank(
     tmp = stats_path.with_name(STATS_FILE + ".partial")
     tmp.write_text(json.dumps(asdict(stats), indent=1) + "\n", encoding="utf-8")
     os.replace(tmp, stats_path)
+    if progress:
+        progress(f"rank: peak RSS {peak_rss_mib():,.0f} MiB")
     return stats
 
 

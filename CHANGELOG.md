@@ -3,6 +3,17 @@
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Fixed: link rank runs in bounded memory (2026-10-12)
+* `wsp index rank` was killed at a 14.5 GB memory cap on the live library (255.6M documents, 640.7M
+  edges): every per-node array (id keys, groups, degrees, ranks) and both key tables were held in
+  memory, with sort copies on top. Node keys, redirects and links now go to key partitions in the
+  index work directory and are resolved partition by partition (exact id, loose id, then redirect,
+  as before); every per-node array is a file there, read and written in slices. Memory peaks at about
+  8 bytes a document (the two weight vectors of the power iteration) plus bounded chunks: 1.16 GB
+  peak RSS on a synthetic 50M-document, 152M-edge library, an estimated 2.8 GB at the live size.
+  Scratch disk peaks at about 20 bytes a library link plus 24 bytes a document. The sidecar is byte
+  for byte the one the old build wrote; a new `node_chunk` setting sizes the slices and the
+  partitions, and destination buckets crowded by popular pages are split before they are sorted.
 ### Fixed: court opinions read as opinions (2026-10-12)
 * CourtListener pages showed their text in a monospaced block: a one-line Supreme Court order
   ("Certiorari denied") read like a metadata card, and long opinions lost their paragraphs. The

@@ -3,12 +3,15 @@ groups, 64-bit keys, the sidecar, and its use in lexical ranking, fusion and the
 
 from __future__ import annotations
 
+import dataclasses
 import json
+import re
 from collections.abc import Sequence
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import numpy as np
+import numpy.typing as npt
 import pyarrow as pa
 import pytest
 
@@ -207,6 +210,180 @@ def test_redirect_aliases_keep_the_language_prefix(tmp_path: Path) -> None:
     assert sorted(graph.groups) == [("w", "de"), ("w", "en")]
     assert graph.intra_edges == 3
     graph.remove_edges()
+
+
+def _loose(doc_id: str) -> str:
+    return re.sub("#.*$", "", doc_id).replace("_", " ").lower()
+
+
+def _mixed_library(seed: int) -> tuple[list[DocRecord], list[tuple[str, str]]]:
+    """Two sources, two languages, every way a link resolves or does not (and conflicts in each)."""
+    rng = np.random.default_rng(seed)
+    natives = [("w", f"en/T{i}", "en") for i in range(40)] + [("w", f"de/T{i}", "de") for i in range(30)]
+    natives += [("w", "en/Foo_bar", "en"), ("w", "en/foo_bar", "en")]  # one loose id, two documents
+    natives += [("enc", f"N{i}", "en") for i in range(30)]
+    ids = [f"wsp:{s}/{n}" for s, n, _ in natives]
+    aliases = [
+        ("wsp:w/en/T1", "Alias one"),
+        ("wsp:w/en/T2", "Alias one"),  # the same alias again: the first one wins
+        ("wsp:w/de/T3", "Drei"),
+        ("wsp:enc/N4", "Four"),
+        ("wsp:w/en/Missing", "Gone"),  # a redirect to a page the library does not have
+    ]
+    forms = [
+        "wsp:w/en/Alias_one",
+        "wsp:w/de/Drei",
+        "wsp:enc/Four",
+        "wsp:w/en/FOO_BAR#Section",
+        "wsp:w/en/Gone",
+        "wsp:w/en/Nope",
+        "https://example.org/",
+    ]
+    docs: list[DocRecord] = []
+    for i, (source, native, lang) in enumerate(natives):
+        links: list[str] = []
+        for _ in range(int(rng.integers(0, 9))):
+            pick = int(rng.integers(0, len(ids) + len(forms)))
+            if pick < len(ids):
+                target = ids[pick]
+                links.append(target if rng.random() < 0.7 else target.lower() + "#Part")
+            else:
+                links.append(forms[pick - len(ids)])
+        if i % 7 == 0:
+            links += [ids[i], *links[:1]]  # a self-link and a duplicate
+        title = native.partition("/")[2] if source == "w" else native
+        docs.append(doc(source, native, title, lang=lang, links=tuple(links)))
+    return docs, aliases
+
+
+def _reference(
+    ids: Sequence[str], docs: Sequence[DocRecord], aliases: Sequence[tuple[str, str]]
+) -> tuple[set[tuple[int, int]], dict[str, int], int]:
+    """Edges, resolution counts and unresolved links by plain dictionaries (first node wins)."""
+    exact: dict[str, int] = {}
+    loose: dict[str, int] = {}
+    for node, doc_id in enumerate(ids):
+        exact.setdefault(doc_id, node)
+        loose.setdefault(_loose(doc_id), node)
+    by_alias: dict[str, int] = {}
+    for target, name in aliases:
+        if target in exact:
+            alias = alias_doc_id(target, name, prefixed=target.startswith("wsp:w/"))
+            by_alias.setdefault(_loose(alias), exact[target])
+    edges: set[tuple[int, int]] = set()
+    counts = {"exact": 0, "loose": 0, "alias": 0}
+    unresolved = 0
+    by_id: dict[str, DocRecord] = {d.doc_id: d for d in docs}
+    for s, doc_id in enumerate(ids):
+        for link in by_id[doc_id].links:
+            if not link.startswith("wsp:"):
+                continue
+            if link in exact:
+                counts["exact"] += 1
+                t = exact[link]
+            elif _loose(link) in loose:
+                counts["loose"] += 1
+                t = loose[_loose(link)]
+            elif _loose(link) in by_alias:
+                counts["alias"] += 1
+                t = by_alias[_loose(link)]
+            else:
+                unresolved += 1
+                continue
+            if s != t:
+                edges.add((s, t))
+    return edges, counts, unresolved
+
+
+def _reference_ranks(
+    n: int, edges: set[tuple[int, int]], groups: npt.NDArray[np.int32], d: float = 0.85
+) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+    """Float64 power iteration: per group (edges inside a group, mass kept in it) and global."""
+
+    def iterate(pairs: list[tuple[int, int]], group: npt.NDArray[np.integer[Any]]) -> npt.NDArray[np.float64]:
+        size = np.bincount(group).astype(np.float64)
+        src = np.array([s for s, _ in pairs], dtype=np.int64)
+        dst = np.array([t for _, t in pairs], dtype=np.int64)
+        out = np.bincount(src, minlength=n).astype(np.float64)
+        r = 1.0 / size[group]
+        for _ in range(2000):
+            acc = np.zeros(n)
+            np.add.at(acc, dst, r[src] / out[src])
+            leak = np.bincount(group[out == 0], weights=r[out == 0], minlength=len(size))
+            r = d * acc + (d * leak + 1 - d)[group] / size[group]
+        return r
+
+    intra = [(s, t) for s, t in edges if groups[s] == groups[t]]
+    return iterate(intra, groups), iterate(sorted(edges), np.zeros(n, dtype=np.int64))
+
+
+def test_bounded_memory_build_matches_an_in_memory_reference(tmp_path: Path) -> None:
+    """Tiny chunks, partitions, buckets and buffers send every step through its spill files: the
+    graph must equal a dictionary-resolved reference, the ranks a float64 reference, and the sidecar
+    must be byte for byte the one of the default sizes."""
+    docs, aliases = _mixed_library(11)
+    readers = write(tmp_path / "ref", docs)
+    ids = scan_ids(readers)
+    tiny = RankConfig(
+        tolerance=1e-7,
+        max_iterations=300,
+        node_chunk=3,  # 64 key partitions, 3-node slices
+        edge_chunk=5,
+        bucket_nodes=4,
+        buffer_bytes=40,
+        batch_size=5,
+    )
+    graph = build_graph(readers, tmp_path / "w", aliases=aliases, config=tiny)
+    want_edges, want_counts, want_unresolved = _reference(ids, docs, aliases)
+    assert {(ids.index(s), ids.index(t)) for s, t in edge_pairs(graph, ids)} == want_edges
+    assert graph.resolved == want_counts
+    assert want_counts["loose"]  # the library exercises every path
+    assert want_counts["alias"]
+    assert (graph.edges, graph.unresolved, graph.aliases) == (len(want_edges), want_unresolved, 4)
+    node_group = np.array(graph.node_group)
+    assert graph.group_sizes == tuple(np.bincount(node_group).tolist())
+    out_intra = np.zeros(graph.n, dtype=np.int64)
+    out_all = np.zeros(graph.n, dtype=np.int64)
+    for s, t in want_edges:
+        out_all[s] += 1
+        out_intra[s] += node_group[s] == node_group[t]
+    assert np.array_equal(graph.out_intra, out_intra)
+    assert np.array_equal(np.asarray(graph.out_intra) + graph.out_cross, out_all)
+    assert graph.intra_edges == int(out_intra.sum())
+    assert np.array_equal(graph.id_keys, np.sort(key64(ids)))
+    per_group, global_, iterations, *_ = pagerank(graph, tiny)
+    assert iterations < tiny.max_iterations
+    graph.remove_edges()
+    assert not list((tmp_path / "w").iterdir())
+    want_group, want_global = _reference_ranks(graph.n, want_edges, node_group)
+    np.testing.assert_allclose(per_group, want_group, rtol=2e-4)
+    np.testing.assert_allclose(global_, want_global, rtol=2e-4)
+
+    small = tmp_path / "small" / RANK_FILE
+    default = tmp_path / "default" / RANK_FILE
+    stats = compute_static_rank(readers, small, tmp_path / "w", aliases=aliases, config=tiny)
+    big = dataclasses.replace(tiny, node_chunk=RankConfig().node_chunk, edge_chunk=RankConfig().edge_chunk)
+    compute_static_rank(readers, default, tmp_path / "w2", aliases=aliases, config=big)
+    assert small.read_bytes() == default.read_bytes()  # no result depends on a chunk boundary
+    assert stats.edges == len(want_edges)
+    rank = StaticRank(small)
+    found = rank.pageranks(ids)
+    assert found is not None
+    np.testing.assert_array_equal(found[0], per_group)
+    np.testing.assert_array_equal(found[1], global_)
+    # the feature: percentiles by hand (values strictly below / group size - 1)
+    pct_group = np.array(
+        [
+            (per_group[node_group == g] < v).sum() / max(1, (node_group == g).sum() - 1)
+            for v, g in zip(per_group, node_group, strict=True)
+        ]
+    )
+    pct_global = np.array([(global_ < v).sum() / max(1, len(global_) - 1) for v in global_])
+    want_feature = (0.5 * pct_group.astype(np.float32) + 0.5 * pct_global.astype(np.float32)).astype(
+        np.float32
+    )
+    np.testing.assert_array_equal(rank.features(ids), want_feature)
+    np.testing.assert_array_equal(blend(per_group, global_, node_group, 0.5), want_feature)
 
 
 def test_languages_are_ranked_among_themselves(tmp_path: Path) -> None:
