@@ -511,6 +511,12 @@ class ChunkVectorStore:
     def __len__(self) -> int:
         return int(self._index.size)
 
+    def sources(self) -> frozenset[str]:
+        """Source ids with at least one embedded document (for fair fusion; see HybridSearcher)."""
+        with self._lock:
+            rows = self._db.execute("SELECT DISTINCT source_id FROM docs").fetchall()
+        return frozenset(str(r[0]) for r in rows)
+
     def search(self, vector: Sequence[float], *, limit: int = 50) -> Sequence[tuple[str, float]]:
         q = np.asarray(vector, dtype=np.float32).reshape(1, -1)
         if q.shape[1] != self.dimensions:

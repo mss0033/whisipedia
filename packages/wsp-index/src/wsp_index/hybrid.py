@@ -64,6 +64,7 @@ class HybridSearcher:
         config: FusionConfig | None = None,
         resolve: Resolver | None = None,
         snippet_free: bool = False,
+        dense_sources: frozenset[str] | None = None,
     ) -> None:
         if (vector is None) != (embedder is None):
             raise ValueError("vector index and embedder must be given together")
@@ -73,6 +74,10 @@ class HybridSearcher:
         self.config = config or FusionConfig()
         self.resolve = resolve
         self.snippet_free = snippet_free  # rank lexical candidates without snippets (see search)
+        # Sources the vector index covers (None: all). A lexical hit from a source with no embeddings
+        # is credited its lexical rank on the dense side too: otherwise RRF hands every embedded source
+        # a second vote the others can never get (only mdwiki was embedded, and it won every query).
+        self.dense_sources = dense_sources
 
     def prior(self, source_id: str) -> float:
         return self.config.source_priors.get(source_id, self.config.default_prior)
@@ -108,6 +113,10 @@ class HybridSearcher:
             info[hit.doc_id] = hit
         for rank, (doc_id, _sim) in enumerate(dense, start=1):
             fused[doc_id] = fused.get(doc_id, 0.0) + cfg.dense_weight / (cfg.k + rank)
+        if dense and self.dense_sources is not None:
+            for rank, hit in enumerate(lexical, start=1):
+                if (hit.source_id or _source_of(hit.doc_id)) not in self.dense_sources:
+                    fused[hit.doc_id] += cfg.dense_weight / (cfg.k + rank)  # imputed: no embeddings
 
         static: dict[str, float] = {}
         if cfg.static_rank is not None and cfg.static_weight > 0 and fused:

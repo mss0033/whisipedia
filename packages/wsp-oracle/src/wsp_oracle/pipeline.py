@@ -130,6 +130,7 @@ class OracleSearcher:
         self.passage_text = passage_text
         self.low_confidence = low_confidence
         self.budget_ms = budget_ms
+        self._dense_cover: tuple[float, frozenset[str]] | None = None
         self._pool: ThreadPoolExecutor | None = None
         self._pool_lock = threading.Lock()
 
@@ -293,6 +294,7 @@ class OracleSearcher:
             config=replace(self.fusion, depth=depth),
             resolve=self.resolve,
             snippet_free=self._cut is not None,  # snippets are cut below, for the head only
+            dense_sources=self._dense_sources(),
         )
         fused = list(hybrid.search(route.lexical or route.dense, limit=depth, sources=sources))
         _dense, best_chunk, timings["dense"] = dense_future.result()
@@ -327,6 +329,18 @@ class OracleSearcher:
             log.info("oracle query over budget: %.1f ms (%s)", total, timings)
         low = not hits or (confidence is not None and confidence < self.low_confidence)
         return OracleResult(query, route, hits, passages, confidence, low, timings, scope)
+
+    def _dense_sources(self) -> frozenset[str] | None:
+        """Sources the vector store covers, re-read at most once a minute (embedding runs add more)."""
+        store = getattr(self.vectors, "store", None)
+        sources = getattr(store, "sources", None)
+        if not callable(sources):
+            return None
+        now = time.monotonic()
+        cached = self._dense_cover
+        if cached is None or now - cached[0] > 60.0:
+            cached = self._dense_cover = (now, cast(frozenset[str], sources()))
+        return cached[1]
 
     @property
     def _cut(self) -> Callable[[str, Sequence[str]], Mapping[str, str]] | None:

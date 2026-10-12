@@ -153,3 +153,14 @@ def test_end_to_end_with_tantivy(tmp_path: Path) -> None:
         out = hs.search("analytical engine")
         assert out[0].doc_id == DocId(make_doc_id("enc", "babbage"))
         assert all(h.title for h in out)
+
+
+def test_sources_without_embeddings_are_not_outvoted() -> None:
+    # Lexical: wiki/best first, med/second. Only "med" is embedded and dense ranks med/second first.
+    lexical = FakeLexical([hit("wiki", "best"), hit("med", "second")])
+    vector = FakeVector([(make_doc_id("med", "second"), 0.9)])
+    unfair = HybridSearcher(lexical, vector, HashingEmbedder(8)).search("q")
+    assert unfair[0].doc_id == make_doc_id("med", "second")  # two votes against one
+    fair = HybridSearcher(lexical, vector, HashingEmbedder(8), dense_sources=frozenset({"med"})).search("q")
+    assert [h.doc_id for h in fair] == [make_doc_id("wiki", "best"), make_doc_id("med", "second")]
+    assert fair[0].score == pytest.approx(2 / 61)  # its lexical rank, counted on the dense side too
