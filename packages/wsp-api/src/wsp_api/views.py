@@ -173,14 +173,18 @@ class Library:
         return source_id if spec is None else spec.name
 
     def readable_sources(self) -> frozenset[str]:
-        """Sites a reader can open: held (a current generation) with documents or a home page.
+        """Sites a reader can open: held (a current generation) and either served from ZIM archives or
+        holding refined documents (or a home page).
 
         A planned source with nothing downloaded, or raw data the reader cannot show (a map tile
-        planet, a Wikidata dump) until it is refined, is not listed on the portal or in the directory.
+        planet, a Wikidata dump), is not listed on the portal or in the directory.
         """
-        return frozenset(
-            i.id for i in self.source_infos() if i.current_generation and (i.doc_count or i.home_doc_id)
-        )
+        return frozenset(i.id for i in self.source_infos() if self.is_readable(i))
+
+    def is_readable(self, info: SourceInfo) -> bool:
+        spec = self.s.source(info.id)
+        zim = spec is not None and spec.adapter == ZIM_ADAPTER
+        return bool(info.current_generation) and (zim or bool(info.doc_count) or bool(info.home_doc_id))
 
     def has_docs(self, sources: Sequence[str]) -> list[str]:
         counts = self.state.snapshot().doc_counts

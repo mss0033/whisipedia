@@ -115,7 +115,7 @@ def browse_router(lib: Library) -> APIRouter:
             newest=(news := _site_news(infos, limit=6)) + [lib.change(c) for c in newest][: 8 - len(news)],
             random=doc_ref(lib.catalog.random_doc(sources=None, rng=rng)),
             random_sources=[i.id for i in infos if i.doc_count],
-            sites=[i for i in infos if i.current_generation and (i.doc_count or i.home_doc_id)],  # readable
+            sites=[i for i in infos if lib.is_readable(i)],
         )
 
     # --- Directory ------------------------------------------------------------------------------
