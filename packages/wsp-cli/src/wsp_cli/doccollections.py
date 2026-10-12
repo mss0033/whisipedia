@@ -878,6 +878,8 @@ def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
     )
     for alert in report.alerts:
         out.write(f"ALERT restricted document listed by the issuer: {alert}\n")
+    for key, why in report.rejected:  # every exclusion is written down with its rule
+        out.write(f"rejected: {key}: {why}\n")
     for key, why in report.failed[:20]:
         out.write(f"failed: {key}: {why}\n")
     if proposal is not None:
