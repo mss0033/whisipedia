@@ -8,6 +8,7 @@ route uses it unchanged; it caches recent result lists so paging and facet queri
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import time
 from collections import OrderedDict
@@ -304,7 +305,7 @@ class OracleSearcher:
         )
         fused = list(hybrid.search(route.lexical or route.dense, limit=depth, sources=sources))
         _dense, best_chunk, timings["dense"] = dense_future.result()
-        fused = self._boost(route, fused)
+        fused = _collapse_duplicates(self._boost(route, fused))
         t = lap("lexical+fusion", t)
         pins = self._pins(route, fused, sources)
         pinned = {p.doc_id for p in pins}
@@ -544,3 +545,23 @@ def _prefer_language(
     new_head = sorted((bonus(h, head_part=True) for h in head), key=lambda h: -h.score)
     new_tail = sorted((bonus(h, head_part=False) for h in tail), key=lambda h: -h.score)
     return new_head, new_tail
+
+
+_TITLE_WORDS = re.compile(r"[^\w]+", re.UNICODE)
+_LEADING_ARTICLE = re.compile(r"^(?:a|an|the)\s+")
+
+
+def _collapse_duplicates(hits: Sequence[SearchHit]) -> list[SearchHit]:
+    """One hit per (source, title) when titles differ only in case, punctuation or a leading article:
+    PubMed holds the same 1890s "A Case of Snake-Bite Treated ..." note four times, and a page of them
+    hides everything else. Hits come best first, so the best of each title is kept."""
+    seen: set[tuple[str, str]] = set()
+    out: list[SearchHit] = []
+    for h in hits:
+        title = _LEADING_ARTICLE.sub("", _TITLE_WORDS.sub(" ", h.title.casefold()).strip())
+        key = (h.source_id or source_of(h.doc_id), title)
+        if title and key in seen:
+            continue
+        seen.add(key)
+        out.append(h)
+    return out

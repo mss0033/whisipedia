@@ -321,3 +321,25 @@ def test_snippets_are_cut_on_demand_for_ranked_hits(index: TantivyIndex) -> None
     assert set(cut) == set(page)
     assert all("<b>tide</b>" in v for v in cut.values())
     assert index.snippets("tide", []) == {}
+
+
+def test_tiers_try_every_word_in_the_query_language_first(tmp_path: Path) -> None:
+    cfg = TantivyConfig(languages=("en", "de"), writer_heap_bytes=50_000_000, writer_threads=1)
+    with TantivyIndex(tmp_path / "ix", cfg) as idx:
+        idx.upsert(
+            [
+                doc("s", "both", "Metformin side effects", "metformin side effects and dosing", lang="en"),
+                doc("s", "one", "Metformin", "metformin is a drug", lang="en"),
+                doc("s", "de", "Metformin Nebenwirkungen", "metformin side effects deutsch", lang="de"),
+            ]
+        )
+        idx.commit()
+        assert idx._tiers("metformin side effects") == [  # pyright: ignore[reportPrivateUsage]
+            (("en", "any"), True),
+            (("en", "any"), False),
+            (None, False),
+        ]
+        # Too few every-word matches for the window: the any-word and every-language tiers fill it.
+        hits = idx.search_hits("metformin side effects", limit=10)
+        assert hits[0].doc_id == make_doc_id("s", "both")
+        assert {h.doc_id for h in hits} == {make_doc_id("s", n) for n in ("both", "one", "de")}

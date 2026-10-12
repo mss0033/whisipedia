@@ -33,3 +33,24 @@ def test_without_a_reranker_scores_are_scaled_not_shifted() -> None:
     new_head, tail = _prefer_language("water", head, [h("t", 0.01, "en")], reranked=False)
     assert new_head[0].lang == "en"  # 0.030 * 1.15 > 0.033
     assert tail[0].score == 0.01 * 1.15
+
+
+def test_near_identical_titles_of_one_source_collapse_to_the_best() -> None:
+    from wsp_oracle.pipeline import _collapse_duplicates  # pyright: ignore[reportPrivateUsage]
+
+    hits = [
+        SearchHit(
+            make_doc_id("pubmed", "1"), 0.9, "A Case of Snake Bite Treated with Strychnine.", "", "pubmed"
+        ),
+        SearchHit(
+            make_doc_id("pubmed", "2"), 0.8, "Case of Snake-Bite Treated with Strychnine", "", "pubmed"
+        ),
+        SearchHit(make_doc_id("mdwiki", "3"), 0.7, "Snakebite", "", "mdwiki"),
+        SearchHit(make_doc_id("wiki", "4"), 0.6, "Case of snake bite treated with strychnine", "", "wiki"),
+    ]
+    out = _collapse_duplicates(hits)
+    assert [h.doc_id for h in out] == [
+        make_doc_id("pubmed", "1"),
+        make_doc_id("mdwiki", "3"),
+        make_doc_id("wiki", "4"),
+    ]

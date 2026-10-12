@@ -172,6 +172,9 @@ sources:
     status: active
     license: LicenseRef-NLM-terms
     legal_basis: bulk-access-terms
+    # Research abstracts: no medicine-domain ranking bonus, so practical references (MDWiki, Wikipedia)
+    # lead lay questions at equal relevance ("how to treat a snake bite" led with 1890s case reports).
+    rank_prior: 0
     access: {adapter: pubmed, endpoints: ["https://ftp.ncbi.nlm.nih.gov/pubmed/baseline/", "https://ftp.ncbi.nlm.nih.gov/pubmed/updatefiles/"]}
     update: {strategy: base-plus-incremental}
     size: {files: 1334, bytes: 50e9, measured: false, as_of: 2026-10-09}

@@ -426,6 +426,11 @@ def source_priors(cfg: Mapping[str, Any], specs: Sequence[SourceSpec]) -> dict[s
     table = section(section(cfg, "index"), "domain_priors")
     priors: dict[str, float] = {}
     for spec in specs:
+        own = spec.raw.get("rank_prior")  # the registry's per-source override (e.g. pubmed: 0)
+        if isinstance(own, int | float):
+            if own > 0:
+                priors[spec.id] = float(own)
+            continue
         bonus = table.get(spec.domain[0]) if spec.domain else None
         if isinstance(bonus, int | float) and bonus > 0:
             priors[spec.id] = float(bonus)

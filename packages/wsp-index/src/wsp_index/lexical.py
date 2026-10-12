@@ -57,6 +57,7 @@ from wsp_index.text import (
     build_analyzer,
     drop_stopwords,
     primary_lang,
+    query_language,
     sanitize_query,
 )
 
@@ -580,14 +581,24 @@ class TantivyIndex:
             row = self._db.execute("SELECT title, source_id FROM titles WHERE doc_id=?", (doc_id,)).fetchone()
         return None if row is None else SearchHit(DocId(doc_id), 0.0, str(row[0]), "", str(row[1]))
 
-    def parse(self, query: str) -> tantivy.Query | None:
+    def parse(
+        self, query: str, *, routes: Sequence[str] | None = None, require_all: bool = False
+    ) -> tantivy.Query | None:
+        """The query over ``routes``' title and text fields (all by default); ``require_all``: every word
+        must match (an AND, much cheaper than the OR on large indexes)."""
         text = drop_stopwords(sanitize_query(query))
         if not text:
             return None
-        fields = [f"{kind}_{lang}" for lang in self._routes for kind in ("title", "text")]
-        boosts = {f"title_{lang}": self.config.title_boost for lang in self._routes}
-        parsed, _errors = self._index.parse_query_lenient(text, fields, field_boosts=boosts)
+        langs = tuple(routes) if routes else self._routes
+        fields = [f"{kind}_{lang}" for lang in langs for kind in ("title", "text")]
+        boosts = {f"title_{lang}": self.config.title_boost for lang in langs}
         words = text.split()
+        if require_all and len(words) > 1 and '"' not in text:
+            every, _errors = self._index.parse_query_lenient(
+                " ".join(f"+{w}" for w in words), fields, field_boosts=boosts
+            )
+            return every
+        parsed, _errors = self._index.parse_query_lenient(text, fields, field_boosts=boosts)
         if self.config.coordination_boost <= 0 or len(words) < 2 or '"' in text:
             return parsed
         every, _errors = self._index.parse_query_lenient(
@@ -599,6 +610,20 @@ class TantivyIndex:
                 (tantivy.Occur.Should, tantivy.Query.boost_query(every, self.config.coordination_boost)),
             ]
         )
+
+    def _tiers(self, query: str) -> list[tuple[tuple[str, ...] | None, bool]]:
+        """``(routes, require_all)`` to try in order: every word in the query's language (English, the
+        interface language, when the words do not say) plus the fallback route, then any word there,
+        then any word in every language."""
+        lang = query_language(sanitize_query(query).split()) or "en"
+        primary = tuple(dict.fromkeys((self.route(lang), FALLBACK_LANG)))
+        tiers: list[tuple[tuple[str, ...] | None, bool]] = []
+        if set(primary) != set(self._routes):
+            tiers += [(primary, True), (primary, False)]
+        else:
+            tiers += [(None, True)]
+        tiers.append((None, False))
+        return tiers
 
     def search(
         self, query: str, *, limit: int = 10, offset: int = 0, sources: Sequence[str] | None = None
@@ -616,25 +641,39 @@ class TantivyIndex:
     ) -> Sequence[SearchHit]:
         if limit <= 0 or offset < 0:
             return []
-        parsed = self.parse(query)
-        if parsed is None:
+        if sources is not None and not sources:
             return []
-        clauses: list[tuple[tantivy.Occur, tantivy.Query]] = [(tantivy.Occur.Must, parsed)]
-        if sources is not None:
-            if not sources:
-                return []
-            source_filter = tantivy.Query.term_set_query(self._schema, "source_id", list(sources))
-            clauses.append((tantivy.Occur.Must, source_filter))
-        clauses += self._prior_clauses
-        q = parsed if len(clauses) == 1 else tantivy.Query.boolean_query(clauses)
         searcher = self._index.searcher()
         rank = self.static_rank() if self.config.rank_weight > 0 else None
         depth = self.config.rank_depth
-        if rank is None or depth <= 0 or offset >= depth:
-            result = searcher.search(q, limit, count=False, offset=offset)
+        ranked = not (rank is None or depth <= 0 or offset >= depth)
+        need = max(depth, offset + limit) if ranked else offset + limit
+        # Tiers, cheapest first (2026-10-12, 130M documents: the any-word query over every language's
+        # fields took 0.4-3 s, an every-word query over the query's language 17 ms): take the first tier
+        # that fills the window. Documents matching every word rank first anyway (coordination).
+        parsed: tantivy.Query | None = None
+        result = None
+        for routes, require_all in self._tiers(query):
+            parsed = self.parse(query, routes=routes, require_all=require_all)
+            if parsed is None:
+                continue
+            clauses: list[tuple[tantivy.Occur, tantivy.Query]] = [(tantivy.Occur.Must, parsed)]
+            if sources is not None:
+                source_filter = tantivy.Query.term_set_query(self._schema, "source_id", list(sources))
+                clauses.append((tantivy.Occur.Must, source_filter))
+            clauses += self._prior_clauses
+            q = parsed if len(clauses) == 1 else tantivy.Query.boolean_query(clauses)
+            if ranked:
+                result = searcher.search(q, need, count=False, offset=0)
+            else:
+                result = searcher.search(q, limit, count=False, offset=offset)
+            if len(result.hits) >= (need if ranked else limit):
+                break
+        if parsed is None or result is None:
+            return []
+        if not ranked or rank is None:
             scored = [(float(sc), searcher.doc(a)) for sc, a in result.hits]
         else:
-            result = searcher.search(q, max(depth, offset + limit), count=False, offset=0)
             pool = [(float(sc), searcher.doc(a)) for sc, a in result.hits]
             head, tail = pool[:depth], pool[depth:]
             feats = rank.features([str(d.get_first("doc_id")) for _, d in head])
