@@ -40,7 +40,15 @@ from typing import TextIO, cast
 from wsp_adapters.entries import EntrySource, Redirect
 from wsp_core.errors import FetchError
 from wsp_core.ids import InvalidDocIdError, make_doc_id
-from wsp_core.model import DocRecord, FetchResult, Generation, GenerationStatus, RemoteFile, SourceSpec
+from wsp_core.model import (
+    DocRecord,
+    FetchResult,
+    Generation,
+    GenerationStatus,
+    RemoteFile,
+    SourceSpec,
+    searchable,
+)
 from wsp_core.partitions import partition_of
 from wsp_core.ports import ChangeFeed, Ctx, SourceAdapter, Vault
 from wsp_index import RefineryReader, RefineryWriter, TantivyIndex, ensure_local, refresh
@@ -455,6 +463,10 @@ class Indexer:
             if not gens:
                 if source_ids:
                     reports.append(SourceReport(sid, skipped="no sealed generation"))
+                continue
+            if not searchable(spec):
+                if source_ids:
+                    reports.append(SourceReport(sid, skipped="not indexed (registry index: false)"))
                 continue
             if self.adapter_for(spec) is None:
                 reports.append(SourceReport(sid, skipped=f"no adapter installed for {spec.adapter!r}"))

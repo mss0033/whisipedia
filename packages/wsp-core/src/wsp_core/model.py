@@ -214,6 +214,15 @@ class RemoteHead:
     accepts_ranges: bool = False
 
 
+def searchable(spec: SourceSpec) -> bool:
+    """Whether a source is refined and indexed for search (registry ``index``, default true).
+
+    ``index: false`` marks sources served as stored or not text: a ZIM edition that duplicates an indexed
+    one (wikipedia-en-zim renders wikipedia-top10's English pages), map tiles, an edit history.
+    """
+    return spec.raw.get("index", True) is not False
+
+
 class ReleaseState(StrEnum):
     """Release lifecycle (PLAN §6.3)."""
 

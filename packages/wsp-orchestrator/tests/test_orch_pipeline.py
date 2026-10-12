@@ -331,3 +331,18 @@ def test_ledger_flush_is_idempotent_by_event_id(tmp_path: Path) -> None:
         first.kind, first.subject, first.data, idempotency_key=str(first.data["event_id"])
     )
     assert again == first
+
+
+def test_a_source_marked_index_false_is_promoted_without_refining_or_indexing(tmp_path: Path) -> None:
+    from wsp_orchestrator.testing import make_spec
+
+    h = PipelineHarness(tmp_path, sources=[make_spec("src", raw={"index": False})])
+    h.pipeline.register(h.adapter.add_release("2026-10-01", FILES))
+    result = h.pipeline.run("src", "2026-10-01")
+    assert result.outcome is Outcome.PROMOTED
+    assert transitions(h, "src/2026-10-01") == HAPPY  # the same states, the work skipped
+    assert h.refinery.refined == []
+    assert h.refinery.indexed == []
+    current = h.vault.current("src")
+    assert current is not None
+    assert current.generation_id == "2026-10-01"

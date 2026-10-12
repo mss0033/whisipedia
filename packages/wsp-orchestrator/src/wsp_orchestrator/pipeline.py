@@ -80,6 +80,7 @@ from wsp_core.model import (
     Verdict,
     VerdictStatus,
     allowed_transitions,
+    searchable,
 )
 from wsp_core.partitions import partition_of, same_partition
 from wsp_core.ports import Ctx, Fetcher, Ledger, SourceAdapter, Vault
@@ -639,6 +640,8 @@ class ReleasePipeline:
                 return sealed
             case ReleaseState.SEALED:
                 gen = self._require_sealed(rec)
+                if not searchable(spec):  # served as stored (ZIM, raw data): nothing to refine
+                    return self._transition(rec, ReleaseState.REFINED)
                 result = self.refine(spec, gen, self.vault.generation_path(rec.source_id, rec.generation_id))
                 self.checkpoint("refine:done")
                 return self._transition(rec, ReleaseState.REFINED, doc_count=result.doc_count)
@@ -650,8 +653,9 @@ class ReleasePipeline:
                         return stopped
                     self.vault.promote(rec.source_id, rec.generation_id)
                     self.checkpoint("vault:promoted")
-                self.index(spec, gen)
-                self.checkpoint("index:done")
+                if searchable(spec):
+                    self.index(spec, gen)
+                    self.checkpoint("index:done")
                 return self._transition(rec, ReleaseState.INDEXED)
             case ReleaseState.INDEXED:
                 if not self._is_current(rec):  # indexed by an older daemon before its gate, or legacy

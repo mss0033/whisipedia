@@ -36,6 +36,7 @@
         "irreplaceable": {"type": "boolean"},
         "scores": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0, "maximum": 5}},
         "notes": {"type": "string"},
+        "index": {"type": "boolean", "description": "Refine and index for search (default true); false for sources served as stored or not text."},
         "rank_prior": {"type": "number", "minimum": 0, "description": "Constant ranking bonus for this source's matches; overrides [index.domain_priors] for its first domain (0: none)."}
       },
       "allOf": [

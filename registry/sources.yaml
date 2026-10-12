@@ -34,6 +34,7 @@ sources:
     license: CC-BY-SA-4.0
     legal_basis: open-license
     languages: [en, ceb, de, fr, sv, nl, es, ru, it, pl]
+    index: false  # edit history: not search material
     access: {adapter: wikimedia-dumps, job: metahistory7zdump}
     update: {cadence: P1Y, strategy: snapshot-retention}
     size: {bytes: 456.5e9, measured: true, as_of: 2026-10-09}
@@ -48,6 +49,7 @@ sources:
     status: active
     license: CC-BY-SA-4.0
     legal_basis: open-license
+    index: false  # ZIM edition: renders wikipedia-top10's English pages, which are indexed
     access: {adapter: kiwix-opds, selector: {name: wikipedia_en_all, flavour: maxi}}
     update: {strategy: snapshot-retention}
     size: {bytes: 127.4e9, measured: true, as_of: 2026-10-09}
@@ -61,6 +63,7 @@ sources:
     status: active
     license: CC0-1.0
     legal_basis: open-license
+    index: false  # needs the full -all.json dump before it is refined
     access: {adapter: wikidata, endpoints: ["https://dumps.wikimedia.org/wikidatawiki/entities/"], languages: [en, de, fr, es, ru, it, nl, pl, sv]}
     update: {strategy: snapshot-retention}
     size: {json_bz2_bytes: 103.3e9, truthy_nt_bz2_bytes: 43.5e9, measured: true, as_of: 2026-10-09}
@@ -110,6 +113,7 @@ sources:
     status: active
     license: LicenseRef-PD-US+PG-terms
     legal_basis: public-domain
+    index: false  # reader edition of the gutenberg texts, which are indexed
     access: {adapter: kiwix-opds, selector: {name: gutenberg_mul_all}}
     update: {cadence: P6M, strategy: snapshot-retention}
     size: {bytes: 253.1e9, measured: true, as_of: 2026-10-10}
@@ -250,6 +254,7 @@ sources:
     status: active
     license: ODbL-1.0
     legal_basis: open-license
+    index: false  # map data: not text search material
     access: {adapter: osm-planet, endpoints: ["https://planet.openstreetmap.org/pbf/"]}
     notes: The osm-planet adapter takes the weekly planet PBF and emits named places; replication diffs are not applied yet.
     update: {strategy: base-plus-incremental}

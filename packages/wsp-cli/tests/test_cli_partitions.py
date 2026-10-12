@@ -182,3 +182,26 @@ def test_withheld_review_row_reads_the_key_from_the_file_name() -> None:
     row = withheld_review_row("topo__AK_Mine_1950.pdf-1a2b3c4d.pdf", "https://x", "policy review:safety=mine")
     assert row["key"] == "topo:AK_Mine_1950.pdf"
     assert row["rule"] == "review:safety=mine"
+
+
+def test_a_source_marked_index_false_is_never_built(vault: FileVault, tmp_path: Path) -> None:
+    import dataclasses
+
+    fetch(vault, tmp_path, "ak", "2026-10-03.ak", {"AK_Anchorage_1950.pdf": sheet("Anchorage")})
+    root = tmp_path / "index"
+    served = dataclasses.replace(spec(), raw={**spec().raw, "index": False})
+    ix = Indexer(
+        vault,
+        [served],
+        {"doc-collection": DocCollectionAdapter(throttle=False)},
+        root,
+        TantivyIndex(root / "lexical"),
+        SqliteChangeFeed(root / "changes.sqlite"),
+    )
+    try:
+        assert ix.build() == []  # the nightly run: not even reported
+        (report,) = ix.build([SID])  # asked for by name: says why
+        assert report.skipped == "not indexed (registry index: false)"
+        assert not (root / "refinery" / SID).exists()
+    finally:
+        ix.close()
