@@ -79,6 +79,9 @@ CREATE TABLE IF NOT EXISTS aliases (
 """
 
 
+MIN_TIER_HITS = 30  # a search tier with at least this many matches (and the page asked for) is enough
+
+
 @dataclass(frozen=True, slots=True)
 class TantivyConfig:
     languages: tuple[str, ...] = ("en",)
@@ -667,7 +670,10 @@ class TantivyIndex:
                 result = searcher.search(q, need, count=False, offset=0)
             else:
                 result = searcher.search(q, limit, count=False, offset=offset)
-            if len(result.hits) >= (need if ranked else limit):
+            # Enough when the tier fills the page asked for and holds at least MIN_TIER_HITS: a wide window
+            # (200, for totals and facets) need not be filled by weaker any-word matches.
+            enough = min(need if ranked else limit, max(MIN_TIER_HITS, offset + limit))
+            if len(result.hits) >= enough:
                 break
         if parsed is None or result is None:
             return []
