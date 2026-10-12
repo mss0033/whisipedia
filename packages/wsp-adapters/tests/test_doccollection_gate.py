@@ -36,16 +36,16 @@ RULES = Rules()
 @pytest.mark.parametrize(
     "text",
     [
-        "\ufb01re control",  # the fi ligature, as PDF text layers extract it
+        "\ufb01re control radar",  # the fi ligature, as PDF text layers extract it
         "Fire\u2011Control Systems",  # U+2011 non-breaking hyphen
         "Weapon\u00adization of agents",  # soft hyphen
         "Weapon\u200bization of agents",  # zero-width space
         "Weapon\u2060ization of agents",  # word joiner
         "weapon-\nization of agents",  # hyphenated across a line break
         "weapon\u2010\n  ization of agents",  # Unicode hyphen across a line break
-        "\uff26\uff49\uff52\uff45 \uff43\uff4f\uff4e\uff54\uff52\uff4f\uff4c",  # fullwidth "Fire control"
-        "F I R E  C O N T R O L",  # letter-spaced, double space between words
-        "F I R E C O N T R O L",  # letter-spaced, uniform: only the squeezed copy can match
+        "\uff26\uff49\uff52\uff45 \uff43\uff4f\uff4e\uff54\uff52\uff4f\uff4c radar",  # fullwidth "Fire control"
+        "F I R E  C O N T R O L  R A D A R",  # letter-spaced, double space between words
+        "F I R E C O N T R O L R A D A R",  # letter-spaced, uniform: only the squeezed copy can match
         "Kill\u2013chain analysis",  # en dash between the words
         "MISSILE\u00a0GUIDANCE",  # no-break space
     ],

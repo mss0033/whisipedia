@@ -174,8 +174,8 @@ def test_content_screen() -> None:
         is Verdict.ALLOW
     )
     assert classify_content("SNIPER TRAINING\nContents", rules).verdict is Verdict.DENY
-    body = "x" * 4000 + "\nAppendix: joint targeting\nAnnex: fire control\nAnnex: gunnery"
-    assert classify_content(body, rules).rule == "safety=joint targeting+fire control+gunnery"
+    body = "x" * 4000 + "\nAppendix: joint targeting\nAnnex: fire control systems\nAnnex: gunnery"
+    assert classify_content(body, rules).rule == "safety=joint targeting+fire control systems+gunnery"
     one = "x" * 4000 + "\nAppendix: munitions handling safety"
     assert classify_content(one, rules).verdict is Verdict.ALLOW  # handling safety is not munitions data
 
@@ -214,10 +214,14 @@ def test_deny_phrase_only_in_an_abstract_is_held_for_review() -> None:
     facts = DocFacts(
         key="who:1",
         title="Operational manual on larval source management",
-        abstract="Guidance on vector control; see also fire control of vegetation.",
+        abstract="Guidance on vector control; see also the fire control radar annex.",
     )
     got = classify_metadata(facts, Rules(allow_all=True))
-    assert str(got) == "review:safety-abstract=fire control"
+    assert str(got) == "review:safety-abstract=fire control radar"
+    firefighting = DocFacts(
+        key="fema:1", title="Wildland fire", abstract="Fire control of vegetation near homes."
+    )
+    assert classify_metadata(firefighting, Rules(allow_all=True)).verdict is Verdict.ALLOW
 
 
 def test_builtin_review_can_be_switched_off_for_official_histories_only() -> None:

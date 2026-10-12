@@ -368,7 +368,7 @@ sources:
       key_prefix: nga
       origins: [msi.nga.mil]
       discovery: [{kind: api, flavor: nga-msi, url: "https://msi.nga.mil/api/publications/stored-pubs?output=json"}]
-      filter: {allow_all: true, distribution: {require: [public-release, published]}}
+      filter: {allow_all: true, allow_image_only: true, distribution: {require: [public-release, published]}}  # scanned tables and charts
       mirrors:
         - {channel: "msi.nga.mil publications API (official): stored-pubs listing + /api/publications/download?key=<s3Key>", status: verified, verified: 2026-10-10, note: "listing 200 JSON with fileSize; download HEAD 200 application/pdf"}
     update: {cadence: P3M, strategy: snapshot-retention}
@@ -481,7 +481,7 @@ sources:
       origins: [www.govinfo.gov, training.fema.gov]
       discovery:
         - {kind: api, flavor: govinfo, collection: GOVPUB, package_prefix: [GOVPUB-HS5], api_key: govinfo}
-      filter: {distribution: {require: [public-release, published]}, default: allow, allow_series_prefix: ["GOVPUB-HS5"]}
+      filter: {distribution: {require: [public-release, published]}, allow_image_only: true, default: allow, allow_series_prefix: ["GOVPUB-HS5"]}
       mirrors:
         - {channel: "GovInfo GOVPUB (GPO), SuDoc class HS 5 = FEMA", url: "https://api.govinfo.gov/collections/GOVPUB", status: verified, verified: 2026-10-10, note: "search docclass:HS5 -> 143 packages incl. the National Response Framework (GOVPUB-HS5_100-PURL-gpo49580); partial: GPO deposits, not every FEMA release; needs an api.data.gov key"}
         - {channel: "training.fema.gov (EMI/NDEMU)", status: reachable, verified: 2026-10-10, note: "200; hosts IS course materials that reproduce NRF/NIMS/CPG content"}
@@ -558,7 +558,7 @@ sources:
           flavor: govuk-search
           url: "https://www.gov.uk/api/search.json"
           params: {filter_organisations: cabinet-office, filter_content_purpose_supergroup: guidance_and_regulation, q: "resilience emergency preparedness civil contingencies"}
-      filter: {allow_all: true, distribution: {require: ["license:OGL-UK-3.0"]}}
+      filter: {allow_all: true, distribution: {require: ["license:OGL-UK-3.0", published]}}  # GOV.UK content is OGL v3 unless it says otherwise
     update: {cadence: P3M, strategy: snapshot-retention}
     size: {bytes: 1e9, measured: false, as_of: 2026-10-10}
     notes: Score 4.3. OGL v3 applies to GOV.UK content unless a page says otherwise; check per document (MOD doctrine on GOV.UK is not OGL, see uk-mod-doctrine).
@@ -655,7 +655,7 @@ sources:
             - "\"surgical care at the district hospital\""
       # A UN health agency's guidance is about health: nouns such as chemical, pathogen or surveillance
       # are routine there, so the built-in noun review list is off; the deny list and screens still apply.
-      filter: {allow_all: true, builtin_review: false}
+      filter: {allow_all: true, builtin_review: false, allow_image_only: true}  # older guidance is scanned
     update: {cadence: P3M, strategy: base-plus-incremental}
     size: {records: 277401, bytes: 70e9, measured: false, as_of: 2026-10-10}
     notes: Score 4.2. Record count measured (OAI completeListSize); bytes are an estimate for the selected subsets. Personal non-commercial offline use fits the licence; licence checked per item.
