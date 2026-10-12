@@ -757,3 +757,67 @@
   margin-top: 14px;
   font-size: 1.05rem;
 }
+/* Court opinions (pages/legal.ts): a caption like the head of a slip opinion, then the opinion. */
+.case {
+  display: grid;
+  gap: 14px;
+  max-width: 72ch;
+}
+.case-caption {
+  border-top: 3px double var(--rule);
+  border-bottom: 3px double var(--rule);
+  padding: 10px 0;
+  text-align: center;
+  display: grid;
+  gap: 6px;
+}
+.case-court {
+  font-variant: small-caps;
+  letter-spacing: 0.04em;
+  font-size: 1.1rem;
+  font-weight: bold;
+}
+.case-facts {
+  display: inline-grid;
+  grid-template-columns: auto auto;
+  gap: 2px 12px;
+  margin: 0 auto;
+  text-align: left;
+  font-size: 0.95rem;
+}
+.case-facts dt {
+  font-weight: bold;
+}
+.case-facts dd {
+  margin: 0;
+}
+.case-body p {
+  margin: 0 0 0.8em;
+  line-height: 1.55;
+  text-align: justify;
+  hyphens: auto;
+}
+.page-mark {
+  font: 0.72rem var(--ui-font);
+  color: var(--page-muted);
+  border: 1px solid var(--rule);
+  padding: 0 3px;
+  margin: 0 4px;
+  vertical-align: 0.15em;
+  white-space: nowrap;
+}
+.case-order {
+  border: 2px solid var(--rule);
+  padding: 10px 14px;
+  display: grid;
+  gap: 6px;
+}
+.case-order-label {
+  font: bold 0.8rem var(--ui-font);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.case-order p {
+  margin: 0;
+  font-size: 1.1rem;
+}

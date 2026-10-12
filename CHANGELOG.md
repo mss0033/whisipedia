@@ -3,6 +3,13 @@
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Fixed: court opinions read as opinions (2026-10-12)
+* CourtListener pages showed their text in a monospaced block: a one-line Supreme Court order
+  ("Certiorari denied") read like a metadata card, and long opinions lost their paragraphs. The
+  Navigator now renders court opinions with a case caption (court, date filed, docket, judges,
+  author), the opinion in paragraphs rejoined across page breaks, and star pagination (`*80`) as page
+  markers. A short order is framed as the court's complete order.
+
 ### Changed: content line narrowed (owner decision 2026-10-12)
 * Now allowed: officially public military doctrine on weapons employment, marksmanship and weapons
   qualification, gunnery, fire support and fires, targeting, fire control, air and missile defence,

@@ -21,6 +21,7 @@ import {
   pageHeading,
   wspLink,
 } from '../ui/components.ts';
+import { parseCase, renderCase } from './legal.ts';
 import type { AppServices, PageContext, PageResult } from './types.ts';
 
 type DocRoute = Extract<Route, { page: 'document' }>;
@@ -68,7 +69,7 @@ function asOfText(doc: DocumentResponse): string {
 }
 
 export function isPreformatted(doc: Pick<DocumentResponse, 'source_id' | 'kind'>): boolean {
-  return doc.source_id === 'rfc' || doc.kind === 'data' || doc.kind === 'law';
+  return doc.source_id === 'rfc' || doc.kind === 'data';
 }
 
 /** The page heading already shows the title: drop a first line that only repeats it. */
@@ -104,7 +105,9 @@ export function renderBody(doc: DocumentResponse): { node: HTMLElement; broken: 
     );
     return { node: wrap, broken: 0 };
   }
-  wrap.appendChild(renderPlainText(text, isPreformatted(doc)));
+  // Court opinions: a caption and paragraphs (pages/legal.ts), not raw text.
+  const opinion = doc.kind === 'law' ? parseCase(doc.text ?? '', doc.title) : null;
+  wrap.appendChild(opinion ? renderCase(opinion) : renderPlainText(text, isPreformatted(doc)));
   return { node: wrap, broken: wrap.querySelectorAll('.broken-link').length };
 }
 
