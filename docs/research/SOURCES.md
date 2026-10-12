@@ -162,7 +162,7 @@ News is the **weakest category for open bulk copying**. Most current journalism 
 | Full Internet Archive / Wayback mirror | Petabyte scale, mixed rights. Only curated PD/CC subsets. |
 | Sites whose terms forbid bulk copying | Unless written permission is obtained (tracked as T3 "needs permission") |
 | Classified, leaked, export-controlled (ITAR/EAR), FOUO/CUI or Distribution B–F material; login-gated security products (OSAC, TRIPwire) | Not lawfully public. Firm exclusion, whatever mirror holds a copy ([PREPAREDNESS_AND_DEFENSE.md §3](PREPAREDNESS_AND_DEFENSE.md#3-boundaries-policy)). |
-| Material whose primary content is CBRN agent production or weaponisation, explosives or weapon manufacture, weapons guidance or targeting, or offensive tooling | Safety exclusion, even when publicly released ([§3.2](PREPAREDNESS_AND_DEFENSE.md#32-safety-exclusions-regardless-of-availability-or-license)). |
+| Material whose primary content is CBRN agent production or weaponisation, explosives and demolitions, weapons and munitions technical data (manufacture, guidance, firing tables), or offensive tooling. Public employment doctrine (gunnery, fires, targeting) is in scope (owner decision 2026-10-12) | Safety exclusion, even when publicly released ([§3.2](PREPAREDNESS_AND_DEFENSE.md#32-safety-exclusions-regardless-of-availability-or-license)). |
 
 ---
 

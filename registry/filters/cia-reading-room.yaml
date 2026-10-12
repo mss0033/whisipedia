@@ -2,7 +2,8 @@
 # banners with a release stamp are expected (declassified_ok in the registry). Intelligence *analysis* of
 # foreign programmes is historical-analytical material (research doc §3.2, in scope), so the built-in
 # noun-level review list is off for this collection (a million titles mention weapons); the built-in deny
-# list (production, weaponisation, targeting, offensive tooling) and the front-matter screens still apply.
+# list (explosives, weapons technical data, CBRN production and weaponisation, offensive tooling) and the
+# front-matter screens still apply.
 builtin_review: false
 # Owner decision 2026-10-11: every officially released document is approved; no review list. The
 # built-in deny list and the classification/export-control screens still apply.

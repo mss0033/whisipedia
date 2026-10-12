@@ -32,29 +32,20 @@ allow_series_prefix:
   - "TC 4-02"     # medical training circulars
   - "TC 7-"       # training management
 deny_series_prefix:
-  # Narrow content core only (owner decision 2026-10-11: public material is in scope unless it is
-  # weapons/munitions technical data, weapons employment or gunnery, explosives, or targeting).
+  # Narrow content core only (owner decision 2026-10-11, narrowed 2026-10-12): public material is in
+  # scope unless it is explosives and demolitions, weapons and munitions technical data, CBRN weapons
+  # production or offensive cyber tooling. Public doctrine on weapons employment, marksmanship and
+  # weapons qualification, gunnery, fires and fire support, targeting, fire control, air and missile
+  # defence, mortars and crew drills is in scope since 2026-10-12, so FM/ATP/TC 3-09, FM 3-01,
+  # ATP 3-01., ATP 3-21.90, TC 3-20., FM 3-22, TC 3-22. and ATP/FM 3-60 are no longer denied here.
   - "TM 9-"       # weapons and munitions technical manuals
   - "TM 43-"
-  - "ATP 3-60"    # targeting
-  - "FM 3-60"
-  - "TC 3-22."    # weapons and marksmanship
-  - "TC 3-23."    # weapons, demolitions
-  - "TC 3-20."    # gunnery (tank, Bradley, Stryker)
-  - "FM 3-22"     # weapons qualification
-  # Fires, air and missile defence, mortars: targeting, fire control and weapons employment
-  # (2026-10-12 audit, CA-3: FM 3-09, ATP 3-09.30/.32/.34/.50/.60/.70, TC 3-09.8, ATP 3-01.18
-  # Stinger, ATP 3-01.85/.87 Patriot and ATP 3-21.90 mortars were listed as allow:default).
-  - "FM 3-09"     # fire support and field artillery operations
-  - "ATP 3-09"    # observed fires, JFIRE, kill boxes, cannon/MLRS/Paladin batteries
-  - "TC 3-09"     # field artillery certification and qualification
-  - "FM 3-01"     # air and missile defence employment
-  - "ATP 3-01."   # air and missile defence weapon-system techniques (Stinger, Patriot, ...)
-  - "ATP 3-21.90" # tactical employment of mortars
-deny_keywords:
+  # Kept 2026-10-12 for its demolitions half: the series was denied as "weapons, demolitions". The
+  # weapons half is in scope now, but a prefix cannot tell the two apart, so the series stays denied;
+  # a title in it that is weapons employment only takes an owner allow (`wsp proposals`).
+  - "TC 3-23."
+deny_keywords:  # "gunnery" and "sniper" left 2026-10-12: employment and marksmanship are in scope
   - demolition
-  - gunnery
-  - sniper
   - sabotage
 review_keywords: []
 allow_documents:  # owner review 2026-10-11 (Army publications review page): every offered title included
@@ -347,7 +338,10 @@ allow_documents:  # owner review 2026-10-11 (Army publications review page): eve
   - "TC 9-72"
   - "TC 90-1"
   - "TC 90-5"
-deny_documents:  # content core: targeting, weapons/weapon-system employment, gunnery, munitions data, mines, demolitions
+# Per-title owner decisions of 2026-10-11 (munitions data, mines, demolitions, and employment titles
+# denied under the earlier line). The 2026-10-12 narrowing changed the series rules only: a title here
+# stays out until the owner decides it again (`wsp proposals`).
+deny_documents:
   - "ATP 2-01.4"
   - "ATP 3-22.40"
   - "ATP 3-55.6"

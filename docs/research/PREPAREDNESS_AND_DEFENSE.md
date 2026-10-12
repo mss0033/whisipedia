@@ -95,15 +95,17 @@ A document that is public domain *as a work* but carries a restriction marking i
 The library does not hold material whose **primary content** is:
 
 - synthesis, production, enhancement, dissemination or weaponisation of chemical, biological, radiological or nuclear agents;
-- explosives, improvised munitions, weapon or firearm manufacture or modification;
-- weapons guidance, targeting, fire control, or weapons effects for planning attacks;
+- explosives, demolitions and improvised munitions;
+- weapons and munitions technical data: weapon or firearm manufacture or modification, guidance, firing tables, munitions effectiveness;
 - offensive tooling or techniques for attacking computer systems or people (exploit code, malware, intrusion playbooks, offensive surveillance of individuals).
+
+Weapons employment, marksmanship and weapons qualification, gunnery, fire support, targeting, fire control, air and missile defence, mortar employment and weapon-system crew drills are **not** in this list: officially public doctrine on them is in scope (owner decision 2026-10-12).
 
 **In scope**: defensive, protective, preparedness, medical-response, historical-analytical and educational fundamentals. For example: radar *principles* and weather radar; CBRN *medical management*, detection awareness, decontamination and shelter-in-place guidance; antiterrorism and physical security from the defender's side; surveillance *detection* and counter-surveillance awareness for protecting people and facilities; threat assessment; vulnerability *catalogues and defensive mappings* (CVE, CWE, ATT&CK as used by defenders); security configuration baselines.
 
 ### 3.3 Mixed collections are filtered per document
 
-Many issuers publish in-scope and excluded documents side by side. The Army Publishing Directorate lists planning doctrine next to munitions and targeting manuals; the Joint Publications include a targeting series; DTIC and NPS Calhoun hold everything from water purification theses to weapons research. For these, **the collection is never ingested whole**. The `doc-collection` adapter applies, in order (§5.3):
+Many issuers publish in-scope and excluded documents side by side. The Army Publishing Directorate lists planning doctrine next to munitions technical manuals and demolitions training circulars; DTIC and NPS Calhoun hold everything from water purification theses to weapons research. For these, **the collection is never ingested whole**. The `doc-collection` adapter applies, in order (§5.3):
 
 1. the **distribution gate** (§3.1), read from the document itself;
 2. a **series allow-list** (publication series known to be in scope);
@@ -320,8 +322,8 @@ access:
     distribution: {require: [A], read_from: pdf-front-matter}   # A | public-release | license:<SPDX>
     allow_series: ["ADP", "FM 3-0", "FM 5-0", "FM 6-0", "FM 6-22", "ATP 3-39.32", "ATP 3-37.2", "TC 3-25.26", "TC 4-02.1", "TC 4-02.3"]
     allow_series_prefix: ["ADP ", "FM 4-", "ATP 4-02", "ATP 3-34"]
-    deny_series_prefix: ["FM 3-09", "ATP 3-09", "TC 3-09", "ATP 3-60", "TM 9-", "TM 43-", "ATP 3-11.", "ATP 3-34.210", "TC 3-22.", "TC 3-23."]
-    deny_keywords: ["demolition", "munition", "explosive ordnance", "targeting", "fire support", "weapon system", "small arms", "marksmanship", "sniper", "chemical agent production", "improvised"]
+    deny_series_prefix: ["TM 9-", "TM 43-", "ATP 3-11.", "ATP 3-34.210", "TC 3-23."]
+    deny_keywords: ["demolition", "munition", "explosive ordnance", "chemical agent production", "improvised"]
     review_keywords: ["electronic warfare", "chemical", "biological", "radiological", "nuclear", "surveillance", "cyberspace operations", "information operations"]
     default: review                         # what happens to documents no rule matches: review | deny
   keep_superseded: true
@@ -343,7 +345,7 @@ The deny lists above are illustrative: the real lists live in `registry/filters/
 | `distribution_text` | "DISTRIBUTION RESTRICTION: Approved for public release; distribution is unlimited." | verbatim, for audit |
 | `currency` | current / superseded / historical / rescinded | §2.2 |
 | `supersedes` / `superseded_by` | `army:FM-5-0:2014-...` | detail page, front-matter "This publication supersedes…", or inferred from a newer edition with the same number |
-| `filter_decision` | allow:series=FM 5-0 / deny:keyword=targeting / review:keyword=chemical | §5.3 |
+| `filter_decision` | allow:series=FM 5-0 / deny:keyword=demolition / review:keyword=chemical | §5.3 |
 | `origin_url`, `fetched_at`, `http` (ETag, Last-Modified, content-length), `tls_host` | provenance | fetcher |
 | `sha256`, `blake3`, `bytes` | checksum | vault (upstream rarely publishes checksums) |
 | `mirror_sha256` | for documents fetched from more than one copy (NEETS) | cross-check |
@@ -389,7 +391,7 @@ wsp proposals list --status open            # e.g. "army-pubs-public: 7 document
 wsp proposals show 41                       # each document: title, pub number, distribution text,
                                             # matched rule (review:keyword=chemical), first-page excerpt
 wsp proposals accept 41 --note "CBRN medical management, in scope"
-wsp proposals reject 42 --note "weapons employment, out of scope"
+wsp proposals reject 42 --note "demolitions manual, out of scope"
 ```
 
 - A proposal carries a drafted change to `registry/filters/<source>.yaml`: accepting adds the publication numbers to `allow_documents`; rejecting adds them to `deny_documents`, so the decision is remembered and the document is never proposed again.

@@ -3,6 +3,23 @@
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Changed: content line narrowed (owner decision 2026-10-12)
+* Now allowed: officially public military doctrine on weapons employment, marksmanship and weapons
+  qualification, gunnery, fire support and fires, targeting, fire control, air and missile defence,
+  mortar employment and weapon-system crew drills.
+* The deny core keeps five categories: classified or restricted distribution (the marking screen,
+  unchanged); explosives and demolitions; weapons and munitions technical data; CBRN weapons
+  production; offensive cyber tooling. The categories "weapons employment and gunnery", "targeting and
+  fire control" and "weapon-system crew drills" and their patterns are removed. Weapons guidance
+  ("missile guidance") moves to weapons and munitions technical data. "Sniper", "gunnery" and
+  "marksmanship" no longer count as history-prone nouns next to a core hit.
+* Army rules: the FM/ATP/TC 3-09, FM 3-01, ATP 3-01., ATP 3-21.90, TC 3-20., FM 3-22, TC 3-22. and
+  ATP/FM 3-60 series denies and the "gunnery" and "sniper" keywords are removed. TM 9-, TM 43- and
+  TC 3-23. (demolitions) stay denied. The 19 per-title owner denies of 2026-10-11 are unchanged. Joint
+  Publications: the JP 3-60 deny is removed.
+* army-pubs-public and joint-publications will fetch the newly allowed series on their next run
+  (joint-publications is still a candidate with no official channel, so it lists nothing yet).
+
 ### Fixed: legacy Office files linked as PDFs (2026-10-12)
 * A `.pdf` link that serves an Excel 97, Word 97 or PowerPoint 97 file (an OLE2 compound file) is renamed
   to `.xls`/`.doc`/`.ppt` like the zip-based Office formats, and held for review (no text extractor reads

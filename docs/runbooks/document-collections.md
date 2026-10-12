@@ -109,7 +109,7 @@ the front-matter screen wait in `<vault>/_incoming/_quarantine/<source>/`.
 ```sh
 wsp proposals show 41
 wsp proposals accept 41 --note "CBRN medical management: in scope"   # adds them to allow_documents
-wsp proposals reject 42 --note "weapons employment: out of scope"    # adds them to deny_documents
+wsp proposals reject 42 --note "demolitions manual: out of scope"    # adds them to deny_documents
 git diff registry/filters/ && git commit -am "chore(registry): owner review of <source>"
 ```
 

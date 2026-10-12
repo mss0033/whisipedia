@@ -326,7 +326,10 @@ def _local_repo(root: Path, files: dict[str, str]) -> Path:
         ({"README.md": "Foreign Relations of the United States volumes. " * 4, "v/1.xml": "<x/>"}, "allow"),
         ({"README.md": "Tools for exploit development and malware development. " * 3}, "deny"),
         (
-            {"README.md": "Collected notes and references for practitioners. " * 3, "weaponeering/a.md": "x"},
+            {
+                "README.md": "Collected notes and references for practitioners. " * 3,
+                "shaped_charges/a.md": "x",
+            },
             "deny",
         ),
         ({"data.bin": "x"}, "review"),  # nothing to read: held

@@ -36,17 +36,17 @@ RULES = Rules()
 @pytest.mark.parametrize(
     "text",
     [
-        "\ufb01re control radar",  # the fi ligature, as PDF text layers extract it
-        "Fire\u2011Control Systems",  # U+2011 non-breaking hyphen
+        "\ufb01ring tables",  # the fi ligature, as PDF text layers extract it
+        "Shaped\u2011Charges",  # U+2011 non-breaking hyphen
         "Weapon\u00adization of agents",  # soft hyphen
         "Weapon\u200bization of agents",  # zero-width space
         "Weapon\u2060ization of agents",  # word joiner
         "weapon-\nization of agents",  # hyphenated across a line break
         "weapon\u2010\n  ization of agents",  # Unicode hyphen across a line break
-        "\uff26\uff49\uff52\uff45 \uff43\uff4f\uff4e\uff54\uff52\uff4f\uff4c radar",  # fullwidth
-        "F I R E  C O N T R O L  R A D A R",  # letter-spaced, double space between words
-        "F I R E C O N T R O L R A D A R",  # letter-spaced, uniform: only the squeezed copy can match
-        "Call\u2013for\u2013fire procedures",  # en dashes between the words
+        "\uff26\uff49\uff52\uff49\uff4e\uff47 \uff54\uff41\uff42\uff4c\uff45\uff53",  # fullwidth
+        "F I R I N G  T A B L E S",  # letter-spaced, double space between words
+        "F I R I N G T A B L E S",  # letter-spaced, uniform: only the squeezed copy can match
+        "Demolition\u2013charge calculations",  # en dash between the words
         "MISSILE\u00a0GUIDANCE",  # no-break space
     ],
 )
@@ -57,7 +57,7 @@ def test_content_screen_normalizes_before_matching(text: str) -> None:
 
 @pytest.mark.parametrize(
     "title",
-    ["\ufb01re control system", "Weapon\u00adization of anthrax", "S N I P E R  T R A I N I N G"],
+    ["\ufb01ring table", "Weapon\u00adization of anthrax", "S H A P E D  C H A R G E S"],
 )
 def test_metadata_screen_normalizes_titles(title: str) -> None:
     decision = classify_metadata(DocFacts(key="k", title=title), Rules(allow_all=True))

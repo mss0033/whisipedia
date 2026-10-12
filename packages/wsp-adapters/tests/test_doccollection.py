@@ -251,10 +251,10 @@ def test_screen_file_stages(tmp_path: Path) -> None:
     weapon = tmp_path / "w.pdf"
     weapon.write_bytes(
         make_pdf(
-            [["SNIPER TRAINING AND EMPLOYMENT", "Approved for public release; distribution is unlimited."]]
+            [["SHAPED CHARGES AND DEMOLITIONS", "Approved for public release; distribution is unlimited."]]
         )
     )
-    assert str(screen_file(weapon, rules).decision) == "deny:safety=sniper training"
+    assert str(screen_file(weapon, rules).decision) == "deny:safety=shaped charges"
     bad = tmp_path / "x.pdf"
     bad.write_bytes(b"<html>not a pdf</html>")
     from wsp_adapters.doccollection.adapter import well_formed
@@ -369,25 +369,25 @@ def test_throttle_spaces_requests_per_host() -> None:
 def test_index_page_follow_never_opens_denied_series() -> None:
     index = b"""<html><body>
       <a href="/pubs/fm5-0.html">FM 5-0</a>
-      <a href="/pubs/fm3-09.html">FM 3-09</a>
+      <a href="/pubs/tm9-1300.html">TM 9-1300</a>
       <a href="/files/direct.pdf">Download PDF</a>
       <a href="http://www.x.gov/files/plain-http.pdf">insecure</a>
     </body></html>"""
     detail = b'<a href="/files/FM5-0_2022.pdf">PDF</a>'
     routes = {"https://www.x.gov/index": index, "https://www.x.gov/pubs/fm5-0.html": detail}
-    rules = Rules(deny_series_prefix=("FM 3-09",))
+    rules = Rules(deny_series_prefix=("TM 9-",))
     env = env_for(routes, origins=("www.x.gov",), rules=rules)
     cfg = {
         "kind": "index-page",
         "url": "https://www.x.gov/index",
         "follow": r"/pubs/",
         "filter_follow": True,
-        "pub_number": r"(FM \d+-\d+)",
+        "pub_number": r"((?:FM|TM) \d+-\d+)",
     }
     cands = list(discover_all([cfg], env))
     fetcher = env.fetcher
     assert isinstance(fetcher, FakeFetcher)
-    assert "https://www.x.gov/pubs/fm3-09.html" not in fetcher.requests
+    assert "https://www.x.gov/pubs/tm9-1300.html" not in fetcher.requests
     urls = {c.url: c for c in cands}
     assert set(urls) == {"https://www.x.gov/files/direct.pdf", "https://www.x.gov/files/FM5-0_2022.pdf"}
     assert urls["https://www.x.gov/files/FM5-0_2022.pdf"].title == "FM 5-0"

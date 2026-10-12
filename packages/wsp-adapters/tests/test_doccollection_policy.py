@@ -38,20 +38,23 @@ def decide(pub: str, title: str, rules: Rules = APD) -> str:
         ("FM 5-0", "Planning and Orders Production", "allow:series=FM 5-0"),
         ("ADP 6-22", "Army Leadership and the Profession", "allow:series=ADP"),
         ("TC 4-02.1", "First Aid", "allow:series=TC 4-02.1"),
-        # fires are targeting and fire control (2026-10-12 audit, CA-3): the series rule names it
-        (
-            "FM 3-09",
-            "Fire Support and Field Artillery Operations",
-            "deny:safety=fire support and field artillery",
-        ),
-        ("TC 3-20.31", "Training and Qualification, Crew", "deny:deny-series=TC 3-20."),
-        ("TC 3-22.9", "Rifle and Carbine", "deny:deny-series=TC 3-22."),
-        ("ATP 3-60", "Targeting", "deny:deny-series=ATP 3-60"),
-        ("", "Joint Targeting Process", "deny:safety=joint targeting"),
+        # Employment doctrine is in scope (owner decision 2026-10-12): fires, gunnery, crew
+        # qualification, marksmanship, mortars and targeting are allowed.
+        ("FM 3-09", "Fire Support and Field Artillery Operations", "allow:default"),
+        ("TC 3-20.31", "Training and Qualification, Crew", "allow:default"),
+        ("TC 3-22.9", "Rifle and Carbine", "allow:default"),
+        ("FM 3-22.9", "Rifle Marksmanship", "allow:default"),
+        ("ATP 3-21.90", "Tactical Employment of Mortars", "allow:default"),
+        ("ATP 3-60", "Targeting", "allow:default"),
+        ("", "Joint Targeting Process", "allow:default"),
+        ("", "Mortar Fire Direction Procedures", "allow:default"),
+        # The deny core and the marking screen still hold.
         ("FM 3-01.13", "(U) Air Defense Planning Data (S/Nf)", "deny:marking=classified-portion"),
+        ("TM 9-1300-206", "Ammunition and Explosives Standards", "deny:deny-series=TM 9-"),
+        ("TC 3-23.30", "Grenades and Pyrotechnic Signals", "deny:deny-series=TC 3-23."),
+        ("", "Demolition Charges and Calculations", "deny:safety=demolition charges"),
         ("ATP 3-34.4", "Engineer Reference", "allow:series=ATP 3-34.4"),
         ("ATP 9-99", "Unheard-Of Series", "allow:default"),
-        ("", "Mortar Fire Direction Procedures", "deny:safety=mortar fire direction"),
         ("FM 6-27", "Commander's Handbook on the Law of Land Warfare", "allow:series=FM 6-27"),
         ("ATP 4-02.2", "Medical Evacuation in a Chemical Environment", "allow:series=ATP 4-02"),
     ],
@@ -62,7 +65,7 @@ def test_army_series_rules(pub: str, title: str, expected: str) -> None:
 
 def test_deny_beats_allow_and_owner_decisions_are_remembered() -> None:
     rules = APD.merged({"allow_series_prefix": ["TC 3-"]})
-    assert decide("TC 3-22.9", "Rifle and Carbine", rules).startswith("deny:")
+    assert decide("TC 3-23.30", "Grenades and Pyrotechnic Signals", rules).startswith("deny:")
     owner = APD.merged({"allow_documents": ["ATP 9-99"], "deny_documents": ["FM 1"]})
     assert decide("ATP 9-99", "Unheard-Of Series", owner) == "allow:owner=allow"
     assert decide("FM 1", "The Army", owner) == "deny:owner=deny"
@@ -177,9 +180,14 @@ def test_content_screen() -> None:
         classify_content("Planning and orders production\nContents\nChapter 1 Fundamentals", rules).verdict
         is Verdict.ALLOW
     )
-    assert classify_content("SNIPER TRAINING\nContents", rules).verdict is Verdict.DENY
-    body = "x" * 4000 + "\nAppendix: joint targeting\nAnnex: fire control systems\nAnnex: gunnery"
-    assert classify_content(body, rules).rule == "safety=joint targeting+fire control systems+gunnery"
+    assert classify_content("SHAPED CHARGES\nContents", rules).verdict is Verdict.DENY
+    body = "x" * 4000 + "\nAppendix: firing tables\nAnnex: shaped charges\nAnnex: munitions"
+    assert classify_content(body, rules).rule == "safety=firing tables+shaped charges+munitions"
+    # Employment doctrine is in scope (owner decision 2026-10-12): no hit, wherever it stands.
+    doctrine = "SNIPER TRAINING\nGunnery\nAppendix: joint targeting\nAnnex: fire control systems"
+    assert classify_content(doctrine + "\nAnnex: battle drills\nCall for fire", rules).verdict is (
+        Verdict.ALLOW
+    )
     one = "x" * 4000 + "\nAppendix: munitions handling safety"
     assert classify_content(one, rules).verdict is Verdict.ALLOW  # handling safety is not munitions data
 
@@ -218,10 +226,10 @@ def test_deny_phrase_only_in_an_abstract_is_held_for_review() -> None:
     facts = DocFacts(
         key="who:1",
         title="Operational manual on larval source management",
-        abstract="Guidance on vector control; see also the fire control radar annex.",
+        abstract="Guidance on vector control; see also the shaped charges annex.",
     )
     got = classify_metadata(facts, Rules(allow_all=True))
-    assert str(got) == "review:safety-abstract=fire control radar"
+    assert str(got) == "review:safety-abstract=shaped charges"
     firefighting = DocFacts(
         key="fema:1", title="Wildland fire", abstract="Fire control of vegetation near homes."
     )

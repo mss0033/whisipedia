@@ -619,7 +619,7 @@ class CollectionFetcher:
         """What the gate reads of a repository: the default branch's README, then its file paths.
 
         A path list names a repository's contents the way a table of contents names a book's
-        (``exploit-development/``, ``weaponeering.md``), so the content screen's title-page and
+        (``exploit-development/``, ``shaped-charges.md``), so the content screen's title-page and
         three-phrase rules apply to it. File contents other than the README are not read.
         """
         try:

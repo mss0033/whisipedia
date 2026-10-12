@@ -18,11 +18,12 @@ Unknown series default to review: nothing a rule does not clearly allow reaches 
 without the owner (``wsp proposals``). Every decision names the rule that made it, for audit.
 
 The built-in safety lists encode the §13 boundary that holds *regardless of release status*:
-CBRN production or weaponisation, explosives and improvised munitions, weapon manufacture,
-weapons guidance/targeting/fire control, and offensive tooling. They are phrase lists, matched on
-word boundaries after neutral phrases (``bomb threat``, ``nuclear power``) are blanked out, so a
-defensive or civil document is not caught by a bare noun. Bare nouns (``explosive``, ``weapon``,
-``chemical``) go to review instead.
+CBRN production or weaponisation, explosives and improvised munitions, weapons and munitions
+technical data (manufacture, guidance, firing tables), and offensive tooling. Employment doctrine
+(gunnery, fires, targeting, crew drills) is in scope (owner decision 2026-10-12). They are phrase
+lists, matched on word boundaries after neutral phrases (``bomb threat``, ``nuclear power``) are
+blanked out, so a defensive or civil document is not caught by a bare noun. Bare nouns
+(``explosive``, ``weapon``, ``chemical``) go to review instead.
 """
 
 from __future__ import annotations
@@ -56,7 +57,7 @@ class Stage(StrEnum):
 @dataclass(frozen=True, slots=True)
 class Decision:
     verdict: Verdict
-    rule: str  # e.g. "series=FM 5-0", "safety=targeting", "marking=distribution-C"
+    rule: str  # e.g. "series=FM 5-0", "safety=shaped charges", "marking=distribution-C"
     stage: Stage = Stage.METADATA
     alert: bool = False  # an index listed a restricted document: that is news for the owner
 
@@ -66,13 +67,15 @@ class Decision:
 
 # --- built-in safety lists (PLAN §13; research doc §3.2) ------------------------------------------
 #
-# The owner's line (2026-10-11): publicly published material is in scope. The deny core below is what
-# stays out regardless of release status, one entry per excluded category (classified and restricted
-# material is the marking screen's job, below). Each entry is a *pattern*: a space is a word gap
-# (spaces or hyphens: ``mine field``, ``mine-field``), ``~`` an optional one (``booby~trap``: booby
-# trap, booby-trap, boobytrap); the rest is regular-expression syntax, matched case-insensitively
-# between word boundaries, so word forms are spelled out (``snipers?``, ``weaponi[sz](?:e|ed|ing)``).
-# A pattern names a *technique* (``tank gunnery``, ``call for fire``), never a bare noun: histories,
+# The owner's line (2026-10-11, narrowed 2026-10-12): officially public material is in scope, public
+# military doctrine on weapons employment, marksmanship, gunnery, fires, targeting, fire control, air
+# and missile defence and crew drills included. The deny core below is what stays out regardless of
+# release status, one entry per excluded category (classified and restricted material is the marking
+# screen's job, below). Each entry is a *pattern*: a space is a word gap (spaces or hyphens:
+# ``mine field``, ``mine-field``), ``~`` an optional one (``booby~trap``: booby trap, booby-trap,
+# boobytrap); the rest is regular-expression syntax, matched case-insensitively between word
+# boundaries, so word forms are spelled out (``charges?``, ``weaponi[sz](?:e|ed|ing)``). A pattern
+# names a *technique* (``shaped charges``, ``firing tables``), never a bare noun: histories,
 # defensive guidance and health reports use the nouns too (2026-10-12 audit, CA-3/CA-4).
 # ``tests/test_doccollection_policy.py`` holds must-deny and must-allow titles for every category.
 
@@ -90,7 +93,8 @@ _WEAPONIZABLE = (
     r"ricin|sarin|biological|chemical)"
 )
 
-# Owner category -> patterns. The category names are the owner's list (PLAN §13, 2026-10-11).
+# Owner category -> patterns. The category names are the owner's list (PLAN §13, 2026-10-11; weapons
+# employment and gunnery, targeting and fire control, and weapon-system crew drills left it 2026-10-12).
 DENY_CORE: Mapping[str, tuple[str, ...]] = {
     "explosives and demolitions": (
         r"explosives? (?:manufactur\w*|production|formulations?|synthesis|fabrication)",
@@ -130,53 +134,9 @@ DENY_CORE: Mapping[str, tuple[str, ...]] = {
         r"(?:technical|operator['\u2019]?s) manual (?:for )?(?:the )?(?:\w+ ){0,3}" + _WEAPON,
         r"firing tables?",
         r"(?:nuclear )?warhead design",
-    ),
-    "weapons employment and gunnery": (
-        r"weapons? employment",
-        _WEAPON + r" employment",
-        r"employment of (?:the )?(?:\w+ ){0,2}" + _WEAPON,
-        r"(?:tank|bradley|stryker|crew|vehicle|aerial|helicopter|artillery|mortar|weapons?|machine~gun) "
-        r"gunnery",
-        r"gunnery (?:tables?|training|qualification|manuals?|skills?|procedures?|techniques?|ranges?)",
-        r"(?:rifle|pistol|carbine|machine~gun|weapons?|combat|precision|advanced|sniper) marksmanship",
-        r"marksmanship (?:training|programs?|fundamentals|qualification|manuals?|guide)",
-        r"counter~snipers?",
-        r"sniping",
-        r"sniper (?:training|employment|operations|techniques?|teams?|manuals?|handbook|rifles?|tactics|"
-        r"courses?|skills)",
-        r"close air support",
-    ),
-    "targeting and fire control": (
-        r"(?:military|joint|lethal|dynamic|deliberate) targeting",
-        r"targeting (?:process|cycle|methodology)",
-        r"(?:military|joint|lethal|artillery|weapons?) target (?:development|acquisition|nomination|"
-        r"engagement)",
-        r"target acquisition (?:radars?|systems?|and (?:fire|weapons?|surveillance))",
-        r"(?:laser )?target designat\w*",
-        r"laser designat\w*",
-        r"weaponeering",
-        r"kill box(?:es)?",
-        r"calls? for fire",
-        r"fire control (?:systems?|radars?|computers?|solutions?|orders|equipment|instruments?)",
-        r"(?:gun|weapons?|naval|artillery|tank|missile) fire control",
-        r"(?:artillery|mortar|battery|cannon|field artillery) fire direction",
-        r"fire direction (?:procedures|computations?|computers?|officers?|data)",
-        r"fire support (?:coordinat\w*|planning|officers?|teams?|operations|plans?|elements?)",
-        r"(?:joint|indirect|naval|artillery|close|lethal) fire support",
-        r"fire support and field artillery",
-        r"field artillery (?:operations|gunnery|manual|techniques|tactics|survey|cannon batter(?:y|ies)|"
-        r"batter(?:y|ies))",
-        r"forward observers?",
-        r"observed fires?",
+        # Guidance is engineering data of the weapon, not its employment; kept from the former
+        # "targeting and fire control" category (owner decision 2026-10-12).
         r"(?:missile|weapons?|bomb) guidance",
-        r"counter~battery fire",
-        r"indirect fire (?:procedures|techniques|computations?)",
-    ),
-    "weapon-system crew drills": (
-        r"crew drills? (?:for )?(?:the )?(?:\w+ ){0,3}" + _WEAPON,
-        _WEAPON + r" (?:\w+ ){0,2}crew drills?",
-        r"(?:gun|weapons?|tank|howitzer|mortar|missile|launcher) crew drills?",
-        r"battle drills?",
     ),
     "CBRN weapons production": (
         r"(?:chemical|biological|bacteriological|toxin|nuclear|radiological) weapons? "
@@ -205,13 +165,10 @@ SAFETY_DENY: tuple[str, ...] = tuple(p for patterns in DENY_CORE.values() for p 
 # events, not techniques ("Booby Traps in Vietnam", "armed groups plant booby traps on roads"), so
 # alone they decide nothing; next to a core hit they count (:func:`classify_content`).
 SAFETY_CONTEXT: tuple[str, ...] = (
-    r"snipers?",
-    r"gunnery",
     r"booby~trap(?:s|ped|ping)?",
     r"mine~lay(?:ing|ers?)",
     r"mine~fields?",
     r"mine warfare",
-    r"marksmanship",
     r"demolitions?",
     r"weaponi[sz](?:e|ed|es|ing|ation)",
     r"shellcode",
@@ -1056,7 +1013,7 @@ def classify_content(
     deny. So do a core hit anywhere together with a history-prone noun (:data:`SAFETY_CONTEXT`) on
     the title page, or three distinct hits in the front matter of which at least one is a core hit.
     Fewer: review. History-prone nouns alone decide nothing (a situation report that mentions booby
-    traps, a history of sniping). ``overridden``: the owner's ``override_safety`` for this document.
+    traps, a history of minelaying). ``overridden``: the owner's ``override_safety`` for this document.
     """
     st = Stage.CONTENT
     normalized = normalize_text(front_matter)

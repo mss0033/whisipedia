@@ -68,9 +68,6 @@ def test_the_deny_core_has_exactly_the_owners_content_categories() -> None:
     assert set(DENY_CORE) == {
         "explosives and demolitions",
         "weapons and munitions technical data",
-        "weapons employment and gunnery",
-        "targeting and fire control",
-        "weapon-system crew drills",
         "CBRN weapons production",
         "offensive cyber tooling",
     }
@@ -94,6 +91,13 @@ def test_the_deny_core_has_exactly_the_owners_content_categories() -> None:
         "Minelaying in the Baltic 1914-1918 (history)",
         "Fire Direction Center (wildland fire dispatch)",
         "Wildland fire control near homes",
+        # Employment doctrine (owner decision 2026-10-12)
+        "Sniper Training and Employment",
+        "Tank Gunnery Training",
+        "Joint Targeting Process",
+        "Fire Control Systems",
+        "Battle Drills for the Infantry Rifle Platoon",
+        "Close Air Support",
     ],
 )
 def test_public_civil_and_historical_titles_are_not_denied(title: str) -> None:
@@ -111,9 +115,12 @@ def test_a_situation_report_and_a_weapons_history_are_not_held() -> None:
 
 def test_a_history_prone_noun_counts_only_next_to_a_core_hit() -> None:
     rules = Rules()
-    assert classify_content("Gunnery\n" + "x" * 3500, rules).verdict is Verdict.ALLOW
-    with_core = "Gunnery\n" + "x" * 3500 + "\nAnnex: joint targeting"
-    assert str(classify_content(with_core, rules)) == "deny:safety=gunnery+joint targeting"
+    assert classify_content("Booby Traps\n" + "x" * 3500, rules).verdict is Verdict.ALLOW
+    with_core = "Booby Traps\n" + "x" * 3500 + "\nAnnex: shaped charges"
+    assert str(classify_content(with_core, rules)) == "deny:safety=booby traps+shaped charges"
+    # Gunnery is no longer a core noun (owner decision 2026-10-12): it adds nothing to a core hit.
+    gunnery = "Gunnery\n" + "x" * 3500 + "\nAnnex: shaped charges"
+    assert str(classify_content(gunnery, rules)) == "review:safety=shaped charges"
 
 
 @pytest.mark.parametrize(
@@ -124,19 +131,45 @@ def test_a_history_prone_noun_counts_only_next_to_a_core_hit() -> None:
         ("ATP 3-09.32", "Multi-Service Tactics for the Joint Application of Firepower"),
         ("TC 3-09.8", "Field Artillery Certification and Qualification"),
         ("ATP 3-21.90", "Tactical Employment of Mortars"),
+        ("FM 3-09", "Fire Support and Field Artillery Operations"),
+        ("TC 3-20.31", "Training and Qualification, Crew"),
+        ("FM 3-22.9", "Rifle Marksmanship"),
     ],
 )
-def test_army_fires_air_defence_and_mortar_series_are_denied(pub: str, title: str) -> None:
+def test_army_fires_air_defence_and_mortar_series_are_allowed(pub: str, title: str) -> None:
+    """Employment doctrine is in scope (owner decision 2026-10-12; denied by CA-3 before)."""
     apd = load_rules({"rules": "registry/filters/army-pubs-public.yaml", "default": "allow"}, repo_root=REPO)
     got = classify_metadata(DocFacts(key=f"k:{pub}", pub_number=pub, title=title), apd)
-    assert got.verdict is Verdict.DENY, (pub, got)
+    assert got.verdict is Verdict.ALLOW, (pub, got)
+
+
+def test_joint_targeting_is_allowed_by_the_joint_publications_rules() -> None:
+    jp = load_rules({"rules": "registry/filters/joint-publications.yaml", "default": "allow"}, repo_root=REPO)
+    got = classify_metadata(DocFacts(key="jp:JP-3-60", pub_number="JP 3-60", title="Joint Targeting"), jp)
+    assert str(got) == "allow:default"
+
+
+@pytest.mark.parametrize(
+    ("title", "rule"),
+    [
+        ("Explosives and Demolitions", "safety=explosives and demolitions"),
+        ("Improvised Explosive Device Construction", "safety=improvised explosive device construction"),
+        ("Firing Tables for the 155mm Howitzer", "safety=firing tables"),
+        ("Missile Guidance Systems", "safety=missile guidance"),
+        ("Production of Nerve Agents", "safety=production of nerve agents"),
+        ("Malware Development for Beginners", "safety=malware development"),
+    ],
+)
+def test_the_remaining_deny_core_still_denies(title: str, rule: str) -> None:
+    got = classify_metadata(DocFacts(key="k", title=title), Rules(allow_all=True))
+    assert str(got) == f"deny:{rule}", title
 
 
 # --- CA-16: owner decisions -------------------------------------------------------------------------
 
 
 def test_owner_allow_never_lifts_a_deny_core_title_but_a_reasoned_override_does() -> None:
-    title = "Joint Targeting Process"  # a later edition retitled into the core
+    title = "Demolition Charges"  # a later edition retitled into the core
     allowed = Rules(allow_all=True).merged({"allow_documents": ["army:x:2030"]})
     assert classify_metadata(DocFacts(key="army:x:2030", title=title), allowed).verdict is Verdict.DENY
     over = Rules(allow_all=True).merged({"override_safety": {"army:x:2030": "owner 2026-10-12: history"}})
@@ -146,7 +179,7 @@ def test_owner_allow_never_lifts_a_deny_core_title_but_a_reasoned_override_does(
 
 
 def test_an_accepted_content_hold_is_released_only_with_allow_content_review() -> None:
-    held = Extracted("Planning guide\n" + "x" * 3500 + "\nAnnex: joint targeting" + FILLER)
+    held = Extracted("Planning guide\n" + "x" * 3500 + "\nAnnex: shaped charges" + FILLER)
     rules = Rules(require=("published",))
     assert screen_text(held, rules, keys=("who:1",)).decision.verdict is Verdict.REVIEW
     allowed = rules.merged({"allow_documents": ["who:1"]})
