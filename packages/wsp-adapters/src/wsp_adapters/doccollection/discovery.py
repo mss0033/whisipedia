@@ -994,7 +994,11 @@ def archive_org(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]
             landing_url=f"https://archive.org/details/{ident}",
             discovered_by="archive-org",
             resolve="archive-org",
-            extra={"provenance": _s(cfg.get("provenance")), "creator": _s(it.get("creator"))},
+            extra={
+                "provenance": _s(cfg.get("provenance")),
+                "creator": _s(it.get("creator")),
+                **({"prefer": _s(cfg.get("prefer"))} if cfg.get("prefer") else {}),
+            },
             partition=f"b{_bucket(ident, buckets):04d}" if buckets else f"b{page:04d}",
         )
         if not buckets and env.partition and env.partition.startswith("b") and env.partition < f"b{page:04d}":
@@ -1073,6 +1077,12 @@ def resolve_archive_org(cand: Candidate, env: DiscoverEnv) -> list[Candidate]:
     if not pdfs:
         return []
     f = pdfs[0]
+    if cand.extra.get("prefer") == "text-pdf":
+        # The Archive's OCR copy of an image-only original ("Additional Text PDF", <name>_text.pdf):
+        # the same pages with a text layer, so the screens can read it and search can find it.
+        ocr = next((x for x in files if _s(x.get("format")) == "Additional Text PDF"), None)
+        if ocr is not None:
+            f = ocr
     name = _s(f.get("name"))
     return [
         cand.with_url(

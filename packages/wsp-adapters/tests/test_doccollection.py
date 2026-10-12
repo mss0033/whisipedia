@@ -882,3 +882,40 @@ def test_a_zip_is_screened_by_its_readme_and_member_names(tmp_path: Path) -> Non
     bad = tmp_path / "bad.zip"
     bad.write_bytes(b"<html>")
     assert well_formed(bad) == "not a zip archive"
+
+
+def test_archive_items_can_prefer_the_ocr_text_pdf() -> None:
+    files = {
+        "result": [
+            {
+                "name": "1.pdf",
+                "source": "original",
+                "format": "Image Container PDF",
+                "size": "100",
+                "md5": "AA",
+            },
+            {
+                "name": "1_text.pdf",
+                "source": "derivative",
+                "format": "Additional Text PDF",
+                "size": "210",
+                "md5": "BB",
+            },
+        ]
+    }
+    routes = {"https://archive.org/metadata/doc1/files": json.dumps(files).encode()}
+    env = env_for(routes, origins=("archive.org",))
+    base = Candidate(
+        key="t:doc1",
+        url="https://archive.org/metadata/doc1/files",
+        title="Doc",
+        issuer="T",
+        landing_url="https://archive.org/details/doc1",
+        resolve="archive-org",
+    )
+    (orig,) = resolve(base, env)
+    assert orig.url.endswith("/1.pdf")
+    assert orig.md5 == "aa"
+    (ocr,) = resolve(replace(base, extra={"prefer": "text-pdf"}), env)
+    assert ocr.url.endswith("/1_text.pdf")
+    assert (ocr.size, ocr.md5) == (210, "bb")
