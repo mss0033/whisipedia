@@ -1074,7 +1074,7 @@ sources:
       discovery:
         - {kind: s3-listing, label: htmc-geopdf, bucket_url: "https://prd-tnm.s3.amazonaws.com", prefix: "StagedProducts/Maps/HistoricalTopo/PDF/", key_pattern: "\\.pdf$", partition: "HistoricalTopo/PDF/([A-Z]{2})/", partition_in_prefix: true}
         - {kind: s3-listing, label: htmc-geotiff, bucket_url: "https://prd-tnm.s3.amazonaws.com", prefix: "StagedProducts/Maps/HistoricalTopo/GeoTIFF/", key_pattern: "\\.(tif|zip)$", partition: "HistoricalTopo/GeoTIFF/([A-Z]{2})/", partition_in_prefix: true}
-      filter: {allow_all: true}
+      filter: {allow_all: true, allow_image_only: true}  # scanned maps: no text layer to screen
       currency: {collection: historical}
       formats: {geopdf: true, geotiff: optional}
       mirrors:
