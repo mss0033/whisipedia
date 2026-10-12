@@ -280,3 +280,24 @@ def test_misnamed_downloads_get_the_suffix_their_bytes_have(tmp_path: Path) -> N
     blob = tmp_path / "d.pdf"
     blob.write_bytes(b"\x00\x01binary")
     assert true_suffix(blob).name == "d.pdf"  # unknown: left for the PDF check to refuse
+
+
+def test_legacy_office_files_linked_as_pdfs_are_renamed(tmp_path: Path) -> None:
+    # A 2013 GOV.UK attachment linked as a PDF is an Excel 97 workbook: it failed "not a PDF" on every
+    # fetch (2026-10-12) and is now stored as .xls, held for review (no text extractor reads it).
+    from wsp_adapters.doccollection.adapter import body_kind, true_suffix, well_formed
+
+    magic = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+    for stream, suffix in (("Workbook", ".xls"), ("WordDocument", ".doc"), ("PowerPoint Document", ".ppt")):
+        f = tmp_path / f"legacy{suffix[1:]}.pdf"
+        f.write_bytes(magic + b"\x00" * 1000 + stream.encode("utf-16-le") + b"\x00" * 100)
+        assert body_kind(f) == "ole"
+        renamed = true_suffix(f)
+        assert renamed.suffix == suffix
+        assert well_formed(renamed) is None
+    unknown = tmp_path / "unknown.pdf"
+    unknown.write_bytes(magic + b"\x00" * 200)
+    assert true_suffix(unknown).name == "unknown.pdf"  # no main stream found: the PDF check refuses it
+    fake = tmp_path / "fake.xls"
+    fake.write_bytes(b"<html>login</html>")
+    assert well_formed(fake) == "not a .xls file (no OLE2 header)"

@@ -3,6 +3,12 @@
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Fixed: legacy Office files linked as PDFs (2026-10-12)
+* A `.pdf` link that serves an Excel 97, Word 97 or PowerPoint 97 file (an OLE2 compound file) is renamed
+  to `.xls`/`.doc`/`.ppt` like the zip-based Office formats, and held for review (no text extractor reads
+  them) instead of failing "not a PDF" on every fetch (five UK resilience attachments from 2011-2013).
+  Original files of those and of other office formats are served with their media types.
+
 ### Changed: search latency (2026-10-12)
 * The source cap re-runs a crowded query at most twice (was three times), and a query reads each stored
   document once (the cap and the hit list shared none of their reads). Measured on the live index: the

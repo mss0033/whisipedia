@@ -829,6 +829,16 @@ _ERROR_WORDS_RE = re.compile(
 )
 _HTML_RE = re.compile(rb"<html|<!doctype\s+html|<head[\s>]|<body[\s>]", re.IGNORECASE)
 _OFFICE_SUFFIXES = (".docx", ".xlsx", ".pptx", ".odt", ".ods", ".odp", ".zip", ".epub")
+# Legacy (97-2003) Office files are OLE2 compound files, not zips. Their main stream names the kind.
+_OLE_MAGIC = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+_OLE_SUFFIXES = (".doc", ".xls", ".ppt")
+_OLE_STREAMS = (
+    ("WordDocument".encode("utf-16-le"), ".doc"),
+    ("Workbook".encode("utf-16-le"), ".xls"),
+    ("Book".encode("utf-16-le"), ".xls"),
+    ("PowerPoint Document".encode("utf-16-le"), ".ppt"),
+)
+_OLE_SCAN_BYTES = 4 * 1024 * 1024
 _TEXT_DOC_SUFFIXES = (".txt", ".csv", ".md")
 
 
@@ -843,8 +853,8 @@ def _error_text(head: bytes, size: int) -> bool:
 
 
 def body_kind(path: Path) -> str:
-    """What a downloaded file's bytes are: ``pdf``, ``zip``, ``html``, ``json``, ``xml``, ``text``,
-    ``empty`` or ``binary`` (by content, never by name)."""
+    """What a downloaded file's bytes are: ``pdf``, ``zip``, ``ole`` (a legacy Office file), ``html``,
+    ``json``, ``xml``, ``text``, ``empty`` or ``binary`` (by content, never by name)."""
     head = _head(path)
     stripped = head.lstrip()
     if not stripped:
@@ -853,6 +863,8 @@ def body_kind(path: Path) -> str:
         return "pdf"
     if head.startswith(b"PK\x03\x04"):
         return "zip"
+    if head.startswith(_OLE_MAGIC):
+        return "ole"
     if _HTML_RE.search(head[:1024]):
         return "html"
     if b"\x00" in head:
@@ -886,6 +898,8 @@ def true_suffix(path: Path) -> Path:
     suffix = ""
     if kind == "zip":
         suffix = _zip_kind(path)
+    elif kind == "ole":
+        suffix = _ole_kind(path)
     elif kind == "text" and not _error_text(_head(path), path.stat().st_size):
         suffix = ".txt"  # CSV and plain text attachments
     else:
@@ -895,6 +909,17 @@ def true_suffix(path: Path) -> Path:
     target = path.with_suffix(suffix)
     path.replace(target)
     return target
+
+
+def _ole_kind(path: Path) -> str:
+    """``.doc``, ``.xls`` or ``.ppt`` by the main stream a legacy Office file holds (its directory entry
+    names are UTF-16), or ``""`` when none is found in the first :data:`_OLE_SCAN_BYTES`: a GOV.UK
+    attachment from 2013 linked as a PDF is an Excel 97 workbook (``LEXICON_v2_1_1-Feb-2013.xls``)."""
+    data = _head(path, _OLE_SCAN_BYTES)
+    for name, suffix in _OLE_STREAMS:
+        if name in data:
+            return suffix
+    return ""
 
 
 def _zip_kind(path: Path) -> str:
@@ -958,6 +983,8 @@ def well_formed(path: Path) -> str | None:
             if name.endswith(".zip")
             else f"not a {Path(name).suffix} file (no zip container)"
         )
+    if name.endswith(_OLE_SUFFIXES) and not head.startswith(_OLE_MAGIC):
+        return f"not a {Path(name).suffix} file (no OLE2 header)"
     if name.endswith(_TEXT_DOC_SUFFIXES):
         kind = body_kind(path)
         if kind not in ("text", "empty"):
