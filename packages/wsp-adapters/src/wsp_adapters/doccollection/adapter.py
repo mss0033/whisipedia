@@ -43,6 +43,7 @@ import logging
 import re
 import sqlite3
 import time
+import zipfile
 from collections import deque
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -555,6 +556,8 @@ def well_formed(path: Path) -> str | None:
         return "not a PDF (missing %PDF- header)"
     if name.endswith((".html", ".htm")) and b"<" not in head:
         return "not HTML"
+    if name.endswith(".zip") and not head.startswith(b"PK\x03\x04"):
+        return "not a zip archive"
     return None
 
 
@@ -603,10 +606,30 @@ def extract_text(path: Path, *, max_pages: int) -> Extracted:
             return Extracted(html_to_text(path.read_bytes()[: 16 * 1024 * 1024]))
         if suffix in TEXT_SUFFIXES:
             return Extracted(path.read_bytes()[: 16 * 1024 * 1024].decode("utf-8", "replace"))
+        if suffix == ".zip" and head.startswith(b"PK\x03\x04"):  # an archive, not a DOCX/EPUB container
+            return Extracted(zip_screen_text(path))
     except Exception as exc:
         log.warning("text extraction failed for %s: %s", path.name, exc)
         return Extracted("", "extraction-error")
     return Extracted("", "unsupported-format")
+
+
+ZIP_SCREEN_CHARS = 60_000
+
+
+def zip_screen_text(path: Path) -> str:
+    """What the gate reads of a zip archive: its README-like members, then its member names (nested
+    zips' names too). A list of names reads like a table of contents ("U_Windows_10_V3R1_STIG.zip"), so
+    the content screen's title-page and three-phrase rules apply to it, as for git bundles."""
+    parts: list[str] = []
+    with zipfile.ZipFile(path) as zf:
+        names = zf.namelist()
+        for name in names:
+            low = name.lower().rsplit("/", 1)[-1]
+            if low.startswith("readme") and low.endswith((".txt", ".md", "")) and not name.endswith("/"):
+                parts.append(zf.read(name)[:20_000].decode("utf-8", "replace"))
+        parts.extend(n.replace("/", " / ").replace("_", " ") for n in names)
+    return "\n".join(parts)[:ZIP_SCREEN_CHARS]
 
 
 def document_text(path: Path, *, max_pages: int) -> str:

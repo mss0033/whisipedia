@@ -708,26 +708,37 @@ def test_concurrent_requests_overlap_but_start_an_interval_apart() -> None:
     import threading as th
     import time
 
-    starts: list[float] = []
     lock = th.Lock()
+    active = [0, 0]  # in flight now, most at once
 
     class Slow(FakeFetcher):
         def get_bytes(self, url: str, *, max_bytes: int = 64 * 1024 * 1024) -> bytes:
             with lock:
-                starts.append(time.monotonic())
+                active[0] += 1
+                active[1] = max(active[1], active[0])
             time.sleep(0.25)  # a slow round trip
+            with lock:
+                active[0] -= 1
             return b"{}"
 
-    t = Throttle(Slow({}), interval=0.05)
+    slots: list[float] = []
+
+    def sleep(delay: float) -> None:
+        with lock:
+            slots.append(time.monotonic() + delay)  # the start this request reserved
+        time.sleep(delay)
+
+    t = Throttle(Slow({}), interval=0.05, sleep=sleep)
     workers = [th.Thread(target=t.get_bytes, args=(f"https://a.gov/{i}",)) for i in range(6)]
-    began = time.monotonic()
     for w in workers:
         w.start()
     for w in workers:
         w.join()
-    starts.sort()
-    assert all(b - a >= 0.045 for a, b in itertools.pairwise(starts))  # never closer than the interval
-    assert time.monotonic() - began < 6 * 0.25  # but overlapping, not one after another
+    slots.sort()
+    # Reserved starts are an interval apart (each computed under the throttle's lock); ignore the tiny
+    # jitter between computing a slot and reading the clock here.
+    assert all(b - a >= 0.05 - 0.01 for a, b in itertools.pairwise(slots))
+    assert active[1] >= 2  # requests overlapped: one did not wait for the previous to finish
     assert t.requests["a.gov"] == 6
 
 
@@ -822,3 +833,52 @@ def test_a_gatsby_site_is_read_from_page_data_with_chapters_named_by_book() -> N
     ]
     assert len({c.key for c in found}) == 4  # "Front Matter" twice, but never one key
     assert not env.incomplete
+
+
+def test_latest_dated_finds_the_newest_published_release() -> None:
+    from wsp_core.errors import NotFoundError
+    from wsp_core.model import RemoteHead
+
+    published = {
+        "https://dl.example.mil/Library_July_2026.zip",
+        "https://dl.example.mil/Library_April_2026.zip",
+    }
+
+    class Heads(FakeFetcher):
+        def head(self, url: str) -> RemoteHead:
+            if url not in published:
+                raise NotFoundError(url)
+            return RemoteHead(url=url, size=123)
+
+    env = DiscoverEnv(fetcher=Heads({}), issuer="DISA", prefix="stig", origins=("dl.example.mil",))
+    cfg = {
+        "kind": "latest-dated",
+        "url": "https://dl.example.mil/Library_{Month}_{YYYY}.zip",
+        "months": [1, 4, 7, 10],
+        "today": "2026-10-12",  # October not out yet: July is the newest
+        "series": "Library",
+        "title": "Library",
+    }
+    (cand,) = list(discover_all([cfg], env))
+    assert cand.url == "https://dl.example.mil/Library_July_2026.zip"
+    assert (cand.key, cand.edition_date, cand.size) == ("stig:Library-2026-07", "2026-07-01", 123)
+    assert cand.title == "Library (July 2026)"
+
+
+def test_a_zip_is_screened_by_its_readme_and_member_names(tmp_path: Path) -> None:
+    import zipfile
+
+    from wsp_adapters.doccollection.adapter import extract_text, well_formed
+
+    z = tmp_path / "lib.zip"
+    with zipfile.ZipFile(z, "w") as zf:
+        zf.writestr("README.txt", "Security Technical Implementation Guides, approved for public release.")
+        zf.writestr("U_Windows_10_V3R1_STIG.zip", b"PK")
+    got = extract_text(z, max_pages=3)
+    assert got.problem == ""
+    assert "approved for public release" in got.text
+    assert "U Windows 10 V3R1 STIG.zip" in got.text
+    assert well_formed(z) is None
+    bad = tmp_path / "bad.zip"
+    bad.write_bytes(b"<html>")
+    assert well_formed(bad) == "not a zip archive"

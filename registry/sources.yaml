@@ -851,7 +851,15 @@ sources:
       issuer: Defense Information Systems Agency
       key_prefix: disa
       origins: [www.cyber.mil, dl.dod.cyber.mil]
-      discovery: [{kind: index-page, url: "https://www.cyber.mil/stigs/downloads/", documents: "dl\\.dod\\.cyber\\.mil/.+\\.zip$"}]
+      # www.cyber.mil became a Salesforce app (2026-10-12): the downloads page lists nothing a client can
+      # read. DISA publishes every STIG and SRG each quarter in one library zip at a predictable URL.
+      discovery:
+        - kind: latest-dated
+          url: "https://dl.dod.cyber.mil/wp-content/uploads/stigs/zip/U_SRG-STIG_Library_{Month}_{YYYY}.zip"
+          months: [1, 4, 7, 10]
+          lookback: 12
+          series: SRG-STIG-Library
+          title: DISA SRG and STIG Library
       filter: {allow_all: true, distribution: {require: [public-release, published]}}
       mirrors:
         - {channel: "www.cyber.mil + dl.dod.cyber.mil", status: reachable, verified: 2026-10-10, note: "both answered 200 to a plain client on 2026-10-10"}

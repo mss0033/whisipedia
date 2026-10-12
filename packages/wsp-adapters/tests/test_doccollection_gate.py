@@ -192,12 +192,19 @@ def test_extraction_error_is_held(tmp_path: Path) -> None:
     assert str(screen.decision) == "review:text=extraction-error"
 
 
-@pytest.mark.parametrize("suffix", [".zip", ".tif", ".jpg", ".docx", ".epub", ".bin"])
+@pytest.mark.parametrize("suffix", [".tif", ".jpg", ".docx", ".epub", ".bin"])
 def test_unsupported_formats_are_held(tmp_path: Path, suffix: str) -> None:
+    # DOCX and EPUB are zip containers: never screened by member names, only a real .zip archive is.
     path = tmp_path / f"doc{suffix}"
     path.write_bytes(b"PK\x03\x04" + b"\x00" * 64)
     screen = screen_file(path, Rules(allow_image_only=True))
     assert str(screen.decision) == "review:text=unsupported-format"
+
+
+def test_a_corrupt_zip_is_held(tmp_path: Path) -> None:
+    path = tmp_path / "doc.zip"
+    path.write_bytes(b"PK\x03\x04" + b"\x00" * 64)
+    assert str(screen_file(path, Rules(allow_image_only=True)).decision) == "review:text=extraction-error"
 
 
 def test_owner_allow_releases_only_missing_evidence_holds(tmp_path: Path) -> None:

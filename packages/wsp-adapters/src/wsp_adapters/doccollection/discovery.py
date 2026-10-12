@@ -43,7 +43,7 @@ import threading
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, cast
 from urllib.parse import quote, urlencode, urljoin, urlsplit
@@ -1173,6 +1173,46 @@ def fixed_list(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
         )
 
 
+_MONTHS = (
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+)  # fmt: skip
+
+
+def latest_dated(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
+    """The newest of a dated series published at a predictable URL (``url`` with ``{Month}``, ``{MM}``,
+    ``{YYYY}``): DISA's quarterly ``U_SRG-STIG_Library_October_2026.zip``. Recent months (``months``,
+    default every month) are probed newest first with HEAD, up to ``lookback`` months back."""
+    template = _s(cfg.get("url"))
+    months = {int(m) for m in cast(list[Any], cfg.get("months") or range(1, 13))}
+    lookback = int(cfg.get("lookback", 12))
+    today = date.fromisoformat(_s(cfg["today"])) if cfg.get("today") else datetime.now(UTC).date()
+    head = getattr(env.fetcher, "head", None)
+    if not callable(head):
+        raise DiscoveryError("latest-dated needs a fetcher that supports HEAD")
+    year, month = today.year, today.month
+    for _ in range(lookback + 1):
+        if month in months:
+            url = template.format(Month=_MONTHS[month - 1], MM=f"{month:02d}", YYYY=year)
+            try:
+                found = cast(RemoteHead, head(url))
+            except NotFoundError:
+                found = None
+            if found is not None:
+                stamp = f"{year}-{month:02d}"
+                yield Candidate(
+                    key=make_key(env.prefix, f"{_s(cfg.get('series')) or 'release'}-{stamp}"),
+                    url=url,
+                    title=f"{_s(cfg.get('title')) or title_from_url(url)} ({_MONTHS[month - 1]} {year})",
+                    issuer=env.issuer,
+                    edition_date=f"{stamp}-01",
+                    size=found.size,
+                    discovered_by="latest-dated",
+                )
+                return
+        year, month = (year - 1, 12) if month == 1 else (year, month - 1)
+
+
 DISCOVERERS: dict[str, Discoverer] = {
     "index-page": index_page,
     "api": api,
@@ -1182,6 +1222,7 @@ DISCOVERERS: dict[str, Discoverer] = {
     "git": git_repo,
     "list": fixed_list,
     "document": fixed_list,
+    "latest-dated": latest_dated,
 }
 
 Resolver = Callable[[Candidate, DiscoverEnv], list[Candidate]]
