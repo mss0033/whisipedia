@@ -780,3 +780,45 @@ def test_xml_answers_with_forbidden_control_characters_still_parse() -> None:
 
     root = xml_root(b"<records><record><title>Shelter\x0b design \x01guide</title></record></records>")
     assert root.findtext("record/title") == "Shelter design guide"
+
+
+def test_a_gatsby_site_is_read_from_page_data_with_chapters_named_by_book() -> None:
+    category = b'<a href="/book-a">Book A</a> <a href="/book-b">Book B</a>'
+    shell = b"<html><body><div id=___gatsby></div></body></html>"
+
+    def page_data(book: str) -> bytes:
+        html = (
+            f'<a href="https://files.example.mil/dl.aspx?docid={book}-epub">{book} EPUB file download</a>'
+            f'<a href="https://files.example.mil/dl.aspx?docid={book}-1">Front Matter</a>'
+            f'<a href="https://files.example.mil/dl.aspx?docid={book}-2">Chapter One</a>'
+        )
+        return json.dumps({"result": {"data": {"page": {"body": html}}}}).encode()
+
+    routes = {
+        "https://site.example.mil/cat": category,
+        "https://site.example.mil/page-data/cat/page-data.json": b"{}",
+        "https://site.example.mil/book-a": shell,
+        "https://site.example.mil/book-b": shell,
+        "https://site.example.mil/page-data/book-a/page-data.json": page_data("Book A"),
+        "https://site.example.mil/page-data/book-b/page-data.json": page_data("Book B"),
+    }
+    env = env_for(routes, origins=("site.example.mil", "files.example.mil"))
+    cfg = {
+        "kind": "index-page",
+        "gatsby": True,
+        "url": "https://site.example.mil/cat",
+        "follow": r"site\.example\.mil/book-",
+        "depth": 1,
+        "documents": r"files\.example\.mil/dl\.aspx\?docid=",
+        "documents_skip_text": r"\b(EPUB|MOBI)\b",
+        "key_from": "text",
+    }
+    found = list(discover_all([cfg], env))
+    assert sorted(c.title for c in found) == [
+        "Book A: Chapter One",
+        "Book A: Front Matter",
+        "Book B: Chapter One",
+        "Book B: Front Matter",
+    ]
+    assert len({c.key for c in found}) == 4  # "Front Matter" twice, but never one key
+    assert not env.incomplete

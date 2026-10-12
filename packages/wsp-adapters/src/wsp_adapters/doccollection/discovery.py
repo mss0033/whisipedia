@@ -307,6 +307,17 @@ def index_page(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
     filter_follow = bool(cfg.get("filter_follow", False))
     pub_rx = _s(cfg.get("pub_number")) or None
     label = _s(cfg.get("label")) or "index-page"
+    # Sites built with Gatsby send an empty shell; the page's HTML is in /page-data/<path>/page-data.json.
+    gatsby = bool(cfg.get("gatsby", False))
+    # Only document links whose text matches (e.g. "PDF" where each book also offers an EPUB).
+    text_rx = re.compile(_s(cfg["documents_text"]), re.IGNORECASE) if cfg.get("documents_text") else None
+    skip_text_rx = (
+        re.compile(_s(cfg["documents_skip_text"]), re.IGNORECASE) if cfg.get("documents_skip_text") else None
+    )
+    strip_rx = re.compile(_s(cfg["title_strip"]), re.IGNORECASE) if cfg.get("title_strip") else None
+    # "text": key documents by their (stripped) link text, for sites whose file URLs all share one path
+    # (".../FileDownloadpublic.aspx?docid=..."), where a key from the URL would collide.
+    key_from_text = _s(cfg.get("key_from")) == "text"
     seen_pages: set[str] = set()
     seen_docs: set[str] = set()
     queue: list[tuple[str, int, Mapping[str, str]]] = [(u, 0, {}) for u in urls]
@@ -318,6 +329,8 @@ def index_page(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
         seen_pages.add(page)
         try:
             html = env.get_text(page)
+            if gatsby:
+                html += "\n" + _gatsby_html(env, page)
         except FetchError as exc:
             env.notes.append(f"{label}: {page}: {exc}")
             if not isinstance(exc, NotFoundError):  # a page that is gone lists nothing; a timeout might
@@ -334,15 +347,23 @@ def index_page(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
             if doc_rx.search(url):
                 if url in seen_docs or not origin_ok(url, env.origins):
                     continue
+                if text_rx is not None and not text_rx.search(text):
+                    continue
+                if skip_text_rx is not None and skip_text_rx.search(text):
+                    continue
                 seen_docs.add(url)
+                if strip_rx is not None:
+                    text = strip_rx.sub("", text).strip()
                 title = inherited.get("title") if is_generic_title(text) else text
                 title = title or title_from_url(url)
+                if key_from_text and inherited.get("title") and title != inherited["title"]:
+                    title = f"{inherited['title']}: {title}"  # a chapter, named with its book
                 pub = inherited.get("pub_number") or _pub_number(pub_rx, text, title, url)
                 edition = inherited.get("edition_date") or (
                     iso_date(f"{text} {url}") if cfg.get("dates") else ""
                 )
                 yield Candidate(
-                    key=pub_key(env.prefix, pub, edition, title_from_url(url)),
+                    key=pub_key(env.prefix, pub, edition, title if key_from_text else title_from_url(url)),
                     url=url,
                     title=title,
                     issuer=env.issuer,
@@ -365,6 +386,24 @@ def index_page(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
         env.notes.append(f"{label}: stopped after {visited} pages ({pending} more queued): a sample")
         env.incomplete.append(f"{label}: stopped after {visited} pages ({pending} more queued)")
         env.scale[label] = (visited + pending) / max(visited, 1)
+
+
+def _gatsby_html(env: DiscoverEnv, page: str) -> str:
+    """The HTML a Gatsby page renders: every string in its ``page-data.json``, one per line."""
+    parts = urlsplit(page)
+    path = parts.path.rstrip("/") or "/index"
+    data: object = env.get_json(f"{parts.scheme}://{parts.netloc}/page-data{path}/page-data.json")
+    out: list[str] = []
+    stack: list[object] = [data]
+    while stack:
+        item = stack.pop()
+        if isinstance(item, str):
+            out.append(item)
+        elif isinstance(item, Mapping):
+            stack.extend(cast(Mapping[str, object], item).values())
+        elif isinstance(item, list):
+            stack.extend(cast(list[object], item))
+    return "\n".join(reversed(out))
 
 
 def _rows(
