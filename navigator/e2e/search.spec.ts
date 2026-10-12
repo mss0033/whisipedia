@@ -207,11 +207,8 @@ test('a misspelled query offers "Did you mean", and following it searches the fi
   page,
   nav,
   data,
-  target,
 }) => {
-  // E2E-10 (docs/testing/e2e-findings.md): live, `did_you_mean` is null for
-  // "diabetis insulen" (and "vacine"). Remove test.fail() once it is offered.
-  test.fail(target === 'live', 'E2E-10');
+  // E2E-10 (docs/testing/e2e-findings.md) is fixed: the live library offers the correction.
   await nav.open('wsp://home');
   await nav.go(data.misspelled);
   const line = nav.main.locator('.did-you-mean');

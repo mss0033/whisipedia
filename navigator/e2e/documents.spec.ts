@@ -31,7 +31,7 @@ test('open a search result, follow an internal link, then Back and Forward', asy
 
   await nav.step('the original page renders, with exactly one page heading', async () => {
     await expect(article).toBeVisible();
-    await expect(body.locator('p').first()).toBeVisible();
+    await expect(body.locator('p:visible').first()).toBeVisible(); // Wikipedia leads with a hidden mw-empty-elt <p>
     await expect(nav.main.locator('h1')).toHaveCount(1);
     await expect(nav.heading).toContainText(title);
     await expect(nav.heading).toBeFocused();

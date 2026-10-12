@@ -41,7 +41,9 @@ export const DATA: Record<Target, TargetData> = {
     question: 'how do vaccines train the immune system',
     docQuery: 'immune system',
     result: /^Immune system$/,
-    docAddress: /^wsp:\/\/mdwiki\/Immune_system$/,
+    // MDWiki's or Wikipedia's article: both are good first results (fusion no longer favours
+    // the one source with passage embeddings).
+    docAddress: /^wsp:\/\/(mdwiki|wikipedia-top10\/en|wikipedia-en-zim)\/Immune_system$/,
     doc: 'wsp://wikipedia-en-zim/Alan_Turing',
     docTitle: /Alan Turing/,
     doc2: 'wsp://wikipedia-en-zim/Turing_machine',
