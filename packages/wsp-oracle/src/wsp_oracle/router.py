@@ -140,7 +140,7 @@ _COMPARE = re.compile(
 )
 _DEFINE_PREFER = ("wiktionary", "dictionary")
 _LOCATE_PREFER = ("osm", "maps", "wikivoyage", "geonames")
-_HOW_TO_PREFER = ("wikihow", "wikibooks", "stackexchange")
+_HOW_TO_PREFER = ("wikihow", "wikibooks", "stackexchange", "mdwiki")  # mdwiki: practical medicine
 
 
 def _clean(text: str) -> str:

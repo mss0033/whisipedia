@@ -214,7 +214,9 @@ class OracleSearcher:
 
         def preferred(h: SearchHit) -> bool:
             src = h.source_id or source_of(h.doc_id)
-            return src in exact or any(p in src for p in route.prefer)
+            # A bundle's book is the first part of the native id ("kiwix-curated-t2/wikibooks_en_all/...").
+            book = h.doc_id.removeprefix(f"wsp:{src}/").partition("/")[0]
+            return src in exact or any(p in src or p in book for p in route.prefer)
 
         boosted = [replace(h, score=h.score * PREFER_BOOST) if preferred(h) else h for h in fused]
         return sorted(boosted, key=lambda h: -h.score)

@@ -54,3 +54,24 @@ def test_near_identical_titles_of_one_source_collapse_to_the_best() -> None:
         make_doc_id("mdwiki", "3"),
         make_doc_id("wiki", "4"),
     ]
+
+
+def test_how_to_prefers_books_inside_bundles() -> None:
+    from typing import Any, cast
+
+    from wsp_oracle.pipeline import OracleSearcher
+    from wsp_oracle.router import Router
+
+    route = Router.from_sources(["kiwix-curated-t2", "pubmed"], {}).route("how to treat a snake bite")
+    fused = [
+        SearchHit(make_doc_id("pubmed", "1"), 1.0, "A Case of Snake-Bite", "", "pubmed"),
+        SearchHit(
+            make_doc_id("kiwix-curated-t2", "wikibooks_en_all/First_Aid/Snakebite"),
+            0.8,
+            "First Aid",
+            "",
+            "kiwix-curated-t2",
+        ),
+    ]
+    out = OracleSearcher._boost(cast(Any, None), route, fused)  # pyright: ignore[reportPrivateUsage]
+    assert out[0].source_id == "kiwix-curated-t2"  # 0.8 x 1.5 > 1.0
