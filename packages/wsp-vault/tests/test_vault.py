@@ -103,6 +103,23 @@ def test_adopt_renames_after_verifying(vault: FileVault, tmp_path: Path) -> None
     assert [str(a.relpath) for a in gen.artifacts] == ["upstream/big.zim"]
 
 
+def test_adopt_drops_an_identical_refetched_copy_and_refuses_a_different_one(
+    vault: FileVault, tmp_path: Path
+) -> None:
+    incoming = tmp_path / "vault" / "_incoming" / "doc.pdf"
+    incoming.parent.mkdir(parents=True)
+    incoming.write_bytes(b"pdf one")
+    art = vault.adopt(SOURCE, GEN, incoming, "upstream/doc.pdf")
+    incoming.write_bytes(b"pdf one")  # the collection was fetched again after an interrupted ingest
+    assert vault.adopt(SOURCE, GEN, incoming, "upstream/doc.pdf") == art
+    assert not incoming.exists()
+    incoming.write_bytes(b"pdf two")
+    with pytest.raises(VaultError, match="different content"):
+        vault.adopt(SOURCE, GEN, incoming, "upstream/doc.pdf")
+    assert incoming.exists()  # never replaced, never deleted
+    assert (vault.staging_path(SOURCE, GEN) / "upstream/doc.pdf").read_bytes() == b"pdf one"
+
+
 def test_adopt_many_batches_records_and_resumes(vault: FileVault, tmp_path: Path) -> None:
     incoming = tmp_path / "vault" / "_incoming" / "tree"
     items: list[tuple[Path, str, Sequence[Checksum]]] = []

@@ -501,7 +501,17 @@ class FileVault:
         if path.exists():
             _require_regular(path)
             if dest.exists():
-                raise VaultError(f"{relpath} is already staged; refusing to replace it")
+                # Staged by an earlier, interrupted ingest and fetched again since: the same bytes are
+                # nothing to do (drop the incoming copy); different bytes are never replaced.
+                have = readback(dest, extra=extra)
+                if readback(path, extra=extra) != have:
+                    raise VaultError(
+                        f"{relpath} is already staged with different content; refusing to replace it"
+                    )
+                validate(have)
+                path.unlink()
+                fsync_dir(path.parent)
+                return rel.as_posix(), have
             if moving.exists():
                 raise VaultError(f"an interrupted adoption left {moving}; inspect it and {path} by hand")
             if os.stat(dest.parent).st_dev != os.stat(path).st_dev:
