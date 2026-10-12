@@ -422,8 +422,10 @@ class TantivyIndex:
         n = 0
         with self._lock:
             db = self._db
-            db.execute("UPDATE titles SET prior = 0 WHERE prior <> 0")  # uses titles_prior while it exists
+            # Drop the index first: zeroing through it rewrites the index once per row (tens of millions
+            # after an earlier run); without it the reset is one pass over the table.
             db.execute("DROP INDEX IF EXISTS titles_prior")
+            db.execute("UPDATE titles SET prior = 0 WHERE prior <> 0")
             db.commit()
             db.execute(
                 "CREATE TEMP TABLE IF NOT EXISTS prior_load (doc_id TEXT PRIMARY KEY, prior REAL NOT NULL) "

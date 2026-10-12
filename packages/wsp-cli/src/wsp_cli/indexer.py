@@ -502,7 +502,7 @@ class Indexer:
 
         def per_source() -> Iterator[Iterator[dict[str, float]]]:
             for sid, reader in readers:
-                self._say(f"rank: priors for {sid}")
+                self._say(f"rank: priors for {sid}")  # one line per source: progress in the log
                 yield batches(reader)
 
         n = self.index.set_priors_bulk(per_source())
