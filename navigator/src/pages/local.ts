@@ -1,6 +1,6 @@
 /** wsp://history and wsp://hotlist — local, per-browser pages. */
 import { h } from '../core/dom.ts';
-import { formatDate, formatDateTime } from '../core/format.ts';
+import { formatLocalDate, formatLocalDateTime } from '../core/format.ts';
 import { pageHeading, wspLink } from '../ui/components.ts';
 import type { PageContext, PageResult } from './types.ts';
 
@@ -28,7 +28,7 @@ export async function renderHistory(ctx: PageContext): Promise<PageResult> {
     }
     const groups = new Map<string, typeof rows>();
     for (const e of rows) {
-      const day = formatDate(e.lastVisit);
+      const day = formatLocalDate(e.lastVisit);
       groups.set(day, [...(groups.get(day) ?? []), e]);
     }
     table.replaceChildren(
@@ -72,7 +72,7 @@ export async function renderHistory(ctx: PageContext): Promise<PageResult> {
                 null,
                 h('td', null, wspLink(e.address, e.title || e.address)),
                 h('td', null, h('code', null, e.address)),
-                h('td', null, formatDateTime(e.lastVisit)),
+                h('td', null, formatLocalDateTime(e.lastVisit)),
                 h('td', null, String(e.visits)),
                 h('td', null, del),
               );
@@ -170,7 +170,7 @@ export async function renderHotlist(ctx: PageContext): Promise<PageResult> {
             h('span', { class: 'bm-icon', 'aria-hidden': 'true' }, '◆'),
             ' ',
             wspLink(b.address, b.title),
-            h('span', { class: 'fineprint' }, ` added ${formatDate(b.added)} `),
+            h('span', { class: 'fineprint' }, ` added ${formatLocalDate(b.added)} `),
             up,
             down,
             del,

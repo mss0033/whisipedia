@@ -42,6 +42,7 @@ All notable changes are documented here. The format follows [Keep a Changelog](h
 * Original files: at most 4 stream at once (others get 503 busy), so a stalled NAS read cannot hold
   Starlette's shared thread pool. Without a cache directory, previews go to a private temporary
   directory, not `/tmp/previews`.
+* History and the Hotlist show the reader's own clock (they showed UTC); library dates stay in UTC.
 * `/v1/suggest` describes what it matches; the Navigator drops suggestion fields the API never sends.
 * Open Library pages say they are catalog cards, not books, and link to a search of the library's
   books for the title and, for an edition, to its work record.

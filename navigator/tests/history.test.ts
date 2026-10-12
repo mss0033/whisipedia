@@ -107,3 +107,15 @@ describe('Hotlist', () => {
     expect(restored.has('wsp://gutenberg/84')).toBe(false);
   });
 });
+
+describe('History times are the reader’s own clock', () => {
+  it('formats visits in local time, library dates in UTC', async () => {
+    const { formatDateTime, formatLocalDateTime } = await import('../src/core/format.ts');
+    const at = Date.UTC(2026, 9, 12, 13, 25);
+    expect(formatDateTime(at)).toBe('Oct 12, 2026, 13:25 UTC');
+    const local = new Date(at);
+    const hh = String(local.getHours()).padStart(2, '0');
+    expect(formatLocalDateTime(at)).toContain(`${hh}:25`);
+    expect(formatLocalDateTime(at)).not.toContain('UTC');
+  });
+});
