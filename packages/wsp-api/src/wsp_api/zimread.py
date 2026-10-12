@@ -118,6 +118,18 @@ def read_entry(archive: Archive, path: str, want: Want) -> EntryData | None:
     return None
 
 
+def page_count(archive: Archive) -> int:
+    """HTML pages in an archive: the ``text/html`` figure of its ``Counter`` metadata (``article_count``
+    also counts redirects: 21.7M for Wikipedia English's ~7M pages), else ``article_count``."""
+    if "Counter" in archive.metadata_keys:
+        counter = archive.get_metadata("Counter").decode("utf-8", errors="replace")
+        for part in counter.split(";"):
+            mime, _, n = part.partition("=")
+            if mime.strip() == "text/html" and n.strip().isdigit():
+                return int(n)
+    return int(archive.article_count)
+
+
 RANDOM_TRIES = 20  # random entries drawn until one is an article (most are, after the front matter)
 
 
@@ -193,7 +205,7 @@ class InProcessZimReader:
         return book_name_of(self._opener(file), file)
 
     def warm(self, file: str) -> int | None:
-        return int(self._cache.get(file).article_count)
+        return page_count(self._cache.get(file))
 
     def random(self, file: str) -> tuple[str, str] | None:
         return random_article(self._cache.get(file))

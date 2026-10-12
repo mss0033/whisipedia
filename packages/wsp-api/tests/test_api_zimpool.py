@@ -196,7 +196,7 @@ def test_workers_never_write_core_dumps(pool: ZimProcessPool, zim: str) -> None:
 
 
 def test_random_articles_and_warm_opens(pool: ZimProcessPool, zim: str) -> None:
-    pool.warm(zim)
+    assert pool.warm(zim) == 51  # HTML pages: Home + 50, not the redirect or the image
     seen: set[str] = set()
     for _ in range(30):
         found = pool.random(zim)

@@ -22,7 +22,15 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 from multiprocessing.connection import Connection
 
-from wsp_api.zimread import ArchiveCache, Want, book_name_of, open_archive, random_article, read_entry
+from wsp_api.zimread import (
+    ArchiveCache,
+    Want,
+    book_name_of,
+    open_archive,
+    page_count,
+    random_article,
+    read_entry,
+)
 
 _PR_SET_DUMPABLE = 4
 
@@ -70,7 +78,7 @@ class _Server:
             file = str(args[0])
             return book_name_of(open_archive(file), file)  # not cached: bundles have hundreds of books
         if op == "count":  # opens the archive (kept open) and answers its article count
-            return int(self.cache.get(str(args[0])).article_count)
+            return page_count(self.cache.get(str(args[0])))
         if op == "random":
             found = random_article(self.cache.get(str(args[0])))
             return None if found is None else list(found)
