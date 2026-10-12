@@ -36,6 +36,7 @@ import hashlib
 import json
 import logging
 import re
+import threading
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -91,19 +92,23 @@ class Throttle:
         self.per_host = {k.lower(): v for k, v in (per_host or {}).items()}
         self.clock = clock
         self.sleep = sleep
-        self._last: dict[str, float] = {}
+        self._last: dict[str, float] = {}  # host -> start time of its latest (reserved) request
         self.requests: dict[str, int] = {}
+        self._lock = threading.Lock()
 
     def _wait(self, url: str) -> None:
+        """Reserve this host's next start slot, then sleep until it. Thread-safe: concurrent callers
+        get consecutive slots, so requests may overlap but never *start* closer than the interval."""
         host = urlsplit(url).netloc.lower()
         gap = max(self.interval, self.per_host.get(host, 0.0))
-        last = self._last.get(host)
-        if last is not None:
-            delay = gap - (self.clock() - last)
-            if delay > 0:
-                self.sleep(delay)
-        self._last[host] = self.clock()
-        self.requests[host] = self.requests.get(host, 0) + 1
+        with self._lock:
+            now = self.clock()
+            last = self._last.get(host)
+            start = now if last is None else max(now, last + gap)
+            self._last[host] = start
+            self.requests[host] = self.requests.get(host, 0) + 1
+        if start > now:
+            self.sleep(start - now)
 
     def get_bytes(self, url: str, *, max_bytes: int = 64 * 1024 * 1024) -> bytes:
         self._wait(url)

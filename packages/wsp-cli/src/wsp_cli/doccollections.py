@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import hashlib
 import json
 import os
 import re
@@ -30,7 +31,9 @@ import statistics
 import subprocess
 import sys
 import tempfile
+from collections import deque
 from collections.abc import Mapping, Sequence
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -443,25 +446,67 @@ class CollectionFetcher:
             return report
         throttle = env.fetcher
         repos = registry_repos(coll)
-        for cand in docs:
-            if cand.key in held_sha and not cand.size:
-                report.skipped += 1  # same key held by an earlier generation; size unknown, keep it
-                continue
-            try:
-                if cand.resolve == "git":
-                    path, screen = self._git_bundle(cand, dest_dir, cfg.rules, repos)
-                else:
-                    path = self._download(throttle, cand, dest_dir, cfg.origins)
-                    screen = None
-            except (FetchError, OSError, ValueError, subprocess.CalledProcessError) as exc:
-                report.failed.append((cand.key, f"{type(exc).__name__}: {exc}"))
-                continue
-            self._screen(cand, path, cfg.rules, report, held_sha, screen=screen)
+        # Downloads overlap when the source allows it (``rate.concurrency``); the throttle still spaces
+        # their starts. Screening and the report stay on this thread, in completion order.
+        pool = (
+            ThreadPoolExecutor(cfg.concurrency, thread_name_prefix="fetch") if cfg.concurrency > 1 else None
+        )
+        inflight: deque[tuple[Candidate, Future[Path]]] = deque()
+        fetch_errors = (FetchError, OSError, ValueError, subprocess.CalledProcessError)
+
+        def drain(keep: int) -> None:
+            while len(inflight) > keep:
+                cand, fut = inflight.popleft()
+                try:
+                    path = fut.result()
+                except fetch_errors as exc:
+                    report.failed.append((cand.key, f"{type(exc).__name__}: {exc}"))
+                    continue
+                self._screen(cand, path, cfg.rules, report, held_sha, screen=None)
+
+        try:
+            for cand in docs:
+                if cand.key in held_sha and not cand.size:
+                    report.skipped += 1  # same key held by an earlier generation; size unknown, keep it
+                    continue
+                if pool is not None and cand.resolve != "git":
+                    inflight.append(
+                        (cand, pool.submit(self._download, throttle, cand, dest_dir, cfg.origins))
+                    )
+                    drain(2 * cfg.concurrency)
+                    continue
+                try:
+                    if cand.resolve == "git":
+                        path, screen = self._git_bundle(cand, dest_dir, cfg.rules, repos)
+                    else:
+                        path = self._download(throttle, cand, dest_dir, cfg.origins)
+                        screen = None
+                except fetch_errors as exc:
+                    report.failed.append((cand.key, f"{type(exc).__name__}: {exc}"))
+                    continue
+                self._screen(cand, path, cfg.rules, report, held_sha, screen=screen)
+            drain(0)
+        finally:
+            if pool is not None:
+                pool.shutdown(wait=True, cancel_futures=True)
         self._finish(spec, coll, report, prev_gen, prev_catalog, survey, dest_dir)
         return report
 
     def _download(self, fetcher: Fetcher, cand: Candidate, dest_dir: Path, origins: Sequence[str]) -> Path:
-        """Download within ``origins``; every redirect hop and the final URL are checked too."""
+        """Download within ``origins``; every redirect hop and the final URL are checked too.
+
+        A run interrupted after some downloads (a reboot, a restarted lane) keeps them: a complete file
+        already in ``dest_dir`` whose MD5 matches the one the issuer's listing published is used as is.
+        Without a published checksum the file is fetched again (its origin cannot be re-checked).
+        """
+        done = dest_dir / cand.file_name
+        if cand.md5 and done.is_file() and (cand.size is None or done.stat().st_size == cand.size):
+            digest = hashlib.md5(usedforsecurity=False)
+            with done.open("rb") as fh:
+                while chunk := fh.read(8 << 20):
+                    digest.update(chunk)
+            if digest.hexdigest() == cand.md5.lower():
+                return done
         remote = RemoteFile(url=cand.url, name=cand.file_name, size=cand.size, mirrors=cand.mirrors)
         return Path(download_from_origins(fetcher, remote, dest_dir / cand.file_name, origins).path)
 

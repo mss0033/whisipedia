@@ -43,7 +43,9 @@ import logging
 import re
 import sqlite3
 import time
+from collections import deque
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -112,6 +114,9 @@ class CollectionConfig:
     per_host: Mapping[str, float] = field(default_factory=dict[str, float])
     pdf_max_pages: int = DEFAULT_PDF_MAX_PAGES
     keep_superseded: bool = True
+    # Requests in flight at once (``rate.concurrency``, 1-8). Starts stay ``interval`` apart per host:
+    # this only stops a 2-3 s round trip from cutting a 1 request/s budget to 0.3/s.
+    concurrency: int = 1
 
     @staticmethod
     def from_spec(spec: SourceSpec, repo_root: Path = REPO_ROOT) -> CollectionConfig:
@@ -134,6 +139,7 @@ class CollectionConfig:
             },
             pdf_max_pages=int(str(acc.get("pdf_max_pages", DEFAULT_PDF_MAX_PAGES))),
             keep_superseded=bool(acc.get("keep_superseded", True)),
+            concurrency=min(8, max(1, int(str(rate.get("concurrency", 1))))),
         )
 
 
@@ -225,35 +231,65 @@ class DocCollectionAdapter:
         out = Survey(ctx.source.id)
         resolved = 0
         cache = ResolveCache.open(ctx.workdir)
-        for cand in discover_all(cfg.discovery, env):
-            decision = classify_metadata(cand.facts, cfg.rules)
-            out.decisions.append((cand, decision))
-            if decision.verdict is not Verdict.ALLOW:
-                continue
-            if (
-                cand.resolve
-                and cand.resolve != "git"
-                and resolve_limit is not None
-                and resolved >= resolve_limit
-            ):
-                out.unresolved += 1
-                continue
-            cached = cache.get(cand) if cache is not None and cand.resolve else None
-            if cached is not None:
-                docs = cached
-            else:
-                try:
-                    docs = resolve(cand, env)
-                except Exception as exc:
-                    out.notes.append(f"resolve {cand.key}: {type(exc).__name__}: {exc}")
-                    out.unresolved += 1
-                    continue
-                if cache is not None and cand.resolve and cand.resolve != "git":
-                    cache.put(cand, docs)
+        pool = (
+            ThreadPoolExecutor(cfg.concurrency, thread_name_prefix="resolve") if cfg.concurrency > 1 else None
+        )
+        inflight: deque[tuple[Candidate, Future[list[Candidate]]]] = deque()
+
+        def accept(cand: Candidate, docs: list[Candidate], *, fresh: bool) -> None:
+            nonlocal resolved
+            if fresh and cache is not None and cand.resolve and cand.resolve != "git":
+                cache.put(cand, docs)  # the cache is only touched from this thread
             resolved += 1 if cand.resolve else 0
             if progress is not None and cand.resolve and resolved % progress_every == 0:
                 progress(f"{ctx.source.id}: {resolved:,} resolved, {len(out.decisions):,} listed so far")
             out.allowed.extend(d for d in docs if origin_ok(d.url, cfg.origins) or d.resolve == "git")
+
+        def failed(cand: Candidate, exc: BaseException) -> None:
+            out.notes.append(f"resolve {cand.key}: {type(exc).__name__}: {exc}")
+            out.unresolved += 1
+
+        def drain(keep: int) -> None:
+            while len(inflight) > keep:
+                cand, fut = inflight.popleft()
+                try:
+                    docs = fut.result()
+                except Exception as exc:
+                    failed(cand, exc)
+                    continue
+                accept(cand, docs, fresh=True)
+
+        try:
+            for cand in discover_all(cfg.discovery, env):
+                decision = classify_metadata(cand.facts, cfg.rules)
+                out.decisions.append((cand, decision))
+                if decision.verdict is not Verdict.ALLOW:
+                    continue
+                if (
+                    cand.resolve
+                    and cand.resolve != "git"
+                    and resolve_limit is not None
+                    and resolved + len(inflight) >= resolve_limit
+                ):
+                    out.unresolved += 1
+                    continue
+                cached = cache.get(cand) if cache is not None and cand.resolve else None
+                if cached is not None:
+                    accept(cand, cached, fresh=False)
+                elif pool is not None and cand.resolve:
+                    inflight.append((cand, pool.submit(resolve, cand, env)))
+                    drain(4 * cfg.concurrency)  # bounded: never more than a few dozen waiting
+                else:
+                    try:
+                        docs = resolve(cand, env)
+                    except Exception as exc:
+                        failed(cand, exc)
+                        continue
+                    accept(cand, docs, fresh=True)
+            drain(0)
+        finally:
+            if pool is not None:
+                pool.shutdown(wait=True, cancel_futures=True)
         if cache is not None:
             cache.close()
         out.totals = dict(env.totals)

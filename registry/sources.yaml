@@ -1042,7 +1042,7 @@ sources:
       key_prefix: cia-rr
       partitioned: true  # fetch one batch per run: wsp collections fetch --partition b0001 (..b0100)
       origins: [archive.org, www.cia.gov]
-      rate: {requests_per_second: 1, per_host: {www.cia.gov: 10}}
+      rate: {requests_per_second: 1, concurrency: 3, per_host: {www.cia.gov: 10}}  # 3 in flight: archive.org round trips take 2-3 s
       discovery:
         - kind: archive-org
           query: "collection:ciareadingroom"
@@ -1067,6 +1067,7 @@ sources:
     legal_basis: public-domain
     access:
       adapter: doc-collection
+      rate: {requests_per_second: 1, concurrency: 3}  # map PDFs average ~10 s each one at a time
       issuer: US Geological Survey (National Geospatial Program)
       key_prefix: usgs-htmc
       partitioned: true  # fetch one state per run: wsp collections fetch --partition <st>

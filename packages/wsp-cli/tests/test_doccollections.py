@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import dataclasses
 import io
 import json
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 import yaml
@@ -312,3 +313,45 @@ def test_fetch_refuses_a_document_redirected_off_origin(vault: FileVault, tmp_pa
     assert report.failed
     assert "OriginError" in report.failed[0][1]
     assert not list((vault.root / "_incoming" / "test-pubs" / "2026-10-10").glob("*.pdf"))
+
+
+def test_concurrent_downloads_give_the_same_report(vault: FileVault, tmp_path: Path) -> None:
+    many = [*OBJECTS, *[(f"FM-6-{i}_2022.pdf", GOOD) for i in range(8)]]
+    base = spec(many)
+    access = {
+        **cast(dict[str, object], base.raw["access"]),
+        "rate": {"requests_per_second": 1, "concurrency": 4},
+    }
+    s = dataclasses.replace(base, raw={**base.raw, "access": access})
+    report = runner(vault, many, tmp_path).run(s, version="2026-10-10")
+    assert sorted(d.cand.title for d in report.fetched) == sorted(
+        ["FM 5 0 2022", *[f"FM 6 {i} 2022" for i in range(8)]]
+    )
+    assert report.rejected == [("test:restricted.pdf", "deny:marking=distribution-C")]
+    assert len(report.held) == 1
+    assert not report.failed
+
+
+def test_a_resumed_fetch_reuses_complete_files_with_a_published_md5(tmp_path: Path) -> None:
+    import hashlib
+
+    from wsp_adapters.doccollection.model import Candidate
+
+    fetch = CollectionFetcher(
+        tmp_path / "vault", FakeFetcher(), keys={}, user_agent="t", workdir=tmp_path, throttle=False
+    )
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    cand = Candidate(
+        key="t:a",
+        url="https://bucket.example.gov/a.pdf",
+        title="A",
+        issuer="T",
+        size=3,
+        md5=hashlib.md5(b"pdf").hexdigest(),
+    )
+    (dest / cand.file_name).write_bytes(b"pdf")
+    assert fetch._download(FakeFetcher(), cand, dest, ["bucket.example.gov"]) == dest / cand.file_name  # pyright: ignore[reportPrivateUsage]
+    (dest / cand.file_name).write_bytes(b"bad")  # same size, wrong bytes: fetched again (and here: fails)
+    with pytest.raises(Exception):  # noqa: B017, PT011 - the fake fetcher has no route for it
+        fetch._download(FakeFetcher(), cand, dest, ["bucket.example.gov"])  # pyright: ignore[reportPrivateUsage]

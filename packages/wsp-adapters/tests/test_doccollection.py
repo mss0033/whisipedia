@@ -701,3 +701,31 @@ def test_resolve_cache_survives_a_restart_and_misses_on_changed_listings(tmp_pat
     now[0] += 101
     assert again.get(cand) is None  # expired: a later cycle resolves again
     again.close()
+
+
+def test_concurrent_requests_overlap_but_start_an_interval_apart() -> None:
+    import itertools
+    import threading as th
+    import time
+
+    starts: list[float] = []
+    lock = th.Lock()
+
+    class Slow(FakeFetcher):
+        def get_bytes(self, url: str, *, max_bytes: int = 64 * 1024 * 1024) -> bytes:
+            with lock:
+                starts.append(time.monotonic())
+            time.sleep(0.25)  # a slow round trip
+            return b"{}"
+
+    t = Throttle(Slow({}), interval=0.05)
+    workers = [th.Thread(target=t.get_bytes, args=(f"https://a.gov/{i}",)) for i in range(6)]
+    began = time.monotonic()
+    for w in workers:
+        w.start()
+    for w in workers:
+        w.join()
+    starts.sort()
+    assert all(b - a >= 0.045 for a, b in itertools.pairwise(starts))  # never closer than the interval
+    assert time.monotonic() - began < 6 * 0.25  # but overlapping, not one after another
+    assert t.requests["a.gov"] == 6
