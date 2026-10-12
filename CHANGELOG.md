@@ -3,6 +3,34 @@
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Fixed: vault, orchestrator and lanes audit (2026-10-12)
+* Lanes marked items done that never landed: any fetch outcome (killed, crashed, refused, every
+  download failed) was followed by an ingest that exited 0. `wsp collections fetch` now exits with one
+  code per outcome (0 complete, 2 refused, 4 listing incomplete, 6 partial, 7 alerts, 8 nothing new),
+  `wsp ingest --source S --version V` answers for that one version (8: nothing planned), and
+  `tools/lanes/lane-run.sh` marks an item done only after a complete fetch and an ingest of its cycle.
+  A stuck version no longer fails the other versions or partitions. Exit codes are in the
+  document-collections runbook.
+* A re-fetch after an interrupted ingest was refused for good ("already staged with different
+  content": new `fetched_at` stamps). A staged, unsealed file is replaced when the new bytes verify
+  against the plan's checksum (ledger `vault.restaged`).
+* A crash between the link and the unlink of a no-replace publish (no renameat2) blocked adoption and
+  sealing; the move is now finished on the next run. The duplicate check of a re-fetched file no
+  longer deletes bytes a concurrent fetch renamed onto it.
+* Promotion compares generations in natural order (`-r10` after `-r4`) and checks "a newer one is
+  current" under the pointer lock, in `wsp ingest` and in the orchestrator.
+* Fetch locks live in the machine's lock directory (the orchestrator's `/tmp` is private) and are
+  removed after each download. Busy heavy steps take their locks before reading the registry and the
+  NAS. A restarted orchestrator no longer deletes the work of a step unit that still runs. Sources
+  flipped to `index: false` leave the search index.
+* Memory: the background slice is sized for a 16 GiB WSL with shares that fit under its MemoryHigh
+  (orchestrator, a new fetch sub-slice for lanes, one heavy job at 4G); `tools/wsp-bg` refuses a job
+  as big as the slice, passes SIGTERM to the job, and can hold the heavy lock across a whole rebuild.
+* Ops scripts in the repo: `tools/lanes/` (lane runner, resumable rebuild that stops at a failed
+  step, resume after reboot that waits for the NAS and fails loudly). The API health check survives
+  host sleep and does not restart the API while the whole machine is short of memory. The USR1 stack
+  dump is documented with `--kill-whom=main`.
+
 ### Changed: document collections admit all public material outside a narrow content core (owner decision 2026-10-11)
 * Still excluded: classified or restricted documents; explosives and demolitions; weapons and munitions
   technical data; weapons employment and gunnery; targeting and fire control; weapon-system crew drills;
