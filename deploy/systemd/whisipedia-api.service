@@ -14,6 +14,9 @@ Type=simple
 WorkingDirectory=@REPO@
 EnvironmentFile=-%h/.config/whisipedia/whisipedia.env
 Environment=PYTHONUNBUFFERED=1
+# Fewer glibc malloc arenas: a long-lived threaded server otherwise keeps freed memory in per-thread
+# arenas and its resident size creeps up over hours.
+Environment=MALLOC_ARENA_MAX=2
 Environment=WSP_CONFIG_DIR=@CONFIG_DIR@
 ExecStart=@REPO@/.venv/bin/wsp --config-dir @CONFIG_DIR@ serve --host 127.0.0.1 --port 8737
 Restart=on-failure
@@ -25,7 +28,8 @@ IPAddressDeny=any
 IPAddressAllow=localhost
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 # Interactive: outside the background slice, with its own ceiling (caches are bounded; a leak
-# must restart the API, not stall the desktop).
+# must restart the API, not stall the desktop). MemoryHigh only throttles, so whisipedia-api-health.timer
+# restarts an API that stops answering. Steady state ~2.5-3 GB, most of it the CUDA runtime and models.
 MemoryHigh=4G
 MemoryMax=5G
 MemorySwapMax=512M

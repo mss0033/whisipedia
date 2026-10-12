@@ -19,11 +19,18 @@ from typing import TextIO
 UNITS = (
     "whisipedia-orchestrator.service",
     "whisipedia-api.service",
+    "whisipedia-api-health.service",  # restarts an API that stops answering (tools/wsp-api-health)
+    "whisipedia-api-health.timer",
     "whisipedia-index.service",
     "whisipedia-index.timer",
     "whisipedia-background.slice",  # shared memory/CPU/IO budget of the background units
 )
-ENABLE = ("whisipedia-orchestrator.service", "whisipedia-api.service", "whisipedia-index.timer")
+ENABLE = (
+    "whisipedia-orchestrator.service",
+    "whisipedia-api.service",
+    "whisipedia-api-health.timer",
+    "whisipedia-index.timer",
+)
 MARKER = "# Rendered by `wsp service install` from deploy/systemd/"
 
 Runner = Callable[[Sequence[str]], tuple[int, str]]

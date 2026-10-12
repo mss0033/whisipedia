@@ -1,0 +1,12 @@
+# Probe the API every 2 minutes; see tools/wsp-api-health.
+
+[Unit]
+Description=Whisipedia API health check every 2 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitInactiveSec=2min
+AccuracySec=15s
+
+[Install]
+WantedBy=timers.target

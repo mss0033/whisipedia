@@ -26,6 +26,16 @@ All notable changes are documented here. The format follows [Keep a Changelog](h
   100. Collection fetches report resolve progress every 500 items.
 
 ### Fixed
+* API hang (2026-10-11): the API sat over its memory ceiling, which throttles rather than kills, and
+  one start-page request took 3.8 hours.
+  * The Refinery id index (20 B/doc, 0.8 GB for wikipedia-top10) is now a memory-mapped sidecar
+    (`_ids.{h,loc}.npy`), written on first use. The document store no longer charges it to its budget.
+  * Freed model-staging memory is trimmed after the Oracle loads, and the unit sets
+    `MALLOC_ARENA_MAX=2`.
+  * Runtime overrides capping the API at 3G were removed.
+  * New `whisipedia-api-health.timer` (`tools/wsp-api-health`): restarts the API when the start page
+    does not answer in 60 s, twice in a row.
+  * Measured after the fix: anon 1.6-1.9 GB, down from 2.5-3.9 GB; start page 0.05 s warm.
 * Vector search scans exactly once the candidate set covers the whole store. Before, a filtered search
   over many near-ties could miss matches in the approximate graph (an intermittent test failure).
 

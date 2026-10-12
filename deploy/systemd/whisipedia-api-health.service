@@ -1,0 +1,9 @@
+# Restarts the API when it stops answering (tools/wsp-api-health). Started by whisipedia-api-health.timer.
+
+[Unit]
+Description=Whisipedia API health check
+
+[Service]
+Type=oneshot
+ExecStart=@REPO@/tools/wsp-api-health
+TimeoutStartSec=5min

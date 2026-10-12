@@ -176,3 +176,52 @@ def test_document_store_evicts_by_memory_not_just_count(tmp_path: Path) -> None:
     for gid in ("g1", "g2", "g3"):
         assert store.reader("enc", gid) is not None
     assert len(store._readers) == 1  # pyright: ignore[reportPrivateUsage]  # the newest stays usable
+
+
+def test_the_id_index_is_memory_mapped_from_a_sidecar(tmp_path: Path) -> None:
+    import numpy as np
+
+    from wsp_index.refinery import IDS_MAP_H, IDS_MAP_LOC
+
+    g = gen(tmp_path, "g1", docs_v1())
+    assert g.id_index_bytes == 20 * 20  # no sidecar yet: counted as anonymous memory
+    got = g.get(make_doc_id("enc", "d05"))
+    assert got is not None
+    assert got.title == "Doc 5"
+    assert (g.dir / IDS_MAP_H).is_file()
+    assert (g.dir / IDS_MAP_LOC).is_file()
+    assert isinstance(g._id_index()[0], np.memmap)  # pyright: ignore[reportPrivateUsage]
+    assert g.id_index_bytes == 0
+    assert not list(g.dir.glob("*.tmp"))
+    # every document resolves through the map, and a fresh reader reuses it
+    again = RefineryReader(g.dir)
+    assert all(again.get(make_doc_id("enc", f"d{i:02d}")) is not None for i in range(20))
+    assert again.get(make_doc_id("enc", "nope")) is None
+
+
+def test_a_torn_id_map_is_rewritten(tmp_path: Path) -> None:
+    import numpy as np
+
+    from wsp_index.refinery import IDS_MAP_H
+
+    g = gen(tmp_path, "g1", docs_v1())
+    assert g.get(make_doc_id("enc", "d01")) is not None
+    np.save(g.dir / IDS_MAP_H, np.arange(3, dtype=np.uint64))  # wrong length
+    fresh = RefineryReader(g.dir)
+    assert fresh.get(make_doc_id("enc", "d07")) is not None
+    assert np.load(g.dir / IDS_MAP_H, mmap_mode="r").shape == (20,)
+
+
+def test_an_unwritable_generation_falls_back_to_memory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import wsp_index.refinery as refinery
+
+    g = gen(tmp_path, "g1", docs_v1())
+
+    def refuse(gen_dir: Path, n: int) -> None:
+        raise PermissionError("read-only")
+
+    monkeypatch.setattr(refinery, "_write_id_map", refuse)
+    assert g.get(make_doc_id("enc", "d09")) is not None
+    assert g.id_index_bytes == 20 * 20

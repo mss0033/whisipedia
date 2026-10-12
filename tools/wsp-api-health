@@ -1,0 +1,23 @@
+#!/bin/sh
+# Restart the API when it stops answering (run by whisipedia-api-health.timer).
+#
+# A cgroup at MemoryHigh is throttled, never killed: on 2026-10-11 the API sat over its ceiling and one
+# start-page request took 3.8 hours while systemd still reported it "active". This probes the start page
+# (a thread-pool route, so a starved pool counts too) and restarts the unit when it does not answer.
+# Grace: no restart in the first 5 minutes after a start (models and indexes are still loading).
+URL="${WSP_API_HEALTH_URL:-http://127.0.0.1:8737/v1/portal}"
+TIMEOUT="${WSP_API_HEALTH_TIMEOUT:-60}"
+UNIT=whisipedia-api.service
+
+systemctl --user is-active -q "$UNIT" || exit 0  # stopped on purpose, or systemd is already restarting it
+started=$(systemctl --user show "$UNIT" -p ActiveEnterTimestampMonotonic --value)
+now=$(awk '{printf "%d", $1 * 1000000}' /proc/uptime)
+[ $((now - started)) -lt 300000000 ] && exit 0
+
+for try in 1 2; do
+  code=$(curl -s -o /dev/null -m "$TIMEOUT" -w "%{http_code}" "$URL")
+  [ "$code" = 200 ] && exit 0
+  sleep 5
+done
+echo "API did not answer $URL within ${TIMEOUT}s twice (last status $code); restarting $UNIT"
+systemctl --user restart "$UNIT"

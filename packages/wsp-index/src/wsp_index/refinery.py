@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 import threading
@@ -51,10 +52,17 @@ import pyarrow.parquet as pq
 from wsp_core.ids import DocId, content_hash
 from wsp_core.model import ChangeRecord, DocRecord
 
+log = logging.getLogger(__name__)
+
 FORMAT_VERSION = 2  # 2: ``aliases`` column (port revision v0.2); older generations are rebuilt
 SUCCESS_FILE = "_SUCCESS.json"
 IDS_FILE = "_ids.parquet"
 SHADOW_FILE = "_shadowed.parquet"  # rows superseded by a later row with the same doc_id
+# The id index as memory-mapped arrays (local disk, ADR-0002): sorted hashes and (part, rg, row). Written
+# next to a sealed generation on its first point lookup, so a long-lived reader (the API) holds it as
+# reclaimable page cache instead of ~20 bytes of anonymous memory per document.
+IDS_MAP_H = "_ids.h.npy"
+IDS_MAP_LOC = "_ids.loc.npy"
 CURRENT_FILE = "CURRENT.txt"
 PARTS_DIR = "_parts"  # partitioned sources: refined vault generations, composed into set generations
 SET_MARK = ".set"  # set generation ids: <newest member id>.setNNNNN
@@ -559,6 +567,39 @@ def compose_set(root: Path, source_id: str, members: Sequence[Path]) -> str:
     return set_id
 
 
+def _write_id_map(gen_dir: Path, n: int) -> None:
+    """Write ``_ids.{h,loc}.npy`` from ``_ids.parquet`` batch by batch (bounded memory), atomically."""
+    tag = f".{os.getpid()}.{threading.get_ident()}.tmp"
+    hp, lp = gen_dir / (IDS_MAP_H + tag), gen_dir / (IDS_MAP_LOC + tag)
+    try:
+        h = np.lib.format.open_memmap(hp, mode="w+", dtype=np.uint64, shape=(n,))
+        loc = np.lib.format.open_memmap(lp, mode="w+", dtype=np.uint32, shape=(n, 3))
+        i = 0
+        source = pq.ParquetFile(gen_dir / IDS_FILE)
+        batches = source.iter_batches(batch_size=1 << 20, columns=["h", "part", "rg", "row"])  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
+        for batch in batches:
+            k = batch.num_rows
+            h[i : i + k] = batch.column(0).to_numpy()
+            loc[i : i + k, 0] = batch.column(1).to_numpy()
+            loc[i : i + k, 1] = batch.column(2).to_numpy()
+            loc[i : i + k, 2] = batch.column(3).to_numpy()
+            i += k
+        if i != n:
+            raise RefineryError(f"{gen_dir / IDS_FILE}: {i} rows read, {n} expected")
+        h.flush()
+        loc.flush()
+        del h, loc
+        for tmp in (hp, lp):
+            with tmp.open("rb") as f:
+                os.fsync(f.fileno())
+        os.replace(lp, gen_dir / IDS_MAP_LOC)  # loc first: h appearing last completes the pair
+        os.replace(hp, gen_dir / IDS_MAP_H)
+        _fsync_dir(gen_dir)
+    finally:
+        for tmp in (hp, lp):
+            tmp.unlink(missing_ok=True)
+
+
 # --- reader ------------------------------------------------------------------------------------
 
 
@@ -616,15 +657,54 @@ class RefineryReader:
         if ids is None:
             with self._lock:
                 if self._ids is None:
-                    table = pq.read_table(self.dir / IDS_FILE)  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
-                    self._ids = (
-                        table.column("h").to_numpy(),
-                        table.column("part").to_numpy(),
-                        table.column("rg").to_numpy(),
-                        table.column("row").to_numpy(),
-                    )
+                    self._ids = self._load_id_index()
                 ids = self._ids
         return ids
+
+    def _load_id_index(
+        self,
+    ) -> tuple[
+        npt.NDArray[np.uint64], npt.NDArray[np.uint32], npt.NDArray[np.uint32], npt.NDArray[np.uint32]
+    ]:
+        """The id index, memory-mapped from its sidecar (written on first use); in memory if it cannot be."""
+        n = int(pq.ParquetFile(self.dir / IDS_FILE).metadata.num_rows)  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
+        try:
+            mapped = self._mapped_ids(n)
+            if mapped is None:
+                _write_id_map(self.dir, n)
+                mapped = self._mapped_ids(n)
+            if mapped is not None:
+                h, loc = mapped
+                return h, loc[:, 0], loc[:, 1], loc[:, 2]
+        except OSError as exc:  # read-only or full disk: the old in-memory index still works
+            log.warning(
+                "refinery %s: id map unavailable (%s); loading the id index into memory", self.dir, exc
+            )
+        table = pq.read_table(self.dir / IDS_FILE)  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
+        return (
+            table.column("h").to_numpy(),
+            table.column("part").to_numpy(),
+            table.column("rg").to_numpy(),
+            table.column("row").to_numpy(),
+        )
+
+    def _mapped_ids(self, n: int) -> tuple[npt.NDArray[np.uint64], npt.NDArray[np.uint32]] | None:
+        hp, lp = self.dir / IDS_MAP_H, self.dir / IDS_MAP_LOC
+        if not (hp.is_file() and lp.is_file()):
+            return None
+        h = np.load(hp, mmap_mode="r")
+        loc = np.load(lp, mmap_mode="r")
+        if h.dtype != np.uint64 or loc.dtype != np.uint32 or h.shape != (n,) or loc.shape != (n, 3):
+            return None  # torn or from another index: rewritten
+        return cast(npt.NDArray[np.uint64], h), cast(npt.NDArray[np.uint32], loc)
+
+    @property
+    def id_index_bytes(self) -> int:
+        """Anonymous memory the id index holds or will hold: 0 when memory-mapped (page cache)."""
+        ids = self._ids
+        if ids is not None:
+            return 0 if isinstance(ids[0], np.memmap) else 20 * len(ids[0])
+        return 0 if (self.dir / IDS_MAP_H).is_file() else 20 * len(self)
 
     def __len__(self) -> int:
         if self._docs >= 0:

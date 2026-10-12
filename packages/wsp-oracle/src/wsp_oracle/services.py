@@ -8,6 +8,9 @@ Face libraries in offline mode. There is no generative model (ADR-0008).
 
 from __future__ import annotations
 
+import contextlib
+import ctypes
+import gc
 import logging
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -45,6 +48,17 @@ class OracleServices:
         if self.vectors is not None:
             self.vectors.close()
         self.index.close()
+
+
+def release_freed_memory() -> None:
+    """Return freed heap pages to the OS (glibc ``malloc_trim``); a no-op elsewhere.
+
+    Loading a model stages its weights in host memory before moving them to the GPU; glibc keeps those
+    freed pages, ~200 MB a model, for the life of the API (measured 2026-10-11).
+    """
+    gc.collect()
+    with contextlib.suppress(OSError, AttributeError):  # not glibc
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
 
 
 def open_embedder(cfg: OracleConfig, *, device: str | None = None) -> TransformerEmbedder:
@@ -157,6 +171,8 @@ def build_oracle(
         else:
             log.info("oracle: no GPU; reranking skipped (reranker.cpu_fallback = false)")
 
+    if embedder is not None or reranker is not None:
+        release_freed_memory()  # the weights were staged in host memory on their way to the device
     fusion = FusionConfig(
         k=ocfg.rrf_k,
         lexical_weight=ocfg.lexical_weight,

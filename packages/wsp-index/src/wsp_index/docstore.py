@@ -21,10 +21,12 @@ from wsp_index.refinery import (
 
 
 def _reader_cost(reader: RefineryReader) -> int:
-    """Upper estimate of a reader's resident memory: id index (20 B/doc once a lookup loaded it), open
+    """Upper estimate of a reader's anonymous memory: the id index (20 B/doc unless memory-mapped), open
     file footers (~2.5 MB each) and the row-group cache (~4 MB of text each, by the writer's sizing)."""
     return (
-        20 * len(reader) + 3 * 1024 * 1024 * reader.max_open_files + 4 * 1024 * 1024 * reader.cache_row_groups
+        reader.id_index_bytes
+        + 3 * 1024 * 1024 * reader.max_open_files
+        + 4 * 1024 * 1024 * reader.cache_row_groups
     )
 
 
