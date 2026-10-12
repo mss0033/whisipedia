@@ -256,3 +256,24 @@ def test_an_html_page_named_pdf_is_kept_as_html(tmp_path: Path) -> None:
     real = tmp_path / "real.pdf"
     real.write_bytes(b"%PDF-1.4 ...")
     assert true_suffix(real) == real
+
+
+def test_misnamed_downloads_get_the_suffix_their_bytes_have(tmp_path: Path) -> None:
+    import zipfile
+
+    from wsp_adapters.doccollection.adapter import true_suffix
+
+    docx = tmp_path / "a.pdf"
+    with zipfile.ZipFile(docx, "w") as zf:
+        zf.writestr("word/document.xml", "<w:document/>")
+    assert true_suffix(docx).name == "a.docx"
+    sheet = tmp_path / "b.pdf"
+    with zipfile.ZipFile(sheet, "w") as zf:
+        zf.writestr("xl/workbook.xml", "<workbook/>")
+    assert true_suffix(sheet).name == "b.xlsx"
+    csv = tmp_path / "c.pdf"
+    csv.write_bytes(b"year,count\n2024,3\n")
+    assert true_suffix(csv).name == "c.txt"
+    blob = tmp_path / "d.pdf"
+    blob.write_bytes(b"\x00\x01binary")
+    assert true_suffix(blob).name == "d.pdf"  # unknown: left for the PDF check to refuse

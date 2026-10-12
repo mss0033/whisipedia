@@ -557,11 +557,43 @@ def true_suffix(path: Path) -> Path:
     if head.lstrip().startswith(b"%PDF-"):
         return path
     lowered = head.lower()
+    suffix = ""
     if b"<html" in lowered or b"<!doctype html" in lowered:
-        target = path.with_suffix(".html")
-        path.replace(target)
-        return target
-    return path
+        suffix = ".html"
+    elif head.startswith(b"PK\x03\x04"):
+        suffix = _zip_kind(path)
+    elif head and b"\x00" not in head:
+        try:
+            head.decode("utf-8")
+            suffix = ".txt"  # CSV and plain text attachments
+        except UnicodeDecodeError:
+            suffix = ""
+    if not suffix:
+        return path
+    target = path.with_suffix(suffix)
+    path.replace(target)
+    return target
+
+
+def _zip_kind(path: Path) -> str:
+    """``.docx``, ``.xlsx``, ``.pptx``, ``.odt``/``.ods``/``.odp`` or ``.zip`` by what a zip file holds."""
+    try:
+        with zipfile.ZipFile(path) as zf:
+            names = set(zf.namelist())
+            if "word/document.xml" in names:
+                return ".docx"
+            if any(n.startswith("xl/") for n in names):
+                return ".xlsx"
+            if any(n.startswith("ppt/") for n in names):
+                return ".pptx"
+            if "mimetype" in names:
+                mime = zf.read("mimetype").decode("ascii", "replace")
+                for kind, ext in (("text", ".odt"), ("spreadsheet", ".ods"), ("presentation", ".odp")):
+                    if kind in mime:
+                        return ext
+    except zipfile.BadZipFile:
+        return ""
+    return ".zip"
 
 
 def well_formed(path: Path) -> str | None:
