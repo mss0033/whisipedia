@@ -935,7 +935,7 @@ sources:
       filter: {distribution: {require: [A]}, rules: registry/filters/joint-publications.yaml, default: allow}
       mirrors:
         - {channel: "www.jcs.mil Joint Electronic Library", status: blocked, verified: 2026-10-10, note: "403 to a plain client (WAF); JEL+ needs a CAC"}
-        - {channel: "GovInfo GOVPUB, SuDoc D 5 (Joint Chiefs)", status: unverified, verified: 2026-10-10, note: "DEMO_KEY quota exhausted before this class could be counted; check with a key: api.govinfo.gov/collections/GOVPUB + package prefix GOVPUB-D5"}
+        - {channel: "GovInfo GOVPUB, SuDoc D 5", status: rejected, verified: 2026-10-12, note: "296 packages, but National Defense University Press studies, not joint doctrine (no JP found)"}
         - {channel: "archive.org JP copies", status: rejected, verified: 2026-10-10, note: "user uploads (e.g. opensource/jp3_57), not the issuer"}
     update: {cadence: P3M, strategy: snapshot-retention}
     size: {bytes: 2e9, measured: false, as_of: 2026-10-10}
@@ -959,7 +959,7 @@ sources:
       mirrors:
         - {channel: "www.marines.mil MCPEL", status: blocked, verified: 2026-10-10, note: "403 (WAF)"}
         - {channel: "www.usmcu.edu (Marine Corps University)", status: blocked, verified: 2026-10-10, note: "403 (WAF)"}
-        - {channel: "GovInfo GOVPUB, SuDoc D 214 (Marine Corps)", status: unverified, verified: 2026-10-10, note: "count with a key: package prefix GOVPUB-D214"}
+        - {channel: "GovInfo GOVPUB, SuDoc D 214 (Marine Corps)", status: rejected, verified: 2026-10-12, note: "166 packages: History Division and MCU Press titles, not MCDP doctrine"}
     update: {cadence: P3M, strategy: snapshot-retention}
     size: {bytes: 3e9, measured: false, as_of: 2026-10-10}
     notes: Score 4.4. Start with MCDP 1-8; other series through review. D11 (2026-10-10) — no official mirror verified yet; discovery stays empty.
@@ -977,12 +977,13 @@ sources:
       issuer: US Army Center of Military History
       key_prefix: cmh
       origins: [history.army.mil, www.govinfo.gov]
-      discovery: []
+      discovery:
+        - {kind: api, flavor: govinfo, collection: GOVPUB, package_prefix: [GOVPUB-D114], api_key: govinfo}
       filter: {allow_all: true, distribution: {require: [public-release, published]}}
       currency: {historical_before: "1990-01-01"}
       mirrors:
         - {channel: "history.army.mil", status: blocked, verified: 2026-10-10, note: "403 (WAF)"}
-        - {channel: "GovInfo GOVPUB, SuDoc D 114 (CMH) within D 101 (Army, 3,090 packages verified)", status: unverified, verified: 2026-10-10, note: "D 101 verified by search; D 114 to be counted with a key (package prefix GOVPUB-D114)"}
+        - {channel: "GovInfo GOVPUB, SuDoc D 114 (CMH)", url: "https://api.govinfo.gov/collections/GOVPUB", status: verified, verified: 2026-10-12, note: "236 packages (search docclass:D114), e.g. The Chemical Warfare Service, South to the Naktong, North to the Yalu"}
     update: {cadence: P6M, strategy: snapshot-retention}
     size: {bytes: 30e9, measured: false, as_of: 2026-10-10}
     notes: Score 4.3. D11 (2026-10-10) — history.army.mil WAF-blocked; GovInfo is the candidate official channel (to verify with a key). Official histories are history, not guidance, so no historical banner is needed beyond the date rule for pre-1990 field guidance.

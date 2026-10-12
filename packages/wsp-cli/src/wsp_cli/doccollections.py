@@ -155,7 +155,11 @@ class SourceDryRun:
         return dataclasses.asdict(self)
 
 
-def summarize(spec: SourceSpec, survey: Survey, *, head_sizes: Sequence[int] = ()) -> SourceDryRun:
+def summarize(
+    spec: SourceSpec, survey: Survey, *, head_sizes: Sequence[int] = (), sampled: bool = True
+) -> SourceDryRun:
+    """``sampled``: the listing was cut short (``--max-pages``), so totals are extrapolated; a complete
+    listing that is smaller than ``upstream`` is a filtered one (a package prefix), never scaled up."""
     out = SourceDryRun(spec.id, spec.adapter or "", spec.status.value)
     out.discovered = len(survey.decisions)
     out.allowed = survey.count(Verdict.ALLOW)
@@ -189,7 +193,7 @@ def summarize(spec: SourceSpec, survey: Survey, *, head_sizes: Sequence[int] = (
     per_doc = statistics.median([*sizes, *head_sizes]) if (sizes or head_sizes) else 0
     allowed_docs = max(out.documents + out.unresolved, out.allowed)
     estimate = out.known_bytes + int(per_doc * max(0, allowed_docs - out.sized))
-    if out.upstream_total and out.discovered and out.upstream_total > out.discovered:
+    if sampled and out.upstream_total and out.discovered and out.upstream_total > out.discovered:
         factor = out.upstream_total / out.discovered
         estimate = int(estimate * factor)
         out.extrapolated = True
@@ -248,7 +252,7 @@ def dry_run(
             sizes = head_sample(env.fetcher, survey.allowed, head_samples)
             if isinstance(env.fetcher, Throttle):
                 survey.requests = dict(env.fetcher.requests)
-            results.append(summarize(spec, survey, head_sizes=sizes))
+            results.append(summarize(spec, survey, head_sizes=sizes, sampled=max_pages is not None))
         except Exception as exc:
             results.append(
                 SourceDryRun(
