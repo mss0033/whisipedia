@@ -625,6 +625,8 @@ def extract_text(path: Path, *, max_pages: int) -> Extracted:
             return Extracted(path.read_bytes()[: 16 * 1024 * 1024].decode("utf-8", "replace"))
         if suffix == ".zip" and head.startswith(b"PK\x03\x04"):  # an archive, not a DOCX/EPUB container
             return Extracted(zip_screen_text(path))
+        if suffix == ".docx" and head.startswith(b"PK\x03\x04"):
+            return Extracted(docx_text(path))
     except Exception as exc:
         log.warning("text extraction failed for %s: %s", path.name, exc)
         return Extracted("", "extraction-error")
@@ -632,6 +634,19 @@ def extract_text(path: Path, *, max_pages: int) -> Extracted:
 
 
 ZIP_SCREEN_CHARS = 60_000
+
+
+_W_NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+
+
+def docx_text(path: Path) -> str:
+    """The text of a Word (.docx) document: its paragraphs from ``word/document.xml``, in order."""
+    import xml.etree.ElementTree as ET
+
+    with zipfile.ZipFile(path) as zf:
+        root = ET.fromstring(zf.read("word/document.xml"))  # noqa: S314 - expat rejects external entities
+    paragraphs = ("".join(t.text or "" for t in p.iter(f"{_W_NS}t")) for p in root.iter(f"{_W_NS}p"))
+    return "\n".join(p for p in paragraphs if p.strip())
 
 
 def zip_screen_text(path: Path) -> str:

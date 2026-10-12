@@ -192,17 +192,18 @@ def test_extraction_error_is_held(tmp_path: Path) -> None:
     assert str(screen.decision) == "review:text=extraction-error"
 
 
-@pytest.mark.parametrize("suffix", [".tif", ".jpg", ".docx", ".epub", ".bin"])
+@pytest.mark.parametrize("suffix", [".tif", ".jpg", ".epub", ".bin"])
 def test_unsupported_formats_are_held(tmp_path: Path, suffix: str) -> None:
-    # DOCX and EPUB are zip containers: never screened by member names, only a real .zip archive is.
+    # EPUB is a zip container: never screened by member names (only a real .zip archive is).
     path = tmp_path / f"doc{suffix}"
     path.write_bytes(b"PK\x03\x04" + b"\x00" * 64)
     screen = screen_file(path, Rules(allow_image_only=True))
     assert str(screen.decision) == "review:text=unsupported-format"
 
 
-def test_a_corrupt_zip_is_held(tmp_path: Path) -> None:
-    path = tmp_path / "doc.zip"
+@pytest.mark.parametrize("suffix", [".zip", ".docx"])
+def test_a_corrupt_zip_or_word_file_is_held(tmp_path: Path, suffix: str) -> None:
+    path = tmp_path / f"doc{suffix}"
     path.write_bytes(b"PK\x03\x04" + b"\x00" * 64)
     assert str(screen_file(path, Rules(allow_image_only=True)).decision) == "review:text=extraction-error"
 
@@ -318,3 +319,22 @@ def test_configured_off_origin_mirror_is_refused_before_any_request(tmp_path: Pa
     with pytest.raises(OriginError):
         download_from_origins(_RedirectingFetcher([]), remote, tmp_path / "a.pdf", ORIGINS)
     assert not (tmp_path / "a.pdf").exists()
+
+
+def test_a_word_document_is_read_and_screened(tmp_path: Path) -> None:
+    import zipfile
+
+    from wsp_adapters.doccollection.adapter import extract_text
+
+    body = (
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>'
+        "<w:p><w:r><w:t>Community resilience </w:t></w:r><w:r><w:t>guidance</w:t></w:r></w:p>"
+        "<w:p><w:r><w:t>Plan for flooding and power cuts in your area.</w:t></w:r></w:p>"
+        "</w:body></w:document>"
+    )
+    path = tmp_path / "guide.docx"
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("word/document.xml", body)
+    got = extract_text(path, max_pages=3)
+    assert got.problem == ""
+    assert got.text == "Community resilience guidance\nPlan for flooding and power cuts in your area."
