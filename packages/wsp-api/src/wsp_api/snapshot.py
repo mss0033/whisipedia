@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import pickle
 import threading
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -117,6 +119,41 @@ def build_snapshot(
     return LibrarySnapshot(time.monotonic(), sources, counts)
 
 
+SNAPSHOT_CACHE_VERSION = 1
+
+
+def save_snapshot(path: Path, snap: LibrarySnapshot) -> None:
+    """Write ``snap`` atomically to ``path`` (local disk; a failure only costs a slower next start)."""
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+        with tmp.open("wb") as fh:
+            pickle.dump(
+                (SNAPSHOT_CACHE_VERSION, snap.sources, snap.doc_counts), fh, protocol=pickle.HIGHEST_PROTOCOL
+            )
+        tmp.replace(path)
+    except Exception as exc:  # never fail a refresh over its cache
+        log.warning("could not save the library snapshot to %s: %s", path, exc)
+
+
+def load_snapshot(path: Path, specs: Sequence[SourceSpec]) -> LibrarySnapshot | None:
+    """The snapshot saved by :func:`save_snapshot`, if readable, of this version and these sources.
+
+    The file is the server's own output on local disk (ADR-0002), never data from upstream.
+    """
+    try:
+        with path.open("rb") as fh:
+            version, sources, counts = pickle.load(fh)  # noqa: S301 - our own local cache file
+    except FileNotFoundError:
+        return None
+    except Exception as exc:
+        log.warning("ignoring an unreadable library snapshot %s: %s", path, exc)
+        return None
+    if version != SNAPSHOT_CACHE_VERSION or {s.id for s in specs} - set(sources):
+        return None
+    return LibrarySnapshot(time.monotonic(), sources, counts)
+
+
 # --- a value refreshed on a period ------------------------------------------------------------------
 
 
@@ -149,6 +186,11 @@ class Refreshed[T]:
     def age(self) -> float | None:
         value = self._value
         return None if value is None else time.monotonic() - value[0]
+
+    def seed(self, value: T) -> None:
+        """Publish ``value`` (e.g. loaded from disk) as already stale, so the next build replaces it."""
+        self._value = (time.monotonic() - self.every - 1.0, value)
+        self._ready.set()
 
     def refresh(self) -> T:
         """Build now (in this thread) and publish the result."""
@@ -221,6 +263,9 @@ class StateSettings:
     ops_seconds: float = 0.0
     ledger_verify_seconds: float = 300.0
     wait_seconds: float = 20.0  # background: how long a request waits for the very first snapshot
+    # Local file holding the last snapshot: a restarted server answers from it at once while the
+    # first fresh build (thousands of NAS round trips, a minute or more) runs. None: memory only.
+    cache_file: Path | None = None
 
 
 class LibraryState:
@@ -253,7 +298,11 @@ class LibraryState:
             every=settings.snapshot_seconds,
             background=bg,
         )
-        self.core.after = self._find_homes
+        self.core.after = self._after_snapshot
+        if bg and settings.cache_file is not None:
+            cached = load_snapshot(settings.cache_file, self._specs)
+            if cached is not None:
+                self.core.seed(cached)  # served until the first fresh build replaces it
         self.ops = Refreshed("ops", self._build_ops, every=settings.ops_seconds, background=bg)
         self.proposals = Refreshed(
             "proposals",
@@ -335,6 +384,11 @@ class LibraryState:
             log.warning("cannot read the landing page of %s/%s yet: %s", source_id, generation_id, exc)
             return _FAILED
         return None if native is None else make_doc_id(source_id, native)
+
+    def _after_snapshot(self, snap: LibrarySnapshot) -> None:
+        if self.settings.cache_file is not None:
+            save_snapshot(self.settings.cache_file, snap)
+        self._find_homes(snap)
 
     def _find_homes(self, snap: LibrarySnapshot) -> None:
         """After a background snapshot: landing pages of current Kiwix generations not known yet.

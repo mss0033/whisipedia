@@ -59,6 +59,7 @@ class DocumentView:
 
 
 DEFAULT_ZIM_MAX_OPEN = 512
+SNAPSHOT_CACHE_FILE = "library-snapshot.pickle"
 
 
 def _zim_reader(settings: ApiSettings, services: Services) -> ZimReader:
@@ -91,6 +92,7 @@ class Library:
                 snapshot_seconds=settings.snapshot_seconds,
                 ops_seconds=settings.ops_seconds,
                 ledger_verify_seconds=settings.ledger_verify_seconds,
+                cache_file=settings.cache_dir / SNAPSHOT_CACHE_FILE if settings.cache_dir else None,
             ),
         )
         self.zim: ZimAssetStore | None
