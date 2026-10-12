@@ -580,11 +580,19 @@ def _first_publication_date(pubs: object) -> str:
     return ""
 
 
+_XML_ILLEGAL = re.compile(rb"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+
+
+def xml_root(body: bytes) -> ET.Element:
+    """Parse an API's XML answer; control characters XML forbids (seen in OSTI records) are dropped."""
+    return ET.fromstring(_XML_ILLEGAL.sub(b"", body))  # noqa: S314 - HTTPS API answer; expat rejects external entities
+
+
 def _osti_records(body: bytes) -> list[Json]:
     """OSTI answers JSON or XML depending on the query (no Accept header in the port): read both."""
     text = body.lstrip()
     if text.startswith(b"<"):
-        root = ET.fromstring(text)  # noqa: S314 - HTTPS OSTI response; expat rejects external entities
+        root = xml_root(text)
         out: list[Json] = []
         for rec in root.iter("record"):
             row: Json = {child.tag: (child.text or "").strip() for child in rec}
@@ -874,7 +882,7 @@ def oai_pmh(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
     url: str | None = f"{endpoint}?{urlencode(params)}"
     pages = 0
     while url and pages < env.pages():
-        root = ET.fromstring(env.fetcher.get_bytes(url))  # noqa: S314 - HTTPS OAI response; expat rejects external entities
+        root = xml_root(env.fetcher.get_bytes(url))
         pages += 1
         for rec in root.iter(f"{_OAI}record"):
             header = rec.find(f"{_OAI}header")

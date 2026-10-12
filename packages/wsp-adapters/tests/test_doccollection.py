@@ -773,3 +773,10 @@ def test_a_complete_archive_listing_is_cached_and_a_partial_one_is_not(tmp_path:
     env = DiscoverEnv(fetcher=Down({}), issuer="T", prefix="t", origins=("archive.org",), cache_dir=tmp_path)
     assert sorted(c.key for c in discover_all([cfg], env)) == first
     assert not env.incomplete
+
+
+def test_xml_answers_with_forbidden_control_characters_still_parse() -> None:
+    from wsp_adapters.doccollection.discovery import xml_root
+
+    root = xml_root(b"<records><record><title>Shelter\x0b design \x01guide</title></record></records>")
+    assert root.findtext("record/title") == "Shelter design guide"
