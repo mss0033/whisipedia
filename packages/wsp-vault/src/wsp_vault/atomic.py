@@ -255,16 +255,33 @@ def link_noreplace(src: Path, dest: Path) -> None:
     os.unlink(src)
 
 
+def _finish_interrupted_link(src: Path, dest: Path) -> bool:
+    """If ``src`` and ``dest`` are one file (hard links), drop ``src`` and report the move as done."""
+    try:
+        if not os.path.samefile(src, dest):
+            return False
+    except FileNotFoundError:
+        return False
+    os.unlink(src)
+    return True
+
+
 def publish_noreplace(src: Path, dest: Path) -> None:
     """Move ``src`` to ``dest`` atomically, never replacing an existing ``dest``.
 
     Tries ``renameat2(RENAME_NOREPLACE)``, then ``link`` + ``unlink``. Raises ``FileExistsError`` if
     ``dest`` exists, :class:`NoReplaceUnsupportedError` if the filesystem supports neither.
+
+    Resumable: if ``dest`` exists and *is* ``src`` (the same inode: a crash came between the
+    fallback's ``link`` and ``unlink``), the move is finished by unlinking ``src`` (audit 2026-10-12,
+    M1). Every caller re-running after such a crash completes instead of failing forever.
     """
     try:
         rename_noreplace(src, dest)
         return
     except FileExistsError:
+        if _finish_interrupted_link(src, dest):
+            return
         raise
     except OSError as exc:
         if exc.errno not in _NOREPLACE_UNSUPPORTED:
@@ -272,6 +289,8 @@ def publish_noreplace(src: Path, dest: Path) -> None:
     try:
         link_noreplace(src, dest)
     except FileExistsError:
+        if _finish_interrupted_link(src, dest):
+            return
         raise
     except OSError as exc:
         if exc.errno in _NOREPLACE_UNSUPPORTED | {errno.EMLINK}:

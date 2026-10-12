@@ -33,6 +33,7 @@ from wsp_cli.locks import (
 from wsp_cli.service import ServiceManager, unit_dir
 from wsp_cli.wiring import drill_once, parity_targets, repair_ladder, scrubber
 from wsp_core.model import GenerationStatus, SourceSpec
+from wsp_core.partitions import PartitionError, check_partition, partition_generation_id, partition_of
 from wsp_core.ports import Fetcher
 from wsp_core.registry import RegistryError, load_registry
 from wsp_index.spelling import SPELL_FILE
@@ -46,7 +47,12 @@ from wsp_orchestrator.versions import version_key
 from wsp_vault.drill import DrillKind
 from wsp_vault.vault import FileVault
 
+# `wsp ingest` exit codes (docs/runbooks/document-collections.md, "Exit codes"): 0 every version
+# (with --version: that version) is ingested or already sealed; 1 a version failed; 2 usage;
+# 3 another ingest runs (EXIT_BUSY); 4 files still missing or downloading; 8 with --version only:
+# no download plan names that version (nothing was fetched for it, so there is nothing to ingest).
 EXIT_INCOMPLETE = 4  # `wsp ingest`: some version still has files missing or downloading
+EXIT_NOT_PLANNED = 8  # `wsp ingest --version V`: no download plan names V
 EXIT_UNAVAILABLE = 5  # the vault share is unreachable (scrub stopped without recording anything)
 
 
@@ -109,6 +115,9 @@ def _ingest(
     specs: tuple[SourceSpec, ...],
 ) -> int:
     dry: bool = args.dry_run
+    version = _ingest_version(args, specs)
+    if isinstance(version, int):
+        return version
     vault = _vault(cfg, lay, specs, writable=not dry)
     fetcher: Fetcher | None = None if args.offline else bootstrap.build_fetcher(cfg)
     ing = Ingestor(
@@ -121,15 +130,15 @@ def _ingest(
     )
     try:
         if args.allow_mirror:
-            if args.source != "gutenberg":
-                print("error: --allow-mirror needs --source gutenberg", file=sys.stderr)
+            if args.source != "gutenberg" or version is not None:
+                print("error: --allow-mirror needs --source gutenberg (and no --version)", file=sys.stderr)
                 return 2
             vp = ing.ingest_mirror(dry_run=dry)
             out.write(
                 f"{vp.source_id}/{vp.generation_id}: {vp.status.value} {len(vp.files)} files {vp.reason}\n"
             )
             return 1 if vp.status is VersionStatus.FAILED else 0
-        report = ing.run(source_id=args.source, dry_run=dry)
+        report = ing.run(source_id=args.source, version=version, dry_run=dry)
     finally:
         close = getattr(fetcher, "close", None)
         if callable(close):
@@ -138,10 +147,41 @@ def _ingest(
         out.write(json.dumps(report.to_json(), indent=2) + "\n")
     else:
         render(report, out)
+    if version is not None and not report.versions:
+        return EXIT_NOT_PLANNED  # a lane must not take "nothing to do" for "this cycle landed"
     if any(v.status is VersionStatus.FAILED for v in report.versions):
         return 1
     # Not an error, but not done either: scripts must not mistake it for success (exit 0).
     return EXIT_INCOMPLETE if any(v.status is VersionStatus.INCOMPLETE for v in report.versions) else 0
+
+
+def _ingest_version(args: argparse.Namespace, specs: Sequence[SourceSpec]) -> str | int | None:
+    """The incoming version ``--version``/``--partition`` name (as ``wsp collections fetch`` names it:
+    ``<cycle>.<partition>`` for a partitioned source), ``None`` for all versions, or an exit code."""
+    cycle: str | None = getattr(args, "version", None)
+    part: str | None = getattr(args, "partition", None)
+    if cycle is None and part is None:
+        return None
+    if not args.source or cycle is None:
+        print("error: --version needs --source, and --partition needs --version", file=sys.stderr)
+        return 2
+    spec = next((s for s in specs if s.id == args.source), None)
+    if part is None:
+        if spec is not None and spec.partitioned and partition_of(cycle) is None:
+            print(
+                f"error: {spec.id} is partitioned: add --partition (or give <cycle>.<partition>)",
+                file=sys.stderr,
+            )
+            return 2
+        return cycle
+    if spec is not None and not spec.partitioned:
+        print(f"error: {spec.id} is not partitioned (access.partitioned): drop --partition", file=sys.stderr)
+        return 2
+    try:
+        return partition_generation_id(cycle, check_partition(part.lower()))
+    except PartitionError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
 
 
 # --- index build -----------------------------------------------------------------------------------------

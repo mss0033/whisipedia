@@ -38,7 +38,7 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import IO, Any, Protocol, cast
+from typing import IO, Any, Protocol, cast, runtime_checkable
 
 from wsp_orchestrator.errors import (
     FailureKind,
@@ -115,6 +115,13 @@ class Launcher(Protocol):
     def start(
         self, unit: str, argv: Sequence[str], *, env: Mapping[str, str], cwd: Path, limits: UnitLimits
     ) -> ChildProcess: ...
+
+
+@runtime_checkable
+class KnowsUnits(Protocol):
+    """Optional launcher capability: is a unit of this name still running (or stopping)?"""
+
+    def unit_running(self, unit: str) -> bool: ...
 
 
 # --- systemd-run -------------------------------------------------------------------------------------
@@ -198,6 +205,28 @@ class SystemdRunLauncher:
     def __post_init__(self) -> None:
         self.systemd_run = self.systemd_run or shutil.which("systemd-run")
         self.systemctl = self.systemctl or shutil.which("systemctl")
+
+    def unit_running(self, unit: str) -> bool:
+        """True unless systemd reports the unit gone (``inactive``, ``failed`` or unknown).
+
+        ``activating``, ``active``, ``deactivating`` and ``reloading`` all count as running; when
+        systemctl cannot answer, the unit is assumed running (deferring is safe, clearing its box is not).
+        """
+        if self.systemctl is None:
+            return False
+        try:
+            done = subprocess.run(  # noqa: S603 - fixed argv, no shell
+                [self.systemctl, "--user", "show", "-p", "ActiveState", "--value", unit],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return True
+        if done.returncode != 0:
+            return True
+        return done.stdout.strip() not in ("inactive", "failed", "")
 
     @staticmethod
     def available() -> bool:
@@ -382,6 +411,11 @@ class IsolatedRunner:
         unit = unit_name(step, key)
         lim = limits or self.limits
         box = self.workdir / "_steps" / unit
+        if box.exists() and isinstance(self.launcher, KnowsUnits) and self.launcher.unit_running(unit):
+            # Left by an earlier daemon whose child unit still runs: its request and result files are
+            # in there. Clearing them would throw its work away; wait for it instead (audit
+            # 2026-10-12, L5). A busy step is deferred, no attempt counted.
+            raise ResourceBusyError(f"{step}: {unit} from an earlier run is still running")
         shutil.rmtree(box, ignore_errors=True)
         box.mkdir(parents=True)
         try:

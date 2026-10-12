@@ -205,3 +205,42 @@ def test_a_source_marked_index_false_is_never_built(vault: FileVault, tmp_path: 
         assert not (root / "refinery" / SID).exists()
     finally:
         ix.close()
+
+
+def test_a_source_flipped_to_index_false_leaves_the_index(vault: FileVault, tmp_path: Path) -> None:
+    """Audit 2026-10-12 L4: ``index: false`` only skipped work, so a source flipped after it was indexed
+    stayed searchable. The next build removes its documents (with REMOVED records in the feed)."""
+    import dataclasses
+    import json
+
+    fetch(vault, tmp_path, "ak", "2026-10-03.ak", {"AK_Anchorage_1950.pdf": sheet("Anchorage")})
+    ix = indexer(vault, tmp_path)
+    try:
+        ix.build([SID])
+        assert [h.doc_id for h in ix.index.search("Anchorage")]
+        cursor = ix.feed.since(None, limit=100_000)[1]
+    finally:
+        ix.close()
+    root = tmp_path / "index"
+    served = dataclasses.replace(spec(), raw={**spec().raw, "index": False})
+    ix = Indexer(
+        vault,
+        [served],
+        {"doc-collection": DocCollectionAdapter(throttle=False)},
+        root,
+        TantivyIndex(root / "lexical"),
+        SqliteChangeFeed(root / "changes.sqlite"),
+    )
+    try:
+        (report,) = ix.build()  # the nightly run reports what it removed
+        assert report.deleted == 1
+        assert not ix.index.has_source(SID)
+        assert [h.doc_id for h in ix.index.search("Anchorage")] == []
+        changes, _ = ix.feed.since(cursor)
+        assert [(c.doc_id, c.kind.value) for c in changes] == [
+            (make_doc_id(SID, "topo:AK_Anchorage_1950.pdf"), "removed")
+        ]
+        assert SID not in json.loads((root / "index-state.json").read_text())
+        assert ix.build() == []  # done: nothing left to remove, nothing reported
+    finally:
+        ix.close()

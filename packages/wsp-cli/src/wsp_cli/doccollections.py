@@ -127,7 +127,17 @@ def api_keys(cfg: Mapping[str, Any]) -> dict[str, str]:
 # --- dry run -----------------------------------------------------------------------------------------
 
 
-EXIT_LISTING_INCOMPLETE = 4  # `wsp collections fetch`: a listing failed; nothing fetched, retry later
+# `wsp collections fetch` exit codes: one per outcome, so a lane can tell "this cycle is complete" from
+# everything else (audit 2026-10-12, C1; docs/runbooks/document-collections.md, "Exit codes"). An
+# uncaught error exits 1 (Python's traceback exit) and a kill exits 128+signal (137, 143): neither is
+# ever complete. Only 0, 7 and 8 are complete; a lane marks an item done only after one of them AND a
+# successful `wsp ingest --source S --version V` (where, after 7 or 8, "nothing planned" is expected).
+EXIT_COMPLETE = 0  # every listed document fetched, unchanged, rejected or held; the plan is written
+EXIT_REFUSED = 2  # not fetched at all: excluded source, no legal basis, wrong or missing --partition
+EXIT_LISTING_INCOMPLETE = 4  # a listing failed; nothing fetched, retry later (same cycle)
+EXIT_PARTIAL = 6  # some or all downloads failed (or another fetch held them); the rest is planned
+EXIT_ALERT = 7  # complete, but the issuer lists restricted documents (deleted, never kept): read them
+EXIT_NOTHING_NEW = 8  # complete, and nothing changed upstream: no plan, nothing to ingest
 
 
 @dataclass
@@ -372,6 +382,17 @@ class FetchReport:
     incomplete: list[str] = field(default_factory=list[str])  # the listing failed: nothing was fetched
     skipped: int = 0
     alerts: list[str] = field(default_factory=list[str])
+
+
+def fetch_exit_code(report: FetchReport) -> int:
+    """The exit code of a finished (not dry-run) fetch: the worst outcome wins (4, 6, 7, then 8 or 0)."""
+    if report.incomplete:
+        return EXIT_LISTING_INCOMPLETE
+    if report.failed:
+        return EXIT_PARTIAL
+    if report.alerts:
+        return EXIT_ALERT
+    return EXIT_COMPLETE if report.fetched else EXIT_NOTHING_NEW
 
 
 class CollectionFetcher:
@@ -852,18 +873,18 @@ def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
         raise bootstrap.ConfigError(f"unknown source {args.source!r}")
     if spec.status is SourceStatus.EXCLUDED or spec.raw.get("legal_basis") == "none":
         print(f"error: {spec.id} is excluded or has no legal basis", file=sys.stderr)
-        return 2
+        return EXIT_REFUSED
     if spec.partitioned and not args.partition and not args.dry_run:
         print(f"error: {spec.id} is fetched one partition per run: add --partition", file=sys.stderr)
-        return 2
+        return EXIT_REFUSED
     if args.partition and not spec.partitioned:
         print(f"error: {spec.id} is not partitioned (access.partitioned): drop --partition", file=sys.stderr)
-        return 2
+        return EXIT_REFUSED
     try:
         partition = check_partition(args.partition.lower()) if args.partition else None
     except PartitionError as exc:
         print(f"error: {exc}", file=sys.stderr)
-        return 2
+        return EXIT_REFUSED
     paths = bootstrap.paths(cfg)
     vault_root = paths.require_vault()
     today = datetime.now(UTC).strftime("%Y-%m-%d")
@@ -911,9 +932,19 @@ def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
         side.parent.mkdir(parents=True, exist_ok=True)
         side.write_text(json.dumps(rows, indent=1), encoding="utf-8")
         out.write(f"review list (no orchestrator state DB for proposals): {side}\n")
+    if args.dry_run:
+        return EXIT_COMPLETE
+    code = fetch_exit_code(report)
+    outcome = {
+        EXIT_COMPLETE: "complete",
+        EXIT_PARTIAL: "partial (fetch again later for the failed documents)",
+        EXIT_ALERT: "complete, with alerts",
+        EXIT_NOTHING_NEW: "complete, nothing new",
+    }[code]
+    out.write(f"outcome: {outcome} (exit {code})\n")
     if report.fetched:
-        out.write(f"next: wsp ingest --source {spec.id}\n")
-    return 1 if report.alerts else 0
+        out.write(f"next: wsp ingest --source {spec.id} --version {version}\n")
+    return code
 
 
 def register(sub: Any, add: Any) -> None:
@@ -937,7 +968,14 @@ def register(sub: Any, add: Any) -> None:
     )
     s.add_argument("--json", action="store_true")
     s = add(
-        "fetch", cmd_fetch, "Fetch one collection politely into <vault>/_incoming (then: wsp ingest).", co_sub
+        "fetch",
+        cmd_fetch,
+        "Fetch one collection politely into <vault>/_incoming (then: wsp ingest --source S --version V). "
+        "Exit codes: 0 complete (plan written); 1 crashed; 2 refused; 4 listing incomplete, nothing "
+        "fetched (retry the same cycle later); 6 partial, some downloads failed (ingest what came, "
+        "fetch again later); 7 complete with alerts (restricted documents listed, deleted); 8 complete, "
+        "nothing new (no plan). Only 0, 7 and 8 are complete.",
+        co_sub,
     )
     s.add_argument("--source", required=True)
     s.add_argument("--version", default=None, help="cycle label (default: today, YYYY-MM-DD)")

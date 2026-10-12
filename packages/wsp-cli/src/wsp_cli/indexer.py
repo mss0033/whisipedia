@@ -39,8 +39,10 @@ from typing import TextIO, cast
 
 from wsp_adapters.entries import EntrySource, Redirect
 from wsp_core.errors import FetchError
-from wsp_core.ids import InvalidDocIdError, make_doc_id
+from wsp_core.ids import DocId, InvalidDocIdError, make_doc_id
 from wsp_core.model import (
+    ChangeKind,
+    ChangeRecord,
     DocRecord,
     FetchResult,
     Generation,
@@ -352,6 +354,33 @@ class Indexer:
         # Every member's aliases are applied before the state is saved (a crash cannot lose them).
         return self.index_generation(spec, set_id, alias_generations=sorted(ids))
 
+    def deindex(self, spec: SourceSpec, *, batch: int = 50_000) -> SourceReport:
+        """Remove every indexed document of a source that is no longer searchable (``index: false``).
+
+        ``index: false`` only skips work; a source flipped after it was indexed kept its documents in
+        search (audit 2026-10-12, L4). Each batch is published to the change feed as ``REMOVED``
+        first, then deleted and committed, so a crash re-runs into the same result (a repeated
+        removal is harmless; a missed one is not). The Refinery keeps its history; the
+        indexed-generation state entry goes last.
+        """
+        state = self._state()
+        indexed = state.get(spec.id)
+        skipped = "not indexed (registry index: false)"
+        if indexed is None and not self.index.has_source(spec.id):
+            return SourceReport(spec.id, skipped=skipped)
+        deleted = 0
+        for ids in self.index.source_doc_ids(spec.id, batch=batch):
+            gone = [DocId(i) for i in ids]
+            self.feed.publish(ChangeRecord(d, ChangeKind.REMOVED, indexed or "", None, None) for d in gone)
+            deleted += self.index.delete(gone)
+            self.index.commit(rebuild_suggest=False)
+            self._changed = True
+        if indexed is not None:
+            state.pop(spec.id, None)
+            self._save_state(state)
+        self._say(f"  {spec.id}: index: false, removed {deleted:,} indexed document(s)")
+        return SourceReport(spec.id, deleted=deleted, skipped=skipped)
+
     def build_catalog(self, spec: SourceSpec, generation_id: str) -> Path | None:
         """Precompute the portal/directory/random data of one indexed generation (derived, local)."""
         started = self.clock()
@@ -465,8 +494,9 @@ class Indexer:
                     reports.append(SourceReport(sid, skipped="no sealed generation"))
                 continue
             if not searchable(spec):
-                if source_ids:
-                    reports.append(SourceReport(sid, skipped="not indexed (registry index: false)"))
+                gone = self.deindex(spec)  # flipped to index: false since it was indexed (L4)
+                if source_ids or gone.deleted:
+                    reports.append(gone)
                 continue
             if self.adapter_for(spec) is None:
                 reports.append(SourceReport(sid, skipped=f"no adapter installed for {spec.adapter!r}"))
