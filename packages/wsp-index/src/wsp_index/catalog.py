@@ -522,7 +522,7 @@ def refresh_featured(
 
 class _Tailable(Protocol):
     def tail(
-        self, limit: int, *, sources: Sequence[str] | None = None, max_scan: int = 200_000
+        self, limit: int, *, sources: Sequence[str] | None = None
     ) -> tuple[Sequence[ChangeRecord], str]: ...
 
 

@@ -40,6 +40,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
     label: `Search ${src.name}:`,
     onSubmit: (q) => ctx.app.navigate(searchAddress(q, { source: src.id })),
   });
+  const held = src.current_generation !== null;
   const related = src.related
     .map((r) => sources.find((s) => s.id === r))
     .filter((s) => s !== undefined);
@@ -61,7 +62,14 @@ export async function render(ctx: PageContext): Promise<PageResult> {
     ),
     pageHeading(`Welcome to ${src.name}`),
     src.description ? h('p', { class: 'site-desc' }, src.description) : null,
-    form,
+    held
+      ? null
+      : h(
+          'p',
+          { class: 'site-notice' },
+          'This site is planned for the library but has not been downloaded yet, so there is nothing to read here for now.',
+        ),
+    held ? form : null,
     h(
       'table',
       { class: 'kv' },
@@ -97,10 +105,12 @@ export async function render(ctx: PageContext): Promise<PageResult> {
       src.home_doc_id
         ? [docLink(src.home_doc_id, h('span', { class: 'btn-like' }, 'Enter site')), ' ']
         : null,
-      wspLink(
-        makeAddress('random', '', { source: src.id }),
-        h('span', { class: 'btn-like' }, 'Random page'),
-      ),
+      src.doc_count
+        ? wspLink(
+            makeAddress('random', '', { source: src.id }),
+            h('span', { class: 'btn-like' }, 'Random page'),
+          )
+        : null,
     ),
     related.length
       ? h(

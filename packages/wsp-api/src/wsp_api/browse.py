@@ -115,7 +115,7 @@ def browse_router(lib: Library) -> APIRouter:
             newest=(news := _site_news(infos, limit=6)) + [lib.change(c) for c in newest][: 8 - len(news)],
             random=doc_ref(lib.catalog.random_doc(sources=None, rng=rng)),
             random_sources=[i.id for i in infos if i.doc_count],
-            sites=infos,
+            sites=[i for i in infos if i.current_generation],  # planned sources with nothing yet: not listed
         )
 
     # --- Directory ------------------------------------------------------------------------------
@@ -127,7 +127,11 @@ def browse_router(lib: Library) -> APIRouter:
         ] = "",
     ) -> DirectoryPage:
         parts = [p for p in path.strip("/").split("/") if p]
+        # Only sites the library holds: a planned source with nothing downloaded is not listed (its
+        # address still opens a page saying so). A path to it still resolves, for old bookmarks.
+        held = lib.held_sources()
         specs = sorted(s.sources, key=lambda x: x.name.casefold())
+        listed = [x for x in specs if x.id in held]
         domains = sorted({d for x in specs for d in x.domain})
 
         def not_found() -> ApiError:
@@ -135,8 +139,9 @@ def browse_router(lib: Library) -> APIRouter:
 
         if not parts:
             children = [
-                DirectoryCategory(path=d, name=sites.domain_name(d), count=sum(d in x.domain for x in specs))
+                DirectoryCategory(path=d, name=sites.domain_name(d), count=sum(d in x.domain for x in listed))
                 for d in domains
+                if any(d in x.domain for x in listed)
             ]
             children.sort(key=lambda c: c.name)
             return DirectoryPage(path="", name="Top", trail=[], children=children, entries=[])
@@ -156,6 +161,7 @@ def browse_router(lib: Library) -> APIRouter:
                     crosslink=x.domain[0] != domain,
                 )
                 for x in members
+                if x.id in held
             ]
             return DirectoryPage(path=domain, name=trail[0].name, trail=trail, children=children, entries=[])
 

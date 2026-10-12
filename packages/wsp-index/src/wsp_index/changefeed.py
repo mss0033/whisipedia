@@ -14,6 +14,7 @@ from collections.abc import Iterable, Sequence
 from pathlib import Path
 
 from wsp_core.errors import InvalidCursorError
+from wsp_core.feedsql import SOURCE_INDEX, tail_rows
 from wsp_core.ids import DocId
 from wsp_core.model import ChangeKind, ChangeRecord
 from wsp_index.localfs import ensure_local
@@ -46,6 +47,7 @@ class SqliteChangeFeed:
         self._db.execute("PRAGMA journal_mode=WAL")
         self._db.execute("PRAGMA synchronous=NORMAL")
         self._db.executescript(_SCHEMA)
+        self._db.execute(SOURCE_INDEX)  # built once on an older feed (a minute for 100M rows)
         row = self._db.execute("SELECT value FROM meta WHERE key='epoch'").fetchone()
         if row is None:
             epoch = secrets.token_hex(4)
@@ -111,30 +113,15 @@ class SqliteChangeFeed:
             row = self._db.execute("SELECT value FROM meta WHERE key=?", (f"checkpoint:{key}",)).fetchone()
         return None if row is None else str(row[0])
 
-    def tail(
-        self, limit: int, *, sources: Sequence[str] | None = None, max_scan: int = 200_000
-    ) -> tuple[Sequence[ChangeRecord], str]:
+    def tail(self, limit: int, *, sources: Sequence[str] | None = None) -> tuple[Sequence[ChangeRecord], str]:
         """The newest ``limit`` changes, newest first, plus the head cursor (no full replay).
 
-        With ``sources`` only changes of those sources are returned; at most ``max_scan`` rows are
-        examined so a rare source cannot turn this into a full scan.
+        With ``sources`` only changes of those sources are returned (one index range per source).
         """
-        prefixes = tuple(f"wsp:{s}/" for s in sources) if sources else None
-        out: list[ChangeRecord] = []
         with self._lock:
             top = int(self._db.execute("SELECT COALESCE(MAX(seq), 0) FROM changes").fetchone()[0])
-            rows = self._db.execute(
-                "SELECT seq, doc_id, kind, generation_id, old_hash, new_hash, renamed_from "
-                "FROM changes ORDER BY seq DESC LIMIT ?",
-                (max_scan if prefixes else limit,),
-            )
-            for r in rows:
-                if prefixes is not None and not str(r[1]).startswith(prefixes):
-                    continue
-                out.append(_record(r))
-                if len(out) >= limit:
-                    break
-        return out, self._cursor(top)
+            rows = tail_rows(self._db, limit, sources, indexed=True)
+        return [_record(r) for r in rows], self._cursor(top)
 
     def since(self, cursor: str | None, *, limit: int = 1000) -> tuple[Sequence[ChangeRecord], str]:
         if limit < 1:

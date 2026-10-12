@@ -99,7 +99,14 @@ def cmd_serve(args: argparse.Namespace, out: TextIO) -> int:
     if not _is_loopback(host) and not args.allow_remote:
         print(f"error: refusing to bind non-loopback {host!r} without --allow-remote", file=sys.stderr)
         return 2
+    import faulthandler
+    import signal
+
     import uvicorn  # local import: only `serve` needs the ASGI server
+
+    # `systemctl --user kill -s USR1 whisipedia-api` prints every thread's stack to the journal: the
+    # only way to see a stalled server's Python stacks (ptrace is not allowed for the user's processes).
+    faulthandler.register(signal.SIGUSR1, all_threads=True)
 
     from wsp_api import create_app
 

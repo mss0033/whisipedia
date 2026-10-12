@@ -167,6 +167,13 @@ class Library:
         spec = self.s.source(source_id)
         return source_id if spec is None else spec.name
 
+    def held_sources(self) -> frozenset[str]:
+        """Sources with a current generation in the library (from the snapshot)."""
+        snap = self.state.snapshot()
+        return frozenset(
+            x.id for x in self.s.sources if snap.source(x.id).current is not None or snap.source(x.id).members
+        )
+
     def has_docs(self, sources: Sequence[str]) -> list[str]:
         counts = self.state.snapshot().doc_counts
         return [x for x in sources if counts.get(x)]

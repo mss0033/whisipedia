@@ -15,6 +15,7 @@ from collections.abc import Iterable, Sequence
 from pathlib import Path
 
 from wsp_core.errors import InvalidCursorError
+from wsp_core.feedsql import has_source_index, tail_rows
 from wsp_core.ids import DocId
 from wsp_core.model import ChangeKind, ChangeRecord
 
@@ -85,25 +86,12 @@ class ReadOnlyChangeFeed:
         last = int(rows[-1][0]) if rows else after
         return [_record(r) for r in rows], self._cursor(last)
 
-    def tail(
-        self, limit: int, *, sources: Sequence[str] | None = None, max_scan: int = 200_000
-    ) -> tuple[Sequence[ChangeRecord], str]:
+    def tail(self, limit: int, *, sources: Sequence[str] | None = None) -> tuple[Sequence[ChangeRecord], str]:
         """The newest ``limit`` changes, newest first, plus the head cursor (as the writer's ``tail``)."""
-        prefixes = tuple(f"wsp:{s}/" for s in sources) if sources else None
         db = self._db()
         top = int(db.execute("SELECT COALESCE(MAX(seq), 0) FROM changes").fetchone()[0])
-        rows = db.execute(
-            f"SELECT {_COLUMNS} FROM changes ORDER BY seq DESC LIMIT ?",  # noqa: S608 - constant
-            (max_scan if prefixes else limit,),
-        )
-        out: list[ChangeRecord] = []
-        for r in rows:
-            if prefixes is not None and not str(r[1]).startswith(prefixes):
-                continue
-            out.append(_record(r))
-            if len(out) >= limit:
-                break
-        return out, self._cursor(top)
+        rows = tail_rows(db, limit, sources, indexed=bool(sources) and has_source_index(db))
+        return [_record(r) for r in rows], self._cursor(top)
 
     def publish(self, changes: Iterable[ChangeRecord]) -> str:
         raise PermissionError("the API's change feed is read-only")

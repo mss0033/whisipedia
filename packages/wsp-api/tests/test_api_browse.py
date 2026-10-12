@@ -314,3 +314,16 @@ def test_rewrite_drops_inline_styles() -> None:
     )
     out = rewrite_html(page, source_id="s", generation_id="g", native_id="A/P")
     assert out == '<head></head><p class="c">Hi <b>there</b></p>'
+
+
+def test_planned_sources_with_nothing_downloaded_are_not_listed() -> None:
+    from wsp_api.testing.fakes import SAMPLE_SOURCES
+
+    planned = replace(SAMPLE_SOURCES[0], id="arxiv", name="arXiv", domain=("papers",))
+    services = replace(sample_services(), sources=(*SAMPLE_SOURCES, planned))
+    with local_client(create_app(services)) as c:
+        portal = Portal.model_validate(c.get("/v1/portal").json())
+        assert "arxiv" not in {s.id for s in portal.sites}
+        top = DirectoryPage.model_validate(c.get("/v1/directory").json())
+        assert "papers" not in {ch.path for ch in top.children}  # a category holding only planned sites
+        assert c.get("/v1/sources/arxiv").status_code == 200  # its page still opens and says so
