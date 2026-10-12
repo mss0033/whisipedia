@@ -187,7 +187,7 @@ def test_portal(browse: httpx.Client) -> None:
     assert portal.featured is not None
     assert portal.featured.doc_id.startswith("wsp:wikipedia-en-zim/")
     assert portal.featured.blurb
-    sites_first = [c for c in portal.newest if c.title and "— updated" in c.title]
+    sites_first = [c for c in portal.newest if not c.doc_id or c.address == f"wsp://{c.source_id}"]
     assert portal.newest[: len(sites_first)] == sites_first  # recently sealed sites lead What's New
     docs = portal.newest[len(sites_first) :]
     assert docs[0].doc_id == ENIGMA

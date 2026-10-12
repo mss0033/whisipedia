@@ -23,6 +23,7 @@ from wsp_api.schemas import (
     GenerationInfo,
     Hit,
     LedgerEntry,
+    Rendition,
     SourceHealth,
     SourceInfo,
     VaultLocation,
@@ -93,6 +94,7 @@ def document(
     generation_id: str | None = None,
     html: str | None = None,
     vault: VaultLocation | None = None,
+    rendition: Rendition | None = None,
     has_history: bool = False,
     include_text: bool = True,
 ) -> Document:
@@ -119,6 +121,7 @@ def document(
         format="text" if html is None else "html",
         html=html,
         vault=vault,
+        rendition=rendition,
         has_history=has_history,
         currency=currency_of(doc.meta),
         banner=banner_for(doc.meta),

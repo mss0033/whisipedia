@@ -87,7 +87,7 @@ export interface SearchParams {
 
 /** A location-bar or search-box suggestion: from the API (titles) or from local history. */
 export interface Suggestion {
+  /** A title (`/v1/suggest` returns titles only) or, from History, a page title with its address. */
   text: string;
-  doc_id?: DocId | undefined;
-  kind?: G.DocKind | undefined;
+  address?: string | undefined;
 }

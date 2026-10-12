@@ -307,6 +307,15 @@ class ZimAssetStore:
         file = self._book_file(source_id, generation_id, layout, book) if book else None
         return None if file is None else (file, entry_path, f"{book}/")
 
+    def file_of(self, source_id: str, generation_id: str, native_id: str) -> str | None:
+        """The archive that holds ``native_id`` (no entry is read). ``None`` if unknown, or while a
+        bundle's book list is still being built."""
+        try:
+            where = self._locate(source_id, generation_id, native_id)
+        except ZimUnavailable:
+            return None
+        return None if where is None else where[0]
+
     def _read(self, file: str, path: str, want: Want) -> EntryData | None:
         try:
             return self.reader.read(file, path, want)

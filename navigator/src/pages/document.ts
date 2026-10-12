@@ -5,7 +5,7 @@
  */
 import { ApiRequestError } from '../api/client.ts';
 import type { DocumentResponse, SourceInfo } from '../api/types.ts';
-import { makeAddress, searchAddress } from '../core/address.ts';
+import { docIdToAddress, makeAddress, searchAddress } from '../core/address.ts';
 import { diffLines, diffStats } from '../core/diff.ts';
 import { h } from '../core/dom.ts';
 import { formatDate } from '../core/format.ts';
@@ -71,6 +71,13 @@ export function isPreformatted(doc: Pick<DocumentResponse, 'source_id' | 'kind'>
   return doc.source_id === 'rfc' || doc.kind === 'data' || doc.kind === 'law';
 }
 
+/** The page heading already shows the title: drop a first line that only repeats it. */
+export function withoutTitleLine(text: string, title: string): string {
+  const m = /^\s*([^\n]*)\n?/.exec(text);
+  const norm = (x: string) => x.replace(/\s+/g, ' ').trim().toLowerCase();
+  return m && norm(m[1]!) === norm(title) && norm(title) ? text.slice(m[0].length) : text;
+}
+
 export function renderBody(doc: DocumentResponse): { node: HTMLElement; broken: number } {
   const wrap = h('div', { class: 'doc-body', lang: doc.lang });
   if (doc.format === 'html' && doc.html) {
@@ -83,8 +90,87 @@ export function renderBody(doc: DocumentResponse): { node: HTMLElement; broken: 
     wrap.appendChild(fragment);
     return { node: wrap, broken: stats.broken };
   }
-  wrap.appendChild(renderPlainText(doc.text ?? '', isPreformatted(doc)));
+  wrap.appendChild(
+    renderPlainText(withoutTitleLine(doc.text ?? '', doc.title), isPreformatted(doc)),
+  );
   return { node: wrap, broken: wrap.querySelectorAll('.broken-link').length };
+}
+
+/**
+ * A library catalog card (Open Library): it describes a book the library may not hold. Say so, and
+ * offer the ways to the book itself: a search of the library's books for the title, and the work
+ * record an edition belongs to.
+ */
+export function catalogNotice(
+  doc: Pick<DocumentResponse, 'title' | 'text' | 'source_id'>,
+  source: Pick<SourceInfo, 'domain'> | undefined,
+): HTMLElement | null {
+  if (!source?.domain.includes('catalog')) return null;
+  const title = doc.title.replace(/\s*[:(].*$/, '').trim() || doc.title; // "Title : subtitle" -> "Title"
+  const work = /^Work:\s*(works\/OL\d+W)\s*$/m.exec(doc.text ?? '')?.[1];
+  return h(
+    'div',
+    { class: 'notice catalog-notice', role: 'note' },
+    h('b', null, 'Catalog card. '),
+    'This page describes a book; it is not the book. ',
+    wspLink(
+      searchAddress(title, { kind: 'books' }),
+      `Look for “${title}” among the library’s books`,
+    ),
+    work ? [' · ', wspLink(makeAddress(doc.source_id, work), 'All editions of this work')] : null,
+    '.',
+  );
+}
+
+const MAX_LISTED_LINKS = 60;
+
+/**
+ * The outbound links of a plain-text document (a Gutenberg book's illustrated edition, a PubMed
+ * record's DOI and MeSH links). HTML pages carry theirs in the page; text has nowhere else to show them.
+ * Pages the library holds come first; the rest are shown as broken links (not fetched, offline).
+ */
+export function linksList(
+  doc: Pick<DocumentResponse, 'format' | 'html' | 'links'>,
+): HTMLElement | null {
+  if ((doc.format === 'html' && doc.html) || doc.links.length === 0) return null;
+  const held = doc.links.filter((l) => l.target);
+  const elsewhere = doc.links.filter((l) => !l.target);
+  const items = [...held, ...elsewhere].slice(0, MAX_LISTED_LINKS).map((l) => {
+    if (l.target) {
+      const addr = docIdToAddress(l.target);
+      const m = /^wsp:([^/]+)\/(.+)$/.exec(l.target);
+      const label = m ? m[2]!.replace(/_/g, ' ') : l.target;
+      return h(
+        'li',
+        null,
+        wspLink(addr, label),
+        m ? h('span', { class: 'fineprint' }, ` (${m[1]})`) : null,
+      );
+    }
+    const addr = makeAddress('offline', '', { url: l.href });
+    return h(
+      'li',
+      null,
+      h(
+        'a',
+        {
+          href: `#${addr}`,
+          dataset: { wsp: addr },
+          class: 'broken-link',
+          title: `Not in library: ${l.href}`,
+        },
+        l.href,
+      ),
+    );
+  });
+  const more = doc.links.length - items.length;
+  return h(
+    'section',
+    { class: 'doc-links', 'aria-label': 'Links' },
+    h('h2', null, held.length ? 'Also in the library' : 'Links'),
+    h('ul', null, ...items),
+    more > 0 ? h('p', { class: 'fineprint' }, `…and ${more} more.`) : null,
+  );
 }
 
 function webring(source: SourceInfo | undefined, everything: SourceInfo[]): HTMLElement | null {
@@ -290,9 +376,11 @@ function timeMachine(ctx: PageContext, doc: DocumentResponse, route: DocRoute): 
       })
       .catch((err: unknown) => {
         list.replaceChildren(
-          err instanceof ApiRequestError && err.isUnavailable
-            ? 'This source keeps no history.'
-            : `Could not load history: ${String(err)}`,
+          err instanceof ApiRequestError && err.isBusy
+            ? 'The library is busy; reload the page to see the versions.'
+            : err instanceof ApiRequestError && err.isUnavailable
+              ? 'This source keeps no history.'
+              : `Could not load history: ${String(err)}`,
         );
       });
   };
@@ -384,20 +472,29 @@ export async function render(ctx: PageContext): Promise<PageResult> {
   } catch (err) {
     if (err instanceof ApiRequestError && err.status === 404) {
       const words = route.nativeId.replace(/[_/]+/g, ' ');
-      // A link led here but the library lacks the page: tell the gap miner (PLAN §5.3).
-      void ctx.app.api.reportGap({ href: ctx.address, from_doc_id: ctx.app.lastDocId() });
+      // A link led here but the library lacks the page: tell the gap miner (PLAN §5.3). Not for an
+      // old version (`?at=`): the page exists, only that version does not.
+      if (!route.at)
+        void ctx.app.api.reportGap({ href: ctx.address, from_doc_id: ctx.app.lastDocId() });
+      const site = (await ctx.app.sources()).find((s) => s.id === route.source);
       return {
+        status: 'error',
         title: '404 Not Found',
         body: errorPage({
           title: 'Not Found',
           heading: 'Not Found',
-          message: `The requested page was not found in the library. It may not have been mirrored yet, or it was removed upstream.`,
+          message: route.at
+            ? `The library holds no version of this page as of ${route.at}.`
+            : `The requested page was not found in the library. It may not have been mirrored yet, or it was removed upstream.`,
           address: ctx.address,
           suggestions: [
+            route.at
+              ? wspLink(makeAddress(route.source, route.nativeId), 'View the current page')
+              : null,
             wspLink(searchAddress(words), `Search the library for “${words}”`),
-            wspLink(makeAddress(route.source), `Go to the ${route.source} site`),
+            site ? wspLink(makeAddress(site.id), `Go to ${site.name}`) : null,
             wspLink(makeAddress('home'), 'Go to the Start Page'),
-          ],
+          ].filter((x): x is HTMLAnchorElement => x !== null),
         }),
       };
     }
@@ -445,6 +542,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
     webring(source, sources),
     tmBanner,
     documentWarning(doc),
+    catalogNotice(doc, source),
     // Original pages (ZIM HTML) carry their own <h1>; don't print the title twice.
     content instanceof Element && content.querySelector('h1') ? null : pageHeading(doc.title),
     route.at ? null : originalPanel(doc, (path) => ctx.app.api.url(path)),
@@ -456,6 +554,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
           `${broken} link(s) on this page point outside the library and are shown as broken links.`,
         )
       : null,
+    route.diff ? null : linksList(doc),
     timeMachine(ctx, doc, route),
     footer(ctx.app, doc, here),
   );

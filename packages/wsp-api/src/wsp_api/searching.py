@@ -21,7 +21,7 @@ from concurrent.futures import Future
 from dataclasses import dataclass, replace
 from typing import Any, cast
 
-from wsp_api import convert, search, sites
+from wsp_api import convert, instant, search, sites
 from wsp_api.schemas import DocKind, Hit, KindFacet, SearchResults, SearchScope
 from wsp_api.snapshot import ZIM_ADAPTER
 from wsp_api.views import Library
@@ -198,6 +198,7 @@ class Searcher:
                 KindFacet(kind=k, count=n) for k, n in sorted(counts.items(), key=lambda x: (-x[1], x[0]))
             ],
             navigate_to=nav,
+            instant=instant.definition(q, lib.s.documents.get) if offset == 0 else None,
             did_you_mean=did_you_mean,
             low_confidence=low,
             scope=None

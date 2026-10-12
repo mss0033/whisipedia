@@ -18,6 +18,7 @@ const OP_LABEL = {
 } as const;
 const PAGE = 30;
 const MAX = 500;
+const RENDER_MS = 500;
 
 /** Groups by generation (the library's update cycles), keeping the input order. */
 export function groupByGeneration(changes: Change[]): Map<string, Change[]> {
@@ -91,15 +92,41 @@ export async function render(ctx: PageContext): Promise<PageResult> {
       });
   });
 
-  const watcher = watchChanges(ctx.app.api, first.cursor, (c) => {
-    changes = [
-      c,
-      ...changes.filter((x) => !(x.doc_id === c.doc_id && x.generation_id === c.generation_id)),
-    ];
-    renderGroups(list, changes, sources);
-    empty.hidden = true;
-    live.textContent = `Just in: ${c.title ?? c.doc_id}`;
-  });
+  // Live updates: newest first, at most MAX kept, one render per RENDER_MS however fast they arrive.
+  let pending: ReturnType<typeof setTimeout> | undefined;
+  const scheduleRender = () => {
+    pending ??= setTimeout(() => {
+      pending = undefined;
+      if (!ctx.signal.aborted) renderGroups(list, changes, sources);
+    }, RENDER_MS);
+  };
+  const reload = () => {
+    ctx.app.api
+      .recentChanges(limit, undefined, ctx.signal)
+      .then((r) => {
+        changes = [...r.items];
+        live.textContent = 'Many changes just landed; showing the newest.';
+        scheduleRender();
+      })
+      .catch(() => {
+        /* the next event or reload tries again */
+      });
+  };
+  const watcher = watchChanges(
+    ctx.app.api,
+    first.cursor,
+    (c) => {
+      changes = [
+        c,
+        ...changes.filter((x) => !(x.doc_id === c.doc_id && x.generation_id === c.generation_id)),
+      ].slice(0, MAX);
+      empty.hidden = true;
+      live.textContent = `Just in: ${c.title ?? c.doc_id}`;
+      scheduleRender();
+    },
+    { onSkipped: reload },
+  );
+  ctx.signal.addEventListener('abort', () => clearTimeout(pending), { once: true });
   ctx.signal.addEventListener('abort', () => watcher.close(), { once: true });
 
   const body = h(

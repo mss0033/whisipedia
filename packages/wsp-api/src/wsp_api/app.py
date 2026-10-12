@@ -224,13 +224,11 @@ def _v1(lib: Library, settings: ApiSettings) -> APIRouter:
 
         def build() -> GenerationPage:
             st = state.snapshot().source(source_id)
-            cur = st.current
+            # A partitioned source serves a set of generations at once (ADR-0010): each one is current.
+            current = {g.generation_id for g in (st.members or ([st.current] if st.current else []))}
             gens = sorted(st.generations, key=lambda g: g.generation_id, reverse=True)
             chunk, nxt = convert.page(gens, cursor, limit)
-            items = [
-                convert.generation_info(g, current=cur is not None and g.generation_id == cur.generation_id)
-                for g in chunk
-            ]
+            items = [convert.generation_info(g, current=g.generation_id in current) for g in chunk]
             return GenerationPage(items=items, next_cursor=nxt)
 
         return await state.run(build)
@@ -291,6 +289,7 @@ def _v1(lib: Library, settings: ApiSettings) -> APIRouter:
                 generation_id=view.generation_id,
                 html=view.html,
                 vault=view.vault,
+                rendition=view.rendition,
                 has_history=view.has_history,
                 include_text=include_text,
             )
@@ -331,7 +330,10 @@ def _v1(lib: Library, settings: ApiSettings) -> APIRouter:
 
     @r.get("/suggest", tags=["search"], responses=errors(422))
     def suggest(
-        q: Annotated[str, Query(max_length=200, description="Title prefix.")],
+        q: Annotated[
+            str,
+            Query(max_length=200, description="Text typed so far: titles with a word that starts with it."),
+        ],
         limit: Annotated[int, Query(ge=1, le=50)] = 10,
     ) -> Suggestions:
         return Suggestions(query=q, suggestions=list(s.index.suggest(q, limit=limit)))
@@ -379,6 +381,13 @@ def _v1(lib: Library, settings: ApiSettings) -> APIRouter:
             float | None,
             Query(gt=0, le=3600, description="Close the stream after this long (then reconnect)."),
         ] = None,
+        summarize: Annotated[
+            bool,
+            Query(
+                description="Skip a backlog: when a whole batch is waiting, send one `skipped` event "
+                "(its `id` is the feed head) and continue from the head. For readers of recent changes."
+            ),
+        ] = False,
     ) -> StreamingResponse:
         cursor = last_event_id or since
         await asyncio.to_thread(_feed_since, cursor, 1)  # validate the cursor before committing to 200
@@ -390,6 +399,7 @@ def _v1(lib: Library, settings: ApiSettings) -> APIRouter:
             max_seconds=max_seconds,
             is_disconnected=request.is_disconnected,
             describe=lib.change,
+            summarize=summarize,
         )
         return StreamingResponse(
             events,

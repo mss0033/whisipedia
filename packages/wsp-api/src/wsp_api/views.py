@@ -11,24 +11,33 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import cast
 
-from wsp_api import convert
+from wsp_api import convert, schemas
 from wsp_api.addresses import address_of
 from wsp_api.catalog import FeedCatalog
 from wsp_api.errors import ApiError
 from wsp_api.htmlrewrite import VERSION as REWRITE_VERSION
 from wsp_api.htmlrewrite import rewrite_html
 from wsp_api.offload import Offload
+from wsp_api.originals import FILE_REF, stored_file
 from wsp_api.pages import ByteLRU, Rendered, render
-from wsp_api.renditions import borrowed
+from wsp_api.renditions import Rendition, release_time, rendition_doc_id, renditions
 from wsp_api.schemas import Change, DocRef, DocumentLink, SourceInfo, VaultLocation
 from wsp_api.seams import DocumentFields, VaultView
 from wsp_api.services import ApiSettings, Services
 from wsp_api.snapshot import LibrarySnapshot, LibraryState, StateSettings
 from wsp_api.zim import BookIndex, ZimAssetStore
 from wsp_api.zimpool import ZimProcessPool
-from wsp_api.zimread import InProcessZimReader, ZimReader
+from wsp_api.zimread import InProcessZimReader, ZimReader, ZimUnavailable
 from wsp_core.ids import DocId, InvalidDocIdError, make_doc_id, parse_doc_id
-from wsp_core.model import ChangeRecord, DocRecord, Generation, GenerationStatus, SearchHit, SourceSpec
+from wsp_core.model import (
+    Artifact,
+    ChangeRecord,
+    DocRecord,
+    Generation,
+    GenerationStatus,
+    SearchHit,
+    SourceSpec,
+)
 from wsp_core.ports import AssetStore, Catalog
 
 log = logging.getLogger(__name__)
@@ -36,6 +45,7 @@ MANIFEST_NAME = "MANIFEST.json"  # same name as wsp_vault.manifest.MANIFEST_NAME
 ZIM_ADAPTER = "kiwix-opds"
 BOOK_INDEX_FILE = "zim-books.json"
 _MAX_LINK_LOOKUPS = 1000
+_MAX_ZIM_LINK_CHECKS = 32  # each opens an archive entry (no content read)
 _HISTORY_CACHE = 2048
 HIT_COLUMNS = ("license", "timestamp", "lang", "url_native")
 
@@ -57,6 +67,7 @@ class DocumentView:
     html: str | None
     vault: VaultLocation | None
     has_history: bool
+    rendition: schemas.Rendition | None = None
 
 
 DEFAULT_ZIM_MAX_OPEN = 512
@@ -249,7 +260,7 @@ class Library:
             if self.zim is not None:
                 return self.zim.exists(source_id, gen.generation_id, native_id)
             return self.assets.html(source_id, gen.generation_id, f"zim:{native_id}") is not None
-        except ApiError:
+        except (ApiError, ZimUnavailable):  # busy is a 503 the client retries, not "not in the library"
             raise
         except Exception:  # an unreadable archive is "not here", not an error page
             log.warning("existence check failed for %s", did, exc_info=True)
@@ -274,7 +285,10 @@ class Library:
         return convert.change(rec, title=self.title(rec.doc_id))
 
     def links(self, doc: DocRecord) -> list[DocumentLink]:
+        """Outbound links, each resolved to a local document when the library holds it: in the store,
+        or (at most :data:`_MAX_ZIM_LINK_CHECKS` of them) a page of a Kiwix source's current ZIM."""
         out: list[DocumentLink] = []
+        zim_checks = 0
         for i, href in enumerate(doc.links):
             target: str | None = None
             if i < _MAX_LINK_LOOKUPS and href.startswith("wsp:"):
@@ -284,8 +298,18 @@ class Library:
                     did = None
                 if did is not None and self.in_store(did):
                     target = did
+                elif did is not None and zim_checks < _MAX_ZIM_LINK_CHECKS and self._zim_backed(did):
+                    zim_checks += 1
+                    try:
+                        target = did if self.exists(did) else None
+                    except (ApiError, ZimUnavailable):  # busy: show it unresolved rather than fail the page
+                        target = None
             out.append(DocumentLink(href=href, target=target))
         return out
+
+    def _zim_backed(self, did: DocId) -> bool:
+        spec = self.s.source(parse_doc_id(did)[0])
+        return spec is not None and spec.adapter == ZIM_ADAPTER
 
     # --- history ---
 
@@ -389,7 +413,7 @@ class Library:
             license=spec.license,
             text=page.text,
             revision=gen.generation_id,
-            timestamp=gen.sealed_at,
+            timestamp=release_time(gen),
             html_ref=f"zim:{native_id}",
             content_hash=page.content_hash,
         )
@@ -410,37 +434,79 @@ class Library:
         if doc is None:
             where = f" at generation {at}" if at else ""
             raise ApiError(404, "document_not_found", f"no such document{where}: {did}")
+        rendition: Rendition | None = None
         if gen is None:
             introduced = self.generation_of(versions, doc.content_hash, at)
-            gen = self.serving_generation(doc.source_id, introduced, at) or (
-                self.vault.current(doc.source_id) if doc.html_ref else None
+            # A stored file names its generation (`file:<gen>/…`); a partitioned source's history holds
+            # refinery set ids, which never equal a vault generation id (ADR-0010).
+            gen = (
+                self.stored_generation(doc)
+                or self.serving_generation(doc.source_id, introduced, at)
+                or (self.vault.current(doc.source_id) if doc.html_ref else None)
             )
-            if doc.html_ref and gen is not None:
+            if doc.html_ref and gen is not None and stored_file(doc) is None:
                 page = self.rendered(doc.source_id, gen, doc.html_ref, doc.native_id)
                 html = None if page is None else page.html
-            spec = self.s.source(doc.source_id)
-            if html is None and at is None and (alt := borrowed(spec, doc, self.vault)):
+            if html is None and at is None:
                 # e.g. the Wikipedia dump (indexed text) rendered with the Kiwix ZIM's page for its title.
-                page = self.rendered(alt.source_id, alt.generation, alt.html_ref, alt.html_ref[4:])
-                html = None if page is None else page.html
+                for alt in renditions(self.s.source(doc.source_id), doc, self.vault):
+                    page = self.rendered(alt.source_id, alt.generation, alt.html_ref, alt.html_ref[4:])
+                    if page is not None:
+                        html, rendition = page.html, alt
+                        break
+        if rendition is not None:  # View Source Data describes the page on screen
+            vault = self.vault_location(rendition.generation, rendition.html_ref, rendition.source_id)
+        elif gen is not None:
+            vault = self.vault_location(gen, doc.html_ref, doc.source_id)
+        else:
+            vault = None
         return DocumentView(
             doc=doc,
             generation_id=gen.generation_id if gen is not None else introduced,
             html=html,
-            vault=None if gen is None else self.vault_location(gen, doc),
+            vault=vault,
             has_history=len(versions) > 1,
+            rendition=None
+            if rendition is None
+            else schemas.Rendition(
+                source_id=rendition.source_id,
+                generation_id=rendition.generation.generation_id,
+                doc_id=rendition_doc_id(rendition),
+            ),
         )
 
-    def vault_location(self, gen: Generation, doc: DocRecord) -> VaultLocation:
+    def stored_generation(self, doc: DocRecord) -> Generation | None:
+        """The generation a stored original (``file:<gen>/…``) lives in, if the vault has it."""
+        where = stored_file(doc)
+        if where is None:
+            return None
+        return next((g for g in self.vault.generations(doc.source_id) if g.generation_id == where[0]), None)
+
+    def vault_location(self, gen: Generation, html_ref: str | None, source_id: str) -> VaultLocation:
+        """The file that holds the page: the stored original, the ZIM archive holding the entry, or the
+        generation's only file. Otherwise the generation directory (no size or hashes)."""
         base = self._vault_rel(gen)
-        zim = doc.html_ref is not None and doc.html_ref.startswith("zim:")
-        candidates = [a for a in gen.artifacts if a.relpath.suffix == ".zim"] if zim else list(gen.artifacts)
-        art = candidates[0] if len(candidates) == 1 or (zim and candidates) else None
+        art: Artifact | None = None
+        entry: str | None = None
+        if html_ref is not None and html_ref.startswith("zim:"):
+            entry = html_ref.removeprefix("zim:")
+            zims = [a for a in gen.artifacts if a.relpath.suffix == ".zim"]
+            if len(zims) == 1:
+                art = zims[0]
+            elif zims and self.zim is not None:
+                file = self.zim.file_of(source_id, gen.generation_id, entry)
+                name = None if file is None else Path(file).name
+                art = next((a for a in zims if a.relpath.name == name), None)
+        elif html_ref is not None and html_ref.startswith(FILE_REF):
+            rel = html_ref.removeprefix(FILE_REF).partition("/")[2]
+            art = next((a for a in gen.artifacts if str(a.relpath) == rel), None)
+        elif len(gen.artifacts) == 1:
+            art = gen.artifacts[0]
         return VaultLocation(
             generation_id=gen.generation_id,
             path=str(base / str(art.relpath)) if art is not None else str(base),
             manifest=str(base / MANIFEST_NAME),
-            entry=doc.html_ref.removeprefix("zim:") if zim and doc.html_ref else None,
+            entry=entry,
             size=None if art is None else art.size,
             sha256=None if art is None else art.sha256,
             blake3=None if art is None else art.blake3,

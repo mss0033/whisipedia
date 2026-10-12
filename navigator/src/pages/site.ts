@@ -45,7 +45,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
   const held = src.current_generation !== null;
   const related = src.related
     .map((r) => sources.find((s) => s.id === r))
-    .filter((s): s is SourceInfo => s !== undefined && s.readable);
+    .filter((s): s is SourceInfo => s?.readable === true);
 
   const body = h(
     'div',
@@ -108,9 +108,19 @@ export async function render(ctx: PageContext): Promise<PageResult> {
         ? [docLink(src.home_doc_id, h('span', { class: 'btn-like' }, 'Enter site')), ' ']
         : null,
       src.doc_count || src.home_doc_id
+        ? [
+            wspLink(
+              makeAddress('random', '', { source: src.id }),
+              h('span', { class: 'btn-like' }, 'Random page'),
+            ),
+            ' ',
+          ]
+        : null,
+      // Its A–Z (or subject) shelves in the directory: the way in for a site with no landing page.
+      src.readable && src.domain[0]
         ? wspLink(
-            makeAddress('random', '', { source: src.id }),
-            h('span', { class: 'btn-like' }, 'Random page'),
+            makeAddress('directory', `${src.domain[0]}/${src.id}`),
+            h('span', { class: 'btn-like' }, 'Browse this site'),
           )
         : null,
     ),

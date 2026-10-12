@@ -141,6 +141,21 @@ export function searchAddress(q: string, extra: Record<string, string | number |
   return makeAddress('search', '', { q, ...extra });
 }
 
+/**
+ * Sites with something to read, once the library's site list has arrived (null until then). Shortcuts
+ * and autolinks into a site the library does not hold would only lead to a 404 and a false gap report.
+ */
+let readableHosts: ReadonlySet<string> | null = null;
+
+export function setReadableHosts(hosts: Iterable<string> | null): void {
+  readableHosts = hosts === null ? null : new Set(hosts);
+}
+
+/** True while the list is unknown (the server answers for itself), else whether `host` is readable. */
+export function isReadableHost(host: string): boolean {
+  return readableHosts === null || readableHosts.has(host);
+}
+
 /** Instant client-side navigational shortcuts ("rfc 9110", "Q42"). */
 const SHORTCUTS: Array<[RegExp, (m: RegExpExecArray) => string]> = [
   [/^rfc\s*-?\s*(\d{1,5})$/i, (m) => makeAddress('rfc', String(Number(m[1])))],
@@ -184,7 +199,9 @@ export function interpretInput(text: string): LocationInput | null {
     return { type: 'external', url: t, address: makeAddress('offline', '', { url: t }) };
   }
   const shortcut = shortcutFor(t);
-  if (shortcut) return { type: 'address', address: shortcut };
+  if (shortcut && isReadableHost(parseAddress(shortcut)?.host ?? '')) {
+    return { type: 'address', address: shortcut };
+  }
   return { type: 'search', query: t };
 }
 

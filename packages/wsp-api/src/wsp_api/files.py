@@ -2,18 +2,21 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import os
+import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, cast
+from typing import TYPE_CHECKING, Annotated, Any, cast
 from urllib.parse import unquote
 
 from fastapi import APIRouter
 from fastapi import Path as PathParam
 from fastapi.responses import FileResponse
+from starlette.types import Receive, Scope, Send
 
-from wsp_api.errors import ApiError, errors
-from wsp_api.offload import Offload
+from wsp_api.errors import ApiError, error_response, errors
+from wsp_api.offload import RETRY_AFTER, Offload
 from wsp_api.originals import INLINE, MEDIA_TYPES, PREVIEW_SIZE, PREVIEWABLE, display_name, stored_file
 from wsp_api.views import Library, parse_doc
 from wsp_core.model import DocRecord
@@ -26,8 +29,39 @@ DocIdSegment = Annotated[
 ]
 
 
+MAX_TRANSFERS = 4  # concurrent originals: a stalled NAS read holds a thread of Starlette's shared pool
+
+
+class _BoundedFile(FileResponse):
+    """A :class:`FileResponse` that takes a transfer slot for as long as it streams, or answers 503."""
+
+    def __init__(self, slots: asyncio.Semaphore, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._slots = slots
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if self._slots.locked():
+            busy = error_response(
+                503, "busy", "too many files are being sent; try again shortly", retry_after=RETRY_AFTER
+            )
+            await busy(scope, receive, send)
+            return
+        async with self._slots:
+            await super().__call__(scope, receive, send)
+
+
 def files_router(lib: Library) -> APIRouter:
     r = APIRouter(prefix="/v1")
+    transfers = asyncio.Semaphore(MAX_TRANSFERS)
+    private_cache: list[Path] = []  # without a cache dir: one private temporary directory per router
+
+    def preview_dir() -> Path:
+        if lib.settings.cache_dir is not None:
+            return lib.settings.cache_dir / "previews"
+        if not private_cache:
+            private_cache.append(Path(tempfile.mkdtemp(prefix="wsp-previews-")))
+        return private_cache[0]
+
     # One decode at a time, in its own pool: a 100-megapixel map scan takes seconds and must not hold
     # a `nas` slot that document reads need. Requests beyond the small queue are shed with a 503.
     previews = Offload(workers=1, queue=4, timeout=120.0, name="preview")
@@ -58,7 +92,8 @@ def files_router(lib: Library) -> APIRouter:
         """The document's stored original file (PDF, map scan, archive). Supports ``Range``."""
         _doc, path = await lib.nas.run(lambda: locate(doc_id))
         suffix = path.suffix.lower()
-        return FileResponse(
+        return _BoundedFile(
+            transfers,
             path,
             media_type=MEDIA_TYPES.get(suffix, "application/octet-stream"),
             filename=display_name(path.name),
@@ -78,8 +113,7 @@ def files_router(lib: Library) -> APIRouter:
                 raise ApiError(404, "no_preview", "only images and map scans have a preview")
             st = path.stat()
             key = hashlib.sha256(f"{path}|{st.st_size}|{st.st_mtime_ns}".encode()).hexdigest()[:32]
-            cache = (lib.settings.cache_dir or Path("/tmp")) / "previews"  # noqa: S108 - fallback only
-            return path, cache / f"{key}.jpg"
+            return path, preview_dir() / f"{key}.jpg"
 
         src, out = await lib.nas.run(find)
         if not out.is_file():  # a cached preview never waits behind a render

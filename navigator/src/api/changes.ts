@@ -17,7 +17,14 @@ export interface WatchOptions {
   /** Injected for tests; defaults to the global EventSource if there is one. */
   eventSource?: typeof EventSource | undefined;
   pollMs?: number;
+  /**
+   * For readers of recent changes only: when a backlog is waiting (a whole generation landing), skip
+   * to the feed head instead of receiving every record, and call this so the page reloads its list.
+   */
+  onSkipped?: () => void;
 }
+
+const POLL_BATCH = 200;
 
 export function watchChanges(
   api: WspClient,
@@ -35,8 +42,13 @@ export function watchChanges(
   const poll = (): void => {
     if (closed) return;
     api
-      .changes(since, 200)
-      .then((page) => {
+      .changes(since, POLL_BATCH)
+      .then(async (page) => {
+        if (opts.onSkipped && page.items.length >= POLL_BATCH) {
+          since = (await api.recentChanges(1)).cursor ?? page.cursor; // the head
+          opts.onSkipped();
+          return;
+        }
         for (const c of page.items) onChange(c);
         since = page.cursor;
       })
@@ -56,8 +68,16 @@ export function watchChanges(
   };
 
   if (ES) {
-    const qs = since ? `?since=${encodeURIComponent(since)}` : '';
+    const params = new URLSearchParams();
+    if (since) params.set('since', since);
+    if (opts.onSkipped) params.set('summarize', 'true');
+    const qs = params.toString() ? `?${params}` : '';
     source = new ES(api.url(`/v1/changes/stream${qs}`));
+    source.addEventListener('skipped', (ev) => {
+      const msg = ev as MessageEvent<string>;
+      if (msg.lastEventId) since = msg.lastEventId;
+      opts.onSkipped?.();
+    });
     source.addEventListener('change', (ev) => {
       const msg = ev as MessageEvent<string>;
       if (msg.lastEventId) since = msg.lastEventId;

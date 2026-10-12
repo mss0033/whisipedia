@@ -128,3 +128,39 @@ describe('did you mean and site scope', () => {
     expect(render('http caching').querySelector('.scope-hint')).toBeNull();
   });
 });
+
+describe('result pages (audit 2026-10-12 F9, F24)', () => {
+  const page = (q: string, extra = '') =>
+    resolveRoute(`wsp://search?q=${encodeURIComponent(q)}${extra}`) as Extract<
+      ReturnType<typeof resolveRoute>,
+      { page: 'search' }
+    >;
+
+  it('keeps every ranked page reachable with a sliding window', () => {
+    const resp = search(new URLSearchParams({ q: 'http caching', page_size: '10' }));
+    const div = document.createElement('div');
+    div.append(
+      renderResultsPage(
+        { ...resp, offset: 90, limit: 10, total: 200, next_offset: 100 },
+        page('http caching', '&page=10'),
+        null,
+      ),
+    );
+    const labels = [...div.querySelectorAll('.pagination a, .pagination b')].map(
+      (a) => a.textContent,
+    );
+    expect(labels).toContain('Next');
+    expect(labels).toContain('14'); // pages 5-14 around page 10 of 20
+    expect(labels).not.toContain('4');
+    expect(div.querySelector('.pagination b')?.textContent).toBe('10');
+  });
+
+  it('keeps the site filter on a correction', () => {
+    const resp = search(new URLSearchParams({ q: 'vacine', page_size: '10' }));
+    const div = document.createElement('div');
+    div.append(renderResultsPage(resp, page('vacine', '&source=gutenberg'), 'Project Gutenberg'));
+    expect(div.querySelector('.did-you-mean a')?.getAttribute('href')).toContain(
+      'source=gutenberg',
+    );
+  });
+});

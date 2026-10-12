@@ -73,3 +73,45 @@ def test_stream_delivers_changes_published_while_connected(app: FastAPI, service
 
 def test_format_event_splits_multiline_data() -> None:
     assert format_event("a\nb", event="x", event_id="7") == "id: 7\nevent: x\ndata: a\ndata: b\n\n"
+
+
+def test_summarize_skips_a_backlog_to_the_head() -> None:
+    from collections.abc import Sequence
+
+    from wsp_api.sse import change_events
+
+    records = [
+        ChangeRecord(make_doc_id("s", f"d{i}"), ChangeKind.ADDED, "g1", None, f"h{i}") for i in range(10)
+    ]
+
+    class Feed:
+        def since(self, cursor: str | None, *, limit: int = 1000) -> tuple[Sequence[ChangeRecord], str]:
+            start = int(cursor or 0)
+            chunk = records[start : start + limit]
+            return chunk, str(start + len(chunk))
+
+        def head(self) -> str:
+            return str(len(records))
+
+    async def collect(summarize: bool) -> list[dict[str, str]]:
+        async def gone() -> bool:
+            return True
+
+        out = ""
+        async for part in change_events(
+            Feed(),  # type: ignore[arg-type]
+            None,
+            poll_seconds=0,
+            heartbeat_seconds=60,
+            max_seconds=None,
+            is_disconnected=gone,
+            batch=4,
+            summarize=summarize,
+        ):
+            out += part
+        return _events(out)
+
+    skipped = asyncio.run(collect(True))
+    assert [(e["event"], e.get("id")) for e in skipped] == [("skipped", "10")]  # one event, not ten
+    assert json.loads(skipped[0]["data"]) == {"cursor": "10"}
+    assert len(asyncio.run(collect(False))) == 10  # without it, every record is delivered

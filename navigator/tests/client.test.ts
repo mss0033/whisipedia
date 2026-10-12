@@ -113,6 +113,36 @@ describe('watchChanges', () => {
     w.close();
   });
 
+  it('asks a recent-changes reader to be told of a backlog, not flooded (audit F7)', () => {
+    const opened: string[] = [];
+    const handlers = new Map<string, (ev: MessageEvent<string>) => void>();
+    class FakeES {
+      readyState = 0;
+      constructor(url: string) {
+        opened.push(url);
+      }
+      addEventListener(name: string, fn: (ev: MessageEvent<string>) => void) {
+        handlers.set(name, fn);
+      }
+      close() {}
+    }
+    let skipped = 0;
+    const api = new WspClient({ fetch: mockFetch() });
+    const w = watchChanges(api, '7', () => {}, {
+      eventSource: FakeES as unknown as typeof EventSource,
+      onSkipped: () => {
+        skipped += 1;
+      },
+    });
+    expect(opened).toEqual(['/v1/changes/stream?since=7&summarize=true']);
+    handlers.get('skipped')!({
+      data: '{"cursor":"99"}',
+      lastEventId: '99',
+    } as MessageEvent<string>);
+    expect(skipped).toBe(1);
+    w.close();
+  });
+
   it('falls back to polling the feed from the cursor', async () => {
     const log: string[] = [];
     const api = new WspClient({ fetch: mockFetch(log) });

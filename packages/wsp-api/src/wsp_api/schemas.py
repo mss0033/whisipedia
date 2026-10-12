@@ -177,6 +177,15 @@ class OriginalFile(_Wire):
     )
 
 
+class Rendition(_Wire):
+    """Where the HTML on screen comes from when another source renders this document (e.g. the
+    Wikipedia dump's text shown with the Kiwix ZIM's page)."""
+
+    source_id: str
+    generation_id: str
+    doc_id: str = Field(description="The page in that source, `wsp:<source_id>/<native_id>`.")
+
+
 class Document(_Wire):
     doc_id: str = Field(description="Stable id `wsp:<source_id>/<native_id>` (PLAN §9.2).")
     source_id: str
@@ -220,6 +229,11 @@ class Document(_Wire):
         default=None,
         description="Reader warning to show above the document, e.g. 'Historical document — methods may be "
         "outdated or unsafe.' (PLAN D13). Absent when there is nothing to warn about.",
+    )
+    rendition: Rendition | None = Field(
+        default=None,
+        description="Set when `html` is another source's page for this title; `vault` then describes "
+        "that page's file.",
     )
     original: OriginalFile | None = Field(
         default=None, description="The stored original file, for documents refined from one (PDFs, maps)."
@@ -460,6 +474,11 @@ class DirectoryPage(_Wire):
     trail: list[DirectoryCrumb] = Field(description="Ancestors and this node, Top excluded.")
     children: list[DirectoryCategory]
     entries: list[DirectoryEntry]
+    total: int | None = Field(
+        default=None,
+        description="Documents in this category when `entries` lists only the best known of them "
+        "(the catalog keeps a bounded list per category); null when `entries` is complete.",
+    )
 
 
 # --- System Monitor ----------------------------------------------------------------------------

@@ -37,7 +37,18 @@ describe('resolveRoute', () => {
       diff: false,
       fragment: 'Legacy',
     });
-    expect(resolveRoute('wsp://rfc/9110?at=yesterday')).toMatchObject({ at: undefined });
+    expect(resolveRoute('wsp://rfc/9110?at=..%2Fx')).toMatchObject({ at: undefined });
+    expect(resolveRoute('wsp://rfc/9110?at=%20')).toMatchObject({ at: undefined });
+    // Real generation ids are not all dates (audit 2026-10-12 F3).
+    for (const at of [
+      '2026-08',
+      'pubmed26-u1671',
+      '2026-10-12-r2',
+      '2026-10-11.nj',
+      '2026-10-11.ri.set00001',
+    ]) {
+      expect(resolveRoute(`wsp://rfc/9110?at=${at}`)).toMatchObject({ at });
+    }
   });
 
   it('handles random, offline and invalid input', () => {

@@ -93,6 +93,8 @@ export interface DirectoryPage {
   trail: Array<DirectoryCrumb>;
   children: Array<DirectoryCategory>;
   entries: Array<DirectoryEntry>;
+  /** Documents in this category when `entries` lists only the best known of them (the catalog keeps a bounded list per category); null when `entries` is complete. */
+  total: number | null;
 }
 
 export interface DiskUsage {
@@ -151,6 +153,8 @@ export interface Document {
   currency: string | null;
   /** Reader warning to show above the document, e.g. 'Historical document — methods may be outdated or unsafe.' (PLAN D13). Absent when there is nothing to warn about. */
   banner: string | null;
+  /** Set when `html` is another source's page for this title; `vault` then describes that page's file. */
+  rendition: Rendition | null;
   /** The stored original file, for documents refined from one (PDFs, maps). */
   original: OriginalFile | null;
 }
@@ -445,6 +449,17 @@ export interface RecentChanges {
   cursor: string | null;
 }
 
+/**
+ * Where the HTML on screen comes from when another source renders this document (e.g. the
+ * Wikipedia dump's text shown with the Kiwix ZIM's page).
+ */
+export interface Rendition {
+  source_id: string;
+  generation_id: string;
+  /** The page in that source, `wsp:<source_id>/<native_id>`. */
+  doc_id: string;
+}
+
 export interface Resolution {
   /** Canonical form, e.g. `wsp://rfc/9110`. */
   address: string;
@@ -715,7 +730,7 @@ export interface Routes {
   'GET /v1/suggest': {
     path: Record<string, never>;
     query: {
-      /** Title prefix. */
+      /** Text typed so far: titles with a word that starts with it. */
       q: string;
       limit?: number | undefined;
     };
@@ -752,6 +767,8 @@ export interface Routes {
       since?: string | null | undefined;
       /** Close the stream after this long (then reconnect). */
       max_seconds?: number | null | undefined;
+      /** Skip a backlog: when a whole batch is waiting, send one `skipped` event (its `id` is the feed head) and continue from the head. For readers of recent changes. */
+      summarize?: boolean | undefined;
     };
     body: null;
     response: EventStream<Change>;

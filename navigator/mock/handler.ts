@@ -392,6 +392,7 @@ export function document(
     currency: d.currency ?? null,
     banner: d.banner ?? null,
     original: d.original ?? null,
+    rendition: null,
   };
 }
 
@@ -566,6 +567,7 @@ export function directory(params: URLSearchParams): Response<'GET /v1/directory'
   return {
     path,
     name: node.name,
+    total: node.total ?? null,
     trail: parts.map((_, i) => {
       const p = parts.slice(0, i + 1).join('/');
       return { path: p, name: DIRECTORY[p]?.name ?? p };

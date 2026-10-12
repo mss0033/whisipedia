@@ -51,6 +51,20 @@ export function sourceDataDialog(doc: DocumentResponse): HTMLDialogElement {
     ['Content hash', code(doc.content_hash)],
     ['Generation', code(doc.generation_id, '')],
   ];
+  if (doc.rendition) {
+    // The page on screen is another source's copy of this title; the vault rows describe that copy.
+    rows.push([
+      'Page shown from',
+      [
+        `${doc.rendition.source_id}, generation `,
+        code(doc.rendition.generation_id, ''),
+        ' (',
+        h('code', null, doc.rendition.doc_id),
+        ')',
+      ],
+    ]);
+  }
+  if (doc.original) rows.push(['Original file', code(doc.original.name)]);
   if (vault) {
     rows.push(
       ['Vault file', code(vault.path)],

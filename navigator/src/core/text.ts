@@ -3,7 +3,7 @@
  * cross-source autolinks ("RFC 9110", "wsp:gutenberg/1342", URLs).
  */
 
-import { makeAddress, normalizeAddress } from './address.ts';
+import { isReadableHost, makeAddress, normalizeAddress } from './address.ts';
 import { interwikiAddress } from './interwiki.ts';
 
 const TOKEN_RE =
@@ -15,6 +15,11 @@ export function linkify(text: string): DocumentFragment {
   for (const m of text.matchAll(TOKEN_RE)) {
     const i = m.index ?? 0;
     if (i > pos) f.appendChild(document.createTextNode(text.slice(pos, i)));
+    if (m[2] && !isReadableHost('rfc')) {
+      f.appendChild(document.createTextNode(m[0])); // the library holds no RFCs: plain text, not a 404
+      pos = i + m[0].length;
+      continue;
+    }
     const a = document.createElement('a');
     a.textContent = m[0];
     if (m[2]) {

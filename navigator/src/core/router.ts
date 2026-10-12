@@ -46,6 +46,8 @@ function toPage(v: string | undefined): number {
   return Number.isFinite(n) && n >= 1 && n <= 1000 ? n : 1;
 }
 
+const GENERATION_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+
 export function resolveRoute(address: string): Route {
   const a = parseAddress(address);
   if (!a) return { page: 'invalid', input: address };
@@ -84,7 +86,9 @@ export function resolveRoute(address: string): Route {
         source: a.host,
         nativeId: a.path,
         docId,
-        at: p.at && /^\d{4}-\d{2}-\d{2}$/.test(p.at) ? p.at : undefined,
+        // Any generation id: dates, Kiwix months ("2026-08"), "pubmed26-u1671", "2026-10-11.nj",
+        // refinery set ids ("2026-10-11.ri.set00001"). The API answers 404 for one it does not know.
+        at: p.at && GENERATION_ID_RE.test(p.at) ? p.at : undefined,
         diff: p.diff === '1',
         fragment: a.fragment,
       };

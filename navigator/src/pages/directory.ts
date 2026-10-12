@@ -28,6 +28,7 @@ export function directoryFromSources(path: string, sources: SourceInfo[]): Direc
         }))
         .sort((a, b) => a.name.localeCompare(b.name)),
       entries: [],
+      total: null,
     };
   }
   const kind = kinds.find((k) => k === path);
@@ -37,6 +38,7 @@ export function directoryFromSources(path: string, sources: SourceInfo[]): Direc
     name: KIND_LABELS[kind],
     trail: [{ path, name: KIND_LABELS[kind] }],
     children: [],
+    total: null,
     entries: sources
       .filter((s) => s.kind === kind)
       .map((s) => ({
@@ -49,6 +51,18 @@ export function directoryFromSources(path: string, sources: SourceInfo[]): Direc
   };
 }
 
+/** A category lists its best-known entries only (the catalog keeps a bounded list): say so, and offer
+ * the site's own search for the rest. */
+function truncatedNote(shown: number, total: number, sourceId: string): HTMLElement {
+  return h(
+    'p',
+    { class: 'notice dir-truncated' },
+    `Showing ${formatNumber(shown)} of ${formatNumber(total)} pages in this category. `,
+    wspLink(makeAddress(sourceId), 'Search this site'),
+    ' to find the rest.',
+  );
+}
+
 export async function render(ctx: PageContext): Promise<PageResult> {
   const path = (ctx.route as { path: string }).path.replace(/^\/+|\/+$/g, '');
   const sources = await ctx.app.sources();
@@ -56,9 +70,11 @@ export async function render(ctx: PageContext): Promise<PageResult> {
   try {
     dir = await ctx.app.api.directory(path, ctx.signal);
   } catch (err) {
-    if (!(err instanceof ApiRequestError) || !err.isUnavailable) throw err;
-    // "No such category" is an answer; anything else means an older daemon.
-    dir = err.code === 'category_not_found' ? null : directoryFromSources(path, sources);
+    if (!(err instanceof ApiRequestError)) throw err;
+    // "No such category" is an answer; a missing route means an older daemon. Busy is retried.
+    if (err.code === 'category_not_found') dir = null;
+    else if (err.isMissingRoute) dir = directoryFromSources(path, sources);
+    else throw err;
   }
   if (!dir) {
     return {
@@ -149,6 +165,9 @@ export async function render(ctx: PageContext): Promise<PageResult> {
               ),
             ),
           ),
+          dir.total
+            ? truncatedNote(dir.entries.length, dir.total, dir.entries[0]!.source_id)
+            : null,
         ]
       : null,
     !dir.children.length && !dir.entries.length

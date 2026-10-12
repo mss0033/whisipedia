@@ -9,11 +9,17 @@ Event format::
 Clients resume with ``Last-Event-ID`` (browsers do this automatically) or ``?since=``. Delivery is
 at-least-once: after a disconnect mid-batch, the batch is replayed. Comment lines (``: keepalive``)
 are sent while idle.
+
+``summarize``: a reader that only shows recent changes (the Navigator's What's New page) need not be
+sent a whole generation landing (Open Library: 114 million records). When a batch comes back full,
+the stream sends one ``skipped`` event (``id:`` the feed's head) and continues from the head; the
+client reloads its recent list. Without it every record is delivered.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 
@@ -45,11 +51,18 @@ async def change_events(
     is_disconnected: Callable[[], Awaitable[bool]],
     batch: int = 500,
     describe: Callable[[ChangeRecord], Change] = change,
+    summarize: bool = False,
 ) -> AsyncIterator[str]:
     yield f"retry: {RETRY_MS}\n\n"
     started = last_sent = time.monotonic()
+    head: Callable[[], str] | None = getattr(feed, "head", None) if summarize else None
     while True:
         records, new_cursor = await asyncio.to_thread(feed.since, cursor, limit=batch)
+        if head is not None and len(records) >= batch:  # a backlog: skip to the head, say so once
+            cursor = await asyncio.to_thread(head)
+            last_sent = time.monotonic()
+            yield format_event(json.dumps({"cursor": cursor}), event="skipped", event_id=cursor)
+            continue
         described = await asyncio.to_thread(_describe_all, describe, records)
         for i, item in enumerate(described):
             last = i == len(described) - 1

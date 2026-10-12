@@ -16,8 +16,10 @@ Two cases:
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+import re
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any, Protocol, cast
 
 from wsp_api.pages import page_text, page_title
@@ -48,6 +50,22 @@ def _current(vault: _Current, source_id: str) -> Generation | None:
         return None
 
 
+_RELEASE_ID = re.compile(r"^(\d{4})-(\d{2})(?:-(\d{2}))?(?![\d])")
+
+
+def release_time(gen: Generation) -> datetime | None:
+    """When the upstream released a ZIM generation: Kiwix generation ids are the archive's own date
+    (``2026-08``, ``2025-11-14``), which refined pages of the same archive also report; the seal time
+    is only when the copy reached the vault."""
+    m = _RELEASE_ID.match(gen.generation_id)
+    if m is None:
+        return gen.sealed_at
+    try:
+        return datetime(int(m[1]), int(m[2]), int(m[3] or 1), tzinfo=UTC)
+    except ValueError:
+        return gen.sealed_at
+
+
 def zim_document(
     spec: SourceSpec | None, native_id: str, vault: _Current, assets: AssetStore
 ) -> DocRecord | None:
@@ -74,7 +92,7 @@ def zim_document(
         license=spec.license,
         text=text,
         revision=gen.generation_id,
-        timestamp=gen.sealed_at,
+        timestamp=release_time(gen),
         html_ref=f"zim:{native_id}",
         content_hash=content_hash(text),
     )
@@ -90,10 +108,11 @@ def _rules(spec: SourceSpec) -> Sequence[Mapping[str, Any]]:
     return [cast(Mapping[str, Any], r) for r in cast(list[object], rules) if isinstance(r, Mapping)]
 
 
-def borrowed(spec: SourceSpec | None, doc: DocRecord, vault: _Current) -> Rendition | None:
-    """The HTML another source holds for this document's title, per the registry's ``rendition``."""
+def renditions(spec: SourceSpec | None, doc: DocRecord, vault: _Current) -> Iterator[Rendition]:
+    """Where another source may hold HTML for this document's title, per the registry's ``rendition``
+    rules, in rule order. The caller tries each until one has the page."""
     if spec is None:
-        return None
+        return
     for rule in _rules(spec):
         lang = rule.get("lang")
         if lang and doc.lang and lang != doc.lang:
@@ -101,8 +120,12 @@ def borrowed(spec: SourceSpec | None, doc: DocRecord, vault: _Current) -> Rendit
         target = str(rule.get("source", ""))
         gen = _current(vault, target) if target else None
         if gen is not None:
-            return Rendition(target, gen, f"zim:{doc.title.replace(' ', '_')}")
-    return None
+            yield Rendition(target, gen, f"zim:{doc.title.replace(' ', '_')}")
+
+
+def borrowed(spec: SourceSpec | None, doc: DocRecord, vault: _Current) -> Rendition | None:
+    """The first rendition candidate (see :func:`renditions`)."""
+    return next(renditions(spec, doc, vault), None)
 
 
 def rendition_doc_id(rendition: Rendition) -> DocId:

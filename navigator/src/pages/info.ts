@@ -112,13 +112,6 @@ export async function renderHelp(ctx: PageContext): Promise<PageResult> {
         wspLink(searchAddress('define sesquipedalian'), 'define sesquipedalian'),
         '.',
       ),
-      h(
-        'li',
-        null,
-        '“map of …” shows a map box: ',
-        wspLink(searchAddress('map of Lisbon'), 'map of Lisbon'),
-        '.',
-      ),
       h('li', null, "I'm Feeling Lucky opens the first result directly."),
     ),
     h('h2', null, 'Keyboard shortcuts'),
@@ -174,7 +167,9 @@ export async function renderRandom(ctx: PageContext): Promise<PageResult> {
     const r = await ctx.app.api.random(source, ctx.signal);
     return { redirect: docIdToAddress(r.doc_id) };
   } catch (err) {
-    if (!(err instanceof ApiRequestError)) throw err;
+    // Busy or failing: the app retries. Only an older daemon (no /v1/random) or an empty site fall back.
+    if (!(err instanceof ApiRequestError) || !(err.isMissingRoute || err.code === 'empty'))
+      throw err;
     // Older daemon without /v1/random: a random recent change.
     const ch = await ctx.app.api
       .recentChanges(50, source, ctx.signal)

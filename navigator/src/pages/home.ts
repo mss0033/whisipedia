@@ -5,7 +5,7 @@
 import { ApiRequestError } from '../api/client.ts';
 import type { Change, Portal, SourceInfo } from '../api/types.ts';
 import { attachSuggest } from '../chrome/suggest.ts';
-import { docIdToAddress, makeAddress, searchAddress } from '../core/address.ts';
+import { makeAddress, searchAddress } from '../core/address.ts';
 import { h } from '../core/dom.ts';
 import { formatDate, formatNumber, odometer } from '../core/format.ts';
 import {
@@ -38,27 +38,33 @@ function sitesList(sources: SourceInfo[]): HTMLElement {
   return h(
     'div',
     { class: 'sites-list' },
-    ...[...byKind.entries()].map(([kind, list]) =>
-      h(
-        'div',
-        { class: 'sites-group' },
-        h('h3', null, kind),
+    // Alphabetical by kind, with the catch-all "Other" last.
+    ...[...byKind.entries()]
+      .sort(
+        ([a], [b]) =>
+          Number(a === KIND_LABELS.other) - Number(b === KIND_LABELS.other) || a.localeCompare(b),
+      )
+      .map(([kind, list]) =>
         h(
-          'ul',
-          null,
-          ...list.map((s) =>
-            h(
-              'li',
-              null,
-              wspLink(makeAddress(s.id), s.name),
-              s.health !== 'ok'
-                ? h('span', { class: `lamp-inline lamp-${s.health}` }, ` (${s.health})`)
-                : null,
+          'div',
+          { class: 'sites-group' },
+          h('h3', null, kind),
+          h(
+            'ul',
+            null,
+            ...list.map((s) =>
+              h(
+                'li',
+                null,
+                wspLink(makeAddress(s.id), s.name),
+                s.health !== 'ok'
+                  ? h('span', { class: `lamp-inline lamp-${s.health}` }, ` (${s.health})`)
+                  : null,
+              ),
             ),
           ),
         ),
       ),
-    ),
   );
 }
 
@@ -66,21 +72,22 @@ function whatsNewList(changes: Change[]): HTMLElement {
   return h(
     'ul',
     { class: 'whatsnew-mini' },
-    ...changes
-      .slice(0, 8)
-      .map((c) =>
-        h(
-          'li',
-          null,
-          c.kind === 'removed'
-            ? h('s', null, c.title ?? c.doc_id)
+    ...changes.slice(0, 8).map((c) =>
+      h(
+        'li',
+        null,
+        c.kind === 'removed'
+          ? h('s', null, c.title ?? c.doc_id)
+          : // A site entry has no doc_id (doc-collection sites have no landing page): follow its address.
+            c.address
+            ? wspLink(c.address, c.title ?? c.address)
             : docLink(c.doc_id, c.title ?? c.doc_id),
-          ' ',
-          c.kind === 'added'
-            ? newBadge()
-            : h('span', { class: 'updated' }, c.kind === 'removed' ? 'removed' : 'updated'),
-        ),
+        ' ',
+        c.kind === 'added'
+          ? newBadge()
+          : h('span', { class: 'updated' }, c.kind === 'removed' ? 'removed' : 'updated'),
       ),
+    ),
   );
 }
 
@@ -101,7 +108,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
     onSubmit: (q, lucky) => app.navigate(searchAddress(q, { lucky: lucky ? 1 : undefined })),
   });
   attachSuggest(input, app, {
-    onPick: (s) => app.navigate(s.doc_id ? docIdToAddress(s.doc_id) : searchAddress(s.text)),
+    onPick: (s) => app.navigate(s.address ?? searchAddress(s.text)),
   });
 
   const totalDocs = sources.reduce((n, s) => n + (s.doc_count ?? 0), 0);

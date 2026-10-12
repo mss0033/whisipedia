@@ -5,7 +5,7 @@ from __future__ import annotations
 import ipaddress
 import random
 import secrets
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Annotated
 
 from fastapi import APIRouter, Query, Request, Response
@@ -65,6 +65,9 @@ def _is_loopback(request: Request) -> bool:
         return host == "localhost"
 
 
+CATEGORY_LIMIT = 200  # entries per directory category page; the catalog keeps a bounded list anyway
+
+
 def browse_router(lib: Library) -> APIRouter:
     r = APIRouter(prefix="/v1")
     s = lib.s
@@ -112,7 +115,14 @@ def browse_router(lib: Library) -> APIRouter:
                 for e in (portal_source.on_this_day(today) if portal_source is not None else ())
             ],
             did_you_know=[],  # TODO: Wikipedia "Did you know" pages are not in the dumps or ZIMs
-            newest=(news := _site_news(infos, limit=6)) + [lib.change(c) for c in newest][: 8 - len(news)],
+            newest=(
+                news := _site_news(
+                    [i for i in infos if lib.is_readable(i)],
+                    limit=6,
+                    is_new=lambda sid: len(lib.vault.generations(sid)) <= 1,
+                )
+            )
+            + [lib.change(c) for c in newest][: 8 - len(news)],
             random=doc_ref(lib.catalog.random_doc(sources=None, rng=rng)),
             random_sources=[i.id for i in infos if i.doc_count],
             sites=[i for i in infos if lib.is_readable(i)],
@@ -187,7 +197,7 @@ def browse_router(lib: Library) -> APIRouter:
             raise not_found()
         trail.append(DirectoryCrumb(path=f"{here}/{cat.slug}", name=cat.name))
         entries: list[DirectoryEntry] = []
-        for did in lib.catalog.category_docs(spec.id, cat.slug, limit=200):
+        for did in lib.catalog.category_docs(spec.id, cat.slug, limit=CATEGORY_LIMIT):
             ref = doc_ref(did)
             if ref is not None:
                 entries.append(
@@ -196,7 +206,12 @@ def browse_router(lib: Library) -> APIRouter:
                     )
                 )
         return DirectoryPage(
-            path=f"{here}/{cat.slug}", name=cat.name, trail=trail, children=[], entries=entries
+            path=f"{here}/{cat.slug}",
+            name=cat.name,
+            trail=trail,
+            children=[],
+            entries=entries,
+            total=cat.count if cat.count > len(entries) else None,
         )
 
     # --- Random ---------------------------------------------------------------------------------
@@ -285,8 +300,9 @@ def _presentable_recent(lib: Library, *, limit: int) -> list[ChangeRecord]:
     return out
 
 
-def _site_news(infos: Sequence[SourceInfo], *, limit: int) -> list[Change]:
-    """Recently sealed sites, newest first, linked to each site's landing page (PLAN §10.2 What's New)."""
+def _site_news(infos: Sequence[SourceInfo], *, limit: int, is_new: Callable[[str], bool]) -> list[Change]:
+    """Recently sealed readable sites, newest first, linked to each site (PLAN §10.2 What's New). A site
+    with no landing page has no ``doc_id``; clients follow ``address``. ``is_new``: its first generation."""
     fresh = sorted(
         (i for i in infos if i.as_of is not None and i.current_generation),
         key=lambda i: i.as_of or 0,
@@ -298,10 +314,10 @@ def _site_news(infos: Sequence[SourceInfo], *, limit: int) -> list[Change]:
         out.append(
             Change(
                 doc_id=info.home_doc_id or "",
-                kind="added" if info.current_generation else "modified",
+                kind="added" if is_new(info.id) else "modified",
                 generation_id=info.current_generation or "",
                 source_id=info.id,
-                title=f"{info.name} — updated {when}".strip(),
+                title=f"{info.name} ({when})" if when else info.name,  # the kind says new or updated
                 address=info.address,
             )
         )

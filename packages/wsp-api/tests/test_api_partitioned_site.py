@@ -39,3 +39,14 @@ def test_an_ordinary_source_is_its_current_generation() -> None:
     info = source_info(SPEC, g)
     assert (info.bytes, info.current_generation) == (300, "2026-10-11")
     assert source_info(SPEC, None).bytes is None
+
+
+def test_site_news_links_each_site_and_tells_new_from_updated() -> None:
+    from wsp_api.browse import _site_news  # pyright: ignore[reportPrivateUsage]
+
+    old, new = gen("2026-10-11.hi", 300, 11), gen("2026-10-09.ri", 200, 9)
+    infos = [source_info(SPEC, old), source_info(SPEC, new)]
+    news = _site_news(infos, limit=6, is_new=lambda _sid: False)
+    assert [c.address for c in news] == ["wsp://usgs-historical-topo"] * 2
+    assert all(c.doc_id == "" and c.kind == "modified" for c in news)  # no landing page: follow `address`
+    assert _site_news(infos[:1], limit=6, is_new=lambda _sid: True)[0].kind == "added"

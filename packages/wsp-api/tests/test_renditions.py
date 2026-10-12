@@ -84,3 +84,15 @@ def test_live_text_leaves_out_scripts_and_styles() -> None:
     doc = zim_document(spec("zim-src", "kiwix-opds"), "T", Vault({"zim-src": GEN}), Assets({"zim:T": page}))  # type: ignore[arg-type]
     assert doc is not None
     assert doc.text == "Readable."
+
+
+def test_a_zim_page_is_as_of_its_release_not_its_copy() -> None:
+    from wsp_api.renditions import release_time
+
+    assert release_time(GEN) == datetime(2026, 8, 1, tzinfo=UTC)
+    day = Generation("z", "2025-11-14", GenerationStatus.SEALED, sealed_at=datetime(2026, 10, 10, tzinfo=UTC))
+    assert release_time(day) == datetime(2025, 11, 14, tzinfo=UTC)
+    other = Generation(
+        "z", "pubmed26-u1671", GenerationStatus.SEALED, sealed_at=datetime(2026, 10, 10, tzinfo=UTC)
+    )
+    assert release_time(other) == other.sealed_at

@@ -825,7 +825,14 @@ Status of this Memo
 
 export const DIRECTORY: Record<
   string,
-  { name: string; children: string[]; entries: string[]; crosslinks?: string[] }
+  {
+    name: string;
+    children: string[];
+    entries: string[];
+    crosslinks?: string[];
+    /** Pages in the category when `entries` lists only the best known. */
+    total?: number;
+  }
 > = {
   '': {
     name: 'Top',
@@ -850,6 +857,7 @@ export const DIRECTORY: Record<
     name: 'Novels',
     children: [],
     entries: ['wsp:gutenberg/84', 'wsp:gutenberg/1342'],
+    total: 7121,
   },
   'Arts/Literature/Poetry': { name: 'Poetry', children: [], entries: [] },
   Science: {

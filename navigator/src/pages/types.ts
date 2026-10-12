@@ -45,6 +45,8 @@ export type PageResult =
       focus?: HTMLElement | undefined;
       /** Fragment id to scroll to after render. */
       scrollTo?: string | undefined;
+      /** An error page (not kept in History), or one that retries by itself. Default: a page. */
+      status?: 'error' | 'retrying' | undefined;
     }
   | { redirect: string };
 

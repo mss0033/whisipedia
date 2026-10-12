@@ -167,3 +167,31 @@ def test_display_names_drop_the_fetcher_prefix_and_hash() -> None:
     )
     assert display_name("faa__00-80T-80-07e0dcb1.pdf") == "00-80T-80.pdf"
     assert display_name("cp1.pdf") == "cp1.pdf"
+
+
+def test_transfers_beyond_the_cap_are_busy(tmp_path: Path) -> None:
+    import asyncio
+
+    from wsp_api.files import _BoundedFile  # pyright: ignore[reportPrivateUsage]
+
+    f = tmp_path / "a.pdf"
+    f.write_bytes(PDF)
+    sent: list[dict[str, object]] = []
+
+    async def receive() -> dict[str, object]:
+        return {"type": "http.disconnect"}
+
+    async def send(message: dict[str, object]) -> None:
+        sent.append(message)
+
+    async def run() -> None:
+        slots = asyncio.Semaphore(1)
+        scope: dict[str, object] = {"type": "http", "method": "GET", "headers": []}
+        async with slots:  # the only slot is streaming another file
+            await _BoundedFile(slots, f)(scope, receive, send)  # type: ignore[arg-type]
+        assert sent[0]["status"] == 503
+        sent.clear()
+        await _BoundedFile(slots, f)(scope, receive, send)  # type: ignore[arg-type]
+        assert sent[0]["status"] == 200
+
+    asyncio.run(run())

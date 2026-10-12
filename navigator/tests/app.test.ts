@@ -106,6 +106,7 @@ describe('Navigator app', () => {
     app.navigate('wsp://rfc/99999');
     await settled(() => !!main().querySelector('.page-error'));
     expect(main().textContent).toContain('Not Found');
+    expect(app.history.has('wsp://rfc/99999')).toBe(false); // error pages are not places visited
     app.navigate('wsp://nosuchsite');
     await settled(() => main().textContent?.includes('Unable to locate the server') ?? false);
   });
@@ -128,6 +129,10 @@ describe('Navigator app', () => {
       app.navigate(addr);
       await settled(() => !!main().querySelector(sel));
     }
+    // A category that lists only its best-known pages says so (audit 2026-10-12 F8).
+    app.navigate('wsp://directory/Arts/Literature/Novels');
+    await settled(() => !!main().querySelector('.dir-truncated'));
+    expect(main().querySelector('.dir-truncated')?.textContent).toContain('2 of 7,121');
     app.navigate('wsp://search?q=define+sesquipedalian');
     await settled(() => !!main().querySelector('.instant-definition'));
     app.navigate('wsp://random?source=rfc');

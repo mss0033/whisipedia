@@ -161,6 +161,12 @@ class VaultLocation(_Wire):
     blake3: str | None = Field(default=None, description="Manifest entry hash of the file.")
 
 
+class Rendition(_Wire):
+    source_id: str
+    generation_id: str
+    doc_id: str
+
+
 class OriginalFile(_Wire):
     url: str
     name: str
@@ -210,6 +216,7 @@ class Document(_Wire):
     banner: str | None = Field(
         default=None, description="Reader warning to show above the document (PLAN D13)."
     )
+    rendition: Rendition | None = None
     original: OriginalFile | None = None
 
 
@@ -441,6 +448,7 @@ class DirectoryPage(_Wire):
     trail: list[DirectoryCrumb] = Field(description="Ancestors and this node, Top excluded.")
     children: list[DirectoryCategory]
     entries: list[DirectoryEntry]
+    total: int | None = None
 
 
 # --- System Monitor ----------------------------------------------------------------------------

@@ -698,10 +698,10 @@
             "schema": {
               "type": "string",
               "maxLength": 200,
-              "description": "Title prefix.",
+              "description": "Text typed so far: titles with a word that starts with it.",
               "title": "Q"
             },
-            "description": "Title prefix."
+            "description": "Text typed so far: titles with a word that starts with it."
           },
           {
             "name": "limit",
@@ -961,6 +961,18 @@
               "title": "Max Seconds"
             },
             "description": "Close the stream after this long (then reconnect)."
+          },
+          {
+            "name": "summarize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Skip a backlog: when a whole batch is waiting, send one `skipped` event (its `id` is the feed head) and continue from the head. For readers of recent changes.",
+              "default": false,
+              "title": "Summarize"
+            },
+            "description": "Skip a backlog: when a whole batch is waiting, send one `skipped` event (its `id` is the feed head) and continue from the head. For readers of recent changes."
           },
           {
             "name": "last-event-id",
@@ -2190,6 +2202,18 @@
             },
             "type": "array",
             "title": "Entries"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total",
+            "description": "Documents in this category when `entries` lists only the best known of them (the catalog keeps a bounded list per category); null when `entries` is complete."
           }
         },
         "type": "object",
@@ -2198,7 +2222,8 @@
           "name",
           "trail",
           "children",
-          "entries"
+          "entries",
+          "total"
         ],
         "title": "DirectoryPage"
       },
@@ -2474,6 +2499,17 @@
             "title": "Banner",
             "description": "Reader warning to show above the document, e.g. 'Historical document — methods may be outdated or unsafe.' (PLAN D13). Absent when there is nothing to warn about."
           },
+          "rendition": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Rendition"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set when `html` is another source's page for this title; `vault` then describes that page's file."
+          },
           "original": {
             "anyOf": [
               {
@@ -2512,6 +2548,7 @@
           "has_history",
           "currency",
           "banner",
+          "rendition",
           "original"
         ],
         "title": "Document"
@@ -3924,6 +3961,31 @@
           "cursor"
         ],
         "title": "RecentChanges"
+      },
+      "Rendition": {
+        "properties": {
+          "source_id": {
+            "type": "string",
+            "title": "Source Id"
+          },
+          "generation_id": {
+            "type": "string",
+            "title": "Generation Id"
+          },
+          "doc_id": {
+            "type": "string",
+            "title": "Doc Id",
+            "description": "The page in that source, `wsp:<source_id>/<native_id>`."
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_id",
+          "generation_id",
+          "doc_id"
+        ],
+        "title": "Rendition",
+        "description": "Where the HTML on screen comes from when another source renders this document (e.g. the\nWikipedia dump's text shown with the Kiwix ZIM's page)."
       },
       "Resolution": {
         "properties": {

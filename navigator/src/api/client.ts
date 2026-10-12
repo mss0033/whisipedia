@@ -37,6 +37,17 @@ export class ApiRequestError extends Error {
   get isUnavailable(): boolean {
     return this.status === 404 || this.status === 501 || this.status === 503;
   }
+  /** The route itself is missing (an older daemon): a 404 with no specific code, or 501. */
+  get isMissingRoute(): boolean {
+    return (
+      (this.status === 404 && (this.code === 'not_found' || this.code === 'http_404')) ||
+      this.status === 501
+    );
+  }
+  /** The library is busy or warming up: retry, never treat it as an answer. */
+  get isBusy(): boolean {
+    return this.status === 503;
+  }
 }
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;

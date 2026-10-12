@@ -5,14 +5,10 @@
 import type { Suggestion } from '../api/types.ts';
 import { debounce, h, uid } from '../core/dom.ts';
 import type { AppServices } from '../pages/types.ts';
-import { KIND_LABELS } from '../ui/components.ts';
 
 export const SUGGEST_DEBOUNCE_MS = 50;
 
-export interface PickedSuggestion extends Suggestion {
-  /** Set for local history matches. */
-  address?: string;
-}
+export type PickedSuggestion = Suggestion;
 
 export interface SuggestOptions {
   onPick: (s: PickedSuggestion) => void;
@@ -83,11 +79,7 @@ export function attachSuggest(
             { class: 'suggest-text' },
             k ? [h('b', null, text.slice(0, k)), text.slice(k)] : text,
           ),
-          s.address
-            ? h('span', { class: 'suggest-kind' }, 'History')
-            : s.kind
-              ? h('span', { class: 'suggest-kind' }, KIND_LABELS[s.kind])
-              : null,
+          s.address ? h('span', { class: 'suggest-kind' }, 'History') : null,
         );
         li.addEventListener('pointerdown', (ev) => ev.preventDefault());
         li.addEventListener('click', () => {

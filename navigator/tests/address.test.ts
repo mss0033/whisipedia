@@ -90,3 +90,21 @@ describe('location bar input', () => {
     expect(hashToAddress('')).toBeNull();
   });
 });
+
+describe('shortcuts and autolinks follow the readable sites (audit 2026-10-12 F20)', () => {
+  it('searches instead of jumping into a site the library does not hold', async () => {
+    const { interpretInput, setReadableHosts } = await import('../src/core/address.ts');
+    const { linkify } = await import('../src/core/text.ts');
+    try {
+      setReadableHosts(['gutenberg']);
+      expect(interpretInput('rfc 9110')).toEqual({ type: 'search', query: 'rfc 9110' });
+      expect(interpretInput('pg 84')).toEqual({ type: 'address', address: 'wsp://gutenberg/84' });
+      expect(linkify('see RFC 9110').querySelector('a')).toBeNull();
+      setReadableHosts(['rfc']);
+      expect(linkify('see RFC 9110').querySelector('a')?.dataset.wsp).toBe('wsp://rfc/9110');
+    } finally {
+      setReadableHosts(null);
+    }
+    expect(interpretInput('rfc 9110')).toEqual({ type: 'address', address: 'wsp://rfc/9110' });
+  });
+});

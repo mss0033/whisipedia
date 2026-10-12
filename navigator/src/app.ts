@@ -9,7 +9,6 @@ import { type IconName, icon, throbberSvg } from './chrome/icons.ts';
 import { MenuBar, type MenuDef, type MenuItem } from './chrome/menus.ts';
 import { attachSuggest } from './chrome/suggest.ts';
 import {
-  docIdToAddress,
   HOME_ADDRESS,
   hashToAddress,
   interpretInput,
@@ -17,6 +16,7 @@ import {
   makeAddress,
   parseAddress,
   searchAddress,
+  setReadableHosts,
 } from './core/address.ts';
 import { h } from './core/dom.ts';
 import { GlobalHistory, Hotlist, SessionStack } from './core/history.ts';
@@ -140,10 +140,16 @@ export class App implements AppServices {
 
   sources(): Promise<SourceInfo[]> {
     if (!this.sourcesPromise) {
-      this.sourcesPromise = this.api.sources().catch(() => {
-        this.sourcesPromise = null;
-        return [];
-      });
+      this.sourcesPromise = this.api.sources().then(
+        (list) => {
+          setReadableHosts(list.filter((x) => x.readable).map((x) => x.id));
+          return list;
+        },
+        () => {
+          this.sourcesPromise = null;
+          return [];
+        },
+      );
     }
     // Pages use the list for site names and the webring only: a slow library (busy NAS) must not
     // hold a page back, so after a short wait they render without it (E2E-2). The request carries
@@ -289,6 +295,7 @@ export class App implements AppServices {
         return;
       }
       result = {
+        status: 'error',
         title: 'Too many redirects',
         body: errorPage({
           title: 'Redirect loop',
@@ -314,10 +321,10 @@ export class App implements AppServices {
     } else {
       this.stack.setTitle(title);
     }
-    if (result.title !== 'Still loading') this.transientTries.delete(address);
+    if (result.status !== 'retrying') this.transientTries.delete(address);
     this.currentDoc = this.pendingDoc;
     this.currentTitle = title;
-    this.history.record(address, title);
+    if (!result.status) this.history.record(address, title); // error pages are not places visited
 
     this.main.replaceChildren(result.body);
     this.markVisited();
@@ -360,6 +367,7 @@ export class App implements AppServices {
           if (this.seq === seq) this.reload();
         }, this.transientRetryMs);
         return {
+          status: 'retrying',
           title: 'Still loading',
           body: errorPage({
             title: 'Still loading',
@@ -375,6 +383,7 @@ export class App implements AppServices {
     this.transientTries.delete(address);
     if (err instanceof ApiRequestError) {
       return {
+        status: 'error',
         title: `Error ${err.status}`,
         body: errorPage({
           title: 'Error',
@@ -392,6 +401,7 @@ export class App implements AppServices {
       };
     }
     return {
+      status: 'error',
       title: 'Unable to locate the server',
       body: errorPage({
         title: 'Unable to locate the server',
@@ -841,7 +851,6 @@ export class App implements AppServices {
       history: true,
       onPick: (s) => {
         if (s.address) this.navigate(s.address);
-        else if (s.doc_id) this.navigate(docIdToAddress(s.doc_id));
         else this.navigate(searchAddress(s.text), { fromLocation: true });
       },
     });

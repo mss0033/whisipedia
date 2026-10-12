@@ -45,7 +45,7 @@ function makeForm(app: AppServices, route: SearchRoute, big: boolean) {
   });
   attachSuggest(input, app, {
     onPick: (sug) => {
-      if (sug.doc_id) app.navigate(docIdToAddress(sug.doc_id));
+      if (sug.address) app.navigate(sug.address);
       else go(app, sug.text, false, route.kind, route.source);
     },
   });
@@ -90,8 +90,8 @@ async function renderHome(ctx: PageContext, route: SearchRoute): Promise<PageRes
       'Try: ',
       ...[
         'how do vaccines train the immune system',
-        'rfc about http caching',
-        'map of Lisbon',
+        'adventures of huckleberry finn',
+        'east greenwich topographic map',
         'books by Mary Shelley',
         'define sesquipedalian',
       ].flatMap((q, i) => [i ? ' · ' : '', wspLink(searchAddress(q), q)]),
@@ -111,7 +111,10 @@ export async function render(ctx: PageContext): Promise<PageResult> {
   if (!route.query) return renderHome(ctx, route);
 
   if (route.lucky) {
-    const r = await ctx.app.api.search({ q: route.query, page_size: 1 }, ctx.signal);
+    const r = await ctx.app.api.search(
+      { q: route.query, kind: route.kind, source: route.source, page_size: 1 },
+      ctx.signal,
+    );
     // navigate_to names the page; otherwise the top hit, like "I'm Feeling Lucky".
     const first = r.navigate_to ?? r.hits[0]?.doc_id;
     if (first) return { redirect: docIdToAddress(first) };
@@ -205,7 +208,10 @@ export function renderResultsPage(
           'p',
           { class: 'did-you-mean' },
           'Did you mean: ',
-          wspLink(searchAddress(resp.did_you_mean), h('b', null, h('i', null, resp.did_you_mean))),
+          wspLink(
+            searchAddress(resp.did_you_mean, { kind: route.kind, source: route.source }),
+            h('b', null, h('i', null, resp.did_you_mean)),
+          ),
           '?',
         )
       : null,
@@ -309,8 +315,11 @@ export function resultItem(hit: Hit, query: string, n: number): HTMLLIElement {
 function pagination(resp: SearchResults, route: SearchRoute): HTMLElement | null {
   const cur = pageOf(resp);
   const known = Math.ceil(resp.total / resp.limit);
-  const pages = Math.min(10, Math.max(known, resp.next_offset !== null ? cur + 1 : cur));
-  if (pages <= 1) return null;
+  // The last page we know of; a sliding window of ten numbers keeps every ranked page reachable.
+  const last = Math.max(known, resp.next_offset !== null ? cur + 1 : cur);
+  if (last <= 1) return null;
+  const first = Math.max(1, Math.min(cur - 5, last - 9));
+  const end = Math.min(last, first + 9);
   const link = (p: number, text: Child) =>
     wspLink(
       searchAddress(route.query, {
@@ -330,7 +339,7 @@ function pagination(resp: SearchResults, route: SearchRoute): HTMLElement | null
       cur > 1 ? link(cur - 1, 'Previous') : h('span', { class: 'pg-dim' }, ' '),
     ),
   );
-  for (let p = 1; p <= pages; p += 1) {
+  for (let p = first; p <= end; p += 1) {
     cells.push(
       h(
         'li',
@@ -349,7 +358,7 @@ function pagination(resp: SearchResults, route: SearchRoute): HTMLElement | null
       'li',
       { class: 'pg-cell pg-edge' },
       h('span', { class: 'pg-letter', 'aria-hidden': 'true' }, 'Bang!'),
-      cur < pages ? link(cur + 1, 'Next') : h('span', { class: 'pg-dim' }, ' '),
+      cur < last ? link(cur + 1, 'Next') : h('span', { class: 'pg-dim' }, ' '),
     ),
   );
   return h(

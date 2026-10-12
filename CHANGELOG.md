@@ -3,6 +3,54 @@
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Fixed: API and Navigator audit (2026-10-12)
+* View Source Data names the file that holds the page:
+  * the archive a multi-ZIM page is in (it named the source's first archive);
+  * the stored PDF of a collection document, with its size and hashes;
+  * for a partitioned source, the partition that holds the document (refinery set ids never matched a
+    vault generation, so a Connecticut map was reported under New Jersey);
+  * for a borrowed page (the Wikipedia top-10 dump shown with the Kiwix page), that page's archive,
+    with the new `Document.rendition` naming it.
+  * Every member of a partitioned source's current set is `current` in `/generations`.
+* A borrowed rendition tries each registry rule until one has the page.
+* Cross-source links of text documents resolve to pages of Kiwix sources (up to 32 checks per
+  document). The Navigator lists them under a text document ("Also in the library"), so a Gutenberg
+  book reaches its illustrated edition.
+* A ZIM archive that is still opening is a 503 the client retries, not "not in the library".
+* Start Page "What's New!": site entries list only readable sites and link to the site (they opened
+  "This site is not in the library"); a site's first generation is "new", later ones "updated".
+* Time Machine links work for every generation id (`2026-08`, `pubmed26-u1671`, `2026-10-11.nj`, refinery
+  set ids); only dates were accepted, and the others silently showed the current page.
+* What's New keeps the newest 500 changes and renders at most twice a second. With the new
+  `summarize=true` on `/v1/changes/stream`, a backlog (a whole generation landing) arrives as one
+  `skipped` event and the page reloads its list, instead of millions of events.
+* A directory category that lists only its best-known pages says "Showing 200 of 7,121" and points to
+  the site's search (`DirectoryPage.total`). Site pages link to their shelves ("Browse this site").
+* Search: result pages slide a window of ten, so pages 11–20 are reachable. "I'm Feeling Lucky" and
+  "Did you mean" keep the kind and site filters. "define <word>" shows a dictionary box from the
+  library's Wiktionary entry. The "map of …" promise is gone from Help and the examples: no readable
+  map source can answer it.
+* Busy is not "missing": Random, the directory and the Time Machine retry a 503 instead of falling back
+  to old-daemon behaviour or saying "This source keeps no history".
+* Error pages are not recorded in History, and the retry counter no longer keys on a page title. A 404
+  for an old version (`?at=`) reports no gap and offers the current page. "Go to the site" appears only
+  for a site that exists.
+* Shortcuts and autolinks ("rfc 9110", "RFC 2616" in text) go to search, or stay plain text, when the
+  library holds no such site.
+* A live Kiwix page is dated by its archive's release (`2026-08`), as refined pages of the same archive
+  are, not by when the copy reached the vault.
+* Original files: at most 4 stream at once (others get 503 busy), so a stalled NAS read cannot hold
+  Starlette's shared thread pool. Without a cache directory, previews go to a private temporary
+  directory, not `/tmp/previews`.
+* `/v1/suggest` describes what it matches; the Navigator drops suggestion fields the API never sends.
+* Open Library pages say they are catalog cards, not books, and link to a search of the library's
+  books for the title and, for an edition, to its work record.
+* A text document whose first line repeats its title no longer prints it twice. Start Page site
+  groups are alphabetical, with "Other" last. Site entries in What's New read "Name (Oct 12)": the
+  badge already says new or updated.
+* Not changed: a trailing slash in an address is still dropped (F19). The only native ids that end in
+  "/" are bundle book roots, which resolve to the same page without it.
+
 ### Added: read a collection document's original file (2026-10-12)
 * `GET /v1/files/{doc_id}` serves the PDF, map scan or archive a collection document was refined from,
   read from that document's own generation (paths that leave it are refused). PDFs and web images open
