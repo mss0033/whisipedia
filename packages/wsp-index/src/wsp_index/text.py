@@ -50,8 +50,10 @@ ANALYZER_VERSION = 2
 40-*byte* limit (split Devanagari at the virama, kept CJK clauses as one token, dropped Cyrillic words
 over 20 letters). 2: :data:`TOKEN_PATTERN` for the fallback and Tamil, and a 40-*character* limit.
 Queries are analyzed with the current version, so an index built with another one must be rebuilt
-from the Refinery (remove ``<index>/lexical`` and run ``wsp index build``); the lexical index should
-record this number in its schema signature so a mismatch is refused instead of silently missing."""
+from the Refinery: remove ``<index>/lexical`` *and* ``<index>/index-state.json`` (which records what
+the lexical index holds; ``wsp index build`` refuses a ``lexical/`` removed alone) and run ``wsp index
+build``, or follow docs/runbooks/rebuild-indexes.md. The lexical index records this number in its
+schema signature, so a mismatch is refused instead of silently missing."""
 
 _NO_SPACE_SCRIPTS = r"\p{Han}\p{Hiragana}\p{Katakana}\p{Thai}\p{Lao}\p{Khmer}\p{Myanmar}\p{Tibetan}"
 TOKEN_PATTERN = rf"[{_NO_SPACE_SCRIPTS}]|[[\p{{Alphabetic}}\p{{N}}\p{{M}}]--[{_NO_SPACE_SCRIPTS}]]+"
