@@ -32,15 +32,19 @@ carry ``Candidate.resolve`` and are resolved only for documents the metadata fil
 
 from __future__ import annotations
 
+import contextlib
+import gzip
 import hashlib
 import json
 import logging
+import os
 import re
 import threading
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import date
+from pathlib import Path
 from typing import Any, cast
 from urllib.parse import quote, urlencode, urljoin, urlsplit
 from xml.etree import ElementTree as ET
@@ -55,7 +59,7 @@ from wsp_adapters.doccollection.model import (
     title_from_url,
 )
 from wsp_adapters.doccollection.policy import DocFacts, Rules, Verdict, classify_metadata
-from wsp_core.errors import FetchError
+from wsp_core.errors import FetchError, NotFoundError
 from wsp_core.model import FetchResult, RemoteFile, RemoteHead
 from wsp_core.ports import Fetcher, SupportsHead
 
@@ -142,6 +146,11 @@ class DiscoverEnv:
     totals: dict[str, int] = field(default_factory=dict[str, int])  # discoverer label -> upstream total
     scale: dict[str, float] = field(default_factory=dict[str, float])  # crawl stopped early: pages seen ratio
     notes: list[str] = field(default_factory=list[str])
+    # Listing failures that may hide documents (timeouts, server errors, a discoverer that stopped, a
+    # sampled crawl). A listing with any is incomplete: nothing may be inferred from what it lacks
+    # (no "withdrawn" labels) and a fetch stops before downloading (see CollectionFetcher.run).
+    incomplete: list[str] = field(default_factory=list[str])
+    cache_dir: Path | None = None  # local disk for listings worth keeping between runs (archive.org)
 
     def get_json(self, url: str) -> Any:
         return json.loads(self.fetcher.get_bytes(url, max_bytes=256 * 1024 * 1024))
@@ -311,6 +320,8 @@ def index_page(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
             html = env.get_text(page)
         except FetchError as exc:
             env.notes.append(f"{label}: {page}: {exc}")
+            if not isinstance(exc, NotFoundError):  # a page that is gone lists nothing; a timeout might
+                env.incomplete.append(f"{label}: {page}: {exc}")
             continue
         visited += 1
         if cfg.get("rows") and level == 0:
@@ -352,6 +363,7 @@ def index_page(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
     if queue and visited >= max_pages:
         pending = len({u for u, _lvl, _i in queue} - seen_pages)
         env.notes.append(f"{label}: stopped after {visited} pages ({pending} more queued): a sample")
+        env.incomplete.append(f"{label}: stopped after {visited} pages ({pending} more queued)")
         env.scale[label] = (visited + pending) / max(visited, 1)
 
 
@@ -902,6 +914,9 @@ def oai_pmh(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
 # --- archive.org -----------------------------------------------------------------------------------
 
 
+ARCHIVE_LISTING_TTL = 7 * 86400.0  # a cached archive.org listing is used for a week
+
+
 def archive_org(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
     """archive.org scrape API: ``query``; each item is resolved to its original PDF later.
 
@@ -909,53 +924,90 @@ def archive_org(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]
     issuing agency, or an item that mirrors an official release one-to-one (PLAN D11).
 
     Partitions: with ``buckets: N`` an item's batch ``b0001``..``bN`` is a hash of its identifier, so it
-    never moves between batches while the collection grows during a weeks-long acquisition (a batch
-    then lists the whole collection: about ``total / page_size`` requests). Without ``buckets`` a batch
-    is a listing page, which shifts as items are added (small collections only).
+    never moves between batches while the collection grows during a weeks-long acquisition. A batch then
+    needs the whole listing; a complete listing is kept for a week in ``env.cache_dir`` (one listing of
+    985,000 items serves all 100 CIA batches). Without ``buckets`` a batch is a listing page, which
+    shifts as items are added (small collections only).
     """
+    buckets = int(cfg.get("buckets") or 0)
+    for page, it in _archive_items(cfg, env):
+        ident = _s(it.get("identifier"))
+        subjects = it.get("subject")
+        pub = _pub_number(_s(cfg.get("pub_number")) or None, _s(it.get("title")), ident)
+        yield Candidate(
+            key=make_key(env.prefix, ident),
+            url=f"https://archive.org/metadata/{quote(ident)}/files",
+            title=_s(it.get("title")) or ident,
+            issuer=env.issuer,
+            pub_number=f"{_s(cfg.get('pub_prefix'))}{pub}" if pub else "",
+            edition_date=iso_date(_s(it.get("date"))),
+            size=int(it["item_size"]) if isinstance(it.get("item_size"), int) else None,
+            subjects=_strs(subjects)[:20],
+            abstract=_s(it.get("description"))[:1000] if isinstance(it.get("description"), str) else "",
+            landing_url=f"https://archive.org/details/{ident}",
+            discovered_by="archive-org",
+            resolve="archive-org",
+            extra={"provenance": _s(cfg.get("provenance")), "creator": _s(it.get("creator"))},
+            partition=f"b{_bucket(ident, buckets):04d}" if buckets else f"b{page:04d}",
+        )
+        if not buckets and env.partition and env.partition.startswith("b") and env.partition < f"b{page:04d}":
+            break  # the wanted page batch has been listed
+
+
+def _archive_items(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[tuple[int, Json]]:
+    """``(listing page number, item)`` from the scrape API, or from a complete cached listing."""
     query = _s(cfg.get("query"))
     fields = "identifier,title,date,item_size,subject,creator,description"
-    cursor: str | None = None
-    pages = 0
     count = int(cfg.get("page_size", 1000))
-    buckets = int(cfg.get("buckets") or 0)
-    while pages < env.pages():
-        params = {"q": query, "fields": fields, "count": count}
-        if cursor:
-            params["cursor"] = cursor
-        data = cast(Json, env.get_json("https://archive.org/services/search/v1/scrape?" + urlencode(params)))
-        pages += 1
-        env.totals["archive-org"] = int(data.get("total") or 0)
-        for it in cast(list[Json], data.get("items") or []):
-            ident = _s(it.get("identifier"))
-            subjects = it.get("subject")
-            pub = _pub_number(_s(cfg.get("pub_number")) or None, _s(it.get("title")), ident)
-            yield Candidate(
-                key=make_key(env.prefix, ident),
-                url=f"https://archive.org/metadata/{quote(ident)}/files",
-                title=_s(it.get("title")) or ident,
-                issuer=env.issuer,
-                pub_number=f"{_s(cfg.get('pub_prefix'))}{pub}" if pub else "",
-                edition_date=iso_date(_s(it.get("date"))),
-                size=int(it["item_size"]) if isinstance(it.get("item_size"), int) else None,
-                subjects=_strs(subjects)[:20],
-                abstract=_s(it.get("description"))[:1000] if isinstance(it.get("description"), str) else "",
-                landing_url=f"https://archive.org/details/{ident}",
-                discovered_by="archive-org",
-                resolve="archive-org",
-                extra={"provenance": _s(cfg.get("provenance")), "creator": _s(it.get("creator"))},
-                partition=f"b{_bucket(ident, buckets):04d}" if buckets else f"b{pages:04d}",
-            )
-        cursor = _s(data.get("cursor")) or None
-        if (
-            not buckets
-            and env.partition
-            and env.partition.startswith("b")
-            and env.partition <= f"b{pages:04d}"
-        ):
-            break  # the wanted batch has been listed
-        if not cursor:
-            break
+    whole = env.max_pages is None and env.cache_dir is not None and bool(cfg.get("buckets"))
+    cache = None
+    if whole and env.cache_dir is not None:
+        name = hashlib.sha256(f"{query}|{fields}".encode()).hexdigest()[:16]
+        cache = env.cache_dir / f"archive-listing-{name}.jsonl.gz"
+        try:
+            fresh = time.time() - cache.stat().st_mtime < ARCHIVE_LISTING_TTL
+        except OSError:
+            fresh = False
+        if fresh:
+            with gzip.open(cache, "rt", encoding="utf-8") as fh:
+                total = 0
+                for line in fh:
+                    page, item = json.loads(line)
+                    total += 1
+                    yield int(page), cast(Json, item)
+            env.totals["archive-org"] = total
+            return
+    tmp = None if cache is None else cache.with_name(f"{cache.name}.{os.getpid()}.partial")
+    complete = False
+    try:
+        with contextlib.ExitStack() as stack:
+            out = None
+            if tmp is not None:
+                tmp.parent.mkdir(parents=True, exist_ok=True)
+                out = stack.enter_context(gzip.open(tmp, "wt", encoding="utf-8"))
+            cursor: str | None = None
+            pages = 0
+            while pages < env.pages():
+                params = {"q": query, "fields": fields, "count": count}
+                if cursor:
+                    params["cursor"] = cursor
+                url = "https://archive.org/services/search/v1/scrape?" + urlencode(params)
+                data = cast(Json, env.get_json(url))
+                pages += 1
+                env.totals["archive-org"] = int(data.get("total") or 0)
+                for it in cast(list[Json], data.get("items") or []):
+                    if out is not None:
+                        out.write(json.dumps([pages, it]) + "\n")
+                    yield pages, it
+                cursor = _s(data.get("cursor")) or None
+                if not cursor:
+                    complete = True  # every page read (a max_pages stop is a sample, never cached)
+                    break
+        if complete and tmp is not None and cache is not None:
+            tmp.replace(cache)
+    finally:
+        if tmp is not None:
+            tmp.unlink(missing_ok=True)
 
 
 def _bucket(ident: str, buckets: int) -> int:
@@ -1110,6 +1162,7 @@ def discover_all(configs: Sequence[Mapping[str, Any]], env: DiscoverEnv) -> Iter
                 yield cand
         except (FetchError, ValueError, ET.ParseError, DiscoveryError) as exc:
             env.notes.append(f"{kind}: {type(exc).__name__}: {exc}")
+            env.incomplete.append(f"{kind}: {type(exc).__name__}: {exc}")
             log.warning("discovery %s failed: %s", kind, exc)
 
 

@@ -155,6 +155,7 @@ class Survey:
     scale: float = 1.0  # > 1 when an index crawl stopped early (sample)
     notes: list[str] = field(default_factory=list[str])
     requests: dict[str, int] = field(default_factory=dict[str, int])
+    incomplete: list[str] = field(default_factory=list[str])  # see DiscoverEnv.incomplete; + failed resolves
 
     def count(self, verdict: Verdict) -> int:
         return sum(d.verdict is verdict for _c, d in self.decisions)
@@ -207,6 +208,7 @@ class DocCollectionAdapter:
             max_pages=max_pages,
             partition=partition,
             allow_demo_key=self.allow_demo_key,
+            cache_dir=ctx.workdir,
         )
 
     # --- discovery ---------------------------------------------------------------------------------
@@ -295,6 +297,9 @@ class DocCollectionAdapter:
         out.totals = dict(env.totals)
         out.scale = max(env.scale.values(), default=1.0)
         out.notes.extend(env.notes)
+        out.incomplete.extend(env.incomplete)
+        if out.unresolved and resolve_limit is None:  # their documents' keys are unknown this run
+            out.incomplete.append(f"{out.unresolved} listed item(s) could not be resolved")
         if isinstance(env.fetcher, Throttle):
             out.requests = dict(env.fetcher.requests)
         return out

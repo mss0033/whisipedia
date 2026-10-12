@@ -729,3 +729,47 @@ def test_concurrent_requests_overlap_but_start_an_interval_apart() -> None:
     assert all(b - a >= 0.045 for a, b in itertools.pairwise(starts))  # never closer than the interval
     assert time.monotonic() - began < 6 * 0.25  # but overlapping, not one after another
     assert t.requests["a.gov"] == 6
+
+
+def test_a_complete_archive_listing_is_cached_and_a_partial_one_is_not(tmp_path: Path) -> None:
+    from wsp_core.errors import FetchError
+
+    base = "https://archive.org/services/search/v1/scrape?q=collection%3Ax&fields=identifier%2Ctitle%2Cdate%2Citem_size%2Csubject%2Ccreator%2Cdescription&count=2"
+    page1 = {
+        "items": [{"identifier": "a", "title": "A"}, {"identifier": "b", "title": "B"}],
+        "total": 3,
+        "cursor": "c2",
+    }
+    page2 = {"items": [{"identifier": "c", "title": "C"}], "total": 3}
+    routes = {base: json.dumps(page1).encode(), base + "&cursor=c2": json.dumps(page2).encode()}
+    cfg = {
+        "kind": "archive-org",
+        "query": "collection:x",
+        "provenance": "mirror",
+        "page_size": 2,
+        "buckets": 2,
+    }
+
+    class Down(FakeFetcher):
+        def get_bytes(self, url: str, *, max_bytes: int = 64 * 1024 * 1024) -> bytes:
+            raise FetchError("ReadTimeout")
+
+    # A listing that fails on page 2: incomplete, and nothing cached.
+    half = {base: routes[base]}
+    env = DiscoverEnv(
+        fetcher=FakeFetcher(half), issuer="T", prefix="t", origins=("archive.org",), cache_dir=tmp_path
+    )
+    assert len(list(discover_all([cfg], env))) == 2
+    assert env.incomplete
+    assert not list(tmp_path.glob("archive-listing-*"))
+    # A complete listing is kept; the next run reads it without a request.
+    env = DiscoverEnv(
+        fetcher=FakeFetcher(routes), issuer="T", prefix="t", origins=("archive.org",), cache_dir=tmp_path
+    )
+    first = sorted(c.key for c in discover_all([cfg], env))
+    assert first == ["t:a", "t:b", "t:c"]
+    assert not env.incomplete
+    assert len(list(tmp_path.glob("archive-listing-*.jsonl.gz"))) == 1
+    env = DiscoverEnv(fetcher=Down({}), issuer="T", prefix="t", origins=("archive.org",), cache_dir=tmp_path)
+    assert sorted(c.key for c in discover_all([cfg], env)) == first
+    assert not env.incomplete

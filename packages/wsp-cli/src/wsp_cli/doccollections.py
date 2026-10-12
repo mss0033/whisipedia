@@ -126,6 +126,9 @@ def api_keys(cfg: Mapping[str, Any]) -> dict[str, str]:
 # --- dry run -----------------------------------------------------------------------------------------
 
 
+EXIT_LISTING_INCOMPLETE = 4  # `wsp collections fetch`: a listing failed; nothing fetched, retry later
+
+
 @dataclass
 class SourceDryRun:
     source_id: str
@@ -361,6 +364,7 @@ class FetchReport:
     held: list[dict[str, str]] = field(default_factory=list[dict[str, str]])  # quarantined for review
     review: list[dict[str, str]] = field(default_factory=list[dict[str, str]])  # metadata-stage review
     failed: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
+    incomplete: list[str] = field(default_factory=list[str])  # the listing failed: nothing was fetched
     skipped: int = 0
     alerts: list[str] = field(default_factory=list[str])
 
@@ -443,6 +447,11 @@ class CollectionFetcher:
             f"{survey.count(Verdict.DENY)} denied, {survey.count(Verdict.REVIEW)} for review"
         )
         if dry_run:
+            return report
+        if survey.incomplete:
+            # A partial listing must never become a generation: documents it misses would look withdrawn
+            # (and a partitioned batch would be marked done with most of its items missing).
+            report.incomplete = list(survey.incomplete)
             return report
         throttle = env.fetcher
         repos = registry_repos(coll)
@@ -869,6 +878,11 @@ def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
         dry_run=args.dry_run,
         partition=partition,
     )
+    if report.incomplete:
+        out.write(f"{spec.id}/{version}: the listing is incomplete; nothing fetched (try again later):\n")
+        for why in report.incomplete[:20]:
+            out.write(f"  {why}\n")
+        return EXIT_LISTING_INCOMPLETE
     rows = [*report.review, *report.held]
     proposal = None if args.dry_run else write_review_proposal(cfg, spec, version, rows)
     out.write(

@@ -1046,7 +1046,7 @@ sources:
       discovery:
         - kind: archive-org
           query: "collection:ciareadingroom"
-          page_size: 10000
+          page_size: 5000  # 10,000-item pages timed out (60 s); the complete listing is cached a week
           buckets: 100  # stable batches b0001..b0100 (~9,850 items each), hashed from the identifier
           provenance: "Internet Archive's one-to-one mirror of foia.cia.gov (creator 'CIA Reading Room'; identifiers are the CIA document numbers, e.g. CIA-RDP84-00499R000900030045-6); spot-check bytes against www.cia.gov when deep links answer"
       filter: {rules: registry/filters/cia-reading-room.yaml, declassified_ok: true, distribution: {require: [declassified, public-release, published]}, default: allow}

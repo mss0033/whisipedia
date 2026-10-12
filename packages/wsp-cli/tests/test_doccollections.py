@@ -355,3 +355,42 @@ def test_a_resumed_fetch_reuses_complete_files_with_a_published_md5(tmp_path: Pa
     (dest / cand.file_name).write_bytes(b"bad")  # same size, wrong bytes: fetched again (and here: fails)
     with pytest.raises(Exception):  # noqa: B017, PT011 - the fake fetcher has no route for it
         fetch._download(FakeFetcher(), cand, dest, ["bucket.example.gov"])  # pyright: ignore[reportPrivateUsage]
+
+
+def test_an_incomplete_listing_fetches_nothing_and_withdraws_nothing(
+    vault: FileVault, tmp_path: Path
+) -> None:
+    from wsp_core.errors import FetchError
+
+    class Flaky(FakeFetcher):
+        def get_bytes(self, url: str, *, max_bytes: int = 64 * 1024 * 1024) -> bytes:
+            if url.startswith(f"{BUCKET}/?"):  # the listing itself times out
+                raise FetchError("GET listing failed after 6 attempt(s): ReadTimeout")
+            return super().get_bytes(url, max_bytes=max_bytes)
+
+    s = spec(OBJECTS)
+    first = runner(vault, OBJECTS, tmp_path).run(s, version="2026-10-10")
+    assert first.fetched
+    flaky = CollectionFetcher(
+        vault.root,
+        Flaky(routes(OBJECTS)),
+        keys={},
+        user_agent="t",
+        workdir=tmp_path / "w",
+        out=io.StringIO(),
+        throttle=False,
+    )
+    again = flaky.run(s, version="2026-11-10")
+    assert again.incomplete
+    assert again.fetched == []
+    assert not (vault.root / "_incoming" / "test-pubs" / "2026-11-10").exists()  # no partial generation
+
+
+def test_a_gone_index_page_is_not_an_incomplete_listing() -> None:
+    from wsp_adapters.doccollection.discovery import DiscoverEnv, discover_all
+
+    env = DiscoverEnv(fetcher=FakeFetcher({}), issuer="T", prefix="t", origins=("a.gov",))
+    cfg = {"kind": "index-page", "urls": ["https://a.gov/gone"], "documents": r"a\.gov/.+\.pdf$"}
+    assert list(discover_all([cfg], env)) == []
+    assert env.notes  # noted
+    assert env.incomplete == []  # but a 404 hides nothing
