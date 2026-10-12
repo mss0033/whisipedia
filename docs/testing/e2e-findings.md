@@ -164,6 +164,8 @@ the 181 books whose id carries a date suffix.
 
 ## E2E-10: no "Did you mean" on the live library (Medium)
 
+**Status:** fixed 2026-10-12. The live speller now offers `diabetes insulin`; the journey test passes on live and is no longer pinned.
+
 **Repro (live, API 1.3.0 after the spelling work merged):** Ctrl+L, type
 `diabetis insulen`, Enter. Or `curl 'http://127.0.0.1:8737/v1/search?q=diabetis+insulen&limit=3'`.
 
