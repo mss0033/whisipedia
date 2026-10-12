@@ -9,7 +9,8 @@
 #                         collections-cia lane-cia cia-reading-room b0001 b0002 b0003
 #                         collections-small lane-small - neets cia-csi crs-reports
 #                       run as: tools/wsp-bg --fetch UNIT -- tools/lanes/lane-run.sh LANE SOURCE ITEM...
-#   index/rebuild.conf  the sources of a lexical rebuild, whitespace separated; resumed with
+#   index/rebuild.conf  the sources of a lexical rebuild, whitespace separated (a first word
+#                       --enable-timer enables the nightly index timer at the end); resumed with
 #                       tools/lanes/rebuild-resume.sh unless index/rebuild.paused exists. Memory:
 #                       $REBUILD_MEMORY_MAX (default 6G: stop the lanes, see the slice's budget).
 #
@@ -42,7 +43,7 @@ sleep "$SETTLE"
 
 status=0
 if [ -f "$S/index/rebuild.conf" ] && [ ! -e "$S/index/rebuild.paused" ]; then
-  # shellcheck disable=SC2046  # the sources, one word each
+  # shellcheck disable=SC2046  # the words of rebuild.conf: [--enable-timer] SOURCE...
   tools/wsp-bg --wait index-rebuild "${REBUILD_MEMORY_MAX:-6G}" -- \
     tools/lanes/rebuild-resume.sh "$S/index/rebuild.done" $(sed 's/#.*//' "$S/index/rebuild.conf") ||
     { echo "<3>index-rebuild not started (already running, or refused)" >&2; status=1; }

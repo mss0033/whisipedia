@@ -201,7 +201,7 @@ exit "${code:-0}"
 """
 
 
-def _rebuild(tmp_path: Path, codes: dict[str, int]) -> tuple[int, str, list[str]]:
+def _rebuild(tmp_path: Path, codes: dict[str, int], *flags: str) -> tuple[int, str, list[str]]:
     fake = tmp_path / "fake"
     (fake / "codes").mkdir(parents=True, exist_ok=True)
     for path in (fake / "codes").iterdir():
@@ -211,15 +211,18 @@ def _rebuild(tmp_path: Path, codes: dict[str, int]) -> tuple[int, str, list[str]
     wsp = fake / "wsp"
     wsp.write_text(FAKE_INDEX_WSP)
     wsp.chmod(0o755)
+    systemctl = fake / "systemctl"  # never the real one: --enable-timer would enable the live timer
+    systemctl.write_text('#!/bin/sh\necho "systemctl $*" >> "$FAKE/calls"\n')
+    systemctl.chmod(0o755)
     env = {
-        "PATH": "/usr/bin:/bin",
+        "PATH": f"{fake}:/usr/bin:/bin",
         "FAKE": str(fake),
         "WSP": str(wsp),
         "REBUILD_BUSY_WAIT": "0",
         "REBUILD_BUSY_TRIES": "3",
     }
     script = ROOT / "tools" / "lanes" / "rebuild-resume.sh"
-    argv = [str(script), str(tmp_path / "rebuild.done"), "mdwiki", "courtlistener", "pubmed"]
+    argv = [str(script), *flags, str(tmp_path / "rebuild.done"), "mdwiki", "courtlistener", "pubmed"]
     done = subprocess.run(argv, env=env, capture_output=True, text=True, timeout=60)
     calls = (fake / "calls").read_text().splitlines() if (fake / "calls").exists() else []
     (fake / "calls").unlink(missing_ok=True)
@@ -302,3 +305,12 @@ def test_resume_starts_each_lane_in_the_fetch_budget(tmp_path: Path) -> None:
     assert len(started) == 3
     assert all("--slice=whisipedia-background-fetch.slice" in s for s in started)
     assert started[0].endswith("tools/lanes/lane-run.sh lane-cia cia-reading-room b0001 b0002")
+
+
+def test_the_timer_is_enabled_once_after_everything_is_done(tmp_path: Path) -> None:
+    code, _, calls = _rebuild(tmp_path, {}, "--enable-timer")
+    assert code == 0
+    assert calls[-1] == "systemctl --user enable --now whisipedia-index.timer"
+    code, _, calls = _rebuild(tmp_path, {}, "--enable-timer")
+    assert code == 0
+    assert calls == [], "every step, the timer included, was done already"

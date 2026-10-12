@@ -1,7 +1,7 @@
 #!/bin/sh
 # Resumable lexical rebuild: build each source, then rank and spell, skipping the steps already done.
 #
-#   tools/wsp-bg --wait index-rebuild 6G -- tools/lanes/rebuild-resume.sh DONE_FILE SOURCE...
+#   tools/wsp-bg --wait index-rebuild 6G -- tools/lanes/rebuild-resume.sh [--enable-timer] DONE_FILE SOURCE...
 #
 # DONE_FILE records finished steps (build:<source>, rank, spell), so a restart after a reboot carries
 # on where it stopped. Run it under tools/wsp-bg WITH the heavy lock (no --no-heavy-lock): wsp-bg holds
@@ -13,12 +13,15 @@
 # (720: 12 hours). Any other failure (an OOM kill, a traceback) is a failed step: the remaining builds
 # still run, but rank and spell run only when every build is in DONE_FILE, and the script exits 1
 # without "all done" (they used to run without the failed source and were then never recomputed).
-# REBUILD_ENABLE_TIMER=1 enables whisipedia-index.timer once everything is done. SIGTERM is passed on
+# --enable-timer enables whisipedia-index.timer once everything is done. SIGTERM is passed on
 # to the running step.
 set -u
-[ $# -ge 2 ] || { echo "usage: $0 DONE_FILE SOURCE..." >&2; exit 2; }
+timer=0
+[ "${1:-}" = --enable-timer ] && { timer=1; shift; }
+[ $# -ge 2 ] || { echo "usage: $0 [--enable-timer] DONE_FILE SOURCE..." >&2; exit 2; }
 DONE=$1
 shift
+for s in "$@"; do [ "$s" = --enable-timer ] && timer=1; done  # also accepted among the sources
 REPO=$(cd "$(dirname "$0")/../.." && pwd)
 WSP=${WSP:-$REPO/.venv/bin/wsp}
 BUSY_TRIES=${REBUILD_BUSY_TRIES:-720}
@@ -80,6 +83,7 @@ step() {  # step NAME CMD...: 0 when done (now or before), else the step's exit 
 
 failed=""
 for s in "$@"; do
+  [ "$s" = --enable-timer ] && continue
   step "build:$s" "$WSP" index build --no-rank --no-spell --source "$s" || failed="$failed $s"
 done
 if [ -n "$failed" ]; then
@@ -88,7 +92,7 @@ if [ -n "$failed" ]; then
 fi
 step rank "$WSP" index rank || { echo "=== $(date -Is) NOT done: rank failed"; exit 1; }
 step spell "$WSP" index spell || { echo "=== $(date -Is) NOT done: spell failed"; exit 1; }
-if [ "${REBUILD_ENABLE_TIMER:-0}" = 1 ] && ! grep -qx timer "$DONE"; then
+if [ "$timer" = 1 ] && ! grep -qx timer "$DONE"; then
   systemctl --user enable --now whisipedia-index.timer && echo timer >> "$DONE"
 fi
 echo "=== $(date -Is) all done"
