@@ -654,6 +654,7 @@ class TantivyIndex:
                     title=str(doc.get_first(f"title_{route}") or ""),
                     snippet=cut.get(doc_id, ""),
                     source_id=str(doc.get_first("source_id") or ""),
+                    lang=str(doc.get_first("lang") or ""),
                 )
             )
         return hits

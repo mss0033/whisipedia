@@ -22,6 +22,7 @@ from wsp_core.ids import DocId, InvalidDocIdError, parse_doc_id
 from wsp_core.model import DocRecord, SearchHit
 from wsp_core.ports import Embedder, LexicalIndex, Reranker
 from wsp_index import FusionConfig, HybridSearcher
+from wsp_index.text import query_language
 from wsp_oracle.embedder import encode_queries
 from wsp_oracle.reranker import plain
 from wsp_oracle.router import Intent, Route, Router
@@ -31,6 +32,11 @@ log = logging.getLogger("wsp_oracle")
 
 Resolver = Callable[[str], SearchHit | None]
 PREFER_BOOST = 1.5
+# Soft preference for documents in the query's language (English, the interface language, when the
+# query does not say): the cross-encoder's scores saturate near 1.0 for a page of good matches, so
+# their order there is noise ("python list comprehension" led with a Spanish Stack Overflow question).
+LANG_BONUS = 0.01  # added to reranker scores (0-1): reorders near-ties only
+LANG_BOOST = 1.15  # multiplies fused scores below the reranked head
 
 
 def source_of(doc_id: str) -> str:
@@ -322,6 +328,7 @@ class OracleSearcher:
             pins = [replace(p, score=scores.get(p.doc_id, p.score)) for p in pins]
             head = [replace(h, snippet=display[h.doc_id]) for h in ranked if h.doc_id in display]
             t = lap("rerank", t)
+        head, tail = _prefer_language(route.query or query, head, tail, reranked=confidence is not None)
         hits = tuple([*pins, *head, *tail])
         total = (time.perf_counter() - t0) * 1000
         timings["total"] = round(total, 3)
@@ -520,3 +527,20 @@ def cosine_top(query: np.ndarray, matrix: np.ndarray, k: int) -> list[int]:
         return []
     top = np.argpartition(-sims, k - 1)[:k]
     return [int(i) for i in top[np.argsort(-sims[top], kind="stable")]]
+
+
+def _prefer_language(
+    query: str, head: Sequence[SearchHit], tail: Sequence[SearchHit], *, reranked: bool
+) -> tuple[list[SearchHit], list[SearchHit]]:
+    """Favour hits in the query's language (:data:`LANG_BONUS`, :data:`LANG_BOOST`), each list kept sorted."""
+    lang = query_language(query.split()) or "en"
+
+    def bonus(h: SearchHit, *, head_part: bool) -> SearchHit:
+        if h.lang != lang:
+            return h
+        additive = head_part and reranked  # reranker scores are 0-1; fused (RRF) scores are ~0.03
+        return replace(h, score=h.score + LANG_BONUS if additive else h.score * LANG_BOOST)
+
+    new_head = sorted((bonus(h, head_part=True) for h in head), key=lambda h: -h.score)
+    new_tail = sorted((bonus(h, head_part=False) for h in tail), key=lambda h: -h.score)
+    return new_head, new_tail

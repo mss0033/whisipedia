@@ -328,6 +328,7 @@ class SearchHit:
     title: str
     snippet: str = ""
     source_id: str = ""
+    lang: str = ""  # the document's language (BCP-47 primary subtag), when the index knows it
 
 
 @dataclass(frozen=True, slots=True)
