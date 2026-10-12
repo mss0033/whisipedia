@@ -642,40 +642,65 @@ class TantivyIndex:
             head = [(sc + w * float(f), d) for (sc, d), f in zip(head, feats, strict=True)]
             head.sort(key=lambda t: -t[0])
             scored = [*head, *tail][offset : offset + limit]
-        generators: dict[str, tantivy.SnippetGenerator] = {}
-        external: Mapping[str, str] = {}
-        if snippets and not self.config.store_text and self.texts is not None and scored:
-            external = self.texts([str(d.get_first("doc_id")) for _, d in scored])
+        cut = self._snippet_map(searcher, parsed, [d for _, d in scored]) if snippets else {}
         hits: list[SearchHit] = []
         for score, doc in scored:
             route = self.route(str(doc.get_first("lang") or ""))
-            title = str(doc.get_first(f"title_{route}") or "")
-            snippet = ""
-            source_doc = doc
-            if snippets and not self.config.store_text:
-                text = external.get(str(doc.get_first("doc_id")))
-                source_doc = None if text is None else tantivy.Document(**{f"text_{route}": text})
-            if snippets and source_doc is not None:
-                gen = generators.get(route)
-                if gen is None:
-                    gen = tantivy.SnippetGenerator.create(searcher, parsed, self._schema, f"text_{route}")
-                    gen.set_max_num_chars(self.config.snippet_chars)
-                    generators[route] = gen
-                snippet = gen.snippet_from_doc(source_doc).to_html()
-                if not snippet:
-                    snippet = _lead(
-                        str(source_doc.get_first(f"text_{route}") or ""), self.config.snippet_chars
-                    )
+            doc_id = str(doc.get_first("doc_id"))
             hits.append(
                 SearchHit(
-                    doc_id=DocId(str(doc.get_first("doc_id"))),
+                    doc_id=DocId(doc_id),
                     score=float(score),
-                    title=title,
-                    snippet=snippet,
+                    title=str(doc.get_first(f"title_{route}") or ""),
+                    snippet=cut.get(doc_id, ""),
                     source_id=str(doc.get_first("source_id") or ""),
                 )
             )
         return hits
+
+    def snippets(self, query: str, doc_ids: Sequence[str]) -> dict[str, str]:
+        """Highlighted snippets of ``query`` in each of ``doc_ids`` (for hits ranked without them: the
+        Oracle ranks a window of 200 but shows ten). Ids not in the index are left out."""
+        parsed = self.parse(query) if doc_ids else None
+        if parsed is None:
+            return {}
+        searcher = self._index.searcher()
+        by_id = tantivy.Query.term_set_query(self._schema, "doc_id", list(dict.fromkeys(doc_ids)))
+        found = searcher.search(by_id, len(doc_ids), count=False)
+        return self._snippet_map(searcher, parsed, [searcher.doc(a) for _, a in found.hits])
+
+    def _snippet_map(
+        self, searcher: tantivy.Searcher, parsed: tantivy.Query, docs: Sequence[tantivy.Document]
+    ) -> dict[str, str]:
+        """doc id -> snippet, from the stored text or, when none is stored, from ``texts``."""
+        if not docs:
+            return {}
+        ids = [str(d.get_first("doc_id")) for d in docs]
+        external: Mapping[str, str] = {}
+        if not self.config.store_text:
+            if self.texts is None:
+                return {}
+            external = self.texts(ids)
+        generators: dict[str, tantivy.SnippetGenerator] = {}
+        out: dict[str, str] = {}
+        for doc_id, doc in zip(ids, docs, strict=True):
+            route = self.route(str(doc.get_first("lang") or ""))
+            source_doc = doc
+            if not self.config.store_text:
+                text = external.get(doc_id)
+                if text is None:
+                    continue
+                source_doc = tantivy.Document(**{f"text_{route}": text})
+            gen = generators.get(route)
+            if gen is None:
+                gen = tantivy.SnippetGenerator.create(searcher, parsed, self._schema, f"text_{route}")
+                gen.set_max_num_chars(self.config.snippet_chars)
+                generators[route] = gen
+            snippet = gen.snippet_from_doc(source_doc).to_html()
+            out[doc_id] = snippet or _lead(
+                str(source_doc.get_first(f"text_{route}") or ""), self.config.snippet_chars
+            )
+        return out
 
 
 def _stamp(path: Path) -> tuple[int, int, int]:

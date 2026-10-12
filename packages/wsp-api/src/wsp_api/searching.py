@@ -135,6 +135,9 @@ class Searcher:
         kinds = [self.kind_of(h) for h in found.hits]
         shown = [h for h, k in zip(found.hits, kinds, strict=True) if kind is None or k is kind]
         page = shown[offset : offset + limit]
+        fill = getattr(s.index, "with_snippets", None)
+        if callable(fill) and any(not h.snippet for h in page):  # ranked without them: cut for this page
+            page = list(cast(Sequence[SearchHit], fill(q, page)))
         more = offset + limit < len(shown)
         terms = search.terms(q)
         hits: list[Hit] = []

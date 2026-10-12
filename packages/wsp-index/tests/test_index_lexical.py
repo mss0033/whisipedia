@@ -306,3 +306,18 @@ def test_without_a_text_source_hits_have_no_snippet(tmp_path: Path) -> None:
         (hit,) = idx.search("hormone", limit=1)
         assert hit.snippet == ""
         assert hit.title == "Insulin"
+
+
+def test_snippets_are_cut_on_demand_for_ranked_hits(index: TantivyIndex) -> None:
+    from wsp_index.hybrid import HybridSearcher
+
+    index.upsert([doc("s", str(i), f"Tide {i}", f"tables of tide heights for port {i}") for i in range(30)])
+    index.commit()
+    ranked = HybridSearcher(index, snippet_free=True).search("tide heights", limit=30)
+    assert len(ranked) == 30
+    assert all(h.snippet == "" for h in ranked)  # a window ranked without snippets
+    page = [h.doc_id for h in ranked[:3]]
+    cut = index.snippets("tide heights", [*page, "wsp:s/missing"])
+    assert set(cut) == set(page)
+    assert all("<b>tide</b>" in v for v in cut.values())
+    assert index.snippets("tide", []) == {}

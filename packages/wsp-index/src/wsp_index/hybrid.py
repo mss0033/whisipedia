@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
+from typing import Any, cast
 
 from wsp_core.ids import DocId, InvalidDocIdError, parse_doc_id
 from wsp_core.model import DocRecord, SearchHit
@@ -62,6 +63,7 @@ class HybridSearcher:
         *,
         config: FusionConfig | None = None,
         resolve: Resolver | None = None,
+        snippet_free: bool = False,
     ) -> None:
         if (vector is None) != (embedder is None):
             raise ValueError("vector index and embedder must be given together")
@@ -70,6 +72,7 @@ class HybridSearcher:
         self.embedder = embedder
         self.config = config or FusionConfig()
         self.resolve = resolve
+        self.snippet_free = snippet_free  # rank lexical candidates without snippets (see search)
 
     def prior(self, source_id: str) -> float:
         return self.config.source_priors.get(source_id, self.config.default_prior)
@@ -81,7 +84,11 @@ class HybridSearcher:
             return []
         cfg = self.config
         depth = max(cfg.depth, offset + limit)
-        lexical = list(self.lexical.search(query, limit=depth, sources=sources))
+        # Candidates without snippets when the index can (a window of ``depth`` is ranked, a page shown):
+        # the caller cuts snippets for what it shows (``snippets``), not for every candidate.
+        cheap = getattr(self.lexical, "search_hits", None)
+        run = cast(Any, cheap) if callable(cheap) and self.snippet_free else self.lexical.search
+        lexical = list(cast(Sequence[SearchHit], run(query, limit=depth, sources=sources)))
         dense: list[tuple[str, float]] = []
         if self.vector is not None and self.embedder is not None:
             qvec = self.embedder.embed([query])[0]

@@ -292,6 +292,7 @@ class OracleSearcher:
             _NoEmbed() if self.vectors is not None else None,
             config=replace(self.fusion, depth=depth),
             resolve=self.resolve,
+            snippet_free=self._cut is not None,  # snippets are cut below, for the head only
         )
         fused = list(hybrid.search(route.lexical or route.dense, limit=depth, sources=sources))
         _dense, best_chunk, timings["dense"] = dense_future.result()
@@ -303,6 +304,11 @@ class OracleSearcher:
         t = lap("titles", t)
 
         head, tail = rest[: self.rerank_top], rest[self.rerank_top :]
+        pins, head = (
+            self.with_snippets(route.lexical or query, pins),
+            self.with_snippets(route.lexical or query, head),
+        )
+        t = lap("snippets", t)
         passages = self._passages([*pins, *head], best_chunk)
         confidence: float | None = None
         if self.reranker is not None and head:
@@ -321,6 +327,22 @@ class OracleSearcher:
             log.info("oracle query over budget: %.1f ms (%s)", total, timings)
         low = not hits or (confidence is not None and confidence < self.low_confidence)
         return OracleResult(query, route, hits, passages, confidence, low, timings, scope)
+
+    @property
+    def _cut(self) -> Callable[[str, Sequence[str]], Mapping[str, str]] | None:
+        cut = getattr(self.lexical, "snippets", None)
+        return cast(Callable[[str, Sequence[str]], Mapping[str, str]], cut) if callable(cut) else None
+
+    def with_snippets(self, query: str, hits: Sequence[SearchHit]) -> list[SearchHit]:
+        """``hits`` with a snippet cut for each one that has none (when the lexical index can cut them)."""
+        cut = self._cut
+        missing = [h.doc_id for h in hits if not h.snippet]
+        if cut is None or not missing or not query.strip():
+            return list(hits)
+        found = cut(query, missing)
+        return [
+            replace(h, snippet=found[h.doc_id]) if not h.snippet and h.doc_id in found else h for h in hits
+        ]
 
     def depth_for(self, depth: int | None) -> int:
         """How many candidates :meth:`run` fuses and ranks for a requested depth."""
@@ -414,7 +436,12 @@ class OracleIndex:
         if sources is not None and not sources:
             return []
         res = self.result(query, sources=sources, depth=offset + limit)
-        return list(res.hits[offset : offset + limit])
+        return self.searcher.with_snippets(res.route.lexical or query, res.hits[offset : offset + limit])
+
+    def with_snippets(self, query: str, hits: Sequence[SearchHit]) -> list[SearchHit]:
+        """Snippets for a page of hits taken from :meth:`result` (only the head of a run has them)."""
+        route, _ = self.searcher.scoped(query, None)
+        return self.searcher.with_snippets(route.lexical or query, hits)
 
     def suggest(self, prefix: str, *, limit: int = 10) -> Sequence[str]:
         return self.lexical.suggest(prefix, limit=limit)
