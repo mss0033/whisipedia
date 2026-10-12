@@ -394,3 +394,27 @@ def test_a_gone_index_page_is_not_an_incomplete_listing() -> None:
     assert list(discover_all([cfg], env)) == []
     assert env.notes  # noted
     assert env.incomplete == []  # but a 404 hides nothing
+
+
+def test_an_unresolved_item_withdraws_nothing_but_does_not_stop_the_fetch(
+    vault: FileVault, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from wsp_adapters.doccollection.adapter import DocCollectionAdapter
+
+    s = spec(OBJECTS)
+    assert runner(vault, OBJECTS, tmp_path).run(s, version="2026-10-10").fetched
+    real = DocCollectionAdapter.survey
+
+    def one_unresolved(self: DocCollectionAdapter, *args: object, **kwargs: object) -> object:
+        out = real(self, *args, **kwargs)  # type: ignore[arg-type]
+        out.allowed = [c for c in out.allowed if "FM-5-0" not in c.key]  # its resolve failed this run
+        out.unresolved = 1
+        return out
+
+    monkeypatch.setattr(DocCollectionAdapter, "survey", one_unresolved)
+    more = [*OBJECTS, ("FM-6-0_2022.pdf", GOOD)]
+    again = runner(vault, more, tmp_path).run(s, version="2026-11-10")
+    assert not again.incomplete
+    assert [d.cand.title for d in again.fetched] == ["FM 6 0 2022"]
+    catalog = read_catalog_file(vault.root / "_incoming" / "test-pubs" / "2026-11-10" / CATALOG)
+    assert all(m.currency != "withdrawn" for m in catalog)  # FM 5-0 was not listed, yet not withdrawn

@@ -663,7 +663,9 @@ class CollectionFetcher:
         dest_dir: Path,
     ) -> None:
         cfg = self.adapter.config(coll)
-        listed = {c.key for c in survey.allowed}
+        # Items whose resolve failed are still upstream, but their documents' keys are unknown this run:
+        # nothing may be called withdrawn then (the fetch itself goes ahead; a later run resolves them).
+        listed = None if survey.unresolved else {c.key for c in survey.allowed}
         catalog = build_catalog(prev_catalog, prev_gen, report.fetched, cfg.currency, listed=listed)
         if not report.fetched:
             self._say(f"{spec.id}: nothing new to ingest")

@@ -299,8 +299,7 @@ class DocCollectionAdapter:
         out.scale = max(env.scale.values(), default=1.0)
         out.notes.extend(env.notes)
         out.incomplete.extend(env.incomplete)
-        if out.unresolved and resolve_limit is None:  # their documents' keys are unknown this run
-            out.incomplete.append(f"{out.unresolved} listed item(s) could not be resolved")
+
         if isinstance(env.fetcher, Throttle):
             out.requests = dict(env.fetcher.requests)
         return out
