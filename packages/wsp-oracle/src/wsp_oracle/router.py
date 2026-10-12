@@ -84,7 +84,8 @@ class Route:
     parts: tuple[str, ...] = ()
     """Compared entities (``compare`` only)."""
     prefer: tuple[str, ...] = field(default=())
-    """Source-id fragments to boost (``wiktionary`` for define, ``osm``/``maps`` for locate)."""
+    """Projects to boost (``wiktionary`` for define, ``osm``/``maps`` for locate): a source id or a
+    bundle's book named after one (``osm-planet``, ``wikibooks_en_all``), matched by its first word."""
     prefer_sources: tuple[str, ...] = ()
     """Exact source ids to boost: the sources of a site named as a soft prior (``wikipedia ...``)."""
 

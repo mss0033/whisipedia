@@ -604,9 +604,16 @@ def _write_id_map(gen_dir: Path, n: int) -> None:
 
 
 class RefineryReader:
-    """Point lookups and scans over one sealed generation."""
+    """Point lookups and scans over one sealed generation.
 
-    def __init__(self, gen_dir: Path, *, cache_row_groups: int = 32) -> None:
+    ``map_ids=False``: never write the id-map sidecar (``_ids.{h,loc}.npy``, 20 bytes a document) for
+    this generation. Lookups then use the sidecar if one exists, else read the one row group of the
+    hash-sorted ``_ids.parquet`` whose statistics cover the id (~20 MB decoded). For generations read
+    rarely, from a request: the history of a document opened every older generation and wrote a
+    sidecar for each, 720 MB for one PubMed set (audit 2026-10-12 #12).
+    """
+
+    def __init__(self, gen_dir: Path, *, cache_row_groups: int = 32, map_ids: bool = True) -> None:
         if not is_sealed(gen_dir):
             raise RefineryError(f"not a sealed refinery generation: {gen_dir}")
         self.dir = gen_dir
@@ -647,6 +654,58 @@ class RefineryReader:
         self._cache: OrderedDict[tuple[int, int, tuple[str, ...]], pa.Table] = OrderedDict()
         self._cache_size = cache_row_groups
         self._lock = threading.Lock()
+        self._map_ids = map_ids
+        self._id_groups: tuple[pq.ParquetFile, list[tuple[int, int]]] | None = None
+        self._id_groups_lock = threading.Lock()  # a ParquetFile is not safe for concurrent reads
+
+    def _sparse(self) -> bool:
+        """Lookups read ``_ids.parquet`` row groups instead of loading (or writing) the id index."""
+        return not self._map_ids and self._ids is None and not (self.dir / IDS_MAP_H).is_file()
+
+    def _locations(self, h: np.uint64) -> list[tuple[int, int, int]]:
+        """``(part, rg, row)`` of each live row whose id hashes to ``h``."""
+        if self._sparse():
+            found = self._sparse_locations(h)
+            if found is not None:
+                return found
+        hs, parts, rgs, rows = self._id_index()
+        i = int(np.searchsorted(hs, h))
+        out: list[tuple[int, int, int]] = []
+        while i < len(hs) and hs[i] == h:
+            out.append((int(parts[i]), int(rgs[i]), int(rows[i])))
+            i += 1
+        return out
+
+    def _sparse_locations(self, h: np.uint64) -> list[tuple[int, int, int]] | None:
+        """From the row groups of ``_ids.parquet`` whose min/max statistics cover ``h`` (the file is
+        sorted by hash); ``None`` when it has no statistics."""
+        with self._id_groups_lock:
+            if self._id_groups is None:
+                pf = pq.ParquetFile(self.dir / IDS_FILE)
+                bounds: list[tuple[int, int]] = []
+                for i in range(pf.metadata.num_row_groups):  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
+                    stats = pf.metadata.row_group(i).column(0).statistics  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
+                    if stats is None or not stats.has_min_max:
+                        return None
+                    bounds.append((int(cast(int, stats.min)), int(cast(int, stats.max))))
+                self._id_groups = (pf, bounds)
+            pf, bounds = self._id_groups
+            out: list[tuple[int, int, int]] = []
+            for i, (lo, hi) in enumerate(bounds):
+                if lo <= int(h) <= hi:
+                    t = pf.read_row_group(i, columns=["h", "part", "rg", "row"])  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
+                    hs = t.column(0).to_numpy()
+                    j = int(np.searchsorted(hs, h))
+                    while j < len(hs) and hs[j] == h:
+                        out.append(
+                            (
+                                int(t.column(1)[j].as_py()),
+                                int(t.column(2)[j].as_py()),
+                                int(t.column(3)[j].as_py()),
+                            )
+                        )
+                        j += 1
+            return out
 
     def _id_index(
         self,
@@ -670,7 +729,7 @@ class RefineryReader:
         n = int(pq.ParquetFile(self.dir / IDS_FILE).metadata.num_rows)  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
         try:
             mapped = self._mapped_ids(n)
-            if mapped is None:
+            if mapped is None and self._map_ids:
                 _write_id_map(self.dir, n)
                 mapped = self._mapped_ids(n)
             if mapped is not None:
@@ -692,8 +751,11 @@ class RefineryReader:
         hp, lp = self.dir / IDS_MAP_H, self.dir / IDS_MAP_LOC
         if not (hp.is_file() and lp.is_file()):
             return None
-        h = np.load(hp, mmap_mode="r")
-        loc = np.load(lp, mmap_mode="r")
+        try:
+            h = np.load(hp, mmap_mode="r")
+            loc = np.load(lp, mmap_mode="r")
+        except ValueError:  # truncated ("mmap length is greater than file size"; audit 2026-10-12 #15)
+            return None  # rewritten
         if h.dtype != np.uint64 or loc.dtype != np.uint32 or h.shape != (n,) or loc.shape != (n, 3):
             return None  # torn or from another index: rewritten
         return cast(npt.NDArray[np.uint64], h), cast(npt.NDArray[np.uint32], loc)
@@ -704,7 +766,7 @@ class RefineryReader:
         ids = self._ids
         if ids is not None:
             return 0 if isinstance(ids[0], np.memmap) else 20 * len(ids[0])
-        return 0 if (self.dir / IDS_MAP_H).is_file() else 20 * len(self)
+        return 0 if (self.dir / IDS_MAP_H).is_file() or not self._map_ids else 20 * len(self)
 
     def __len__(self) -> int:
         if self._docs >= 0:
@@ -762,15 +824,10 @@ class RefineryReader:
     def lookup(self, doc_id: str, columns: Sequence[str] = COLUMNS) -> dict[str, Any] | None:
         """Row of ``doc_id`` restricted to ``columns`` (``doc_id`` is always included), or ``None``."""
         cols = tuple(dict.fromkeys(("doc_id", *columns)))
-        h = np.uint64(id_hash(doc_id))
-        hs, parts, rgs, rows = self._id_index()
-        i = int(np.searchsorted(hs, h))
-        while i < len(hs) and hs[i] == h:
-            table = self._row_group(int(parts[i]), int(rgs[i]), cols)
-            row = int(rows[i])
+        for part, rg, row in self._locations(np.uint64(id_hash(doc_id))):
+            table = self._row_group(part, rg, cols)
             if table.column(0)[row].as_py() == doc_id:
                 return {name: table.column(name)[row].as_py() for name in table.column_names}
-            i += 1
         return None
 
     def doc_id_at(self, i: int) -> str:

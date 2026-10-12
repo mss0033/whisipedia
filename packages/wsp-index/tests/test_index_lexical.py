@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from collections.abc import Iterator, Sequence
 from dataclasses import replace
 from pathlib import Path
@@ -323,9 +324,43 @@ def test_snippets_are_cut_on_demand_for_ranked_hits(index: TantivyIndex) -> None
     assert index.snippets("tide", []) == {}
 
 
-def test_tiers_try_every_word_in_the_query_language_first(tmp_path: Path) -> None:
-    cfg = TantivyConfig(languages=("en", "de"), writer_heap_bytes=50_000_000, writer_threads=1)
-    with TantivyIndex(tmp_path / "ix", cfg) as idx:
+BILINGUAL = TantivyConfig(languages=("en", "de"), writer_heap_bytes=50_000_000, writer_threads=1)
+
+
+def test_every_word_matches_in_any_language_are_found(tmp_path: Path) -> None:
+    # Audit 2026-10-12 #1: the query has no German function words, so it was read as English, and the
+    # English tiers alone (enough matches) answered: the German page about the query was never searched.
+    mauer = make_doc_id("s", "mauer")
+    with TantivyIndex(tmp_path / "ix", BILINGUAL) as idx:
+        idx.upsert(
+            [doc("s", f"b{i}", f"Berliner {i}", "a berliner doughnut recipe") for i in range(250)]
+            + [
+                doc(
+                    "s",
+                    "mauer",
+                    "Berliner Mauer",
+                    "Die Berliner Mauer war ein Grenzbefestigungssystem.",
+                    lang="de",
+                )
+            ]
+        )
+        idx.commit()
+        assert ids(idx.search("Berliner Mauer", limit=10))[0] == mauer  # the only every-word match
+        assert mauer in ids(idx.search_hits("Berliner Mauer", limit=200))
+        # Enough English documents matching every word (the old query-language tier) change nothing.
+        idx.upsert(
+            [doc("s", f"w{i}", f"Walls {i}", "berliner mauer " + "english text " * 50) for i in range(40)]
+        )
+        idx.commit()
+        assert mauer in ids(idx.search("Berliner Mauer", limit=41))
+        assert mauer in ids(idx.search_window("Berliner Mauer", limit=200, partial=False).hits)
+        hit = idx.lookup(mauer)
+        assert hit is not None
+        assert hit.lang == "de"
+
+
+def test_a_few_every_word_matches_rank_among_the_any_word_ones(tmp_path: Path) -> None:
+    with TantivyIndex(tmp_path / "ix", BILINGUAL) as idx:
         idx.upsert(
             [
                 doc("s", "both", "Metformin side effects", "metformin side effects and dosing", lang="en"),
@@ -334,12 +369,80 @@ def test_tiers_try_every_word_in_the_query_language_first(tmp_path: Path) -> Non
             ]
         )
         idx.commit()
-        assert idx._tiers("metformin side effects") == [  # pyright: ignore[reportPrivateUsage]
-            (("en", "any"), True),
-            (("en", "any"), False),
-            (None, False),
+        window = idx.search_window("metformin side effects", limit=10)
+        assert window.hits[0].doc_id == make_doc_id("s", "both")
+        assert {h.doc_id for h in window.hits} == {make_doc_id("s", n) for n in ("both", "one", "de")}
+        assert window.exhaustive
+
+
+def _weak_and_strong(idx: TantivyIndex) -> None:
+    """35 documents matching every word weakly, 40 matching one word strongly (audit 2026-10-12 #6)."""
+    idx.upsert(
+        [doc("s", f"every{i:02d}", f"Note {i}", "alpha beta " + "filler " * 300) for i in range(35)]
+        + [doc("s", f"some{i:02d}", "alpha alpha", "alpha alpha alpha") for i in range(40)]
+    )
+    idx.commit()
+
+
+def test_pages_of_any_size_tile_one_list(index: TantivyIndex) -> None:
+    _weak_and_strong(index)
+    full = ids(index.search_hits("alpha beta", limit=100))
+    assert len(full) == 75
+    assert all(d.startswith("wsp:s/every") for d in full[:35])  # every-word matches lead
+    for size in (7, 10, 30):
+        paged = [
+            d
+            for off in range(0, 80, size)
+            for d in ids(index.search_hits("alpha beta", limit=size, offset=off))
         ]
-        # Too few every-word matches for the window: the any-word and every-language tiers fill it.
-        hits = idx.search_hits("metformin side effects", limit=10)
-        assert hits[0].doc_id == make_doc_id("s", "both")
-        assert {h.doc_id for h in hits} == {make_doc_id("s", n) for n in ("both", "one", "de")}
+        assert paged == full  # no page repeats a document, none is skipped
+    assert ids(index.search("alpha beta", limit=10, offset=30)) == full[30:40]
+
+
+def test_a_window_may_end_with_its_every_word_lead(index: TantivyIndex) -> None:
+    # Audit 2026-10-12 #7: a 200-hit window ran the every-language any-word query (seconds on the full
+    # library) whenever fewer than 200 documents matched every word.
+    from unittest import mock
+
+    _weak_and_strong(index)
+    with mock.patch.object(index, "_top", wraps=index._top) as top:  # pyright: ignore[reportPrivateUsage]
+        lead = index.search_window("alpha beta", limit=200, partial=False)
+        assert top.call_count == 1  # the every-word query only
+        assert len(lead.hits) == 35
+        assert not lead.exhaustive
+        full = index.search_window("alpha beta", limit=200)
+        assert top.call_count == 3
+        assert len(full.hits) == 75
+        assert full.exhaustive
+        assert [h.doc_id for h in full.hits[:35]] == [h.doc_id for h in lead.hits]
+
+
+def test_the_commit_stamp_changes_with_every_commit(index: TantivyIndex) -> None:
+    before = index.commit_stamp()
+    index.upsert([doc("s", "a", "Alpha", "zebra")])
+    assert index.commit_stamp() == before  # buffered, not committed
+    index.commit()
+    assert index.commit_stamp() != before
+
+
+def test_suggest_titles_are_shared_by_the_sources(tmp_path: Path) -> None:
+    # Unranked titles (a rebuild ranks last) were taken in reverse doc-id order until the key budget ran
+    # out: one source's titles, the one sorting last (every completion of "dog" was a Wiktionary phrase).
+    cfg = replace(SMALL, suggest_max_keys=60, suggest_open_rebuild_titles=0)
+    with TantivyIndex(tmp_path / "ix", cfg) as idx:
+        idx.upsert([doc("books", f"b{i:03d}", f"Huckleberry {i}") for i in range(100)])
+        idx.upsert([doc("words", f"w{i:03d}", f"Dog phrase {i}") for i in range(100)])
+        idx.upsert([doc("encyc", f"e{i:03d}", f"Ranked {i}") for i in range(100)])
+        idx.set_priors({make_doc_id("encyc", f"e{i:03d}"): 1.0 + i for i in range(100)})
+        idx.commit()
+        idx.rebuild_suggest()
+        entries = list(idx._all_entries())  # pyright: ignore[reportPrivateUsage]
+        assert len(entries) == 60
+        by_source = Counter(e.doc_id.split("/")[0] for e in entries)
+        # half for ranked titles, best first; the other half shared by the three sources
+        assert [e.doc_id for e in entries[:30]] == [
+            make_doc_id("encyc", f"e{i:03d}") for i in range(99, 69, -1)
+        ]
+        assert by_source == {"wsp:encyc": 40, "wsp:books": 10, "wsp:words": 10}
+        assert idx.suggest("huckle")
+        assert idx.suggest("dog")

@@ -83,6 +83,34 @@ All notable changes are documented here. The format follows [Keep a Changelog](h
 * The Army filter keeps only the weapons, gunnery and targeting series and 19 core titles. The Joint
   Publications filter denies only JP 3-60 (targeting).
 
+### Fixed: search and index audit (2026-10-12)
+* Search found no other-language page for a query without function words: the tiers searched only the
+  query's language (English when unsure) once it had enough matches, so "Berliner Mauer" listed no German
+  page. Every query now searches every language; every-word matches lead (and when there are enough the
+  any-word query is skipped, also for the Oracle's 200-hit window); the language is a ranking preference
+  only. Pages of any size tile one list (they mixed tiers: repeats and gaps).
+* Totals were exact when they were not: a list shortened by collapsing duplicates read as "every match",
+  and the Oracle cache then never ran a deeper request. The Oracle now says whether its retrievers ran
+  out. Only true duplicates collapse (same source, title and text): separate questions or works that
+  share a title stay.
+* Title queries found the book they name: "huckleberry finn" across all sites showed no Gutenberg book
+  (198 Open Library editions filled the 200-hit window) and within Gutenberg a Hungarian translation led.
+  No source takes more than an eighth of the Oracle's lexical window while others match, and for a
+  page-name query each source's best near-exact title follows the exact one, the query's language first.
+* Fusion no longer penalises the embedded source: a lexical hit's dense rank is the better of its dense
+  and lexical ranks, for every source (mdwiki's best lexical match had sunk to rank 183). No full scan
+  of the vector store on a request any more.
+* Resumed index loads are idempotent: a part committed before its checkpoint is replaced, never added
+  twice, and orphan removals resume by doc id (a recount skipped orphans that stayed searchable).
+* `wsp index build` refuses a `lexical/` rebuilt without `index-state.json` (it indexed nothing and
+  reported success); a source turned `index: false` leaves the search index.
+* The result cache is cleared when another process commits to the lexical index. History and dated
+  reads write no id-map sidecar for older generations; a truncated sidecar is rewritten. Dense-only hits
+  carry their language. Site preferences match project names, not substrings.
+* Suggest: the two tries are replaced together (a versioned directory and a pointer), and unranked
+  titles are shared by the sources (one source, the last by id, took the whole budget: "dog" completed
+  only to Wiktionary phrases).
+
 ### Fixed: collections and ranking, second pass (2026-10-12)
 * A partial listing (a timed-out page, a failed resolve) never becomes a generation and never marks
   documents withdrawn: the fetch stops with exit 4 and lanes retry. archive.org listings are cached a

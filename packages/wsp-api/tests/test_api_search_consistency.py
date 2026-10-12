@@ -44,6 +44,7 @@ class _Result:
     hits: tuple[SearchHit, ...]
     low_confidence: bool = False
     scope: object = None
+    exhaustive: bool | None = None
 
 
 class OracleLike(CountingIndex):
@@ -51,6 +52,26 @@ class OracleLike(CountingIndex):
 
     def result(self, query: str, *, sources: Sequence[str] | None = None, depth: int = 0) -> _Result:
         return _Result(tuple(self.search(query, limit=depth, sources=sources)))
+
+
+class CollapsingOracle(CountingIndex):
+    """Collapses its candidates to a few and says whether they are every match (audit 2026-10-12 F10)."""
+
+    exhaustive = False
+
+    def result(self, query: str, *, sources: Sequence[str] | None = None, depth: int = 0) -> _Result:
+        hits = tuple(self.search(query, limit=depth, sources=sources))[:2]
+        return _Result(hits, exhaustive=self.exhaustive)
+
+
+@pytest.mark.parametrize("exhaustive", [False, True])
+def test_the_total_is_exact_only_when_the_oracle_says_so(exhaustive: bool) -> None:
+    index = CollapsingOracle(cast(InMemoryLexicalIndex, browse_services().index))
+    index.exhaustive = exhaustive
+    with _client(index) as c:
+        res = _search(c, q="the", limit=10)
+        assert res.total == 2
+        assert res.total_is_estimate is not exhaustive  # a short list is not proof that nothing is left
 
 
 def _client(index: object, **kw: Any) -> httpx.Client:

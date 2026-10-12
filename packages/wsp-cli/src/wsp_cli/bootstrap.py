@@ -488,7 +488,10 @@ def build_services(cfg: Mapping[str, Any], lay: Layout) -> Services:
         live = [s for s in specs if s.status is not SourceStatus.EXCLUDED]
         documents = open_documents(cfg)  # one store: documents and search snippets share its caches
         oracle = build_oracle(
-            cfg, lexical=open_index(cfg, specs, documents=documents), sources=[s.id for s in live]
+            cfg,
+            lexical=open_index(cfg, specs, documents=documents),
+            sources=[s.id for s in live],
+            content_hashes=documents.content_hashes,
         )
         return Services(
             index=oracle.index,

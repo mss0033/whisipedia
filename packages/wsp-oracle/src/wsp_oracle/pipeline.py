@@ -19,11 +19,11 @@ from typing import cast
 
 import numpy as np
 
-from wsp_core.ids import DocId, InvalidDocIdError, parse_doc_id
+from wsp_core.ids import DocId, InvalidDocIdError, content_hash, parse_doc_id
 from wsp_core.model import DocRecord, SearchHit
 from wsp_core.ports import Embedder, LexicalIndex, Reranker
 from wsp_index import FusionConfig, HybridSearcher
-from wsp_index.text import query_language
+from wsp_index.text import primary_lang, query_language
 from wsp_oracle.embedder import encode_queries
 from wsp_oracle.reranker import plain
 from wsp_oracle.router import Intent, Route, Router
@@ -32,12 +32,17 @@ from wsp_oracle.vectors import DocVectorIndex
 log = logging.getLogger("wsp_oracle")
 
 Resolver = Callable[[str], SearchHit | None]
+ContentHashes = Callable[[Sequence[str]], Mapping[str, str]]
 PREFER_BOOST = 1.5
 # Soft preference for documents in the query's language (English, the interface language, when the
 # query does not say): the cross-encoder's scores saturate near 1.0 for a page of good matches, so
 # their order there is noise ("python list comprehension" led with a Spanish Stack Overflow question).
 LANG_BONUS = 0.01  # added to reranker scores (0-1): reorders near-ties only
 LANG_BOOST = 1.15  # multiplies fused scores below the reranked head
+SOURCE_SHARE = 8
+"""One source takes at most 1/8 of the lexical window while other sources have matches (``per_source``)."""
+TITLE_PINS = 8
+"""Near-exact titles pinned after the exact one for a page-name query, one per source, at most."""
 
 
 def source_of(doc_id: str) -> str:
@@ -74,6 +79,10 @@ class OracleResult:
     low_confidence: bool = False
     timings_ms: Mapping[str, float] = field(default_factory=dict[str, float])
     scope: Scope | None = None
+    exhaustive: bool = False
+    """``hits`` are every match for the query: the retrievers ran out before the depth asked for, so a
+    deeper run finds nothing more and a count of ``hits`` is exact. Not the same as ``len(hits)`` being
+    under that depth: collapsed duplicates and filtered hits make a list shorter, not complete."""
 
 
 class _StaticDense:
@@ -123,7 +132,10 @@ class OracleSearcher:
         passage_text: Callable[[Sequence[str]], Mapping[str, str]] | None = None,
         low_confidence: float = 0.05,
         budget_ms: float = 100.0,
+        content_hashes: ContentHashes | None = None,
     ) -> None:
+        """``content_hashes`` (``ParquetDocumentStore.content_hashes``) tells duplicate records from
+        distinct documents that share a title; without it no hit is collapsed."""
         if (embedder is None) != (vectors is None):
             raise ValueError("embedder and vectors must be given together")
         self.lexical = lexical
@@ -137,7 +149,7 @@ class OracleSearcher:
         self.passage_text = passage_text
         self.low_confidence = low_confidence
         self.budget_ms = budget_ms
-        self._dense_cover: tuple[float, frozenset[str]] | None = None
+        self.content_hashes = content_hashes
         self._pool: ThreadPoolExecutor | None = None
         self._pool_lock = threading.Lock()
 
@@ -205,18 +217,49 @@ class OracleSearcher:
                 pins.append(hit)
         return pins
 
+    def _title_pins(self, route: Route, candidates: Iterable[SearchHit], pinned: set[str]) -> list[SearchHit]:
+        """For a page-name query, each source's best near-exact title: one holding every word of the
+        query and at most as many others, in the query's language first (English when the query does
+        not say), then the shortest, then the best ranked.
+
+        A title query lost the book it names: "huckleberry finn" across all sites showed no Gutenberg
+        book (Open Library's editions and Stack Exchange users named so outscored its long text in
+        BM25), and within Gutenberg a Hungarian translation led the English edition (the reranker's
+        scores saturate near 1.0 for every title match; 2026-10-12). Translations and other sites'
+        titles are still found, one per source, after the query language's.
+        """
+        if route.intent not in (Intent.NAVIGATE, Intent.LOOKUP) or not route.title:
+            return []
+        words = set(_words_of(route.title))
+        if not words:
+            return []
+        lang = query_language(route.title.split()) or "en"
+        best: dict[str, tuple[tuple[bool, int, int], SearchHit]] = {}
+        for i, h in enumerate(candidates):
+            title = _words_of(h.title)
+            if h.doc_id in pinned or not words <= set(title) or len(title) > 2 * len(words):
+                continue
+            key = (not h.lang or primary_lang(h.lang) != lang, len(title), i)
+            src = h.source_id or source_of(h.doc_id)
+            if src not in best or key < best[src][0]:
+                best[src] = (key, h)
+        return [h for _, h in sorted(best.values(), key=lambda t: t[0])]
+
     def _boost(self, route: Route, fused: list[SearchHit]) -> list[SearchHit]:
         """Soft priors: hits from preferred sources (a site named without an identifier, dictionaries
         for "define", maps for "where is") score ``PREFER_BOOST`` times higher."""
         if not route.prefer and not route.prefer_sources:
             return fused
         exact = frozenset(route.prefer_sources)
+        projects = frozenset(route.prefer)
 
         def preferred(h: SearchHit) -> bool:
             src = h.source_id or source_of(h.doc_id)
+            if src in exact or _project(src) in projects:
+                return True
             # A bundle's book is the first part of the native id ("kiwix-curated-t2/wikibooks_en_all/...").
-            book = h.doc_id.removeprefix(f"wsp:{src}/").partition("/")[0]
-            return src in exact or any(p in src or p in book for p in route.prefer)
+            book, sep, _ = h.doc_id.removeprefix(f"wsp:{src}/").partition("/")
+            return bool(sep) and _project(book) in projects
 
         boosted = [replace(h, score=h.score * PREFER_BOOST) if preferred(h) else h for h in fused]
         return sorted(boosted, key=lambda h: -h.score)
@@ -287,7 +330,9 @@ class OracleSearcher:
             sources = None if searched is None else list(searched)
         t = lap("route", t0)
         if not route.lexical and not route.dense:
-            return OracleResult(query, route, (), low_confidence=True, timings_ms=timings, scope=scope)
+            return OracleResult(
+                query, route, (), low_confidence=True, timings_ms=timings, scope=scope, exhaustive=True
+            )
         # Never fewer candidates than the configured depth: the ranking of the first results must not
         # depend on the page size (I'm Feeling Lucky asks for one hit, the results page for ten; E2E-6).
         depth = self.depth_for(depth)
@@ -303,13 +348,19 @@ class OracleSearcher:
             config=replace(self.fusion, depth=depth),
             resolve=self.resolve,
             snippet_free=self._cut is not None,  # snippets are cut below, for the head only
-            dense_sources=self._dense_sources(),
+            # Enough every-word matches are the lexical candidates on their own: the any-word query costs
+            # seconds on the full library (audit 2026-10-12 #7). The result then is not exhaustive.
+            partial=False,
+            per_source=max(depth // SOURCE_SHARE, 1),
         )
-        fused = list(hybrid.search(route.lexical or route.dense, limit=depth, sources=sources))
+        found = hybrid.fuse(route.lexical or route.dense, limit=depth, sources=sources)
         _dense, best_chunk, timings["dense"] = dense_future.result()
-        fused = _collapse_duplicates(self._boost(route, fused))
+        fused = _collapse_duplicates(self._boost(route, list(found.hits)), self.content_hashes)
         t = lap("lexical+fusion", t)
         pins = self._pins(route, fused, sources)
+        # Candidates from the lexical window too: a book's long text ranks it below the fusion's cut.
+        named = self._title_pins(route, [*fused, *found.lexical], {p.doc_id for p in pins})
+        pins += named
         pinned = {p.doc_id for p in pins}
         rest = [h for h in fused if h.doc_id not in pinned]
         t = lap("titles", t)
@@ -331,6 +382,12 @@ class OracleSearcher:
             pins = [replace(p, score=scores.get(p.doc_id, p.score)) for p in pins]
             head = [replace(h, snippet=display[h.doc_id]) for h in ranked if h.doc_id in display]
             t = lap("rerank", t)
+        if named:  # near-exact titles: the query's language first, then by the reranker's score
+            lang = query_language(route.title.split()) or "en"
+            exact, near = pins[: len(pins) - len(named)], pins[len(pins) - len(named) :]
+            if confidence is not None:
+                near.sort(key=lambda h: (not h.lang or primary_lang(h.lang) != lang, -h.score))
+            pins, head = [*exact, *near[:TITLE_PINS]], [*near[TITLE_PINS:], *head]
         head, tail = _prefer_language(route.query or query, head, tail, reranked=confidence is not None)
         hits = tuple([*pins, *head, *tail])
         total = (time.perf_counter() - t0) * 1000
@@ -338,19 +395,7 @@ class OracleSearcher:
         if total > self.budget_ms:
             log.info("oracle query over budget: %.1f ms (%s)", total, timings)
         low = not hits or (confidence is not None and confidence < self.low_confidence)
-        return OracleResult(query, route, hits, passages, confidence, low, timings, scope)
-
-    def _dense_sources(self) -> frozenset[str] | None:
-        """Sources the vector store covers, re-read at most once a minute (embedding runs add more)."""
-        store = getattr(self.vectors, "store", None)
-        sources = getattr(store, "sources", None)
-        if not callable(sources):
-            return None
-        now = time.monotonic()
-        cached = self._dense_cover
-        if cached is None or now - cached[0] > 60.0:
-            cached = self._dense_cover = (now, cast(frozenset[str], sources()))
-        return cached[1]
+        return OracleResult(query, route, hits, passages, confidence, low, timings, scope, found.exhaustive)
 
     @property
     def _cut(self) -> Callable[[str, Sequence[str]], Mapping[str, str]] | None:
@@ -393,11 +438,13 @@ class OracleIndex:
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         """``refresh`` (``ChunkVectorStore.refresh``) is polled every ``refresh_seconds``: a rebuilt
-        vector store is reopened and the cache cleared. Cached results expire after
-        ``cache_seconds`` (the lexical index may have changed under them)."""
+        vector store is reopened and the cache cleared. So is the lexical index's commit stamp
+        (``TantivyIndex.commit_stamp``): a commit by another process (``wsp index build``, the
+        orchestrator) clears the cache, so removed documents are not listed (and 404) for minutes after
+        and new ones are found (audit 2026-10-12 #10). Cached results also expire after ``cache_seconds``."""
         self.searcher = searcher
         self.lexical = searcher.lexical
-        # (result, the depth it was computed for, when): a result shorter than that depth is exhaustive.
+        # (result, the depth it was computed for, when)
         self._cache: OrderedDict[tuple[str, tuple[str, ...] | None], tuple[OracleResult, int, float]] = (
             OrderedDict()
         )
@@ -408,14 +455,24 @@ class OracleIndex:
         self._cache_seconds = cache_seconds
         self._clock = clock
         self._checked = clock()
+        self._stamp = self._lexical_stamp()
+
+    def _lexical_stamp(self) -> object:
+        stamp = getattr(self.lexical, "commit_stamp", None)
+        return stamp() if callable(stamp) else None
 
     def _maybe_refresh(self) -> None:
-        if self._refresh is None:
-            return
         now = self._clock()
         if now - self._checked < self._refresh_seconds:
             return
         self._checked = now
+        stamp = self._lexical_stamp()
+        if stamp != self._stamp:
+            self._stamp = stamp
+            log.info("oracle: lexical index committed; result cache cleared")
+            self._invalidate()
+        if self._refresh is None:
+            return
         try:
             changed = self._refresh()
         except Exception:  # a store being rewritten: keep serving the old one, retry later
@@ -438,7 +495,7 @@ class OracleIndex:
             if cached is not None:
                 hit, deep, at = cached
                 fresh = now - at < self._cache_seconds
-                if fresh and (depth <= deep or len(hit.hits) < deep):  # deep enough, or exhaustive
+                if fresh and (depth <= deep or hit.exhaustive):  # deep enough, or nothing more to find
                     self._cache.move_to_end(key)
                     return hit
                 shown = hit if fresh else None
@@ -539,7 +596,7 @@ def _prefer_language(
     lang = query_language(query.split()) or "en"
 
     def bonus(h: SearchHit, *, head_part: bool) -> SearchHit:
-        if h.lang != lang:
+        if not h.lang or primary_lang(h.lang) != lang:  # stored tags are full BCP-47 ("en-GB")
             return h
         additive = head_part and reranked  # reranker scores are 0-1; fused (RRF) scores are ~0.03
         return replace(h, score=h.score + LANG_BONUS if additive else h.score * LANG_BOOST)
@@ -551,19 +608,49 @@ def _prefer_language(
 
 _TITLE_WORDS = re.compile(r"[^\w]+", re.UNICODE)
 _LEADING_ARTICLE = re.compile(r"^(?:a|an|the)\s+")
+_PROJECT = re.compile(r"[-_.]")
+_EMPTY_TEXT = content_hash("")
 
 
-def _collapse_duplicates(hits: Sequence[SearchHit]) -> list[SearchHit]:
-    """One hit per (source, title) when titles differ only in case, punctuation or a leading article:
-    PubMed holds the same 1890s "A Case of Snake-Bite Treated ..." note four times, and a page of them
-    hides everything else. Hits come best first, so the best of each title is kept."""
-    seen: set[tuple[str, str]] = set()
-    out: list[SearchHit] = []
+def _words_of(title: str) -> list[str]:
+    """A title's words, case-folded, without punctuation."""
+    return [w for w in _TITLE_WORDS.split(title.replace("_", " ").casefold()) if w]
+
+
+def _project(name: str) -> str:
+    """The project a source id or bundle book is named after: ``osm-planet`` -> ``osm``,
+    ``wikibooks_en_all`` -> ``wikibooks`` (preferences name projects, not substrings)."""
+    return _PROJECT.split(name, maxsplit=1)[0]
+
+
+def _collapse_duplicates(hits: Sequence[SearchHit], content_hashes: ContentHashes | None) -> list[SearchHit]:
+    """One hit per duplicate record: PubMed holds the same 1890s "A Case of Snake-Bite Treated ..." note
+    four times, and a page of them hides everything else. Hits come best first, so the best is kept.
+
+    Duplicates share the source, the title up to case, punctuation and a leading article, *and* the
+    text (content hash). A title alone proves nothing: Stack Overflow has many separate questions
+    titled "Python list comprehension", Open Library many works called "Berlin" (audit 2026-10-12 #8).
+    Hashes are read only for hits whose title repeats; an empty text proves nothing either.
+    """
+    keys: list[tuple[str, str]] = []
+    count: dict[tuple[str, str], int] = {}
     for h in hits:
         title = _LEADING_ARTICLE.sub("", _TITLE_WORDS.sub(" ", h.title.casefold()).strip())
         key = (h.source_id or source_of(h.doc_id), title)
-        if title and key in seen:
-            continue
-        seen.add(key)
+        keys.append(key)
+        if title:
+            count[key] = count.get(key, 0) + 1
+    shared = [h.doc_id for h, key in zip(hits, keys, strict=True) if count.get(key, 0) > 1]
+    if not shared or content_hashes is None:
+        return list(hits)
+    hashes = content_hashes(shared)
+    seen: set[tuple[str, str, str]] = set()
+    out: list[SearchHit] = []
+    for h, key in zip(hits, keys, strict=True):
+        digest = hashes.get(h.doc_id)
+        if digest is not None and digest != _EMPTY_TEXT and count.get(key, 0) > 1:
+            if (*key, digest) in seen:
+                continue
+            seen.add((*key, digest))
         out.append(h)
     return out

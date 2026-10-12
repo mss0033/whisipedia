@@ -14,6 +14,11 @@ Structure (chosen by ``scripts/bench_index.py``; see ``docs/components/index.md`
 
 Ranking: ``score = prior + 1 / (1 + len(title))``. ``prior`` is a popularity signal such as
 ``log1p(inbound links)``; the length term prefers "Paris" over "Paris Commune" when priors tie.
+
+On disk each build is a version directory (``v000007/`` with both tries) named by the ``CURRENT``
+pointer, which a build replaces atomically once the version is complete: a reader never pairs a new
+titles trie with an old heavy-prefix trie (the two files used to be replaced one after the other).
+The previous version is kept for readers that read the pointer just before it moved.
 """
 
 from __future__ import annotations
@@ -22,6 +27,8 @@ import bisect
 import heapq
 import itertools
 import os
+import re
+import shutil
 import threading
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
@@ -37,6 +44,8 @@ SEP = "\x1f"
 _LIST_SEP = "\x1e"
 TRIE_FILE = "titles.marisa"
 HEAVY_FILE = "heavy.marisa"
+POINTER_FILE = "CURRENT"
+_VERSION = re.compile(r"^v(\d{6,})$")
 DEFAULT_HEAVY_THRESHOLD = 512
 _MAX_SCAN = 4_096  # completions examined past a heavy prefix's precomputed top list
 DEFAULT_TOP_K = 32
@@ -152,19 +161,55 @@ class TitleTrie:
         heavy_trie = _bytes_trie(
             (prefix, _LIST_SEP.join(top).encode("utf-8")) for prefix, top in heavy.items()
         )
-        for obj, name in ((trie, TRIE_FILE), (heavy_trie, HEAVY_FILE)):
-            partial = directory / (name + ".partial")
-            obj.save(str(partial))
-            os.replace(partial, directory / name)
+        versions = _versions(directory)
+        name = f"v{(versions[-1][0] + 1) if versions else 1:06d}"
+        target = directory / name
+        shutil.rmtree(target, ignore_errors=True)  # a build that died before its pointer moved
+        target.mkdir()
+        for obj, file in ((trie, TRIE_FILE), (heavy_trie, HEAVY_FILE)):
+            obj.save(str(target / file))
+            _fsync(target / file)
+        _fsync(target)
+        partial = directory / f"{POINTER_FILE}.{os.getpid()}.partial"
+        partial.write_text(name + "\n", encoding="utf-8")
+        _fsync(partial)
+        os.replace(partial, directory / POINTER_FILE)
+        _fsync(directory)
+        previous = [v for _, v in versions if v != name][-1:]
+        for _, old in versions:
+            if old not in (name, *previous):
+                shutil.rmtree(directory / old, ignore_errors=True)
+        for legacy in (TRIE_FILE, HEAVY_FILE):  # the flat layout of older builds
+            (directory / legacy).unlink(missing_ok=True)
         return cls.open(directory)
 
     @classmethod
     def open(cls, directory: Path) -> TitleTrie:
-        return cls(_mmap_record_trie(directory / TRIE_FILE), _mmap_bytes_trie(directory / HEAVY_FILE))
+        """The current version (a pointer read just before a build moved it and deleted the version it
+        named is read again once)."""
+        try:
+            where = _current(directory)
+            return cls(_mmap_record_trie(where / TRIE_FILE), _mmap_bytes_trie(where / HEAVY_FILE))
+        except FileNotFoundError:
+            where = _current(directory)
+            return cls(_mmap_record_trie(where / TRIE_FILE), _mmap_bytes_trie(where / HEAVY_FILE))
 
     @classmethod
     def exists(cls, directory: Path) -> bool:
-        return (directory / TRIE_FILE).is_file() and (directory / HEAVY_FILE).is_file()
+        where = _current(directory)
+        return (where / TRIE_FILE).is_file() and (where / HEAVY_FILE).is_file()
+
+    @classmethod
+    def stamp(cls, directory: Path) -> tuple[int, int, int]:
+        """Identity of the current build on disk (each build replaces the pointer); zeros if none."""
+        path = directory / POINTER_FILE
+        if not path.is_file():
+            path = directory / TRIE_FILE  # the flat layout of older builds
+        try:
+            st = path.stat()
+        except OSError:
+            return (0, 0, 0)
+        return (st.st_ino, st.st_mtime_ns, st.st_size)
 
     def _score(self, key: str) -> float:
         return self._trie[key][0][0]
@@ -189,6 +234,31 @@ class TitleTrie:
         )
         for score, key in heapq.nsmallest(_MAX_SCAN, window, key=lambda sk: (-sk[0], sk[1])):
             yield (score, *_split_key(key))
+
+
+def _current(directory: Path) -> Path:
+    """The directory of the current build: the one ``CURRENT`` names, else the flat older layout."""
+    try:
+        name = (directory / POINTER_FILE).read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return directory
+    if not _VERSION.match(name):
+        raise ValueError(f"corrupt suggest pointer in {directory}: {name!r}")
+    return directory / name
+
+
+def _versions(directory: Path) -> list[tuple[int, str]]:
+    """Build directories, oldest first."""
+    found = ((_VERSION.match(p.name), p.name) for p in directory.iterdir() if p.is_dir())
+    return sorted((int(m.group(1)), name) for m, name in found if m)
+
+
+def _fsync(path: Path) -> None:
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
 
 
 def _heavy_prefixes(

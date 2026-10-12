@@ -67,3 +67,22 @@ def test_normalize_and_sanitize() -> None:
     assert sanitize_query('foo:bar "x') == "foo bar x"
     assert sanitize_query("a AND b") == "a and b"
     assert sanitize_query('"exact phrase"') == '"exact phrase"'
+
+
+def test_a_build_replaces_both_tries_at_once(tmp_path: Path) -> None:
+    # Audit 2026-10-12 #18: the titles trie and the heavy-prefix trie were replaced one after the other,
+    # and a reader reloading between the two paired a new titles trie with the old heavy one.
+    from wsp_index.suggest import HEAVY_FILE, POINTER_FILE, TRIE_FILE
+
+    (tmp_path / TRIE_FILE).write_bytes(b"older flat layout")
+    first = TitleTrie.build([SuggestEntry("wsp:s/1", "Alpha")], tmp_path)
+    stamp = TitleTrie.stamp(tmp_path)
+    assert (tmp_path / POINTER_FILE).read_text().strip() == "v000001"
+    assert not (tmp_path / TRIE_FILE).exists()  # the flat files are gone
+    TitleTrie.build([SuggestEntry("wsp:s/2", "Beta")], tmp_path)
+    TitleTrie.build([SuggestEntry("wsp:s/3", "Gamma")], tmp_path)
+    assert TitleTrie.stamp(tmp_path) != stamp
+    assert sorted(p.name for p in tmp_path.iterdir()) == [POINTER_FILE, "v000002", "v000003"]
+    assert all((tmp_path / "v000003" / f).is_file() for f in (TRIE_FILE, HEAVY_FILE))
+    assert Suggester(TitleTrie.open(tmp_path)).suggest("g") == ["Gamma"]
+    assert Suggester(first).suggest("a") == ["Alpha"]  # a reader of a deleted version keeps its mapping

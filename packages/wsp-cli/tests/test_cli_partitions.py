@@ -205,3 +205,56 @@ def test_a_source_marked_index_false_is_never_built(vault: FileVault, tmp_path: 
         assert not (root / "refinery" / SID).exists()
     finally:
         ix.close()
+
+
+def test_a_source_turned_index_false_leaves_the_search_index(vault: FileVault, tmp_path: Path) -> None:
+    # Audit 2026-10-12 #13: turning a source to `index: false` only skipped it; what it had indexed
+    # stayed searchable for good, and index-state.json kept it.
+    import dataclasses
+    import json
+
+    fetch(vault, tmp_path, "ak", "2026-10-03.ak", {"AK_Anchorage_1950.pdf": sheet("Anchorage")})
+    ix = indexer(vault, tmp_path)
+    try:
+        ix.build()
+        assert ix.index.has_source(SID)
+        ix.specs[SID] = dataclasses.replace(spec(), raw={**spec().raw, "index": False})
+        (report,) = ix.build()  # the nightly run says so: something was removed
+        assert (report.deleted, report.skipped) == (1, "not indexed (registry index: false)")
+        assert not ix.index.has_source(SID)
+        assert ix.index.search("Anchorage") == []
+        assert SID not in json.loads((tmp_path / "index" / "index-state.json").read_text())
+        assert ix.build() == []  # nothing left to say
+    finally:
+        ix.close()
+
+
+def test_a_lexical_index_rebuilt_alone_is_refused(vault: FileVault, tmp_path: Path) -> None:
+    # Audit 2026-10-12 #11: with lexical/ removed and index-state.json kept, `wsp index build` trusted
+    # the state, indexed nothing and reported success.
+    import shutil
+
+    from wsp_cli.indexer import IndexStateError
+
+    fetch(vault, tmp_path, "ak", "2026-10-03.ak", {"AK_Anchorage_1950.pdf": sheet("Anchorage")})
+    ix = indexer(vault, tmp_path)
+    try:
+        ix.build()
+    finally:
+        ix.close()
+    shutil.rmtree(tmp_path / "index" / "lexical")
+    ix = indexer(vault, tmp_path)
+    try:
+        with pytest.raises(IndexStateError, match="rebuild-indexes"):
+            ix.build()
+    finally:
+        ix.close()
+    (tmp_path / "index" / "index-state.json").unlink()  # as the error says: index it from the start
+    ix = indexer(vault, tmp_path)
+    try:
+        ix.build()
+        assert [h.doc_id for h in ix.index.search("Anchorage")] == [
+            make_doc_id(SID, "topo:AK_Anchorage_1950.pdf")
+        ]
+    finally:
+        ix.close()

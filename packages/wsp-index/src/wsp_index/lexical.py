@@ -9,9 +9,20 @@ On-disk layout under the index directory (local disk only, ADR-0002)::
     spelling/       vocabulary for "did you mean" (``wsp_index.spelling``), written by ``wsp index spell``
 
 Static rank: when ``static_rank.bin`` exists, the top ``rank_depth`` BM25 hits are re-sorted by
-``bm25 + rank_weight * feature`` (feature ≈ 0.14 for an unlinked page, 0.69 average, up to ~10).
-Deeper hits keep their BM25 order, so paging stays consistent. The file is re-checked every few
-seconds, so a rank rebuilt by another process is picked up without a restart.
+``bm25 + rank_weight * feature``. The feature is a percentile in ``[0, 1]`` (``wsp_index.linkrank``),
+so with ``rank_weight = 1`` it adds at most 1 to BM25 scores of roughly 5-40 (plus source priors of up
+to 6): it breaks near-ties, it does not reorder clear matches. Deeper hits keep their BM25 order, so
+paging stays consistent. The file is re-checked every few seconds, so a rank rebuilt by another
+process is picked up without a restart.
+
+Every-word matches first: a query of several words is first run as an AND (every word must match,
+in any language's fields), which is cheap. With at least :data:`MIN_TIER_HITS` such matches they lead
+the result list, best first, and the documents matching only some of the words follow; with fewer,
+the list is the any-word query's (which boosts every-word matches; ``coordination_boost``). Neither
+query is limited to the query's language: a German page titled "Berliner Mauer" is a match for
+``Berliner Mauer`` even though the query has no German function words (audit 2026-10-12 #1); a
+preference for the query's language is a ranking matter, left to the Oracle. The list does not depend
+on the page asked for, so pages of any size tile it.
 
 Per-language analysis: each configured language ``L`` gets ``title_L``/``text_L`` fields analyzed
 with ``wsp_L`` (Snowball stemmer where Tantivy has one); every other language goes to
@@ -31,6 +42,7 @@ import json
 import sqlite3
 import threading
 import time
+from collections import Counter
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -46,7 +58,6 @@ from wsp_index.localfs import ensure_local
 from wsp_index.suggest import (
     DEFAULT_HEAVY_THRESHOLD,
     DEFAULT_TOP_K,
-    TRIE_FILE,
     SuggestEntry,
     Suggester,
     TitleTrie,
@@ -57,7 +68,6 @@ from wsp_index.text import (
     build_analyzer,
     drop_stopwords,
     primary_lang,
-    query_language,
     sanitize_query,
 )
 
@@ -79,7 +89,21 @@ CREATE TABLE IF NOT EXISTS aliases (
 """
 
 
-MIN_TIER_HITS = 30  # a search tier with at least this many matches (and the page asked for) is enough
+MIN_TIER_HITS = 30
+"""Every-word matches enough to lead the result list on their own (module docstring)."""
+SUGGEST_TURN = 1_000
+"""Unranked titles a source adds to the suggest trie per turn (``_all_entries``)."""
+DIVERSE_ROUNDS = 3
+"""Queries run again at most this many times to share a window among sources (``per_source``)."""
+
+
+@dataclass(frozen=True, slots=True)
+class LexicalWindow:
+    """The first hits of a query's result list (:meth:`TantivyIndex.search_window`)."""
+
+    hits: Sequence[SearchHit]
+    exhaustive: bool
+    """``hits`` are every match of the query: a deeper window would find nothing more."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -233,9 +257,12 @@ class TantivyIndex:
             ).fetchone()
         return row is not None
 
-    def source_doc_ids(self, source_id: str, *, batch: int = 50_000) -> Iterator[list[str]]:
-        """Indexed doc ids of ``source_id`` in batches (primary-key order, keyset-paged)."""
-        last, hi = f"wsp:{source_id}/", f"wsp:{source_id}0"
+    def source_doc_ids(
+        self, source_id: str, *, batch: int = 50_000, after: str | None = None
+    ) -> Iterator[list[str]]:
+        """Indexed doc ids of ``source_id`` in batches (primary-key order, keyset-paged), from the first
+        one past ``after`` when given."""
+        last, hi = max(f"wsp:{source_id}/", after or ""), f"wsp:{source_id}0"
         while True:
             with self._lock:
                 rows = self._db.execute(
@@ -262,7 +289,10 @@ class TantivyIndex:
             self._set_meta("schema", sig)
             self._db.commit()
         elif existing != sig:
-            raise SchemaMismatchError(f"index at {self.path} was built with {existing}, config wants {sig}")
+            raise SchemaMismatchError(
+                f"index at {self.path} was built with {existing}, config wants {sig}: remove it together "
+                "with index-state.json and run `wsp index build` (docs/runbooks/rebuild-indexes.md)"
+            )
 
     def _build_schema(self) -> tantivy.Schema:
         sb = tantivy.SchemaBuilder()
@@ -464,24 +494,68 @@ class TantivyIndex:
         return out
 
     def _all_entries(self) -> Iterable[SuggestEntry]:
-        """Titles with their aliases, best prior first, until ``suggest_max_keys`` keys (streamed:
-        the ``titles_prior`` index walks in order without sorting 40M rows)."""
+        """Titles with their aliases until ``suggest_max_keys`` keys, streamed (never a sort of the
+        table): half of the keys go to ranked titles (a static-rank prior), best first along the
+        ``titles_prior`` index; the rest is shared by the sources in turn, in batches along the primary key.
+
+        Equal priors used to be taken in reverse doc-id order, so a library without ranks yet (a rebuild
+        runs ``wsp index rank`` last) offered only the titles of the source whose id sorts last: every
+        completion of "dog" was a Wiktionary phrase, and "huckleberry" had none (2026-10-12). Within a
+        source the unranked titles are taken in doc-id order: nothing else orders them without a sort.
+        """
         budget = self.config.suggest_max_keys
+        used = 0
+        taken: set[str] = set()
         cur = self._db.cursor()
-        cur.execute("SELECT doc_id, title, prior FROM titles ORDER BY prior DESC")
-        while budget > 0 and (rows := cur.fetchmany(2_000)):
-            ids = [r[0] for r in rows]
-            marks = ",".join("?" * len(ids))  # only placeholders are interpolated
-            aliases: dict[str, list[str]] = {}
-            for d, a in self._db.execute(f"SELECT doc_id, alias FROM aliases WHERE doc_id IN ({marks})", ids):  # noqa: S608
-                aliases.setdefault(d, []).append(a)
-            for d, title, prior in rows:
-                entry = SuggestEntry(d, title, tuple(aliases.get(d, ())), float(prior))
-                budget -= 1 + len(entry.aliases)
+        cur.execute("SELECT doc_id, title, prior FROM titles WHERE prior > 0 ORDER BY prior DESC")
+        while used < budget // 2 and (rows := cur.fetchmany(2_000)):
+            for entry in self._with_aliases(rows):
+                used += 1 + len(entry.aliases)
+                taken.add(entry.doc_id)
                 yield entry
-                if budget <= 0:
+                if used >= budget // 2:
                     break
         cur.close()
+        after = {source_id: f"wsp:{source_id}/" for source_id in self._source_ids()}
+        while used < budget and after:
+            turn = max(1, min(SUGGEST_TURN, (budget - used) // len(after)))  # an equal share of what is left
+            for source_id, last in list(after.items()):
+                rows = self._db.execute(
+                    "SELECT doc_id, title, prior FROM titles WHERE doc_id > ? AND doc_id < ? "
+                    "ORDER BY doc_id LIMIT ?",
+                    (last, f"wsp:{source_id}0", turn),
+                ).fetchall()
+                if len(rows) < turn:
+                    del after[source_id]
+                else:
+                    after[source_id] = str(rows[-1][0])
+                for entry in self._with_aliases([r for r in rows if r[0] not in taken]):
+                    used += 1 + len(entry.aliases)
+                    yield entry
+                    if used >= budget:
+                        return
+
+    def _with_aliases(self, rows: Sequence[tuple[str, str, float]]) -> list[SuggestEntry]:
+        ids = [r[0] for r in rows]
+        if not ids:
+            return []
+        marks = ",".join("?" * len(ids))  # only placeholders are interpolated
+        aliases: dict[str, list[str]] = {}
+        for d, a in self._db.execute(f"SELECT doc_id, alias FROM aliases WHERE doc_id IN ({marks})", ids):  # noqa: S608
+            aliases.setdefault(d, []).append(a)
+        return [SuggestEntry(d, title, tuple(aliases.get(d, ())), float(prior)) for d, title, prior in rows]
+
+    def _source_ids(self) -> list[str]:
+        """Ids of the sources with indexed documents (a skip scan of the primary key: one probe each)."""
+        out: list[str] = []
+        low = "wsp:"
+        while row := self._db.execute(
+            "SELECT doc_id FROM titles WHERE doc_id >= ? ORDER BY doc_id LIMIT 1", (low,)
+        ).fetchone():
+            source_id = str(row[0]).removeprefix("wsp:").partition("/")[0]
+            out.append(source_id)
+            low = f"wsp:{source_id}0"  # "0" sorts right after "/": past every id of this source
+        return out
 
     def _rebuild_suggest(self) -> None:
         trie = TitleTrie.build(
@@ -511,11 +585,7 @@ class TantivyIndex:
 
     def _trie_file_stamp(self) -> tuple[int, int, int]:
         """Identity of the trie file on disk: a rebuild changes at least one of these."""
-        try:
-            st = (self._suggest_dir / TRIE_FILE).stat()
-        except OSError:
-            return (0, 0, 0)
-        return (st.st_ino, st.st_mtime_ns, st.st_size)
+        return TitleTrie.stamp(self._suggest_dir)
 
     def _reload_trie_if_rebuilt(self, *, every: float = 5.0) -> None:
         """Pick up a trie rebuilt by another process (e.g. ``wsp index build`` while ``wsp serve`` runs).
@@ -578,23 +648,29 @@ class TantivyIndex:
     def num_docs(self) -> int:
         return self._index.searcher().num_docs
 
-    def lookup(self, doc_id: str) -> SearchHit | None:
-        """Title and source of an indexed document (for fusing hits from other retrievers)."""
-        with self._lock:
-            row = self._db.execute("SELECT title, source_id FROM titles WHERE doc_id=?", (doc_id,)).fetchone()
-        return None if row is None else SearchHit(DocId(doc_id), 0.0, str(row[0]), "", str(row[1]))
+    def commit_stamp(self) -> tuple[int, int, int]:
+        """Identity of the last commit on disk, by any process (Tantivy replaces ``meta.json`` on each):
+        a cache of search results is stale once it changes."""
+        return _stamp(self.path / "tantivy" / "meta.json")
 
-    def parse(
-        self, query: str, *, routes: Sequence[str] | None = None, require_all: bool = False
-    ) -> tantivy.Query | None:
-        """The query over ``routes``' title and text fields (all by default); ``require_all``: every word
-        must match (an AND, much cheaper than the OR on large indexes)."""
+    def lookup(self, doc_id: str) -> SearchHit | None:
+        """Title, source and language of an indexed document (for fusing hits from other retrievers)."""
+        with self._lock:
+            row = self._db.execute(
+                "SELECT title, source_id, lang FROM titles WHERE doc_id=?", (doc_id,)
+            ).fetchone()
+        if row is None:
+            return None
+        return SearchHit(DocId(doc_id), 0.0, str(row[0]), "", str(row[1]), str(row[2]))
+
+    def parse(self, query: str, *, require_all: bool = False) -> tantivy.Query | None:
+        """The query over every language's title and text fields; ``require_all``: every word must
+        match (an AND, much cheaper than the OR on large indexes)."""
         text = drop_stopwords(sanitize_query(query))
         if not text:
             return None
-        langs = tuple(routes) if routes else self._routes
-        fields = [f"{kind}_{lang}" for lang in langs for kind in ("title", "text")]
-        boosts = {f"title_{lang}": self.config.title_boost for lang in langs}
+        fields = [f"{kind}_{lang}" for lang in self._routes for kind in ("title", "text")]
+        boosts = {f"title_{lang}": self.config.title_boost for lang in self._routes}
         words = text.split()
         if require_all and len(words) > 1 and '"' not in text:
             every, _errors = self._index.parse_query_lenient(
@@ -614,80 +690,191 @@ class TantivyIndex:
             ]
         )
 
-    def _tiers(self, query: str) -> list[tuple[tuple[str, ...] | None, bool]]:
-        """``(routes, require_all)`` to try in order: every word in the query's language (English, the
-        interface language, when the words do not say) plus the fallback route, then any word there,
-        then any word in every language."""
-        lang = query_language(sanitize_query(query).split()) or "en"
-        primary = tuple(dict.fromkeys((self.route(lang), FALLBACK_LANG)))
-        tiers: list[tuple[tuple[str, ...] | None, bool]] = []
-        if set(primary) != set(self._routes):
-            tiers += [(primary, True), (primary, False)]
-        else:
-            tiers += [(None, True)]
-        tiers.append((None, False))
-        return tiers
+    def _every_word(self, query: str) -> tantivy.Query | None:
+        """The every-word query, or ``None`` when it is the any-word one (a single word, a phrase)."""
+        text = drop_stopwords(sanitize_query(query))
+        if len(text.split()) < 2 or '"' in text:
+            return None
+        return self.parse(query, require_all=True)
 
     def search(
         self, query: str, *, limit: int = 10, offset: int = 0, sources: Sequence[str] | None = None
     ) -> Sequence[SearchHit]:
-        return self._search(query, limit=limit, offset=offset, sources=sources, snippets=True)
+        return self._search(query, limit=limit, offset=offset, sources=sources, snippets=True).hits
 
     def search_hits(
         self, query: str, *, limit: int = 10, offset: int = 0, sources: Sequence[str] | None = None
     ) -> Sequence[SearchHit]:
         """Like :meth:`search` without snippets: much cheaper for wide windows (totals, facets)."""
-        return self._search(query, limit=limit, offset=offset, sources=sources, snippets=False)
+        return self._search(query, limit=limit, offset=offset, sources=sources, snippets=False).hits
+
+    def search_window(
+        self,
+        query: str,
+        *,
+        limit: int,
+        sources: Sequence[str] | None = None,
+        partial: bool = True,
+        per_source: int | None = None,
+    ) -> LexicalWindow:
+        """The first ``limit`` hits without snippets, and whether they are every match. For a ranker that
+        wants a pool of good candidates (the Oracle).
+
+        ``partial=False``: when every-word matches lead the list (at least :data:`MIN_TIER_HITS`), the
+        window ends with them instead of going on with documents that match only some of the words.
+        That spares the any-word query (0.4-3 s on 130M documents, against ~20 ms; 2026-10-12), and
+        such a window is never exhaustive.
+
+        ``per_source``: no source takes more than this many places while other sources have matches
+        (:meth:`_diverse`): on the full library 198 Open Library editions of "Huckleberry Finn" filled
+        a window of 200, and the book itself, the Wikisource text and every other site were never
+        candidates (2026-10-12).
+        """
+        return self._search(
+            query,
+            limit=limit,
+            offset=0,
+            sources=sources,
+            snippets=False,
+            partial=partial,
+            per_source=per_source,
+        )
+
+    def _top(
+        self,
+        searcher: tantivy.Searcher,
+        parsed: tantivy.Query,
+        n: int,
+        sources: Sequence[str] | None,
+        *,
+        per_source: int | None = None,
+        without: Sequence[str] = (),
+    ) -> list[tuple[float, tantivy.DocAddress]]:
+        """The ``n`` best matches of ``parsed`` within ``sources`` and not in ``without``, source priors
+        added (an exclusion adds no score, so the scores of different exclusions compare)."""
+        if per_source is not None:
+            return self._diverse(searcher, parsed, n, sources, per_source)
+        clauses: list[tuple[tantivy.Occur, tantivy.Query]] = [(tantivy.Occur.Must, parsed)]
+        if sources is not None:
+            source_filter = tantivy.Query.term_set_query(self._schema, "source_id", list(sources))
+            clauses.append((tantivy.Occur.Must, source_filter))
+        if without:
+            excluded = tantivy.Query.term_set_query(self._schema, "source_id", list(without))
+            clauses.append((tantivy.Occur.MustNot, excluded))
+        clauses += self._prior_clauses
+        q = parsed if len(clauses) == 1 else tantivy.Query.boolean_query(clauses)
+        return [(float(sc), a) for sc, a in searcher.search(q, n, count=False, offset=0).hits]
+
+    def _diverse(
+        self,
+        searcher: tantivy.Searcher,
+        parsed: tantivy.Query,
+        n: int,
+        sources: Sequence[str] | None,
+        per_source: int,
+    ) -> list[tuple[float, tantivy.DocAddress]]:
+        """The ``n`` best matches with no source above ``per_source`` places while others have matches.
+
+        A source that fills more than its share of the window is excluded and the query run again, at
+        most :data:`DIVERSE_ROUNDS` times; the window is then each source's best ``per_source`` matches
+        by score, followed by the overflow of the crowded sources by score (deferred, never dropped: a
+        single-source window keeps its order). Each round is one more top-``n`` query, never a scan.
+        """
+        hits = self._top(searcher, parsed, n, sources)
+        if len(hits) < n or (sources is not None and len(set(sources)) < 2):
+            return hits  # every match, or one source: nothing to share
+        pool = [(sc, a, str(searcher.doc(a).get_first("source_id") or "")) for sc, a in hits]
+        crowded: set[str] = set()
+        for _ in range(DIVERSE_ROUNDS):
+            counts = Counter(src for _, _, src in pool)
+            over = {src for src, k in counts.items() if k > per_source} - crowded
+            if not over:
+                break
+            crowded |= over
+            more = self._top(searcher, parsed, n, sources, without=sorted(crowded))
+            pool += [(sc, a, str(searcher.doc(a).get_first("source_id") or "")) for sc, a in more]
+            if len(more) < n:
+                break
+        pool.sort(key=lambda t: -t[0])  # stable: equal scores keep the order Tantivy gave them
+        taken: Counter[str] = Counter()
+        head: list[tuple[float, tantivy.DocAddress]] = []
+        overflow: list[tuple[float, tantivy.DocAddress]] = []
+        for sc, a, src in pool:
+            taken[src] += 1
+            (head if taken[src] <= per_source else overflow).append((sc, a))
+        return [*head, *overflow][:n]
+
+    def _candidates(
+        self,
+        searcher: tantivy.Searcher,
+        query: str,
+        n: int,
+        sources: Sequence[str] | None,
+        *,
+        partial: bool,
+        per_source: int | None = None,
+    ) -> tuple[list[tuple[float, tantivy.DocAddress]], int, bool]:
+        """The first ``n`` entries of the query's result list (module docstring), how many of them are
+        the every-word lead, and whether they are every match.
+
+        The list does not depend on ``n``: whether every-word matches lead is decided by how many there
+        are, known exactly from a window of ``max(n, MIN_TIER_HITS)``, never by the page asked for
+        (pages cut from different lists repeated some documents and skipped others; audit 2026-10-12 #6).
+        """
+        anyq = self.parse(query)
+        if anyq is None:
+            return [], 0, True
+        every = self._every_word(query)
+        if every is not None:
+            first = self._top(searcher, every, max(n, MIN_TIER_HITS), sources, per_source=per_source)
+            if len(first) >= MIN_TIER_HITS:
+                if len(first) >= n:
+                    return first[:n], n, False
+                if not partial:
+                    return first, len(first), False
+                # ``first`` holds every every-word match; the documents matching some words follow.
+                rest = self._top(searcher, anyq, n, sources, per_source=per_source)
+                lead = {(a.segment_ord, a.doc) for _, a in first}  # DocAddress is not hashable
+                tail = [(sc, a) for sc, a in rest if (a.segment_ord, a.doc) not in lead][: n - len(first)]
+                return [*first, *tail], len(first), len(rest) < n
+        hits = self._top(searcher, anyq, n, sources, per_source=per_source)
+        return hits, 0, len(hits) < n
 
     def _search(
-        self, query: str, *, limit: int, offset: int, sources: Sequence[str] | None, snippets: bool
-    ) -> Sequence[SearchHit]:
-        if limit <= 0 or offset < 0:
-            return []
-        if sources is not None and not sources:
-            return []
+        self,
+        query: str,
+        *,
+        limit: int,
+        offset: int,
+        sources: Sequence[str] | None,
+        snippets: bool,
+        partial: bool = True,
+        per_source: int | None = None,
+    ) -> LexicalWindow:
+        if limit <= 0 or offset < 0 or (sources is not None and not sources):
+            return LexicalWindow([], True)
         searcher = self._index.searcher()
         rank = self.static_rank() if self.config.rank_weight > 0 else None
         depth = self.config.rank_depth
         ranked = not (rank is None or depth <= 0 or offset >= depth)
         need = max(depth, offset + limit) if ranked else offset + limit
-        # Tiers, cheapest first (2026-10-12, 130M documents: the any-word query over every language's
-        # fields took 0.4-3 s, an every-word query over the query's language 17 ms): take the first tier
-        # that fills the window. Documents matching every word rank first anyway (coordination).
-        parsed: tantivy.Query | None = None
-        result = None
-        for routes, require_all in self._tiers(query):
-            parsed = self.parse(query, routes=routes, require_all=require_all)
-            if parsed is None:
-                continue
-            clauses: list[tuple[tantivy.Occur, tantivy.Query]] = [(tantivy.Occur.Must, parsed)]
-            if sources is not None:
-                source_filter = tantivy.Query.term_set_query(self._schema, "source_id", list(sources))
-                clauses.append((tantivy.Occur.Must, source_filter))
-            clauses += self._prior_clauses
-            q = parsed if len(clauses) == 1 else tantivy.Query.boolean_query(clauses)
-            if ranked:
-                result = searcher.search(q, need, count=False, offset=0)
-            else:
-                result = searcher.search(q, limit, count=False, offset=offset)
-            # Enough when the tier fills the page asked for and holds at least MIN_TIER_HITS: a wide window
-            # (200, for totals and facets) need not be filled by weaker any-word matches.
-            enough = min(need if ranked else limit, max(MIN_TIER_HITS, offset + limit))
-            if len(result.hits) >= enough:
-                break
-        if parsed is None or result is None:
-            return []
+        pool, lead, exhaustive = self._candidates(
+            searcher, query, need, sources, partial=partial, per_source=per_source
+        )
         if not ranked or rank is None:
-            scored = [(float(sc), searcher.doc(a)) for sc, a in result.hits]
+            scored = [(sc, searcher.doc(a)) for sc, a in pool[offset : offset + limit]]
         else:
-            pool = [(float(sc), searcher.doc(a)) for sc, a in result.hits]
-            head, tail = pool[:depth], pool[depth:]
+            head = [(sc, searcher.doc(a)) for sc, a in pool[:depth]]
             feats = rank.features([str(d.get_first("doc_id")) for _, d in head])
             w = self.config.rank_weight
-            head = [(sc + w * float(f), d) for (sc, d), f in zip(head, feats, strict=True)]
-            head.sort(key=lambda t: -t[0])
-            scored = [*head, *tail][offset : offset + limit]
-        cut = self._snippet_map(searcher, parsed, [d for _, d in scored]) if snippets else {}
+            boosted = [(sc + w * float(f), d) for (sc, d), f in zip(head, feats, strict=True)]
+            # Re-sorted within the every-word lead and within the rest: their scores come from different
+            # queries, and the lead stays first.
+            order = sorted(range(len(boosted)), key=lambda i: (i >= lead, -boosted[i][0]))
+            deeper = [(sc, searcher.doc(a)) for sc, a in pool[depth : offset + limit]]
+            scored = [*(boosted[i] for i in order), *deeper][offset : offset + limit]
+        parsed = self.parse(query) if snippets else None
+        cut = {} if parsed is None else self._snippet_map(searcher, parsed, [d for _, d in scored])
         hits: list[SearchHit] = []
         for score, doc in scored:
             route = self.route(str(doc.get_first("lang") or ""))
@@ -702,7 +889,7 @@ class TantivyIndex:
                     lang=str(doc.get_first("lang") or ""),
                 )
             )
-        return hits
+        return LexicalWindow(hits, exhaustive and len(pool) <= offset + limit)
 
     def snippets(self, query: str, doc_ids: Sequence[str]) -> dict[str, str]:
         """Highlighted snippets of ``query`` in each of ``doc_ids`` (for hits ranked without them: the

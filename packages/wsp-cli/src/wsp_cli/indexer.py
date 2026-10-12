@@ -39,7 +39,7 @@ from typing import TextIO, cast
 
 from wsp_adapters.entries import EntrySource, Redirect
 from wsp_core.errors import FetchError
-from wsp_core.ids import InvalidDocIdError, make_doc_id
+from wsp_core.ids import DocId, InvalidDocIdError, make_doc_id
 from wsp_core.model import (
     DocRecord,
     FetchResult,
@@ -74,6 +74,10 @@ from wsp_orchestrator.pipeline import RefineResult
 
 PROGRESS_EVERY = 10_000
 STATE_FILE = "index-state.json"
+
+
+class IndexStateError(RuntimeError):
+    """``index-state.json`` names a generation the lexical index does not hold."""
 
 
 class OfflineFetcher:
@@ -304,6 +308,19 @@ class Indexer:
         state = self._state()
         previous = state.get(spec.id)
         new_dir = generation_dir(self.refinery, spec.id, generation_id)
+        if (
+            previous is not None
+            and self._documents_in(spec.id, previous)
+            and not self.index.has_source(spec.id)
+        ):
+            # The state is trusted to diff from: with ``lexical/`` rebuilt alone, the run "indexed"
+            # nothing (or only the changes) and reported success (audit 2026-10-12 #11).
+            raise IndexStateError(
+                f"{STATE_FILE} says {spec.id} is indexed at {previous}, but the lexical index holds none of "
+                f"its documents (was {self.index.path} rebuilt alone?). Remove {self.root / STATE_FILE} "
+                f"too (or only {spec.id!r} in it) to index again from the start "
+                "(docs/runbooks/rebuild-indexes.md)"
+            )
         if previous == generation_id:
             if not (self.root / CATALOG_DIR / f"{spec.id}.json").is_file():
                 self.build_catalog(spec, generation_id)
@@ -324,6 +341,38 @@ class Indexer:
             f"  indexed {spec.id}/{generation_id}: +{stats.upserted:,} upserted, -{stats.deleted:,} removed"
         )
         return SourceReport(spec.id, indexed=generation_id, upserted=stats.upserted, deleted=stats.deleted)
+
+    def _documents_in(self, source_id: str, generation_id: str) -> bool:
+        """Whether a refined generation holds documents (unknown, e.g. deleted since: assumed so)."""
+        path = generation_dir(self.refinery, source_id, generation_id) / SUCCESS_FILE
+        try:
+            return int(json.loads(path.read_text(encoding="utf-8")).get("docs", 1)) > 0
+        except (OSError, ValueError):
+            return True
+
+    def purge(self, spec: SourceSpec) -> int:
+        """Remove from the search index a source the registry no longer indexes (``index: false``).
+
+        Its documents stay in the library (served as stored), so no change records are published; the
+        source leaves ``index-state.json``. Idempotent: a crash leaves the rest for the next run.
+        Before, such a source was only skipped, and what it had indexed stayed searchable for good
+        (audit 2026-10-12 #13).
+        """
+        state = self._state()
+        removed = 0
+        if self.index.has_source(spec.id):
+            for ids in self.index.source_doc_ids(spec.id):
+                removed += self.index.delete([DocId(d) for d in ids])
+                self.index.commit(rebuild_suggest=False)
+            self._changed = True
+        if spec.id in state:
+            del state[spec.id]
+            self._save_state(state)
+        if removed:
+            self._say(
+                f"{spec.id}: not indexed (registry index: false): {removed:,} documents removed from search"
+            )
+        return removed
 
     def index_partitioned(self, spec: SourceSpec, include: str | None = None) -> SourceReport:
         """Index the union of a partitioned source's current partitions (ADR-0010).
@@ -459,14 +508,17 @@ class Indexer:
             if spec is None:
                 reports.append(SourceReport(sid, skipped="not in the registry"))
                 continue
+            if not searchable(spec):
+                removed = self.purge(spec)
+                if source_ids or removed:
+                    reports.append(
+                        SourceReport(sid, deleted=removed, skipped="not indexed (registry index: false)")
+                    )
+                continue
             gens = [g for g in self.vault.generations(sid) if g.status is GenerationStatus.SEALED]
             if not gens:
                 if source_ids:
                     reports.append(SourceReport(sid, skipped="no sealed generation"))
-                continue
-            if not searchable(spec):
-                if source_ids:
-                    reports.append(SourceReport(sid, skipped="not indexed (registry index: false)"))
                 continue
             if self.adapter_for(spec) is None:
                 reports.append(SourceReport(sid, skipped=f"no adapter installed for {spec.adapter!r}"))

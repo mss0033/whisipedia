@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import shutil
+from collections.abc import Callable, Iterable
 from pathlib import Path
+from typing import Any
 
 import pyarrow.parquet as pq
 import pytest
 
-from wsp_core.ids import make_doc_id
-from wsp_core.model import ChangeKind, DocRecord
+from wsp_core.ids import DocId, make_doc_id
+from wsp_core.model import ChangeKind, ChangeRecord, DocRecord
 from wsp_index import TantivyConfig, TantivyIndex
 from wsp_index.changefeed import SqliteChangeFeed
 from wsp_index.delta import KeyIndex, id_keys
@@ -129,6 +131,115 @@ def test_without_the_old_generation_stale_documents_are_still_removed(tmp_path: 
         assert idx.has_source("enc")
 
 
+def zebras(n: int) -> list[DocRecord]:
+    return [doc("enc", f"z{i:03d}", f"Zebra {i}", f"zebra number {i}") for i in range(n)]
+
+
+def indexed(idx: TantivyIndex) -> tuple[int, int]:
+    """(documents, distinct doc ids) in the index."""
+    found = [h.doc_id for h in idx.search_hits("zebra", limit=1000)]
+    return len(found), len(set(found))
+
+
+class KilledError(RuntimeError):
+    pass
+
+
+def kill_publish(monkeypatch: pytest.MonkeyPatch, when: Callable[[int, list[ChangeRecord]], bool]) -> None:
+    """Make ``SqliteChangeFeed.publish`` fail once, on the call (counted from 1) ``when`` picks."""
+    real = SqliteChangeFeed.publish
+    calls = {"n": 0, "killed": False}
+
+    def flaky(self: SqliteChangeFeed, changes: Iterable[ChangeRecord], **kw: Any) -> str:
+        records = list(changes)
+        calls["n"] += 1
+        if not calls["killed"] and when(calls["n"], records):
+            calls["killed"] = True
+            raise KilledError("killed")
+        return real(self, records, **kw)
+
+    monkeypatch.setattr(SqliteChangeFeed, "publish", flaky)
+
+
+def test_a_resumed_first_load_never_adds_a_document_twice(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Audit 2026-10-12 #3: part 2 was committed but not checkpointed; the resume added it again.
+    g1 = gen(tmp_path, "g1", zebras(30), per_file=10)
+    feed = SqliteChangeFeed(tmp_path / "feed.sqlite")
+    kill_publish(monkeypatch, lambda n, _: n == 2)  # after part 2's commit
+    with TantivyIndex(tmp_path / "ix", SMALL) as idx:
+        with pytest.raises(KilledError):
+            refresh(idx, feed, None, g1)
+        refresh(idx, feed, None, g1)
+        assert indexed(idx) == (30, 30)
+        assert idx.num_docs == 30
+
+
+def test_a_resumed_reload_of_a_held_source_replaces_its_documents(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Audit 2026-10-12 #3: the source was held from g1, whose Refinery directory is gone; after a resume
+    # every remaining part was added without deleting its documents first.
+    g1, g2 = gen(tmp_path, "g1", zebras(30), per_file=10), gen(tmp_path, "g2", zebras(30), per_file=10)
+    feed = SqliteChangeFeed(tmp_path / "feed.sqlite")
+    with TantivyIndex(tmp_path / "ix", SMALL) as idx:
+        refresh(idx, feed, None, g1)
+        shutil.rmtree(g1.dir)
+        kill_publish(monkeypatch, lambda n, _: n == 2)  # after g2's part 2 commit (part 1 checkpointed)
+        with pytest.raises(KilledError):
+            refresh(idx, feed, None, g2)
+        refresh(idx, feed, None, g2)
+        assert indexed(idx) == (30, 30)
+        assert idx.num_docs == 30
+
+
+@pytest.mark.parametrize("stage", ["publish", "delete"])
+def test_a_resumed_removal_of_orphans_removes_every_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stage: str
+) -> None:
+    # Audit 2026-10-12 #4: removals found from the index were skipped by count on resume, but the index
+    # had already forgotten the deleted ones: as many orphans as were done stayed searchable for good.
+    import wsp_index.sync as sync
+
+    monkeypatch.setattr(sync, "DELETE_CHUNK", 10)
+    g1, g2 = gen(tmp_path, "g1", zebras(60), per_file=10), gen(tmp_path, "g2", zebras(30), per_file=10)
+    feed = SqliteChangeFeed(tmp_path / "feed.sqlite")
+    with TantivyIndex(tmp_path / "ix", SMALL) as idx:
+        refresh(idx, feed, None, g1)
+        head = feed.head()
+        shutil.rmtree(g1.dir)
+        removals = {"n": 0}
+        if stage == "publish":  # the second chunk is deleted and committed, its records not published
+
+            def second_removal(_n: int, records: list[ChangeRecord]) -> bool:
+                removals["n"] += any(r.kind is ChangeKind.REMOVED for r in records)
+                return removals["n"] == 2
+
+            kill_publish(monkeypatch, second_removal)
+        else:  # the second chunk is recorded as pending, then the delete fails
+            real = TantivyIndex.delete
+
+            def flaky(self: TantivyIndex, doc_ids: Iterable[DocId]) -> int:
+                removals["n"] += 1
+                if removals["n"] == 2:
+                    raise KilledError("killed")
+                return real(self, doc_ids)
+
+            monkeypatch.setattr(TantivyIndex, "delete", flaky)
+        with pytest.raises(KilledError):
+            refresh(idx, feed, None, g2)
+        idx.rollback()
+        stats = refresh(idx, feed, None, g2)
+        assert indexed(idx) == (30, 30)
+        kept = sorted(h.doc_id for h in idx.search_hits("zebra", limit=100))
+        assert kept == sorted(d.doc_id for d in zebras(30))
+        published, _ = feed.since(head, limit=1000)
+        removed = [c.doc_id for c in published if c.kind is ChangeKind.REMOVED]
+        assert sorted(removed) == sorted(d.doc_id for d in zebras(60)[30:])  # each exactly once
+        assert stats.deleted == 30
+
+
 def test_long_documents_flush_early_into_small_row_groups(tmp_path: Path) -> None:
     books = [doc("enc", f"b{i}", f"Book {i}", "word " * 40_000) for i in range(6)]  # 200k chars each
     with RefineryWriter(tmp_path, "enc", "g1", buffer_chars=450_000) as w:
@@ -225,3 +336,40 @@ def test_an_unwritable_generation_falls_back_to_memory(
     monkeypatch.setattr(refinery, "_write_id_map", refuse)
     assert g.get(make_doc_id("enc", "d09")) is not None
     assert g.id_index_bytes == 20 * 20
+
+
+def test_a_truncated_id_map_is_rewritten(tmp_path: Path) -> None:
+    # Audit 2026-10-12 #15: np.load raised ValueError ("mmap length is greater than file size") for a
+    # truncated sidecar, and every lookup in the generation failed instead of rewriting it.
+    import numpy as np
+
+    from wsp_index.refinery import IDS_MAP_LOC
+
+    g = gen(tmp_path, "g1", docs_v1())
+    assert g.get(make_doc_id("enc", "d01")) is not None
+    path = g.dir / IDS_MAP_LOC
+    path.write_bytes(path.read_bytes()[:-40])
+    fresh = RefineryReader(g.dir)
+    assert fresh.get(make_doc_id("enc", "d07")) is not None
+    assert np.load(path, mmap_mode="r").shape == (20, 3)
+
+
+def test_history_writes_no_id_map_for_older_generations(tmp_path: Path) -> None:
+    # Audit 2026-10-12 #12: a history request wrote a 20-byte-a-document sidecar for every generation.
+    from wsp_index.docstore import ParquetDocumentStore
+    from wsp_index.refinery import IDS_MAP_H
+
+    gen(tmp_path, "g1", docs_v1())
+    gen(tmp_path, "g2", docs_v2())
+    store = ParquetDocumentStore(tmp_path)
+    versions = store.history(make_doc_id("enc", "d00"))
+    assert [g for g, _ in versions] == ["g1", "g2"]  # changed in g2
+    assert store.get(make_doc_id("enc", "d03"), at_generation="g1") is not None  # removed in g2
+    assert store.get(make_doc_id("enc", "d03")) is None
+    assert not (generation_dir(tmp_path, "enc", "g1") / IDS_MAP_H).exists()
+    assert (generation_dir(tmp_path, "enc", "g2") / IDS_MAP_H).exists()  # the current one has its map
+    sparse = RefineryReader(generation_dir(tmp_path, "enc", "g1"), map_ids=False)
+    assert all(sparse.get(d.doc_id) is not None for d in docs_v1())
+    assert sparse.get(make_doc_id("enc", "nope")) is None
+    assert sparse.id_index_bytes == 0
+    assert sparse._ids is None  # pyright: ignore[reportPrivateUsage]
