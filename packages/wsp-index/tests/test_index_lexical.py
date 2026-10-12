@@ -20,14 +20,14 @@ from wsp_index import (
 )
 from wsp_index.lexical import SchemaMismatchError
 from wsp_index.refinery import generation_dir
-from wsp_index_helpers import doc
+from wsp_index_helpers import SnippetIndex, doc
 
 SMALL = TantivyConfig(writer_heap_bytes=20_000_000, writer_threads=1)
 
 
 @pytest.fixture
 def index(tmp_path: Path) -> Iterator[TantivyIndex]:
-    idx = TantivyIndex(tmp_path / "ix", SMALL)
+    idx = SnippetIndex(tmp_path / "ix", SMALL)
     yield idx
     idx.close()
 
@@ -281,3 +281,28 @@ def test_an_index_built_with_older_analyzers_is_refused(tmp_path: Path) -> None:
     db.close()
     with pytest.raises(SchemaMismatchError):
         TantivyIndex(tmp_path / "ix", SMALL)
+
+
+def test_snippets_come_from_the_document_store_when_text_is_not_stored(tmp_path: Path) -> None:
+    from wsp_index import ParquetDocumentStore, RefineryWriter
+
+    docs = [doc("s", "a", "Insulin", "Insulin is a peptide hormone made by beta cells of the pancreas.")]
+    with RefineryWriter(tmp_path / "refinery", "s", "g1") as w:
+        w.write(docs)
+    store = ParquetDocumentStore(tmp_path / "refinery")
+    with TantivyIndex(tmp_path / "ix", SMALL, texts=store.texts) as idx:
+        idx.upsert(docs)
+        idx.commit()
+        (hit,) = idx.search("hormone", limit=1)
+        assert "<b>hormone</b>" in hit.snippet
+        stored = idx._index.searcher().doc(idx._index.searcher().search(idx.parse("hormone"), 1).hits[0][1])  # pyright: ignore[reportPrivateUsage, reportOptionalMemberAccess, reportArgumentType]
+        assert stored.get_first("text_en") is None  # the body text is not stored in Tantivy
+
+
+def test_without_a_text_source_hits_have_no_snippet(tmp_path: Path) -> None:
+    with TantivyIndex(tmp_path / "ix", SMALL) as idx:
+        idx.upsert([doc("s", "a", "Insulin", "Insulin is a peptide hormone.")])
+        idx.commit()
+        (hit,) = idx.search("hormone", limit=1)
+        assert hit.snippet == ""
+        assert hit.title == "Insulin"

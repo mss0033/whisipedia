@@ -93,6 +93,23 @@ class ParquetDocumentStore:
         reader = self.reader(source_id, gen)
         return None if reader is None else reader.get(doc_id)
 
+    def texts(self, doc_ids: Sequence[str]) -> dict[str, str]:
+        """Current text of each document that has one (search snippets when the lexical index stores no
+        text). Reads only the ``text`` column of each document's row group (cached per reader)."""
+        out: dict[str, str] = {}
+        for doc_id in doc_ids:
+            try:
+                source_id, _ = parse_doc_id(DocId(doc_id))
+            except InvalidDocIdError:
+                continue
+            gen = current_generation(self.root, source_id)
+            reader = None if gen is None else self.reader(source_id, gen)
+            row = None if reader is None else reader.lookup(doc_id, ("text",))
+            text = None if row is None else row.get("text")
+            if isinstance(text, str):
+                out[doc_id] = text
+        return out
+
     def history(self, doc_id: DocId) -> Sequence[tuple[str, str]]:
         try:
             source_id, _ = parse_doc_id(doc_id)

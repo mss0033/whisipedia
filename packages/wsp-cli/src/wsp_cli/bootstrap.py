@@ -432,13 +432,16 @@ def source_priors(cfg: Mapping[str, Any], specs: Sequence[SourceSpec]) -> dict[s
     return priors
 
 
-def open_index(cfg: Mapping[str, Any], specs: Sequence[SourceSpec] = ()) -> TantivyIndex:
+def open_index(
+    cfg: Mapping[str, Any], specs: Sequence[SourceSpec] = (), *, documents: ParquetDocumentStore | None = None
+) -> TantivyIndex:
+    """The lexical index; with ``documents`` its search snippets are cut from the Refinery's text."""
     from wsp_index import TantivyConfig, TantivyIndex, ensure_local
 
     p = paths(cfg)
     ensure_local(p.require_index())
     config = TantivyConfig(languages=index_languages(cfg), source_priors=source_priors(cfg, specs))
-    return TantivyIndex(p.lexical, config)
+    return TantivyIndex(p.lexical, config, texts=None if documents is None else documents.texts)
 
 
 def open_documents(cfg: Mapping[str, Any]) -> ParquetDocumentStore:
@@ -478,10 +481,13 @@ def build_services(cfg: Mapping[str, Any], lay: Layout) -> Services:
         memoize_domains(vault)  # TODO(vault): FileVault.domain_of lists the NAS on every call
         changes = open_feed_read_only(cfg)
         live = [s for s in specs if s.status is not SourceStatus.EXCLUDED]
-        oracle = build_oracle(cfg, lexical=open_index(cfg, specs), sources=[s.id for s in live])
+        documents = open_documents(cfg)  # one store: documents and search snippets share its caches
+        oracle = build_oracle(
+            cfg, lexical=open_index(cfg, specs, documents=documents), sources=[s.id for s in live]
+        )
         return Services(
             index=oracle.index,
-            documents=RefineryDocuments(open_documents(cfg)),
+            documents=RefineryDocuments(documents),
             changes=changes,
             vault=vault,
             ledger=build_ledger(cfg, signer),

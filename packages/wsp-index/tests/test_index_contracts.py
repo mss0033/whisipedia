@@ -12,7 +12,8 @@ from wsp_core.ports import ChangeFeed, LexicalIndex
 from wsp_core.testing.change_feed_contract import ChangeFeedContract
 from wsp_core.testing.document_store_contract import DocumentStoreContract, StoreFactory
 from wsp_core.testing.lexical_index_contract import LexicalIndexContract
-from wsp_index import ParquetDocumentStore, RefineryWriter, SqliteChangeFeed, TantivyConfig, TantivyIndex
+from wsp_index import ParquetDocumentStore, RefineryWriter, SqliteChangeFeed, TantivyConfig
+from wsp_index_helpers import SnippetIndex
 
 SMALL = TantivyConfig(writer_heap_bytes=20_000_000, writer_threads=1)
 
@@ -20,7 +21,7 @@ SMALL = TantivyConfig(writer_heap_bytes=20_000_000, writer_threads=1)
 class TestTantivyIndexContract(LexicalIndexContract):
     @pytest.fixture
     def index(self, tmp_path: Path, request: pytest.FixtureRequest) -> LexicalIndex:
-        idx = TantivyIndex(tmp_path / "ix", SMALL)
+        idx = SnippetIndex(tmp_path / "ix", SMALL)
         request.addfinalizer(idx.close)  # noqa: PT021  # base fixture returns, not yields
         return idx
 

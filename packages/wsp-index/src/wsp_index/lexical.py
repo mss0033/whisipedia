@@ -31,7 +31,7 @@ import json
 import sqlite3
 import threading
 import time
-from collections.abc import Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import TracebackType
@@ -90,8 +90,10 @@ class TantivyConfig:
     commit_every: int | None = None
     """Commit automatically after this many buffered upserts/deletes (``None``: only explicit)."""
     snippet_chars: int = 200
-    store_text: bool = True
-    """Store body text in Tantivy (needed for highlighted snippets; costs roughly 40% of text size)."""
+    store_text: bool = False
+    """Store body text in Tantivy too. Off: snippets are cut from the Refinery's copy (the ``texts``
+    source of :class:`TantivyIndex`). Storing measured 1.4 KB a document (105 GB for 76M on
+    2026-10-11), and every ranked candidate loaded its whole stored text, which made search slow."""
     suggest_rebuild_threshold: int = 2_000
     """Rebuild the suggest trie at commit when more than this many titles changed since the last build."""
     suggest_max_keys: int = 3_000_000
@@ -129,8 +131,16 @@ class SchemaMismatchError(RuntimeError):
 class TantivyIndex:
     """Reference ``LexicalIndex``. One writer per index directory; searches are thread-safe."""
 
-    def __init__(self, path: Path, config: TantivyConfig | None = None) -> None:
+    def __init__(
+        self,
+        path: Path,
+        config: TantivyConfig | None = None,
+        *,
+        texts: Callable[[Sequence[str]], Mapping[str, str]] | None = None,
+    ) -> None:
         self.config = config or TantivyConfig()
+        # Document text by id for snippets when the index stores none (the Refinery document store).
+        self.texts = texts
         self.path = ensure_local(path)
         self._langs: tuple[str, ...] = tuple(dict.fromkeys(primary_lang(x) for x in self.config.languages))
         self._routes: tuple[str, ...] = (*self._langs, FALLBACK_LANG)
@@ -633,20 +643,29 @@ class TantivyIndex:
             head.sort(key=lambda t: -t[0])
             scored = [*head, *tail][offset : offset + limit]
         generators: dict[str, tantivy.SnippetGenerator] = {}
+        external: Mapping[str, str] = {}
+        if snippets and not self.config.store_text and self.texts is not None and scored:
+            external = self.texts([str(d.get_first("doc_id")) for _, d in scored])
         hits: list[SearchHit] = []
         for score, doc in scored:
             route = self.route(str(doc.get_first("lang") or ""))
             title = str(doc.get_first(f"title_{route}") or "")
             snippet = ""
-            if snippets and self.config.store_text:
+            source_doc = doc
+            if snippets and not self.config.store_text:
+                text = external.get(str(doc.get_first("doc_id")))
+                source_doc = None if text is None else tantivy.Document(**{f"text_{route}": text})
+            if snippets and source_doc is not None:
                 gen = generators.get(route)
                 if gen is None:
                     gen = tantivy.SnippetGenerator.create(searcher, parsed, self._schema, f"text_{route}")
                     gen.set_max_num_chars(self.config.snippet_chars)
                     generators[route] = gen
-                snippet = gen.snippet_from_doc(doc).to_html()
+                snippet = gen.snippet_from_doc(source_doc).to_html()
                 if not snippet:
-                    snippet = _lead(str(doc.get_first(f"text_{route}") or ""), self.config.snippet_chars)
+                    snippet = _lead(
+                        str(source_doc.get_first(f"text_{route}") or ""), self.config.snippet_chars
+                    )
             hits.append(
                 SearchHit(
                     doc_id=DocId(str(doc.get_first("doc_id"))),
