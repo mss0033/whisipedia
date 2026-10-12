@@ -338,26 +338,11 @@ allow_documents:  # owner review 2026-10-11 (Army publications review page): eve
   - "TC 9-72"
   - "TC 90-1"
   - "TC 90-5"
-# Per-title owner decisions of 2026-10-11 (munitions data, mines, demolitions, and employment titles
-# denied under the earlier line). The 2026-10-12 narrowing changed the series rules only: a title here
-# stays out until the owner decides it again (`wsp proposals`).
+# Per-title denies (2026-10-11, the "not offered" group of the Army review page, re-sorted 2026-10-12
+# under the narrowed line). Released then: air and missile defence crew training (TC 44-*), nonlethal
+# weapons, law-enforcement weapons qualification, live fire and gunner programs, targeting intelligence,
+# air-to-surface radar employment, and the foreign mine and explosive-hazard identification handbooks
+# (TC 20-32-*: recognising mines to avoid them). Still out: demolitions and munitions technical data.
 deny_documents:
-  - "ATP 2-01.4"
-  - "ATP 3-22.40"
-  - "ATP 3-55.6"
-  - "TC 19-220"
-  - "TC 20-32-3"
-  - "TC 20-32-4"
-  - "TC 20-32-5"
-  - "TC 3-19.5"
-  - "TC 3-34.85"
-  - "TC 4-11.46"
-  - "TC 4-11.47"
-  - "TC 44-117-11"
-  - "TC 44-117-21"
-  - "TC 44-635-13"
-  - "TC 44-635-14"
-  - "TC 44-635-15"
-  - "TC 44-693-10"
-  - "TC 44-693-11"
-  - "TC 9-9"
+  - "TC 3-34.85"   # Sapper Leader Course Handbook: demolition charges and their calculation
+  - "TC 9-9"       # Ordnance Materiel Handbook: munitions technical data
