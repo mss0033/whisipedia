@@ -22,11 +22,13 @@ from pathlib import Path
 from typing import cast
 
 import numpy as np
+import pyarrow as pa
 
 from wsp_core.ids import InvalidDocIdError, make_doc_id
 from wsp_index.linkrank import StaticRank
 from wsp_index.refinery import RefineryReader
 from wsp_index.suggest import SuggestEntry
+from wsp_vault.ratelimit import RateLimiter
 
 SCAN_BATCH = 65_536
 SUGGEST_TURN = 1_000
@@ -52,15 +54,24 @@ def _open_redirects(path: Path) -> sqlite3.Connection:
 class TitleSources:
     """Titles, aliases and suggest entries of the indexed sources."""
 
-    def __init__(self, sources: Sequence[IndexedSource]) -> None:
+    def __init__(self, sources: Sequence[IndexedSource], *, limiter: RateLimiter | None = None) -> None:
+        """``limiter``: paces the Refinery scans by their decoded bytes (on the NAS the site reads
+        documents over the same link; a suggest rebuild scans every indexed generation)."""
         self.sources = list(sources)
+        self.limiter = limiter
+
+    def _scan(self, src: IndexedSource, columns: list[str]) -> Iterator[pa.RecordBatch]:
+        for batch in src.reader.scan(columns, batch_size=SCAN_BATCH):
+            if self.limiter is not None:
+                self.limiter.consume(batch.nbytes)
+            yield batch
 
     # --- aliases -------------------------------------------------------------------------------
 
     def iter_aliases(self) -> Iterator[tuple[str, str]]:
         """Every ``(doc_id, alias)``: the Refinery's aliases, then the redirects, source by source."""
         for src in self.sources:
-            for batch in src.reader.scan(["doc_id", "aliases"], batch_size=SCAN_BATCH):
+            for batch in self._scan(src, ["doc_id", "aliases"]):
                 ids = cast(list[str], batch.column(0).to_pylist())
                 names = cast(list[list[str] | None], batch.column(1).to_pylist())
                 for doc_id, aliases in zip(ids, names, strict=True):
@@ -103,7 +114,7 @@ class TitleSources:
         for src in self.sources:
             mine = turns.setdefault(src.source_id, [])
             cap = allot.get(src.source_id, 0)
-            for batch in src.reader.scan(["doc_id", "title", "aliases"], batch_size=SCAN_BATCH):
+            for batch in self._scan(src, ["doc_id", "title", "aliases"]):
                 ids = cast(list[str], batch.column(0).to_pylist())
                 hit = np.zeros(len(ids), dtype=np.bool_)
                 if len(top):

@@ -12,10 +12,12 @@ import tantivy
 
 from wsp_core.ids import make_doc_id
 from wsp_index import TantivyConfig, TantivyIndex
+from wsp_index import lexical as lexical_module
 from wsp_index.lexical import TANTIVY_POINTER, point_tantivy, tantivy_dir
 from wsp_index.refinery import RefineryReader, RefineryWriter, generation_dir
 from wsp_index.titles import IndexedSource, TitleSources, water_fill
 from wsp_index_helpers import doc, set_rank
+from wsp_vault.ratelimit import RateLimiter
 
 SMALL = TantivyConfig(writer_heap_bytes=20_000_000, writer_threads=1)
 
@@ -148,6 +150,9 @@ def test_the_tantivy_index_can_live_elsewhere(tmp_path: Path) -> None:
     assert tantivy_dir(lexical) == lexical / "tantivy"
     elsewhere = tmp_path / "nas" / "tantivy-g2"
     point_tantivy(lexical, elsewhere)
+    with pytest.raises(RuntimeError, match="not mounted"):  # the NAS is not there: never an empty index
+        TantivyIndex(lexical, SMALL)
+    (tmp_path / "nas").mkdir()
     assert (lexical / TANTIVY_POINTER).read_text(encoding="utf-8").strip() == str(elsewhere)
     with TantivyIndex(lexical, SMALL) as idx:
         idx.upsert([doc("a", "1", "Far away")])
@@ -157,3 +162,56 @@ def test_the_tantivy_index_can_live_elsewhere(tmp_path: Path) -> None:
     assert not (lexical / "tantivy").exists()
     with pytest.raises(ValueError, match="absolute"):
         point_tantivy(lexical, Path("relative/dir"))
+    stray = tmp_path / "nas" / "stray"
+    stray.mkdir()
+    (stray / "not-an-index").write_text("x")
+    point_tantivy(lexical, stray)
+    with pytest.raises(RuntimeError, match="holds no Tantivy index"):
+        TantivyIndex(lexical, SMALL)
+
+
+def test_lookup_answers_from_a_cache_until_the_index_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A lookup is a stored-document read (on the NAS, round trips); list pages do hundreds."""
+    monkeypatch.setattr(lexical_module, "LOOKUP_STAMP_EVERY", 0.0)
+    with TantivyIndex(tmp_path / "ix", SMALL) as idx:
+        idx.upsert([doc("a", "1", "First title")])
+        idx.commit()
+        reads = {"n": 0}
+        real = tantivy.Searcher.doc
+
+        def counting(self: tantivy.Searcher, address: tantivy.DocAddress) -> tantivy.Document:
+            reads["n"] += 1
+            return real(self, address)
+
+        monkeypatch.setattr(tantivy.Searcher, "doc", counting)
+        did = make_doc_id("a", "1")
+        for _ in range(3):
+            hit = idx.lookup(did)
+            assert hit is not None
+            assert hit.title == "First title"
+        assert idx.lookup(make_doc_id("a", "9")) is None
+        assert idx.lookup(make_doc_id("a", "9")) is None
+        assert reads["n"] == 1  # misses are remembered too
+        idx.upsert([doc("a", "1", "Second title")])
+        idx.commit()  # meta.json changes: the cache is dropped
+        hit = idx.lookup(did)
+        assert hit is not None
+        assert hit.title == "Second title"
+        assert reads["n"] == 2
+
+
+def test_suggest_scans_are_paced_by_bytes(wiki: IndexedSource) -> None:
+    clock = {"t": 0.0}
+    slept: list[float] = []
+
+    def sleep(s: float) -> None:
+        slept.append(s)
+        clock["t"] += s
+
+    limiter = RateLimiter(1000.0, burst_seconds=0.0, monotonic=lambda: clock["t"], sleep=sleep)
+    total = sum(b.nbytes for b in wiki.reader.scan(["doc_id", "title", "aliases"]))
+    assert total > 0
+    TitleSources([wiki], limiter=limiter).suggest_entries(None, budget=100)
+    assert sum(slept) == pytest.approx(total / 1000.0)

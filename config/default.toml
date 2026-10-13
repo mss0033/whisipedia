@@ -33,6 +33,7 @@ health_probe_interval = "P1W"
 [index]
 root = "/path/to/local/index"    # local disk, never SMB (ADR-0002): refinery/, lexical/, changes.sqlite
 refinery_root = ""               # "" = <root>/refinery; may be on the NAS (ADR-0011): write-once Parquet,
+refinery_read_mb_per_sec = 30   # pace bulk scans of the Refinery (suggest rebuilds); 0 = unpaced
                                  # its id maps then live in <root>/refinery-maps
 changes_archive = ""             # "" = no archive; else sealed old change-feed ranges (may be the NAS)
 changes_keep_rows = 2000000      # `wsp index archive-changes` keeps the newest this many changes local,

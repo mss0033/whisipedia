@@ -69,10 +69,13 @@ live configuration (`CONFIG`, the main checkout's `config/`).
 
    ```
    systemd-run --user --unit whisipedia-job-relex --slice whisipedia-background.slice \
-     -p MemoryHigh=7G -p MemoryMax=8G -p Nice=19 -p IOSchedulingClass=best-effort \
+     -p MemoryHigh=3500M -p MemoryMax=4500M -p Nice=19 -p IOSchedulingClass=idle -E MALLOC_ARENA_MAX=2 \
      WT/.venv/bin/wsp --config-dir CONFIG index rebuild-lexical --into INDEX/lexical.next
    ```
 
+   `MALLOC_ARENA_MAX=2` matters: Tantivy allocates with glibc malloc, and with ~50 threads the
+   default per-thread arenas kept ~2.5 GB of freed memory (the job swapped under its ceiling).
+   Reads of the Refinery are paced (`--read-mb-per-sec`, default 30): the site shares the link.
    It resumes where it stopped if you run it again. At the end it waits for the index lock, catches
    up with whatever the live index took in meanwhile, carries over the rank and spelling files, and
    builds the suggest trie.

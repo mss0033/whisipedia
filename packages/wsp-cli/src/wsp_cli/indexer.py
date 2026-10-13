@@ -74,6 +74,7 @@ from wsp_index.refinery import (
 from wsp_index.spelling import SPELL_FILE, SpellConfig, VocabStats, build_vocabulary
 from wsp_index.titles import IndexedSource, TitleSources
 from wsp_orchestrator.pipeline import RefineResult
+from wsp_vault.ratelimit import RateLimiter
 
 PROGRESS_EVERY = 10_000
 STATE_FILE = "index-state.json"
@@ -572,9 +573,12 @@ class Indexer:
         return reports
 
 
-def indexed_title_sources(refinery: Path, work: Path, state: Mapping[str, str]) -> TitleSources:
+def indexed_title_sources(
+    refinery: Path, work: Path, state: Mapping[str, str], *, read_mb_per_sec: float = 0.0
+) -> TitleSources:
     """:class:`TitleSources` of the generations ``state`` (``index-state.json``) records as indexed: each
-    one's Refinery reader and redirect tables (a set generation's are its members')."""
+    one's Refinery reader and redirect tables (a set generation's are its members').
+    ``read_mb_per_sec`` > 0 paces the scans (the Refinery on the NAS shares the site's link)."""
     sources: list[IndexedSource] = []
     for sid in sorted(state):
         gen_dir = generation_dir(refinery, sid, state[sid])
@@ -583,4 +587,5 @@ def indexed_title_sources(refinery: Path, work: Path, state: Mapping[str, str]) 
         gens = (state[sid], *(set_members(gen_dir) or ()))
         tables = tuple(work / sid / g / "redirects.sqlite" for g in dict.fromkeys(gens))
         sources.append(IndexedSource(sid, RefineryReader(gen_dir, map_ids=False), tables))
-    return TitleSources(sources)
+    limiter = RateLimiter(read_mb_per_sec * 1e6, burst_seconds=5.0) if read_mb_per_sec > 0 else None
+    return TitleSources(sources, limiter=limiter)

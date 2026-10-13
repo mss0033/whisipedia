@@ -371,7 +371,7 @@ def cmd_index_rebuild_lexical(args: argparse.Namespace, out: TextIO) -> int:
         out.write(line + "\n")
         out.flush()
 
-    index = TantivyIndex(into, config, titles=lambda: bootstrap.indexed_titles(p))
+    index = TantivyIndex(into, config, titles=lambda: bootstrap.indexed_titles(cfg))
     try:
         limit = float(args.read_mb_per_sec)
         limiter = RateLimiter(limit * 1e6, burst_seconds=5.0) if limit > 0 else None

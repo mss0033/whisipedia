@@ -468,20 +468,23 @@ def open_index(
         p.lexical,
         config,
         texts=None if documents is None else documents.texts,
-        titles=lambda: indexed_titles(p),
+        titles=lambda: indexed_titles(cfg),
     )
 
 
-def indexed_titles(p: Paths) -> TitleSources:
-    """Titles and aliases of the indexed generations, for a full suggest rebuild (ADR-0011)."""
+def indexed_titles(cfg: Mapping[str, Any]) -> TitleSources:
+    """Titles and aliases of the indexed generations, for a full suggest rebuild (ADR-0011). The scans
+    are paced by ``[index] refinery_read_mb_per_sec`` (the Refinery on the NAS shares the site's link)."""
     import json
 
     from wsp_cli.indexer import STATE_FILE, indexed_title_sources
 
+    p = paths(cfg)
     root = p.require_index()
     state_path = root / STATE_FILE
     state = dict(json.loads(state_path.read_text(encoding="utf-8"))) if state_path.is_file() else {}
-    return indexed_title_sources(p.refinery, root / "work", state)
+    rate = float(section(cfg, "index").get("refinery_read_mb_per_sec", 30))
+    return indexed_title_sources(p.refinery, root / "work", state, read_mb_per_sec=rate)
 
 
 def open_documents(cfg: Mapping[str, Any]) -> ParquetDocumentStore:

@@ -50,7 +50,7 @@ import os
 import sqlite3
 import threading
 import time
-from collections import Counter
+from collections import Counter, OrderedDict
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -113,6 +113,8 @@ def point_tantivy(lexical: Path, target: Path) -> None:
     os.replace(partial, lexical / TANTIVY_POINTER)
 
 
+LOOKUP_CACHE = 100_000  # lookup() answers kept (~300 bytes each)
+LOOKUP_STAMP_EVERY = 5.0  # seconds between checks that the index on disk is still the same
 MIN_TIER_HITS = 30
 """Every-word matches enough to lead the result list on their own (module docstring)."""
 DIVERSE_ROUNDS = 2
@@ -247,11 +249,25 @@ class TantivyIndex:
         self._source_names: dict[int, str] = {}
         self._reload_source_keys()
         index_dir = self.tantivy_dir = tantivy_dir(self.path)  # may be on the NAS (ADR-0011)
-        index_dir.mkdir(parents=True, exist_ok=True)
-        if tantivy.Index.exists(str(index_dir)):
+        if index_dir == self.path / "tantivy":
+            index_dir.mkdir(parents=True, exist_ok=True)
+        elif not index_dir.parent.is_dir():
+            # Never create directories under a pointer: with the NAS unmounted, that made an empty
+            # index on the root disk and the API served an empty library (2026-10-13 review).
+            raise RuntimeError(
+                f"{TANTIVY_POINTER} names {index_dir}, whose parent does not exist (not mounted?)"
+            )
+        if index_dir.is_dir() and tantivy.Index.exists(str(index_dir)):
             self._index = tantivy.Index.open(str(index_dir))
+        elif index_dir.is_dir() and any(index_dir.iterdir()):
+            raise RuntimeError(f"{TANTIVY_POINTER} names {index_dir}, which holds no Tantivy index")
         else:
+            index_dir.mkdir(exist_ok=True)
             self._index = tantivy.Index(self._build_schema(), path=str(index_dir))
+        self._lookups: OrderedDict[str, SearchHit | None] = OrderedDict()  # lookup(): doc id -> hit
+        self._lookups_stamp: tuple[int, int, int] | None = None
+        self._lookups_checked = -1e9
+        self._lookups_lock = threading.Lock()
         for lang in self._routes:
             self._index.register_tokenizer(f"wsp_{lang}", build_analyzer(lang))
         self._schema = self._index.schema
@@ -647,7 +663,31 @@ class TantivyIndex:
         return _stamp(self.tantivy_dir / "meta.json")
 
     def lookup(self, doc_id: str) -> SearchHit | None:
-        """Title, source and language of an indexed document (for fusing hits from other retrievers)."""
+        """Title, source and language of an indexed document (for fusing hits from other retrievers,
+        and the title of every change-feed row and directory entry).
+
+        A stored-document read, on the NAS a round trip or more: the last :data:`LOOKUP_CACHE` answers
+        are kept, dropped when the index on disk changes (checked every :data:`LOOKUP_STAMP_EVERY` s).
+        """
+        now = time.monotonic()
+        with self._lookups_lock:
+            if now - self._lookups_checked >= LOOKUP_STAMP_EVERY:
+                self._lookups_checked = now
+                stamp = self.commit_stamp()
+                if stamp != self._lookups_stamp:
+                    self._lookups_stamp = stamp
+                    self._lookups.clear()
+            if doc_id in self._lookups:
+                self._lookups.move_to_end(doc_id)
+                return self._lookups[doc_id]
+        hit = self._lookup(doc_id)
+        with self._lookups_lock:
+            self._lookups[doc_id] = hit
+            while len(self._lookups) > LOOKUP_CACHE:
+                self._lookups.popitem(last=False)
+        return hit
+
+    def _lookup(self, doc_id: str) -> SearchHit | None:
         searcher = self._index.searcher()
         found = searcher.search(tantivy.Query.term_query(self._schema, "doc_id", doc_id), 1, count=False)
         if not found.hits:
