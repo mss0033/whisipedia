@@ -622,6 +622,7 @@ def build_catalog(cfg: Mapping[str, Any], specs: Sequence[SourceSpec], changes: 
         changes,
         sources=[s.id for s in specs],
         featured_sources=[s.id for s in specs if is_featured_source(s)],
+        map_root=p.refinery_maps,  # the same sidecars the document store maps
     )
 
 

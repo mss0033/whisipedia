@@ -55,7 +55,7 @@ from wsp_core.ids import DocId
 from wsp_core.model import Category, ChangeRecord, DayEvent, SourceSpec
 from wsp_core.ports import ChangeFeed
 from wsp_index.linkrank import StaticRank
-from wsp_index.refinery import RefineryReader, current_generation, generation_dir, is_sealed
+from wsp_index.refinery import RefineryReader, current_generation, generation_dir, id_map_dir, is_sealed
 from wsp_index.text import primary_lang
 
 pc = cast(Any, _pc)  # pyarrow-stubs type compute kernels too narrowly for column arrays
@@ -550,8 +550,13 @@ class RefineryCatalog:
         featured_sources: Sequence[str] = (),
         reload_seconds: float = 5.0,
         monotonic: Callable[[], float] = time.monotonic,
+        map_root: Path | None = None,
     ) -> None:
+        """``map_root``: a local directory for the id-map sidecars, for a Refinery on the NAS (ADR-0011).
+        Without one a reader there loads each source's whole id index into memory (~20 bytes a
+        document, read over the network) on its first random pick."""
         self.refinery_root = refinery_root
+        self.map_root = map_root
         self.catalog_root = catalog_root
         self.feed = feed
         self.sources = tuple(sources)
@@ -617,7 +622,8 @@ class RefineryCatalog:
         gen_dir = generation_dir(self.refinery_root, source_id, gen)
         if not is_sealed(gen_dir):
             return None
-        reader = RefineryReader(gen_dir, cache_row_groups=2)
+        map_dir = None if self.map_root is None else id_map_dir(self.map_root, gen_dir)
+        reader = RefineryReader(gen_dir, cache_row_groups=2, map_dir=map_dir)
         with self._lock:
             for old in [k for k in self._readers if k[0] == source_id]:
                 del self._readers[old]

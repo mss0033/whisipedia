@@ -6,10 +6,13 @@ from collections import Counter
 from datetime import date
 from pathlib import Path
 
+import pytest
+
 from wsp_core.ids import DocId
 from wsp_core.model import ChangeKind, ChangeRecord
 from wsp_core.ports import Catalog, PortalSource
 from wsp_index import RefineryWriter, SqliteChangeFeed
+from wsp_index import refinery as refinery_module
 from wsp_index.catalog import (
     CatalogConfig,
     InitialCategories,
@@ -146,3 +149,31 @@ def test_explicit_provider_and_reload(tmp_path: Path) -> None:
     assert {c.slug for c in cat.categories("kiwix-bundle")} == {"i", "w"}
     assert cat.featured(date(2026, 1, 1)) is None
     feed.close()
+
+
+def test_random_picks_on_the_nas_map_the_id_index_locally(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """On a network filesystem a reader without a map root loads each source's whole id index into
+    memory (~20 bytes a document, read over the network): the API grew to 7 GB picking random pages
+    for the start page (2026-10-13). With the map root it is memory-mapped from local disk."""
+    refinery = tmp_path / "refinery"
+    _wiki(refinery)
+
+    def cifs(_path: Path) -> str:
+        return "cifs"
+
+    monkeypatch.setattr(refinery_module, "filesystem_type", cifs)
+    feed = SqliteChangeFeed(tmp_path / "changes.sqlite")
+    on_nas = RefineryCatalog(refinery, tmp_path / "catalog", feed)
+    assert on_nas.random_doc(sources=None, rng=random.Random(1)) is not None
+    reader = on_nas._reader("wikipedia-en-zim")  # pyright: ignore[reportPrivateUsage]
+    assert reader is not None
+    assert reader.id_index_bytes > 0  # in memory: what the fix avoids
+    maps = tmp_path / "maps"
+    mapped = RefineryCatalog(refinery, tmp_path / "catalog", feed, map_root=maps)
+    assert mapped.random_doc(sources=None, rng=random.Random(1)) is not None
+    reader = mapped._reader("wikipedia-en-zim")  # pyright: ignore[reportPrivateUsage]
+    assert reader is not None
+    assert reader.id_index_bytes == 0
+    assert any(maps.rglob("*.npy"))
