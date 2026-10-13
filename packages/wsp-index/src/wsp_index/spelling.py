@@ -61,7 +61,7 @@ import pyarrow.compute as _pc
 import pyarrow.parquet as pq
 
 from wsp_index.refinery import RefineryReader
-from wsp_index.text import language_parts, primary_lang
+from wsp_index.text import language_row_groups, primary_lang
 
 SPELL_FILE = "spelling.bin"
 MAGIC = b"WSPSPEL2"
@@ -268,24 +268,28 @@ def _even(n: int, k: int) -> list[int]:
 
 
 def sample_language(
-    reader: RefineryReader, parts: Sequence[tuple[int, int]], lang: str, max_docs: int, columns: Sequence[str]
+    reader: RefineryReader,
+    groups: Sequence[tuple[int, int, int]],
+    lang: str,
+    max_docs: int,
+    columns: Sequence[str],
 ) -> Iterator[pa.Table]:
-    """Rows whose ``lang`` column is ``lang``, about ``max_docs`` of them, from row groups spread
-    evenly over ``parts`` (``(part, rows of lang in it)``, :func:`wsp_index.text.language_parts`).
-    Never the first N rows in storage order."""
-    total = sum(r for _, r in parts)
+    """Rows whose ``lang`` column is ``lang``, about ``max_docs`` of them, from the row groups that hold
+    the language (``(part, row group, rows)``, :func:`wsp_index.text.language_row_groups`), spread
+    evenly over them. Never the first N rows in storage order."""
+    total = sum(n for _, _, n in groups)
     if total == 0:
         return
     share = min(1.0, max_docs / total)
-    for part, rows in parts:
-        pf = pq.ParquetFile(reader.dir / f"part-{part:05d}.parquet")
-        n_rg = pf.metadata.num_row_groups
-        want_rows = max(1, round(rows * share))
-        per_rg = max(1, pf.metadata.num_rows // max(1, n_rg))
-        pick = _even(n_rg, max(1, math.ceil(want_rows / per_rg * pf.metadata.num_rows / max(1, rows))))
-        for rg in pick:
-            table = pf.read_row_group(rg, columns=[*columns, "lang"])  # pyright: ignore[reportUnknownMemberType]
-            yield table.filter(pc.equal(table.column("lang"), lang)).select(list(columns))
+    chosen = [groups[i] for i in _even(len(groups), max(1, math.ceil(len(groups) * share)))]
+    files: dict[int, pq.ParquetFile] = {}
+    for part, rg, _ in chosen:
+        pf = files.get(part)
+        if pf is None:
+            files.clear()  # chosen is in part order: one file open at a time
+            pf = files[part] = pq.ParquetFile(reader.dir / f"part-{part:05d}.parquet")
+        table = pf.read_row_group(rg, columns=[*columns, "lang"])  # pyright: ignore[reportUnknownMemberType]
+        yield table.filter(pc.equal(table.column("lang"), lang)).select(list(columns))
 
 
 def count_words(
@@ -298,12 +302,12 @@ def count_words(
     One vocabulary per language with at least ``min_language_docs`` documents; the rest share the
     ``any`` vocabulary. Each language is sampled from row groups spread over its own parts.
     """
-    plan: dict[str, list[tuple[RefineryReader, str, list[tuple[int, int]]]]] = {}
+    plan: dict[str, list[tuple[RefineryReader, str, list[tuple[int, int, int]]]]] = {}
     for _source, reader in readers:
-        for raw, parts in language_parts(reader).items():
-            plan.setdefault(primary_lang(raw), []).append((reader, raw, parts))
+        for raw, rgs in language_row_groups(reader).items():
+            plan.setdefault(primary_lang(raw), []).append((reader, raw, rgs))
     wanted = {primary_lang(x) for x in cfg.languages}
-    sizes = {lang: sum(r for _, _, parts in srcs for _, r in parts) for lang, srcs in plan.items()}
+    sizes = {lang: sum(n for _, _, rgs in srcs for _, _, n in rgs) for lang, srcs in plan.items()}
     groups: dict[str, list[str]] = {}
     for lang in sorted(plan):
         if wanted and lang not in wanted:
@@ -319,10 +323,10 @@ def count_words(
         docs = 0
         available = sum(sizes[lang] for lang in langs)
         for lang in langs:
-            for reader, raw, parts in plan[lang]:
-                share = sum(r for _, r in parts) / available
+            for reader, raw, rgs in plan[lang]:
+                share = sum(n for _, _, n in rgs) / available
                 budget = max(1, round(cfg.max_docs * share))
-                for table in sample_language(reader, parts, raw, budget, ("title", "text")):
+                for table in sample_language(reader, rgs, raw, budget, ("title", "text")):
                     titles = table.column(0).combine_chunks()
                     texts = table.column(1).combine_chunks()
                     lead = pc.utf8_slice_codeunits(texts, 0, cfg.max_chars)

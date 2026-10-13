@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import os
 import time
+from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import numpy as np
+import pyarrow.parquet as pq
 import pytest
 
 from wsp_index import RefineryReader, RefineryWriter
@@ -247,3 +250,34 @@ def test_vocabulary_sample_is_stratified_by_language(tmp_path: Path) -> None:
     # about 60 of 300 English documents, from every English part (the topics are 100 apart)
     assert stats.documents < 200
     assert all(s.count(t, "en") > 0 for t in topics)
+
+
+def test_a_rare_language_reads_only_the_row_groups_holding_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 2026-10-12: sampling by part read every whole part holding one row of a language, so the hundreds
+    # of rare languages of Wiktionary read the dump hundreds of times (hours under the index lock).
+    from wsp_index.spelling import sample_language
+    from wsp_index.text import language_row_groups
+
+    docs = [doc("w", f"e{i:03d}", f"English {i}", "plain english words") for i in range(200)]
+    docs[123] = replace(docs[123], lang="fr")
+    docs[124] = replace(docs[124], lang="fr")
+    with RefineryWriter(tmp_path / "ref", "w", "g1", row_group_rows=10) as w:
+        w.write(docs)
+    reader = RefineryReader(generation_dir(tmp_path / "ref", "w", "g1"))
+    groups = language_row_groups(reader)
+    assert sum(n for _, _, n in groups["fr"]) == 2
+    assert len(groups["fr"]) == 1
+    assert sum(n for _, _, n in groups["en"]) == 198
+    reads: list[int] = []
+    real = pq.ParquetFile.read_row_group  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]  # pyarrow-stubs leave some parameter types unknown
+
+    def counting(self: pq.ParquetFile, i: int, *args: Any, **kwargs: Any) -> Any:
+        reads.append(i)
+        return real(self, i, *args, **kwargs)
+
+    monkeypatch.setattr(pq.ParquetFile, "read_row_group", counting)
+    rows = sum(t.num_rows for t in sample_language(reader, groups["fr"], "fr", 1000, ("title",)))
+    assert rows == 2
+    assert len(reads) == 1

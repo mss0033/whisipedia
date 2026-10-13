@@ -9,6 +9,7 @@ import unicodedata
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, cast
 
+import numpy as np
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
 import tantivy
@@ -267,6 +268,31 @@ def drop_stopwords(query: str, stopwords: frozenset[str] | None = None) -> str:
     words = query.split()
     kept = [w for w in words if w.casefold() not in stopwords]
     return " ".join(kept) if kept else query
+
+
+def language_row_groups(reader: RefineryReader) -> dict[str, list[tuple[int, int, int]]]:
+    """``{lang: [(part, row group, rows in that language), ...]}`` of a generation, from each part's
+    ``lang`` column (read once per part, a few bytes a row).
+
+    Finer than :func:`language_parts`, so a language that has three rows in a part costs reading the
+    row groups holding them, not the part: sampling every rare language of Wiktionary by part read
+    the whole dump once per language (hours, 2026-10-12).
+    """
+    out: dict[str, list[tuple[int, int, int]]] = {}
+    for part, path in enumerate(reader.parts):
+        pf = pq.ParquetFile(path)
+        sizes = [pf.metadata.row_group(i).num_rows for i in range(pf.metadata.num_row_groups)]
+        col = pq.read_table(path, columns=["lang"]).column(0).combine_chunks()  # pyright: ignore[reportUnknownMemberType]
+        encoded = cast(Any, pc).dictionary_encode(col)
+        langs = [str(x or "") for x in encoded.dictionary.to_pylist()]
+        codes = np.asarray(encoded.indices.to_numpy(zero_copy_only=False), dtype=np.int64)
+        start = 0
+        for rg, size in enumerate(sizes):
+            counts = np.bincount(codes[start : start + size], minlength=len(langs))
+            for code in np.flatnonzero(counts).tolist():
+                out.setdefault(langs[code], []).append((part, rg, int(counts[code])))
+            start += size
+    return out
 
 
 def language_parts(reader: RefineryReader) -> dict[str, list[tuple[int, int]]]:
