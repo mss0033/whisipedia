@@ -579,6 +579,22 @@ export class App implements AppServices {
             }),
           ),
           { type: 'sep' },
+          { type: 'header', label: 'Light or Dark' },
+          ...(
+            [
+              ['system', 'Follow System Setting'],
+              ['light', 'Always Light'],
+              ['dark', 'Always Dark'],
+            ] as const
+          ).map(
+            ([scheme, label]): MenuItem => ({
+              type: 'radio',
+              label,
+              checked: prefs().scheme === scheme,
+              action: () => this.theme.update({ scheme }),
+            }),
+          ),
+          { type: 'sep' },
           {
             type: 'check',
             label: 'High Contrast',

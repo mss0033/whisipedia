@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MemoryStore, SafeStorage } from '../src/core/storage.ts';
 import {
   clampScale,
@@ -65,12 +65,85 @@ describe('ThemeManager', () => {
   });
 });
 
+/** A stand-in for the OS light/dark setting: jsdom has no matchMedia. */
+function fakeSystem(dark: boolean) {
+  const listeners = new Set<() => void>();
+  const mql = {
+    matches: dark,
+    media: '(prefers-color-scheme: dark)',
+    addEventListener: (_: string, l: () => void) => listeners.add(l),
+    removeEventListener: (_: string, l: () => void) => listeners.delete(l),
+  };
+  vi.stubGlobal('matchMedia', (q: string) => (q === mql.media ? mql : { matches: false }));
+  return {
+    set(next: boolean) {
+      mql.matches = next;
+      for (const l of listeners) l();
+    },
+  };
+}
+
+describe('dark mode', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('follows the system setting by default', () => {
+    fakeSystem(true);
+    const { root, tm } = setup();
+    expect(tm.current.scheme).toBe('system');
+    expect(root.dataset.dark).toBe('on');
+    expect(tm.dark()).toBe(true);
+  });
+
+  it('restyles when the system setting changes, unless a choice was made', () => {
+    const system = fakeSystem(false);
+    const { root, tm } = setup();
+    const seen: boolean[] = [];
+    tm.onChange(() => seen.push(tm.dark()));
+    expect(root.dataset.dark).toBe('off');
+    system.set(true);
+    expect(root.dataset.dark).toBe('on');
+    tm.update({ scheme: 'light' });
+    system.set(false);
+    system.set(true);
+    expect(root.dataset.dark).toBe('off');
+    expect(seen).toEqual([true, false]);
+  });
+
+  it('keeps an explicit choice over the system setting, and restores it', () => {
+    fakeSystem(false);
+    const store = new MemoryStore();
+    const a = setup(store);
+    a.tm.update({ scheme: 'dark' });
+    expect(a.root.dataset.dark).toBe('on');
+    const b = setup(store);
+    expect(b.tm.current.scheme).toBe('dark');
+    expect(b.root.dataset.dark).toBe('on');
+  });
+
+  it('is off without matchMedia, unless chosen', () => {
+    const { root, tm } = setup();
+    expect(root.dataset.dark).toBe('off');
+    tm.update({ scheme: 'dark' });
+    expect(root.dataset.dark).toBe('on');
+  });
+
+  it('marks which themes are dark already', () => {
+    expect(THEMES.filter((t) => !t.dark).map((t) => t.id)).toEqual([
+      'navigator96',
+      'mosaic93',
+      'system7',
+    ]);
+  });
+});
+
 describe('sanitizePrefs', () => {
   it('rejects garbage from storage', () => {
     expect(sanitizePrefs(null)).toEqual(DEFAULT_PREFS);
-    expect(sanitizePrefs({ theme: 'netscape99', fontScale: 'x', motion: 1 })).toEqual(
-      DEFAULT_PREFS,
-    );
+    expect(
+      sanitizePrefs({ theme: 'netscape99', fontScale: 'x', motion: 1, scheme: 'dusk' }),
+    ).toEqual(DEFAULT_PREFS);
     expect(clampScale(9)).toBe(2);
     expect(clampScale(Number.NaN)).toBe(1);
   });

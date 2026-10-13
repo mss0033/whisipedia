@@ -48,7 +48,7 @@ export async function renderAbout(_ctx: PageContext): Promise<PageResult> {
     h(
       'p',
       null,
-      'Change the theme from the View menu. A high-contrast variant, text sizes and reduced motion live there too.',
+      'Change the theme from the View menu. Light or Dark there gives the light themes their night colours (following the system setting unless you choose); a high-contrast variant, text sizes and reduced motion live there too.',
     ),
     h('h2', null, 'Credits'),
     h(

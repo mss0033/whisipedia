@@ -365,7 +365,7 @@
   flex: none;
   margin: 0 auto;
   padding: 0 8px;
-  background: #fff;
+  background: var(--chrome-bg);
 }
 :root[data-theme="system7"] .titlebar-buttons,
 :root[data-theme="system7"] .titlebar-icon {
@@ -380,7 +380,183 @@
   text-decoration-style: dashed;
 }
 :root[data-theme="system7"] .window {
-  box-shadow: 2px 2px 0 #000;
+  box-shadow: 2px 2px 0 var(--chrome-dark);
+}
+
+/* ------------------------------ Dark mode ----------------------------- */
+/* Night palettes for the light themes, on when data-dark="on" (View › Light or
+ * Dark). Same specificity as the theme blocks above and later in the file, so
+ * they win; high contrast below wins over them. Encarta and Phosphor are dark
+ * already and ignore it. The shared block sets every colour token; the themes
+ * after it change what makes them themselves. */
+:root[data-dark="on"]:where(
+  [data-theme="navigator96"],
+  [data-theme="mosaic93"],
+  [data-theme="system7"]
+) {
+  --desktop-bg: #003a3a;
+  --chrome-bg: #3b3b3e;
+  --chrome-fg: #ececec;
+  --chrome-muted: #bdbdbd;
+  --chrome-disabled: #85858a;
+  --chrome-light: #66666b;
+  --chrome-shadow: #222224;
+  --chrome-dark: #000;
+  --title-bg: #1e2f8f;
+  --title-fg: #fff;
+  --menu-hi-bg: #2f4fc4;
+  --menu-hi-fg: #fff;
+  --menu-drop: 2px 2px 0 rgb(0 0 0 / 0.6);
+  --window-border: 1px solid #56565b;
+  --bevel-out:
+    inset -1px -1px #000, inset 1px 1px #75757a, inset -2px -2px #222224, inset 2px 2px #56565b;
+  --bevel-in:
+    inset -1px -1px #75757a, inset 1px 1px #222224, inset -2px -2px #56565b, inset 2px 2px #000;
+  --bevel-in-thin: inset -1px -1px #75757a, inset 1px 1px #222224;
+
+  --field-bg: #18181a;
+  --field-fg: #ececec;
+  --page-bg: #1c1c1f;
+  --page-fg: #e4e4e4;
+  --page-muted: #a9a9ae;
+  --link: #8ab4ff;
+  --visited: #c7a2ff;
+  --active-link: #ff7a7a;
+  --broken: #ff8f8f;
+  --focus: #fff;
+  --accent: #3f5fd6;
+  --accent-fg: #fff;
+  --hl-fg: inherit;
+  --hl-bg: transparent;
+  --result-url: #74d474;
+  --box-border: #5d5d62;
+  --box-title-bg: #1e2f8f;
+  --box-title-fg: #fff;
+  --badge-bg: #35341f;
+  --badge-fg: #f2f0c4;
+  --badge-border: #7a784c;
+  --rule: #5d5d62;
+  --notice-bg: #302f1d;
+  --notice-warn-bg: #3f2326;
+  --new-bg: #c40000;
+  --new-fg: #ffff00;
+  --icon-fill: #8c8c91;
+  --icon-stroke: #000;
+  --stop-fill: #e84040;
+  --throbber-sky: #000030;
+  --throbber-sky-active: #000090;
+  --throbber-star: #fff;
+  --throbber-comet: #ffff80;
+  --throbber-letter: #c0c0ff;
+  --logo-0: #6585ff;
+  --logo-1: #ff5f5e;
+  --logo-2: #ffc93c;
+  --logo-3: #6585ff;
+  --logo-4: #40d36c;
+  --logo-5: #ff5f5e;
+  --ok: #6fd46f;
+  --warn: #f2b84b;
+  --bad: #ff7373;
+  --ins-bg: #173a1f;
+  --del-bg: #4a1f23;
+  color-scheme: dark;
+}
+:root[data-dark="on"]:where([data-theme="mosaic93"]) {
+  --desktop-bg: #24323f;
+  --chrome-bg: #4a4a4c;
+  --chrome-light: #6c6c6e;
+  --chrome-shadow: #2a2a2c;
+  --title-bg: #3b5673;
+  --title-fg: #fff;
+  --menu-hi-bg: #5c5c74;
+  --menu-hi-fg: #fff;
+  --bevel-out: inset -2px -2px #2a2a2c, inset 2px 2px #6c6c6e;
+  --bevel-in: inset 2px 2px #2a2a2c, inset -2px -2px #6c6c6e;
+  --bevel-in-thin: inset 1px 1px #2a2a2c, inset -1px -1px #6c6c6e;
+  --page-bg: #2f2f31;
+  --page-fg: #e2e2e2;
+  --page-muted: #bdbdbd;
+  --field-bg: #262628;
+  --box-title-bg: transparent;
+  --box-title-fg: #e2e2e2;
+  --box-border: #6c6c6e;
+  --badge-bg: #3a3a3c;
+  --badge-fg: #e2e2e2;
+  --notice-bg: #3a3a3c;
+  --notice-warn-bg: #4a3436;
+  --throbber-sky: #0a1428;
+  --logo-0: #e2e2e2;
+  --logo-1: #e2e2e2;
+  --logo-2: #e2e2e2;
+  --logo-3: #e2e2e2;
+  --logo-4: #e2e2e2;
+  --logo-5: #e2e2e2;
+}
+/* System 7 at night: the 1-bit look inverted, white lines on black. */
+:root[data-dark="on"]:where([data-theme="system7"]) {
+  --desktop-bg: #404040;
+  --chrome-bg: #000;
+  --chrome-fg: #fff;
+  --chrome-muted: #fff;
+  --chrome-disabled: #808080;
+  --chrome-light: #000;
+  --chrome-shadow: #fff;
+  --chrome-dark: #fff;
+  --title-bg: repeating-linear-gradient(to bottom, #000 0, #000 1px, #fff 1px, #fff 2px);
+  --title-fg: #fff;
+  --menu-hi-bg: #fff;
+  --menu-hi-fg: #000;
+  --menu-border: 1px solid #fff;
+  --menu-drop: 2px 2px 0 #fff;
+  --window-border: 1px solid #fff;
+  --bevel-out: inset 0 0 0 1px #fff;
+  --bevel-in: inset 0 0 0 1px #fff, inset 2px 2px 0 #fff;
+  --bevel-in-thin: inset 0 0 0 1px #fff;
+  --field-bg: #000;
+  --field-fg: #fff;
+  --page-bg: #000;
+  --page-fg: #fff;
+  --page-muted: #fff;
+  --link: #fff;
+  --visited: #fff;
+  --active-link: #fff;
+  --broken: #fff;
+  --focus: #fff;
+  --accent: #fff;
+  --accent-fg: #000;
+  --hl-fg: #000;
+  --hl-bg: #fff;
+  --result-url: #fff;
+  --box-border: #fff;
+  --box-title-bg: #000;
+  --box-title-fg: #fff;
+  --badge-bg: #000;
+  --badge-fg: #fff;
+  --badge-border: #fff;
+  --rule: #fff;
+  --notice-bg: #000;
+  --notice-warn-bg: #000;
+  --new-bg: #fff;
+  --new-fg: #000;
+  --icon-fill: #000;
+  --icon-stroke: #fff;
+  --stop-fill: #fff;
+  --throbber-sky: #000;
+  --throbber-sky-active: #222;
+  --throbber-star: #fff;
+  --throbber-comet: #fff;
+  --throbber-letter: #fff;
+  --logo-0: #fff;
+  --logo-1: #fff;
+  --logo-2: #fff;
+  --logo-3: #fff;
+  --logo-4: #fff;
+  --logo-5: #fff;
+  --ok: #fff;
+  --warn: #fff;
+  --bad: #fff;
+  --ins-bg: #000;
+  --del-bg: #000;
 }
 
 /* ----------------------------- High contrast -------------------------- */

@@ -47,6 +47,61 @@ test('every theme can be picked from the View menu (screenshot each)', async ({ 
   });
 });
 
+test('Light or Dark follows the system and can be chosen (screenshot each)', async ({
+  page,
+  nav,
+}) => {
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await nav.open('wsp://home');
+  const html = page.locator('html');
+  const look = () =>
+    nav.main.evaluate((m) => getComputedStyle(m).color + getComputedStyle(m).backgroundColor);
+  await nav.step('dark by default when the system is dark', async () => {
+    await expect(html).toHaveAttribute('data-dark', 'on');
+  });
+  const dark = await look();
+  await nav.step('the system turning light restyles the page', async () => {
+    await page.emulateMedia({ colorScheme: 'light' });
+    await expect(html).toHaveAttribute('data-dark', 'off');
+    expect(await look()).not.toBe(dark);
+  });
+  await nav.step('Always Dark overrides a light system and survives a reload', async () => {
+    await nav.menu('View', 'Always Dark');
+    await expect(html).toHaveAttribute('data-dark', 'on');
+    expect(await look()).toBe(dark);
+    await page.reload();
+    await nav.settled();
+    await expect(html).toHaveAttribute('data-dark', 'on');
+  });
+  for (const theme of THEMES.filter(
+    (t) => !['encarta95', 'phosphor-amber', 'phosphor-green'].includes(t.id),
+  )) {
+    await nav.step(`${theme.name} at night`, async () => {
+      await nav.menu('View', theme.name);
+      const [fg, bg] = await nav.main.evaluate((m) => [
+        getComputedStyle(m).color,
+        getComputedStyle(m).backgroundColor,
+      ]);
+      const luma = (c: string) => {
+        const [r, g, b] = (c.match(/\d+/g) ?? []).map(Number);
+        return 0.2126 * (r ?? 0) + 0.7152 * (g ?? 0) + 0.0722 * (b ?? 0);
+      };
+      expect(luma(bg), 'a dark page').toBeLessThan(80);
+      expect(luma(fg) - luma(bg), 'light text on it').toBeGreaterThan(120);
+      await nav.snapshot(`dark-${theme.id}`);
+    });
+  }
+  await nav.step('High Contrast still wins over the dark palette', async () => {
+    await nav.menu('View', 'High Contrast');
+    expect(await nav.main.evaluate((m) => getComputedStyle(m).backgroundColor)).toBe(
+      'rgb(0, 0, 0)',
+    );
+    await nav.menu('View', 'High Contrast');
+  });
+  await nav.menu('View', 'Follow System Setting');
+  await expect(html).toHaveAttribute('data-dark', 'off');
+});
+
 test('High Contrast toggles on and off over a theme', async ({ page, nav }) => {
   await nav.open('wsp://home');
   const html = page.locator('html');
