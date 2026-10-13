@@ -76,7 +76,12 @@ live configuration (`CONFIG`, the main checkout's `config/`).
    It resumes where it stopped if you run it again. At the end it waits for the index lock, catches
    up with whatever the live index took in meanwhile, carries over the rank and spelling files, and
    builds the suggest trie.
-2. **Copy the Tantivy index to the NAS, verify it, and point at it:**
+
+   Short of local space (the old local Refinery is kept until the owner approves deleting it): add
+   `--tantivy-dir NAS/tantivy/<date>` to build the Tantivy index on the NAS directly. Merges then run
+   over the network (slower); a NAS outage stops the build, and running it again resumes from the last
+   committed part. Skip step 2.
+2. **Copy the Tantivy index to the NAS, verify it, and point at it** (when built locally):
 
    ```
    rsync -a --info=progress2 --no-perms --no-owner --no-group \
