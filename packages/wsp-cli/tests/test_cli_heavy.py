@@ -418,8 +418,11 @@ def test_the_job_inherits_the_heavy_lock_and_nobody_else_can_forge_it(
             pass
 
 
-def _api_health(tmp_path: Path, *, started: str, full_avg60: str) -> tuple[str, list[str]]:
-    """Run tools/wsp-api-health against a fake systemctl and an API that never answers."""
+def _api_health(
+    tmp_path: Path, *, started: str, full_avg60: str, unit_memory: tuple[str, str] | None = None
+) -> tuple[str, list[str]]:
+    """Run tools/wsp-api-health against a fake systemctl and an API that never answers.
+    ``unit_memory``: the unit's (memory.current, memory.high) under a fake cgroup root."""
     import subprocess
 
     from test_cli_autonomy import ROOT
@@ -428,7 +431,10 @@ def _api_health(tmp_path: Path, *, started: str, full_avg60: str) -> tuple[str, 
     fakebin.mkdir(parents=True, exist_ok=True)
     calls = tmp_path / "calls"
     scripts = {
-        "systemctl": f'#!/bin/sh\necho "$*" >> {calls}\ncase "$*" in *show*) echo "{started}" ;; esac\n',
+        "systemctl": (
+            f'#!/bin/sh\necho "$*" >> {calls}\n'
+            f'case "$*" in *ControlGroup*) echo /api.service ;; *show*) echo "{started}" ;; esac\n'
+        ),
         "curl": "#!/bin/sh\nprintf 000\n",
         "sleep": "#!/bin/sh\n",
     }
@@ -440,7 +446,17 @@ def _api_health(tmp_path: Path, *, started: str, full_avg60: str) -> tuple[str, 
         "some avg10=1.00 avg60=1.00 avg300=1.00 total=1\n"
         f"full avg10=0.50 avg60={full_avg60} avg300=0.50 total=1\n"
     )
-    env = {"PATH": f"{fakebin}:/usr/bin:/bin", "WSP_API_HEALTH_PRESSURE": str(pressure), "TZ": "UTC"}
+    cgroot = tmp_path / "cgroup"
+    if unit_memory is not None:
+        (cgroot / "api.service").mkdir(parents=True)
+        (cgroot / "api.service" / "memory.current").write_text(unit_memory[0] + "\n")
+        (cgroot / "api.service" / "memory.high").write_text(unit_memory[1] + "\n")
+    env = {
+        "PATH": f"{fakebin}:/usr/bin:/bin",
+        "WSP_API_HEALTH_PRESSURE": str(pressure),
+        "WSP_API_HEALTH_CGROUP_ROOT": str(cgroot),
+        "TZ": "UTC",
+    }
     done = subprocess.run(
         [str(ROOT / "tools" / "wsp-api-health")], capture_output=True, text=True, env=env, check=True
     )
@@ -459,6 +475,25 @@ def test_api_health_restarts_a_silent_api_but_not_under_machine_wide_pressure(tm
     assert "memory pressure" in out
     assert "not restarting" in out
     assert not any("restart" in c for c in calls)
+
+
+def test_api_health_restarts_an_api_at_its_own_ceiling_even_under_pressure(tmp_path: Path) -> None:
+    """2026-10-13: the API over its MemoryHigh thrashed the machine for 20 minutes, and the machine-wide
+    pressure it caused kept the check from restarting it."""
+    from datetime import UTC, datetime, timedelta
+
+    hour_ago = (datetime.now(UTC) - timedelta(hours=1)).strftime("%a %Y-%m-%d %H:%M:%S UTC")
+    gib = str(1 << 30)
+    out, calls = _api_health(tmp_path, started=hour_ago, full_avg60="64.60", unit_memory=(gib, gib))
+    assert "at its MemoryHigh" in out
+    assert calls[-1] == "--user restart whisipedia-api.service"
+    # Under its ceiling, or with no ceiling, the machine-wide rule still holds.
+    for memory in ((str(1 << 29), gib), (gib, "max")):
+        out, calls = _api_health(
+            tmp_path / memory[1], started=hour_ago, full_avg60="64.60", unit_memory=memory
+        )
+        assert "not restarting" in out
+        assert not any("restart" in c for c in calls)
 
 
 @pytest.mark.parametrize("started", ["", "n/a"])

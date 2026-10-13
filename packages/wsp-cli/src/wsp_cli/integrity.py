@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from wsp_cli import bootstrap
-from wsp_cli.locks import HEAVY, exclusive, lock_dir_for
+from wsp_cli.locks import PROFILE, exclusive, lock_dir_for
 from wsp_core.model import Generation, GenerationStatus, SourceSpec
 from wsp_orchestrator.integrity import ContentProfile, IntegrityHooks, IntegritySettings, ProfileBuilder
 from wsp_orchestrator.isolation import IsolatedRunner
@@ -236,12 +236,14 @@ class IsolatedProfiler:
 
 
 def profile_child(payload: Mapping[str, Any]) -> dict[str, Any]:
-    """Child unit: profile one sealed generation (HEAVY lock; reads the Refinery and the vault)."""
+    """Child unit: profile one sealed generation (``PROFILE`` lock, not ``HEAVY``: paced, it runs for
+    hours with little memory, and must not hold up refines and the nightly index; reads the Refinery
+    and the vault)."""
     from wsp_cli.wiring import child_context
 
     p = bootstrap.paths(cast(Mapping[str, Any], payload["config"]))
     # The lock first, then the registry and manifest reads (audit 2026-10-12, L1).
-    with exclusive(lock_dir_for(p.require_index()), HEAVY):
+    with exclusive(lock_dir_for(p.require_index()), PROFILE):
         ctx = child_context(payload)
         assert ctx.generation is not None
         sec = bootstrap.section(ctx.cfg, "integrity")

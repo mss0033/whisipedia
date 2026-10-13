@@ -3,6 +3,14 @@
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Fixed: content profiles no longer hold the heavy lock; the health check restarts an API at its ceiling (2026-10-13)
+* A content profile takes its own `PROFILE` lock instead of `HEAVY`. Paced to a share of the NAS link
+  (`[integrity] profile_busy_share`), a profile of a big ZIM runs for most of a day; under `HEAVY` it kept
+  every refine waiting and made the nightly `wsp index build` exit busy for that long.
+* `tools/wsp-api-health` restarts the API when the API's own cgroup is at its `MemoryHigh`, even while the
+  machine is under memory pressure: that pressure was the API's own doing (20 minutes of thrashing on
+  2026-10-13 while the check declined to act).
+
 ### Changed: faster suggest priors, rank lookups and OSTI downloads (2026-10-12)
 * `wsp index rank` writes suggest priors in bulk: the old ones are zeroed, each source's priors are loaded
   into a temporary table and applied with one keyed UPDATE, the prior index is dropped during the load

@@ -19,7 +19,8 @@ Heavy work never runs in the daemon (audit 2026-10-11, C2/C3/H7): refine, index 
 profile run as child units (:class:`wsp_orchestrator.isolation.IsolatedRunner`; ``systemd-run`` in
 ``whisipedia-background.slice`` with ``[orchestrator.heavy]`` limits, a plain child process without
 systemd). The child functions below take the machine-wide ``HEAVY`` lock and, when they write the
-Refinery or the index, the ``INDEX`` lock (``wsp_cli.locks``); a busy lock comes back as
+Refinery or the index, the ``INDEX`` lock (``wsp_cli.locks``); a profile takes ``PROFILE`` instead
+(paced and hours long, it must not hold the heavy jobs up); a busy lock comes back as
 ``ResourceBusyError`` and the step is deferred without counting an attempt. Refining never opens the
 Tantivy index. Scrub slices take the ``SCRUB`` lock and drills the ``DRILL`` lock, shared with
 ``wsp scrub`` / ``wsp drill``.

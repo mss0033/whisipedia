@@ -6,8 +6,11 @@ would interleave ledger appends and race on staging renames.
 Lock names shared by every process (CLI, orchestrator, timer, ``tools/wsp-bg``):
 
 * ``INDEX`` — the one writer of the Refinery, the Tantivy index, the suggest trie and the change feed;
-* ``HEAVY`` — at most one memory-heavy job on the machine at a time (refine, index, rank, spell, embed,
-  profile), so their budgets never add up inside ``whisipedia-background.slice``;
+* ``HEAVY`` — at most one memory-heavy job on the machine at a time (refine, index, rank, spell,
+  embed), so their budgets never add up inside ``whisipedia-background.slice``;
+* ``PROFILE`` — one content profile at a time. A profile holds little memory but, paced to a share of
+  the NAS link (``[integrity] profile_busy_share``), runs for most of a day: under ``HEAVY`` it kept the
+  nightly index build (which exits busy at once) and every refine waiting that long (2026-10-13);
 * ``INGEST`` — the one writer of vault staging and promotion from ``_incoming``;
 * ``SCRUB`` — the one scrub (and repair ladder) over the scrub state DB;
 * ``DRILL`` — one chaos drill at a time.
@@ -32,6 +35,7 @@ from wsp_orchestrator.errors import ResourceBusyError
 INDEX = "index"
 HEAVY = "heavy"
 INGEST = "ingest"
+PROFILE = "profile"  # one content profile at a time (hours long, paced: never under HEAVY)
 SCRUB = "scrub"  # the one scrub/repair writer of the scrub state DB (orchestrator slices, wsp scrub)
 DRILL = "drill"  # one chaos drill at a time (orchestrator, wsp drill)
 
