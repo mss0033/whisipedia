@@ -30,6 +30,17 @@ def test_trie_matches_bruteforce_including_heavy_prefixes(tmp_path: Path) -> Non
             )
 
 
+def test_heavy_prefixes_survive_the_largest_code_point(tmp_path: Path) -> None:
+    """A normalized key containing U+10FFFF has no successor character to bound its branch with."""
+    odd = "\U0010ffff"
+    entries = [SuggestEntry(f"wsp:s/{i}", f"x{odd}{odd} {i}", prior=float(i)) for i in range(12)]
+    entries += [SuggestEntry(f"wsp:t/{i}", f"xy {i}", prior=0.5) for i in range(3)]
+    trie = TitleTrie.build(entries, tmp_path, heavy_threshold=4, top_k=3)
+    sug = Suggester(trie)
+    for prefix in ["x", f"x{odd}", f"x{odd}{odd}", f"x{odd}{odd} 1", "xy"]:
+        assert sug.suggest(prefix, limit=5) == suggest_entries_bruteforce(entries, prefix, 5), prefix
+
+
 def test_reopen_from_disk(tmp_path: Path) -> None:
     entries = _entries(50)
     TitleTrie.build(entries, tmp_path)

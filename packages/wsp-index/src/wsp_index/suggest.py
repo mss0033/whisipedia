@@ -29,6 +29,7 @@ import itertools
 import os
 import re
 import shutil
+import sys
 import threading
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
@@ -41,6 +42,7 @@ import numpy as np
 from wsp_index.text import normalize_key
 
 SEP = "\x1f"
+_MAX_CHAR = chr(sys.maxunicode)  # U+10FFFF, a noncharacter some titles do contain
 _LIST_SEP = "\x1e"
 TRIE_FILE = "titles.marisa"
 HEAVY_FILE = "heavy.marisa"
@@ -286,7 +288,9 @@ def _heavy_prefixes(
                 pos += 1
                 continue
             ch = key[depth]
-            end = bisect.bisect_left(keys, prefix + chr(ord(ch) + 1), pos, hi)
+            # Keys after ``prefix + ch``; nothing sorts after the largest code point, so every key
+            # left in the window shares that branch.
+            end = hi if ch == _MAX_CHAR else bisect.bisect_left(keys, prefix + chr(ord(ch) + 1), pos, hi)
             if ch != SEP:
                 stack.append((prefix + ch, pos, end))
             pos = end
