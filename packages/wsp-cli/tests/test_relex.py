@@ -14,7 +14,7 @@ import numpy as np
 import pytest
 
 from wsp_cli import ops
-from wsp_cli.relex import CHECKPOINT, Relexer, relex
+from wsp_cli.relex import CHECKPOINT, ROWS_PER_UPSERT, Relexer, relex
 from wsp_core.ids import DocId, make_doc_id
 from wsp_core.model import DocRecord
 from wsp_index import TantivyConfig, TantivyIndex
@@ -216,3 +216,30 @@ def test_load_paces_its_reads_of_the_refinery(library: tuple[Path, dict[str, str
     with TantivyIndex(tmp_path / "new", SMALL) as idx:
         Relexer(idx, ref, lambda: state, read_limiter=limiter).load()
     assert sum(slept) == pytest.approx(sizes / 1000.0)  # every part's bytes, at 1000 B/s
+
+
+def test_load_turns_rows_into_objects_a_bounded_batch_at_a_time(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A part of whole books is gigabytes as Python objects; Tantivy gets them in bounded batches."""
+    ref = tmp_path / "refinery"
+    refine(
+        ref,
+        "big",
+        "g1",
+        [rec("big", f"b{i:04d}", f"Big {i}") for i in range(ROWS_PER_UPSERT * 2 + 7)],
+        per_file=10_000,
+    )
+    real = TantivyIndex.upsert
+    sizes: list[int] = []
+
+    def counting(self: TantivyIndex, docs: list[DocRecord], *, replace: bool = True) -> int:
+        sizes.append(len(docs))
+        return real(self, docs, replace=replace)
+
+    monkeypatch.setattr(TantivyIndex, "upsert", counting)
+    with TantivyIndex(tmp_path / "new", SMALL) as idx:
+        assert Relexer(idx, ref, lambda: {"big": "g1"}).load() == ROWS_PER_UPSERT * 2 + 7
+        assert idx.num_docs == ROWS_PER_UPSERT * 2 + 7
+    assert max(sizes) <= ROWS_PER_UPSERT
+    assert sum(sizes) == ROWS_PER_UPSERT * 2 + 7

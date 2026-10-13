@@ -39,6 +39,7 @@ from wsp_vault.ratelimit import RateLimiter
 CHECKPOINT = "REBUILD.json"
 CATCH_UP_ROUNDS = 3
 COMMIT_BYTES = 2 << 30  # of Arrow table data between commits
+ROWS_PER_UPSERT = 256  # rows turned into Python objects at a time (a part of whole books is gigabytes)
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,9 +116,13 @@ class Relexer:
                     self.read_limiter.consume(reader.parts[part].stat().st_size)
                 table, _ = reader.part_table(part, COLUMNS)
                 pending += table.nbytes
-                docs = [record_from_row(row) for row in table.to_pylist()]
+                # Rows become Python objects a batch at a time, never a whole part: a Gutenberg part
+                # (whole books) is ~2 GB of strings and dicts, and the job swapped at 5 GB under a
+                # 3.5 GB ceiling (2026-10-13). Tantivy copies each batch into its own heap.
+                for batch in table.to_batches(max_chunksize=ROWS_PER_UPSERT):
+                    docs = [record_from_row(row) for row in batch.to_pylist()]
+                    total += self.index.upsert(docs, replace=part < replace_until)
                 del table
-                total += self.index.upsert(docs, replace=part < replace_until)
                 last = part == reader.n_parts - 1
                 if pending >= self.commit_bytes or last:
                     done[sid] = {"generation": gen, "parts": batch_start, "replace_until": part + 1}
