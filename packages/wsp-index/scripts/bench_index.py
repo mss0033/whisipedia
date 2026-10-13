@@ -201,7 +201,7 @@ def main() -> int:
     n = sum(index_generation(idx, r) for r in readers)
     build_s = time.perf_counter() - t0
     t0 = time.perf_counter()
-    idx.set_priors({k: math.log1p(v) for k, v in inlinks.items()})
+    idx.mark_suggest_stale()  # priors come from a static rank file (`wsp index rank`); none here
     idx.commit()
     prior_s = time.perf_counter() - t0
     results["index"] = {
@@ -209,7 +209,7 @@ def main() -> int:
         "build_s_incl_read_commit_suggest": round(build_s, 1),
         "docs_per_s": round(n / build_s),
         "text_mb_per_s": round(text_bytes / 1e6 / build_s, 1),
-        "set_priors_and_rebuild_suggest_s": round(prior_s, 1),
+        "rebuild_suggest_s": round(prior_s, 1),
         "tantivy_mb": round(dir_bytes(index_dir / "tantivy") / 1e6, 1),
         "suggest_mb": round(dir_bytes(index_dir / "suggest") / 1e6, 1),
         "writer_heap_mb": args.heap_mb,

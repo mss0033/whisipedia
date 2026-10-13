@@ -57,3 +57,45 @@ Roll back by removing `refinery_root` and restarting. The local copy is unchange
 
 The archive is write-once. Never edit or delete a range while the feed is in use: every cursor
 before the archive mark is read from it.
+
+## 3. The search index
+
+The new index has two fast columns and no title table (ADR-0011), so the code that reads it goes live
+only at the switch. Until then, build it with the branch's checkout (`WT`, its own `.venv`) and the
+live configuration (`CONFIG`, the main checkout's `config/`).
+
+1. **Rebuild beside the live index.** It runs in the background slice and takes about a day; search
+   keeps working. It needs about 170 GB free on the PC, which is why sections 1 and 2 come first.
+
+   ```
+   systemd-run --user --unit whisipedia-job-relex --slice whisipedia-background.slice \
+     -p MemoryHigh=7G -p MemoryMax=8G -p Nice=19 -p IOSchedulingClass=best-effort \
+     WT/.venv/bin/wsp --config-dir CONFIG index rebuild-lexical --into INDEX/lexical.next
+   ```
+
+   It resumes where it stopped if you run it again. At the end it waits for the index lock, catches
+   up with whatever the live index took in meanwhile, carries over the rank and spelling files, and
+   builds the suggest trie.
+2. **Copy the Tantivy index to the NAS, verify it, and point at it:**
+
+   ```
+   rsync -a --info=progress2 --no-perms --no-owner --no-group \
+     INDEX/lexical.next/tantivy/ NAS/tantivy/<date>/
+   (cd INDEX/lexical.next/tantivy && find . -type f -print0 | sort -z | xargs -0 sha256sum) > /tmp/tantivy.sha256
+   (cd NAS/tantivy/<date> && sha256sum --quiet -c /tmp/tantivy.sha256)
+   WT/.venv/bin/wsp --config-dir CONFIG index point-tantivy INDEX/lexical.next NAS/tantivy/<date>
+   rm -r INDEX/lexical.next/tantivy
+   ```
+3. **Switch** (about a minute of downtime):
+
+   ```
+   systemctl --user stop whisipedia-api whisipedia-index.timer whisipedia-orchestrator
+   mv INDEX/lexical INDEX/lexical.old && mv INDEX/lexical.next INDEX/lexical
+   git -C ~/dev/whisipedia merge --ff-only <branch>
+   systemctl --user start whisipedia-api whisipedia-orchestrator whisipedia-index.timer
+   ```
+
+   Then search for a few things, open `wsp://home`, and run `wsp doctor`.
+4. **Roll back** by stopping the API, swapping the two directories back, and checking out the previous
+   commit. After a week, and with the owner's approval, delete `INDEX/lexical.old` (the old
+   166 GB index and 73 GB `meta.sqlite`).

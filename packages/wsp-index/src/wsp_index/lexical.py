@@ -1,9 +1,10 @@
 """``LexicalIndex`` on Tantivy: BM25 over per-language fields, snippets, source filter, suggest.
 
-On-disk layout under the index directory (local disk only, ADR-0002)::
+On-disk layout under the index directory (local disk; ADR-0002, ADR-0011)::
 
-    tantivy/        Tantivy index
-    meta.sqlite     doc_id -> (source, title, lang, prior) and aliases; feeds suggest and ``lookup``
+    tantivy/        Tantivy index, unless TANTIVY.txt names another directory (a generation on the NAS)
+    TANTIVY.txt     optional: absolute path of the Tantivy index in use
+    meta.sqlite     settings and the source numbers of the ``source_key`` column
     suggest/        mmapped MARISA tries (see ``wsp_index.suggest``)
     static_rank.bin link-analysis static rank (``wsp_index.linkrank``), written by ``wsp index rank``
     spelling/       vocabulary for "did you mean" (``wsp_index.spelling``), written by ``wsp index spell``
@@ -32,6 +33,12 @@ library is searched in one pass and adding a language only needs a reindex of th
 Writes are buffered by Tantivy and become visible on ``commit()`` (batched commits; optionally
 automatic every ``commit_every`` operations). ``upsert`` is delete-by-term on ``doc_id`` plus add,
 which Tantivy orders by opstamp, so repeated upserts of one id in a batch keep only the last.
+
+Titles, aliases and suggest priors are not copied into a database (ADR-0011): titles are stored in
+Tantivy, aliases and titles for the suggest trie come from :class:`~wsp_index.titles.TitleSources`
+(the Refinery and the redirect tables), priors from the static rank. Two fast columns spare stored
+document reads on the hot path (each one a disk or network round trip): ``doc_key`` (the static rank's
+key of the doc id) for ranking a window, ``source_key`` (a small per-index number) for the source cap.
 """
 
 from __future__ import annotations
@@ -39,21 +46,24 @@ from __future__ import annotations
 import contextlib
 import html
 import json
+import os
 import sqlite3
 import threading
 import time
 from collections import Counter
-from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import TracebackType
 from typing import Any, Self, cast
 
+import numpy as np
+import numpy.typing as npt
 import tantivy
 
 from wsp_core.ids import DocId
 from wsp_core.model import DocRecord, SearchHit
-from wsp_index.linkrank import RANK_FILE, StaticRank
+from wsp_index.linkrank import RANK_FILE, StaticRank, key64
 from wsp_index.localfs import ensure_local
 from wsp_index.suggest import (
     DEFAULT_HEAVY_THRESHOLD,
@@ -70,41 +80,52 @@ from wsp_index.text import (
     primary_lang,
     sanitize_query,
 )
+from wsp_index.titles import TitleSources
 
 _META_SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS titles (
-    doc_id TEXT PRIMARY KEY,
-    source_id TEXT NOT NULL,
-    title TEXT NOT NULL,
-    lang TEXT NOT NULL,
-    prior REAL NOT NULL DEFAULT 0
-) WITHOUT ROWID;
-CREATE INDEX IF NOT EXISTS titles_prior ON titles(prior);
-CREATE TABLE IF NOT EXISTS aliases (
-    doc_id TEXT NOT NULL,
-    alias TEXT NOT NULL,
-    PRIMARY KEY (doc_id, alias)
-) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS source_keys (source_id TEXT PRIMARY KEY, key INTEGER NOT NULL UNIQUE);
 """
+SCHEMA_FIELDS = 2
+"""Version of the field set: 2 added the ``doc_key`` and ``source_key`` fast columns (ADR-0011)."""
+TANTIVY_POINTER = "TANTIVY.txt"
+
+
+def tantivy_dir(lexical: Path) -> Path:
+    """The Tantivy index of the lexical directory ``lexical``: the one ``TANTIVY.txt`` names, else
+    ``lexical/tantivy``."""
+    pointer = lexical / TANTIVY_POINTER
+    if pointer.is_file():
+        text = pointer.read_text(encoding="utf-8").strip()
+        if text:
+            return Path(text)
+    return lexical / "tantivy"
+
+
+def point_tantivy(lexical: Path, target: Path) -> None:
+    """Make ``target`` (an absolute path, e.g. a copy on the NAS) the Tantivy index of ``lexical``."""
+    if not target.is_absolute():
+        raise ValueError(f"the Tantivy pointer must be absolute: {target}")
+    partial = lexical / (TANTIVY_POINTER + ".partial")
+    partial.write_text(f"{target}\n", encoding="utf-8")
+    with partial.open("rb") as fh:
+        os.fsync(fh.fileno())
+    os.replace(partial, lexical / TANTIVY_POINTER)
 
 
 MIN_TIER_HITS = 30
 """Every-word matches enough to lead the result list on their own (module docstring)."""
-SUGGEST_TURN = 1_000
-"""Unranked titles a source adds to the suggest trie per turn (``_all_entries``)."""
 DIVERSE_ROUNDS = 2
 """Queries run again at most this many times to share a window among sources (``per_source``). Each
-round reads the stored source of up to a window of new hits (1-3 ms each from a cold disk). Two rounds
+round reads the source of up to a window of new hits from the ``source_key`` fast column. Two rounds
 cover one crowding source after another (Open Library's editions, then Stack Exchange users named
 "Huckleberry Finn"); measured on the live index (2026-10-12), a third cost 0.3-1.5 s more per query and
 brought no title into the window that two did not."""
 
 
 class _DocMemo:
-    """A searcher whose ``doc`` reads each stored document once for one query: the source cap reads a
-    window's sources and the hits are then built from the same documents (each read is 1-3 ms from a
-    cold disk). Everything else goes to the searcher."""
+    """A searcher whose ``doc`` reads each stored document once for one query (each read is 1-3 ms from
+    a cold local disk, more from the NAS). Everything else goes to the searcher."""
 
     def __init__(self, searcher: tantivy.Searcher) -> None:
         self._searcher = searcher
@@ -177,7 +198,12 @@ class TantivyConfig:
         """Everything that changes how documents are analyzed: an index built otherwise is refused
         (it would silently miss matches) and must be rebuilt."""
         return json.dumps(
-            {"languages": sorted(self.languages), "store_text": self.store_text, "analyzer": ANALYZER_VERSION}
+            {
+                "languages": sorted(self.languages),
+                "store_text": self.store_text,
+                "analyzer": ANALYZER_VERSION,
+                "fields": SCHEMA_FIELDS,
+            }
         )
 
 
@@ -194,10 +220,15 @@ class TantivyIndex:
         config: TantivyConfig | None = None,
         *,
         texts: Callable[[Sequence[str]], Mapping[str, str]] | None = None,
+        titles: TitleSources | Callable[[], TitleSources] | None = None,
     ) -> None:
+        """``titles``: where the suggest trie's titles and aliases come from on a full rebuild (built on
+        first use when a callable). Without it the trie is built from the stored titles, which reads
+        every document: only for small indexes (tests, samples)."""
         self.config = config or TantivyConfig()
         # Document text by id for snippets when the index stores none (the Refinery document store).
         self.texts = texts
+        self._titles = titles
         self.path = ensure_local(path)
         self._langs: tuple[str, ...] = tuple(dict.fromkeys(primary_lang(x) for x in self.config.languages))
         self._routes: tuple[str, ...] = (*self._langs, FALLBACK_LANG)
@@ -212,8 +243,11 @@ class TantivyIndex:
         self._db.executescript(_META_SCHEMA)
         self._check_signature()
 
-        index_dir = self.path / "tantivy"
-        index_dir.mkdir(exist_ok=True)
+        self.source_keys: dict[str, int] = {}
+        self._source_names: dict[int, str] = {}
+        self._reload_source_keys()
+        index_dir = self.tantivy_dir = tantivy_dir(self.path)  # may be on the NAS (ADR-0011)
+        index_dir.mkdir(parents=True, exist_ok=True)
         if tantivy.Index.exists(str(index_dir)):
             self._index = tantivy.Index.open(str(index_dir))
         else:
@@ -267,42 +301,49 @@ class TantivyIndex:
         ]
 
     def _small(self) -> bool:
-        """Few enough titles that a suggest rebuild costs milliseconds, not minutes and gigabytes."""
-        cap = self.config.suggest_open_rebuild_titles
-        return self._title_count(cap + 1) <= cap
-
-    def _title_count(self, cap: int) -> int:
-        """Number of titles, counting at most ``cap`` (cheap on a huge table)."""
-        row = self._db.execute("SELECT COUNT(*) FROM (SELECT 1 FROM titles LIMIT ?)", (cap,)).fetchone()
-        return int(row[0])
+        """Few enough documents that a suggest rebuild costs milliseconds, not minutes and gigabytes."""
+        return self._index.searcher().num_docs <= self.config.suggest_open_rebuild_titles
 
     def has_source(self, source_id: str) -> bool:
-        """Whether any document of ``source_id`` is indexed (a primary-key range probe)."""
-        lo = f"wsp:{source_id}/"
-        hi = f"wsp:{source_id}0"  # "0" sorts right after "/"
-        with self._lock:
-            row = self._db.execute(
-                "SELECT 1 FROM titles WHERE doc_id >= ? AND doc_id < ? LIMIT 1", (lo, hi)
-            ).fetchone()
-        return row is not None
+        """Whether any live document of ``source_id`` is indexed."""
+        q = tantivy.Query.term_query(self._schema, "source_id", source_id)
+        return bool(self._index.searcher().search(q, 1, count=False).hits)
 
-    def source_doc_ids(
-        self, source_id: str, *, batch: int = 50_000, after: str | None = None
-    ) -> Iterator[list[str]]:
-        """Indexed doc ids of ``source_id`` in batches (primary-key order, keyset-paged), from the first
-        one past ``after`` when given."""
-        last, hi = max(f"wsp:{source_id}/", after or ""), f"wsp:{source_id}0"
-        while True:
-            with self._lock:
-                rows = self._db.execute(
-                    "SELECT doc_id FROM titles WHERE doc_id > ? AND doc_id < ? ORDER BY doc_id LIMIT ?",
-                    (last, hi, batch),
-                ).fetchall()
-            if not rows:
-                return
-            ids = [str(r[0]) for r in rows]
-            yield ids
-            last = ids[-1]
+    def present(self, doc_ids: Sequence[str]) -> set[str]:
+        """The live indexed documents among ``doc_ids``."""
+        out: set[str] = set()
+        ids = list(dict.fromkeys(doc_ids))
+        searcher = self._index.searcher()
+        for i in range(0, len(ids), 10_000):
+            chunk = ids[i : i + 10_000]
+            q = tantivy.Query.term_set_query(self._schema, "doc_id", chunk)
+            for _, a in searcher.search(q, len(chunk), count=False).hits:
+                out.add(str(searcher.doc(a).get_first("doc_id")))
+        return out
+
+    def delete_source(self, source_id: str) -> None:
+        """Delete every document of ``source_id`` (one delete term; visible after ``commit()``)."""
+        with self._lock:
+            self._get_writer().delete_documents_by_term("source_id", source_id)
+            self._suggest_stale = True
+            self._after_write(1)
+
+    def _reload_source_keys(self) -> None:
+        with self._lock:
+            rows = self._db.execute("SELECT source_id, key FROM source_keys").fetchall()
+            self.source_keys = {str(sid): int(k) for sid, k in rows}
+            self._source_names = {k: sid for sid, k in self.source_keys.items()}
+
+    def _source_key(self, source_id: str) -> int:
+        """The source's number in the ``source_key`` column (assigned on first sight, never reused)."""
+        key = self.source_keys.get(source_id)
+        if key is None:
+            key = max(self.source_keys.values(), default=0) + 1
+            self._db.execute("INSERT INTO source_keys(source_id, key) VALUES (?, ?)", (source_id, key))
+            self._db.commit()  # numbers are never rolled back: a rolled-back document leaves an unused one
+            self.source_keys[source_id] = key
+            self._source_names[key] = source_id
+        return key
 
     def _meta(self, key: str) -> str | None:
         row = self._db.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
@@ -328,6 +369,8 @@ class TantivyIndex:
         sb.add_text_field("doc_id", stored=True, tokenizer_name="raw")
         sb.add_text_field("source_id", stored=True, tokenizer_name="raw")
         sb.add_text_field("lang", stored=True, tokenizer_name="raw")
+        sb.add_unsigned_field("doc_key", fast=True)  # the static rank's key of doc_id (ranking, no doc read)
+        sb.add_unsigned_field("source_key", fast=True)  # small source number (the source cap, no doc read)
         for lang in self._routes:
             sb.add_text_field(f"title_{lang}", stored=True, tokenizer_name=f"wsp_{lang}")
             sb.add_text_field(f"text_{lang}", stored=self.config.store_text, tokenizer_name=f"wsp_{lang}")
@@ -355,31 +398,28 @@ class TantivyIndex:
         n = 0
         with self._lock:
             writer = self._get_writer()
-            rows: list[tuple[str, str, str, str]] = []
-            aliases: list[tuple[str, str]] = []
-            for doc in docs:
+            staged: list[SuggestEntry] = []
+            batch = list(docs)
+            keys = key64([d.doc_id for d in batch]) if batch else np.zeros(0, np.uint64)
+            for doc, key in zip(batch, keys.tolist(), strict=True):
                 route = self.route(doc.lang)
                 tdoc = tantivy.Document()
                 tdoc.add_text("doc_id", doc.doc_id)
                 tdoc.add_text("source_id", doc.source_id)
                 tdoc.add_text("lang", doc.lang)
+                tdoc.add_unsigned("doc_key", int(key))
+                tdoc.add_unsigned("source_key", self._source_key(doc.source_id))
                 tdoc.add_text(f"title_{route}", doc.title)
                 tdoc.add_text(f"text_{route}", doc.text)
                 if replace:
                     writer.delete_documents_by_term("doc_id", doc.doc_id)
                 writer.add_document(tdoc)
-                rows.append((doc.doc_id, doc.source_id, doc.title, doc.lang))
-                aliases.extend((doc.doc_id, a) for a in doc.aliases if a.strip())
+                if doc.title:
+                    aliases = tuple(a for a in doc.aliases if a.strip())
+                    staged.append(SuggestEntry(doc.doc_id, doc.title, aliases, 0.0))
                 n += 1
-            self._db.executemany(
-                "INSERT INTO titles(doc_id, source_id, title, lang) VALUES (?, ?, ?, ?) "
-                "ON CONFLICT(doc_id) DO UPDATE SET source_id=excluded.source_id, title=excluded.title, "
-                "lang=excluded.lang",
-                rows,
-            )
-            # DocRecord.aliases add to (never replace) aliases set with set_aliases().
-            self._db.executemany("INSERT OR IGNORE INTO aliases(doc_id, alias) VALUES (?, ?)", aliases)
-            self._stage_suggest([r[0] for r in rows])
+            if self._suggest_room(len(staged)):
+                self._pending_suggest.extend(self._with_priors(staged))
             self._after_write(n)
         return n
 
@@ -390,8 +430,6 @@ class TantivyIndex:
             writer = self._get_writer()
             for doc_id in ids:
                 writer.delete_documents_by_term("doc_id", doc_id)
-            self._db.executemany("DELETE FROM titles WHERE doc_id=?", [(d,) for d in ids])
-            self._db.executemany("DELETE FROM aliases WHERE doc_id=?", [(d,) for d in ids])
             if self._suggest_room(len(ids)):
                 gone = set(ids)
                 # Commit applies removals before upserts, so drop staged upserts of these ids.
@@ -400,69 +438,12 @@ class TantivyIndex:
             self._after_write(len(ids))
         return len(ids)
 
-    def set_priors(self, priors: Mapping[str, float]) -> int:
-        """Set suggest popularity priors (e.g. ``log1p(inlinks)``); visible after ``commit()``."""
+    def mark_suggest_stale(self) -> None:
+        """Rebuild the whole suggest trie at the next commit (new ranks, new redirect tables)."""
         with self._lock:
-            cur = self._db.executemany(
-                "UPDATE titles SET prior=? WHERE doc_id=?", [(float(v), k) for k, v in priors.items()]
-            )
-            self._stage_suggest(list(priors))
-            return cur.rowcount
-
-    def set_priors_bulk(self, sources: Iterable[Iterable[Mapping[str, float]]]) -> int:
-        """Replace every suggest prior: zero the old ones, then load each source's batches into a
-        temporary table and apply them with one keyed UPDATE per source, committing per source.
-
-        :meth:`set_priors` updates one row at a time and keeps ``titles_prior`` (an index on the
-        prior) current on each update, for 256M rows a random index write each, in one transaction
-        whose WAL every reader of the index must scan: measured 2026-10-12, about 7,000 rows/s, so
-        12+ hours, with searches at 20+ s meanwhile. Here the index is dropped while loading and
-        rebuilt once, rows are applied in key order, and the suggest trie is rebuilt once at the
-        next :meth:`commit`. Only non-zero priors are written (the default is 0)."""
-        n = 0
-        with self._lock:
-            db = self._db
-            # Drop the index first: zeroing through it rewrites the index once per row (tens of millions
-            # after an earlier run); without it the reset is one pass over the table.
-            db.execute("DROP INDEX IF EXISTS titles_prior")
-            db.execute("UPDATE titles SET prior = 0 WHERE prior <> 0")
-            db.commit()
-            db.execute(
-                "CREATE TEMP TABLE IF NOT EXISTS prior_load (doc_id TEXT PRIMARY KEY, prior REAL NOT NULL) "
-                "WITHOUT ROWID"
-            )
-            try:
-                for batches in sources:
-                    db.execute("DELETE FROM prior_load")
-                    for batch in batches:
-                        db.executemany(
-                            "INSERT OR REPLACE INTO prior_load (doc_id, prior) VALUES (?, ?)",
-                            [(k, float(v)) for k, v in batch.items() if v],
-                        )
-                    cur = db.execute(
-                        "UPDATE titles SET prior = prior_load.prior FROM prior_load "
-                        "WHERE titles.doc_id = prior_load.doc_id"
-                    )
-                    n += max(cur.rowcount, 0)
-                    db.execute("DELETE FROM prior_load")
-                    db.commit()
-            finally:
-                db.execute("CREATE INDEX IF NOT EXISTS titles_prior ON titles(prior)")
-                db.commit()
-            self._suggest_stale = True  # one trie rebuild at the next commit
+            self._suggest_stale = True
             self._pending_suggest.clear()
-        return n
-
-    def set_aliases(self, aliases: Mapping[str, Sequence[str]]) -> None:
-        """Replace the alias list of each given document (redirects, alternative names)."""
-        with self._lock:
-            ids = [(d,) for d in aliases]
-            self._db.executemany("DELETE FROM aliases WHERE doc_id=?", ids)
-            self._db.executemany(
-                "INSERT OR IGNORE INTO aliases(doc_id, alias) VALUES (?, ?)",
-                [(d, a) for d, names in aliases.items() for a in names if a.strip()],
-            )
-            self._stage_suggest(list(aliases))
+            self._pending_removed.clear()
 
     def _suggest_room(self, n: int) -> bool:
         """False (and mark the trie stale) once the overlay would exceed the rebuild threshold."""
@@ -475,10 +456,6 @@ class TantivyIndex:
             self._pending_removed.clear()
             return False
         return True
-
-    def _stage_suggest(self, doc_ids: list[str]) -> None:
-        if self._suggest_room(len(doc_ids)):
-            self._pending_suggest.extend(self._load_entries(doc_ids))
 
     def _after_write(self, n: int) -> None:
         self._buffered += n
@@ -552,87 +529,46 @@ class TantivyIndex:
 
     # --- suggest -------------------------------------------------------------------------------
 
-    def _load_entries(self, doc_ids: Sequence[str]) -> list[SuggestEntry]:
-        out: list[SuggestEntry] = []
-        for i in range(0, len(doc_ids), 500):
-            chunk = doc_ids[i : i + 500]
-            marks = ",".join("?" * len(chunk))  # only placeholders are interpolated below
-            alias_sql = f"SELECT doc_id, alias FROM aliases WHERE doc_id IN ({marks})"  # noqa: S608
-            title_sql = f"SELECT doc_id, title, prior FROM titles WHERE doc_id IN ({marks})"  # noqa: S608
-            aliases: dict[str, list[str]] = {}
-            for d, a in self._db.execute(alias_sql, chunk):
-                aliases.setdefault(d, []).append(a)
-            for d, title, prior in self._db.execute(title_sql, chunk):
-                out.append(SuggestEntry(d, title, tuple(aliases.get(d, ())), float(prior)))
-        return out
+    def _with_priors(self, entries: list[SuggestEntry]) -> list[SuggestEntry]:
+        """``entries`` with their static-rank prior (an overlay entry until the next full rebuild; redirect
+        aliases join it then)."""
+        rank = self.static_rank()
+        if rank is None or not entries:
+            return entries
+        feats = rank.features([e.doc_id for e in entries])
+        return [
+            SuggestEntry(e.doc_id, e.title, e.aliases, float(f)) for e, f in zip(entries, feats, strict=True)
+        ]
 
-    def _all_entries(self) -> Iterable[SuggestEntry]:
-        """Titles with their aliases until ``suggest_max_keys`` keys, streamed (never a sort of the
-        table): half of the keys go to ranked titles (a static-rank prior), best first along the
-        ``titles_prior`` index; the rest is shared by the sources in turn, in batches along the primary key.
-
-        Equal priors used to be taken in reverse doc-id order, so a library without ranks yet (a rebuild
-        runs ``wsp index rank`` last) offered only the titles of the source whose id sorts last: every
-        completion of "dog" was a Wiktionary phrase, and "huckleberry" had none (2026-10-12). Within a
-        source the unranked titles are taken in doc-id order: nothing else orders them without a sort.
-        """
+    def _suggest_entries(self) -> list[SuggestEntry]:
+        """Every entry of a full trie rebuild, at most ``suggest_max_keys`` keys."""
+        titles = self._titles() if callable(self._titles) else self._titles
         budget = self.config.suggest_max_keys
+        if titles is not None:
+            return titles.suggest_entries(self.static_rank(), budget)
+        # No title sources (tests, the sample library): the stored titles, best-ranked first.
+        searcher = self._index.searcher()
+        found = searcher.search(tantivy.Query.all_query(), max(1, searcher.num_docs), count=False)
+        entries: list[SuggestEntry] = []
+        for _, a in found.hits:
+            doc = searcher.doc(a)
+            route = self.route(str(doc.get_first("lang") or ""))
+            title = str(doc.get_first(f"title_{route}") or "")
+            if title:
+                entries.append(SuggestEntry(str(doc.get_first("doc_id")), title))
+        entries = sorted(self._with_priors(entries), key=lambda e: (-e.prior, e.doc_id))
+        out: list[SuggestEntry] = []
         used = 0
-        taken: set[str] = set()
-        cur = self._db.cursor()
-        cur.execute("SELECT doc_id, title, prior FROM titles WHERE prior > 0 ORDER BY prior DESC")
-        while used < budget // 2 and (rows := cur.fetchmany(2_000)):
-            for entry in self._with_aliases(rows):
-                used += 1 + len(entry.aliases)
-                taken.add(entry.doc_id)
-                yield entry
-                if used >= budget // 2:
-                    break
-        cur.close()
-        after = {source_id: f"wsp:{source_id}/" for source_id in self._source_ids()}
-        while used < budget and after:
-            turn = max(1, min(SUGGEST_TURN, (budget - used) // len(after)))  # an equal share of what is left
-            for source_id, last in list(after.items()):
-                rows = self._db.execute(
-                    "SELECT doc_id, title, prior FROM titles WHERE doc_id > ? AND doc_id < ? "
-                    "ORDER BY doc_id LIMIT ?",
-                    (last, f"wsp:{source_id}0", turn),
-                ).fetchall()
-                if len(rows) < turn:
-                    del after[source_id]
-                else:
-                    after[source_id] = str(rows[-1][0])
-                for entry in self._with_aliases([r for r in rows if r[0] not in taken]):
-                    used += 1 + len(entry.aliases)
-                    yield entry
-                    if used >= budget:
-                        return
-
-    def _with_aliases(self, rows: Sequence[tuple[str, str, float]]) -> list[SuggestEntry]:
-        ids = [r[0] for r in rows]
-        if not ids:
-            return []
-        marks = ",".join("?" * len(ids))  # only placeholders are interpolated
-        aliases: dict[str, list[str]] = {}
-        for d, a in self._db.execute(f"SELECT doc_id, alias FROM aliases WHERE doc_id IN ({marks})", ids):  # noqa: S608
-            aliases.setdefault(d, []).append(a)
-        return [SuggestEntry(d, title, tuple(aliases.get(d, ())), float(prior)) for d, title, prior in rows]
-
-    def _source_ids(self) -> list[str]:
-        """Ids of the sources with indexed documents (a skip scan of the primary key: one probe each)."""
-        out: list[str] = []
-        low = "wsp:"
-        while row := self._db.execute(
-            "SELECT doc_id FROM titles WHERE doc_id >= ? ORDER BY doc_id LIMIT 1", (low,)
-        ).fetchone():
-            source_id = str(row[0]).removeprefix("wsp:").partition("/")[0]
-            out.append(source_id)
-            low = f"wsp:{source_id}0"  # "0" sorts right after "/": past every id of this source
+        for e in entries:
+            if used >= budget:
+                break
+            out.append(e)
+            used += 1 + len(e.aliases)
         return out
 
     def _rebuild_suggest(self) -> None:
         trie = TitleTrie.build(
-            self._all_entries(),
+            self._suggest_entries(),
             self._suggest_dir,
             heavy_threshold=self.config.suggest_heavy_threshold,
             top_k=self.config.suggest_top_k,
@@ -699,22 +635,6 @@ class TantivyIndex:
         self._rank_stamp = (-1, -1, -1)
         return self.static_rank()
 
-    def iter_aliases(self, *, batch: int = 50_000) -> Iterator[tuple[str, str]]:
-        """Every ``(doc_id, alias)`` pair (redirects and alternative names), in batches."""
-        last = ("", "")
-        while True:
-            with self._lock:
-                rows = self._db.execute(
-                    "SELECT doc_id, alias FROM aliases WHERE (doc_id, alias) > (?, ?) "
-                    "ORDER BY doc_id, alias LIMIT ?",
-                    (*last, batch),
-                ).fetchall()
-            if not rows:
-                return
-            for d, a in rows:
-                yield str(d), str(a)
-            last = (str(rows[-1][0]), str(rows[-1][1]))
-
     # --- reads ---------------------------------------------------------------------------------
 
     @property
@@ -724,17 +644,18 @@ class TantivyIndex:
     def commit_stamp(self) -> tuple[int, int, int]:
         """Identity of the last commit on disk, by any process (Tantivy replaces ``meta.json`` on each):
         a cache of search results is stale once it changes."""
-        return _stamp(self.path / "tantivy" / "meta.json")
+        return _stamp(self.tantivy_dir / "meta.json")
 
     def lookup(self, doc_id: str) -> SearchHit | None:
         """Title, source and language of an indexed document (for fusing hits from other retrievers)."""
-        with self._lock:
-            row = self._db.execute(
-                "SELECT title, source_id, lang FROM titles WHERE doc_id=?", (doc_id,)
-            ).fetchone()
-        if row is None:
+        searcher = self._index.searcher()
+        found = searcher.search(tantivy.Query.term_query(self._schema, "doc_id", doc_id), 1, count=False)
+        if not found.hits:
             return None
-        return SearchHit(DocId(doc_id), 0.0, str(row[0]), "", str(row[1]), str(row[2]))
+        doc = searcher.doc(found.hits[0][1])
+        lang = str(doc.get_first("lang") or "")
+        title = str(doc.get_first(f"title_{self.route(lang)}") or "")
+        return SearchHit(DocId(doc_id), 0.0, title, "", str(doc.get_first("source_id") or ""), lang)
 
     def parse(self, query: str, *, require_all: bool = False) -> tantivy.Query | None:
         """The query over every language's title and text fields; ``require_all``: every word must
@@ -856,7 +777,7 @@ class TantivyIndex:
         hits = self._top(searcher, parsed, n, sources)
         if len(hits) < n or (sources is not None and len(set(sources)) < 2):
             return hits  # every match, or one source: nothing to share
-        pool = [(sc, a, str(searcher.doc(a).get_first("source_id") or "")) for sc, a in hits]
+        pool = self._with_sources(searcher, hits)
         crowded: set[str] = set()
         for _ in range(DIVERSE_ROUNDS):
             counts = Counter(src for _, _, src in pool)
@@ -865,7 +786,7 @@ class TantivyIndex:
                 break
             crowded |= over
             more = self._top(searcher, parsed, n, sources, without=sorted(crowded))
-            pool += [(sc, a, str(searcher.doc(a).get_first("source_id") or "")) for sc, a in more]
+            pool += self._with_sources(searcher, more)
             if len(more) < n:
                 break
         pool.sort(key=lambda t: -t[0])  # stable: equal scores keep the order Tantivy gave them
@@ -876,6 +797,36 @@ class TantivyIndex:
             taken[src] += 1
             (head if taken[src] <= per_source else overflow).append((sc, a))
         return [*head, *overflow][:n]
+
+    def _with_sources(
+        self, searcher: tantivy.Searcher, hits: Sequence[tuple[float, tantivy.DocAddress]]
+    ) -> list[tuple[float, tantivy.DocAddress, str]]:
+        """Each hit with its source id, from the ``source_key`` fast column (no stored document read)."""
+        keys = searcher.fast_field_values("source_key", [a for _, a in hits]) if hits else []
+        if any(k is not None and int(k) not in self._source_names for k in keys):
+            self._reload_source_keys()  # numbered by the writer since this reader opened the index
+        by_key = self._source_names
+        out: list[tuple[float, tantivy.DocAddress, str]] = []
+        for (sc, a), key in zip(hits, keys, strict=True):
+            src = by_key.get(int(key)) if key is not None else None
+            if src is None:  # a source numbered by another process since this one opened the index
+                src = str(searcher.doc(a).get_first("source_id") or "")
+            out.append((sc, a, src))
+        return out
+
+    def _rank_features(
+        self, searcher: tantivy.Searcher, rank: StaticRank, addrs: Sequence[tantivy.DocAddress]
+    ) -> npt.NDArray[np.float32]:
+        """Static-rank feature of each address, from the ``doc_key`` fast column (no stored document read
+        for a version-2 rank file)."""
+        if not addrs:
+            return np.zeros(0, dtype=np.float32)
+        keys = searcher.fast_field_values("doc_key", list(addrs))
+        if all(k is not None for k in keys):
+            found = rank.features_by_key(np.asarray(keys, dtype=np.uint64))
+            if found is not None:
+                return found
+        return rank.features([str(searcher.doc(a).get_first("doc_id")) for a in addrs])
 
     def _candidates(
         self,
@@ -935,17 +886,17 @@ class TantivyIndex:
             searcher, query, need, sources, partial=partial, per_source=per_source
         )
         if not ranked or rank is None:
-            scored = [(sc, searcher.doc(a)) for sc, a in pool[offset : offset + limit]]
+            chosen = pool[offset : offset + limit]
         else:
-            head = [(sc, searcher.doc(a)) for sc, a in pool[:depth]]
-            feats = rank.features([str(d.get_first("doc_id")) for _, d in head])
+            head = pool[:depth]
+            feats = self._rank_features(searcher, rank, [a for _, a in head])
             w = self.config.rank_weight
-            boosted = [(sc + w * float(f), d) for (sc, d), f in zip(head, feats, strict=True)]
+            boosted = [(sc + w * float(f), a) for (sc, a), f in zip(head, feats, strict=True)]
             # Re-sorted within the every-word lead and within the rest: their scores come from different
             # queries, and the lead stays first.
             order = sorted(range(len(boosted)), key=lambda i: (i >= lead, -boosted[i][0]))
-            deeper = [(sc, searcher.doc(a)) for sc, a in pool[depth : offset + limit]]
-            scored = [*(boosted[i] for i in order), *deeper][offset : offset + limit]
+            chosen = [*(boosted[i] for i in order), *pool[depth : offset + limit]][offset : offset + limit]
+        scored = [(sc, searcher.doc(a)) for sc, a in chosen]  # stored documents: only the hits returned
         parsed = self.parse(query) if snippets else None
         cut = {} if parsed is None else self._snippet_map(searcher, parsed, [d for _, d in scored])
         hits: list[SearchHit] = []

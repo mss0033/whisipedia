@@ -1330,6 +1330,36 @@ class StaticRank:
     def feature(self, doc_id: str) -> float:
         return float(self.features([doc_id])[0])
 
+    def features_by_key(self, keys: U64) -> F32 | None:
+        """:meth:`features` for keys from :meth:`keys_of` (the search index stores them as a fast field,
+        so ranking a window needs no stored document); None for a version-1 file, keyed otherwise."""
+        if self.version == 1:
+            return None
+        if len(keys) == 0 or self.size == 0:
+            return np.zeros(len(keys), dtype=np.float32)
+        h = np.asarray(keys, dtype=np.uint64)
+        pos = np.searchsorted(self._keys, h) if self._fence is None else self._fenced(h)
+        pos = np.minimum(pos, self.size - 1)
+        found = self._keys[pos] == h
+        return np.where(found, self._feature[pos], 0.0).astype(np.float32)
+
+    def keys_of(self, doc_ids: Sequence[str]) -> U64:
+        """The keys :meth:`top_keys` returns, for ``doc_ids``."""
+        return self._key(doc_ids)
+
+    def top_keys(self, m: int) -> U64:
+        """Sorted keys of the ``m`` documents with the highest feature (more on a tie at the cut; never
+        a document without rank). One pass over the feature array plus a copy of it (4 B a document)."""
+        if m <= 0 or self.size == 0:
+            return np.zeros(0, dtype=np.uint64)
+        feature = np.asarray(self._feature)
+        if m >= self.size:
+            chosen = np.flatnonzero(feature > 0)
+        else:
+            cut = float(np.partition(feature, self.size - m)[self.size - m])
+            chosen = np.flatnonzero((feature >= cut) & (feature > 0))
+        return np.asarray(self._keys)[chosen]  # the key array is sorted, so are these
+
     def pagerank(self, doc_id: str) -> tuple[float, float] | None:
         """``(per_group, global)`` PageRank of one document, or None."""
         found = self.pageranks([doc_id])

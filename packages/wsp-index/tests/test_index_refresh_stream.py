@@ -119,16 +119,18 @@ def test_a_crash_resumes_without_losing_or_repeating_feed_records(
         assert again.num_docs == 20
 
 
-def test_without_the_old_generation_stale_documents_are_still_removed(tmp_path: Path) -> None:
+def test_without_the_old_generation_stale_documents_are_found_in_the_others(tmp_path: Path) -> None:
+    # Refreshed without ``old`` (state lost): stale documents are found in the source's other Refinery
+    # generations (ADR-0011), here g1, and removed.
     g1, g2 = gen(tmp_path, "g1", docs_v1()), gen(tmp_path, "g2", docs_v2())
     with TantivyIndex(tmp_path / "ix", SMALL) as idx:
         refresh(idx, None, None, g1)
-        shutil.rmtree(g1.dir)  # the Refinery may be deleted; the index still holds g1
         stats = refresh(idx, None, None, g2)
         assert stats.deleted == 2
         assert idx.num_docs == 19
         assert not idx.has_source("other")
         assert idx.has_source("enc")
+        assert g1.dir.is_dir()
 
 
 def zebras(n: int) -> list[DocRecord]:
@@ -179,13 +181,12 @@ def test_a_resumed_first_load_never_adds_a_document_twice(
 def test_a_resumed_reload_of_a_held_source_replaces_its_documents(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Audit 2026-10-12 #3: the source was held from g1, whose Refinery directory is gone; after a resume
-    # every remaining part was added without deleting its documents first.
+    # Audit 2026-10-12 #3: the source was held from g1 but refreshed without it (old=None); after a
+    # resume every remaining part was added without deleting its documents first.
     g1, g2 = gen(tmp_path, "g1", zebras(30), per_file=10), gen(tmp_path, "g2", zebras(30), per_file=10)
     feed = SqliteChangeFeed(tmp_path / "feed.sqlite")
     with TantivyIndex(tmp_path / "ix", SMALL) as idx:
         refresh(idx, feed, None, g1)
-        shutil.rmtree(g1.dir)
         kill_publish(monkeypatch, lambda n, _: n == 2)  # after g2's part 2 commit (part 1 checkpointed)
         with pytest.raises(KilledError):
             refresh(idx, feed, None, g2)
@@ -208,7 +209,6 @@ def test_a_resumed_removal_of_orphans_removes_every_one(
     with TantivyIndex(tmp_path / "ix", SMALL) as idx:
         refresh(idx, feed, None, g1)
         head = feed.head()
-        shutil.rmtree(g1.dir)
         removals = {"n": 0}
         if stage == "publish":  # the second chunk is deleted and committed, its records not published
 
@@ -238,6 +238,20 @@ def test_a_resumed_removal_of_orphans_removes_every_one(
         removed = [c.doc_id for c in published if c.kind is ChangeKind.REMOVED]
         assert sorted(removed) == sorted(d.doc_id for d in zebras(60)[30:])  # each exactly once
         assert stats.deleted == 30
+
+
+def test_a_held_source_without_any_other_generation_is_reloaded_with_a_warning(tmp_path: Path) -> None:
+    # Its earlier documents can only be listed from another Refinery generation (ADR-0011: the index
+    # keeps no table of them). The run says so, and still loads the new generation.
+    g1, g2 = gen(tmp_path, "g1", zebras(30), per_file=10), gen(tmp_path, "g2", zebras(20), per_file=10)
+    feed = SqliteChangeFeed(tmp_path / "feed.sqlite")
+    lines: list[str] = []
+    with TantivyIndex(tmp_path / "ix", SMALL) as idx:
+        refresh(idx, feed, None, g1)
+        shutil.rmtree(g1.dir)
+        refresh(idx, feed, None, g2, progress=lines.append)
+        assert any("rebuild-lexical" in line for line in lines)
+        assert len(idx.present([d.doc_id for d in zebras(30)])) == 30  # g1's extra 10 cannot be found
 
 
 def test_long_documents_flush_early_into_small_row_groups(tmp_path: Path) -> None:

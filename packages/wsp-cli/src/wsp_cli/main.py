@@ -357,6 +357,24 @@ def build_parser(argv: Sequence[str] | None = None) -> argparse.ArgumentParser:
         ix_sub,
     )
     s = add(
+        "rebuild-lexical",
+        _ops("cmd_index_rebuild_lexical"),
+        "Build a fresh search index beside the live one from the indexed generations (no feed changes).",
+        ix_sub,
+    )
+    s.add_argument(
+        "--into", required=True, help="new lexical directory (local disk), e.g. <index>/lexical.next"
+    )
+    s.add_argument("--tantivy-dir", default=None, help="put its Tantivy index here instead (absolute path)")
+    s = add(
+        "point-tantivy",
+        _ops("cmd_index_point_tantivy"),
+        "Use a verified copy of a lexical directory's Tantivy index (e.g. on the NAS).",
+        ix_sub,
+    )
+    s.add_argument("lexical", help="lexical directory (e.g. <index>/lexical)")
+    s.add_argument("target", help="absolute path of the copy")
+    s = add(
         "archive-changes",
         _ops("cmd_index_archive_changes"),
         "Move old change-feed ranges to the sealed archive ([index] changes_archive; may be the NAS).",

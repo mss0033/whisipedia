@@ -7,6 +7,7 @@ import argparse
 import contextlib
 import json
 import sys
+import time
 from collections import Counter
 from collections.abc import Generator, Mapping, Sequence
 from datetime import UTC, datetime
@@ -313,6 +314,104 @@ def cmd_index_archive_changes(args: argparse.Namespace, out: TextIO) -> int:
                 feed.close()
     except LockHeldError as exc:
         return _busy(exc)
+    return 0
+
+
+@contextlib.contextmanager
+def _index_writer_waiting(
+    cfg: Mapping[str, Any], out: TextIO, *, every: float = 60.0, limit: float = 12 * 3600.0
+) -> Generator[None]:
+    """:func:`_index_writer`, waiting for a holder to finish instead of failing at once (a day-long
+    rebuild must not give up at its last step because the nightly job holds the lock)."""
+    deadline = time.monotonic() + limit
+    stack = contextlib.ExitStack()
+    while True:
+        try:
+            stack.enter_context(_index_writer(cfg))
+            break
+        except LockHeldError as exc:
+            if time.monotonic() >= deadline:
+                raise
+            out.write(f"waiting for the index lock ({exc})\n")
+            out.flush()
+            time.sleep(every)
+    with stack:
+        yield
+
+
+def cmd_index_rebuild_lexical(args: argparse.Namespace, out: TextIO) -> int:
+    """Build a fresh search index in ``--into`` from the indexed generations (``wsp_cli.relex``)."""
+    from wsp_cli.relex import Relexer, relex
+    from wsp_index import TantivyConfig, TantivyIndex
+    from wsp_index.lexical import point_tantivy, tantivy_dir
+
+    _, cfg, specs = _context(args)
+    p = bootstrap.paths(cfg)
+    into = Path(args.into).expanduser().resolve()
+    if into == p.lexical.resolve():
+        out.write("rebuild-lexical: --into must not be the live lexical directory\n")
+        return 2
+    into.mkdir(parents=True, exist_ok=True)
+    if args.tantivy_dir:
+        target = Path(args.tantivy_dir).expanduser().resolve()
+        if tantivy_dir(into) not in (into / "tantivy", target):
+            out.write(f"rebuild-lexical: {into} already builds into {tantivy_dir(into)}\n")
+            return 2
+        point_tantivy(into, target)
+    config = TantivyConfig(
+        languages=bootstrap.index_languages(cfg), source_priors=bootstrap.source_priors(cfg, specs)
+    )
+    state_path = p.require_index() / "index-state.json"
+
+    def state() -> dict[str, str]:
+        return dict(json.loads(state_path.read_text(encoding="utf-8"))) if state_path.is_file() else {}
+
+    def say(line: str) -> None:
+        out.write(line + "\n")
+        out.flush()
+
+    index = TantivyIndex(into, config, titles=lambda: bootstrap.indexed_titles(p))
+    try:
+        relexer = Relexer(index, p.refinery, state, say=say)
+        report = relex(relexer, p.lexical, lambda: _index_writer_waiting(cfg, out))
+    except LockHeldError as exc:
+        return _busy(exc)
+    finally:
+        index.close()
+    out.write(
+        f"rebuild-lexical: {report.sources} sources, {report.documents:,} documents loaded, "
+        f"caught up: {', '.join(report.caught_up) or 'nothing'}\n"
+        f"Next: docs/runbooks/move-to-nas.md, 'Switch to the rebuilt search index'.\n"
+    )
+    return 0
+
+
+def cmd_index_point_tantivy(args: argparse.Namespace, out: TextIO) -> int:
+    """Make a verified copy of a lexical directory's Tantivy index the one it uses (e.g. on the NAS)."""
+    import tantivy
+
+    from wsp_index.lexical import point_tantivy, tantivy_dir
+
+    lexical = Path(args.lexical).expanduser().resolve()
+    target = Path(args.target).expanduser().resolve()
+    current = tantivy_dir(lexical)
+    for path in (current, target):
+        if not (path / "meta.json").is_file():
+            out.write(f"point-tantivy: {path} is not a Tantivy index\n")
+            return 2
+    if (current / "meta.json").read_bytes() != (target / "meta.json").read_bytes():
+        out.write(f"point-tantivy: {target} is not a copy of {current} (meta.json differs)\n")
+        return 2
+    mine = {f.name: f.stat().st_size for f in current.iterdir() if f.is_file() and not f.name.startswith(".")}
+    theirs = {
+        f.name: f.stat().st_size for f in target.iterdir() if f.is_file() and not f.name.startswith(".")
+    }
+    if mine != theirs:
+        out.write(f"point-tantivy: {target} does not hold the same files as {current}\n")
+        return 2
+    tantivy.Index.open(str(target))  # opens: segments and schema readable
+    point_tantivy(lexical, target)
+    out.write(f"point-tantivy: {lexical} now uses {target} (the old copy at {current} can go)\n")
     return 0
 
 

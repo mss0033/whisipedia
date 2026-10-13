@@ -41,6 +41,7 @@ if TYPE_CHECKING:  # heavy imports stay lazy so `wsp search --url ...` starts fa
     from wsp_index import ParquetDocumentStore, SqliteChangeFeed, TantivyIndex
     from wsp_index.feedarchive import ChangeArchive
     from wsp_index.spelling import ReloadingSpeller
+    from wsp_index.titles import TitleSources
     from wsp_vault.ledger import JsonlLedger
     from wsp_vault.vault import FileVault
 
@@ -463,7 +464,24 @@ def open_index(
     p = paths(cfg)
     ensure_local(p.require_index())
     config = TantivyConfig(languages=index_languages(cfg), source_priors=source_priors(cfg, specs))
-    return TantivyIndex(p.lexical, config, texts=None if documents is None else documents.texts)
+    return TantivyIndex(
+        p.lexical,
+        config,
+        texts=None if documents is None else documents.texts,
+        titles=lambda: indexed_titles(p),
+    )
+
+
+def indexed_titles(p: Paths) -> TitleSources:
+    """Titles and aliases of the indexed generations, for a full suggest rebuild (ADR-0011)."""
+    import json
+
+    from wsp_cli.indexer import STATE_FILE, indexed_title_sources
+
+    root = p.require_index()
+    state_path = root / STATE_FILE
+    state = dict(json.loads(state_path.read_text(encoding="utf-8"))) if state_path.is_file() else {}
+    return indexed_title_sources(p.refinery, root / "work", state)
 
 
 def open_documents(cfg: Mapping[str, Any]) -> ParquetDocumentStore:

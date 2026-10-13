@@ -31,7 +31,7 @@ import re
 import shutil
 import sqlite3
 import time
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
@@ -39,7 +39,6 @@ from typing import TextIO, cast
 
 from wsp_adapters.entries import EntrySource, Redirect
 from wsp_core.errors import FetchError
-from wsp_core.ids import DocId, InvalidDocIdError, make_doc_id
 from wsp_core.model import (
     DocRecord,
     FetchResult,
@@ -59,7 +58,7 @@ from wsp_index.catalog import (
     is_featured_source,
     refresh_featured,
 )
-from wsp_index.linkrank import RankConfig, RankStats, StaticRank, compute_static_rank, fence_path, write_fence
+from wsp_index.linkrank import RankConfig, RankStats, compute_static_rank, fence_path, write_fence
 from wsp_index.refinery import (
     CURRENT_FILE,
     SUCCESS_FILE,
@@ -70,8 +69,10 @@ from wsp_index.refinery import (
     id_map_dir,
     is_sealed,
     part_dir,
+    set_members,
 )
 from wsp_index.spelling import SPELL_FILE, SpellConfig, VocabStats, build_vocabulary
+from wsp_index.titles import IndexedSource, TitleSources
 from wsp_orchestrator.pipeline import RefineResult
 
 PROGRESS_EVERY = 10_000
@@ -339,8 +340,8 @@ class Indexer:
             self._say(f"  {spec.id}/{generation_id}: id map written")
         _write_durably(self.refinery / spec.id / CURRENT_FILE, generation_id + "\n")
         stats = refresh(self.index, self.feed, old, new, progress=self._say)
-        for gid in dict.fromkeys((generation_id, *alias_generations)):
-            self._apply_redirect_aliases(spec, gid)
+        if any(p.is_file() for p in self._redirect_tables(spec.id, (generation_id, *alias_generations))):
+            self.index.mark_suggest_stale()  # its redirects join the trie at the rebuild in finish()
         self.index.commit(rebuild_suggest=False)
         self._changed = True
         state[spec.id] = generation_id
@@ -370,9 +371,9 @@ class Indexer:
         state = self._state()
         removed = 0
         if self.index.has_source(spec.id):
-            for ids in self.index.source_doc_ids(spec.id):
-                removed += self.index.delete([DocId(d) for d in ids])
-                self.index.commit(rebuild_suggest=False)
+            removed = self._indexed_count(spec.id)
+            self.index.delete_source(spec.id)
+            self.index.commit(rebuild_suggest=False)
             self._changed = True
         if spec.id in state:
             del state[spec.id]
@@ -424,23 +425,22 @@ class Indexer:
         self._say(f"  catalog {spec.id}/{generation_id}: built in {self.clock() - started:.1f}s")
         return path
 
-    def _apply_redirect_aliases(self, spec: SourceSpec, generation_id: str) -> None:
-        path = self.work / spec.id / generation_id / "redirects.sqlite"
-        if not path.is_file():
-            return
-        with closing(sqlite3.connect(path)) as db:
-            batch: dict[str, list[str]] = {}
-            for target, alias in db.execute("SELECT target, alias FROM redirects ORDER BY target"):
-                try:
-                    doc_id = make_doc_id(spec.id, str(target))
-                except InvalidDocIdError:
-                    continue
-                if doc_id not in batch and len(batch) >= 5_000:
-                    self.index.set_aliases(batch)
-                    batch = {}
-                batch.setdefault(doc_id, []).append(str(alias))
-            if batch:
-                self.index.set_aliases(batch)
+    def _redirect_tables(self, source_id: str, generation_ids: Iterable[str]) -> list[Path]:
+        """The ``redirects.sqlite`` of each refined generation (written by :meth:`refine`)."""
+        return [self.work / source_id / gid / "redirects.sqlite" for gid in dict.fromkeys(generation_ids)]
+
+    def _indexed_count(self, source_id: str) -> int:
+        """Documents of ``source_id`` in its indexed generation (0 when unknown)."""
+        gen = self._state().get(source_id)
+        path = generation_dir(self.refinery, source_id, gen) / SUCCESS_FILE if gen else None
+        try:
+            return int(json.loads(path.read_text(encoding="utf-8")).get("docs", 0)) if path else 0
+        except (OSError, ValueError):
+            return 0
+
+    def title_sources(self) -> TitleSources:
+        """Titles and aliases of the indexed generations (the suggest trie's and the rank's inputs)."""
+        return indexed_title_sources(self.refinery, self.work, self._state())
 
     # --- static rank (PageRank) ---------------------------------------------------------------
 
@@ -465,14 +465,18 @@ class Indexer:
                 readers,
                 self.index.rank_path,
                 self.work / "_rank",
-                aliases=self.index.iter_aliases(),
+                aliases=self.title_sources().iter_aliases(),
                 config=config or RankConfig(),
                 progress=self._say,
             )
             self._say(f"rank: {stats.line()}")
         rank = self.index.reload_static_rank()
         if rank is not None:
-            self._apply_priors(readers, rank)
+            # Suggest priors are the rank's features, read from the rank file: one trie rebuild.
+            started_suggest = self.clock()
+            self.index.mark_suggest_stale()
+            self.index.commit()
+            self._say(f"rank: suggest rebuilt in {self.clock() - started_suggest:.1f}s")
             for sid, reader in readers:
                 spec = self.specs[sid]
                 if is_featured_source(spec):
@@ -512,24 +516,6 @@ class Indexer:
         stats = build_vocabulary(readers, path, config or SpellConfig(), progress=self._say)
         self._say(f"spell: {stats.line()}")
         return stats
-
-    def _apply_priors(self, readers: Sequence[tuple[str, RefineryReader]], rank: StaticRank) -> None:
-        """Suggest popularity priors from the static rank: one bulk load per source (streamed, 50k
-        documents at a time), then one suggest rebuild."""
-
-        def batches(reader: RefineryReader) -> Iterator[dict[str, float]]:
-            for batch in reader.scan(["doc_id"], batch_size=50_000):
-                ids = cast(list[str], batch.column(0).to_pylist())
-                yield {d: float(f) for d, f in zip(ids, rank.features(ids), strict=True)}
-
-        def per_source() -> Iterator[Iterator[dict[str, float]]]:
-            for sid, reader in readers:
-                self._say(f"rank: priors for {sid}")  # one line per source: progress in the log
-                yield batches(reader)
-
-        n = self.index.set_priors_bulk(per_source())
-        self._say(f"rank: {n:,} suggest priors set")
-        self.index.commit()
 
     # --- whole runs ----------------------------------------------------------------------------
 
@@ -584,3 +570,17 @@ class Indexer:
             )
         self.finish()
         return reports
+
+
+def indexed_title_sources(refinery: Path, work: Path, state: Mapping[str, str]) -> TitleSources:
+    """:class:`TitleSources` of the generations ``state`` (``index-state.json``) records as indexed: each
+    one's Refinery reader and redirect tables (a set generation's are its members')."""
+    sources: list[IndexedSource] = []
+    for sid in sorted(state):
+        gen_dir = generation_dir(refinery, sid, state[sid])
+        if not is_sealed(gen_dir):
+            continue
+        gens = (state[sid], *(set_members(gen_dir) or ()))
+        tables = tuple(work / sid / g / "redirects.sqlite" for g in dict.fromkeys(gens))
+        sources.append(IndexedSource(sid, RefineryReader(gen_dir, map_ids=False), tables))
+    return TitleSources(sources)

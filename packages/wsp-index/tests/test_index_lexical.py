@@ -21,7 +21,8 @@ from wsp_index import (
 )
 from wsp_index.lexical import SchemaMismatchError
 from wsp_index.refinery import generation_dir
-from wsp_index_helpers import SnippetIndex, doc
+from wsp_index.titles import IndexedSource, TitleSources
+from wsp_index_helpers import SnippetIndex, doc, set_rank
 
 SMALL = TantivyConfig(writer_heap_bytes=20_000_000, writer_threads=1)
 
@@ -130,14 +131,13 @@ def test_lookup(index: TantivyIndex) -> None:
 
 
 def test_suggest_priors_and_aliases(index: TantivyIndex) -> None:
-    index.upsert([doc("s", "p", "Paris"), doc("s", "pc", "Paris Commune"), doc("s", "ph", "Paris Hilton")])
+    paris = replace(doc("s", "p", "Paris"), aliases=("City of Light",))
+    index.upsert([paris, doc("s", "pc", "Paris Commune"), doc("s", "ph", "Paris Hilton")])
     index.commit()
     assert index.suggest("paris") == ["Paris", "Paris Hilton", "Paris Commune"]  # shorter first
-    index.set_priors({make_doc_id("s", "pc"): 5.0})
-    index.set_aliases({make_doc_id("s", "p"): ["City of Light"]})
-    index.commit()
+    assert index.suggest("city of") == ["Paris"]  # the document's own aliases join at once
+    set_rank(index, {make_doc_id("s", "pc"): 0.9})  # priors are the static rank's features
     assert index.suggest("paris")[0] == "Paris Commune"
-    assert index.suggest("city of") == ["Paris"]
 
 
 def test_suggest_rebuild_path_matches_overlay_path(tmp_path: Path) -> None:
@@ -428,15 +428,22 @@ def test_the_commit_stamp_changes_with_every_commit(index: TantivyIndex) -> None
 def test_suggest_titles_are_shared_by_the_sources(tmp_path: Path) -> None:
     # Unranked titles (a rebuild ranks last) were taken in reverse doc-id order until the key budget ran
     # out: one source's titles, the one sorting last (every completion of "dog" was a Wiktionary phrase).
+    sources: list[IndexedSource] = []
+    docs = {
+        "books": [doc("books", f"b{i:03d}", f"Huckleberry {i}") for i in range(100)],
+        "words": [doc("words", f"w{i:03d}", f"Dog phrase {i}") for i in range(100)],
+        "encyc": [doc("encyc", f"e{i:03d}", f"Ranked {i}") for i in range(100)],
+    }
+    for sid, items in docs.items():
+        with RefineryWriter(tmp_path / "ref", sid, "g1") as w:
+            w.write(items)
+        sources.append(IndexedSource(sid, RefineryReader(generation_dir(tmp_path / "ref", sid, "g1"))))
     cfg = replace(SMALL, suggest_max_keys=60, suggest_open_rebuild_titles=0)
-    with TantivyIndex(tmp_path / "ix", cfg) as idx:
-        idx.upsert([doc("books", f"b{i:03d}", f"Huckleberry {i}") for i in range(100)])
-        idx.upsert([doc("words", f"w{i:03d}", f"Dog phrase {i}") for i in range(100)])
-        idx.upsert([doc("encyc", f"e{i:03d}", f"Ranked {i}") for i in range(100)])
-        idx.set_priors({make_doc_id("encyc", f"e{i:03d}"): 1.0 + i for i in range(100)})
-        idx.commit()
-        idx.rebuild_suggest()
-        entries = list(idx._all_entries())  # pyright: ignore[reportPrivateUsage]
+    with TantivyIndex(tmp_path / "ix", cfg, titles=TitleSources(sources)) as idx:
+        for items in docs.values():
+            idx.upsert(items)
+        set_rank(idx, {make_doc_id("encyc", f"e{i:03d}"): (1.0 + i) / 101 for i in range(100)})
+        entries = idx._suggest_entries()  # pyright: ignore[reportPrivateUsage]
         assert len(entries) == 60
         by_source = Counter(e.doc_id.split("/")[0] for e in entries)
         # half for ranked titles, best first; the other half shared by the three sources
@@ -470,22 +477,10 @@ def test_a_query_reads_each_stored_document_once() -> None:
     assert memo.num_docs == 7  # everything else goes to the searcher
 
 
-def test_bulk_priors_replace_every_prior_and_rebuild_suggest(index: TantivyIndex) -> None:
+def test_a_new_rank_replaces_every_prior(index: TantivyIndex) -> None:
     index.upsert([doc("s", "p", "Paris"), doc("s", "pc", "Paris Commune"), doc("t", "ph", "Paris Hilton")])
     index.commit()
-    index.set_priors({make_doc_id("s", "p"): 9.0})  # an old prior the new rank no longer gives
-    index.commit()
+    set_rank(index, {make_doc_id("s", "p"): 0.9})
     assert index.suggest("paris")[0] == "Paris"
-    n = index.set_priors_bulk(
-        [
-            [{make_doc_id("s", "pc"): 5.0}, {make_doc_id("s", "p"): 0.0}],  # source s, two batches
-            [{make_doc_id("t", "ph"): 2.0, make_doc_id("t", "missing"): 1.0}],  # source t
-        ]
-    )
-    assert n == 2  # rows that exist and got a non-zero prior
-    index.commit()
+    set_rank(index, {make_doc_id("s", "pc"): 0.5, make_doc_id("t", "ph"): 0.2})  # p has no rank now
     assert index.suggest("paris") == ["Paris Commune", "Paris Hilton", "Paris"]
-    rows = dict(index._db.execute("SELECT doc_id, prior FROM titles").fetchall())  # pyright: ignore[reportPrivateUsage]
-    assert rows[make_doc_id("s", "p")] == 0.0  # the old prior was cleared
-    names = {r[0] for r in index._db.execute("SELECT name FROM sqlite_master WHERE type = 'index'")}  # pyright: ignore[reportPrivateUsage]
-    assert "titles_prior" in names  # rebuilt after the load

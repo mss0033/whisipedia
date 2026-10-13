@@ -13,13 +13,15 @@ Package `packages/wsp-index` (import `wsp_index`). Implements PLAN §9.1–9.3 a
 `HybridSearcher` fuses a `LexicalIndex` with an optional `VectorIndex` + `Embedder`. `sync.refresh` diffs
 two Refinery generations, updates the index, then publishes the changes to the feed.
 
-## Storage placement (ADR-0002)
+## Storage placement (ADR-0002, ADR-0011)
 
 | Data | Where | Why |
 |---|---|---|
-| Refinery Parquet | NAS or local | write-once, sealed files; atomic `*.partial` and rename; no mmap (a soft SMB mount would turn I/O errors into SIGBUS) |
-| Tantivy index, `meta.sqlite`, suggest tries | **local disk only** | mutable and locked; `ensure_local()` refuses `cifs`/`smb3`/`nfs`/`9p`/... mounts |
-| Change feed SQLite (WAL) | **local disk only** | same reason |
+| Refinery Parquet (`[index] refinery_root`) | NAS or local | write-once, sealed files; atomic `*.partial` and rename; no mmap over the NAS (a soft SMB mount turns I/O errors into SIGBUS) |
+| Refinery id maps (`<index>/refinery-maps`) | local | memory-mapped on every document lookup |
+| Tantivy index (`lexical/TANTIVY.txt` names it) | NAS or local | built on local disk, copied once (`wsp index point-tantivy`); a NAS outage can crash a reader, never damage the index |
+| `meta.sqlite` (settings, source numbers), suggest tries, rank, spelling | **local disk only** | SQLite cannot run on the SMB share; the rest is read on every keystroke or query |
+| Change feed SQLite (WAL) | **local disk only** | same reason; old ranges move to the archive (`[index] changes_archive`, NAS) |
 
 ## Refinery layout
 
@@ -71,7 +73,9 @@ compression measured. Groups larger than 1,024 rows push lookups past the API bu
 
 Every title and alias becomes one key, `normalized\x1fTitle\x1fdoc_id`, stored in a MARISA trie
 (`marisa-trie`, mmapped) with a float32 score. The score is `prior + 1/(1+len(title))`, where
-`prior` is the static-rank feature (PageRank, below) set with `set_priors` by `wsp index rank`. Very short prefixes match too many keys to
+`prior` is the static-rank feature (PageRank, below), read from `static_rank.bin`. A full rebuild
+takes its titles and aliases from the Refinery and the redirect tables (`wsp_index.titles`), never
+from a copy in a database (ADR-0011). Very short prefixes match too many keys to
 rank on every keystroke, so at build time each prefix with more than 512 completions stores its
 top 32 keys in a second trie. Every other prefix ranks at most 512 candidates. Between rebuilds,
 incremental changes go to an in-memory overlay. The overlay is folded into the trie on commit once
@@ -99,7 +103,8 @@ build` runs it last whenever something changed (`--no-rank` skips it).
 * **Graph.** Nodes are the documents of every source's current Refinery generation; edges are
   `DocRecord.links` that start with `wsp:`. Targets resolve with `pyarrow.compute.index_in` (C++): the
   exact doc id first, then a loose key (lower case, `_` as space, no `#fragment`) that also covers
-  redirects and aliases from `meta.sqlite`. Self-links and duplicate links are dropped. Edges go to an
+  redirects and aliases (`TitleSources.iter_aliases`: the Refinery's `aliases` column and the
+  redirect tables). Self-links and duplicate links are dropped. Edges go to an
   on-disk list under `work/_rank/`, split into links inside one source and links across sources.
 * **Ranks.** One streamed power iteration (damping 0.85, L1 tolerance 1e-6, at most 50 rounds) yields
   two PageRanks: **per source** (only links inside the source; teleport and dangling mass stay in the
@@ -176,11 +181,13 @@ list length, so check the result again on the real English Wikipedia index (35×
   `wikipedia-en-zim` gets a flat static rank; the link graph comes from the dump source
   (`wikipedia-en`) and the other adapters that emit `wsp:` links.
 
-- `DocRecord.aliases` (Refinery format 2) are added to the suggest aliases on upsert; redirects still come in through `TantivyIndex.set_aliases` (`wsp index build` does this).
+- `DocRecord.aliases` (Refinery format 2) join the suggest overlay on upsert; redirect aliases join at
+  the next full trie rebuild (a new generation with redirects marks the trie stale).
 - Suggest matches title prefixes only. It does not complete words in the middle of a title.
 - Dense retrieval is a seam only (`NumpyVectorIndex` is exact and O(n)). ANN and a real embedder
   are Phase 3.
 - `diff_generations` loads `(doc_id, content_hash)` for two generations into memory, about 100
   bytes per document. Partition it by hash before running it on the 7M-article sources.
-- `meta.sqlite` commits after the Tantivy commit. A crash between the two leaves suggest one batch
-  behind until that batch is re-applied (upserts are idempotent).
+- Without the old generation (lost `index-state.json`), stale documents of a source are found in its
+  other Refinery generations; leftovers of a generation deleted from the Refinery by hand are not
+  (`wsp index rebuild-lexical` clears them).
