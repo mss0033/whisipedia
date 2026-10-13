@@ -82,8 +82,12 @@ def browse_router(lib: Library) -> APIRouter:
 
     # --- Portal ---------------------------------------------------------------------------------
 
-    @r.get("/portal", tags=["navigator"])
-    def portal() -> Portal:
+    @r.get("/portal", tags=["navigator"], responses=errors(503))
+    async def portal() -> Portal:
+        # The random pick and the featured document read the Refinery (the NAS since ADR-0011).
+        return await lib.nas.run(_portal)
+
+    def _portal() -> Portal:
         today = s.clock().date()
         portal_source = lib.catalog if isinstance(lib.catalog, PortalSource) else None
         pick = portal_source.featured(today) if portal_source is not None else None
@@ -216,11 +220,14 @@ def browse_router(lib: Library) -> APIRouter:
 
     # --- Random ---------------------------------------------------------------------------------
 
-    @r.get("/random", tags=["navigator"], responses=errors(404))
-    def random_page(
+    @r.get("/random", tags=["navigator"], responses=errors(404, 503))
+    async def random_page(
         source: Annotated[str | None, Query(description="Pick from this source only.")] = None,
         seed: Annotated[int | None, Query(description="Make the pick reproducible.")] = None,
     ) -> DocRef:
+        return await lib.nas.run(lambda: _random_page(source, seed))
+
+    def _random_page(source: str | None, seed: int | None) -> DocRef:
         if source is not None:
             lib.source(source)
         rng = random.Random(secrets.randbits(64) if seed is None else seed)  # noqa: S311 - not security

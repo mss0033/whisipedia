@@ -638,6 +638,9 @@ def ensure_id_map(gen_dir: Path, map_dir: Path) -> bool:
     return True
 
 
+ID_ROW_GROUPS_CACHED = 2
+
+
 # --- reader ------------------------------------------------------------------------------------
 
 
@@ -712,6 +715,9 @@ class RefineryReader:
             self._map_ids = map_ids
         self._id_groups: tuple[pq.ParquetFile, list[tuple[int, int]]] | None = None
         self._id_groups_lock = threading.Lock()  # a ParquetFile is not safe for concurrent reads
+        # Decoded id row groups of the last sparse lookups (~20 B a row, a row group is ~1M rows): a
+        # history page asks the same generations for one document, a diff for neighbouring hashes.
+        self._id_rows: OrderedDict[int, tuple[npt.NDArray[np.uint64], pa.Table]] = OrderedDict()
 
     def _sparse(self) -> bool:
         """Lookups read ``_ids.parquet`` row groups instead of loading (or writing) the id index."""
@@ -751,8 +757,16 @@ class RefineryReader:
             out: list[tuple[int, int, int]] = []
             for i, (lo, hi) in enumerate(bounds):
                 if lo <= int(h) <= hi:
-                    t = pf.read_row_group(i, columns=["h", "part", "rg", "row"])  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
-                    hs = t.column(0).to_numpy()
+                    cached = self._id_rows.get(i)
+                    if cached is None:
+                        t = pf.read_row_group(i, columns=["h", "part", "rg", "row"])  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
+                        cached = (t.column(0).to_numpy(), t)
+                        self._id_rows[i] = cached
+                        while len(self._id_rows) > ID_ROW_GROUPS_CACHED:
+                            self._id_rows.popitem(last=False)
+                    else:
+                        self._id_rows.move_to_end(i)
+                    hs, t = cached
                     j = int(np.searchsorted(hs, h))
                     while j < len(hs) and hs[j] == h:
                         out.append(
@@ -819,6 +833,11 @@ class RefineryReader:
         if h.dtype != np.uint64 or loc.dtype != np.uint32 or h.shape != (n,) or loc.shape != (n, 3):
             return None  # torn or from another index: rewritten
         return cast(npt.NDArray[np.uint64], h), cast(npt.NDArray[np.uint32], loc)
+
+    @property
+    def id_rows_bytes(self) -> int:
+        """Memory of the decoded id row groups kept for sparse lookups (:data:`ID_ROW_GROUPS_CACHED`)."""
+        return sum(t.nbytes + h.nbytes for h, t in self._id_rows.values())
 
     @property
     def id_index_bytes(self) -> int:

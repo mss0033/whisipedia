@@ -27,6 +27,7 @@ def _reader_cost(reader: RefineryReader) -> int:
     file footers (~2.5 MB each) and the row-group cache (~4 MB of text each, by the writer's sizing)."""
     return (
         reader.id_index_bytes
+        + reader.id_rows_bytes
         + 3 * 1024 * 1024 * reader.max_open_files
         + 4 * 1024 * 1024 * reader.cache_row_groups
     )

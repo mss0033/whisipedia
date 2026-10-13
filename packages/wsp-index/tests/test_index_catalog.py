@@ -198,3 +198,36 @@ def test_catalog_builders_map_the_id_index_locally_on_the_nas(
     assert any(maps.rglob("*.npy"))
     assert refresh_featured(refinery, "wikipedia-en-zim", "2026-08", tmp_path / "catalog", cfg, map_root=maps)
     assert not any((tmp_path / "refinery").rglob("*.npy"))  # never beside the generation on the NAS
+
+
+def test_random_picks_ask_the_nas_for_each_source_once_in_a_while(tmp_path: Path) -> None:
+    """Finding a source's current generation is three metadata round trips on the NAS, and listing
+    the Refinery a directory walk: once per source per reload period, not per pick."""
+    refinery = tmp_path / "refinery"
+    _wiki(refinery)
+    _bundle(refinery)
+    feed = SqliteChangeFeed(tmp_path / "changes.sqlite")
+    clock = {"t": 100.0}
+    cat = RefineryCatalog(
+        refinery,
+        tmp_path / "catalog",
+        feed,
+        sources=["wikipedia-en-zim", "kiwix-bundle"],
+        reload_seconds=5,
+        monotonic=lambda: clock["t"],
+    )
+    calls = {"n": 0}
+
+    def counting(root: Path, source_id: str) -> str | None:
+        calls["n"] += 1
+        return refinery_module.current_generation(root, source_id)
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr("wsp_index.catalog.current_generation", counting)
+        for i in range(5):
+            assert cat.random_doc(sources=None, rng=random.Random(i)) is not None
+        assert calls["n"] == 2  # one per registered source
+        assert cat._known_sources() == ["kiwix-bundle", "wikipedia-en-zim"]  # pyright: ignore[reportPrivateUsage]
+        clock["t"] += 6
+        assert cat.random_doc(sources=None, rng=random.Random(9)) is not None
+        assert calls["n"] == 4

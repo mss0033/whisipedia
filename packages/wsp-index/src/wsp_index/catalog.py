@@ -582,6 +582,7 @@ class RefineryCatalog:
         self._lock = threading.Lock()
         self._entries: dict[str, tuple[float, _Entry | None]] = {}
         self._readers: dict[tuple[str, str], RefineryReader] = {}  # current generation of each source
+        self._current: dict[str, tuple[float, str | None]] = {}  # source -> (asked at, generation)
 
     # --- precomputed data ---
 
@@ -620,14 +621,30 @@ class RefineryCatalog:
         return _Entry(mtime, data, cats)
 
     def _known_sources(self) -> list[str]:
-        found = set(self.sources)
-        if self.refinery_root.is_dir():
-            found.update(p.name for p in self.refinery_root.iterdir() if p.is_dir())
-        return sorted(found)
+        """The registry's sources; only without one (tests, ad-hoc tools) is the Refinery listed, a
+        directory walk that is many round trips on the NAS and ran on every random pick."""
+        if self.sources:
+            return sorted(self.sources)
+        if not self.refinery_root.is_dir():
+            return []
+        return sorted(p.name for p in self.refinery_root.iterdir() if p.is_dir())
+
+    def _current_generation(self, source_id: str) -> str | None:
+        """Remembered for ``reload_seconds``: three metadata round trips on the NAS, asked once per
+        source on every random pick and start page."""
+        now = self._monotonic()
+        with self._lock:
+            hit = self._current.get(source_id)
+            if hit is not None and now - hit[0] < self.reload_seconds:
+                return hit[1]
+        gen = current_generation(self.refinery_root, source_id)
+        with self._lock:
+            self._current[source_id] = (now, gen)
+        return gen
 
     def _reader(self, source_id: str) -> RefineryReader | None:
         """The current generation's reader (cheap until a random pick memory-maps its id index)."""
-        gen = current_generation(self.refinery_root, source_id)
+        gen = self._current_generation(source_id)
         if gen is None:
             return None
         key = (source_id, gen)

@@ -19,6 +19,12 @@ All notable changes are documented here. The format follows [Keep a Changelog](h
   old cursor no longer holds up the start page's recent changes and every other reader.
 * The nightly index unit runs with `MALLOC_ARENA_MAX=2`: Tantivy allocates with glibc malloc, and with
   about fifty threads the default per-thread arenas kept 2.5 GB of freed memory.
+* The catalog remembers each source's current generation for its reload period and takes the known
+  sources from the registry: a random pick had asked the NAS for every source's pointer and walked the
+  Refinery's directory each time.
+* A reader without an id map keeps its last two decoded `_ids.parquet` row groups (a history page asks
+  the same older generations for one document). `/v1/portal`, `/v1/random` and `/v1/documents/{id}/history`
+  run in the NAS pool (deadline and shedding) rather than FastAPI's default thread pool.
 
 ### Fixed: content profiles no longer hold the heavy lock; the health check restarts an API at its ceiling (2026-10-13)
 * A content profile takes its own `PROFILE` lock instead of `HEAVY`. Paced to a share of the NAS link

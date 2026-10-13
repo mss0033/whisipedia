@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any, cast
 
+import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 
 from wsp_index import refinery
@@ -161,3 +165,27 @@ def test_the_document_store_asks_for_the_current_generation_once_in_a_while(
     clock["t"] += CURRENT_TTL + 1
     assert store.get(DOCS[1].doc_id) is not None
     assert calls["n"] == 2
+
+
+def test_sparse_lookups_keep_the_last_decoded_id_row_groups(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without a map (older generations read for history) each lookup read and decoded a whole
+    ``_ids.parquet`` row group over the NAS; the last two are kept."""
+    gen = _write(tmp_path / "nas")
+    monkeypatch.setattr(refinery, "filesystem_type", _on_smb)
+    reads = {"n": 0}
+    real = cast(Callable[..., pa.Table], pq.ParquetFile.read_row_group)  # pyright: ignore[reportUnknownMemberType]
+
+    def counting(self: pq.ParquetFile, i: int, *args: Any, **kw: Any) -> pa.Table:
+        reads["n"] += 1
+        return real(self, i, *args, **kw)
+
+    monkeypatch.setattr(pq.ParquetFile, "read_row_group", counting)
+    reader = RefineryReader(gen, map_ids=False)
+    before = reads["n"]
+    for d in DOCS[:10]:
+        assert reader.lookup(d.doc_id, ("content_hash",)) is not None
+    id_reads = reads["n"] - before
+    assert id_reads <= 10  # the part's row groups, read once each: not one id row group per lookup
+    assert reader.id_rows_bytes > 0

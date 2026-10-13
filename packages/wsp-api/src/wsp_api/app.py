@@ -236,8 +236,15 @@ def _v1(lib: Library, settings: ApiSettings) -> APIRouter:
     # --- Documents ------------------------------------------------------------------------------
     # The doc id is one raw path segment (wsp_api.routing), so the two routes cannot collide.
 
-    @r.get("/documents/{doc_id}/history", tags=["documents"], responses=errors(400, 404))
-    def document_history(doc_id: DocIdSegment, cursor: Cursor = None, limit: Limit = 100) -> HistoryPage:
+    @r.get("/documents/{doc_id}/history", tags=["documents"], responses=errors(400, 404, 503))
+    async def document_history(
+        doc_id: DocIdSegment, cursor: Cursor = None, limit: Limit = 100
+    ) -> HistoryPage:
+        # Every older generation is a Refinery read, on the NAS since ADR-0011: the NAS pool's deadline
+        # and shedding apply, not the default thread pool's.
+        return await lib.nas.run(lambda: _history(doc_id, cursor, limit))
+
+    def _history(doc_id: str, cursor: str | None, limit: int) -> HistoryPage:
         did = parse_doc(unquote(doc_id))
         versions = lib.history(did)
         if not versions:
