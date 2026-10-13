@@ -147,10 +147,20 @@ def build_oracle(
     index_root = _index_root(cfg)
     if lexical is None:
         lexical = _open_lexical(cfg, index_root)
-        if content_hashes is None and index_root is not None and (index_root / "refinery").is_dir():
+        if content_hashes is None and index_root is not None:
             from wsp_index import ParquetDocumentStore
+            from wsp_index.refinery import configured_root
 
-            content_hashes = ParquetDocumentStore(index_root / "refinery").content_hashes
+            index = cfg.get("index", {})
+            value = (
+                cast(Mapping[str, Any], index).get("refinery_root") if isinstance(index, Mapping) else None
+            )
+            refinery = configured_root(index_root, value)
+            if refinery.is_dir():
+                maps = (
+                    index_root / "refinery-maps" if str(value or "").strip() else None
+                )  # as bootstrap.Paths
+                content_hashes = ParquetDocumentStore(refinery, map_root=maps).content_hashes
     if resolve is None:
         lookup = getattr(lexical, "lookup", None)
         resolve = cast(Resolver, lookup) if callable(lookup) else None

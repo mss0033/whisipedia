@@ -15,6 +15,7 @@ from wsp_index.refinery import (
     RefineryReader,
     current_generation,
     generation_dir,
+    id_map_dir,
     is_sealed,
     sealed_generations,
 )
@@ -43,12 +44,21 @@ class ParquetDocumentStore:
     The cache is bounded by an estimate of their memory (``memory_budget`` bytes: id index, open file
     footers, cached row groups), not just by count: one wikipedia-top10 reader is ~0.8 GB, a small
     source's a few MB, so a count bound alone let the API reach 5 GB (audit api-cli #3).
+
+    ``map_root``: a local directory for the id-map sidecars (:func:`~wsp_index.refinery.id_map_dir`),
+    for a Refinery on the NAS (ADR-0011). Without it they live next to each generation.
     """
 
     def __init__(
-        self, root: Path, *, max_open_generations: int = 16, memory_budget: int = 1536 * 1024 * 1024
+        self,
+        root: Path,
+        *,
+        max_open_generations: int = 16,
+        memory_budget: int = 1536 * 1024 * 1024,
+        map_root: Path | None = None,
     ) -> None:
         self.root = root
+        self.map_root = map_root
         self._readers: OrderedDict[tuple[str, str, bool], RefineryReader] = OrderedDict()
         self._max = max_open_generations
         self._budget = memory_budget
@@ -72,7 +82,8 @@ class ParquetDocumentStore:
         gen_dir = generation_dir(self.root, source_id, generation_id)
         if not is_sealed(gen_dir):
             return None
-        reader = RefineryReader(gen_dir, map_ids=current)
+        map_dir = None if self.map_root is None else id_map_dir(self.map_root, gen_dir)
+        reader = RefineryReader(gen_dir, map_ids=current, map_dir=map_dir)
         with self._lock:
             self._readers[key] = reader
             while len(self._readers) > 1 and (

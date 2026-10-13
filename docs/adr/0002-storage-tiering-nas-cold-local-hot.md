@@ -1,6 +1,6 @@
 # ADR-0002: Cold write-once data on the NAS, hot indexes on local storage
 
-- Status: Proposed
+- Status: Proposed (amended by ADR-0011)
 - Date: 2026-10-09
 
 ## Context

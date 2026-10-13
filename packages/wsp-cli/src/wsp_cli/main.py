@@ -357,6 +357,13 @@ def build_parser(argv: Sequence[str] | None = None) -> argparse.ArgumentParser:
         ix_sub,
     )
     s = add(
+        "archive-changes",
+        _ops("cmd_index_archive_changes"),
+        "Move old change-feed ranges to the sealed archive ([index] changes_archive; may be the NAS).",
+        ix_sub,
+    )
+    s.add_argument("--compact", action="store_true", help="then VACUUM the database to give the space back")
+    s = add(
         "catalog",
         _ops("cmd_index_catalog"),
         "Rebuild the portal/directory/random catalog from the Refinery (local disk).",

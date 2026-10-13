@@ -330,7 +330,7 @@ def test_an_unwritable_generation_falls_back_to_memory(
 
     g = gen(tmp_path, "g1", docs_v1())
 
-    def refuse(gen_dir: Path, n: int) -> None:
+    def refuse(gen_dir: Path, n: int, out_dir: Path) -> None:
         raise PermissionError("read-only")
 
     monkeypatch.setattr(refinery, "_write_id_map", refuse)

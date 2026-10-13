@@ -202,6 +202,7 @@ def open_indexer(
         lambda: bootstrap.open_changes(cfg),
         user_agent=bootstrap.user_agent(cfg),
         out=out,
+        refinery=p.refinery,
     )
     try:
         yield ix
@@ -281,6 +282,36 @@ def cmd_index_spell(args: argparse.Namespace, out: TextIO) -> int:
         return _busy(exc)
     if stats is None:
         out.write("spell: nothing indexed\n")
+    return 0
+
+
+def cmd_index_archive_changes(args: argparse.Namespace, out: TextIO) -> int:
+    """Move old change-feed ranges into the sealed archive (``[index] changes_archive``, ADR-0011)."""
+    _, cfg, _ = _context(args)
+    sec = bootstrap.section(cfg, "index")
+    if bootstrap.paths(cfg).changes_archive is None:
+        out.write("archive-changes: [index] changes_archive is not set\n")
+        return 2
+    try:
+        with _index_writer(cfg):
+            feed = bootstrap.open_changes(cfg)
+            try:
+                report = feed.archive_old(
+                    keep_rows=int(sec.get("changes_keep_rows", 2_000_000)),
+                    keep_per_source=int(sec.get("changes_keep_per_source", 1000)),
+                    say=lambda line: out.write(line + "\n"),
+                )
+                out.write(
+                    f"archive-changes: {report.ranges} range(s) sealed, {report.deleted:,} rows removed, "
+                    f"archived through {report.archived_through:,}\n"
+                )
+                if args.compact:
+                    out.write("archive-changes: compacting the database (rewrites it once)\n")
+                    feed.compact()
+            finally:
+                feed.close()
+    except LockHeldError as exc:
+        return _busy(exc)
     return 0
 
 

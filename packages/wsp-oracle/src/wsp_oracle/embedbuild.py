@@ -35,7 +35,7 @@ import pyarrow.compute as _pc
 
 from wsp_core.ports import Embedder
 from wsp_index import RefineryReader
-from wsp_index.refinery import current_generation, generation_dir
+from wsp_index.refinery import configured_root, current_generation, generation_dir
 from wsp_index.text import language_parts
 from wsp_oracle.chunker import Chunk, chunk_text, is_wiki_like, make_chunk_id
 from wsp_oracle.embedder import encode_passages
@@ -326,7 +326,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     index = raw.get("index", {})
     root_value = cast(Mapping[str, Any], index).get("root") if isinstance(index, Mapping) else None
     index_root = Path(str(root_value)).expanduser() if root_value else None
-    refinery = args.refinery or (index_root / "refinery" if index_root else None)
+    refinery_value = (
+        cast(Mapping[str, Any], index).get("refinery_root") if isinstance(index, Mapping) else None
+    )
+    refinery = args.refinery or (configured_root(index_root, refinery_value) if index_root else None)
     if refinery is None or not refinery.is_dir():
         print(f"no Refinery at {refinery} (set index.root or --refinery)", file=sys.stderr)
         return 2

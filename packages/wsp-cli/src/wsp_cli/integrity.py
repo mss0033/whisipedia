@@ -188,7 +188,7 @@ def profile_child(payload: Mapping[str, Any]) -> dict[str, Any]:
         assert ctx.generation is not None
         sec = bootstrap.section(ctx.cfg, "integrity")
         profiler = Profiler(
-            p.index_root / "refinery" if p.index_root is not None else None,
+            p.refinery if p.index_root is not None else None,
             float(sec.get("profile_sample_rate", DEFAULT_SAMPLE_RATE)),
         )
         prof = profiler(
@@ -221,7 +221,7 @@ def integrity_hooks(
     """The guard's hooks. With ``runner`` (the daemon) profiles are computed in child units."""
     sec = bootstrap.section(cfg, "integrity")
     p = bootstrap.paths(cfg)
-    refinery = p.index_root / "refinery" if p.index_root is not None else None
+    refinery = p.refinery if p.index_root is not None else None
 
     def attest(source_id: str, generation_id: str, name: str, body: Mapping[str, Any]) -> str:
         return write_attestation(vault, source_id, generation_id, name, body)

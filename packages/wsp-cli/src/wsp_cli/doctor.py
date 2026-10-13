@@ -146,11 +146,8 @@ class Doctor:
         root = self.paths.index_root
         if root is None or not root.is_dir():
             return Check("index", "Search index", Level.FAIL, f"{root} does not exist; run `wsp index build`")
-        refined = (
-            len([p for p in (root / "refinery").iterdir() if p.is_dir()])
-            if (root / "refinery").is_dir()
-            else 0
-        )
+        refinery = self.paths.refinery
+        refined = len([p for p in refinery.iterdir() if p.is_dir()]) if refinery.is_dir() else 0
         catalog = len(list((root / "catalog").glob("*.json"))) if (root / "catalog").is_dir() else 0
         lexical = (root / "lexical").is_dir()
         level = Level.OK if lexical and refined else Level.WARN

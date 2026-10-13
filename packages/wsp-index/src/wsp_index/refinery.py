@@ -51,6 +51,7 @@ import pyarrow.parquet as pq
 
 from wsp_core.ids import DocId, content_hash
 from wsp_core.model import ChangeRecord, DocRecord
+from wsp_index.localfs import REMOTE_FS_TYPES, filesystem_type
 
 log = logging.getLogger(__name__)
 
@@ -58,9 +59,11 @@ FORMAT_VERSION = 2  # 2: ``aliases`` column (port revision v0.2); older generati
 SUCCESS_FILE = "_SUCCESS.json"
 IDS_FILE = "_ids.parquet"
 SHADOW_FILE = "_shadowed.parquet"  # rows superseded by a later row with the same doc_id
-# The id index as memory-mapped arrays (local disk, ADR-0002): sorted hashes and (part, rg, row). Written
-# next to a sealed generation on its first point lookup, so a long-lived reader (the API) holds it as
-# reclaimable page cache instead of ~20 bytes of anonymous memory per document.
+# The id index as memory-mapped arrays: sorted hashes and (part, rg, row). Written on a sealed
+# generation's first point lookup, so a long-lived reader (the API) holds it as reclaimable page cache
+# instead of ~20 bytes of anonymous memory per document. Next to the generation when the Refinery is on
+# local disk; under a local map root (:func:`id_map_dir`) when it is on the NAS (ADR-0011): a page fault
+# on a ``soft`` SMB mount is a SIGBUS, not an OSError.
 IDS_MAP_H = "_ids.h.npy"
 IDS_MAP_LOC = "_ids.loc.npy"
 CURRENT_FILE = "CURRENT.txt"
@@ -131,6 +134,26 @@ def part_dir(root: Path, source_id: str, generation_id: str) -> Path:
 
 def is_sealed(gen_dir: Path) -> bool:
     return (gen_dir / SUCCESS_FILE).is_file()
+
+
+def id_map_dir(map_root: Path, gen_dir: Path) -> Path:
+    """Where the id-map sidecar of the sealed ``gen_dir`` lives under a local ``map_root``.
+
+    ``<map_root>/<source>/<generation>-<stamp>``: the stamp hashes the generation's path and seal
+    marker, so a generation refined again under the same id (a format bump) gets a fresh map instead
+    of a stale one that happens to have the same length.
+    """
+    seal = (gen_dir / SUCCESS_FILE).read_bytes()
+    stamp = hashlib.blake2b(str(gen_dir.resolve()).encode("utf-8") + b"\0" + seal, digest_size=8).hexdigest()
+    source = gen_dir.parent.parent.name if gen_dir.parent.name == PARTS_DIR else gen_dir.parent.name
+    return map_root / source / f"{gen_dir.name}-{stamp}"
+
+
+def configured_root(index_root: Path, value: object) -> Path:
+    """The Refinery root: ``[index] refinery_root`` when set (it may be on the NAS, ADR-0011), else
+    ``<index root>/refinery``."""
+    text = str(value).strip() if value is not None else ""
+    return Path(text).expanduser() if text else index_root / "refinery"
 
 
 def sealed_generations(root: Path, source_id: str) -> list[str]:
@@ -221,7 +244,7 @@ def _atomic_replace(partial: Path, final: Path) -> None:
 
 
 def _fsync_dir(directory: Path) -> None:
-    """Make a rename in ``directory`` durable (local ext4; the Refinery never lives on SMB)."""
+    """Make a rename in ``directory`` durable (ext4, and SMB3, where it is a server flush)."""
     fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
     try:
         os.fsync(fd)
@@ -567,10 +590,12 @@ def compose_set(root: Path, source_id: str, members: Sequence[Path]) -> str:
     return set_id
 
 
-def _write_id_map(gen_dir: Path, n: int) -> None:
-    """Write ``_ids.{h,loc}.npy`` from ``_ids.parquet`` batch by batch (bounded memory), atomically."""
+def _write_id_map(gen_dir: Path, n: int, out_dir: Path) -> None:
+    """Write ``out_dir/_ids.{h,loc}.npy`` from ``gen_dir/_ids.parquet`` batch by batch (bounded memory),
+    atomically."""
+    out_dir.mkdir(parents=True, exist_ok=True)
     tag = f".{os.getpid()}.{threading.get_ident()}.tmp"
-    hp, lp = gen_dir / (IDS_MAP_H + tag), gen_dir / (IDS_MAP_LOC + tag)
+    hp, lp = out_dir / (IDS_MAP_H + tag), out_dir / (IDS_MAP_LOC + tag)
     try:
         h = np.lib.format.open_memmap(hp, mode="w+", dtype=np.uint64, shape=(n,))
         loc = np.lib.format.open_memmap(lp, mode="w+", dtype=np.uint32, shape=(n, 3))
@@ -592,9 +617,9 @@ def _write_id_map(gen_dir: Path, n: int) -> None:
         for tmp in (hp, lp):
             with tmp.open("rb") as f:
                 os.fsync(f.fileno())
-        os.replace(lp, gen_dir / IDS_MAP_LOC)  # loc first: h appearing last completes the pair
-        os.replace(hp, gen_dir / IDS_MAP_H)
-        _fsync_dir(gen_dir)
+        os.replace(lp, out_dir / IDS_MAP_LOC)  # loc first: h appearing last completes the pair
+        os.replace(hp, out_dir / IDS_MAP_H)
+        _fsync_dir(out_dir)
     finally:
         for tmp in (hp, lp):
             tmp.unlink(missing_ok=True)
@@ -611,9 +636,20 @@ class RefineryReader:
     hash-sorted ``_ids.parquet`` whose statistics cover the id (~20 MB decoded). For generations read
     rarely, from a request: the history of a document opened every older generation and wrote a
     sidecar for each, 720 MB for one PubMed set (audit 2026-10-12 #12).
+
+    ``map_dir``: where the sidecar lives (:func:`id_map_dir`). Without one it lives in ``gen_dir``,
+    unless ``gen_dir`` is on a network filesystem: then no sidecar is written or memory-mapped there,
+    and lookups read ``_ids.parquet`` row groups as with ``map_ids=False`` (ADR-0011).
     """
 
-    def __init__(self, gen_dir: Path, *, cache_row_groups: int = 32, map_ids: bool = True) -> None:
+    def __init__(
+        self,
+        gen_dir: Path,
+        *,
+        cache_row_groups: int = 32,
+        map_ids: bool = True,
+        map_dir: Path | None = None,
+    ) -> None:
         if not is_sealed(gen_dir):
             raise RefineryError(f"not a sealed refinery generation: {gen_dir}")
         self.dir = gen_dir
@@ -654,13 +690,21 @@ class RefineryReader:
         self._cache: OrderedDict[tuple[int, int, tuple[str, ...]], pa.Table] = OrderedDict()
         self._cache_size = cache_row_groups
         self._lock = threading.Lock()
-        self._map_ids = map_ids
+        if map_dir is None and filesystem_type(gen_dir) in REMOTE_FS_TYPES:
+            self._map_dir: Path | None = None
+            self._map_ids = False
+        else:
+            self._map_dir = gen_dir if map_dir is None else map_dir
+            self._map_ids = map_ids
         self._id_groups: tuple[pq.ParquetFile, list[tuple[int, int]]] | None = None
         self._id_groups_lock = threading.Lock()  # a ParquetFile is not safe for concurrent reads
 
     def _sparse(self) -> bool:
         """Lookups read ``_ids.parquet`` row groups instead of loading (or writing) the id index."""
-        return not self._map_ids and self._ids is None and not (self.dir / IDS_MAP_H).is_file()
+        return not self._map_ids and self._ids is None and not self._has_map()
+
+    def _has_map(self) -> bool:
+        return self._map_dir is not None and (self._map_dir / IDS_MAP_H).is_file()
 
     def _locations(self, h: np.uint64) -> list[tuple[int, int, int]]:
         """``(part, rg, row)`` of each live row whose id hashes to ``h``."""
@@ -729,8 +773,8 @@ class RefineryReader:
         n = int(pq.ParquetFile(self.dir / IDS_FILE).metadata.num_rows)  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
         try:
             mapped = self._mapped_ids(n)
-            if mapped is None and self._map_ids:
-                _write_id_map(self.dir, n)
+            if mapped is None and self._map_ids and self._map_dir is not None:
+                _write_id_map(self.dir, n, self._map_dir)
                 mapped = self._mapped_ids(n)
             if mapped is not None:
                 h, loc = mapped
@@ -748,7 +792,9 @@ class RefineryReader:
         )
 
     def _mapped_ids(self, n: int) -> tuple[npt.NDArray[np.uint64], npt.NDArray[np.uint32]] | None:
-        hp, lp = self.dir / IDS_MAP_H, self.dir / IDS_MAP_LOC
+        if self._map_dir is None:
+            return None
+        hp, lp = self._map_dir / IDS_MAP_H, self._map_dir / IDS_MAP_LOC
         if not (hp.is_file() and lp.is_file()):
             return None
         try:
@@ -766,7 +812,7 @@ class RefineryReader:
         ids = self._ids
         if ids is not None:
             return 0 if isinstance(ids[0], np.memmap) else 20 * len(ids[0])
-        return 0 if (self.dir / IDS_MAP_H).is_file() or not self._map_ids else 20 * len(self)
+        return 0 if self._has_map() or not self._map_ids else 20 * len(self)
 
     def __len__(self) -> int:
         if self._docs >= 0:

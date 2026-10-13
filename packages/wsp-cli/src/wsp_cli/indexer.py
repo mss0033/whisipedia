@@ -153,12 +153,13 @@ class Indexer:
         user_agent: str = "Whisipedia indexer",
         out: TextIO | None = None,
         clock: Callable[[], float] = time.monotonic,
+        refinery: Path | None = None,
     ) -> None:
         self.vault = vault
         self.specs = {s.id: s for s in specs}
         self.adapters = adapters
         self.root = ensure_local(root)
-        self.refinery = root / "refinery"
+        self.refinery = refinery or root / "refinery"  # [index] refinery_root: may be the NAS (ADR-0011)
         self.work = root / "work"
         # Opened on first use: refining needs neither, and opening the index is not free.
         self._index = index if isinstance(index, TantivyIndex) else None

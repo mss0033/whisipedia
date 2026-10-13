@@ -39,6 +39,7 @@ if TYPE_CHECKING:  # heavy imports stay lazy so `wsp search --url ...` starts fa
     from wsp_core.ids import DocId
     from wsp_core.model import DocRecord
     from wsp_index import ParquetDocumentStore, SqliteChangeFeed, TantivyIndex
+    from wsp_index.feedarchive import ChangeArchive
     from wsp_index.spelling import ReloadingSpeller
     from wsp_vault.ledger import JsonlLedger
     from wsp_vault.vault import FileVault
@@ -199,6 +200,8 @@ class Paths:
     state_dir: Path | None  # local orchestrator/warden state (directory of orchestrator.state_db)
     workdir: Path | None
     proposals_dir: Path | None = None
+    refinery_root: Path | None = None  # [index] refinery_root: the Refinery elsewhere (the NAS, ADR-0011)
+    changes_archive: Path | None = None  # [index] changes_archive: sealed old change-feed ranges (ADR-0011)
 
     @property
     def incoming(self) -> Path:
@@ -210,7 +213,12 @@ class Paths:
 
     @property
     def refinery(self) -> Path:
-        return self.require_index() / "refinery"
+        return self.refinery_root or self.require_index() / "refinery"
+
+    @property
+    def refinery_maps(self) -> Path | None:
+        """Local home of the Refinery's id-map sidecars when the Refinery is elsewhere (ADR-0011)."""
+        return None if self.refinery_root is None else self.require_index() / "refinery-maps"
 
     @property
     def lexical(self) -> Path:
@@ -262,6 +270,8 @@ def paths(cfg: Mapping[str, Any]) -> Paths:
         state_dir=state_db.parent if state_db else None,
         workdir=_opt_path(orch.get("workdir")),
         proposals_dir=_opt_path(section(cfg, "curator").get("proposals_dir")),
+        refinery_root=_opt_path(section(cfg, "index").get("refinery_root")),
+        changes_archive=_opt_path(section(cfg, "index").get("changes_archive")),
     )
 
 
@@ -462,7 +472,7 @@ def open_documents(cfg: Mapping[str, Any]) -> ParquetDocumentStore:
     p = paths(cfg)
     ensure_local(p.require_index())
     p.refinery.mkdir(parents=True, exist_ok=True)
-    return ParquetDocumentStore(p.refinery)
+    return ParquetDocumentStore(p.refinery, map_root=p.refinery_maps)
 
 
 def open_changes(cfg: Mapping[str, Any]) -> SqliteChangeFeed:
@@ -470,7 +480,15 @@ def open_changes(cfg: Mapping[str, Any]) -> SqliteChangeFeed:
 
     p = paths(cfg)
     ensure_local(p.require_index())
-    return SqliteChangeFeed(p.changes_db)
+    return SqliteChangeFeed(p.changes_db, archive=change_archive(cfg))
+
+
+def change_archive(cfg: Mapping[str, Any]) -> ChangeArchive | None:
+    """The change feed's archive of sealed old ranges, when ``[index] changes_archive`` is set."""
+    from wsp_index.feedarchive import ChangeArchive
+
+    root = paths(cfg).changes_archive
+    return None if root is None else ChangeArchive(root)
 
 
 # --- API services -----------------------------------------------------------------------------------
@@ -549,7 +567,7 @@ def open_feed_read_only(cfg: Mapping[str, Any]) -> ReadOnlyChangeFeed | SqliteCh
     from wsp_api.feed import ReadOnlyChangeFeed
 
     db = paths(cfg).changes_db
-    return ReadOnlyChangeFeed(db) if db.is_file() else open_changes(cfg)
+    return ReadOnlyChangeFeed(db, archive=change_archive(cfg)) if db.is_file() else open_changes(cfg)
 
 
 class RefineryDocuments:

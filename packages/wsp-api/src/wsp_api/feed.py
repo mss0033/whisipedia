@@ -13,20 +13,22 @@ import sqlite3
 import threading
 from collections.abc import Iterable, Sequence
 from pathlib import Path
+from typing import cast
 
 from wsp_core.errors import InvalidCursorError
-from wsp_core.feedsql import has_source_index, tail_rows
+from wsp_core.feedsql import ArchiveRows, archived_through, has_source_index, since_rows, tail_rows
 from wsp_core.ids import DocId
 from wsp_core.model import ChangeKind, ChangeRecord
-
-_COLUMNS = "seq, doc_id, kind, generation_id, old_hash, new_hash, renamed_from"
 
 
 class ReadOnlyChangeFeed:
     """``ChangeFeed`` reads (``since``, ``tail``, ``head``) over a feed database another process writes."""
 
-    def __init__(self, path: Path, *, busy_timeout_ms: int = 2000) -> None:
+    def __init__(
+        self, path: Path, *, busy_timeout_ms: int = 2000, archive: ArchiveRows | None = None
+    ) -> None:
         self.path = path
+        self.archive = archive  # sealed old ranges (ADR-0011); read behind the feed's archive mark
         self._busy = busy_timeout_ms
         self._local = threading.local()
         self._all: list[sqlite3.Connection] = []
@@ -75,15 +77,16 @@ class ReadOnlyChangeFeed:
             raise ValueError("limit must be positive")
         after = self._parse(cursor)
         db = self._db()
-        if after > 0:
-            top = int(db.execute("SELECT COALESCE(MAX(seq), 0) FROM changes").fetchone()[0])
-            if after > top:
-                raise InvalidCursorError(f"cursor is ahead of the feed: {cursor!r}")
-        rows = db.execute(
-            f"SELECT {_COLUMNS} FROM changes WHERE seq > ? ORDER BY seq LIMIT ?",  # noqa: S608 - constant
-            (after, limit),
-        ).fetchall()
-        last = int(rows[-1][0]) if rows else after
+        db.execute("BEGIN")  # the archive mark and the rows from one snapshot
+        try:
+            if after > 0:
+                top = int(db.execute("SELECT COALESCE(MAX(seq), 0) FROM changes").fetchone()[0])
+                if after > max(top, archived_through(db)):
+                    raise InvalidCursorError(f"cursor is ahead of the feed: {cursor!r}")
+            rows = since_rows(db, self._epoch, after, limit, self.archive)
+        finally:
+            db.execute("COMMIT")
+        last = int(cast(int, rows[-1][0])) if rows else after
         return [_record(r) for r in rows], self._cursor(last)
 
     def tail(self, limit: int, *, sources: Sequence[str] | None = None) -> tuple[Sequence[ChangeRecord], str]:

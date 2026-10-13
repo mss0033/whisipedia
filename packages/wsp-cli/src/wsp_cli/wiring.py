@@ -408,6 +408,7 @@ class ChildContext:
             lambda: bootstrap.open_index(cfg, specs),
             lambda: bootstrap.open_changes(cfg),
             user_agent=bootstrap.user_agent(cfg),
+            refinery=p.refinery,
         )
 
 
