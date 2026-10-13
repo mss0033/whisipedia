@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import time
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,7 @@ import pytest
 from wsp_index import RefineryReader, RefineryWriter
 from wsp_index.refinery import generation_dir
 from wsp_index.spelling import (
+    Correction,
     ReloadingSpeller,
     SpellConfig,
     Speller,
@@ -191,6 +193,9 @@ def test_vocabularies_are_chosen_by_script_and_language() -> None:
     assert s.correct("Москва столица росии") == "Москва столица россии"  # Cyrillic: Russian
     assert s.correct("einstien relativty") == "einstein relativity"  # unknown everywhere: English prior
     assert s.unknown("weltkrieg") == []
+    mixed = s.choose(["zweiter", "world", "war"])  # English knows two of the three words
+    assert mixed is not None
+    assert mixed.lang == "en"
     assert s.languages == ["de", "en", "ru"]
     assert s.count("weltkrieg") == 900
     assert s.count("weltkrieg", "en") == 0
@@ -281,3 +286,34 @@ def test_a_rare_language_reads_only_the_row_groups_holding_it(
     rows = sum(t.num_rows for t in sample_language(reader, groups["fr"], "fr", 1000, ("title",)))
     assert rows == 2
     assert len(reads) == 1
+
+
+def test_a_known_word_picks_the_language_without_fuzzy_searches(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fuzzy scoring is for words no language knows: it reads all over a multi-GB file."""
+    s = Speller.from_vocabularies(
+        {
+            "en": {"glacier": 900, "calving": 300},
+            "de": {"gletscher": 900},
+            "fr": {"glacier": 400},
+        },
+        floors={"en": 3, "de": 3, "fr": 3},
+        min_ratio=10,
+    )
+    fuzzy: list[str] = []
+
+    def counting(
+        real: Callable[[str], tuple[Correction | None, float]],
+    ) -> Callable[[str], tuple[Correction | None, float]]:
+        def best(word: str) -> tuple[Correction | None, float]:
+            fuzzy.append(word)
+            return real(word)
+
+        return best
+
+    for v in s.vocabs:
+        monkeypatch.setattr(v, "best", counting(v.best))
+    assert s.unknown("glacier calving") == []
+    assert fuzzy == []
+    chosen = s.choose(["glacier", "calving"])
+    assert chosen is not None
+    assert chosen.lang == "en"

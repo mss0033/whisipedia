@@ -782,8 +782,11 @@ class Speller:
     def choose(self, words: Sequence[str]) -> Vocabulary | None:
         """The vocabulary under which these normalized words are most probable.
 
-        The script of most words picks the candidates (Latin, Cyrillic, ...); among them, the sum of
-        each word's log probability (:meth:`Vocabulary.best`) plus the prior of ``prefer``."""
+        The script of most words picks the candidates (Latin, Cyrillic, ...). Among them, the ones that
+        know the most of the words, by the sum of those words' log probabilities plus the prior of
+        ``prefer``. Only when no candidate knows any word does each word's best correction score it
+        (:meth:`Vocabulary.best`): that fuzzy search costs random reads all over a multi-GB file, and
+        scoring every language with it held an ordinary query for 1-10 s (2026-10-13)."""
         usable = [w for w in words if len(w) >= 3]
         if not self.vocabs:
             return None
@@ -797,12 +800,19 @@ class Speller:
         pool = self._for_script(script)
         if len(pool) <= 1:
             return pool[0] if pool else None
+        counts = [[v.count(w) for w in usable] for v in pool]
+        known = [sum(1 for c in cs if c) for cs in counts]
+        most = max(known)
         best: tuple[float, int, Vocabulary] | None = None
-        for v in pool:
+        for v, cs, k in zip(pool, counts, known, strict=True):
+            if k < most:
+                continue
             score = self.log_prefer if v.lang in self.prefer else 0.0
-            for w in usable:
-                c = v.count(w)
-                score += (math.log(c) - v.log_total) if c else v.best(w)[1]
+            for w, c in zip(usable, cs, strict=True):
+                if c:
+                    score += math.log(c) - v.log_total
+                elif not most:  # unknown everywhere: how close each language comes decides
+                    score += v.best(w)[1]
             key = (score, len(v), v)
             if best is None or key[:2] > best[:2]:
                 best = key
