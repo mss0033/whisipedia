@@ -21,6 +21,7 @@ from wsp_index import TantivyConfig, TantivyIndex
 from wsp_index.linkrank import RANK_FILE, fence_path, key64, write_rank_file
 from wsp_index.refinery import RefineryWriter
 from wsp_index.spelling import SPELL_FILE
+from wsp_vault.ratelimit import RateLimiter
 
 SMALL = TantivyConfig(writer_heap_bytes=20_000_000, writer_threads=1)
 
@@ -199,3 +200,19 @@ def test_point_tantivy_switches_only_to_a_faithful_copy(tmp_path: Path) -> None:
     with TantivyIndex(lexical, SMALL) as idx:
         assert idx.tantivy_dir == copy
         assert idx.lookup(DocId(make_doc_id("alpha", "a1"))) is not None
+
+
+def test_load_paces_its_reads_of_the_refinery(library: tuple[Path, dict[str, str]], tmp_path: Path) -> None:
+    ref, state = library
+    clock = {"t": 0.0}
+    slept: list[float] = []
+
+    def sleep(s: float) -> None:
+        slept.append(s)
+        clock["t"] += s
+
+    limiter = RateLimiter(1000.0, burst_seconds=0.0, monotonic=lambda: clock["t"], sleep=sleep)
+    sizes = sum(p.stat().st_size for p in ref.rglob("part-*.parquet"))
+    with TantivyIndex(tmp_path / "new", SMALL) as idx:
+        Relexer(idx, ref, lambda: state, read_limiter=limiter).load()
+    assert sum(slept) == pytest.approx(sizes / 1000.0)  # every part's bytes, at 1000 B/s

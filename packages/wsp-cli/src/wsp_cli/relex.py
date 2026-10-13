@@ -9,6 +9,8 @@ into a new feed epoch, every client cursor invalidated, though no document chang
 * commits and checkpoints every ``commit_bytes`` of Refinery parts (``REBUILD.json``), so a stopped
   run resumes; few large commits, because each commit's segments are written and merged on the
   index's file system, and on the NAS every file costs network round trips;
+* paces its reads of the Refinery (``read_limiter``): on the NAS the site reads documents over the
+  same link, and an unpaced bulk read starves it;
 * runs without the index lock, so the live index keeps serving and being updated meanwhile; then,
   under the lock, catches up with every generation indexed live during the rebuild, carries over the
   static rank and spelling vocabulary (keyed by doc id and word, not by index) and builds the suggest
@@ -32,6 +34,7 @@ from wsp_index import TantivyIndex, refresh
 from wsp_index.linkrank import RANK_FILE, fence_path
 from wsp_index.refinery import COLUMNS, RefineryReader, generation_dir, is_sealed, record_from_row
 from wsp_index.spelling import SPELL_FILE
+from wsp_vault.ratelimit import RateLimiter
 
 CHECKPOINT = "REBUILD.json"
 CATCH_UP_ROUNDS = 3
@@ -56,9 +59,11 @@ class Relexer:
         *,
         say: Callable[[str], None] = lambda _: None,
         commit_bytes: int = COMMIT_BYTES,
+        read_limiter: RateLimiter | None = None,
     ) -> None:
         self.index = index
         self.commit_bytes = commit_bytes
+        self.read_limiter = read_limiter
         self.refinery = refinery
         self.state = state
         self.say = say
@@ -106,6 +111,8 @@ class Relexer:
             replace_until = int(str(mark.get("replace_until", start + 1 if start > 0 else 0)))
             batch_start, pending = start, 0
             for part in range(start, reader.n_parts):
+                if self.read_limiter is not None:
+                    self.read_limiter.consume(reader.parts[part].stat().st_size)
                 table, _ = reader.part_table(part, COLUMNS)
                 pending += table.nbytes
                 docs = [record_from_row(row) for row in table.to_pylist()]

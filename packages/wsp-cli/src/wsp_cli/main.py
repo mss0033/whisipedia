@@ -366,6 +366,12 @@ def build_parser(argv: Sequence[str] | None = None) -> argparse.ArgumentParser:
         "--into", required=True, help="new lexical directory (local disk), e.g. <index>/lexical.next"
     )
     s.add_argument("--tantivy-dir", default=None, help="put its Tantivy index here instead (absolute path)")
+    s.add_argument(
+        "--read-mb-per-sec",
+        type=float,
+        default=30.0,
+        help="pace reads of the Refinery (MB/s; 0 = unpaced): on the NAS the site shares the link",
+    )
     s = add(
         "point-tantivy",
         _ops("cmd_index_point_tantivy"),

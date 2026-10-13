@@ -344,6 +344,7 @@ def cmd_index_rebuild_lexical(args: argparse.Namespace, out: TextIO) -> int:
     from wsp_cli.relex import Relexer, relex
     from wsp_index import TantivyConfig, TantivyIndex
     from wsp_index.lexical import point_tantivy, tantivy_dir
+    from wsp_vault.ratelimit import RateLimiter
 
     _, cfg, specs = _context(args)
     p = bootstrap.paths(cfg)
@@ -372,7 +373,9 @@ def cmd_index_rebuild_lexical(args: argparse.Namespace, out: TextIO) -> int:
 
     index = TantivyIndex(into, config, titles=lambda: bootstrap.indexed_titles(p))
     try:
-        relexer = Relexer(index, p.refinery, state, say=say)
+        limit = float(args.read_mb_per_sec)
+        limiter = RateLimiter(limit * 1e6, burst_seconds=5.0) if limit > 0 else None
+        relexer = Relexer(index, p.refinery, state, say=say, read_limiter=limiter)
         report = relex(relexer, p.lexical, lambda: _index_writer_waiting(cfg, out))
     except LockHeldError as exc:
         return _busy(exc)
