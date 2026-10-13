@@ -12,9 +12,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import pytest
 from libzim.writer import Creator, Hint, Item, StringProvider
 
-from wsp_cli.integrity import Profiler, channel_summary, read_integrity_state, zim_entries
+from wsp_cli.integrity import Profiler, ReadPacer, channel_summary, read_integrity_state, zim_entries
 from wsp_cli.monitor import LibraryMonitor
 from wsp_core.activity import ActivityMiddleware, recently_active, seconds_since
 from wsp_core.model import Artifact, Generation, GenerationStatus
@@ -162,3 +163,29 @@ def test_activity_marker_counts_interactive_requests_only(tmp_path: Path) -> Non
     assert seen == ["/v1/system", "/v1/health", "/v1/search"]
     off = ActivityMiddleware(app, path=None)
     asyncio.run(off({"type": "http", "path": "/x"}, None, None))  # type: ignore[arg-type]
+
+
+def test_read_pacer_rests_three_times_as_long_as_it_worked_at_a_quarter_share() -> None:
+    clock = {"t": 0.0}
+    slept: list[float] = []
+
+    def sleep(s: float) -> None:
+        slept.append(s)
+        clock["t"] += s
+
+    pacer = ReadPacer(0.25, burst=0.5, every=1, clock=lambda: clock["t"], sleep=sleep)
+    pacer.tick()  # starts the first burst
+    for _ in range(10):
+        clock["t"] += 0.1  # a tenth of a second of reading per call
+        pacer.tick()
+    assert slept == pytest.approx([1.5, 1.5])  # two 0.5 s bursts, each followed by 1.5 s at rest
+    assert sum(slept) / clock["t"] == pytest.approx(0.75)
+
+
+def test_read_pacer_unpaced_never_sleeps() -> None:
+    for share in (None, 1.0, 2.0):
+        pacer = ReadPacer(share, every=1, sleep=lambda s: pytest.fail("slept"))
+        for _ in range(5):
+            pacer.tick()
+    with pytest.raises(ValueError, match="positive"):
+        ReadPacer(0.0)

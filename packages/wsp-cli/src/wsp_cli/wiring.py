@@ -341,7 +341,7 @@ class HeavySettings:
     limits: UnitLimits = field(default_factory=UnitLimits)
     refine_timeout: float | None = 24 * 3600.0
     index_timeout: float | None = 24 * 3600.0
-    profile_timeout: float | None = 6 * 3600.0
+    profile_timeout: float | None = 24 * 3600.0
 
     @classmethod
     def from_config(cls, cfg: Mapping[str, Any]) -> HeavySettings:
@@ -361,7 +361,8 @@ class HeavySettings:
             ),
             refine_timeout=budget("refine_timeout", "PT24H"),
             index_timeout=budget("index_timeout", "PT24H"),
-            profile_timeout=budget("profile_timeout", "PT6H"),
+            # Paced to a share of the time ([integrity] profile_busy_share), a big ZIM takes most of a day.
+            profile_timeout=budget("profile_timeout", "PT24H"),
         )
 
 

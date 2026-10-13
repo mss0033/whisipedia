@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import closing, suppress
 from dataclasses import dataclass, field
@@ -45,7 +46,58 @@ def _namespace(native_id: str) -> str:
     return head if sep and len(head) <= 40 else "main"
 
 
-def refinery_documents(gen_dir: Path, builder: ProfileBuilder) -> int:
+class ReadPacer:
+    """Paces a bulk reader by time: it works at most ``share`` of the wall clock, in bursts of about
+    ``burst`` seconds, checked every ``every`` calls of :meth:`tick`.
+
+    The profiler's reads happen inside pyarrow and libzim (a ZIM entry's content costs a whole
+    compressed cluster), which do not say how many bytes they read, and this kernel keeps no
+    per-process read counter (no ``/proc/self/io``). Unpaced they fill the NAS link, which the site
+    reads documents over (2026-10-13: a profile of a 9 GB ZIM held it saturated for hours, and the
+    health check restarted the API every nine minutes); ``ionice`` does not throttle a CIFS mount.
+    Working a quarter of the time at the link's ~110 MB/s averages ~28 MB/s, and no burst holds the
+    link longer than about half a second. ``share`` of ``None`` or ``>= 1``: unpaced.
+    """
+
+    def __init__(
+        self,
+        share: float | None,
+        *,
+        burst: float = 0.5,
+        every: int = 16,
+        clock: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> None:
+        if share is not None and share <= 0:
+            raise ValueError("share must be positive")
+        self.share = share if share is not None and share < 1 else None
+        self.burst = burst
+        self.every = every
+        self.clock = clock
+        self.sleep = sleep
+        self._calls = 0
+        self._start: float | None = None
+
+    def tick(self) -> None:
+        if self.share is None:
+            return
+        self._calls += 1
+        if self._calls % self.every:
+            return
+        now = self.clock()
+        if self._start is None:
+            self._start = now
+            return
+        worked = now - self._start
+        if worked >= self.burst:
+            self.sleep(worked * (1 - self.share) / self.share)
+            self._start = self.clock()
+
+
+UNPACED = ReadPacer(None)
+
+
+def refinery_documents(gen_dir: Path, builder: ProfileBuilder, pacer: ReadPacer = UNPACED) -> int:
     """Add every refined document of a generation (sealed Refinery Parquet) to ``builder``."""
     import pyarrow.compute as pc  # pyright: ignore[reportMissingTypeStubs]
     import pyarrow.parquet as pq  # pyright: ignore[reportMissingTypeStubs]
@@ -58,6 +110,7 @@ def refinery_documents(gen_dir: Path, builder: ProfileBuilder) -> int:
             columns=["native_id", "title", "content_hash", "text"], batch_size=PROFILE_BATCH_ROWS
         )
         for batch in batches:
+            pacer.tick()
             ids = cast(list[str], batch.column(0).to_pylist())
             titles = cast(list[str], batch.column(1).to_pylist())
             hashes = cast(list[str], batch.column(2).to_pylist())
@@ -75,7 +128,9 @@ def refinery_documents(gen_dir: Path, builder: ProfileBuilder) -> int:
     return n
 
 
-def zim_entries(path: Path, builder: ProfileBuilder, *, documents: bool, prefix: str = "") -> int:
+def zim_entries(
+    path: Path, builder: ProfileBuilder, *, documents: bool, prefix: str = "", pacer: ReadPacer = UNPACED
+) -> int:
     """Entries of a ZIM: MIME types for all, raw bytes scanned for the deterministic sample.
 
     With ``documents=True`` (no Refinery output to use) every non-redirect entry is also counted as
@@ -86,6 +141,7 @@ def zim_entries(path: Path, builder: ProfileBuilder, *, documents: bool, prefix:
     archive = Archive(path)
     n = 0
     for i in range(int(archive.entry_count)):
+        pacer.tick()
         entry = archive._get_entry_by_id(i)  # pyright: ignore[reportPrivateUsage, reportUnknownMemberType, reportUnknownVariableType]
         if entry.is_redirect:  # pyright: ignore[reportUnknownMemberType]
             continue
@@ -115,6 +171,7 @@ class Profiler:
     refinery_root: Path | None
     sample_rate: float = DEFAULT_SAMPLE_RATE
     zim_reader: Callable[..., int] = field(default=zim_entries)
+    busy_share: float | None = None
 
     def refined_dir(self, spec: SourceSpec, generation_id: str) -> Path | None:
         """Where the generation was refined: ``_parts/<gid>`` for a partitioned source (ADR-0010)."""
@@ -129,10 +186,11 @@ class Profiler:
 
     def __call__(self, spec: SourceSpec, generation: Generation, generation_dir: Path) -> ContentProfile:
         builder = ProfileBuilder(sample_rate=self.sample_rate)
+        pacer = ReadPacer(self.busy_share)
         refined = 0
         gen_dir = self.refined_dir(spec, generation.generation_id)
         if gen_dir is not None and (gen_dir / "_SUCCESS.json").is_file():
-            refined = refinery_documents(gen_dir, builder)
+            refined = refinery_documents(gen_dir, builder, pacer)
         zims = sorted(
             (
                 generation_dir / str(a.relpath)
@@ -143,7 +201,7 @@ class Profiler:
         )
         for z in zims:
             prefix = f"{z.stem}/" if len(zims) > 1 else ""
-            self.zim_reader(z, builder, documents=refined == 0, prefix=prefix)
+            self.zim_reader(z, builder, documents=refined == 0, prefix=prefix, pacer=pacer)
         return builder.build()
 
 
@@ -154,7 +212,7 @@ class IsolatedProfiler:
 
     cfg: Mapping[str, Any]
     runner: IsolatedRunner
-    timeout: float | None = 6 * 3600.0
+    timeout: float | None = 24 * 3600.0
 
     def __call__(self, spec: SourceSpec, generation: Generation, generation_dir: Path) -> ContentProfile:
         out = self.runner.workdir / "_profiles" / spec.id / f"{generation.generation_id}.json.gz"
@@ -190,6 +248,7 @@ def profile_child(payload: Mapping[str, Any]) -> dict[str, Any]:
         profiler = Profiler(
             p.refinery if p.index_root is not None else None,
             float(sec.get("profile_sample_rate", DEFAULT_SAMPLE_RATE)),
+            busy_share=float(sec.get("profile_busy_share", 1.0)),
         )
         prof = profiler(
             ctx.spec, ctx.generation, ctx.vault.generation_path(ctx.spec.id, ctx.generation.generation_id)
@@ -216,7 +275,7 @@ def integrity_hooks(
     scrub: Scrubber | None,
     *,
     runner: IsolatedRunner | None = None,
-    profile_timeout: float | None = 6 * 3600.0,
+    profile_timeout: float | None = 24 * 3600.0,
 ) -> IntegrityHooks:
     """The guard's hooks. With ``runner`` (the daemon) profiles are computed in child units."""
     sec = bootstrap.section(cfg, "integrity")
@@ -230,7 +289,11 @@ def integrity_hooks(
     if runner is not None:
         profile = IsolatedProfiler(cfg, runner, profile_timeout)
     else:
-        profile = Profiler(refinery, float(sec.get("profile_sample_rate", DEFAULT_SAMPLE_RATE)))
+        profile = Profiler(
+            refinery,
+            float(sec.get("profile_sample_rate", DEFAULT_SAMPLE_RATE)),
+            busy_share=float(sec.get("profile_busy_share", 1.0)),
+        )
     return IntegrityHooks(
         settings=IntegritySettings.from_config(cfg),
         attest=attest,

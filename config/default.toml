@@ -100,6 +100,7 @@ unknown_origin = "hold"             # origin/checksum host on a domain never use
 unverifiable = "alert"              # no digest from anywhere
 settle_days = 14                    # the older known-good generation stays until the new one is this old and scrubbed
 profile_sample_rate = 0.03125       # documents sampled for content comparison (same keys every generation)
+profile_busy_share = 0.25           # profiles read at most this share of the time (~28 MB/s on the NAS link; 1 = unpaced)
 wikimedia_primary = "https://dumps.wikimedia.org/"
 kiwix_primary = "https://download.kiwix.org/"
 
