@@ -82,6 +82,54 @@ def test_a_stopped_load_resumes_without_adding_twice(
         assert len(ids(idx)) == 19
 
 
+@pytest.mark.parametrize(("commit_bytes", "commits"), [(1, 5), (1 << 30, 2)])
+def test_load_commits_once_per_batch_of_parts(
+    library: tuple[Path, dict[str, str]],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    commit_bytes: int,
+    commits: int,
+) -> None:
+    ref, state = library
+    real = TantivyIndex.commit
+    calls = {"n": 0}
+
+    def counting(self: TantivyIndex, *, rebuild_suggest: bool = True) -> None:
+        calls["n"] += 1
+        real(self, rebuild_suggest=rebuild_suggest)
+
+    with TantivyIndex(tmp_path / "new", SMALL) as idx:
+        monkeypatch.setattr(TantivyIndex, "commit", counting)
+        assert Relexer(idx, ref, lambda: state, commit_bytes=commit_bytes).load() == 19
+        assert calls["n"] == commits  # 3 + 2 parts: one commit each, or one per source
+        mark = json.loads((tmp_path / "new" / CHECKPOINT).read_text(encoding="utf-8"))
+        assert mark["sources"]["alpha"] == {"generation": "g1", "parts": 3}
+
+
+def test_a_load_stopped_mid_batch_resumes_from_the_batch_start(
+    library: tuple[Path, dict[str, str]], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ref, state = library
+    real = TantivyIndex.upsert
+    calls = {"n": 0}
+
+    def dies_on_third_part(self: TantivyIndex, docs: list[DocRecord], *, replace: bool = True) -> int:
+        calls["n"] += 1
+        if calls["n"] == 3:
+            raise KeyboardInterrupt  # alpha's first two parts are written, not committed
+        return real(self, docs, replace=replace)
+
+    monkeypatch.setattr(TantivyIndex, "upsert", dies_on_third_part)
+    with pytest.raises(KeyboardInterrupt), TantivyIndex(tmp_path / "new", SMALL) as idx:
+        Relexer(idx, ref, lambda: state).load()  # the interrupt leaves the block: uncommitted writes dropped
+    monkeypatch.setattr(TantivyIndex, "upsert", real)
+    with TantivyIndex(tmp_path / "new", SMALL) as idx:  # reopened: the uncommitted parts are gone
+        assert idx.num_docs == 0
+        Relexer(idx, ref, lambda: state).load()
+        assert idx.num_docs == 19
+        assert len(ids(idx)) == 19
+
+
 def test_catch_up_follows_what_the_live_index_did(
     library: tuple[Path, dict[str, str]], tmp_path: Path
 ) -> None:

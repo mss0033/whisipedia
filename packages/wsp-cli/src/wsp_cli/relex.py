@@ -6,7 +6,9 @@ into a new feed epoch, every client cursor invalidated, though no document chang
 
 * reads the Refinery generations that ``index-state.json`` records as indexed, and nothing else;
 * writes only into the new lexical directory: no change records, no index state, no catalog;
-* commits and checkpoints after each Refinery part (``REBUILD.json``), so a stopped run resumes;
+* commits and checkpoints every ``commit_bytes`` of Refinery parts (``REBUILD.json``), so a stopped
+  run resumes; few large commits, because each commit's segments are written and merged on the
+  index's file system, and on the NAS every file costs network round trips;
 * runs without the index lock, so the live index keeps serving and being updated meanwhile; then,
   under the lock, catches up with every generation indexed live during the rebuild, carries over the
   static rank and spelling vocabulary (keyed by doc id and word, not by index) and builds the suggest
@@ -33,6 +35,7 @@ from wsp_index.spelling import SPELL_FILE
 
 CHECKPOINT = "REBUILD.json"
 CATCH_UP_ROUNDS = 3
+COMMIT_BYTES = 2 << 30  # of Arrow table data between commits
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,8 +55,10 @@ class Relexer:
         state: Callable[[], Mapping[str, str]],
         *,
         say: Callable[[str], None] = lambda _: None,
+        commit_bytes: int = COMMIT_BYTES,
     ) -> None:
         self.index = index
+        self.commit_bytes = commit_bytes
         self.refinery = refinery
         self.state = state
         self.say = say
@@ -76,7 +81,11 @@ class Relexer:
     # --- passes --------------------------------------------------------------------------------
 
     def load(self) -> int:
-        """Index every recorded generation, part by part (resumes from the checkpoint)."""
+        """Index every recorded generation, part by part (resumes from the checkpoint).
+
+        Before a commit the checkpoint records the parts it covers (``replace_until``): a run stopped
+        between the commit and the checkpoint replaces those parts on resuming, never adds them twice.
+        """
         done = self._load()
         total = 0
         for sid, gen in sorted(self.state().items()):
@@ -93,16 +102,24 @@ class Relexer:
             start = int(str(mark.get("parts", 0)))
             if start >= reader.n_parts:
                 continue
+            # A resumed run may find parts committed already: they are replaced, never added twice.
+            replace_until = int(str(mark.get("replace_until", start + 1 if start > 0 else 0)))
+            batch_start, pending = start, 0
             for part in range(start, reader.n_parts):
                 table, _ = reader.part_table(part, COLUMNS)
+                pending += table.nbytes
                 docs = [record_from_row(row) for row in table.to_pylist()]
-                # A resumed part may be committed already: it is replaced, never added twice.
-                total += self.index.upsert(docs, replace=part == start and start > 0)
-                self.index.commit(rebuild_suggest=False)
-                done[sid] = {"generation": gen, "parts": part + 1}
-                self._save(done)
-                if part % 16 == 15 or part == reader.n_parts - 1:
+                del table
+                total += self.index.upsert(docs, replace=part < replace_until)
+                last = part == reader.n_parts - 1
+                if pending >= self.commit_bytes or last:
+                    done[sid] = {"generation": gen, "parts": batch_start, "replace_until": part + 1}
+                    self._save(done)
+                    self.index.commit(rebuild_suggest=False)
+                    done[sid] = {"generation": gen, "parts": part + 1}
+                    self._save(done)
                     self.say(f"relex: {sid}/{gen}: part {part + 1}/{reader.n_parts}")
+                    batch_start, pending = part + 1, 0
         return total
 
     def catch_up(self) -> list[str]:
