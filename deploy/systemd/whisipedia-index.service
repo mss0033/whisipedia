@@ -30,6 +30,9 @@ MemoryHigh=3G
 MemoryMax=4G
 OOMScoreAdjust=500
 Environment=WSP_MAX_WORKERS=4
+# Tantivy (Rust) allocates with glibc malloc: with ~50 threads the default per-thread arenas kept
+# ~2.5 GB of freed memory (forty 64 MB regions) and the job swapped under its ceiling (2026-10-13).
+Environment=MALLOC_ARENA_MAX=2
 # best-effort/7, not idle: the build holds the index lock for hours (priority inversion).
 IOSchedulingClass=best-effort
 IOSchedulingPriority=7

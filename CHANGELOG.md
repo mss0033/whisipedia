@@ -3,6 +3,23 @@
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Fixed: Refinery readers on the NAS map their id index from local disk everywhere (2026-10-13 review)
+* The index job's readers (refresh, catalog build, featured pick, rank, spell) now use the local id-map
+  sidecars (`[index] id_map_dir`) like the document store. Without them a reader on the NAS answered
+  each point lookup by reading a whole row group of `_ids.parquet` over the link; the featured pick alone
+  made thousands of such lookups per source.
+* The index job writes a generation's id map as the generation goes live. The API used to build it on the
+  first lookup after a nightly refine, streaming the whole `_ids.parquet` from the NAS inside a request
+  while holding the reader's lock.
+* A reader loads its id index under its own lock, and opens part files outside the lock that guards the
+  row-group cache: readers of other row groups no longer wait for a network round trip.
+* The document store remembers each source's current generation for five seconds: finding it is three
+  metadata round trips on the NAS, and a search page asked once per hit.
+* The change feed reads archived ranges (Parquet, maybe on the NAS) outside its lock: a slow read of an
+  old cursor no longer holds up the start page's recent changes and every other reader.
+* The nightly index unit runs with `MALLOC_ARENA_MAX=2`: Tantivy allocates with glibc malloc, and with
+  about fifty threads the default per-thread arenas kept 2.5 GB of freed memory.
+
 ### Fixed: content profiles no longer hold the heavy lock; the health check restarts an API at its ceiling (2026-10-13)
 * A content profile takes its own `PROFILE` lock instead of `HEAVY`. Paced to a share of the NAS link
   (`[integrity] profile_busy_share`), a profile of a big ZIM runs for most of a day; under `HEAVY` it kept

@@ -258,3 +258,25 @@ def test_a_lexical_index_rebuilt_alone_is_refused(vault: FileVault, tmp_path: Pa
         ]
     finally:
         ix.close()
+
+
+def test_indexing_writes_the_id_map_as_the_generation_goes_live(vault: FileVault, tmp_path: Path) -> None:
+    """ADR-0011: the API maps the id index from local disk; the index job writes the map (2026-10-13
+    review: the first lookup after a nightly refine streamed ``_ids.parquet`` over the NAS in a request)."""
+    fetch(vault, tmp_path, "ri", "2026-10-03.ri", {"RI_Providence_1950.pdf": sheet("Providence")})
+    root = tmp_path / "index"
+    maps = tmp_path / "maps"
+    ix = Indexer(
+        vault,
+        [spec()],
+        {"doc-collection": DocCollectionAdapter(throttle=False)},
+        root,
+        TantivyIndex(root / "lexical"),
+        SqliteChangeFeed(root / "changes.sqlite"),
+        map_root=maps,
+    )
+    try:
+        ix.build([SID])
+    finally:
+        ix.close()
+    assert sorted(p.name for p in maps.rglob("_ids.*.npy")) == ["_ids.h.npy", "_ids.loc.npy"]

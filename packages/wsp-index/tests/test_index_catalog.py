@@ -19,6 +19,7 @@ from wsp_index.catalog import (
     RefineryCatalog,
     build_source_catalog,
     parse_date_page,
+    refresh_featured,
 )
 from wsp_index_helpers import doc
 
@@ -177,3 +178,23 @@ def test_random_picks_on_the_nas_map_the_id_index_locally(
     assert reader is not None
     assert reader.id_index_bytes == 0
     assert any(maps.rglob("*.npy"))
+
+
+def test_catalog_builders_map_the_id_index_locally_on_the_nas(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The featured pick does thousands of point lookups: each one read a whole ``_ids.parquet`` row
+    group over the NAS when the builder's reader had no local map (2026-10-13 review)."""
+    refinery = tmp_path / "refinery"
+    _wiki(refinery)
+
+    def cifs(_path: Path) -> str:
+        return "cifs"
+
+    monkeypatch.setattr(refinery_module, "filesystem_type", cifs)
+    cfg = CatalogConfig(featured=True, featured_candidates=10, min_featured_chars=100)
+    maps = tmp_path / "maps"
+    build_source_catalog(refinery, "wikipedia-en-zim", "2026-08", tmp_path / "catalog", cfg, map_root=maps)
+    assert any(maps.rglob("*.npy"))
+    assert refresh_featured(refinery, "wikipedia-en-zim", "2026-08", tmp_path / "catalog", cfg, map_root=maps)
+    assert not any((tmp_path / "refinery").rglob("*.npy"))  # never beside the generation on the NAS

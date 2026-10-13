@@ -203,6 +203,7 @@ def open_indexer(
         user_agent=bootstrap.user_agent(cfg),
         out=out,
         refinery=p.refinery,
+        map_root=p.refinery_maps,
     )
     try:
         yield ix

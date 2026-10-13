@@ -137,3 +137,22 @@ def test_archive_refuses_overlaps_and_bad_rows(tmp_path: Path) -> None:
     assert [r[0] for r in archive.rows("e", 0, 2, 10)] == [1, 2]
     assert [r[0] for r in archive.rows("e", 0, 3, 1)] == [1]
     assert archive.rows("other", 0, 3, 10) == []
+
+
+def test_archived_rows_are_read_without_the_feed_lock(feed: SqliteChangeFeed) -> None:
+    """A slow archive read (Parquet on the NAS) of an old cursor must not hold up ``tail`` (the start
+    page) and every other reader (2026-10-13 review)."""
+    feed.archive_old(keep_rows=5, keep_per_source=2, chunk_rows=4)
+    archive = feed.archive
+    assert archive is not None
+    real = archive.rows
+    seen: list[bool] = []
+
+    def rows(epoch: str, after: int, through: int, limit: int) -> list[tuple[object, ...]]:
+        seen.append(feed._lock.locked())  # pyright: ignore[reportPrivateUsage]
+        return real(epoch, after, through, limit)
+
+    archive.rows = rows  # type: ignore[method-assign]
+    records, _ = feed.since(None, limit=3)
+    assert len(records) == 3
+    assert seen == [False]

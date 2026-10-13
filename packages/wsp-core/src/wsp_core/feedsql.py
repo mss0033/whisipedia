@@ -36,24 +36,46 @@ def archived_through(db: sqlite3.Connection) -> int:
     return 0 if row is None else int(row[0])
 
 
+def since_local(db: sqlite3.Connection, after: int, limit: int) -> tuple[int, list[tuple[object, ...]]]:
+    """The archive mark and the first ``limit`` database rows after ``max(after, mark)``. Call inside one
+    read transaction, so the mark and the rows are one snapshot (an archiving writer moves the mark and
+    deletes the rows in one transaction). The archived rows before the mark come from
+    :func:`with_archive`, outside any lock: a sealed range never changes, and reading it is Parquet
+    I/O that may be on the NAS."""
+    archived = archived_through(db)
+    rows = db.execute(
+        f"SELECT {COLUMNS} FROM changes WHERE seq > ? ORDER BY seq LIMIT ?",  # noqa: S608 - constant
+        (max(after, archived), limit),
+    ).fetchall()
+    return archived, rows
+
+
+def with_archive(
+    epoch: str,
+    after: int,
+    limit: int,
+    archive: ArchiveRows | None,
+    archived: int,
+    local: Sequence[tuple[object, ...]],
+) -> list[tuple[object, ...]]:
+    """The first ``limit`` rows after ``after``: the archive's while ``after`` is before the mark
+    ``archived``, then the ``local`` rows :func:`since_local` read with it."""
+    if after >= archived:
+        return list(local[:limit])
+    if archive is None:
+        raise ArchiveMissingError(f"changes up to {archived} are archived; set [index] changes_archive")
+    rows = archive.rows(epoch, after, archived, limit)
+    if len(rows) < limit:
+        rows += local[: limit - len(rows)]
+    return rows
+
+
 def since_rows(
     db: sqlite3.Connection, epoch: str, after: int, limit: int, archive: ArchiveRows | None
 ) -> list[tuple[object, ...]]:
-    """The first ``limit`` rows after ``seq`` ``after``: from the archive while ``after`` is in its range,
-    then from the database. Call inside one read transaction, so the archive mark and the rows are one
-    snapshot (an archiving writer moves the mark and deletes the rows in one transaction)."""
-    archived = archived_through(db)
-    rows: list[tuple[object, ...]] = []
-    if after < archived:
-        if archive is None:
-            raise ArchiveMissingError(f"changes up to {archived} are archived; set [index] changes_archive")
-        rows = archive.rows(epoch, after, archived, limit)
-    if len(rows) < limit:
-        rows += db.execute(
-            f"SELECT {COLUMNS} FROM changes WHERE seq > ? ORDER BY seq LIMIT ?",  # noqa: S608 - constant
-            (max(after, archived), limit - len(rows)),
-        ).fetchall()
-    return rows
+    """:func:`since_local` then :func:`with_archive` in one go (callers without a lock to release)."""
+    archived, local = since_local(db, after, limit)
+    return with_archive(epoch, after, limit, archive, archived, local)
 
 
 def has_source_index(db: sqlite3.Connection) -> bool:

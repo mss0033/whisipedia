@@ -16,7 +16,14 @@ from pathlib import Path
 from typing import cast
 
 from wsp_core.errors import InvalidCursorError
-from wsp_core.feedsql import ArchiveRows, archived_through, has_source_index, since_rows, tail_rows
+from wsp_core.feedsql import (
+    ArchiveRows,
+    archived_through,
+    has_source_index,
+    since_local,
+    tail_rows,
+    with_archive,
+)
 from wsp_core.ids import DocId
 from wsp_core.model import ChangeKind, ChangeRecord
 
@@ -83,9 +90,10 @@ class ReadOnlyChangeFeed:
                 top = int(db.execute("SELECT COALESCE(MAX(seq), 0) FROM changes").fetchone()[0])
                 if after > max(top, archived_through(db)):
                     raise InvalidCursorError(f"cursor is ahead of the feed: {cursor!r}")
-            rows = since_rows(db, self._epoch, after, limit, self.archive)
+            archived, local = since_local(db, after, limit)
         finally:
             db.execute("COMMIT")
+        rows = with_archive(self._epoch, after, limit, self.archive, archived, local)  # NAS I/O: no txn
         last = int(cast(int, rows[-1][0])) if rows else after
         return [_record(r) for r in rows], self._cursor(last)
 

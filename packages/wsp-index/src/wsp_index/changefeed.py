@@ -27,8 +27,9 @@ from wsp_core.feedsql import (
     SOURCE_EXPR,
     SOURCE_INDEX,
     archived_through,
-    since_rows,
+    since_local,
     tail_rows,
+    with_archive,
 )
 from wsp_core.ids import DocId
 from wsp_core.model import ChangeKind, ChangeRecord
@@ -162,9 +163,12 @@ class SqliteChangeFeed:
                     top = self._db.execute("SELECT COALESCE(MAX(seq), 0) FROM changes").fetchone()
                     if after > max(int(top[0]), archived_through(self._db)):
                         raise InvalidCursorError(f"cursor is ahead of the feed: {cursor!r}")
-                rows = since_rows(self._db, self._epoch, after, limit, self.archive)
+                archived, local = since_local(self._db, after, limit)
             finally:
                 self._db.execute("COMMIT")
+        # The archive (Parquet, maybe on the NAS) is read without the lock: a stalled read of an old
+        # cursor must not hold up ``tail`` (the start page) and every other reader.
+        rows = with_archive(self._epoch, after, limit, self.archive, archived, local)
         out = [_record(r) for r in rows]
         last = int(cast(int, rows[-1][0])) if rows else after
         return out, self._cursor(last)

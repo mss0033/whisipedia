@@ -65,7 +65,9 @@ from wsp_index.refinery import (
     SUCCESS_FILE,
     compose_set,
     current_generation,
+    ensure_id_map,
     generation_dir,
+    id_map_dir,
     is_sealed,
     part_dir,
 )
@@ -154,12 +156,16 @@ class Indexer:
         out: TextIO | None = None,
         clock: Callable[[], float] = time.monotonic,
         refinery: Path | None = None,
+        map_root: Path | None = None,
     ) -> None:
         self.vault = vault
         self.specs = {s.id: s for s in specs}
         self.adapters = adapters
         self.root = ensure_local(root)
         self.refinery = refinery or root / "refinery"  # [index] refinery_root: may be the NAS (ADR-0011)
+        # Local id-map sidecars (ADR-0011): every reader here maps the id index from local disk, and a
+        # generation's map is written as it goes live, so the API never builds one in a request.
+        self.map_root = map_root
         self.work = root / "work"
         # Opened on first use: refining needs neither, and opening the index is not free.
         self._index = index if isinstance(index, TantivyIndex) else None
@@ -326,9 +332,11 @@ class Indexer:
             if not (self.root / CATALOG_DIR / f"{spec.id}.json").is_file():
                 self.build_catalog(spec, generation_id)
             return SourceReport(spec.id, indexed=generation_id)
-        new = RefineryReader(new_dir)
+        new = self._reader(new_dir)
         old_dir = generation_dir(self.refinery, spec.id, previous) if previous else None
-        old = RefineryReader(old_dir) if old_dir is not None and is_sealed(old_dir) else None
+        old = self._reader(old_dir) if old_dir is not None and is_sealed(old_dir) else None
+        if self.map_root is not None and ensure_id_map(new_dir, id_map_dir(self.map_root, new_dir)):
+            self._say(f"  {spec.id}/{generation_id}: id map written")
         _write_durably(self.refinery / spec.id / CURRENT_FILE, generation_id + "\n")
         stats = refresh(self.index, self.feed, old, new, progress=self._say)
         for gid in dict.fromkeys((generation_id, *alias_generations)):
@@ -407,7 +415,9 @@ class Indexer:
         started = self.clock()
         cfg = CatalogConfig(featured=is_featured_source(spec), rank=self.index.static_rank())
         try:
-            path = build_source_catalog(self.refinery, spec.id, generation_id, self.root / CATALOG_DIR, cfg)
+            path = build_source_catalog(
+                self.refinery, spec.id, generation_id, self.root / CATALOG_DIR, cfg, map_root=self.map_root
+            )
         except Exception as exc:  # derived data: never fail an index build over it
             self._say(f"  catalog {spec.id}/{generation_id}: FAILED ({type(exc).__name__}: {exc})")
             return None
@@ -467,7 +477,14 @@ class Indexer:
                 spec = self.specs[sid]
                 if is_featured_source(spec):
                     cfg = CatalogConfig(featured=True, rank=rank)
-                    refresh_featured(self.refinery, sid, reader.generation_id, self.root / CATALOG_DIR, cfg)
+                    refresh_featured(
+                        self.refinery,
+                        sid,
+                        reader.generation_id,
+                        self.root / CATALOG_DIR,
+                        cfg,
+                        map_root=self.map_root,
+                    )
         self._say(f"rank: done in {self.clock() - started:.1f}s")
         return stats
 
@@ -478,8 +495,12 @@ class Indexer:
         for sid in sorted(self.specs):
             gen = current_generation(self.refinery, sid)
             if gen is not None and is_sealed(generation_dir(self.refinery, sid, gen)):
-                readers.append((sid, RefineryReader(generation_dir(self.refinery, sid, gen))))
+                readers.append((sid, self._reader(generation_dir(self.refinery, sid, gen))))
         return readers
+
+    def _reader(self, gen_dir: Path) -> RefineryReader:
+        map_dir = None if self.map_root is None else id_map_dir(self.map_root, gen_dir)
+        return RefineryReader(gen_dir, map_dir=map_dir)
 
     def spell(self, config: SpellConfig | None = None) -> VocabStats | None:
         """Rebuild the spelling vocabulary from every indexed source (``wsp index spell``)."""

@@ -625,6 +625,19 @@ def _write_id_map(gen_dir: Path, n: int, out_dir: Path) -> None:
             tmp.unlink(missing_ok=True)
 
 
+def ensure_id_map(gen_dir: Path, map_dir: Path) -> bool:
+    """Write the id-map sidecar of the sealed ``gen_dir`` under ``map_dir`` unless a matching one is
+    there. For the index job, right after a generation goes live: the API otherwise built it on the
+    first lookup, streaming the whole ``_ids.parquet`` over the NAS inside a request (ADR-0011).
+    Returns True when a map was written."""
+    reader = RefineryReader(gen_dir, map_ids=True, map_dir=map_dir)
+    n = int(pq.ParquetFile(gen_dir / IDS_FILE).metadata.num_rows)  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
+    if reader._mapped_ids(n) is not None:  # pyright: ignore[reportPrivateUsage]
+        return False
+    _write_id_map(gen_dir, n, map_dir)
+    return True
+
+
 # --- reader ------------------------------------------------------------------------------------
 
 
@@ -689,7 +702,8 @@ class RefineryReader:
         self._max_files = 16  # each open ParquetFile keeps its footer (~2.5 MB with 256-row groups)
         self._cache: OrderedDict[tuple[int, int, tuple[str, ...]], pa.Table] = OrderedDict()
         self._cache_size = cache_row_groups
-        self._lock = threading.Lock()
+        self._lock = threading.Lock()  # the open-file and row-group LRUs (never held across I/O)
+        self._ids_lock = threading.Lock()  # loading the id index: seconds on the NAS, alone
         if map_dir is None and filesystem_type(gen_dir) in REMOTE_FS_TYPES:
             self._map_dir: Path | None = None
             self._map_ids = False
@@ -758,7 +772,7 @@ class RefineryReader:
     ]:
         ids = self._ids
         if ids is None:
-            with self._lock:
+            with self._ids_lock:  # not self._lock: readers of other row groups must not wait for this
                 if self._ids is None:
                     self._ids = self._load_id_index()
                 ids = self._ids
@@ -832,9 +846,17 @@ class RefineryReader:
         """
         with self._lock:
             entry = self._files.get(part)
+            if entry is not None:
+                self._files.move_to_end(part)
+                return entry
+        # Opened outside the lock: the footer read is a network round trip on the NAS, and the lock
+        # also guards the row-group cache every other reader of this generation needs.
+        # No memory_map: a page fault on a soft SMB mount would be a SIGBUS, not an OSError.
+        opened = (pq.ParquetFile(self.dir / f"part-{part:05d}.parquet"), threading.Lock())
+        with self._lock:
+            entry = self._files.get(part)
             if entry is None:
-                # No memory_map: a page fault on a soft SMB mount would be a SIGBUS, not an OSError.
-                entry = (pq.ParquetFile(self.dir / f"part-{part:05d}.parquet"), threading.Lock())
+                entry = opened
                 self._files[part] = entry
                 while len(self._files) > self._max_files:
                     self._files.popitem(last=False)

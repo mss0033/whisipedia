@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import bisect
 import threading
+import time
 from collections import OrderedDict
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import cast
 
@@ -29,6 +30,9 @@ def _reader_cost(reader: RefineryReader) -> int:
         + 3 * 1024 * 1024 * reader.max_open_files
         + 4 * 1024 * 1024 * reader.cache_row_groups
     )
+
+
+CURRENT_TTL = 5.0
 
 
 class ParquetDocumentStore:
@@ -56,13 +60,30 @@ class ParquetDocumentStore:
         max_open_generations: int = 16,
         memory_budget: int = 1536 * 1024 * 1024,
         map_root: Path | None = None,
+        monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         self.root = root
         self.map_root = map_root
+        self._monotonic = monotonic
+        self._current: dict[str, tuple[float, str | None]] = {}  # source -> (asked at, generation)
         self._readers: OrderedDict[tuple[str, str, bool], RefineryReader] = OrderedDict()
         self._max = max_open_generations
         self._budget = memory_budget
         self._lock = threading.Lock()
+
+    def current(self, source_id: str) -> str | None:
+        """The source's current generation, remembered for :data:`CURRENT_TTL` seconds: finding it is
+        three metadata round trips on the NAS, and a search page asked per hit (texts, fields,
+        content hashes). A generation goes live at most once a night."""
+        now = self._monotonic()
+        with self._lock:
+            hit = self._current.get(source_id)
+            if hit is not None and now - hit[0] < CURRENT_TTL:
+                return hit[1]
+        gen = current_generation(self.root, source_id)
+        with self._lock:
+            self._current[source_id] = (now, gen)
+        return gen
 
     def reader(
         self, source_id: str, generation_id: str, *, current: bool | None = None
@@ -72,7 +93,7 @@ class ParquetDocumentStore:
         read for history and dated requests, and wrote ~20 bytes a document each from a GET (audit
         2026-10-12 #12)."""
         if current is None:
-            current = generation_id == current_generation(self.root, source_id)
+            current = generation_id == self.current(source_id)
         key = (source_id, generation_id, current)
         with self._lock:
             cached = self._readers.get(key)
@@ -102,7 +123,7 @@ class ParquetDocumentStore:
         except InvalidDocIdError:
             return None
         if at_generation is None:
-            gen = current_generation(self.root, source_id)
+            gen = self.current(source_id)
         else:
             gens = self.generations(source_id)
             i = bisect.bisect_right(gens, at_generation)
@@ -121,7 +142,7 @@ class ParquetDocumentStore:
                 source_id, _ = parse_doc_id(DocId(doc_id))
             except InvalidDocIdError:
                 continue
-            gen = current_generation(self.root, source_id)
+            gen = self.current(source_id)
             reader = None if gen is None else self.reader(source_id, gen, current=True)
             row = None if reader is None else reader.lookup(doc_id, ("text",))
             text = None if row is None else row.get("text")
@@ -138,7 +159,7 @@ class ParquetDocumentStore:
                 source_id, _ = parse_doc_id(DocId(doc_id))
             except InvalidDocIdError:
                 continue
-            gen = current_generation(self.root, source_id)
+            gen = self.current(source_id)
             reader = None if gen is None else self.reader(source_id, gen, current=True)
             row = None if reader is None else reader.lookup(doc_id, ("content_hash",))
             digest = None if row is None else row.get("content_hash")

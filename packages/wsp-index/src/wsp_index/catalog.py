@@ -437,15 +437,26 @@ def _date_key(native_id: str) -> str | None:
     return f"{month:02d}-{day:02d}"
 
 
+def _job_reader(
+    refinery_root: Path, source_id: str, generation_id: str, map_root: Path | None
+) -> RefineryReader:
+    gen_dir = generation_dir(refinery_root, source_id, generation_id)
+    return RefineryReader(gen_dir, map_dir=None if map_root is None else id_map_dir(map_root, gen_dir))
+
+
 def build_source_catalog(
     refinery_root: Path,
     source_id: str,
     generation_id: str,
     out_root: Path,
     cfg: CatalogConfig = CatalogConfig(),  # noqa: B008 - immutable
+    map_root: Path | None = None,
 ) -> Path:
-    """Scan one Refinery generation and write ``<out_root>/<source_id>.json`` atomically."""
-    reader = RefineryReader(generation_dir(refinery_root, source_id, generation_id))
+    """Scan one Refinery generation and write ``<out_root>/<source_id>.json`` atomically.
+
+    ``map_root``: local id-map sidecars (:func:`~wsp_index.refinery.id_map_dir`); the featured pick
+    does thousands of point lookups, each a whole ``_ids.parquet`` row group over the NAS without one."""
+    reader = _job_reader(refinery_root, source_id, generation_id, map_root)
     groupings = (
         [_Grouping(p, cfg.per_category, None) for p in cfg.providers]
         if cfg.providers
@@ -497,7 +508,12 @@ def build_source_catalog(
 
 
 def refresh_featured(
-    refinery_root: Path, source_id: str, generation_id: str, out_root: Path, cfg: CatalogConfig
+    refinery_root: Path,
+    source_id: str,
+    generation_id: str,
+    out_root: Path,
+    cfg: CatalogConfig,
+    map_root: Path | None = None,
 ) -> bool:
     """Recompute only the ``featured`` list of an existing catalog file (after ``wsp index rank``)."""
     path = out_root / f"{source_id}.json"
@@ -506,7 +522,7 @@ def refresh_featured(
     payload = cast(dict[str, object], json.loads(path.read_text(encoding="utf-8")))
     if payload.get("generation_id") != generation_id:
         return False
-    reader = RefineryReader(generation_dir(refinery_root, source_id, generation_id))
+    reader = _job_reader(refinery_root, source_id, generation_id, map_root)
     by_lang = _featured(reader, source_id, cfg)
     payload["featured"] = _default_featured(by_lang)
     payload["featured_by_lang"] = by_lang

@@ -16,6 +16,8 @@ from wsp_index.refinery import (
     RefineryReader,
     RefineryWriter,
     configured_root,
+    current_generation,
+    ensure_id_map,
     generation_dir,
     id_map_dir,
     part_dir,
@@ -118,3 +120,44 @@ def test_configured_root(tmp_path: Path) -> None:
     assert configured_root(tmp_path, "/mnt/z/whisipedia/index/refinery") == Path(
         "/mnt/z/whisipedia/index/refinery"
     )
+
+
+def test_ensure_id_map_writes_the_sidecar_once_for_the_index_job(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The index job maps a generation as it goes live; the API never builds a map in a request."""
+    gen = _write(tmp_path / "nas")
+    monkeypatch.setattr(refinery, "filesystem_type", _on_smb)
+    maps = id_map_dir(tmp_path / "local", gen)
+    assert ensure_id_map(gen, maps) is True
+    assert _sidecars(maps) == {IDS_MAP_H, IDS_MAP_LOC}
+    assert ensure_id_map(gen, maps) is False  # already there and matching
+    reader = RefineryReader(gen, map_dir=maps)
+    assert reader.get(DOCS[5].doc_id) is not None
+    assert reader.id_index_bytes == 0
+
+
+def test_the_document_store_asks_for_the_current_generation_once_in_a_while(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Finding the current generation is three metadata round trips on the NAS; a search page asked
+    per hit. It is remembered for a few seconds (a generation goes live once a night)."""
+    from wsp_index.docstore import CURRENT_TTL
+
+    _write(tmp_path / "nas")
+    calls = {"n": 0}
+
+    def counting(root: Path, source_id: str) -> str | None:
+        calls["n"] += 1
+        return current_generation(root, source_id)
+
+    monkeypatch.setattr("wsp_index.docstore.current_generation", counting)
+    clock = {"t": 1000.0}
+    store = ParquetDocumentStore(tmp_path / "nas", map_root=tmp_path / "maps", monotonic=lambda: clock["t"])
+    assert store.get(DOCS[1].doc_id) is not None
+    assert store.texts([DOCS[2].doc_id, DOCS[3].doc_id]) != {}
+    assert store.content_hashes([DOCS[4].doc_id]) != {}
+    assert calls["n"] == 1
+    clock["t"] += CURRENT_TTL + 1
+    assert store.get(DOCS[1].doc_id) is not None
+    assert calls["n"] == 2
