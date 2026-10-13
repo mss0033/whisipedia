@@ -133,6 +133,9 @@ class Relexer:
                     continue
                 new_dir = generation_dir(self.refinery, sid, live[sid])
                 if not is_sealed(new_dir):
+                    self.say(
+                        f"relex: {sid}/{live[sid]} is not in the Refinery at {self.refinery}; NOT caught up"
+                    )
                     continue
                 new = RefineryReader(new_dir, map_ids=False)
                 old_gen = str(done.get(sid, {}).get("generation") or "")
