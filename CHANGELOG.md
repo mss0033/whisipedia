@@ -3,6 +3,10 @@
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Fixed: a "Bad address" from the NAS is retried like a timeout (2026-10-14)
+* CIFS answered a read with EFAULT under load; the vault treated it as fatal and three Kiwix releases
+  were quarantined after five attempts each (2026-10-13). It is now a transient error: the chunk is
+  read again at its offset. The three releases were given a fresh start.
 ### Changed: a dormant upstream is a warning, not a pause (2026-10-14)
 * A source whose newest upstream release is older than 3x its cadence raises a warning
   (`dormant:<source>`) and keeps being discovered at cadence; a newer release resolves it. It used to be

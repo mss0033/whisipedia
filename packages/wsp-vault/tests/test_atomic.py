@@ -1,5 +1,7 @@
 import errno
 import hashlib
+import os
+from collections.abc import Sequence
 from pathlib import Path
 
 import blake3
@@ -14,6 +16,7 @@ from wsp_vault.atomic import (
     atomic_write_bytes,
     is_transient,
     partial_path,
+    readback,
 )
 from wsp_vault.hashing import Digests, hash_bytes, hash_file, supported_extra
 
@@ -128,3 +131,25 @@ def test_overwrite_for_pointer_files(tmp_path: Path) -> None:
     atomic_write_bytes(dest, b"a\n")
     atomic_write_bytes(dest, b"b\n", overwrite=True)
     assert dest.read_bytes() == b"b\n"
+
+
+def test_a_bad_address_from_the_network_mount_is_retried(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CIFS answered a read with EFAULT under load (2026-10-13); the chunk is read again like an EIO."""
+    assert is_transient(OSError(errno.EFAULT, "Bad address"))
+    path = tmp_path / "f"
+    path.write_bytes(b"x" * 100_000)
+    real = os.preadv
+    calls = {"n": 0}
+
+    def flaky(fd: int, buffers: Sequence[bytearray | memoryview], offset: int) -> int:
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise OSError(errno.EFAULT, "Bad address")
+        return real(fd, buffers, offset)
+
+    monkeypatch.setattr(os, "preadv", flaky)
+    digests = readback(path, retry=RetryPolicy(attempts=3, sleep=lambda _s: None), bufsize=32_768)
+    assert digests.sha256 == hashlib.sha256(b"x" * 100_000).hexdigest()
+    assert calls["n"] >= 4  # the failed chunk was read again

@@ -49,6 +49,9 @@ PARTIAL_SUFFIX = ".partial"
 TRANSIENT_ERRNOS = frozenset(
     {
         errno.EIO,
+        # CIFS answered preadv with EFAULT ("Bad address") under load on 2026-10-13; the next attempt
+        # read the same chunk fine. Three releases were quarantined after five attempts each.
+        errno.EFAULT,
         errno.ETIMEDOUT,
         errno.EAGAIN,
         errno.ESTALE,
