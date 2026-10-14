@@ -60,40 +60,38 @@ before the archive mark is read from it.
 
 ## 3. The search index
 
-The new index has two fast columns and no title table (ADR-0011), so the code that reads it goes live
-only at the switch. Until then, build it with the branch's checkout (`WT`, its own `.venv`) and the
-live configuration (`CONFIG`, the main checkout's `config/`).
+The Tantivy index stays on the PC (ADR-0012: served from the NAS, searches did not finish). The new
+index has two fast columns and no title table (ADR-0011), so the code that reads it goes live only at
+the switch. Until then, build it with the branch's checkout (`WT`, its own `.venv`) and the live
+configuration (`CONFIG`, the main checkout's `config/`).
 
 1. **Rebuild beside the live index.** It runs in the background slice and takes about a day; search
-   keeps working. It needs about 170 GB free on the PC, which is why sections 1 and 2 come first.
+   keeps working. It needs the new index's size free on the PC (about 170 GB), which is why sections 1
+   and 2 come first.
 
    ```
    systemd-run --user --unit whisipedia-job-relex --slice whisipedia-background.slice \
-     -p MemoryHigh=3500M -p MemoryMax=4500M -p Nice=19 -p IOSchedulingClass=idle -E MALLOC_ARENA_MAX=2 \
+     -p MemoryHigh=5500M -p MemoryMax=6500M -p Nice=19 -p IOSchedulingClass=idle -E MALLOC_ARENA_MAX=2 \
      WT/.venv/bin/wsp --config-dir CONFIG index rebuild-lexical --into INDEX/lexical.next
    ```
 
    `MALLOC_ARENA_MAX=2` matters: Tantivy allocates with glibc malloc, and with ~50 threads the
-   default per-thread arenas kept ~2.5 GB of freed memory (the job swapped under its ceiling).
-   Reads of the Refinery are paced (`--read-mb-per-sec`, default 30): the site shares the link.
-   It resumes where it stopped if you run it again. At the end it waits for the index lock, catches
+   default per-thread arenas kept ~2.5 GB of freed memory (the job swapped under its ceiling). The
+   ceiling must fit the biggest source's parts: at 3.5 GB the job thrashed for two hours on Wikipedia
+   (2026-10-13). Reads of the Refinery are paced (`--read-mb-per-sec`, default 30): the site shares the
+   link. It resumes where it stopped if you run it again. At the end it waits for the index lock, catches
    up with whatever the live index took in meanwhile, carries over the rank and spelling files, and
    builds the suggest trie.
-
-   Short of local space (the old local Refinery is kept until the owner approves deleting it): add
-   `--tantivy-dir NAS/tantivy/<date>` to build the Tantivy index on the NAS directly. Merges then run
-   over the network (slower); a NAS outage stops the build, and running it again resumes from the last
-   committed part. Skip step 2.
-2. **Copy the Tantivy index to the NAS, verify it, and point at it** (when built locally):
+2. **Back the sealed index up to the NAS** (optional, a verified copy for rollback or another PC):
 
    ```
-   rsync -a --info=progress2 --no-perms --no-owner --no-group \
+   rsync -a --bwlimit=60000 --info=progress2 --no-perms --no-owner --no-group \
      INDEX/lexical.next/tantivy/ NAS/tantivy/<date>/
-   (cd INDEX/lexical.next/tantivy && find . -type f -print0 | sort -z | xargs -0 sha256sum) > /tmp/tantivy.sha256
-   (cd NAS/tantivy/<date> && sha256sum --quiet -c /tmp/tantivy.sha256)
-   WT/.venv/bin/wsp --config-dir CONFIG index point-tantivy INDEX/lexical.next NAS/tantivy/<date>
-   rm -r INDEX/lexical.next/tantivy
+   (cd INDEX/lexical.next/tantivy && find . -type f -print0 | sort -z | xargs -0 sha256sum) > tantivy.sha256
    ```
+
+   Verify the copy at a bounded rate (a plain `sha256sum -c` reads at link speed and starves the site).
+   Do **not** `point-tantivy` at it.
 3. **Switch** (about a minute of downtime):
 
    ```

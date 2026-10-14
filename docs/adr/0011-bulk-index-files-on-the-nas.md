@@ -1,6 +1,6 @@
 # ADR-0011: Bulk index files on the NAS, databases on local disk
 
-- Status: Accepted (owner, 2026-10-12)
+- Status: Accepted (owner, 2026-10-12); amended by [ADR-0012](0012-search-index-stays-local.md): the Tantivy index stays local
 - Date: 2026-10-12
 - Amends: [ADR-0002](0002-storage-tiering-nas-cold-local-hot.md)
 
@@ -23,7 +23,7 @@ Measured on 2026-10-12 against `/mnt/z`:
 ## Decision
 - **Write-once files may live on the NAS:**
   - Refinery generations, via `[index] refinery_root`;
-  - sealed Tantivy index generations, selected by a local pointer;
+  - sealed Tantivy index generations, selected by a local pointer (withdrawn by ADR-0012: served from the NAS, searches did not finish);
   - sealed change-feed archive ranges.
 - **Databases stay on local disk,** as before: SQLite (the change-feed window, settings, orchestrator state) and anything opened for writing in place. `ensure_local` still guards them.
 - **Nothing hot is memory-mapped over the NAS** where a local copy is cheap. The Refinery's id-map sidecars, about 20 bytes a document, live under `<index root>/refinery-maps`. Without a map root, a reader on a network mount uses row-group lookups and maps nothing. On a `soft` SMB mount, a page fault on a failed read raises SIGBUS rather than an `OSError`.
