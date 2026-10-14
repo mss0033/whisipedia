@@ -103,6 +103,6 @@ exec systemd-run --user --collect --quiet \
   -p OOMScoreAdjust=500 -p Nice=19 -p IOSchedulingClass=best-effort -p IOSchedulingPriority=7 \
   -p CPUWeight=20 -p KillMode=control-group -p TimeoutStopSec=120 \
   -E WSP_MAX_WORKERS="${WSP_MAX_WORKERS:-4}" -E OMP_NUM_THREADS=4 -E MKL_NUM_THREADS=4 \
-  -E TOKENIZERS_PARALLELISM=false -E PYTHONUNBUFFERED=1 \
+  -E TOKENIZERS_PARALLELISM=false -E PYTHONUNBUFFERED=1 -E MALLOC_ARENA_MAX=2 \
   -E WSP_CONFIG_DIR="$repo/config" $inherited \
   "$@"

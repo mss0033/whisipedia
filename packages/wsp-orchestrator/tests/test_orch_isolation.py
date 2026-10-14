@@ -173,7 +173,8 @@ def test_systemd_run_command_caps_memory_in_the_background_slice(tmp_path: Path)
         "TimeoutStopSec=60",
     } <= props
     assert "IOSchedulingClass=idle" not in props  # priority inversion while holding a lock
-    assert cmd[cmd.index("-E") + 1] == "WSP_MAX_WORKERS=4"
+    envs = {cmd[i + 1] for i, a in enumerate(cmd) if a == "-E"}
+    assert envs == {"WSP_MAX_WORKERS=4", "MALLOC_ARENA_MAX=2"}  # arenas capped by default
     assert cmd[cmd.index("--") + 1 :] == ["/venv/bin/python", "-m", "wsp_orchestrator.child", "m:f", "a", "b"]
 
 

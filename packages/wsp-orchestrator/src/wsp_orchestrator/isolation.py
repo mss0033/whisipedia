@@ -255,7 +255,9 @@ class SystemdRunLauncher:
         ]
         for prop in limits.properties():
             cmd += ["-p", prop]
-        for key, value in sorted(env.items()):
+        # glibc's per-thread arenas kept gigabytes of freed memory under a step's ceiling (the index
+        # unit sets the same, 2026-10-13); a caller's own value wins.
+        for key, value in sorted({"MALLOC_ARENA_MAX": "2", **env}.items()):
             cmd += ["-E", f"{key}={value}"]
         return [*cmd, "--", *argv]
 

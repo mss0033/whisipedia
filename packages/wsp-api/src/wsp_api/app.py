@@ -158,7 +158,9 @@ def create_app(services: Services, settings: ApiSettings | None = None) -> FastA
         return error_response(503, "zim_unavailable", str(exc), retry_after=RETRY_AFTER)
 
     app.add_exception_handler(ZimUnavailable, zim_unavailable)
-    app.add_middleware(GZipMiddleware, minimum_size=GZIP_MIN_BYTES)  # 0.84-2.2 MB pages -> ~5x smaller
+    # 0.84-2.2 MB pages -> ~5x smaller. Level 6, not Starlette's 9: half the CPU (13.7 -> 7.4 ms on a
+    # 448 KB page), 1% more bytes, and the browser is on loopback (2026-10-14 research).
+    app.add_middleware(GZipMiddleware, minimum_size=GZIP_MIN_BYTES, compresslevel=6)
     app.add_middleware(RawSegmentRouting)
     app.add_middleware(SecurityMiddleware, settings=settings)
     app.add_middleware(ActivityMiddleware, path=settings.activity_marker)  # Warden yields (ADR-0009)
