@@ -58,6 +58,8 @@ EDITIONS = line(
         "title": "Frankenstein",
         "authors": [{"key": "/authors/OL1A"}],
         "publishers": ["Lackington"],
+        "identifiers": {"project_gutenberg": ["84"], "librivox": ["3271"]},
+        "ocaid": "frankenstein00shel",
         "publish_date": "1818",
         "isbn_13": ["9780000000002"],
         "languages": [{"key": "/languages/eng"}],
@@ -143,6 +145,14 @@ def test_catalog_records(generation_dir: Path, tmp_path: Path) -> None:
     assert edition.lang == "en"
     assert "By: Mary Shelley" in edition.text
     assert "ISBN: 9780000000002" in edition.text
-    assert edition.links == ("https://openlibrary.org/works/OL1W",)
+    assert (
+        "Also at: Project Gutenberg #84; LibriVox 3271; Internet Archive frankenstein00shel" in edition.text
+    )
+    assert edition.links == (
+        "wsp:gutenberg/84",
+        "https://archive.org/details/frankenstein00shel",
+        "https://openlibrary.org/works/OL1W",
+    )
+    assert "Also at" not in work.text
     assert edition.url_native == "https://openlibrary.org/books/OL1M"
     assert not (tmp_path / "work" / "openlibrary-authors.sqlite").exists()

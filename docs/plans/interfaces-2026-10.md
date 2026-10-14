@@ -10,6 +10,7 @@ the search-cost ideas that measurement left on the table. Plans here are proposa
 |---|---|---|---|
 | Exam Practice Hall | `wsp://practice` | NCVEC question pools (7 documents) | Parser in `core/exam.ts`; study by group, mock exams by seed; progress in the browser |
 | The Screening Room | `wsp://screening-room` | any document whose original file is video or audio | Players in `ui/player.ts`, four skins, resume positions; kinds `video`/`audio` in the API |
+| Catalog cards that know where the book is | Open Library document pages | Open Library works and editions | `catalogNotice` in `pages/document.ts`: held link, same-title lookup, copy elsewhere, or the copyright reason; adapter keeps external ids (2026-10-14) |
 
 ## Designed, not built
 
@@ -20,18 +21,11 @@ A headword goes straight to the entry instead of a 2-3 s search: resolve `wsp:ki
 to a `kind=dictionary` search. A location-bar shortcut (`define serendipity`, `d serendipity`). The
 search page's instant definition box already parses senses; the page reuses it. Effort: a day.
 
-### Open Library cards that know where the book is
-A card describes a book the library may hold. Today it offers a books-only search. Planned:
-1. The adapter keeps the edition's external ids (`identifiers.project_gutenberg`, `librivox`,
-   `standard_ebooks`, `wikisource`) in the record's links; the card then links straight to the book
-   (and the audiobook when the Screening Room has it) when the library holds that id.
-2. Without an id: a title-and-author match against the books the library holds (`search_hits` within
-   `gutenberg`, `standard-ebooks`, `wikisource-en`, exact title key first, then every-word title), shown
-   as "probably this book" with the match shown.
-3. The reason when nothing is found, from the card's publication year: after 1929 (US public-domain
-   line, moving yearly) "still in copyright, so no free text exists"; before it "public domain, but no
-   transcription in the library yet", with the search offered.
-Effort: a day for ids and reasons; the fuzzy match needs an evaluation set of fifty cards.
+### Open Library cards: what is left
+Built 2026-10-14 (see above). Left: the fuzzy title-and-author match for cards whose title differs
+from the book's (translations, subtitles); and a re-refine of Open Library so cards refined before
+2026-10-14 carry their Project Gutenberg and Internet Archive ids (114M records: a few hours of
+background work over the NAS, for the owner to schedule; otherwise the next monthly dump brings them).
 
 ### Book reader for `kind=books`
 Gutenberg, Standard Ebooks and Wikisource texts are long: a reader mode with a table of contents from

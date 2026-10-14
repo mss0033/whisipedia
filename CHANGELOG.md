@@ -3,6 +3,16 @@
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Added: catalog cards go right to the book, or say why not (2026-10-14)
+* An Open Library card now says where the book is: a link the card carries that resolves to a held
+  book ("The library holds this book: Read Frankenstein (Project Gutenberg #84)"), a book of the same
+  title among the library's books (looked up as the page opens), a copy elsewhere the library has not
+  shelved ("Project Gutenberg has this book (#2701)"), or the reason there is none ("Published 1998, it
+  is still in copyright in the United States"). The search of the library's books stays as the fallback.
+* The Open Library adapter keeps a card's external identifiers: an "Also at" line (Project Gutenberg,
+  Standard Ebooks, Wikisource, LibriVox, Internet Archive) and `wsp:` links for the sites the library
+  has. Cards refined before this change carry no ids until Open Library is refined again; the title
+  lookup covers them meanwhile.
 ### Added: the Exam Practice Hall and the Screening Room (2026-10-13)
 * `wsp://practice` drills the library's question pools (the NCVEC amateur radio pools): a syllabus with
   the viewer's progress, study by group with the answer and FCC rule shown, and mock exams drawn one

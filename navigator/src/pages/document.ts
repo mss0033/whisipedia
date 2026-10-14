@@ -7,7 +7,7 @@ import { ApiRequestError } from '../api/client.ts';
 import type { DocumentResponse, SourceInfo } from '../api/types.ts';
 import { docIdToAddress, makeAddress, searchAddress } from '../core/address.ts';
 import { diffLines, diffStats } from '../core/diff.ts';
-import { h } from '../core/dom.ts';
+import { type Child, h } from '../core/dom.ts';
 import { formatDate } from '../core/format.ts';
 import { sanitizeDocumentHtml } from '../core/links.ts';
 import {
@@ -121,30 +121,162 @@ export function renderBody(doc: DocumentResponse): { node: HTMLElement; broken: 
   return { node: wrap, broken: wrap.querySelectorAll('.broken-link').length };
 }
 
+/** What a catalog card needs to say where the book is: the book sites, and a lookup among them. */
+export interface CatalogHelp {
+  /** Ids of the sources whose documents are books. */
+  bookSources: ReadonlySet<string>;
+  /** The library's books matching a title, best first (a search with `kind=books`). */
+  lookup?:
+    | ((
+        title: string,
+      ) => Promise<
+        ReadonlyArray<{ doc_id: string; title: string; address: string; source_name: string }>
+      >)
+    | undefined;
+  now?: Date | undefined;
+}
+
+/** US public domain: a work published in year Y is free from 1 January of Y + 96 (1930 in 2026). */
+export function publicDomainLine(now = new Date()): number {
+  return now.getFullYear() - 96;
+}
+
+function titleKey(title: string): string {
+  return title
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+/** The year a card says the book came out ("First published: 1818", "Published: Lackington, 1818"). */
+export function cardYear(text: string): number | null {
+  const m = /^(?:First published|Published):[^\n]*?\b(1[5-9]\d\d|20\d\d)\b/m.exec(text);
+  return m ? Number(m[1]) : null;
+}
+
+const BOOK_LINK_RE = /^wsp:(gutenberg|standard-ebooks|wikisource-en)\/(.+)$/;
+const BOOK_SITE_NAMES: Record<string, string> = {
+  gutenberg: 'Project Gutenberg',
+  'standard-ebooks': 'Standard Ebooks',
+  'wikisource-en': 'Wikisource',
+};
+
 /**
- * A library catalog card (Open Library): it describes a book the library may not hold. Say so, and
- * offer the ways to the book itself: a search of the library's books for the title, and the work
- * record an edition belongs to.
+ * A library catalog card (Open Library): it describes a book the library may not hold. Say where
+ * the book is: in the library (a link the card carries resolves to a held book, or a book of the
+ * same title turns up), elsewhere (the card names a Project Gutenberg copy the library has not
+ * shelved), or nowhere free (published after the public-domain line), with the search as the
+ * fallback. The owner asked for "go right to the book" or "why not" (2026-10-13).
  */
 export function catalogNotice(
-  doc: Pick<DocumentResponse, 'title' | 'text' | 'source_id'>,
+  doc: Pick<DocumentResponse, 'title' | 'text' | 'source_id'> &
+    Partial<Pick<DocumentResponse, 'links'>>,
   source: Pick<SourceInfo, 'domain'> | undefined,
+  help?: CatalogHelp,
 ): HTMLElement | null {
   if (!source?.domain.includes('catalog')) return null;
+  const text = doc.text ?? '';
   const title = doc.title.replace(/\s*[:(].*$/, '').trim() || doc.title; // "Title : subtitle" -> "Title"
-  const work = /^Work:\s*(works\/OL\d+W)\s*$/m.exec(doc.text ?? '')?.[1];
-  return h(
-    'div',
-    { class: 'notice catalog-notice', role: 'note' },
-    h('b', null, 'Catalog card. '),
-    'This page describes a book; it is not the book. ',
-    wspLink(
-      searchAddress(title, { kind: 'books' }),
-      `Look for “${title}” among the library’s books`,
-    ),
-    work ? [' · ', wspLink(makeAddress(doc.source_id, work), 'All editions of this work')] : null,
-    '.',
+  const work = /^Work:\s*(works\/OL\d+W)\s*$/m.exec(text)?.[1];
+  const workLink = work
+    ? [' · ', wspLink(makeAddress(doc.source_id, work), 'All editions of this work')]
+    : null;
+  const searchLink = (label: string) => wspLink(searchAddress(title, { kind: 'books' }), label);
+  const notice = (...body: Child[]) =>
+    h(
+      'div',
+      { class: 'notice catalog-notice', role: 'note' },
+      h('b', null, 'Catalog card. '),
+      ...body,
+    );
+  if (/^Open Library catalog record: author\.$/m.test(text)) {
+    return notice(
+      'This page describes an author. ',
+      searchLink(`Look for books by ${title} in the library`),
+      '.',
+    );
+  }
+  const links = doc.links ?? [];
+  const held = links.find(
+    (l) => l.target && help?.bookSources.has(l.target.replace(/^wsp:/, '').split('/')[0] ?? ''),
   );
+  if (held?.target) {
+    const m = BOOK_LINK_RE.exec(held.target);
+    const where = m
+      ? ` (${BOOK_SITE_NAMES[m[1]!] ?? m[1]} ${m[1] === 'gutenberg' ? '#' : ''}${m[2]})`
+      : '';
+    return notice(
+      'The library holds this book: ',
+      wspLink(docIdToAddress(held.target), h('b', null, `Read ${title}`)),
+      where,
+      '.',
+      workLink,
+    );
+  }
+  const promised = links
+    .map((l) => BOOK_LINK_RE.exec(l.href))
+    .find((m) => m && !links.find((l) => l.href === m[0])?.target);
+  if (promised) {
+    const site = BOOK_SITE_NAMES[promised[1]!] ?? promised[1];
+    return notice(
+      `${site} has this book (${promised[1] === 'gutenberg' ? '#' : ''}${promised[2]}); the library has not shelved it yet. `,
+      searchLink('Look for another edition among the library’s books'),
+      '.',
+      workLink,
+    );
+  }
+  const year = cardYear(text);
+  const line = publicDomainLine(help?.now);
+  if (year !== null && year > line) {
+    return notice(
+      `This page describes a book, not the book itself. Published ${year}, it is still in copyright in the United States, so no free text of it exists; the card is all the library can hold. `,
+      searchLink('Look for an older edition among the library’s books'),
+      '.',
+      workLink,
+    );
+  }
+  const status = h('span', { class: 'catalog-lookup', 'aria-live': 'polite' });
+  const el = notice(
+    'This page describes a book; it is not the book. ',
+    year !== null ? `Published ${year}, it is in the public domain. ` : null,
+    status,
+    workLink,
+  );
+  const fallback = () =>
+    status.replaceChildren(searchLink(`Look for “${title}” among the library’s books`), '.');
+  if (!help?.lookup) {
+    fallback();
+    return el;
+  }
+  status.textContent = 'Looking for it among the library’s books…';
+  const key = titleKey(title);
+  help
+    .lookup(title)
+    .then((hits) => {
+      const match = hits.find((hit) => {
+        const k = titleKey(hit.title);
+        return k === key || k.startsWith(`${key} by `);
+      });
+      if (match) {
+        status.replaceChildren(
+          'The library holds it: ',
+          wspLink(match.address, h('b', null, `Read ${match.title}`)),
+          ` (${match.source_name}).`,
+        );
+      } else {
+        status.replaceChildren(
+          year !== null
+            ? 'No transcription of it is in the library yet. '
+            : 'The library has no book by this title. ',
+          searchLink('Search the library’s books'),
+          '.',
+        );
+      }
+    })
+    .catch(fallback);
+  return el;
 }
 
 /** A question pool reads better as a drill: offer the Exam Practice Hall. */
@@ -638,7 +770,11 @@ export async function render(ctx: PageContext): Promise<PageResult> {
     webring(source, sources),
     tmBanner,
     documentWarning(doc),
-    catalogNotice(doc, source),
+    catalogNotice(doc, source, {
+      bookSources: new Set(sources.filter((s) => s.kind === 'books').map((s) => s.id)),
+      lookup: (q) =>
+        ctx.app.api.search({ q, kind: 'books', page_size: 5 }, ctx.signal).then((r) => r.hits),
+    }),
     practiceNotice(doc),
     // Original pages (ZIM HTML) carry their own <h1>; don't print the title twice.
     content instanceof Element && content.querySelector('h1') ? null : pageHeading(doc.title),

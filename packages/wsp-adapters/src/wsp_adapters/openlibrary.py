@@ -310,6 +310,40 @@ def _stamp(value: str) -> datetime | None:
     return stamp if stamp.tzinfo else stamp.replace(tzinfo=UTC)
 
 
+_EXTERNAL = (
+    # identifier field -> (label, wsp link or URL template, None when the library has no such site)
+    ("project_gutenberg", "Project Gutenberg #{id}", "wsp:gutenberg/{id}"),
+    ("standard_ebooks", "Standard Ebooks {id}", "wsp:standard-ebooks/{id}"),
+    ("wikisource", "Wikisource {id}", None),
+    ("librivox", "LibriVox {id}", None),
+)
+
+
+def _external(record: Mapping[str, Any]) -> tuple[str, list[str]]:
+    """The copies of the book elsewhere that a catalog card names (``identifiers`` and ``ocaid``): a
+    text line for the reader and, where the library has a site for it, a ``wsp:`` link the API
+    resolves to the book itself when the library holds it (Open Library cards go right to the
+    book, or say why not; owner 2026-10-13)."""
+    found: list[str] = []
+    links: list[str] = []
+    ids = record.get("identifiers")
+    if isinstance(ids, Mapping):
+        table = cast(Mapping[str, object], ids)
+        for field, label, link in _EXTERNAL:
+            for value in _strs(table.get(field)) or _strs([table.get(field)]):
+                value = value.strip().strip("/")
+                if not value:
+                    continue
+                found.append(label.format(id=value))
+                if link is not None:
+                    links.append(link.format(id=value))
+    ocaid = _str(record.get("ocaid"))
+    if ocaid:
+        found.append(f"Internet Archive {ocaid}")
+        links.append(f"https://archive.org/details/{ocaid}")
+    return _join("Also at", found), links
+
+
 def _join(label: str, values: Sequence[str]) -> str:
     return f"{label}: {'; '.join(values)}" if values else ""
 
@@ -348,6 +382,7 @@ def record_doc(
             "Open Library catalog record: work.",
             _join("By", [a for a in authors if a]),
             _join("First published", _strs([record.get("first_publish_date")])),
+            _external(record)[0],
             _join("Subjects", _strs(record.get("subjects"))),
             _join("Places", _strs(record.get("subject_places"))),
             _join("People", _strs(record.get("subject_people"))),
@@ -372,12 +407,13 @@ def record_doc(
             _join("Published", published),
             _join("Format", _strs([record.get("physical_format"), record.get("pagination")])),
             _join("ISBN", isbns),
+            _external(record)[0],
             _join("Subjects", _strs(record.get("subjects"))),
             _join("Work", _keys(record.get("works"))),
         ]
     text = "\n".join(line for line in lines if line)
     stamp = _stamp(modified)
-    links = [f"https://openlibrary.org/{k}" for k in _keys(record.get("works"))]
+    links = [*_external(record)[1], *(f"https://openlibrary.org/{k}" for k in _keys(record.get("works")))]
     return DocRecord(
         doc_id=make_doc_id(source_id, key),
         source_id=source_id,
