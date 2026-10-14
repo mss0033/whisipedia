@@ -1,0 +1,324 @@
+/*
+ * The Screening Room's players (ui/player.ts): one layout, four skins. All original designs in the
+ * spirit of late-1990s and late-2000s desktop and web players; no brand names, marks or copied art.
+ * The chrome follows the skin, the picture is always the browser's own <video>.
+ */
+.player {
+  display: grid;
+  gap: 0;
+  max-width: 100%;
+  margin: 1em 0;
+  user-select: none;
+  outline: none;
+}
+.player:focus-visible {
+  box-shadow: 0 0 0 3px var(--link);
+}
+.player .pl-title {
+  display: flex;
+  justify-content: space-between;
+  gap: 1em;
+  align-items: baseline;
+  font-size: 0.9em;
+  padding: 0.3em 0.6em;
+  min-width: 0;
+}
+.player .pl-title > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.player .pl-badge {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 0.8em;
+  letter-spacing: 0.06em;
+}
+.player .pl-screen {
+  background: #000;
+  display: grid;
+  place-items: center;
+}
+.player video {
+  display: block;
+  width: 100%;
+  max-height: 72vh;
+  aspect-ratio: 4 / 3;
+  background: #000;
+}
+.player audio {
+  display: none;
+}
+.player .pl-controls {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto auto minmax(60px, 90px) auto auto;
+  gap: 0.4em;
+  align-items: center;
+  padding: 0.45em 0.6em;
+  min-width: 0;
+}
+.player .pl-controls button,
+.player .pl-controls select {
+  font: inherit;
+  cursor: pointer;
+  min-width: 2em;
+}
+.player .pl-seek,
+.player .pl-volume {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+}
+.player .pl-time {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.player .pl-skin {
+  font-size: 0.8em;
+  max-width: 9em;
+}
+.player .pl-notice {
+  margin: 0;
+  padding: 0.5em 0.6em;
+  font-size: 0.9em;
+}
+.player .pl-lcd {
+  display: flex;
+  justify-content: space-between;
+  gap: 1em;
+  align-items: baseline;
+  padding: 0.5em 0.7em;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  min-width: 0;
+}
+.player .pl-lcd-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.player .pl-lcd-time {
+  font-size: 1.4em;
+  letter-spacing: 0.05em;
+}
+.player .pl-scope {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 4 / 1;
+}
+@media (max-width: 600px) {
+  .player .pl-controls {
+    grid-template-columns: auto auto minmax(0, 1fr) auto;
+  }
+  .player .pl-volume,
+  .player .pl-mute,
+  .player .pl-skin {
+    grid-column: span 2;
+  }
+}
+
+/* Theater 98: bevelled charcoal, gold glyphs. */
+.player.sk-theater {
+  background: #2b2b33;
+  border: 2px solid #55555f;
+  border-radius: 10px 10px 4px 4px;
+  box-shadow:
+    inset 0 1px 0 #6d6d78,
+    0 6px 18px rgba(0, 0, 0, 0.6);
+  color: #e6c46a;
+  padding: 6px;
+}
+.player.sk-theater .pl-screen,
+.player.sk-theater video {
+  border: 2px inset #111;
+}
+.player.sk-theater .pl-controls,
+.player.sk-theater .pl-lcd {
+  background: linear-gradient(#3a3a44, #24242b);
+  border-radius: 0 0 6px 6px;
+}
+.player.sk-theater .pl-controls button {
+  background: linear-gradient(#55555f, #2d2d35);
+  border: 1px solid #000;
+  color: #e6c46a;
+  border-radius: 50%;
+  width: 2.2em;
+  height: 2.2em;
+}
+.player.sk-theater .pl-controls select {
+  background: #24242b;
+  color: #e6c46a;
+  border: 1px solid #000;
+}
+.player.sk-theater input[type="range"] {
+  accent-color: #e6c46a;
+}
+.player.sk-theater .pl-scope {
+  background: #0b0d08;
+}
+.player.sk-theater .pl-lcd {
+  color: #9bd36a;
+  background: #0b0d08;
+  border: 1px inset #333;
+}
+
+/* Brushed Steel: metal case, lozenge buttons. */
+.player.sk-steel {
+  background: repeating-linear-gradient(90deg, #c9ccd1 0 2px, #bfc2c8 2px 3px, #d3d6da 3px 5px);
+  border: 1px solid #8a8e96;
+  border-radius: 14px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+  color: #22252b;
+  padding: 8px;
+}
+.player.sk-steel .pl-title {
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.5);
+  font-weight: 600;
+}
+.player.sk-steel video {
+  border-radius: 4px;
+  border: 1px solid #6b6f77;
+}
+.player.sk-steel .pl-controls button {
+  background: radial-gradient(circle at 40% 35%, #fff, #b9bdc4 60%, #8e939b);
+  border: 1px solid #6b6f77;
+  border-radius: 999px;
+  color: #22252b;
+  padding: 0.15em 0.7em;
+}
+.player.sk-steel input[type="range"] {
+  accent-color: #3d6fb8;
+}
+.player.sk-steel .pl-lcd,
+.player.sk-steel .pl-scope {
+  background: #e9ecef;
+  border: 1px inset #9aa0a8;
+  color: #22252b;
+}
+
+/* Desktop 95: grey bevels, title bar, LED timecode. */
+.player.sk-desk {
+  background: #c0c0c0;
+  border: 2px outset #e8e8e8;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+  color: #000;
+  padding: 2px;
+}
+.player.sk-desk .pl-title {
+  background: linear-gradient(90deg, #0a246a, #3a6ea5);
+  color: #fff;
+  font-weight: 700;
+  padding: 3px 6px;
+}
+.player.sk-desk video {
+  border: 2px inset #808080;
+  margin: 4px 0;
+}
+.player.sk-desk .pl-controls button {
+  background: #c0c0c0;
+  border: 2px outset #f0f0f0;
+  color: #000;
+}
+.player.sk-desk .pl-controls button:active {
+  border-style: inset;
+}
+.player.sk-desk .pl-controls select {
+  background: #fff;
+  color: #000;
+  border: 2px inset #e0e0e0;
+}
+.player.sk-desk .pl-time,
+.player.sk-desk .pl-lcd {
+  background: #000;
+  color: #3f3;
+  padding: 2px 6px;
+}
+.player.sk-desk .pl-scope {
+  background: #000;
+  border: 2px inset #808080;
+}
+
+/* Tube 2008: a glossy grey control bar under the picture, a red progress bar, a round play button,
+   a quality badge and a fill-the-screen button at the right. An original look in the spirit of the
+   web video players of the late 2000s. */
+.player.sk-tube {
+  background: #fff;
+  border: 1px solid #a9a9a9;
+  color: #333;
+  padding: 0;
+  border-radius: 2px;
+}
+.player.sk-tube .pl-title {
+  font-weight: 700;
+  color: #333;
+  background: #f5f5f5;
+  border-bottom: 1px solid #ddd;
+}
+.player.sk-tube .pl-badge {
+  background: #333;
+  color: #fff;
+  border-radius: 2px;
+  padding: 1px 5px;
+  font-size: 0.7em;
+}
+.player.sk-tube .pl-controls {
+  background: linear-gradient(#f8f8f8, #d9d9d9 55%, #c6c6c6);
+  border-top: 1px solid #b7b7b7;
+  box-shadow: inset 0 1px 0 #fff;
+}
+.player.sk-tube .pl-controls button {
+  background: linear-gradient(#fdfdfd, #d6d6d6);
+  border: 1px solid #8f8f8f;
+  border-radius: 3px;
+  color: #333;
+}
+.player.sk-tube .pl-play {
+  border-radius: 50%;
+  width: 2.4em;
+  height: 2.4em;
+  background: radial-gradient(circle at 40% 35%, #fff, #c9c9c9 70%, #a9a9a9);
+}
+.player.sk-tube .pl-full {
+  margin-left: 0.2em;
+}
+.player.sk-tube input[type="range"].pl-seek {
+  accent-color: #c00;
+  height: 1.2em;
+}
+.player.sk-tube input[type="range"].pl-volume {
+  accent-color: #666;
+}
+.player.sk-tube .pl-controls select {
+  background: #fff;
+  color: #333;
+  border: 1px solid #8f8f8f;
+  border-radius: 3px;
+}
+.player.sk-tube .pl-lcd,
+.player.sk-tube .pl-scope {
+  background: #1a1a1a;
+  color: #eee;
+}
+
+/* The Screening Room page (pages/screening.ts). */
+.page-screening .screening-stage {
+  display: grid;
+  gap: 1.5em;
+}
+.page-screening .screening-player .fineprint {
+  margin: 0.2em 0 0;
+}
+.page-screening .screening-continue li,
+.page-screening .screening-sites li {
+  margin: 0.3em 0;
+}
+.page-screening button.linkish {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--link);
+  text-decoration: underline;
+  cursor: pointer;
+}

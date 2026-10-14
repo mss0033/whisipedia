@@ -68,6 +68,8 @@ export const DOC_KINDS = [
   'data',
   'medicine',
   'news',
+  'video',
+  'audio',
   'other',
 ] as const satisfies readonly G.DocKind[];
 

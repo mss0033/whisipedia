@@ -35,6 +35,17 @@ export type Route =
       diff: boolean;
       fragment: string;
     }
+  | {
+      page: 'practice';
+      /** Native id of the pool document ('' for the hall). */
+      pool: string;
+      group: string | undefined;
+      mode: 'study' | 'exam';
+      seed: number | undefined;
+      /** Question index within the set. */
+      index: number;
+    }
+  | { page: 'screening' }
   | { page: 'invalid'; input: string };
 
 function toKind(v: string | undefined): DocKind | undefined {
@@ -78,6 +89,20 @@ export function resolveRoute(address: string): Route {
       return { page: 'random', source: p.source || a.path || undefined };
     case 'offline':
       return { page: 'offline', url: p.url ?? p.doc ?? '', from: p.from };
+    case 'screening-room':
+      return { page: 'screening' };
+    case 'practice': {
+      const seed = Number.parseInt(p.seed ?? '', 10);
+      const index = Number.parseInt(p.n ?? '0', 10);
+      return {
+        page: 'practice',
+        pool: a.path,
+        group: /^[A-Z]\d[A-Z]$/.test(p.group ?? '') ? p.group : undefined,
+        mode: p.mode === 'exam' ? 'exam' : 'study',
+        seed: Number.isFinite(seed) && seed > 0 ? seed : undefined,
+        index: Number.isFinite(index) && index >= 0 ? index : 0,
+      };
+    }
     default: {
       const docId = addressToDocId(a);
       if (!docId) return { page: 'site', source: a.host };

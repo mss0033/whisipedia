@@ -2303,6 +2303,8 @@
           "data",
           "medicine",
           "news",
+          "video",
+          "audio",
           "other"
         ],
         "title": "DocKind",

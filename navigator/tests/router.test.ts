@@ -13,6 +13,28 @@ describe('resolveRoute', () => {
     expect(resolveRoute('wsp://help/search')).toEqual({ page: 'help', topic: 'search' });
   });
 
+  it('routes the practice hall and a pool with its exam parameters', () => {
+    expect(resolveRoute('wsp://practice')).toEqual({
+      page: 'practice',
+      pool: '',
+      group: undefined,
+      mode: 'study',
+      seed: undefined,
+      index: 0,
+    });
+    expect(resolveRoute('wsp://practice/ncvec:tech:2026?group=T1A&n=3')).toMatchObject({
+      pool: 'ncvec:tech:2026',
+      group: 'T1A',
+      index: 3,
+    });
+    expect(resolveRoute('wsp://practice/p?mode=exam&seed=42&group=bogus&n=-1')).toMatchObject({
+      mode: 'exam',
+      seed: 42,
+      group: undefined,
+      index: 0,
+    });
+  });
+
   it('parses search parameters defensively', () => {
     expect(resolveRoute('wsp://search?q=%20lisbon%20&kind=maps&page=3')).toEqual({
       page: 'search',

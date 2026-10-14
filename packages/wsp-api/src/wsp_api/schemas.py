@@ -41,6 +41,8 @@ class DocKind(StrEnum):
     DATA = "data"
     MEDICINE = "medicine"
     NEWS = "news"
+    VIDEO = "video"
+    AUDIO = "audio"
     OTHER = "other"
 
 

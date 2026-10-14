@@ -3,6 +3,33 @@
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Added: the Exam Practice Hall and the Screening Room (2026-10-13)
+* `wsp://practice` drills the library's question pools (the NCVEC amateur radio pools): a syllabus with
+  the viewer's progress, study by group with the answer and FCC rule shown, and mock exams drawn one
+  question per group and graded at 74%. Keys 1-4/A-D answer, N or Enter moves on. Progress stays in the
+  browser. A pool's document page offers the hall.
+* `wsp://screening-room` (aliases `cinema`, `theater`): a document whose original file is video or audio
+  plays in the room's players instead of the file panel: four skins (Theater 98, Brushed Steel,
+  Desktop 95, Tube 2008; original designs), resume positions, keyboard control, an audio deck with a
+  live spectrum. The room lists what to continue and which sites hold media, and a projection test
+  records a short reel in the browser so the players can be tried before any film is on the shelves.
+  No media is fetched: the collections stay a plan until the owner approves them.
+* Document kinds `video` and `audio` (registry domains `film`, `lectures`, `video`; `audiobooks`,
+  `radio`, `music`, `audio`): search facets, badges and the directory know them.
+### Fixed: a cold search reads a gigabyte, not ten (2026-10-13)
+* The disk's 8 MB read-ahead made each of a query's ~4,500 random page faults on the memory-mapped index
+  pull 8 MB. `deploy/udev/60-whisipedia-readahead.rules` sets 256 KB; `wsp doctor` warns above 1 MB.
+  Fresh searches through the API went from 12-20 s to 2-3.5 s.
+* The API unit keeps 10 GB (its 4 GB ceiling evicted the index's file pages between queries); a search
+  page's passage and content-hash lookups over the NAS run eight at a time; the exact-title pin no longer
+  reads ten documents' text; a shared window asks the index once, three times deeper.
+* A title whose key contains U+10FFFF no longer crashes the suggest build (the lexical rebuild died at
+  its last step on one such title).
+* Ingests are paced on the NAS link (`[vault] ingest_bytes_per_sec`, 40 MB/s) and yield to the owner's
+  use of the library: a collection lane adopting PDFs at the link's full speed had starved the API.
+### Changed: the search index stays on local disk (ADR-0012)
+* Served from the NAS, the rebuilt index answered nothing (searches did not finish); the runbook backs
+  a sealed index up to the NAS instead of pointing at it.
 ### Fixed: Refinery readers on the NAS map their id index from local disk everywhere (2026-10-13 review)
 * The index job's readers (refresh, catalog build, featured pick, rank, spell) now use the local id-map
   sidecars (`[index] id_map_dir`) like the document store. Without them a reader on the NAS answered

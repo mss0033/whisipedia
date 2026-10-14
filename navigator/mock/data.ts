@@ -150,6 +150,51 @@ export const SOURCES: FixtureSource[] = [
     related: ['gutenberg'],
   },
   {
+    id: 'prelinger-archives',
+    name: 'Prelinger Archives',
+    publisher: 'Internet Archive',
+    kind: 'video',
+    domain: ['film'],
+    license: 'Public domain',
+    tier: 'T2',
+    description: 'Ephemeral, industrial and educational films, 1903 to the 1980s.',
+    doc_count: 1,
+    bytes: 0.4e9,
+    as_of: T('2026-10-01'),
+    health: 'ok',
+    related: ['rfc'],
+  },
+  {
+    id: 'librivox',
+    name: 'LibriVox',
+    publisher: 'LibriVox volunteers',
+    kind: 'audio',
+    domain: ['audiobooks'],
+    license: 'Public domain',
+    tier: 'T2',
+    description: 'Public-domain books read aloud by volunteers.',
+    doc_count: 1,
+    bytes: 0.1e9,
+    as_of: T('2026-10-01'),
+    health: 'ok',
+    related: ['gutenberg'],
+  },
+  {
+    id: 'ncvec-question-pools',
+    name: 'NCVEC amateur radio question pools',
+    publisher: 'National Conference of Volunteer Examiner Coordinators',
+    kind: 'other',
+    domain: ['howto'],
+    license: 'Public domain',
+    tier: 'T2',
+    description: 'The question pools every US amateur radio licence exam is drawn from.',
+    doc_count: 7,
+    bytes: 2.1e6,
+    as_of: T('2026-02-19'),
+    health: 'ok',
+    related: ['rfc'],
+  },
+  {
     id: 'rfc',
     name: 'IETF RFC Editor',
     publisher: 'IETF / RFC Editor',
@@ -616,6 +661,116 @@ property of some one or other of their daughters.
     links: [],
     entities: ['Q170583'],
     aliases: ['jane austen'],
+  },
+  {
+    source_id: 'prelinger-archives',
+    native_id: 'DuckandC1951',
+    title: 'Duck and Cover (1951)',
+    kind: 'video',
+    lang: 'en',
+    license: 'Public domain',
+    url_native: 'https://archive.org/details/DuckandC1951',
+    format: 'text',
+    versions: [
+      {
+        revision: '1',
+        timestamp: T('2026-10-01'),
+        text: 'Duck and Cover (1951)\nFederal Civil Defense Administration film with Bert the Turtle. 9 minutes.',
+      },
+    ],
+    links: [],
+    entities: [],
+    original: {
+      url: '/v1/files/wsp%3Aprelinger-archives%2FDuckandC1951',
+      name: 'DuckandC1951.webm',
+      media_type: 'video/webm',
+      inline: true,
+      preview_url: null,
+    },
+  },
+  {
+    source_id: 'librivox',
+    native_id: 'moby-dick-01',
+    title: 'Moby Dick, chapter 1: Loomings',
+    kind: 'audio',
+    lang: 'en',
+    license: 'Public domain',
+    url_native: 'https://librivox.org/moby-dick-by-herman-melville/',
+    format: 'text',
+    versions: [
+      {
+        revision: '1',
+        timestamp: T('2026-10-01'),
+        text: 'Moby Dick, chapter 1: Loomings\nRead by a LibriVox volunteer. 22 minutes.',
+      },
+    ],
+    links: [],
+    entities: [],
+    original: {
+      url: '/v1/files/wsp%3Alibrivox%2Fmoby-dick-01',
+      name: 'mobydick_01.ogg',
+      media_type: 'audio/ogg',
+      inline: true,
+      preview_url: null,
+    },
+  },
+  {
+    source_id: 'ncvec-question-pools',
+    native_id: 'ncvec:2026-2030-Technician-Pool-and-Syllabus-Public-Release:2026',
+    title: '2026-2030 Technician Pool and Syllabus Public Release Feb 19 2026.pdf',
+    kind: 'other',
+    lang: 'en',
+    license: 'Public domain',
+    url_native: 'https://ncvec.org/downloads/2026-2030%20Technician%20Pool.pdf',
+    format: 'text',
+    versions: [
+      {
+        revision: '2026',
+        timestamp: T('2026-02-19'),
+        text: `2026-2030 Technician Pool and Syllabus Public Release Feb 19 2026.pdf
+Issuer: NCVEC Question Pool Committee
+Edition: 2026
+
+SUBELEMENT T1 - COMMISSION’S RULES [2 Exam Questions - 2 Groups] 3 Questions
+T1A Purpose and permissible use of the Amateur Radio Service; Operator/primary station license grant
+T1B Frequency allocations; Emission modes
+SUBELEMENT T2 - OPERATING PROCEDURES [1 Exam Question - 1 Group] 1 Question
+T2A Station operation
+
+T1A01 (C) [97.1]
+Which of the following is part of the Basis and Purpose of the Amateur Radio Service?
+A. Providing personal radio communications for as many citizens as possible
+B. Providing communications for international contesting
+C. Advancing skills in the technical and communication phases of the radio art
+D. All these choices are correct
+~~
+T1A02 (C) [97.1]
+Which agency regulates and enforces the rules for the Amateur Radio Service in the United States?
+A. ARRL
+B. Homeland Security
+C. The FCC
+D. All these choices are correct
+~~
+T1B01 (B) [97.301]
+Which frequency is in the 6 meter band?
+A. 49.00 MHz
+B. 52.525 MHz
+C. 28.50 MHz
+D. 222.1 MHz
+~~
+T2A01 (B) [97.119]
+How often must an amateur station transmit its assigned call sign?
+A. At least every 5 minutes
+B. At least every 10 minutes
+C. At least every 15 minutes
+D. Only at the end of a contact
+~~
+`,
+      },
+    ],
+    links: [],
+    entities: [],
+    aliases: ['question pool', 'technician'],
   },
   {
     source_id: 'rfc',

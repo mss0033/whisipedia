@@ -28,6 +28,14 @@ _DOMAIN_KIND: dict[str, DocKind] = {
     "catalog": DocKind.DATA,
     "medicine": DocKind.MEDICINE,
     "news": DocKind.NEWS,
+    # The Screening Room (ADR pending): film, lectures and recordings.
+    "video": DocKind.VIDEO,
+    "film": DocKind.VIDEO,
+    "lectures": DocKind.VIDEO,
+    "audio": DocKind.AUDIO,
+    "audiobooks": DocKind.AUDIO,
+    "radio": DocKind.AUDIO,
+    "music": DocKind.AUDIO,
 }
 
 _DOMAIN_NAMES = {"qa": "Q&A", "knowledge-graph": "Knowledge Graph", "howto": "How-To"}

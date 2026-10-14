@@ -2,6 +2,7 @@ import type { WspClient } from '../api/client.ts';
 import type { DocumentResponse, SourceInfo } from '../api/types.ts';
 import type { GlobalHistory, Hotlist, SessionStack } from '../core/history.ts';
 import type { Route } from '../core/router.ts';
+import type { SafeStorage } from '../core/storage.ts';
 import type { ThemeManager } from '../core/theme.ts';
 
 export interface NavOptions {
@@ -18,6 +19,8 @@ export interface AppServices {
   readonly hotlist: Hotlist;
   readonly theme: ThemeManager;
   readonly stack: SessionStack;
+  /** Per-viewer conveniences (reading positions, practice progress); never relied on. */
+  readonly storage: SafeStorage;
   navigate(address: string, opts?: NavOptions): void;
   sources(): Promise<SourceInfo[]>;
   /** Transient status bar message. */

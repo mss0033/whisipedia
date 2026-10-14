@@ -35,6 +35,8 @@ import {
   VERSION,
 } from './pages/info.ts';
 import { renderHistory, renderHotlist } from './pages/local.ts';
+import * as practicePage from './pages/practice.ts';
+import * as screeningPage from './pages/screening.ts';
 import * as searchPage from './pages/search.ts';
 import * as sitePage from './pages/site.ts';
 import * as systemPage from './pages/system.ts';
@@ -52,6 +54,8 @@ const SOURCES_WAIT_MS = 3000;
 
 const RENDERERS: Record<Route['page'], PageRenderer> = {
   home: homePage.render,
+  practice: practicePage.render,
+  screening: screeningPage.render,
   directory: directoryPage.render,
   search: searchPage.render,
   whatsnew: whatsnewPage.render,
@@ -95,6 +99,7 @@ function isTransient(err: ApiRequestError): boolean {
 
 export class App implements AppServices {
   readonly api: WspClient;
+  readonly storage: SafeStorage;
   readonly history: GlobalHistory;
   readonly hotlist: Hotlist;
   readonly theme: ThemeManager;
@@ -129,6 +134,7 @@ export class App implements AppServices {
     this.root = root;
     this.api = opts.api ?? new WspClient();
     const storage = opts.storage ?? new SafeStorage();
+    this.storage = storage;
     this.history = new GlobalHistory(storage);
     this.hotlist = new Hotlist(storage);
     this.theme = new ThemeManager(storage, document.documentElement);

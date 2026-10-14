@@ -91,6 +91,20 @@ export async function renderHelp(ctx: PageContext): Promise<PageResult> {
       h('a', { class: 'broken-link', href: '#wsp://offline' }, 'broken links'),
       '.',
     ),
+    h('h2', { id: 'help-practice', tabindex: '-1' }, 'Exam Practice Hall'),
+    h(
+      'p',
+      null,
+      wspLink(makeAddress('practice'), 'wsp://practice'),
+      ' turns the library’s question pools (the amateur radio licence pools) into a drill: pick a group to study it one question at a time with the answer and rule shown, or sit a mock exam that draws one question from every group, as the real one does, and grades it at 74%. Keys 1–4 or A–D answer, N or Enter moves on. What you have answered stays in this browser only.',
+    ),
+    h('h2', { id: 'help-screening', tabindex: '-1' }, 'The Screening Room'),
+    h(
+      'p',
+      null,
+      wspLink(makeAddress('screening-room'), 'wsp://screening-room'),
+      ' is where the library’s film, lectures, recorded radio and music play. A document whose original file is video or audio shows a player in place of the file panel: four skins (Theater 98, Brushed Steel, Desktop 95, Tube 2008) chosen from the player’s menu, resume where you left off, and keys: Space or K play/pause, J and L skip ten seconds, arrows seek and change the volume, M mutes, F fills the screen, 0–9 jump to a tenth. The room lists what to continue and which sites hold media, and its projection test builds a short reel in the browser to try the players before any film is on the shelves.',
+    ),
     h('h2', { id: 'help-search', tabindex: '-1' }, 'Search tips'),
     h(
       'ul',

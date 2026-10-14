@@ -15,6 +15,8 @@ export const KIND_LABELS: Record<DocKind, string> = {
   data: 'Data',
   medicine: 'Medicine',
   news: 'News',
+  video: 'Video',
+  audio: 'Audio',
   other: 'Other',
 };
 
@@ -30,6 +32,8 @@ export const KIND_ORDER: DocKind[] = [
   'medicine',
   'data',
   'news',
+  'video',
+  'audio',
   'other',
 ];
 

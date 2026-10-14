@@ -10,6 +10,14 @@ import { diffLines, diffStats } from '../core/diff.ts';
 import { h } from '../core/dom.ts';
 import { formatDate } from '../core/format.ts';
 import { sanitizeDocumentHtml } from '../core/links.ts';
+import {
+  formatLabel,
+  mediaKindOf,
+  readSkin,
+  remember,
+  resumeAt,
+  writeSkin,
+} from '../core/media.ts';
 import type { Route } from '../core/router.ts';
 import { renderPlainText } from '../core/text.ts';
 import {
@@ -21,7 +29,9 @@ import {
   pageHeading,
   wspLink,
 } from '../ui/components.ts';
+import { audioDeck, videoPlayer } from '../ui/player.ts';
 import { parseCase, renderCase } from './legal.ts';
+import { POOL_SOURCE } from './practice.ts';
 import type { AppServices, PageContext, PageResult } from './types.ts';
 
 type DocRoute = Extract<Route, { page: 'document' }>;
@@ -134,6 +144,20 @@ export function catalogNotice(
     ),
     work ? [' · ', wspLink(makeAddress(doc.source_id, work), 'All editions of this work')] : null,
     '.',
+  );
+}
+
+/** A question pool reads better as a drill: offer the Exam Practice Hall. */
+export function practiceNotice(
+  doc: Pick<DocumentResponse, 'source_id' | 'native_id' | 'title'>,
+): HTMLElement | null {
+  if (doc.source_id !== POOL_SOURCE || /diagrams?/i.test(doc.title)) return null;
+  return h(
+    'div',
+    { class: 'notice practice-notice', role: 'note' },
+    h('b', null, 'Question pool. '),
+    wspLink(makeAddress('practice', doc.native_id), 'Practice it in the Exam Practice Hall'),
+    ': one question at a time with the answer shown, or a mock exam drawn like the real one.',
   );
 }
 
@@ -254,13 +278,23 @@ function fileKind(media: string, name: string): string {
  * picture and a handbook keeps its figures. PDFs open in the browser's own
  * viewer; map scans show a server-made JPEG preview.
  */
+/** What a media original needs from the app: the viewer's skin and playback memory. */
+export interface MediaContext {
+  app: Pick<AppServices, 'storage' | 'theme'>;
+  docId: string;
+  address: string;
+}
+
 export function originalPanel(
   doc: Pick<DocumentResponse, 'original' | 'title' | 'kind'>,
   urlOf: (path: string) => string = (path) => path,
+  media?: MediaContext,
 ): HTMLElement | null {
   const o = doc.original;
   if (!o) return null;
   const url = urlOf(o.url);
+  const playable = mediaKindOf(o.media_type, o.name);
+  if (playable && media) return mediaPanel(doc, o, url, playable, media);
   const kind = fileKind(o.media_type, o.name);
   const links = h(
     'p',
@@ -303,6 +337,53 @@ export function originalPanel(
           'Your browser cannot show this kind of file here; download it to open it.',
         ),
     h('h2', { class: 'original-text-heading' }, 'Text extracted from the file'),
+  );
+}
+
+/** A film or a recording: the Screening Room's player, then the download and the text as usual. */
+function mediaPanel(
+  doc: Pick<DocumentResponse, 'title'>,
+  o: NonNullable<DocumentResponse['original']>,
+  url: string,
+  kind: 'video' | 'audio',
+  media: MediaContext,
+): HTMLElement {
+  const { storage, theme } = media.app;
+  const make = kind === 'video' ? videoPlayer : audioDeck;
+  const player = make({
+    src: url,
+    title: doc.title,
+    mediaType: o.media_type,
+    fileName: o.name,
+    startAt: resumeAt(storage, media.docId) ?? undefined,
+    skin: readSkin(storage, theme.current.theme),
+    onSkin: (skin) => writeSkin(storage, skin),
+    onProgress: (at, duration) =>
+      remember(storage, {
+        docId: media.docId,
+        address: media.address,
+        title: doc.title,
+        kind,
+        at,
+        duration,
+      }),
+    downloadHref: url,
+  });
+  return h(
+    'section',
+    { class: 'original original-media', 'aria-label': kind === 'video' ? 'Film' : 'Recording' },
+    player.el,
+    h(
+      'p',
+      { class: 'original-links' },
+      h('b', null, 'Original file: '),
+      h('code', null, o.name),
+      ` (${formatLabel(o.media_type, o.name)} ${kind}) · `,
+      h('a', { href: url, download: o.name }, 'Download'),
+      ' · ',
+      wspLink(makeAddress('screening-room'), 'Screening Room'),
+    ),
+    h('h2', { class: 'original-text-heading' }, 'Text that came with the file'),
   );
 }
 
@@ -558,9 +639,16 @@ export async function render(ctx: PageContext): Promise<PageResult> {
     tmBanner,
     documentWarning(doc),
     catalogNotice(doc, source),
+    practiceNotice(doc),
     // Original pages (ZIM HTML) carry their own <h1>; don't print the title twice.
     content instanceof Element && content.querySelector('h1') ? null : pageHeading(doc.title),
-    route.at ? null : originalPanel(doc, (path) => ctx.app.api.url(path)),
+    route.at
+      ? null
+      : originalPanel(doc, (path) => ctx.app.api.url(path), {
+          app: ctx.app,
+          docId: doc.doc_id,
+          address: here,
+        }),
     content,
     broken
       ? h(

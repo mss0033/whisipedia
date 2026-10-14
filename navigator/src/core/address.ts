@@ -32,6 +32,8 @@ export const BUILTIN_HOSTS = [
   'help',
   'random',
   'offline',
+  'practice',
+  'screening-room',
 ] as const;
 export type BuiltinHost = (typeof BUILTIN_HOSTS)[number];
 
@@ -52,6 +54,10 @@ export const HOST_ALIASES: Readonly<Record<string, string>> = {
   stack: 'stackexchange',
   'search.wsp': 'search',
   start: 'home',
+  screening: 'screening-room',
+  cinema: 'screening-room',
+  theater: 'screening-room',
+  theatre: 'screening-room',
 };
 
 export const HOME_ADDRESS = 'wsp://home';

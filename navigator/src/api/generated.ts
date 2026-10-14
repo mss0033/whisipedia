@@ -105,7 +105,7 @@ export interface DiskUsage {
 }
 
 /** What kind of site a source is: drives result filters, badges and the start page (PLAN §10.3). */
-export type DocKind = 'encyclopedia' | 'books' | 'papers' | 'law' | 'maps' | 'qa' | 'dictionary' | 'data' | 'medicine' | 'news' | 'other';
+export type DocKind = 'encyclopedia' | 'books' | 'papers' | 'law' | 'maps' | 'qa' | 'dictionary' | 'data' | 'medicine' | 'news' | 'video' | 'audio' | 'other';
 
 export interface DocRef {
   doc_id: string;
