@@ -388,7 +388,28 @@ def build_vault(
         ledger=build_ledger(cfg, signer) if ledger else None,
         parity=parity,
         lock_dir=lock_dir,
+        pace=ingest_pace(cfg),
     )
+
+
+def ingest_pace(cfg: Mapping[str, Any]) -> Callable[[int], None] | None:
+    """A rate limit for the bytes an ingest reads and writes (``[vault] ingest_bytes_per_sec``; 0 = none),
+    paused while the owner uses the library (``yield_to_interactive_seconds``): on the NAS, one lane
+    adopting PDFs at the link's full speed starved the API's Refinery reads (2026-10-13)."""
+    from wsp_core.activity import recently_active
+    from wsp_vault.ratelimit import RateLimiter
+
+    vcfg = section(cfg, "vault")
+    rate = float(vcfg.get("ingest_bytes_per_sec", 40e6))
+    if rate <= 0:
+        return None
+    marker = activity_marker(cfg)
+    window = float(vcfg.get("yield_to_interactive_seconds", 300))
+
+    def busy() -> bool:
+        return window > 0 and recently_active(marker, window)
+
+    return RateLimiter(rate, burst_seconds=5.0, should_pause=busy).consume
 
 
 def _has_par2() -> bool:

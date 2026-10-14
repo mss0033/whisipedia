@@ -323,3 +323,20 @@ def test_manifests_are_parsed_once_and_revalidated(
     os.utime(path, ns=(1, 1))  # a changed stamp (e.g. a repaired manifest) is read again
     assert vault.current(SOURCE) == first
     assert len(calls) == 2
+
+
+def test_ingest_and_adopt_report_every_byte_to_the_pace_hook(tmp_path: Path, make_local: LocalFn) -> None:
+    """On the NAS the copy, the read-back and an adopt's hash share the link with the library's
+    readers; ``pace`` sees each chunk so a rate limiter can hold them to their share."""
+    seen: list[int] = []
+    vault = FileVault(tmp_path / "paced", Ed25519Signer.generate(), pace=seen.append)
+    data = FILES["upstream/beta.txt"]
+    vault.ingest(SOURCE, GEN, make_local("p", data), "upstream/p")
+    assert sum(seen) >= 2 * len(data)  # the copy and the read-back at least
+    seen.clear()
+    incoming = tmp_path / "paced" / "_incoming" / "q.zim"
+    incoming.parent.mkdir(parents=True)
+    alpha = FILES["upstream/alpha.zim"]
+    incoming.write_bytes(alpha)
+    vault.adopt(SOURCE, GEN, incoming, "upstream/q.zim")
+    assert sum(seen) == len(alpha)

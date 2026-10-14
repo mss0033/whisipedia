@@ -259,8 +259,13 @@ class FileVault:
         retry: RetryPolicy = DEFAULT_RETRY,
         clock: Callable[[], datetime] = utcnow,
         lock_dir: Path | None = None,
+        pace: Callable[[int], None] | None = None,
     ) -> None:
-        """``lock_dir`` holds the mutation locks and must be on local disk (never inside the vault);
+        """``pace`` is called with the size of every chunk :meth:`ingest` and :meth:`adopt` read or
+        write (a rate limiter's ``consume``): on a NAS those passes share the link with the readers
+        of the library, and unpaced they took all of it (the API's reads timed out, 2026-10-13).
+
+        ``lock_dir`` holds the mutation locks and must be on local disk (never inside the vault);
         every process that writes this vault must use the same one. ``None``: a per-user directory
         derived from the vault path (:func:`wsp_vault.locks.default_lock_dir`)."""
         self._root = root
@@ -271,6 +276,7 @@ class FileVault:
         self._ledger = ledger
         self._parity = parity
         self._retry = retry
+        self._pace = pace
         self._clock = clock
         locks = lock_dir if lock_dir is not None else default_lock_dir(root)
         if locks.resolve().is_relative_to(root.resolve()):
@@ -430,11 +436,13 @@ class FileVault:
             digests: Digests | None = None
             if not dest.exists():
                 with suppress(FileExistsError):  # another writer published the same path meanwhile
-                    digests = atomic_copy(local, dest, extra=extra, validate=validate, retry=self._retry)
+                    digests = atomic_copy(
+                        local, dest, extra=extra, validate=validate, retry=self._retry, on_chunk=self._pace
+                    )
             if digests is None:
-                have = readback(dest, extra=extra)
+                have = readback(dest, extra=extra, on_chunk=self._pace)
                 if expected is None:
-                    new = readback(local, extra=extra)
+                    new = readback(local, extra=extra, on_chunk=self._pace)
                     if have != new:
                         raise VaultError(f"{relpath} is already staged with different content")
                 else:
@@ -523,7 +531,7 @@ class FileVault:
                 os.unlink(moving)
                 fsync_dir(moving.parent)
         if not path.exists() and not moving.exists() and dest.exists():  # adopted before a crash
-            digests = readback(dest, extra=extra)
+            digests = readback(dest, extra=extra, on_chunk=self._pace)
             validate(digests)
             return rel.as_posix(), digests, None
         if path.exists():
@@ -543,7 +551,7 @@ class FileVault:
         replaced: Digests | None = None
         try:
             before = os.stat(moving)
-            digests = readback(moving, extra=extra)
+            digests = readback(moving, extra=extra, on_chunk=self._pace)
             after = os.stat(moving)
             stamp = (before.st_size, before.st_mtime_ns, before.st_ino)
             if stamp != (after.st_size, after.st_mtime_ns, after.st_ino) or after.st_size != digests.size:
@@ -552,7 +560,7 @@ class FileVault:
                 )
             if dest.exists():
                 # Staged by an earlier, interrupted ingest and fetched again since.
-                have = readback(dest, extra=extra)
+                have = readback(dest, extra=extra, on_chunk=self._pace)
                 if have == digests:  # the same bytes: nothing to do, drop the incoming copy
                     validate(have)
                     os.unlink(moving)

@@ -82,3 +82,14 @@ def test_vault_locks_live_in_their_own_local_directory(tmp_path: Path) -> None:
     cfg = _cfg(tmp_path)
     vault = bootstrap.build_vault(cfg, (), bootstrap.load_signer(cfg, environ={}), ledger=False)
     assert vault.locks.directory == tmp_path / "locks" / "vault"
+
+
+def test_ingest_pace_follows_the_vault_section(tmp_path: Path) -> None:
+    """``ingest_bytes_per_sec`` paces an ingest's copies and hashes; 0 switches the pacing off."""
+    from wsp_cli.bootstrap import ingest_pace
+
+    base = {"vault": {"root": str(tmp_path)}, "index": {"root": str(tmp_path / "index")}}
+    assert ingest_pace({**base, "vault": {**base["vault"], "ingest_bytes_per_sec": 0}}) is None
+    pace = ingest_pace(base)
+    assert pace is not None
+    pace(1024)  # within the burst: returns at once

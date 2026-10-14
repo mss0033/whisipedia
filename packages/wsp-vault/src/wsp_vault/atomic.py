@@ -333,8 +333,12 @@ def rename_with_retry(
             delay *= 2
 
 
-def _commit(tmp: Path, dest: Path, written: Digests, *, overwrite: bool) -> None:
-    back = readback(tmp, retry=RetryPolicy(attempts=1))  # the caller's policy retries the attempt
+def _commit(
+    tmp: Path, dest: Path, written: Digests, *, overwrite: bool, on_chunk: ProgressFn | None = None
+) -> None:
+    back = readback(
+        tmp, retry=RetryPolicy(attempts=1), on_chunk=on_chunk
+    )  # the caller's policy retries the attempt
     if back != written:
         raise ReadbackError(f"{tmp}: read back {back.sha256} after writing {written.sha256}")
     if overwrite:
@@ -412,7 +416,7 @@ def atomic_copy(
             raise IntegrityError(f"{src}: content {written.sha256} does not match expected {expected.sha256}")
         if validate is not None:
             validate(written)
-        _commit(tmp, dest, written, overwrite=overwrite)
+        _commit(tmp, dest, written, overwrite=overwrite, on_chunk=on_chunk)
         return written
 
     return retry.run(lambda: _attempt_in_temp(dest, attempt))
