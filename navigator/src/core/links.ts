@@ -199,6 +199,7 @@ const TAG_ATTRS: Record<string, Set<string>> = {
   time: new Set(['datetime']),
   abbr: new Set(['title']),
   blockquote: new Set(['cite']),
+  details: new Set(['open']),
 };
 
 /** Only same-origin API assets may load (CSP would block anything else anyway). */
@@ -301,6 +302,17 @@ function sanitizeImage(el: Element, stats: SanitizeStats): Node {
       const v = el.getAttribute(a);
       if (v && /^\d{1,4}$/.test(v)) img.setAttribute(a, v);
     }
+    const title = el.getAttribute('title');
+    if (title) img.title = title; // plain text; a comic's hover text lives here
+    // High-density variants, each checked like src: `a.png 2x, b.png 3x`.
+    const srcset = (el.getAttribute('srcset') ?? '')
+      .split(',')
+      .map((item) => item.trim().split(/\s+/))
+      .filter(([u, d]) => u && (!d || /^\d+(\.\d+)?[xw]$/.test(d)))
+      .map(([u, d]) => [allowedImagePath(u!), d] as const)
+      .filter(([u]) => u !== null)
+      .map(([u, d]) => (d ? `${u} ${d}` : u!));
+    if (srcset.length) img.setAttribute('srcset', srcset.join(', '));
     return img;
   }
   stats.removed += 1;

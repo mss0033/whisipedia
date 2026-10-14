@@ -255,6 +255,36 @@ export const SOURCES: FixtureSource[] = [
     related: ['rfc', 'wikipedia-en-zim'],
   },
   {
+    id: 'kiwix-xkcd-com-en-all',
+    name: 'xkcd (Kiwix ZIM)',
+    publisher: 'Randall Munroe',
+    kind: 'other',
+    domain: ['comics'],
+    license: 'CC-BY-NC-2.5',
+    tier: 'T2',
+    description: 'A webcomic of romance, sarcasm, math, and language.',
+    doc_count: 3_000,
+    bytes: 451e6,
+    as_of: T('2026-08-07'),
+    health: 'ok',
+    related: [],
+  },
+  {
+    id: 'kiwix-www-mankier-com-en-all',
+    name: 'ManKier man pages (Kiwix ZIM)',
+    publisher: 'ManKier',
+    kind: 'other',
+    domain: ['computing'],
+    license: 'LicenseRef-per-item',
+    tier: 'T2',
+    description: 'Linux manual pages with examples.',
+    doc_count: 60_000,
+    bytes: 1.2e9,
+    as_of: T('2026-07-01'),
+    health: 'ok',
+    related: [],
+  },
+  {
     id: 'openstax',
     name: 'OpenStax Textbooks',
     publisher: 'Rice University',
@@ -984,6 +1014,57 @@ Status of this Memo
     links: [],
     entities: [],
     aliases: ['carrier pigeon', 'avian carriers', 'april fools rfc'],
+  },
+  {
+    source_id: 'kiwix-xkcd-com-en-all',
+    native_id: 'xkcd.com/936',
+    title: 'xkcd: Password Strength',
+    kind: 'other',
+    lang: 'en',
+    license: 'CC-BY-NC-2.5',
+    url_native: 'https://xkcd.com/936/',
+    format: 'html',
+    versions: [
+      {
+        revision: 'xkcd.com_en_all_2026-08',
+        timestamp: T('2026-08-07'),
+        html: `<div id="middleContainer" class="box"><div id="ctitle">Password Strength</div>
+<ul class="comicNav"><li><a href="wsp://kiwix-xkcd-com-en-all/xkcd.com/1">|&lt;</a></li>
+<li><a rel="prev" href="wsp://kiwix-xkcd-com-en-all/xkcd.com/935" accesskey="p">&lt; Prev</a></li>
+<li><a href="https://c.xkcd.com/random/comic/">Random</a></li>
+<li><a rel="next" href="wsp://kiwix-xkcd-com-en-all/xkcd.com/937" accesskey="n">Next &gt;</a></li></ul>
+<div id="comic"><img src="/v1/assets/kiwix-xkcd-com-en-all/2026-08/imgs.xkcd.com/comics/password_strength.png" title="To anyone who understands information theory and security, I sincerely apologize." alt="Password Strength" srcset="/v1/assets/kiwix-xkcd-com-en-all/2026-08/imgs.xkcd.com/comics/password_strength_2x.png 2x" /></div>
+<div id="transcript">((The comic illustrates the relative strength of passwords.))</div></div>`,
+      },
+    ],
+    links: [],
+    entities: [],
+    aliases: ['correct horse battery staple'],
+  },
+  {
+    source_id: 'kiwix-www-mankier-com-en-all',
+    native_id: 'www.mankier.com/1/rsync',
+    title: 'rsync: a fast, versatile, remote (and local) file-copying tool',
+    kind: 'other',
+    lang: 'en',
+    license: 'LicenseRef-per-item',
+    url_native: 'https://www.mankier.com/1/rsync',
+    format: 'html',
+    versions: [
+      {
+        revision: 'www.mankier.com_en_all_2026-07',
+        timestamp: T('2026-07-01'),
+        html: `<div class="burger"></div><div id="menu"><form action="/" id="ta"><input id="ta-input" name="q"></form>
+<a href="#" class="menu-heading">rsync</a><nav id="menu-scroller"><ul class="nav-h2">
+<li><a href="#Synopsis">Synopsis</a></li><li><a href="#Options">Options</a></li></ul></nav></div>
+<main><section id="Synopsis"><a href="#Synopsis"><h2>Synopsis</h2></a><pre>rsync [OPTION...] SRC... [DEST]</pre></section>
+<section id="Options"><a href="#Options"><h2>Options</h2></a><dl><dt><a id="--help" href="#--help">--help</a></dt><dd>Show help.</dd></dl></section></main>
+<footer><ul><li><a href="wsp://kiwix-www-mankier-com-en-all/www.mankier.com/blog">Blog</a></li></ul></footer>`,
+      },
+    ],
+    links: [],
+    entities: [],
+    aliases: [],
   },
   {
     source_id: 'stackexchange',

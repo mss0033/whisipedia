@@ -30,7 +30,9 @@ import {
   wspLink,
 } from '../ui/components.ts';
 import { audioDeck, videoPlayer } from '../ui/player.ts';
+import { comicBar, comicView, isComic, looksLikeComic } from './comics.ts';
 import { parseCase, renderCase } from './legal.ts';
+import { isManPage, looksLikeManPage, manPageView } from './manpages.ts';
 import { POOL_SOURCE } from './practice.ts';
 import { isBook, RESUME_ID, type ReaderContext, renderBook } from './reader.ts';
 import { isThread, threadView } from './threads.ts';
@@ -100,7 +102,7 @@ export function renderBody(
   }
   const wrap = h('div', { class: 'doc-body', lang: doc.lang });
   if (doc.format === 'html' && doc.html) {
-    const { fragment, stats } = sanitizeDocumentHtml(asThread(doc.html, doc.source_id), {
+    const { fragment, stats } = sanitizeDocumentHtml(rewritePage(doc.html, doc.source_id), {
       sourceId: doc.source_id,
       nativeId: doc.native_id,
       docId: doc.doc_id,
@@ -287,12 +289,28 @@ export function catalogNotice(
   return el;
 }
 
-/** A question page (Stack Exchange) rewritten as a thread before the sanitiser drops its classes. */
-function asThread(html: string, source: string): string {
+/**
+ * Page kinds rewritten before the sanitiser drops their classes: a question page (Stack Exchange) as
+ * a thread, a numbered comic as a comic, a man page with a sections box. A cheap string test first: parsing every 1-2 MB article a
+ * second time only to find it is neither cost a full parse per page (review 2026-10-14).
+ */
+function rewritePage(html: string, source: string): string {
+  const thread = html.includes('data-questionid') || html.includes('id="question"');
+  const comic = looksLikeComic(html);
+  const man = looksLikeManPage(html);
+  if (!thread && !comic && !man) return html;
   const parsed = new DOMParser().parseFromString(html, 'text/html');
-  if (!isThread(parsed.body)) return html;
-  threadView(parsed.body, source);
-  return parsed.body.innerHTML;
+  let changed = false;
+  if (thread && isThread(parsed.body)) {
+    threadView(parsed.body, source);
+    changed = true;
+  }
+  if (comic && isComic(parsed.body)) {
+    comicView(parsed.body, source);
+    changed = true;
+  }
+  if (man && isManPage(parsed.body) && manPageView(parsed.body) > 0) changed = true;
+  return changed ? parsed.body.innerHTML : html;
 }
 
 /** A question pool reads better as a drill: offer the Exam Practice Hall. */
@@ -797,6 +815,9 @@ export async function render(ctx: PageContext): Promise<PageResult> {
         ctx.app.api.search({ q, kind: 'books', page_size: 5 }, ctx.signal).then((r) => r.hits),
     }),
     practiceNotice(doc),
+    doc.format === 'html' && doc.html && looksLikeComic(doc.html) && !route.at
+      ? comicBar(doc.source_id, doc.native_id, (a) => ctx.app.navigate(a))
+      : null,
     // Original pages (ZIM HTML) carry their own <h1>; don't print the title twice.
     content instanceof Element && content.querySelector('h1') ? null : pageHeading(doc.title),
     route.at
