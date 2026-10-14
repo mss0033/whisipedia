@@ -48,6 +48,18 @@ def _quality_run(args: argparse.Namespace, out: TextIO) -> int:
     return cmd_quality_run(args, out)
 
 
+def _alerts_raise(args: argparse.Namespace, out: TextIO) -> int:
+    from wsp_cli.notify import cmd_alerts_raise
+
+    return cmd_alerts_raise(args, out)
+
+
+def _alerts_resolve(args: argparse.Namespace, out: TextIO) -> int:
+    from wsp_cli.notify import cmd_alerts_resolve
+
+    return cmd_alerts_resolve(args, out)
+
+
 def _alerts_digest(args: argparse.Namespace, out: TextIO) -> int:
     from wsp_cli.notify import cmd_alerts_digest
 
@@ -349,6 +361,12 @@ def build_parser(argv: Sequence[str] | None = None) -> argparse.ArgumentParser:
 
     al = add("alerts", _usage, "Alerts: what the library wants you to know.")
     al_sub = al.add_subparsers(dest="alerts_command", required=True, metavar="COMMAND")
+    s = add("raise", _alerts_raise, "Open an alert (scripts: the collection lanes).", al_sub)
+    s.add_argument("--key", required=True, help="stable identity, e.g. lane:lane-cia:b0002")
+    s.add_argument("--severity", choices=["info", "warning", "critical"], default="warning")
+    s.add_argument("--message", required=True)
+    s = add("resolve", _alerts_resolve, "Close an alert once its cause is gone.", al_sub)
+    s.add_argument("--key", required=True)
     s = add(
         "digest",
         _alerts_digest,

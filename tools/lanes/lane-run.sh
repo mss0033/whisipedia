@@ -26,6 +26,11 @@
 #             a sealed generation takes no more files); retry after LANE_PARTIAL_WAIT seconds
 #   anything else (1 crash, 2 refused, 137/143 killed): not done, nothing ingested; the next run retries
 #
+# Failures raise an alert lane:NAME:ITEM (`wsp alerts raise`; the morning digest and the System Monitor
+# show it): critical when an ingest fails (a batch then waits for someone to look, as an interrupted
+# adoption did on 2026-10-14), a warning when downloads keep failing, a listing stays incomplete or a
+# fetch crashes. The item's alert is resolved once it is done. LANE_ALERT_CMD replaces `$WSP` for them.
+#
 # One lane per source at a time: each item holds <state>/locks/<source>.lock (flock) for its fetch and
 # ingest, so two lanes listing the same source never fetch it at once (audit M6); the second one leaves
 # the item for its next run. SIGTERM/SIGINT are passed on to the running command and the lane stops
@@ -37,6 +42,7 @@ NAME=$1 SRC=$2
 shift 2
 REPO=$(cd "$(dirname "$0")/../.." && pwd)
 WSP=${WSP:-$REPO/.venv/bin/wsp}
+ALERT_CMD=${LANE_ALERT_CMD:-$WSP}
 STATE=${WSP_LANE_STATE:-${XDG_STATE_HOME:-$HOME/.local/state}/whisipedia/collections}
 LISTING_TRIES=${LANE_LISTING_TRIES:-8}     # fetch attempts while the listing is incomplete (exit 4)
 LISTING_WAIT=${LANE_LISTING_WAIT:-900}
@@ -50,6 +56,14 @@ touch "$DONE" "$CYCLES" "$FETCHED"
 cd "$REPO" || exit 1
 
 say() { echo "$(date -Is) $*" >> "$LOG"; }
+
+# alert SEVERITY MESSAGE: open lane:NAME:ITEM (never stops the lane: a failure to alert is only logged).
+alert() {
+  "$ALERT_CMD" alerts raise --key "lane:$NAME:$item" --severity "$1" --message "lane $NAME, $item: $2" >> "$LOG" 2>&1 || true
+}
+clear_alert() { "$ALERT_CMD" alerts resolve --key "lane:$NAME:$item" >> "$LOG" 2>&1 || true; }
+# The last error line of the item's own log since this step began (for the alert's message).
+last_error() { tail -c +"$((${1:-0} + 1))" "$out" 2>/dev/null | grep -E 'Error|error:' | tail -n 1 | cut -c1-300; }
 
 # --- signals: pass SIGTERM/SIGINT on to the running command, then stop ---------------------------------
 child=""
@@ -111,6 +125,7 @@ next_cycle() {
 # runs (exit 3). Sets irc.
 ingest_cycle() {
   tries=0
+  ingest_from=$(wc -c < "$out" 2>/dev/null || echo 0)
   while :; do
     # shellcheck disable=SC2086  # $part is "--partition X" or empty, split on purpose
     run "$out" "$WSP" ingest --source "$src" $part --version "$cyc"
@@ -121,6 +136,11 @@ ingest_cycle() {
     pause "$BUSY_WAIT"
   done
   say "ingest $src $part --version $cyc: exit $irc"
+  case $irc in
+    0 | 8) ;;
+    3) alert warning "ingest of cycle $cyc still waiting for another ingest after $tries tries" ;;
+    *) alert critical "ingest of cycle $cyc failed (exit $irc): $(last_error "$ingest_from"). See $out; it is fetched again on the next run." ;;
+  esac
 }
 
 # --- the items ------------------------------------------------------------------------------------------
@@ -179,7 +199,7 @@ for item in "$@"; do
         ;;
       5)
         pending=$((pending + 1))
-        [ "$pending" -ge 3 ] && { say "earlier fetch still not ingested; $item left for a later run"; break; }
+        [ "$pending" -ge 3 ] && { say "earlier fetch still not ingested; $item left for a later run"; alert warning "an earlier fetch is still not ingested after 3 tries"; break; }
         # "<src>: fetched but not ingested yet: V1, V2; run ..." names the versions: ingest each by name
         # (a partition's ingest needs --version), then fetch again.
         waiting=$(tail -c +"$((start + 1))" "$out" | sed -n 's/.*: fetched but not ingested yet: \(.*\); run .*/\1/p' | tail -n 1 | tr -d ',')
@@ -192,7 +212,7 @@ for item in "$@"; do
         ;;
       4)
         listing=$((listing + 1))
-        [ "$listing" -ge "$LISTING_TRIES" ] && { say "listing still incomplete; $item left for a later run"; break; }
+        [ "$listing" -ge "$LISTING_TRIES" ] && { say "listing still incomplete; $item left for a later run"; alert warning "the source's listing stayed incomplete after $LISTING_TRIES tries"; break; }
         pause "$LISTING_WAIT"
         ;;
       6)
@@ -206,11 +226,12 @@ for item in "$@"; do
           set_cycle "$item" "$cyc"
         fi
         partial=$((partial + 1))
-        [ "$partial" -ge "$PARTIAL_TRIES" ] && { say "downloads still failing; $item left for a later run"; break; }
+        [ "$partial" -ge "$PARTIAL_TRIES" ] && { say "downloads still failing; $item left for a later run"; alert warning "downloads still failing after $PARTIAL_TRIES tries (cycle $cyc)"; break; }
         pause "$PARTIAL_WAIT"
         ;;
       *)
         say "fetch did not complete (exit $frc); nothing ingested, $item left for a later run"
+        alert warning "fetch did not complete (exit $frc): $(last_error "$start"). See $out."
         break
         ;;
     esac
@@ -219,6 +240,7 @@ for item in "$@"; do
   if [ "$done_item" = 1 ]; then
     echo "$item" >> "$DONE"
     say "$item: done (cycle $cyc)"
+    clear_alert
   else
     left=1
   fi

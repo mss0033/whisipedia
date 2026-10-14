@@ -209,3 +209,53 @@ def cmd_alerts_digest(args: argparse.Namespace, out: TextIO) -> int:
         body = summary + (f"\n{trawl}" if trawl else "") + "\nDetails: wsp://system or `wsp alerts digest`."
         show_toast("Whisipedia: morning report", body)
     return 0
+
+
+def _alerter(cfg: Mapping[str, Any]) -> Any:
+    """An :class:`~wsp_orchestrator.alerts.Alerter` on the orchestrator's state DB with the configured
+    sinks (so a critical alert raised from a script shows as a notification too), or None."""
+    from wsp_orchestrator.alerts import Alerter
+    from wsp_orchestrator.clock import SystemClock
+    from wsp_orchestrator.store import StateStore
+
+    state_db = Path(str(bootstrap.section(cfg, "orchestrator").get("state_db") or ""))
+    if not state_db.is_file():
+        return None
+    store = StateStore(state_db, check_local=False)
+    return Alerter(store, SystemClock(), [*alert_sinks(cfg)]), store
+
+
+def cmd_alerts_raise(args: argparse.Namespace, out: TextIO) -> int:
+    """``wsp alerts raise``: open an alert from a script (the collection lanes). Open already: no-op."""
+    cfg = bootstrap.load(bootstrap.layout(args.config_dir))
+    pair = _alerter(cfg)
+    if pair is None:
+        out.write("alerts: no orchestrator state DB; nothing raised\n")
+        return 0
+    alerter, store = pair
+    try:
+        # A sink shows its notification from a thread; wait for it: this process exits right after.
+        for sink in alerter.sinks:
+            if isinstance(sink, WindowsToastSink):
+                sink._background = False  # pyright: ignore[reportPrivateUsage]
+        raised = alerter.raise_(Alert(args.key, Severity(args.severity), args.message))
+    finally:
+        store.close()
+    out.write(f"{args.key}: {'raised' if raised else 'already open'}\n")
+    return 0
+
+
+def cmd_alerts_resolve(args: argparse.Namespace, out: TextIO) -> int:
+    """``wsp alerts resolve``: close an alert from a script once its cause is gone."""
+    cfg = bootstrap.load(bootstrap.layout(args.config_dir))
+    pair = _alerter(cfg)
+    if pair is None:
+        return 0
+    alerter, store = pair
+    try:
+        resolved = alerter.resolve(args.key)
+    finally:
+        store.close()
+    if resolved:
+        out.write(f"{args.key}: resolved\n")
+    return 0

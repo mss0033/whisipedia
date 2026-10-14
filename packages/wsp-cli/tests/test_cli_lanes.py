@@ -34,6 +34,12 @@ exit "${code:-98}"
 """
 
 
+FAKE_ALERTS = """#!/bin/sh
+# fake alert command: records `alerts raise|resolve ...` in $FAKE/alerts
+printf '%s\\n' "$*" >> "$FAKE/alerts"
+"""
+
+
 class Lane:
     def __init__(self, tmp_path: Path) -> None:
         self.fake = tmp_path / "fake"
@@ -42,11 +48,15 @@ class Lane:
         wsp = self.fake / "wsp"
         wsp.write_text(FAKE_WSP)
         wsp.chmod(0o755)
+        alerts = self.fake / "alerts-cmd"
+        alerts.write_text(FAKE_ALERTS)
+        alerts.chmod(0o755)
         self.env = {
             "PATH": "/usr/bin:/bin",
             "HOME": str(tmp_path),
             "FAKE": str(self.fake),
             "WSP": str(wsp),
+            "LANE_ALERT_CMD": str(alerts),
             "WSP_LANE_STATE": str(self.state),
             "LANE_LISTING_WAIT": "0",
             "LANE_PARTIAL_WAIT": "0",
@@ -64,6 +74,10 @@ class Lane:
 
     def calls(self) -> list[str]:
         path = self.fake / "calls"
+        return path.read_text().splitlines() if path.exists() else []
+
+    def alerts(self) -> list[str]:
+        path = self.fake / "alerts"
         return path.read_text().splitlines() if path.exists() else []
 
     def done(self) -> list[str]:
@@ -340,3 +354,27 @@ def test_the_timer_is_enabled_once_after_everything_is_done(tmp_path: Path) -> N
     code, _, calls = _rebuild(tmp_path, {}, "--enable-timer")
     assert code == 0
     assert calls == [], "every step, the timer included, was done already"
+
+
+def test_a_failed_ingest_raises_a_critical_alert_and_success_resolves_it(tmp_path: Path) -> None:
+    """2026-10-14: an ingest stopped on an interrupted adoption and nobody heard of it for hours."""
+    lane = Lane(tmp_path)
+    lane.script(fetch=[0], ingest=["1:VaultError: an interrupted adoption left x.adopting"])
+    assert lane.run("osti") == 1
+    raised = [a for a in lane.alerts() if a.startswith("alerts raise")]
+    assert len(raised) == 1
+    assert "--key lane:lane-t:osti --severity critical" in raised[0]
+    assert "VaultError: an interrupted adoption left x.adopting" in raised[0]
+    lane.script(fetch=[0], ingest=[0])
+    assert lane.run("osti") == 0
+    assert lane.alerts()[-1] == "alerts resolve --key lane:lane-t:osti"
+
+
+def test_downloads_that_keep_failing_raise_a_warning(tmp_path: Path) -> None:
+    lane = Lane(tmp_path)
+    lane.script(fetch=[6, 6, 6], ingest=[0, 0, 0])
+    assert lane.run("usgs", LANE_PARTIAL_TRIES="3") == 1
+    raised = [a for a in lane.alerts() if a.startswith("alerts raise")]
+    assert len(raised) == 1
+    assert "--severity warning" in raised[0]
+    assert "downloads still failing after 3 tries" in raised[0]
