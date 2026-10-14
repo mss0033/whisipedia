@@ -90,6 +90,7 @@ from wsp_adapters.doccollection.policy import (
 from wsp_adapters.html_text import html_to_text
 from wsp_core.banners import banner_for
 from wsp_core.ids import content_hash, make_doc_id
+from wsp_core.memory import drop_file_cache
 from wsp_core.model import (
     Checksum,
     DocRecord,
@@ -1033,6 +1034,15 @@ TEXT_SUFFIXES = (".txt", ".xml", ".json", ".md")
 
 
 def extract_text(path: Path, *, max_pages: int) -> Extracted:
+    """Text of a vault file. Its page cache is released afterwards: a refine or a screening reads
+    each file once, and on the NAS those pages would stay charged to the job's memory ceiling."""
+    try:
+        return _extract_text(path, max_pages=max_pages)
+    finally:
+        drop_file_cache(path)
+
+
+def _extract_text(path: Path, *, max_pages: int) -> Extracted:
     with path.open("rb") as fh:
         head = fh.read(512)
     lowered = head.lower()

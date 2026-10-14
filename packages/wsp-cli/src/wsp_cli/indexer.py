@@ -39,6 +39,7 @@ from typing import TextIO, cast
 
 from wsp_adapters.entries import EntrySource, Redirect
 from wsp_core.errors import FetchError
+from wsp_core.memory import memory_line
 from wsp_core.model import (
     DocRecord,
     FetchResult,
@@ -215,7 +216,7 @@ class Indexer:
             if self.index.suggest_rebuild_due():
                 started = self.clock()
                 self.index.rebuild_suggest()
-                self._say(f"suggest: rebuilt in {self.clock() - started:.1f}s")
+                self._say(f"suggest: rebuilt in {self.clock() - started:.1f}s; {memory_line()}")
             else:
                 self.index.commit()
                 self._say("suggest: rebuild not due (fresh trie, small overlay); left for the nightly build")
@@ -282,7 +283,9 @@ class Indexer:
                     rate = n / max(self.clock() - started, 1e-6)
                     self._say(f"  refine {spec.id}/{gid}: {n:,} documents ({rate:,.0f}/s)")
             db.commit()
-        self._say(f"  refined {spec.id}/{gid}: {n:,} documents in {self.clock() - started:.1f}s")
+        self._say(
+            f"  refined {spec.id}/{gid}: {n:,} documents in {self.clock() - started:.1f}s; {memory_line()}"
+        )
         return RefineResult(n)
 
     @staticmethod
@@ -355,7 +358,8 @@ class Indexer:
         self._save_state(state)
         self.build_catalog(spec, generation_id)
         self._say(
-            f"  indexed {spec.id}/{generation_id}: +{stats.upserted:,} upserted, -{stats.deleted:,} removed"
+            f"  indexed {spec.id}/{generation_id}: +{stats.upserted:,} upserted, -{stats.deleted:,} removed; "
+            + memory_line()
         )
         return SourceReport(spec.id, indexed=generation_id, upserted=stats.upserted, deleted=stats.deleted)
 
@@ -521,7 +525,7 @@ class Indexer:
             return None
         path = self.index.path / SPELL_FILE
         stats = build_vocabulary(readers, path, config or SpellConfig(), progress=self._say)
-        self._say(f"spell: {stats.line()}")
+        self._say(f"spell: {stats.line()}; {memory_line()}")
         return stats
 
     # --- whole runs ----------------------------------------------------------------------------

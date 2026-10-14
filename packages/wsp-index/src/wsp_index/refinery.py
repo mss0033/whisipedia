@@ -50,6 +50,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from wsp_core.ids import DocId, content_hash
+from wsp_core.memory import drop_file_cache
 from wsp_core.model import ChangeRecord, DocRecord
 from wsp_index.localfs import REMOTE_FS_TYPES, filesystem_type
 
@@ -372,6 +373,7 @@ class RefineryWriter:
         self._idx_h.append(np.fromiter((id_hash(r.doc_id) for r in self._buf), np.uint64, len(self._buf)))
         self._idx_loc.append(loc)
         _atomic_replace(partial, final)
+        drop_file_cache(final)  # written once, read later: its pages are cache charged to the job
         self._bytes += final.stat().st_size
         self._docs += len(self._buf)
         self._parts += 1
@@ -986,20 +988,32 @@ class RefineryReader:
         return table.take(pa.array(local.astype(np.int64), type=pa.int64()))  # pyright: ignore[reportArgumentType]  # stubs: Int64Array is valid indices
 
     def scan(self, columns: Sequence[str] = COLUMNS, *, batch_size: int = 4096) -> Iterator[pa.RecordBatch]:
-        """All live rows (shadowed duplicates skipped)."""
+        """All live rows (shadowed duplicates skipped).
+
+        A part's page cache is released once it is scanned: a whole-generation scan (index, rank,
+        spell) would otherwise charge the job's cgroup with every part it read on the NAS.
+        """
         for part, path in enumerate(self.parts):
-            pf = pq.ParquetFile(path)
-            present = self._present(pf, columns)
-            live = self._live(part, pf)
-            if live is None:
-                yield from pf.iter_batches(batch_size=batch_size, columns=present)  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
-                continue
-            offset = 0
-            for rg in range(pf.num_row_groups):
-                table = pf.read_row_group(rg, columns=present)  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
-                mask = live[offset : offset + table.num_rows]
-                offset += table.num_rows
-                yield from table.filter(pa.array(mask)).to_batches(max_chunksize=batch_size)
+            try:
+                yield from self._scan_part(part, path, columns, batch_size)
+            finally:
+                drop_file_cache(path)
+
+    def _scan_part(
+        self, part: int, path: Path, columns: Sequence[str], batch_size: int
+    ) -> Iterator[pa.RecordBatch]:
+        pf = pq.ParquetFile(path)
+        present = self._present(pf, columns)
+        live = self._live(part, pf)
+        if live is None:
+            yield from pf.iter_batches(batch_size=batch_size, columns=present)  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
+            return
+        offset = 0
+        for rg in range(pf.num_row_groups):
+            table = pf.read_row_group(rg, columns=present)  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
+            mask = live[offset : offset + table.num_rows]
+            offset += table.num_rows
+            yield from table.filter(pa.array(mask)).to_batches(max_chunksize=batch_size)
 
     def records(self, *, batch_size: int = 1024) -> Iterator[DocRecord]:
         for batch in self.scan(batch_size=batch_size):

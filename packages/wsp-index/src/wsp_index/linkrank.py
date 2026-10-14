@@ -55,7 +55,6 @@ import json
 import math
 import mmap
 import os
-import resource
 import time
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import ExitStack
@@ -69,6 +68,7 @@ import numpy.typing as npt
 import pyarrow as pa
 import pyarrow.compute as _pc
 
+from wsp_core.memory import memory_line
 from wsp_index.refinery import RefineryReader, id_hash
 from wsp_index.text import primary_lang
 
@@ -911,11 +911,6 @@ def _release() -> None:
         trim(0)
 
 
-def peak_rss_mib() -> float:
-    """This process's peak resident set size so far (MiB)."""
-    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
-
-
 def _batched[T](items: Iterable[T], size: int) -> Iterator[list[T]]:
     chunk: list[T] = []
     for item in items:
@@ -1395,6 +1390,8 @@ def compute_static_rank(
     """
     graph = build_graph(readers, workdir, aliases=aliases, config=config, progress=progress)
     try:
+        if progress:
+            progress(f"rank: graph built; {memory_line()}")
         t1 = time.monotonic()
         per_group, global_, iters, res_s, res_g = _pagerank(graph, config)
         if progress:
@@ -1444,7 +1441,7 @@ def compute_static_rank(
     tmp.write_text(json.dumps(asdict(stats), indent=1) + "\n", encoding="utf-8")
     os.replace(tmp, stats_path)
     if progress:
-        progress(f"rank: peak RSS {peak_rss_mib():,.0f} MiB")
+        progress(f"rank: {memory_line()}")
     return stats
 
 
