@@ -319,8 +319,11 @@ export class App implements AppServices {
     // Commit
     const title = result.title;
     if (mode === 'push') {
+      // The same address again (Home twice) is no new entry: the stack keeps one, and so must the
+      // browser's history, or the first Back does nothing (review 2026-10-14 E).
+      const same = this.stack.current?.address === address;
       this.stack.push(address, title);
-      if (extra.pushState !== false)
+      if (extra.pushState !== false && !same)
         history.pushState({ pos: this.stack.position }, '', `#${address}`);
       else history.replaceState({ pos: this.stack.position }, '', `#${address}`);
     } else if (mode === 'replace') {
@@ -865,18 +868,20 @@ export class App implements AppServices {
     this.locInput.addEventListener('input', () => {
       this.locLabel.textContent = 'Go to:';
     });
-    this.locInput.addEventListener('keydown', (ev) => {
-      if (ev.key === 'Escape' && !ev.defaultPrevented) {
-        this.setLocation(this.stack.current?.address ?? '');
-        this.locInput.select();
-      }
-    });
     attachSuggest(this.locInput, this, {
       history: true,
       onPick: (s) => {
         if (s.address) this.navigate(s.address);
         else this.navigate(searchAddress(s.text), { fromLocation: true });
       },
+    });
+    // After the suggestion list's handler: Escape with the list open only closes the list (it
+    // prevents the default); a second Escape restores the address (review 2026-10-14 F).
+    this.locInput.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Escape' && !ev.defaultPrevented) {
+        this.setLocation(this.stack.current?.address ?? '');
+        this.locInput.select();
+      }
     });
 
     const dirButton = (label: string, addr: string) => wspLink(addr, label);

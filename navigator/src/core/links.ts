@@ -208,7 +208,27 @@ const TAG_ATTRS: Record<string, Set<string>> = {
  * 2026-10-14 #9).
  */
 export function isAllowedImageSrc(src: string): boolean {
-  return /^\/v1\/(assets|files)\/[^\s]*$/.test(src);
+  return allowedImagePath(src) !== null;
+}
+
+/**
+ * The path an image source resolves to when it is one of the library's assets, else null. Checked
+ * after resolving: `/v1/assets/../search` or `%2e%2e` would pass a check of the raw string and then
+ * load `/v1/search` (review 2026-10-14 B). Sanitised pages never need `/v1/files/` (whole originals).
+ */
+export function allowedImagePath(src: string): string | null {
+  if (!src.startsWith('/') || src.startsWith('//') || /[\s\\]/.test(src)) return null;
+  let url: URL;
+  let origin: string;
+  try {
+    url = new URL(src, document.baseURI);
+    origin = new URL(document.baseURI).origin;
+  } catch {
+    return null;
+  }
+  if (url.origin !== origin) return null;
+  if (!url.pathname.startsWith('/v1/assets/') || /%2e|%2f|%5c/i.test(url.pathname)) return null;
+  return url.pathname + url.search;
 }
 
 export interface SanitizeStats {
@@ -270,9 +290,10 @@ export function sanitizeDocumentHtml(
 function sanitizeImage(el: Element, stats: SanitizeStats): Node {
   const src = el.getAttribute('src') ?? '';
   const alt = el.getAttribute('alt') ?? '';
-  if (isAllowedImageSrc(src)) {
+  const path = allowedImagePath(src);
+  if (path !== null) {
     const img = document.createElement('img');
-    img.src = src;
+    img.src = path;
     img.alt = alt;
     img.loading = 'lazy';
     img.decoding = 'async';

@@ -183,9 +183,9 @@ function build(kind: MediaKind, opts: PlayerOptions): Player {
     media.muted = !media.muted;
   });
   full?.addEventListener('click', () => {
-    const screen = el.querySelector('.pl-screen') ?? el;
+    // The whole player, not only the screen: the video has no native controls (review 2026-10-14 H).
     if (document.fullscreenElement) void document.exitFullscreen?.();
-    else void screen.requestFullscreen?.();
+    else void el.requestFullscreen?.();
   });
   skinMenu.addEventListener('change', () => {
     const next = skinMenu.value as SkinId;
@@ -228,7 +228,10 @@ function build(kind: MediaKind, opts: PlayerOptions): Player {
   });
   el.addEventListener('keydown', (ev) => {
     if (ev.target instanceof HTMLSelectElement || ev.target instanceof HTMLInputElement) return;
+    if (ev.ctrlKey || ev.altKey || ev.metaKey) return;
     const k = ev.key.toLowerCase();
+    // Space and Enter on a focused button are that button's (Mute, Stop, Full screen), not Play.
+    if ((k === ' ' || k === 'enter') && ev.target instanceof HTMLButtonElement) return;
     let handled = true;
     if (k === ' ' || k === 'k') toggle();
     else if (k === 'j' || k === 'arrowleft')
@@ -252,12 +255,32 @@ function build(kind: MediaKind, opts: PlayerOptions): Player {
   return { el, media };
 }
 
+/**
+ * One audio context for every deck: a context per deck kept running after its page was left, and
+ * browsers cap how many exist (review 2026-10-14 G). It is suspended while no deck plays.
+ */
+let sharedAudio: AudioContext | null = null;
+let decksPlaying = 0;
+
+function audioContext(Ctx: typeof AudioContext): AudioContext {
+  sharedAudio ??= new Ctx();
+  return sharedAudio;
+}
+
 /** A live spectrum on the deck's canvas, drawn only while playing; silent where Web Audio is absent. */
 function spectrum(media: HTMLMediaElement, canvas: HTMLCanvasElement): void {
   const Ctx = (globalThis as { AudioContext?: typeof AudioContext }).AudioContext;
   const g = canvas.getContext?.('2d');
   if (!Ctx || !g) return;
   let analyser: AnalyserNode | null = null;
+  let source: MediaElementAudioSourceNode | null = null;
+  let playing = false;
+  const stopped = () => {
+    if (!playing) return;
+    playing = false;
+    decksPlaying = Math.max(0, decksPlaying - 1);
+    if (decksPlaying === 0) void sharedAudio?.suspend().catch(() => undefined);
+  };
   let frame = 0;
   const bars = 32;
   const draw = () => {
@@ -274,23 +297,39 @@ function spectrum(media: HTMLMediaElement, canvas: HTMLCanvasElement): void {
         g.fillRect(4 + (i * (W - 8)) / bars, H - 6 - s * (H / 11), (W - 8) / bars - 3, H / 11 - 3);
       }
     }
+    if (!canvas.isConnected) {
+      // The page was left while playing: stop, and let the deck's nodes go.
+      media.pause();
+      source?.disconnect();
+      analyser?.disconnect();
+      stopped();
+      return;
+    }
     if (!media.paused) frame = requestAnimationFrame(draw);
   };
   media.addEventListener('play', () => {
     try {
+      const ctx = audioContext(Ctx);
       if (!analyser) {
-        const ctx = new Ctx();
-        const source = ctx.createMediaElementSource(media);
+        source = ctx.createMediaElementSource(media);
         analyser = ctx.createAnalyser();
         analyser.fftSize = 512;
         source.connect(analyser).connect(ctx.destination);
       }
+      if (!playing) {
+        playing = true;
+        decksPlaying += 1;
+      }
+      void ctx.resume().catch(() => undefined);
     } catch {
       analyser = null; // a cross-origin source or a browser without the API: the deck still plays
     }
     cancelAnimationFrame(frame);
     draw();
   });
-  media.addEventListener('pause', () => cancelAnimationFrame(frame));
+  media.addEventListener('pause', () => {
+    cancelAnimationFrame(frame);
+    stopped();
+  });
   draw();
 }

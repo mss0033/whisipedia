@@ -91,6 +91,23 @@ describe('sanitizeDocumentHtml', () => {
     expect(stats.broken).toBe(1);
   });
 
+  it('allows library assets only, after resolving the path', async () => {
+    const { allowedImagePath } = await import('../src/core/links.ts');
+    expect(allowedImagePath('/v1/assets/s/g/a%20b.png')).toBe('/v1/assets/s/g/a%20b.png');
+    for (const bad of [
+      '/v1/assets/../search?q=a',
+      '/v1/assets/%2e%2e/random',
+      '/v1/assets/x/%2E%2E/%2E%2E/history',
+      '/v1/files/x/../../history',
+      '/v1/files/x/preview',
+      '//evil.example/v1/assets/a.png',
+      '/v1/assets\\..\\search',
+      'v1/assets/a.png',
+    ]) {
+      expect(allowedImagePath(bad), bad).toBeNull();
+    }
+  });
+
   it('replaces remote images and keeps same-origin API images', () => {
     expect(div.querySelector('.broken-image')?.textContent).toBe('[IMAGE: Portrait]');
     const imgs = div.querySelectorAll('img');

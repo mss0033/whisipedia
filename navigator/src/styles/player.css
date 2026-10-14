@@ -322,3 +322,19 @@
   text-decoration: underline;
   cursor: pointer;
 }
+
+/* Full screen takes the whole player: the video has no native controls. */
+.player:fullscreen {
+  display: flex;
+  flex-direction: column;
+  background: #000;
+}
+.player:fullscreen .pl-screen {
+  flex: 1;
+  min-height: 0;
+}
+.player:fullscreen video {
+  max-height: 100%;
+  height: 100%;
+  aspect-ratio: auto;
+}

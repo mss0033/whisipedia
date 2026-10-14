@@ -86,6 +86,13 @@ describe('video player', () => {
     expect(media.muted).toBe(true);
     key(' ');
     expect(media.play).toHaveBeenCalled();
+    // Space on a focused button is that button's: Mute, not Play/Pause.
+    const plays = vi.mocked(media.play).mock.calls.length;
+    el.querySelector<HTMLButtonElement>('.pl-controls button')!.dispatchEvent(
+      new KeyboardEvent('keydown', { key: ' ', bubbles: true }),
+    );
+    expect(vi.mocked(media.play).mock.calls.length).toBe(plays);
+    key('k');
     const menu = el.querySelector<HTMLSelectElement>('.pl-skin')!;
     menu.value = 'steel';
     menu.dispatchEvent(new Event('change'));

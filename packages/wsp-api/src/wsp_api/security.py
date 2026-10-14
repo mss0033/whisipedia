@@ -19,7 +19,9 @@ from wsp_api.services import ApiSettings
 SECURITY_HEADERS: tuple[tuple[bytes, bytes], ...] = (
     (
         b"content-security-policy",
-        b"default-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+        # media-src blob:: the Screening Room's projection test plays a reel made in the page.
+        b"default-src 'self'; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; "
+        b"form-action 'self'",
     ),
     (b"x-content-type-options", b"nosniff"),
     (b"referrer-policy", b"no-referrer"),
