@@ -9,6 +9,7 @@ Whisipedia runs as three systemd **user** units (PLAN §6.5, §12.6), rendered f
 | `whisipedia-api.service` | `wsp serve` on `127.0.0.1:8737`, serving `navigator/dist` | loopback only |
 | `whisipedia-index.timer` → `whisipedia-index.service` | nightly `wsp index build` (refine, index, catalog) | none |
 | `whisipedia-trawler.service` | `tools/wsp-trawl`: opens unvisited pages in a headless Chromium, one a minute, pausing while the owner reads; `wsp trawl report` shows what it found | loopback only |
+| `whisipedia-digest.timer` → `whisipedia-digest.service` | 09:00 daily: `wsp alerts digest --notify`, the last day's alerts and trawler findings as one Windows notification (critical alerts also show at once, from the orchestrator) | none |
 
 ## Before you start
 

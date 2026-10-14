@@ -42,6 +42,12 @@ _TAKES_VALUE = frozenset({"--config-dir", "--url"})
 Handler = Callable[[argparse.Namespace, TextIO], int]
 
 
+def _alerts_digest(args: argparse.Namespace, out: TextIO) -> int:
+    from wsp_cli.notify import cmd_alerts_digest
+
+    return cmd_alerts_digest(args, out)
+
+
 def _trawl_report(args: argparse.Namespace, out: TextIO) -> int:
     from wsp_cli.trawl import cmd_trawl_report
 
@@ -327,6 +333,16 @@ def build_parser(argv: Sequence[str] | None = None) -> argparse.ArgumentParser:
     )
     s.add_argument("--settle-seconds", type=float, default=120.0, help="ignore files modified more recently")
     s.add_argument("--json", action="store_true")
+
+    al = add("alerts", _usage, "Alerts: what the library wants you to know.")
+    al_sub = al.add_subparsers(dest="alerts_command", required=True, metavar="COMMAND")
+    s = add(
+        "digest",
+        _alerts_digest,
+        "Alerts raised in the last day; --notify shows a Windows notification.",
+        al_sub,
+    )
+    s.add_argument("--notify", action="store_true", help="also show it as a Windows notification")
 
     tr = add("trawl", _usage, "The trawler: library pages checked the way a reader sees them.")
     tr_sub = tr.add_subparsers(dest="trawl_command", required=True, metavar="COMMAND")

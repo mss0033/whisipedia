@@ -1,0 +1,11 @@
+# Every morning at 09:00; Persistent=true sends it at the next start when the PC was off at 09:00.
+
+[Unit]
+Description=Whisipedia morning alert digest
+
+[Timer]
+OnCalendar=*-*-* 09:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -51,6 +51,7 @@ from wsp_cli.locks import DRILL, HEAVY, INDEX, SCRUB, exclusive, lock_dir_for
 from wsp_core.activity import recently_active
 from wsp_core.model import Generation, GenerationStatus, RemoteFile, SourceSpec, Verdict, VerdictStatus
 from wsp_core.ports import Ctx, SourceAdapter
+from wsp_orchestrator.alerts import AlertSink
 from wsp_orchestrator.bots import Bot
 from wsp_orchestrator.curator import (
     AdapterSmokeBot,
@@ -602,6 +603,12 @@ def storage_probe(root: Path | None) -> Callable[[], bool]:
     return probe
 
 
+def _alert_sinks(config: Mapping[str, Any]) -> list[AlertSink]:
+    from wsp_cli.notify import alert_sinks
+
+    return alert_sinks(config)
+
+
 def build_wiring(config: Mapping[str, Any]) -> Wiring:
     lay = bootstrap.layout()
     specs = tuple(bootstrap.load_sources(config, lay))
@@ -696,6 +703,7 @@ def build_wiring(config: Mapping[str, Any]) -> Wiring:
         ),
         on_withheld=on_withheld,
         on_shutdown=[stopping.set],
+        alert_sinks=_alert_sinks(config),
         document_screen=document_screen(hooks.adapters),
         storage_available=storage_probe(bootstrap.paths(config).vault_root),
     )

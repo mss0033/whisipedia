@@ -1,0 +1,15 @@
+# The morning alert digest (`wsp alerts digest --notify`): what was raised in the last day and what
+# the trawler found, as one Windows notification. Started by whisipedia-digest.timer.
+#
+# Template: `wsp service install` renders @REPO@ and @CONFIG_DIR@ (docs/runbooks/install-services.md).
+
+[Unit]
+Description=Whisipedia morning alert digest
+
+[Service]
+Type=oneshot
+WorkingDirectory=@REPO@
+EnvironmentFile=-%h/.config/whisipedia/whisipedia.env
+ExecStart=@REPO@/.venv/bin/wsp --config-dir @CONFIG_DIR@ alerts digest --notify
+TimeoutStartSec=5min
+Nice=10

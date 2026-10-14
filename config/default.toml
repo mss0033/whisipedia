@@ -89,6 +89,11 @@ offer_max_age = "P14D"          # upstream observations older than this prove no
 parity_interval = "PT6H"        # parity backfill wake-up; it continues every few minutes while work remains
 shutdown_grace_seconds = 10     # on SIGTERM work is cancelled, then abandoned after this (systemd: 120 s)
 
+[alerts]
+windows_toast = true            # critical alerts as Windows notifications (WSL; a no-op elsewhere)
+toast_min_severity = "critical" # info | warning | critical
+toast_max_per_hour = 4          # a burst beyond this waits for the morning digest
+
 [orchestrator.retention_windows]  # upstream retention per adapter; alert at half (PLAN §6.5)
 wikimedia-dumps = "P60D"
 wikidata = "P60D"
