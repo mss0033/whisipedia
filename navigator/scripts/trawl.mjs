@@ -170,7 +170,11 @@ async function check(context, address) {
   page.on('response', async (resp) => {
     const url = resp.url();
     if (!url.startsWith(`${BASE}/v1/`)) return;
-    if (resp.status() >= 500 || (resp.status() === 404 && url.includes('/v1/assets/')))
+    // 503 is "busy, try again" (an archive opening): the page retries by itself, so not a failure.
+    if (
+      (resp.status() >= 500 && resp.status() !== 503) ||
+      (resp.status() === 404 && url.includes('/v1/assets/'))
+    )
       failedApi.push(`${resp.status()} ${url.slice(BASE.length, BASE.length + 160)}`);
     if (doc === null && url.includes('/v1/documents/') && resp.ok() && !url.includes('/history')) {
       try {
