@@ -3,6 +3,12 @@
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Changed: a dormant upstream is a warning, not a pause (2026-10-14)
+* A source whose newest upstream release is older than 3x its cadence raises a warning
+  (`dormant:<source>`) and keeps being discovered at cadence; a newer release resolves it. It used to be
+  auto-paused with a critical alert, which stopped discovery for good: 36 Kiwix sites that are simply
+  finished sat as "critical" in `wsp doctor`. Stale pauses from before are cleared when the orchestrator
+  starts.
 ### Added: catalog cards go right to the book, or say why not (2026-10-14)
 * An Open Library card now says where the book is: a link the card carries that resolves to a held
   book ("The library holds this book: Read Frankenstein (Project Gutenberg #84)"), a book of the same

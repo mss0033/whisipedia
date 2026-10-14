@@ -1360,6 +1360,37 @@ def pause_source(
     return True
 
 
+def drop_pause_reason(
+    store: StateStore,
+    write_event: Callable[[str, str, Mapping[str, object]], None],
+    source_id: str,
+    code: str,
+    *,
+    alerter: Alerter | None = None,
+) -> bool:
+    """Clear one reason code of a pause; the source resumes when no reason is left. Returns True when
+    the reason was there. Used at start for pauses a rule no longer imposes (``stale``: a dormant
+    upstream is a warning since 2026-10-14, not a pause)."""
+    dropped: tuple[str, ...] = ()
+
+    def change(h: SourceHealth) -> SourceHealth:
+        nonlocal dropped
+        dropped = tuple(r for r in h.pause_reasons if r.split(":", 1)[0] == code)
+        if not dropped:
+            return h
+        kept = tuple(r for r in h.pause_reasons if r.split(":", 1)[0] != code)
+        return replace(h, paused=bool(kept), pause_reasons=kept)
+
+    store.modify_source_health(source_id, change)
+    if not dropped:
+        return False
+    health = store.source_health(source_id)
+    write_event("source.pause_reason_dropped", source_id, {"reasons": list(dropped), "paused": health.paused})
+    if alerter is not None and not health.paused:
+        alerter.resolve(f"paused:{source_id}")
+    return True
+
+
 def resume_source(
     store: StateStore,
     write_event: Callable[[str, str, Mapping[str, object]], None],

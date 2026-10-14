@@ -91,8 +91,10 @@ DISCOVERED → PLANNED → FETCHING → FETCHED → VERIFIED → SEALED → REFI
 
 * **Auto-pause** (PLAN §5.4) — one alert, the current generation keeps serving, discovery stops until
   `Orchestrator.resume_source()`:
-  license reported upstream differs from the registry; two consecutive checksum mismatches; newest
-  upstream release older than 3× the cadence; format changed.
+  license reported upstream differs from the registry; two consecutive checksum mismatches; format
+  changed. A newest upstream release older than 3× the cadence is **dormant**, not paused (since
+  2026-10-14): a warning (`dormant:<source>`), discovery goes on at cadence, and a newer release
+  resolves it. Pauses with a `stale` reason from before are cleared at start.
   Adapters report license and format via the typed `ReleaseRef.license` and `ReleaseRef.format`.
 * **Policy gate** (PLAN §5.2–5.4): `evaluate_candidate(candidate, GateConfig, sources)` returns a
   `Proposal` (decision `auto-promote | review | reject`, weighted score and breakdown, per-check

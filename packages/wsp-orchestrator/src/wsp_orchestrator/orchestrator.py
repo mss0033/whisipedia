@@ -49,6 +49,7 @@ from wsp_orchestrator.pipeline import (
     StepError,
     WithheldHook,
     adapter_resolver,
+    drop_pause_reason,
     generation_id_for,
     pause_source,
     resume_source,
@@ -58,6 +59,7 @@ from wsp_orchestrator.policy import (
     Decision,
     GateConfig,
     Observation,
+    PauseReason,
     Proposal,
     auto_pause_findings,
     evaluate_candidate,
@@ -296,6 +298,16 @@ class Orchestrator:
         crashed = self.pipeline.recover_crashes()
         swept = self.pipeline.sweep_workdir()
         flushed = self.pipeline.flush_ledger()
+        unpaused = sum(
+            drop_pause_reason(
+                self.store,
+                self.pipeline.ledger_outbox_writer,
+                sid,
+                PauseReason.STALE.value,
+                alerter=self.alerter,
+            )
+            for sid in self.sources
+        )
         resumed = 0
         for rec in self.store.releases():
             if rec.state not in (ReleaseState.PROMOTED, ReleaseState.QUARANTINED):
@@ -312,6 +324,7 @@ class Orchestrator:
                     "workdirs_swept": swept,
                     "ledger_flushed": flushed,
                     "resumed_releases": resumed,
+                    "stale_pauses_cleared": unpaused,
                     "unclean_previous_stop": unclean,
                 }
             },
@@ -646,6 +659,8 @@ class Orchestrator:
                     observed_license=obs.license or h.observed_license,
                 ),
             )
+        dormant = next((f for f in findings if f.reason is PauseReason.STALE), None)
+        findings = [f for f in findings if f.reason is not PauseReason.STALE]
         for f in findings:
             pause_source(
                 self.store,
@@ -654,8 +669,28 @@ class Orchestrator:
                 f"{f.reason.value}: {f.detail}",
                 alerter=self.alerter,
             )
+        self._note_dormant(spec.id, dormant.detail if dormant else None)
         self.pipeline.flush_ledger()
         return bool(findings) or self.store.source_health(spec.id).paused
+
+    def _note_dormant(self, source_id: str, detail: str | None) -> None:
+        """A dormant upstream (nothing new for 3x the cadence) is a warning, not a pause: the current
+        generation keeps serving and discovery goes on at cadence, so a revived upstream clears it by
+        itself. Pausing it (until 2026-10-14) stopped discovery for good and raised a critical alert
+        for 36 Kiwix sites that are simply finished."""
+        key = f"dormant:{source_id}"
+        if detail is None:
+            self.alerter.resolve(key)
+            return
+        self.alerter.raise_(
+            Alert(
+                key=key,
+                severity=Severity.WARNING,
+                message=f"source {source_id} upstream dormant: {detail}; the current generation keeps"
+                " serving, discovery goes on at cadence",
+                data={"source_id": source_id, "reason": f"stale: {detail}"},
+            )
+        )
 
     def _mark_cycle_ok(self, source_id: str) -> None:
         now = self.clock.now()
