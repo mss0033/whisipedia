@@ -998,8 +998,17 @@ Status of this Memo
       {
         revision: 'a-2026-09-01',
         timestamp: T('2026-09-01'),
-        html: `<h2>Question</h2><p>My server sends both <code>ETag</code> and <code>Last-Modified</code>. Which one does a browser use to revalidate a cached page, and do I need both?</p>
-<h2>Accepted answer (score 212)</h2><p>Both are <em>validators</em>. A cache that holds a stale response sends <code>If-None-Match</code> with the ETag and/or <code>If-Modified-Since</code> with the date; the server answers <code>304 Not Modified</code> if nothing changed. ETags are more precise (sub-second changes, content-based). The full rules are in <a href="wsp:rfc/9111">RFC 9111</a> and conditional requests in <a href="wsp:rfc/9110">RFC 9110</a>.</p>`,
+        html: `<header class="s-topbar js-top-bar"><ol><li><a href="wsp://stackexchange/webmasters/questions">Questions</a></li><li><a href="wsp://stackexchange/webmasters/tags">Tags</a></li></ol></header>
+<div id="content"><div id="mainbar">
+<div id="question" class="question" data-questionid="1007" data-score="37">
+<div class="post-layout"><div class="votecell"><div class="js-voting-container">37</div></div>
+<div class="postcell"><div class="s-prose js-post-body"><p>My server sends both <code>ETag</code> and <code>Last-Modified</code>. Which one does a browser use to revalidate a cached response, and should I send both?</p></div>
+<div class="post-taglist"><a href="wsp://stackexchange/webmasters/questions/tagged/http" class="post-tag" rel="tag">http</a> <a href="wsp://stackexchange/webmasters/questions/tagged/caching" class="post-tag" rel="tag">caching</a></div></div></div></div>
+<div id="answers"><div id="answers-header"><h2>3 Answers</h2></div>
+<div id="answer-1010" class="answer" data-answerid="1010" data-score="5"><div class="post-layout"><div class="votecell"></div><div class="answercell"><div class="s-prose js-post-body"><p>Send both; they cost nothing.</p></div></div></div></div>
+<div id="answer-1008" class="answer accepted-answer" data-answerid="1008" data-score="212"><div class="post-layout"><div class="votecell"></div><div class="answercell"><div class="s-prose js-post-body"><p>Both are <em>validators</em>. A cache that holds a stale response sends <code>If-None-Match</code> with the ETag and <code>If-Modified-Since</code> with the date; the origin answers 304 when either still matches.</p></div></div></div></div>
+<div id="answer-1012" class="answer" data-answerid="1012" data-score="40"><div class="post-layout"><div class="votecell"></div><div class="answercell"><div class="s-prose js-post-body"><p>Prefer the ETag when the content can change within a second.</p></div></div></div></div>
+</div></div><div id="left-sidebar">nav</div></div><footer>Site footer</footer>`,
       },
     ],
     links: [],

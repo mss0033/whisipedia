@@ -3,6 +3,10 @@
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Added: question pages read as threads (2026-10-14)
+* A Stack Exchange question page loses the site's own chrome (top bars, header, sidebars, footer); the
+  accepted answer comes first and the rest follow by score, each post carries its score, and the
+  tags search the library's copy of the site instead of pointing at tag pages it does not hold.
 ### Added: a book reader (2026-10-14)
 * A plain-text book (Gutenberg, Wikisource, Standard Ebooks) opens a chapter at a time: a table of
   contents from its heading lines, previous and next, `?ch=all` for the whole text. The Navigator

@@ -33,6 +33,7 @@ import { audioDeck, videoPlayer } from '../ui/player.ts';
 import { parseCase, renderCase } from './legal.ts';
 import { POOL_SOURCE } from './practice.ts';
 import { isBook, type ReaderContext, renderBook } from './reader.ts';
+import { isThread, threadView } from './threads.ts';
 import type { AppServices, PageContext, PageResult } from './types.ts';
 
 type DocRoute = Extract<Route, { page: 'document' }>;
@@ -99,7 +100,7 @@ export function renderBody(
   }
   const wrap = h('div', { class: 'doc-body', lang: doc.lang });
   if (doc.format === 'html' && doc.html) {
-    const { fragment, stats } = sanitizeDocumentHtml(doc.html, {
+    const { fragment, stats } = sanitizeDocumentHtml(asThread(doc.html, doc.source_id), {
       sourceId: doc.source_id,
       nativeId: doc.native_id,
       docId: doc.doc_id,
@@ -284,6 +285,14 @@ export function catalogNotice(
     })
     .catch(fallback);
   return el;
+}
+
+/** A question page (Stack Exchange) rewritten as a thread before the sanitiser drops its classes. */
+function asThread(html: string, source: string): string {
+  const parsed = new DOMParser().parseFromString(html, 'text/html');
+  if (!isThread(parsed.body)) return html;
+  threadView(parsed.body, source);
+  return parsed.body.innerHTML;
 }
 
 /** A question pool reads better as a drill: offer the Exam Practice Hall. */

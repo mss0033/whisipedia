@@ -12,6 +12,7 @@ the search-cost ideas that measurement left on the table. Plans here are proposa
 | The Screening Room | `wsp://screening-room` | any document whose original file is video or audio | Players in `ui/player.ts`, four skins, resume positions; kinds `video`/`audio` in the API |
 | Dictionary lookup | `wsp://define/<word>`, location bar `define`/`def`/`d` | the Wiktionary copies | `pages/define.ts`: headword spellings tried in order, dictionary search as the fallback (2026-10-14) |
 | Book reader | document pages of `kind=books` | Gutenberg, Wikisource, Standard Ebooks | `core/book.ts` + `pages/reader.ts`: chapters from heading lines, contents, prev/next, remembered place, Continue Reading on the start page (2026-10-14) |
+| Question threads | Stack Exchange document pages | the Stack Exchange ZIMs | `pages/threads.ts` on the raw HTML before the sanitiser: chrome removed, accepted answer first, scores, tags as scoped searches (2026-10-14) |
 | Catalog cards that know where the book is | Open Library document pages | Open Library works and editions | `catalogNotice` in `pages/document.ts`: held link, same-title lookup, copy elsewhere, or the copyright reason; adapter keeps external ids (2026-10-14) |
 
 ## Designed, not built
@@ -31,8 +32,7 @@ Built 2026-10-14 (see above). Left: font and measure controls (the themes set th
 chapter detection for books whose headings are not on their own lines.
 
 ### Stack Exchange threads
-The ZIM pages render already; worth adding: accepted answer first, vote counts as badges, the question's
-tags as searches, and "more like this" from the tags. Effort: a day.
+Built 2026-10-14 (see above). Left: "more like this" from the tags, and comment folding.
 
 ### Comics and man pages
 xkcd/SMBC: previous, next and random by number in the webring bar; the image at its native size.
