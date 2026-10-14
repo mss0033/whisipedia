@@ -3561,6 +3561,17 @@
               }
             ],
             "description": "Source integrity (ADR-0009)."
+          },
+          "trawler": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TrawlerStatus"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null until the trawler has run."
           }
         },
         "type": "object",
@@ -3576,7 +3587,8 @@
           "bots",
           "proposals",
           "orchestrator_state",
-          "integrity"
+          "integrity",
+          "trawler"
         ],
         "title": "OpsStatus",
         "description": "Operations data for the System Monitor (PLAN §12.6); every part tolerates missing state."
@@ -4901,6 +4913,95 @@
           "ops"
         ],
         "title": "SystemStatus"
+      },
+      "TrawlProblem": {
+        "properties": {
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "At"
+          },
+          "address": {
+            "type": "string",
+            "title": "Address"
+          },
+          "source_id": {
+            "type": "string",
+            "title": "Source Id"
+          },
+          "problem": {
+            "type": "string",
+            "title": "Problem",
+            "description": "The first problem found on the page."
+          }
+        },
+        "type": "object",
+        "required": [
+          "at",
+          "address",
+          "source_id",
+          "problem"
+        ],
+        "title": "TrawlProblem"
+      },
+      "TrawlerStatus": {
+        "properties": {
+          "pages": {
+            "type": "integer",
+            "title": "Pages",
+            "description": "Pages checked so far."
+          },
+          "failed": {
+            "type": "integer",
+            "title": "Failed",
+            "description": "Pages with at least one problem, in all."
+          },
+          "failed_last_week": {
+            "type": "integer",
+            "title": "Failed Last Week"
+          },
+          "sources_checked": {
+            "type": "integer",
+            "title": "Sources Checked"
+          },
+          "catalog_without_link": {
+            "type": "integer",
+            "title": "Catalog Without Link",
+            "description": "Catalog cards that do not link their book directly."
+          },
+          "updated": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated"
+          },
+          "recent": {
+            "items": {
+              "$ref": "#/components/schemas/TrawlProblem"
+            },
+            "type": "array",
+            "title": "Recent",
+            "description": "The latest problems, newest first (at most 20)."
+          }
+        },
+        "type": "object",
+        "required": [
+          "pages",
+          "failed",
+          "failed_last_week",
+          "sources_checked",
+          "catalog_without_link",
+          "updated",
+          "recent"
+        ],
+        "title": "TrawlerStatus",
+        "description": "What the trawler (navigator/scripts/trawl.mjs) found opening pages nobody had opened yet."
       },
       "VaultLocation": {
         "properties": {

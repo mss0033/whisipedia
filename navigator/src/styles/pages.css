@@ -985,3 +985,15 @@
   max-width: 100%;
   height: auto;
 }
+
+/* --- System Monitor: alerts and the trawler (pages/system.ts) --- */
+.alert-list,
+.trawl-list {
+  margin: 0;
+  padding-left: 1.2em;
+  display: grid;
+  gap: 0.35em;
+}
+.trawl-list a {
+  word-break: break-all;
+}

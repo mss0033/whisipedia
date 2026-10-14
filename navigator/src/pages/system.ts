@@ -1,8 +1,12 @@
 /**
- * wsp://system — System Monitor: freshness per site, degraded generations and
- * the ledger tail with its integrity check. Refreshes every 5 s while open.
+ * wsp://system — System Monitor: open alerts, what the trawler found, freshness per site, degraded
+ * generations and the ledger tail with its integrity check. Refreshes every 5 s while open.
  */
 import type { SystemStatus } from '../api/types.ts';
+
+type Ops = NonNullable<SystemStatus['ops']>;
+const RANK: Record<string, number> = { critical: 0, warning: 1, info: 2 };
+
 import { makeAddress } from '../core/address.ts';
 import { h } from '../core/dom.ts';
 import { formatDateTime, formatDuration } from '../core/format.ts';
@@ -10,6 +14,94 @@ import { pageHeading, sectionBox, statusLamp, wspLink } from '../ui/components.t
 import type { PageContext, PageResult } from './types.ts';
 
 export const REFRESH_MS = 5000;
+
+/**
+ * Open alerts, worst first; more than three of one kind (36 "dormant upstream" after a discovery
+ * pass) become one line, so the few that matter are not buried.
+ */
+export function alertsBox(ops: Ops | null | undefined): HTMLElement {
+  if (!ops) return sectionBox('Alerts', h('p', null, 'No orchestrator data yet.'));
+  if (!ops.alerts.length) return sectionBox('Alerts', h('p', null, 'None open.'));
+  const sorted = [...ops.alerts].sort(
+    (a, b) => (RANK[a.severity] ?? 3) - (RANK[b.severity] ?? 3) || a.key.localeCompare(b.key),
+  );
+  const groups = new Map<string, typeof sorted>();
+  for (const a of sorted) {
+    const kind = `${a.severity}|${a.key.split(':')[0]}`;
+    groups.set(kind, [...(groups.get(kind) ?? []), a]);
+  }
+  const items: HTMLElement[] = [];
+  for (const [kind, group] of groups) {
+    const [severity, name] = kind.split('|') as [string, string];
+    const lamp = statusLamp(
+      severity === 'critical' ? 'degraded' : severity === 'warning' ? 'stale' : 'ok',
+    );
+    if (group.length > 3) {
+      items.push(
+        h(
+          'li',
+          null,
+          lamp,
+          ` ${group.length} ${severity} alerts of kind `,
+          h('b', null, name),
+          ': ',
+          group.map((a) => a.key.split(':').slice(1).join(':')).join(', '),
+        ),
+      );
+    } else {
+      for (const a of group)
+        items.push(
+          h(
+            'li',
+            null,
+            lamp,
+            ` ${a.message} `,
+            h('span', { class: 'fineprint' }, `(${formatDateTime(a.raised_at)})`),
+          ),
+        );
+    }
+  }
+  return sectionBox(
+    `Alerts (${ops.alerts.length} open)`,
+    h('ul', { class: 'alert-list' }, ...items),
+  );
+}
+
+/** What the trawler found opening pages nobody had opened yet. */
+export function trawlerBox(ops: Ops | null | undefined): HTMLElement | null {
+  const t = ops?.trawler;
+  if (!t) return null;
+  return sectionBox(
+    'Trawler',
+    h(
+      'p',
+      null,
+      `${t.pages.toLocaleString('en-US')} pages checked in ${t.sources_checked} sites; `,
+      `${t.failed_last_week} with problems in the last week (${t.failed} in all). `,
+      t.catalog_without_link
+        ? `${t.catalog_without_link} catalog card(s) without a direct link to their book. `
+        : null,
+      t.updated
+        ? h('span', { class: 'fineprint' }, `Last page ${formatDateTime(t.updated)}.`)
+        : null,
+    ),
+    t.recent.length
+      ? h(
+          'ul',
+          { class: 'trawl-list' },
+          ...t.recent.map((r) =>
+            h(
+              'li',
+              null,
+              wspLink(r.address, r.address.replace(/^wsp:\/\//, '')),
+              h('br'),
+              h('span', { class: 'fineprint' }, `${r.problem} · ${formatDateTime(r.at)}`),
+            ),
+          ),
+        )
+      : h('p', null, 'No problems found yet.'),
+  );
+}
 
 function age(seconds: number | null): string {
   return seconds === null ? '—' : `${Math.floor(seconds / 86400)} d`;
@@ -19,6 +111,8 @@ export function renderSystem(sys: SystemStatus, names: Map<string, string>): HTM
   return h(
     'div',
     { class: 'sys-grid' },
+    alertsBox(sys.ops),
+    trawlerBox(sys.ops),
     sectionBox(
       'Library',
       h(

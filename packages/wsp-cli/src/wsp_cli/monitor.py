@@ -39,6 +39,8 @@ from wsp_api.schemas import (
     ScrubStatus,
     SourceIntegrity,
     SourceSlo,
+    TrawlerStatus,
+    TrawlProblem,
 )
 from wsp_core.model import GenerationStatus, SourceSpec, SourceStatus
 from wsp_core.ports import Vault
@@ -278,6 +280,41 @@ class _Slow:
     at: float = 0.0
 
 
+def trawler_status(path: Path, now: datetime) -> TrawlerStatus | None:
+    """:class:`TrawlerStatus` from the trawler's ``summary.json`` (None when unreadable)."""
+    try:
+        data = cast(dict[str, Any], json.loads(path.read_text(encoding="utf-8")))
+    except (OSError, ValueError):
+        return None
+    week = now - timedelta(days=7)
+    recent: list[TrawlProblem] = []
+    failed_week = 0
+    for item in cast(list[dict[str, Any]], data.get("recent") or []):
+        at = _dt(str(item.get("ts", "")).replace("Z", "+00:00"))
+        if at is None:
+            continue
+        failed_week += at >= week
+        problems = cast(list[str], item.get("problems") or ["?"])
+        recent.append(
+            TrawlProblem(
+                at=at,
+                address=str(item.get("address", "")),
+                source_id=str(item.get("source", "")),
+                problem=str(problems[0])[:300],
+            )
+        )
+    sources = cast(dict[str, dict[str, int]], data.get("sources") or {})
+    return TrawlerStatus(
+        pages=int(data.get("pages", 0)),
+        failed=int(data.get("failed", 0)),
+        failed_last_week=failed_week,
+        sources_checked=len(sources),
+        catalog_without_link=sum(int(s.get("catalog_without_link", 0)) for s in sources.values()),
+        updated=_dt(str(data.get("updated") or "").replace("Z", "+00:00")),
+        recent=sorted(recent, key=lambda r: r.at, reverse=True)[:20],
+    )
+
+
 class LibraryMonitor:
     """Implements :class:`wsp_api.seams.OpsProvider` from local state files and the vault."""
 
@@ -301,6 +338,7 @@ class LibraryMonitor:
         provenance_coverage: Callable[[], Any] | None = None,
         refresh_seconds: float = 600.0,
         background: bool = True,
+        trawl_summary: Path | None = None,
     ) -> None:
         self.sources = list(sources)
         self.vault = vault
@@ -319,6 +357,8 @@ class LibraryMonitor:
         self.provenance_coverage = provenance_coverage
         self.refresh_seconds = refresh_seconds
         self.background = background
+        self.trawl_summary = trawl_summary
+        self._trawl_cache: tuple[float, TrawlerStatus | None] = (-1.0, None)
         self._slow = _Slow()
         self._lock = threading.Lock()
         self._refreshing = False
@@ -495,7 +535,23 @@ class LibraryMonitor:
             proposals=ProposalSummary(**counts, latest=latest),
             orchestrator_state=self.state_db is not None and self.state_db.is_file(),
             integrity=self._integrity(slow, now),
+            trawler=self._trawler(now),
         )
+
+    def _trawler(self, now: datetime) -> TrawlerStatus | None:
+        """The trawler's summary.json, read again only when it changes (the page polls every 5 s)."""
+        path = self.trawl_summary
+        if path is None:
+            return None
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            return None
+        if mtime == self._trawl_cache[0]:
+            return self._trawl_cache[1]
+        status = trawler_status(path, now)
+        self._trawl_cache = (mtime, status)
+        return status
 
     def _integrity(self, slow: _Slow, now: datetime) -> IntegrityStatus | None:
         """Source integrity (ADR-0009) from the state DB and the cached provenance coverage."""

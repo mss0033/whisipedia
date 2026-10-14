@@ -358,6 +358,8 @@ export interface OpsStatus {
   orchestrator_state: boolean;
   /** Source integrity (ADR-0009). */
   integrity: IntegrityStatus | null;
+  /** Null until the trawler has run. */
+  trawler: TrawlerStatus | null;
 }
 
 /** The stored file a collection document was refined from (a PDF, a scanned map, an archive). */
@@ -617,6 +619,29 @@ export interface SystemStatus {
   uptime_seconds: number;
   /** Null without orchestrator data. */
   ops: OpsStatus | null;
+}
+
+export interface TrawlProblem {
+  at: string;
+  address: string;
+  source_id: string;
+  /** The first problem found on the page. */
+  problem: string;
+}
+
+/** What the trawler (navigator/scripts/trawl.mjs) found opening pages nobody had opened yet. */
+export interface TrawlerStatus {
+  /** Pages checked so far. */
+  pages: number;
+  /** Pages with at least one problem, in all. */
+  failed: number;
+  failed_last_week: number;
+  sources_checked: number;
+  /** Catalog cards that do not link their book directly. */
+  catalog_without_link: number;
+  updated: string | null;
+  /** The latest problems, newest first (at most 20). */
+  recent: Array<TrawlProblem>;
 }
 
 /** Where the bytes live, for "View Source Data" and the direct route (PLAN §7, §10.2). */

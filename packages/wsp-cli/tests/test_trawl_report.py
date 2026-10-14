@@ -1,5 +1,6 @@
 import io
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from wsp_cli.trawl import SourceFailures, recent_failures, render
 
@@ -39,3 +40,34 @@ def test_the_report_prints_totals_cards_and_examples() -> None:
     assert "1,200 page(s) checked, 3 with problems" in text
     assert "catalog cards without a direct link to their book: 4" in text
     assert "a: 2 failed in the last 7 days\n  wsp://a/x: empty" in text
+
+
+def test_the_monitor_reads_the_trawler_summary(tmp_path: Path) -> None:
+    import json
+
+    from wsp_cli.monitor import trawler_status
+
+    path = tmp_path / "summary.json"
+    path.write_text(
+        json.dumps(
+            {
+                "pages": 50,
+                "failed": 2,
+                "updated": "2026-10-14T11:00:00Z",
+                "sources": {"a": {"checked": 30, "catalog_without_link": 1}, "b": {"checked": 20}},
+                "recent": [_item("a", 9, "old"), _item("b", 1, "broken-link: wsp://b/x")],
+            }
+        )
+    )
+    t = trawler_status(path, NOW)
+    assert t is not None
+    assert (t.pages, t.failed, t.failed_last_week, t.sources_checked, t.catalog_without_link) == (
+        50,
+        2,
+        1,
+        2,
+        1,
+    )
+    assert [r.problem for r in t.recent] == ["broken-link: wsp://b/x", "old"]  # newest first
+    path.write_text("{torn")
+    assert trawler_status(path, NOW) is None

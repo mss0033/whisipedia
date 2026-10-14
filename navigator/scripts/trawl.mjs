@@ -8,7 +8,8 @@
  * serves), so it checks what a reader sees: the page loads without an error page or a script error,
  * it has content, its images resolve, the right viewer is there (the reader for a book, the player
  * for a film or a recording, the file panel for an original), and a catalog card links its book
- * directly. Pages are drawn at random, source by source in turn; each is checked once.
+ * directly, and a few of its links lead to pages the library holds. Pages are drawn at random from the
+ * least-checked source first; each is checked once.
  *
  * Low impact by construction: every request carries `X-Whisipedia-Probe: check` (background, never
  * counted as the owner's use), it waits WSP_TRAWL_INTERVAL seconds between pages, and it pauses
@@ -44,6 +45,24 @@ const ONLY = process.env.WSP_TRAWL_SOURCE ?? '';
 const HEADERS = { 'X-Whisipedia-Probe': 'check' };
 const PAGE_TIMEOUT = 120_000; // a cold NAS page can take a minute
 const IMAGES_CHECKED = 8;
+const LINKS_CHECKED = 3; // in-library links followed per page (an existence check, not a visit)
+// Pages drawn by the Navigator itself: their links are never documents.
+const BUILTIN = new Set([
+  'home',
+  'directory',
+  'search',
+  'whatsnew',
+  'system',
+  'history',
+  'hotlist',
+  'about',
+  'help',
+  'random',
+  'offline',
+  'practice',
+  'screening-room',
+  'define',
+]);
 const CONTEXT_PAGES = 100; // a fresh browser context every so often bounds its memory
 const RECENT_PROBLEMS = 200;
 const REPORT = (process.env.WSP_TRAWL_REPORT ?? '').trim();
@@ -195,6 +214,9 @@ async function check(context, address) {
           main?.querySelectorAll(
             '.doc-body video, .doc-body audio, .doc-body iframe, .doc-body pre',
           ).length ?? 0,
+        links: [...(main?.querySelectorAll('.doc-body a[data-wsp]:not([data-missing])') ?? [])]
+          .map((a) => a.getAttribute('data-wsp') ?? '')
+          .filter((x) => x.startsWith('wsp://')),
         brokenLinks: Number(
           /^(\d+)/.exec(main?.querySelector('.broken-note')?.textContent ?? '')?.[1] ?? 0,
         ),
@@ -246,6 +268,25 @@ async function check(context, address) {
       }
     }
   }
+  // A few of its links into the library, at random: does the page they name exist? The server
+  // turns every relative link of a ZIM page into a library address without checking it.
+  const links = [...new Set(seen?.links ?? [])].filter(
+    (a) => !BUILTIN.has(a.slice('wsp://'.length).split(/[/?#]/)[0] ?? ''),
+  );
+  let linksChecked = 0;
+  for (const address of shuffle(links).slice(0, LINKS_CHECKED)) {
+    linksChecked += 1;
+    try {
+      const r = await context.request.get(`${BASE}/go/${address.slice('wsp://'.length)}`, {
+        headers: HEADERS,
+        timeout: 60_000,
+      });
+      if (r.status() === 404) problems.push(`broken-link: ${address.slice(0, 160)}`);
+      else if (!r.ok()) problems.push(`link ${r.status()} ${address.slice(0, 160)}`);
+    } catch {
+      problems.push(`link-timeout ${address.slice(0, 160)}`);
+    }
+  }
   for (const f of failedApi.slice(0, 5)) problems.push(`api ${f}`);
   for (const e of scriptErrors.slice(0, 3)) problems.push(`script-error: ${e}`);
   await page.close().catch(() => undefined);
@@ -256,8 +297,33 @@ async function check(context, address) {
     images: seen?.images.length ?? 0,
     not_in_library: seen?.notInLibrary ?? 0,
     broken_links: seen?.brokenLinks ?? 0,
+    links_checked: linksChecked,
     catalog: seen?.catalog ?? null,
   };
+}
+
+function shuffle(items) {
+  const a = [...items];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+/**
+ * The next source to visit: the one with the fewest checked pages (ties at random), skipping those
+ * that drew only checked pages today. Round robin spent as much on a 40-page site as on Wikipedia;
+ * this spreads the first pages over every site, then keeps them level.
+ */
+function nextSource(sources, summary, exhausted) {
+  const today = Date.now() - 86_400_000;
+  const open = sources.filter((s) => (exhausted.get(s) ?? 0) <= today);
+  if (open.length === 0) return null;
+  const count = (s) => summary.sources[s]?.checked ?? 0;
+  const least = Math.min(...open.map(count));
+  const pool = open.filter((s) => count(s) === least);
+  return pool[Math.floor(Math.random() * pool.length)];
 }
 
 /** The hourly report (alerts): a separate process, so a slow or failing one never stops the trawl. */
@@ -289,7 +355,6 @@ async function main() {
     });
   let context = await fresh();
   let sources = await readableSources();
-  let turn = 0;
   let done = 0;
   const exhausted = new Map(); // source -> when it last only drew checked pages
   let stop = false;
@@ -306,13 +371,11 @@ async function main() {
       sources = await readableSources().catch(() => []);
       continue;
     }
-    const source = sources[turn++ % sources.length];
-    if (turn % sources.length === 0) sources = await readableSources().catch(() => sources);
-    if ((exhausted.get(source) ?? 0) > Date.now() - 86_400_000) {
-      if (sources.every((s) => (exhausted.get(s) ?? 0) > Date.now() - 86_400_000)) {
-        log('trawl: every source drew only checked pages today; resting an hour');
-        await sleep(3_600_000);
-      }
+    if (done > 0 && done % 200 === 0) sources = await readableSources().catch(() => sources);
+    const source = nextSource(sources, summary, exhausted);
+    if (source === null) {
+      log('trawl: every source drew only checked pages today; resting an hour');
+      await sleep(3_600_000);
       continue;
     }
     let pick = null;

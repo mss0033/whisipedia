@@ -503,7 +503,49 @@ export function system(): Response<'GET /v1/system'> {
     ledger_ok: true,
     api_version: `${API_VERSION}-mock`,
     uptime_seconds: Math.floor((Date.now() - started) / 1000),
-    ops: null,
+    ops: {
+      slo: [],
+      scrub: null,
+      parity: null,
+      disk: [],
+      budgets: [],
+      lanes: [],
+      queue: [],
+      alerts: [
+        {
+          key: 'integrity:kiwix-solar/2025-01',
+          severity: 'critical',
+          message: 'kiwix-solar/2025-01 quarantined: a mirror served 3 pieces failing their hash',
+          raised_at: '2026-10-09T08:53:41Z',
+        },
+        ...['anonymousplanet', 'armypubs', 'booksdash', 'cd3wd'].map((s) => ({
+          key: `dormant:kiwix-${s}`,
+          severity: 'warning',
+          message: `source kiwix-${s} upstream dormant: newest upstream release is old`,
+          raised_at: '2026-10-09T08:00:00Z',
+        })),
+      ],
+      bots: [],
+      proposals: { open: 0, applied: 0, accepted: 0, rejected: 0, latest: [] },
+      orchestrator_state: true,
+      integrity: null,
+      trawler: {
+        pages: 1440,
+        failed: 3,
+        failed_last_week: 2,
+        sources_checked: 58,
+        catalog_without_link: 4,
+        updated: '2026-10-09T11:59:00Z',
+        recent: [
+          {
+            at: '2026-10-09T11:40:00Z',
+            address: 'wsp://kiwix-learningstatistics-en-all/regression.html',
+            source_id: 'kiwix-learningstatistics-en-all',
+            problem: 'broken-link: wsp://kiwix-learningstatistics-en-all/residuals.html',
+          },
+        ],
+      },
+    },
   };
 }
 

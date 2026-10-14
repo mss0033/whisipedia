@@ -758,6 +758,7 @@ def build_monitor(cfg: Mapping[str, Any], specs: Sequence[SourceSpec], vault: Fi
         vault=vault,
         state_db=_opt_path(orch.get("state_db")),
         scrub_db=p.state_dir / "scrub.sqlite" if p.state_dir else None,
+        trawl_summary=p.state_dir / "trawl" / "summary.json" if p.state_dir else None,
         proposals=CachedProposals(files.files),  # parsed once per file change, with libyaml
         downloads_dir=_opt_path(ops.get("downloads_dir")) or default_downloads_dir(),
         disks={"vault": p.vault_root, "index": p.index_root, "state": p.state_dir},

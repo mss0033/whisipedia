@@ -620,6 +620,25 @@ class IntegrityStatus(_Wire):
     pinned_hosts: int = 0
 
 
+class TrawlProblem(_Wire):
+    at: datetime
+    address: str
+    source_id: str
+    problem: str = Field(description="The first problem found on the page.")
+
+
+class TrawlerStatus(_Wire):
+    """What the trawler (navigator/scripts/trawl.mjs) found opening pages nobody had opened yet."""
+
+    pages: int = Field(description="Pages checked so far.")
+    failed: int = Field(description="Pages with at least one problem, in all.")
+    failed_last_week: int
+    sources_checked: int
+    catalog_without_link: int = Field(description="Catalog cards that do not link their book directly.")
+    updated: datetime | None = None
+    recent: list[TrawlProblem] = Field(description="The latest problems, newest first (at most 20).")
+
+
 class OpsStatus(_Wire):
     """Operations data for the System Monitor (PLAN §12.6); every part tolerates missing state."""
 
@@ -635,6 +654,7 @@ class OpsStatus(_Wire):
     proposals: ProposalSummary
     orchestrator_state: bool = Field(description="False until the orchestrator has created its state DB.")
     integrity: IntegrityStatus | None = Field(default=None, description="Source integrity (ADR-0009).")
+    trawler: TrawlerStatus | None = Field(default=None, description="Null until the trawler has run.")
 
 
 class SystemStatus(_Wire):
