@@ -3,6 +3,11 @@
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Fixed: the health check no longer counts as the owner using the library (2026-10-14)
+* The API health check asks for the start page every two minutes; the activity marker took that for
+  interactive use, so the library was "busy" without end: scrub and parity slices never ran and paced
+  ingests stayed at their slow share. The probe sends `X-Whisipedia-Probe`, which the activity
+  middleware ignores.
 ### Fixed: a paced ingest slows down while the library is in use instead of failing (2026-10-14)
 * The ingest limiter paused by raising, the scrub's way; a seal step in flight failed with
   "the library is in interactive use" and an attempt was counted against the release. Interactive use

@@ -152,6 +152,15 @@ def test_activity_marker_counts_interactive_requests_only(tmp_path: Path) -> Non
     call("/v1/system")
     call("/v1/health")
     assert not marker.exists()
+    # A machine's probe of the start page (the health check, every two minutes) is not the owner.
+    asyncio.run(
+        mw(
+            {"type": "http", "path": "/v1/portal", "headers": [(b"x-whisipedia-probe", b"health")]},
+            None,  # type: ignore[arg-type]
+            None,  # type: ignore[arg-type]
+        )
+    )
+    assert not marker.exists()
     call("/v1/search")
     assert marker.exists()
     assert recently_active(marker, 60)
@@ -160,7 +169,7 @@ def test_activity_marker_counts_interactive_requests_only(tmp_path: Path) -> Non
     assert not recently_active(marker, 60)
     assert (seconds_since(marker) or 0) > 3000
     assert seconds_since(None) is None
-    assert seen == ["/v1/system", "/v1/health", "/v1/search"]
+    assert seen == ["/v1/system", "/v1/health", "/v1/portal", "/v1/search"]
     off = ActivityMiddleware(app, path=None)
     asyncio.run(off({"type": "http", "path": "/x"}, None, None))  # type: ignore[arg-type]
 

@@ -16,6 +16,10 @@ from typing import Any
 
 MARKER_NAME = "last-interactive"
 QUIET_PREFIXES = ("/v1/health", "/v1/system", "/v1/events", "/v1/openapi.json", "/favicon")
+PROBE_HEADER = b"x-whisipedia-probe"
+"""A request carrying this header is a machine's probe, not the owner browsing: the health check asks
+for the start page every two minutes, and counted as interactive use it kept the library "busy" for
+good (scrub and parity never ran, ingests stayed at their slow share; found 2026-10-14)."""
 
 Scope = MutableMapping[str, Any]
 Message = MutableMapping[str, Any]
@@ -61,7 +65,9 @@ class ActivityMiddleware:
         if self.path is not None and scope.get("type") == "http":
             req = str(scope.get("path", ""))
             now = time.monotonic()
-            if now - self._last >= self.min_interval and not req.startswith(QUIET_PREFIXES):
+            headers = scope.get("headers") or ()
+            probe = any(k == PROBE_HEADER for k, _v in headers)
+            if now - self._last >= self.min_interval and not probe and not req.startswith(QUIET_PREFIXES):
                 self._last = now
                 with contextlib.suppress(OSError):  # a read-only state dir must never break browsing
                     touch(self.path)

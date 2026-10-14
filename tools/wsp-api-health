@@ -29,7 +29,8 @@ started_s=$(date -d "$started" +%s 2>/dev/null) || started_s=""
 [ $(( $(date +%s) - started_s )) -lt 300 ] && exit 0
 
 for try in 1 2; do
-  code=$(curl -s -o /dev/null -m "$TIMEOUT" -w "%{http_code}" "$URL")
+  # The probe header keeps this request out of the interactive-use marker (wsp_core.activity).
+  code=$(curl -s -o /dev/null -m "$TIMEOUT" -w "%{http_code}" -H "X-Whisipedia-Probe: health" "$URL")
   [ "$code" = 200 ] && exit 0
   [ "$try" = 2 ] || sleep 5
 done
