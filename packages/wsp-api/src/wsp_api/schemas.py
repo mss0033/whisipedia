@@ -351,6 +351,12 @@ class SearchResults(_Wire):
     )
     total_is_estimate: bool = False
     took_ms: float = 0.0
+    timings_ms: dict[str, float] = Field(
+        default_factory=dict[str, float],
+        description="Diagnostics: milliseconds per stage. `oracle.*` are the ranking pipeline's own, from "
+        "the run that produced the results (a cached result repeats them). Not a contract; stages may "
+        "change.",
+    )
     intent: QueryIntent = QueryIntent.LOOKUP
     facets: list[KindFacet] = Field(
         default_factory=list[KindFacet],

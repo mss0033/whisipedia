@@ -494,6 +494,8 @@ export interface SearchResults {
   total: number;
   total_is_estimate: boolean;
   took_ms: number;
+  /** Diagnostics: milliseconds per stage. `oracle.*` are the ranking pipeline's own, from the run that produced the results (a cached result repeats them). Not a contract; stages may change. */
+  timings_ms: Record<string, number>;
   intent: QueryIntent;
   /** Results per kind in the same ranked list, ignoring the `kind` filter: filtering by a kind shows exactly its count. Kinds with no results are left out. */
   facets: Array<KindFacet>;

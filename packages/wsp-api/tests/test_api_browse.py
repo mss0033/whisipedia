@@ -341,3 +341,10 @@ def test_zim_listing_pages_are_never_results() -> None:
     assert searcher.is_listing(tag_page)
     assert not searcher.is_listing(question)
     assert not searcher.is_listing(other_site)  # not a ZIM source: its ids mean something else
+
+
+def test_a_search_says_where_its_time_went(browse: httpx.Client) -> None:
+    res = SearchResults.model_validate(browse.get("/v1/search", params={"q": "vaccines immune"}).json())
+    assert {"retrieval", "page_snippets", "hit_fields", "navigate", "did_you_mean"} <= set(res.timings_ms)
+    assert all(v >= 0 for v in res.timings_ms.values())
+    assert sum(v for k, v in res.timings_ms.items() if not k.startswith("oracle.")) <= res.took_ms + 1

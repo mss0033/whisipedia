@@ -12,13 +12,14 @@ search per word) and runs one cheap lexical count only when it has a correction 
 
 from __future__ import annotations
 
+import logging
 import re
 import threading
 import time
 from collections import Counter
 from collections.abc import Callable, Hashable, Mapping, Sequence
 from concurrent.futures import Future
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Any, cast
 
 from wsp_api import convert, instant, search, sites
@@ -28,6 +29,8 @@ from wsp_api.views import Library
 from wsp_core.listing import skip_paths, skip_regex
 from wsp_core.model import SearchHit
 
+log = logging.getLogger("wsp.api.search")
+SLOW_SEARCH_MS = 3000.0  # a search slower than this is logged with its stages
 WINDOW = 200  # hits ranked per query: the page, total and facets are all counted in them
 SPARSE = 5  # fewer results than this: "did you mean" may correct any unknown or rare word
 
@@ -66,6 +69,7 @@ class Retrieval:
     complete: bool  # every match is in ``hits``
     low_confidence: bool
     scope: Any = None  # the index's scope object (site, sources, fallback), if it routes queries
+    timings_ms: Mapping[str, float] = field(default_factory=dict[str, float])  # the Oracle's stages
 
 
 def retrieve(index: object, q: str, wanted: Sequence[str] | None) -> Retrieval:
@@ -81,7 +85,10 @@ def retrieve(index: object, q: str, wanted: Sequence[str] | None) -> Retrieval:
         # does not say: a list shorter than the window is all there is.
         exhaustive = getattr(res, "exhaustive", None)
         complete = len(hits) < WINDOW if exhaustive is None else bool(exhaustive) and len(hits) <= WINDOW
-        return Retrieval(hits[:WINDOW], complete, bool(res.low_confidence) or not hits, res.scope)
+        stages = cast(Mapping[str, float], getattr(res, "timings_ms", None) or {})
+        return Retrieval(
+            hits[:WINDOW], complete, bool(res.low_confidence) or not hits, res.scope, dict(stages)
+        )
     lexical = cast(Any, index)
     hits = tuple(cast(Sequence[SearchHit], lexical.search(q, limit=WINDOW + 1, offset=0, sources=wanted)))
     scope_of = getattr(index, "scope", None)
@@ -160,7 +167,15 @@ class Searcher:
     ) -> SearchResults:
         t0 = time.perf_counter()
         lib, s = self.lib, self.lib.s
+        stages: dict[str, float] = {}
+
+        def lap(name: str, since: float) -> float:
+            now = time.perf_counter()
+            stages[name] = round((now - since) * 1000, 1)
+            return now
+
         found = self.retrieval(q, wanted)
+        t = lap("retrieval", t0)
         content = [h for h in found.hits if not self.is_listing(h)]
         kinds = [self.kind_of(h) for h in content]
         shown = [h for h, k in zip(content, kinds, strict=True) if kind is None or k is kind]
@@ -168,6 +183,7 @@ class Searcher:
         fill = getattr(s.index, "with_snippets", None)
         if callable(fill) and any(not h.snippet for h in page):  # ranked without them: cut for this page
             page = list(cast(Sequence[SearchHit], fill(q, page)))
+        t = lap("page_snippets", t)
         more = offset + limit < len(shown)
         terms = search.terms(q)
         hits: list[Hit] = []
@@ -181,13 +197,22 @@ class Searcher:
                     highlights=search.highlights(plain, terms),
                 )
             )
+        t = lap("hit_fields", t)
         counts = Counter(kinds)
         nav = search.navigate_to(s, q, exists=lib.exists) if offset == 0 else None
+        t = lap("navigate", t)
         did_you_mean = self.did_you_mean(q, self.scope_of(kind, wanted), len(shown)) if offset == 0 else None
+        t = lap("did_you_mean", t)
         low = found.low_confidence or not shown
         if s.queries is not None and offset == 0:
             s.queries.record(s.clock(), q, len(shown), low)
         routed = found.scope
+        took = round((time.perf_counter() - t0) * 1000, 2)
+        # The Oracle's own stages (route, lexical+fusion, dense, titles, snippets, rerank) beside the
+        # API's: a slow search says where its time went (it said only its total before 2026-10-14).
+        timings = {**{f"oracle.{k}": float(v) for k, v in found.timings_ms.items()}, **stages}
+        if took >= SLOW_SEARCH_MS:
+            log.warning("slow search %.0f ms %r: %s", took, q[:80], timings)
         return SearchResults(
             query=q,
             offset=offset,
@@ -197,7 +222,8 @@ class Searcher:
             kind=kind,
             total=len(shown),
             total_is_estimate=not found.complete,
-            took_ms=round((time.perf_counter() - t0) * 1000, 2),
+            took_ms=took,
+            timings_ms=timings,
             intent=search.intent(q, navigational=nav is not None),
             facets=[
                 KindFacet(kind=k, count=n) for k, n in sorted(counts.items(), key=lambda x: (-x[1], x[0]))
