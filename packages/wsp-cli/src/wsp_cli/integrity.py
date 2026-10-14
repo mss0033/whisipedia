@@ -28,6 +28,7 @@ from typing import Any, cast
 
 from wsp_cli import bootstrap
 from wsp_cli.locks import PROFILE, exclusive, lock_dir_for
+from wsp_core.memory import drop_file_cache
 from wsp_core.model import Generation, GenerationStatus, SourceSpec
 from wsp_orchestrator.integrity import ContentProfile, IntegrityHooks, IntegritySettings, ProfileBuilder
 from wsp_orchestrator.isolation import IsolatedRunner
@@ -105,26 +106,39 @@ def refinery_documents(gen_dir: Path, builder: ProfileBuilder, pacer: ReadPacer 
     n = 0
     utf8_length = cast(Callable[[Any], Any], pc.utf8_length)  # pyright: ignore[reportUnknownMemberType]
     for part in sorted(gen_dir.glob("part-*.parquet")):
-        pf = pq.ParquetFile(part)
-        batches = pf.iter_batches(  # pyright: ignore[reportUnknownMemberType]
-            columns=["native_id", "title", "content_hash", "text"], batch_size=PROFILE_BATCH_ROWS
-        )
-        for batch in batches:
-            pacer.tick()
-            ids = cast(list[str], batch.column(0).to_pylist())
-            titles = cast(list[str], batch.column(1).to_pylist())
-            hashes = cast(list[str], batch.column(2).to_pylist())
-            sizes = cast(list[int], utf8_length(batch.column(3)).to_pylist())  # lengths only, no copies
-            del batch
-            for native_id, title, digest, size in zip(ids, titles, hashes, sizes, strict=True):
-                builder.add(
-                    native_id,
-                    namespace=_namespace(native_id),
-                    size=int(size),
-                    title=title,
-                    content_hash=digest[:16],
-                )
-                n += 1
+        try:
+            n += _profile_part(part, builder, pacer, utf8_length, pq)
+        finally:
+            # Read once: on the NAS its pages stay charged to the step's memory ceiling (a profile
+            # step held 2.6 GB of cache against 94 MB of heap, 2026-10-14).
+            drop_file_cache(part)
+    return n
+
+
+def _profile_part(
+    part: Path, builder: ProfileBuilder, pacer: ReadPacer, utf8_length: Callable[[Any], Any], pq: Any
+) -> int:
+    n = 0
+    pf = pq.ParquetFile(part)
+    batches = pf.iter_batches(  # pyright: ignore[reportUnknownMemberType]
+        columns=["native_id", "title", "content_hash", "text"], batch_size=PROFILE_BATCH_ROWS
+    )
+    for batch in batches:
+        pacer.tick()
+        ids = cast(list[str], batch.column(0).to_pylist())
+        titles = cast(list[str], batch.column(1).to_pylist())
+        hashes = cast(list[str], batch.column(2).to_pylist())
+        sizes = cast(list[int], utf8_length(batch.column(3)).to_pylist())  # lengths only, no copies
+        del batch
+        for native_id, title, digest, size in zip(ids, titles, hashes, sizes, strict=True):
+            builder.add(
+                native_id,
+                namespace=_namespace(native_id),
+                size=int(size),
+                title=title,
+                content_hash=digest[:16],
+            )
+            n += 1
     return n
 
 
@@ -139,9 +153,26 @@ def zim_entries(
     from libzim.reader import Archive  # pyright: ignore[reportMissingTypeStubs]
 
     archive = Archive(path)
+    try:
+        return _zim_entries(archive, builder, documents=documents, prefix=prefix, pacer=pacer, path=path)
+    finally:
+        drop_file_cache(path)
+
+
+ZIM_DROP_EVERY = 50_000
+"""Entries between page-cache drops of a ZIM being profiled: often enough that a whole-archive read
+does not sit in the step's memory, rarely enough that the API's pages of the same file (dropped too:
+the cache is shared) are not evicted at every entry."""
+
+
+def _zim_entries(
+    archive: Any, builder: ProfileBuilder, *, documents: bool, prefix: str, pacer: ReadPacer, path: Path
+) -> int:
     n = 0
     for i in range(int(archive.entry_count)):
         pacer.tick()
+        if i and i % ZIM_DROP_EVERY == 0:
+            drop_file_cache(path)
         entry = archive._get_entry_by_id(i)  # pyright: ignore[reportPrivateUsage, reportUnknownMemberType, reportUnknownVariableType]
         if entry.is_redirect:  # pyright: ignore[reportUnknownMemberType]
             continue
