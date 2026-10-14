@@ -1,0 +1,11 @@
+# Read-ahead for the disks that hold the search index and the Refinery id maps.
+#
+# WSL's virtual disks come up with read_ahead_kb=8192: every random page fault on a memory-mapped
+# index (term dictionaries, field norms, fast columns, the document store) pulled 8 MB, so one cold
+# search read 8-11 GB from the disk and evicted the index's hot pages for the next one (measured
+# 2026-10-13: 4,500 faults a query). At 256 KB the same query reads 0.4-1 GB.
+#
+# Install (root): cp deploy/udev/60-whisipedia-readahead.rules /etc/udev/rules.d/ && udevadm control
+# --reload && udevadm trigger --subsystem-match=block. Until the next boot, or on a kernel without
+# udev for virtual disks: echo 256 > /sys/block/<disk>/queue/read_ahead_kb
+ACTION=="add|change", SUBSYSTEM=="block", KERNEL=="sd[a-z]", ATTR{queue/read_ahead_kb}="256"

@@ -117,6 +117,9 @@ LOOKUP_CACHE = 100_000  # lookup() answers kept (~300 bytes each)
 LOOKUP_STAMP_EVERY = 5.0  # seconds between checks that the index on disk is still the same
 MIN_TIER_HITS = 30
 """Every-word matches enough to lead the result list on their own (module docstring)."""
+DIVERSE_WIDTH = 3
+"""A shared window (``per_source``) is asked this many times deeper in one run, so that the sources a
+crowding source hides are usually in it already and the query is not run again (:meth:`_diverse`)."""
 DIVERSE_ROUNDS = 2
 """Queries run again at most this many times to share a window among sources (``per_source``). Each
 round reads the source of up to a window of new hits from the ``source_key`` fast column. Two rounds
@@ -809,26 +812,31 @@ class TantivyIndex:
     ) -> list[tuple[float, tantivy.DocAddress]]:
         """The ``n`` best matches with no source above ``per_source`` places while others have matches.
 
-        A source that fills more than its share of the window is excluded and the query run again, at
-        most :data:`DIVERSE_ROUNDS` times; the window is then each source's best ``per_source`` matches
-        by score, followed by the overflow of the crowded sources by score (deferred, never dropped: a
-        single-source window keeps its order). Each round is one more top-``n`` query, never a scan.
+        The query is run once for a window :data:`DIVERSE_WIDTH` times deeper (a top-k heap over the
+        same postings: on the live index the deeper window cost about 5% more, a second run of a cold
+        query 2-3 s; 2026-10-13). Only when a source fills more than its share of the ``n`` best of
+        that wider window too is it excluded and the query run again, at most :data:`DIVERSE_ROUNDS`
+        times. The window is then each source's best ``per_source`` matches by score, followed by the
+        overflow of the crowded sources by score (deferred, never dropped: a single-source window
+        keeps its order). Each round is one more top-``k`` query, never a scan.
         """
-        hits = self._top(searcher, parsed, n, sources)
+        wide = n * DIVERSE_WIDTH
+        hits = self._top(searcher, parsed, wide, sources)
         if len(hits) < n or (sources is not None and len(set(sources)) < 2):
-            return hits  # every match, or one source: nothing to share
+            return hits[:n]  # every match, or one source: nothing to share
         pool = self._with_sources(searcher, hits)
         crowded: set[str] = set()
         for _ in range(DIVERSE_ROUNDS):
-            counts = Counter(src for _, _, src in pool)
+            if len(hits) < wide:
+                break  # the wider window held every match: nothing is hidden behind a crowded source
+            best = sorted(pool, key=lambda t: -t[0])[:n]
+            counts = Counter(src for _, _, src in best)
             over = {src for src, k in counts.items() if k > per_source} - crowded
             if not over:
                 break
             crowded |= over
-            more = self._top(searcher, parsed, n, sources, without=sorted(crowded))
-            pool += self._with_sources(searcher, more)
-            if len(more) < n:
-                break
+            hits = self._top(searcher, parsed, wide, sources, without=sorted(crowded))
+            pool += self._with_sources(searcher, hits)
         pool.sort(key=lambda t: -t[0])  # stable: equal scores keep the order Tantivy gave them
         taken: Counter[str] = Counter()
         head: list[tuple[float, tantivy.DocAddress]] = []

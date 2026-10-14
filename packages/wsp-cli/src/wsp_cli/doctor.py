@@ -28,6 +28,7 @@ CHECK_NAMES = (
     "vault",
     "index",
     "disk",
+    "readahead",
     "aria2",
     "par2",
     "services",
@@ -65,6 +66,27 @@ def _which_version(exe: str, args: Sequence[str]) -> str | None:
         return path
     first = (out.stdout or out.stderr).strip().splitlines()
     return first[0] if first else path
+
+
+READ_AHEAD_MAX_KB = 1024
+"""Above this, a memory-mapped index pays the read-ahead on every random page fault: WSL's virtual
+disks come up at 8192 KB and a cold search read 8-11 GB (2026-10-13); 256 KB is the installed value
+(``deploy/udev/60-whisipedia-readahead.rules``)."""
+
+
+def _read_ahead_kb(path: Path, *, sysfs: Path = Path("/sys"), st_dev: int | None = None) -> int | None:
+    """The read-ahead of the disk holding ``path`` (a partition's is its disk's), or None when sysfs
+    does not say (another OS, a network mount, a device without a queue)."""
+    try:
+        dev = os.stat(path).st_dev if st_dev is None else st_dev
+        node = (sysfs / "dev" / "block" / f"{os.major(dev)}:{os.minor(dev)}").resolve(strict=True)
+        for candidate in (node, node.parent):
+            setting = candidate / "queue" / "read_ahead_kb"
+            if setting.is_file():
+                return int(setting.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return None
+    return None
 
 
 def _free(path: Path) -> tuple[int, int] | None:
@@ -174,6 +196,23 @@ class Doctor:
             if free[0] < minimum or free[0] < 0.05 * free[1]:
                 level = Level.WARN
         return Check("disk", "Disk space", level, "; ".join(parts) or "no paths configured")
+
+    def readahead(self) -> Check:
+        root = self.paths.index_root
+        if root is None or not root.exists():
+            return Check("readahead", "Disk read-ahead", Level.OK, "no index root yet")
+        kb = _read_ahead_kb(root)
+        if kb is None:
+            return Check("readahead", "Disk read-ahead", Level.OK, "not reported by sysfs")
+        if kb > READ_AHEAD_MAX_KB:
+            return Check(
+                "readahead",
+                "Disk read-ahead",
+                Level.WARN,
+                f"{kb} KB on the index disk: a cold search reads gigabytes"
+                " (docs/runbooks/install-services.md, 'Disk read-ahead')",
+            )
+        return Check("readahead", "Disk read-ahead", Level.OK, f"{kb} KB on the index disk")
 
     def aria2(self) -> Check:
         found = self.which("aria2c", ["--version"])

@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Callable
 from contextlib import closing
 from dataclasses import replace
 from pathlib import Path
+from typing import cast
 
 import pytest
 import tantivy
@@ -215,3 +217,39 @@ def test_suggest_scans_are_paced_by_bytes(wiki: IndexedSource) -> None:
     assert total > 0
     TitleSources([wiki], limiter=limiter).suggest_entries(None, budget=100)
     assert sum(slept) == pytest.approx(total / 1000.0)
+
+
+def test_a_shared_window_runs_the_query_once_unless_a_source_crowds_it_out(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A cold query costs seconds on the live index: the window is asked wider once, and only a source
+    that still crowds the ``n`` best of that wider window has the query run again without it."""
+    from wsp_index.lexical import DIVERSE_WIDTH
+
+    calls = {"n": 0}
+    real = cast(Callable[..., object], tantivy.Searcher.search)
+
+    def counting(self: tantivy.Searcher, *args: object, **kwargs: object) -> object:
+        calls["n"] += 1
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(tantivy.Searcher, "search", counting)
+    with TantivyIndex(tmp_path / "ix", SMALL) as idx:
+        idx.upsert([doc("big", f"b{i}", f"Lantern {i}", "lantern oil") for i in range(12)])
+        idx.upsert([doc("small", f"s{i}", f"Lantern {i}", "lantern oil") for i in range(3)])
+        idx.commit()
+        calls["n"] = 0  # the commit's suggest rebuild searched too
+        window = idx.search_window("lantern", limit=10, per_source=3)
+        assert calls["n"] == 1  # 15 matches fit the wider window of 10 * DIVERSE_WIDTH: one run
+        assert sum(h.source_id == "small" for h in window.hits) == 3
+        assert len(window.hits) == 10
+    with TantivyIndex(tmp_path / "ix2", SMALL) as idx:
+        n = 10 * DIVERSE_WIDTH + 20
+        idx.upsert([doc("big", f"b{i}", f"Lantern {i}", "lantern oil") for i in range(n)])
+        idx.upsert([doc("small", f"s{i}", f"Lantern note number {i}", "lantern wick") for i in range(3)])
+        idx.commit()
+        calls["n"] = 0
+        window = idx.search_window("lantern", limit=10, per_source=3)
+        assert calls["n"] == 2  # big filled the wider window: run again without it
+        assert sum(h.source_id == "small" for h in window.hits) == 3
+        assert sum(h.source_id == "big" for h in window.hits) == 7

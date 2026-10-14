@@ -68,3 +68,18 @@ share, and the shares fit under the slice's MemoryHigh, so one job cannot thrott
 ```sh
 wsp service uninstall           # disable --now, remove the files it wrote, daemon-reload
 ```
+
+## Disk read-ahead (root, once)
+
+WSL's virtual disks default to an 8 MB read-ahead; a memory-mapped search index pays it on every
+random page fault (a cold search read 8-11 GB, 2026-10-13). Install the udev rule, and set it for
+the running session:
+
+```
+sudo cp deploy/udev/60-whisipedia-readahead.rules /etc/udev/rules.d/
+sudo udevadm control --reload && sudo udevadm trigger --subsystem-match=block
+sudo sh -c 'echo 256 > /sys/block/sdd/queue/read_ahead_kb'   # the root disk, this session
+cat /sys/block/sdd/queue/read_ahead_kb                        # 256
+```
+
+`wsp doctor` does not check it; `cat /sys/block/*/queue/read_ahead_kb` does.

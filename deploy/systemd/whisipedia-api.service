@@ -30,8 +30,11 @@ RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 # Interactive: outside the background slice, with its own ceiling (caches are bounded; a leak
 # must restart the API, not stall the desktop). MemoryHigh only throttles, so whisipedia-api-health.timer
 # restarts an API that stops answering. Steady state ~2.5-3 GB, most of it the CUDA runtime and models.
-MemoryHigh=4G
-MemoryMax=5G
+# File pages of the memory-mapped search index are charged here too: a ceiling near the anonymous
+# footprint (~2.5 GB) evicted the index between queries and every search faulted it back (cold
+# searches 12-20 s against 7-12 s with room for the cache; 2026-10-13). Only anonymous memory grows.
+MemoryHigh=10G
+MemoryMax=12G
 MemorySwapMax=512M
 NoNewPrivileges=yes
 PrivateTmp=yes

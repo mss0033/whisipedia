@@ -7,6 +7,7 @@ import threading
 import time
 from collections import OrderedDict
 from collections.abc import Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import cast
 
@@ -32,6 +33,9 @@ def _reader_cost(reader: RefineryReader) -> int:
         + 4 * 1024 * 1024 * reader.cache_row_groups
     )
 
+
+LOOKUP_WORKERS = 8
+"""Lookups of one search page run side by side (:meth:`ParquetDocumentStore.texts`)."""
 
 CURRENT_TTL = 5.0
 
@@ -137,36 +141,39 @@ class ParquetDocumentStore:
     def texts(self, doc_ids: Sequence[str]) -> dict[str, str]:
         """Current text of each document that has one (search snippets when the lexical index stores no
         text). Reads only the ``text`` column of each document's row group (cached per reader)."""
-        out: dict[str, str] = {}
-        for doc_id in doc_ids:
+        return {d: t for d, t in self._column_many(doc_ids, "text").items() if isinstance(t, str)}
+
+    def _column_many(self, doc_ids: Sequence[str], column: str) -> dict[str, object]:
+        """One column of the current version of each document, the lookups run side by side.
+
+        A search page asks for fifty passages and the content hashes of repeated titles; one by one
+        over the NAS that was 2-4 s of a query (each lookup a row-group read of 30-80 ms, measured
+        2026-10-13). Readers are safe to share between threads; the pool is bounded so a page cannot
+        flood the link."""
+        wanted = list(dict.fromkeys(doc_ids))
+        if not wanted:
+            return {}
+
+        def one(doc_id: str) -> tuple[str, object] | None:
             try:
                 source_id, _ = parse_doc_id(DocId(doc_id))
             except InvalidDocIdError:
-                continue
+                return None
             gen = self.current(source_id)
             reader = None if gen is None else self.reader(source_id, gen, current=True)
-            row = None if reader is None else reader.lookup(doc_id, ("text",))
-            text = None if row is None else row.get("text")
-            if isinstance(text, str):
-                out[doc_id] = text
-        return out
+            row = None if reader is None else reader.lookup(doc_id, (column,))
+            return None if row is None else (doc_id, row.get(column))
+
+        if len(wanted) == 1:
+            found = one(wanted[0])
+            return {} if found is None else {found[0]: found[1]}
+        with ThreadPoolExecutor(min(LOOKUP_WORKERS, len(wanted)), thread_name_prefix="wsp-lookup") as pool:
+            return dict(f for f in pool.map(one, wanted) if f is not None)
 
     def content_hashes(self, doc_ids: Sequence[str]) -> dict[str, str]:
         """Current content hash of each document that has one (tells duplicate records of one text from
         distinct documents sharing a title). Reads only the ``content_hash`` column."""
-        out: dict[str, str] = {}
-        for doc_id in doc_ids:
-            try:
-                source_id, _ = parse_doc_id(DocId(doc_id))
-            except InvalidDocIdError:
-                continue
-            gen = self.current(source_id)
-            reader = None if gen is None else self.reader(source_id, gen, current=True)
-            row = None if reader is None else reader.lookup(doc_id, ("content_hash",))
-            digest = None if row is None else row.get("content_hash")
-            if isinstance(digest, str):
-                out[doc_id] = digest
-        return out
+        return {d: h for d, h in self._column_many(doc_ids, "content_hash").items() if isinstance(h, str)}
 
     def history(self, doc_id: DocId) -> Sequence[tuple[str, str]]:
         try:

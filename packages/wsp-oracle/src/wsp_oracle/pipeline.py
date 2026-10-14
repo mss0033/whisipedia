@@ -195,7 +195,15 @@ class OracleSearcher:
         key = _title_key(title)
         if not key:
             return None
-        for h in self.lexical.search(title, limit=10, sources=sources):
+        # Snippet-free: a pin's snippet is cut with the page's (``with_snippets``); ``search`` read ten
+        # documents' texts over the NAS for one title (1-2 s of a query, 2026-10-13).
+        fast = getattr(self.lexical, "search_hits", None)
+        found = (
+            fast(title, limit=10, sources=sources)
+            if callable(fast)
+            else self.lexical.search(title, limit=10, sources=sources)
+        )
+        for h in cast(Sequence[SearchHit], found):
             if _title_key(h.title) == key:
                 return h
         return None

@@ -189,3 +189,40 @@ def test_sparse_lookups_keep_the_last_decoded_id_row_groups(
     id_reads = reads["n"] - before
     assert id_reads <= 10  # the part's row groups, read once each: not one id row group per lookup
     assert reader.id_rows_bytes > 0
+
+
+def test_a_page_of_text_and_hash_lookups_runs_side_by_side(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fifty passages one by one over the NAS were 2-4 s of a query; the store reads a page's lookups
+    with a bounded pool (:data:`wsp_index.docstore.LOOKUP_WORKERS`)."""
+    import threading
+    import time
+
+    from wsp_index.docstore import LOOKUP_WORKERS
+
+    _write(tmp_path / "nas")
+    real = RefineryReader.lookup
+    state = {"now": 0, "peak": 0}
+    gate = threading.Lock()
+
+    def slow(self: RefineryReader, doc_id: str, columns: Any = None) -> Any:
+        with gate:
+            state["now"] += 1
+            state["peak"] = max(state["peak"], state["now"])
+        try:
+            time.sleep(0.02)
+            return real(self, doc_id, columns)
+        finally:
+            with gate:
+                state["now"] -= 1
+
+    monkeypatch.setattr(RefineryReader, "lookup", slow)
+    store = ParquetDocumentStore(tmp_path / "nas", map_root=tmp_path / "maps")
+    ids = [d.doc_id for d in DOCS]
+    texts = store.texts([*ids, ids[0], "not-a-doc-id"])  # repeats and junk asked once or not at all
+    assert set(texts) == set(ids)
+    assert 1 < state["peak"] <= LOOKUP_WORKERS
+    hashes = store.content_hashes(ids)
+    assert set(hashes) == set(ids)
+    assert store.texts([ids[0]]) == {ids[0]: texts[ids[0]]}  # one lookup: no pool

@@ -162,6 +162,22 @@ def test_doctor_report(env: Path) -> None:
     assert run("doctor", "--quiet", "--require", "vault")[0] == 0
 
 
+def test_read_ahead_is_read_from_the_partitions_disk(tmp_path: Path) -> None:
+    """``/sys/dev/block/<maj>:<min>`` names a partition; the queue is its disk's."""
+    from wsp_cli.doctor import _read_ahead_kb  # pyright: ignore[reportPrivateUsage]
+
+    disk = tmp_path / "devices" / "pci0" / "block" / "sdd"
+    (disk / "queue").mkdir(parents=True)
+    (disk / "queue" / "read_ahead_kb").write_text("8192\n", encoding="utf-8")
+    (disk / "sdd1").mkdir()
+    (tmp_path / "dev" / "block").mkdir(parents=True)
+    (tmp_path / "dev" / "block" / "8:49").symlink_to(disk / "sdd1")
+    (tmp_path / "dev" / "block" / "8:48").symlink_to(disk)
+    assert _read_ahead_kb(tmp_path, sysfs=tmp_path, st_dev=os.makedev(8, 49)) == 8192
+    assert _read_ahead_kb(tmp_path, sysfs=tmp_path, st_dev=os.makedev(8, 48)) == 8192
+    assert _read_ahead_kb(tmp_path, sysfs=tmp_path, st_dev=os.makedev(8, 64)) is None  # no such device
+
+
 def test_monitor_status_from_local_state(tmp_path: Path) -> None:
     state = tmp_path / "orchestrator.sqlite3"
     store = StateStore(state, check_local=False)
