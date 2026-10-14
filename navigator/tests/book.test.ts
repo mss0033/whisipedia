@@ -5,6 +5,7 @@ import {
   paragraphs,
   positionOf,
   rememberPosition,
+  runLengths,
   splitChapters,
   unfinishedBooks,
 } from '../src/core/book.ts';
@@ -66,6 +67,40 @@ describe('books as chapters', () => {
     ]);
     expect(chapters[1]!.paragraphs).toHaveLength(2);
     expect(chapters[4]!.paragraphs).toEqual(['We were brought up together.']);
+  });
+
+  it('folds a contents list into the chapter before it', () => {
+    const text = [
+      'MOBY DICK',
+      'by Herman Melville',
+      'CONTENTS',
+      'CHAPTER 1. Loomings.',
+      'CHAPTER 2. The Carpet-Bag.',
+      'CHAPTER 3. The Spouter-Inn.',
+      'CHAPTER 1. Loomings.',
+      'Call me Ishmael.',
+      'CHAPTER 2. The Carpet-Bag.',
+      'I stuffed a shirt or two into my old carpet-bag.',
+      'CHAPTER 3. The Spouter-Inn.',
+      'Entering that gable-ended Spouter-Inn, you found yourself in a wide, low, straggling entry.',
+    ].join('\n\n');
+    const chapters = splitChapters(text, 'Moby Dick');
+    expect(chapters.map((c) => c.title)).toEqual([
+      'Moby Dick',
+      'CHAPTER 1. Loomings.',
+      'CHAPTER 2. The Carpet-Bag.',
+      'CHAPTER 3. The Spouter-Inn.',
+    ]);
+    expect(chapters[0]!.paragraphs).toEqual([
+      'MOBY DICK',
+      'by Herman Melville',
+      'CONTENTS',
+      'CHAPTER 1. Loomings.',
+      'CHAPTER 2. The Carpet-Bag.',
+      'CHAPTER 3. The Spouter-Inn.',
+    ]);
+    expect(chapters[1]!.paragraphs).toEqual(['Call me Ishmael.']);
+    expect(runLengths([false, true, true, false, true])).toEqual([0, 2, 2, 0, 1]);
   });
 
   it('keeps a text with too few headings whole', () => {

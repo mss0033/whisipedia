@@ -18,6 +18,21 @@ export interface Chapter {
 const HEADING_WORD =
   /^(chapter|letter|book|part|volume|canto|act|scene|stave|prologue|epilogue|introduction|preface|appendix|conclusion)\b/i;
 export const MIN_HEADINGS = 3;
+/** This many heading lines in a row are a list of contents, not chapters. */
+export const LIST_RUN = 3;
+
+/** For each paragraph, the length of the run of consecutive headings it is in (0 for body text). */
+export function runLengths(heads: readonly boolean[]): number[] {
+  const out = new Array<number>(heads.length).fill(0);
+  let start = 0;
+  for (let i = 0; i <= heads.length; i++) {
+    if (i === heads.length || !heads[i]) {
+      for (let k = start; k < i; k++) out[k] = i - start;
+      start = i + 1;
+    }
+  }
+  return out;
+}
 const MAX_HEADING_CHARS = 80;
 
 /** Paragraphs of a plain text: blank lines separate them, wrapped lines are joined. */
@@ -32,30 +47,56 @@ export function paragraphs(text: string): string[] {
 
 /** Whether a paragraph reads as a chapter heading. */
 export function isHeading(p: string): boolean {
-  if (p.length > MAX_HEADING_CHARS || (/[.!?]$/.test(p) && p.split(' ').length > 6)) return false;
-  if (HEADING_WORD.test(p) && p.split(/\s+/).length <= 8) return true;
+  if (p.length > MAX_HEADING_CHARS) return false;
+  const words = p.split(/\s+/).length;
+  if (HEADING_WORD.test(p)) return words <= 12; // "CHAPTER 91. The Pequod Meets the Rose-Bud."
+  if (/[.!?]$/.test(p) && words > 6) return false; // a short sentence in capitals is still a sentence
   return p === p.toUpperCase() && /[A-Z]/.test(p) && p.length < 60;
 }
 
 export function splitChapters(text: string, bookTitle = ''): Chapter[] {
   const ps = paragraphs(text);
+  const heads = ps.map(isHeading);
+  const runs = runLengths(heads);
   const chapters: Chapter[] = [];
   let current: Chapter = { title: bookTitle || 'Front matter', paragraphs: [] };
   let headings = 0;
   let started = false; // a heading before any body text is a title line, not a chapter
-  for (const p of ps) {
-    if (isHeading(p) && started) {
+  const seen = new Set<string>();
+  for (const [i, p] of ps.entries()) {
+    const heading = heads[i]! && started;
+    // A run of heading lines is a contents list (Moby Dick lists its 135 chapters up front): its
+    // lines read as paragraphs of the chapter they are in, not as chapters. Real chapters have
+    // text; the body's first heading, which often follows the list directly, repeats a line of it.
+    const key = p.toLowerCase();
+    const repeat = seen.has(key);
+    if (heads[i]) seen.add(key);
+    const lastOfRun = heads[i + 1] !== true;
+    const inList = heading && runs[i]! >= LIST_RUN && !(lastOfRun && repeat);
+    if (heading && !inList) {
       headings++;
       chapters.push(current);
       current = { title: p, paragraphs: [] };
     } else {
       current.paragraphs.push(p);
-      if (!isHeading(p)) started = true;
+      if (!heads[i]) started = true;
     }
   }
   chapters.push(current);
   if (headings < MIN_HEADINGS) return [{ title: bookTitle || 'Text', paragraphs: ps }];
-  return chapters;
+  // A chapter with no text of its own ("PART I" right before "CHAPTER I") names the next one.
+  const out: Chapter[] = [];
+  let pending: string[] = [];
+  for (const c of chapters) {
+    if (c.paragraphs.length === 0 && out.length) {
+      pending.push(c.title);
+      continue;
+    }
+    out.push(pending.length ? { ...c, title: [...pending, c.title].join(' · ') } : c);
+    pending = [];
+  }
+  if (pending.length) out.push({ title: pending.join(' · '), paragraphs: [] });
+  return out;
 }
 
 /* -------------------------------- reading positions -------------------------------- */
