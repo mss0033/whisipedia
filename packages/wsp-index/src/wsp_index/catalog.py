@@ -685,11 +685,15 @@ class RefineryCatalog:
         for source_id in candidates:
             entry = self._entry(source_id)
             n = int(entry.data.get("doc_count", 0)) if entry is not None else 0
-            if n <= 0:
-                reader = self._reader(source_id)
-                n = len(reader) if reader is not None else 0
             if n > 0:
                 weighted.append((source_id, n))
+        if not weighted:  # no catalog yet (tests, ad-hoc tools): weigh the sources by their readers.
+            # Not otherwise: a registry source without data yet costs three NAS round trips to ask
+            # for a generation it does not have, and the registry lists ninety of them.
+            for source_id in candidates:
+                reader = self._reader(source_id)
+                if reader is not None and len(reader) > 0:
+                    weighted.append((source_id, len(reader)))
         while weighted:
             total = sum(n for _, n in weighted)
             k = rng.randrange(total)

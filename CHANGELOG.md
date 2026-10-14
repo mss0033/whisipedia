@@ -8,7 +8,8 @@ All notable changes are documented here. The format follows [Keep a Changelog](h
   a few NAS round trips each. On a cold API, with the collection lanes loading the link, that took
   longer than the start page's deadline and the health check restarted the API before the readers
   warmed (ten restarts in two hours). The source is drawn from the catalog's local document counts
-  first and only its reader is opened.
+  first and only its reader is opened; the registry's sources without data yet (about ninety) no
+  longer cost three NAS round trips each on every cold pick.
 ### Added: question pages read as threads (2026-10-14)
 * A Stack Exchange question page loses the site's own chrome (top bars, header, sidebars, footer); the
   accepted answer comes first and the rest follow by score, each post carries its score, and the

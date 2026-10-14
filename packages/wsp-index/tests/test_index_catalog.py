@@ -251,7 +251,10 @@ def test_a_cold_random_pick_opens_one_reader_when_the_catalog_counts_the_sources
         entry: dict[str, object] = {"format": CATALOG_FORMAT, "doc_count": n, "categories": []}
         (catalog_root / f"{source_id}.json").write_text(json.dumps(entry))
     feed = SqliteChangeFeed(tmp_path / "changes.sqlite")
-    cat = RefineryCatalog(refinery, catalog_root, feed, sources=["wikipedia-en-zim", "kiwix-bundle"])
+    # "not-refined-yet" is a registry source without data: it must cost no NAS round trip.
+    cat = RefineryCatalog(
+        refinery, catalog_root, feed, sources=["wikipedia-en-zim", "kiwix-bundle", "not-refined-yet"]
+    )
     opened: list[str] = []
     real = refinery_module.RefineryReader
 
@@ -261,8 +264,16 @@ def test_a_cold_random_pick_opens_one_reader_when_the_catalog_counts_the_sources
             super().__init__(gen_dir, **kw)  # type: ignore[arg-type]
 
     monkeypatch.setattr("wsp_index.catalog.RefineryReader", Counting)
+    asked: list[str] = []
+
+    def counting_generation(root: Path, source_id: str) -> str | None:
+        asked.append(source_id)
+        return refinery_module.current_generation(root, source_id)
+
+    monkeypatch.setattr("wsp_index.catalog.current_generation", counting_generation)
     assert cat.random_doc(sources=None, rng=random.Random(3)) is not None
     assert len(opened) == 1
+    assert "not-refined-yet" not in asked  # no NAS round trips for a source the catalog has not counted
     # Over many picks both sources come up, in proportion to their counts (60 : 20).
     seen = Counter(
         DocId(cat.random_doc(sources=None, rng=random.Random(i)) or "").split("/")[0] for i in range(300)
