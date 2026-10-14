@@ -41,6 +41,7 @@ check then rejects.
 
 from __future__ import annotations
 
+import contextlib
 import math
 import mmap
 import os
@@ -563,6 +564,11 @@ class Vocabulary:
     def __len__(self) -> int:
         return self.size
 
+    def hot_arrays(self) -> tuple[npt.NDArray[np.uint64], ...]:
+        """The arrays every lookup binary-searches (the word hashes, the deletion hashes): what a
+        warm-up reads ahead. The word blob is not among them."""
+        return (self._hash, self._del_hash)
+
     def _word(self, i: int) -> str:
         a, b = int(self._offsets[i]), int(self._offsets[i + 1])
         return bytes(self._blob[a:b]).decode("utf-8")
@@ -724,9 +730,39 @@ class Speller:
                 mm = mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_READ)
             if hasattr(mmap, "MADV_RANDOM"):
                 mm.madvise(mmap.MADV_RANDOM)
-            return cls(np.frombuffer(mm, dtype=np.uint8), **kw)
+            buf = np.frombuffer(mm, dtype=np.uint8)
+            speller = cls(buf, **kw)
+            speller._mm = mm
+            speller._base = int(buf.ctypes.data)
+            speller.warm()
+            return speller
         except (OSError, ValueError):
             return None
+
+    _mm: mmap.mmap | None = None
+    _base: int = 0
+
+    def warm(self) -> int:
+        """Ask the kernel to read the hash arrays ahead (``MADV_WILLNEED``): a binary search over a cold
+        array is dozens of page faults, and "did you mean" cost 0.1-0.3 s a query on a fresh process
+        (0.01-0.05 s warm; 2026-10-14). The word blob stays cold: only a correction reads it.
+        Returns the bytes advised (0 for an in-memory speller)."""
+        mm = self._mm
+        if mm is None or not hasattr(mmap, "MADV_WILLNEED"):
+            return 0
+        page = mmap.PAGESIZE
+        total = 0
+        for v in self.vocabs:
+            for arr in v.hot_arrays():
+                raw = arr.view(np.uint8)
+                off = int(raw.ctypes.data) - self._base
+                if raw.nbytes == 0 or off < 0 or off + raw.nbytes > len(mm):
+                    continue  # a version-1 file's arrays are copies, not views of the mapping
+                start = off - off % page
+                with contextlib.suppress(OSError, ValueError):
+                    mm.madvise(mmap.MADV_WILLNEED, start, raw.nbytes + (off - start))
+                    total += raw.nbytes
+        return total
 
     @classmethod
     def from_counts(cls, counts: Mapping[str, int], **kw: Any) -> Speller:

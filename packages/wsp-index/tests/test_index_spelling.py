@@ -108,6 +108,8 @@ def test_vocabulary_from_the_refinery(tmp_path: Path) -> None:
     assert "words from 21 documents" in stats.line()
     s = Speller.open(path)
     assert s is not None
+    assert s.warm() > 0  # the hash arrays are read ahead on open; 0 only for an in-memory speller
+    assert Speller.from_counts({"a": 1}).warm() == 0
     assert s.count("vaccine") == 20 * 5  # titles count five times
     assert s.count("immune") == 40
     assert s.count("immuen") == 0  # below min_count: corpus typos stay out
