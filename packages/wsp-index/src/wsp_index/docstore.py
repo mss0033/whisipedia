@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import bisect
+import logging
 import threading
 import time
 from collections import OrderedDict
@@ -21,6 +22,8 @@ from wsp_index.refinery import (
     is_sealed,
     sealed_generations,
 )
+
+log = logging.getLogger("wsp.index.docstore")
 
 
 def _reader_cost(reader: RefineryReader) -> int:
@@ -199,8 +202,14 @@ class ParquetDocumentStore:
         out: list[tuple[str, str]] = []
         previous: str | None = None  # hash in the immediately preceding generation (None if absent)
         for gen in self.generations(source_id):
-            reader = self.reader(source_id, gen)
-            row = None if reader is None else reader.lookup(doc_id, ("content_hash",))
+            # One unreadable old generation (a NAS error) must not fail the page it is history for:
+            # it is left out, and the comparison bridges it (2026-10-14: EINVAL on a hard-linked set).
+            try:
+                reader = self.reader(source_id, gen)
+                row = None if reader is None else reader.lookup(doc_id, ("content_hash",))
+            except OSError as exc:
+                log.warning("history of %s: generation %s/%s unreadable: %s", doc_id, source_id, gen, exc)
+                continue
             current = None if row is None else cast(str, row["content_hash"])
             if current is not None and current != previous:
                 out.append((gen, current))

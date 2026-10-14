@@ -262,3 +262,38 @@ def test_concurrent_cold_lookups_build_one_reader(tmp_path: Path, monkeypatch: p
     assert len({id(r) for r in got}) == 1
     assert got[0] is not None
     assert not store._building  # pyright: ignore[reportPrivateUsage]
+
+
+def test_history_skips_a_generation_it_cannot_read(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _write(tmp_path / "nas", gen="g1")
+    _write(tmp_path / "nas", gen="g2")
+    store = ParquetDocumentStore(tmp_path / "nas", map_root=tmp_path / "local")
+    real = store.reader
+
+    def flaky(source_id: str, generation_id: str, *, current: bool | None = None) -> Any:
+        if generation_id == "g1":
+            raise OSError(22, "Invalid argument")  # what SMB answered for a hard-linked name
+        return real(source_id, generation_id, current=current)
+
+    monkeypatch.setattr(store, "reader", flaky)
+    hist = store.history(DOCS[3].doc_id)
+    assert [g for g, _ in hist] == ["g2"]
+
+
+def test_sets_copy_their_parts_on_a_network_mount(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import os
+
+    from wsp_index import refinery as rf
+
+    src = tmp_path / "a.parquet"
+    src.write_bytes(b"x" * 100)
+    rf._link_or_copy(src, tmp_path / "linked.parquet")  # pyright: ignore[reportPrivateUsage]
+    assert os.stat(tmp_path / "linked.parquet").st_ino == os.stat(src).st_ino
+
+    def remote(_path: Path) -> bool:
+        return True
+
+    monkeypatch.setattr(rf, "_on_network_mount", remote)
+    rf._link_or_copy(src, tmp_path / "copied.parquet")  # pyright: ignore[reportPrivateUsage]
+    assert os.stat(tmp_path / "copied.parquet").st_ino != os.stat(src).st_ino
+    assert (tmp_path / "copied.parquet").read_bytes() == src.read_bytes()

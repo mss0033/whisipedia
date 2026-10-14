@@ -494,14 +494,29 @@ def set_members(gen_dir: Path) -> tuple[str, ...] | None:
 
 
 def _link_or_copy(src: Path, dst: Path) -> None:
-    try:
-        os.link(src, dst)
-    except OSError:
-        import shutil
+    """Hard-link ``src`` as ``dst`` on a local disk; copy it on a network mount (or where linking fails).
 
-        partial = dst.with_name(dst.name + ".partial")
-        shutil.copyfile(src, partial)
-        _atomic_replace(partial, dst)
+    On the NAS (SMB) a file with several names cannot be opened by one name while it is open by
+    another: the API held a set's part open and every page whose history read an older set's name for
+    the same file failed with EINVAL (2026-10-14). Copies cost a few hundred MB for today's sets."""
+    if not _on_network_mount(dst.parent):
+        try:
+            os.link(src, dst)
+            return
+        except OSError:
+            pass
+    import shutil
+
+    partial = dst.with_name(dst.name + ".partial")
+    shutil.copyfile(src, partial)
+    _atomic_replace(partial, dst)
+
+
+def _on_network_mount(path: Path) -> bool:
+    from wsp_index.localfs import REMOTE_FS_TYPES, filesystem_type
+
+    fstype = filesystem_type(path)
+    return fstype is not None and fstype.lower() in REMOTE_FS_TYPES
 
 
 def compose_set(root: Path, source_id: str, members: Sequence[Path]) -> str:
