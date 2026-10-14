@@ -508,8 +508,17 @@ export interface MediaContext {
   address: string;
 }
 
+/**
+ * A PDF in a maps source is a map sheet when it has almost no text of its own: a scanned USGS sheet
+ * carries only the library's catalog line (about 180 characters), while the NOAA Coast Pilots in the
+ * same kind of source run to two million (measured 2026-10-14). Sheets show as a picture; anything
+ * with more text than this opens in the viewer like every other PDF.
+ */
+export const MAP_SHEET_MAX_TEXT = 2000;
+
 export function originalPanel(
-  doc: Pick<DocumentResponse, 'original' | 'title' | 'kind'>,
+  doc: Pick<DocumentResponse, 'original' | 'title' | 'kind'> &
+    Partial<Pick<DocumentResponse, 'text'>>,
   urlOf: (path: string) => string = (path) => path,
   media?: MediaContext,
 ): HTMLElement | null {
@@ -531,7 +540,9 @@ export function originalPanel(
     h('a', { href: url, download: o.name }, 'Download'),
   );
   // A map is a picture: show the rendered sheet (it opens the full file); other PDFs read in the viewer.
-  const picture = o.preview_url && (doc.kind === 'maps' || o.media_type !== 'application/pdf');
+  const pdf = o.media_type === 'application/pdf';
+  const sheet = doc.kind === 'maps' && (doc.text ?? '').length <= MAP_SHEET_MAX_TEXT;
+  const picture = o.preview_url && (!pdf || sheet);
   let view: HTMLElement | null = null;
   if (picture && o.preview_url) {
     view = h(

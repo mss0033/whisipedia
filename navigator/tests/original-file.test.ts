@@ -78,6 +78,40 @@ describe('original file panel', () => {
     expect(el.querySelector('iframe')).toBeNull();
     expect(el.querySelector('img')!.getAttribute('src')).toBe('/v1/files/m/preview');
   });
+
+  it('opens a long PDF from a maps source in the viewer (a Coast Pilot is a book)', () => {
+    const el = originalPanel({
+      title: 'Coast Pilot 8',
+      kind: 'maps',
+      text: 'Chapter 1. General information. '.repeat(200),
+      original: {
+        url: '/v1/files/cp8',
+        name: 'COAST-PILOT-8.pdf',
+        media_type: 'application/pdf',
+        inline: true,
+        preview_url: '/v1/files/cp8/preview',
+      },
+    })!;
+    expect(el.querySelector('iframe')?.getAttribute('src')).toBe('/v1/files/cp8');
+    expect(el.querySelector('img')).toBeNull();
+  });
+
+  it('still shows a sheet whose only text is its catalog line', () => {
+    const el = originalPanel({
+      title: 'HI Puako 1928',
+      kind: 'maps',
+      text: 'HI Puako 349899 1928 62500 geo. US Geological Survey, scale 1:62,500.',
+      original: {
+        url: '/v1/files/p',
+        name: 'HI_Puako.pdf',
+        media_type: 'application/pdf',
+        inline: true,
+        preview_url: '/v1/files/p/preview',
+      },
+    })!;
+    expect(el.querySelector('iframe')).toBeNull();
+    expect(el.querySelector('img')!.getAttribute('src')).toBe('/v1/files/p/preview');
+  });
 });
 
 describe('links of a text document (audit 2026-10-12 F6)', () => {
