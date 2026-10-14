@@ -150,6 +150,17 @@ class GenerationPage(_Wire):
 # --- Documents ---------------------------------------------------------------------------------
 
 
+class OtherCopy(_Wire):
+    """Another copy of the same work in the library, and why a reader might prefer it."""
+
+    doc_id: str
+    source_id: str
+    address: str
+    why: str = Field(
+        description='e.g. "the illustrated edition", "the complete text as rendered by Wikisource".'
+    )
+
+
 class DocumentLink(_Wire):
     href: str = Field(description="The link as recorded by the Refinery (a doc id or a native URL).")
     target: str | None = Field(description="Local doc id it resolves to, or null if not in the library.")
@@ -231,6 +242,11 @@ class Document(_Wire):
         default=None,
         description="Reader warning to show above the document, e.g. 'Historical document — methods may be "
         "outdated or unsafe.' (PLAN D13). Absent when there is nothing to warn about.",
+    )
+    copies: list[OtherCopy] = Field(
+        default_factory=list[OtherCopy],
+        description="Other copies of the same work (registry access.copies): an illustrated edition, a "
+        "complete rendering of a page whose text here is partial.",
     )
     rendition: Rendition | None = Field(
         default=None,

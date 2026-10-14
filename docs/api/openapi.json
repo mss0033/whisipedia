@@ -2594,6 +2594,14 @@
             "title": "Banner",
             "description": "Reader warning to show above the document, e.g. 'Historical document — methods may be outdated or unsafe.' (PLAN D13). Absent when there is nothing to warn about."
           },
+          "copies": {
+            "items": {
+              "$ref": "#/components/schemas/OtherCopy"
+            },
+            "type": "array",
+            "title": "Copies",
+            "description": "Other copies of the same work (registry access.copies): an illustrated edition, a complete rendering of a page whose text here is partial."
+          },
           "rendition": {
             "anyOf": [
               {
@@ -2643,6 +2651,7 @@
           "has_history",
           "currency",
           "banner",
+          "copies",
           "rendition",
           "original"
         ],
@@ -3702,6 +3711,36 @@
         ],
         "title": "OriginalFile",
         "description": "The stored file a collection document was refined from (a PDF, a scanned map, an archive)."
+      },
+      "OtherCopy": {
+        "properties": {
+          "doc_id": {
+            "type": "string",
+            "title": "Doc Id"
+          },
+          "source_id": {
+            "type": "string",
+            "title": "Source Id"
+          },
+          "address": {
+            "type": "string",
+            "title": "Address"
+          },
+          "why": {
+            "type": "string",
+            "title": "Why",
+            "description": "e.g. \"the illustrated edition\", \"the complete text as rendered by Wikisource\"."
+          }
+        },
+        "type": "object",
+        "required": [
+          "doc_id",
+          "source_id",
+          "address",
+          "why"
+        ],
+        "title": "OtherCopy",
+        "description": "Another copy of the same work in the library, and why a reader might prefer it."
       },
       "ParityStatus": {
         "properties": {

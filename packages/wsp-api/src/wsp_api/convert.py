@@ -23,6 +23,7 @@ from wsp_api.schemas import (
     GenerationInfo,
     Hit,
     LedgerEntry,
+    OtherCopy,
     Rendition,
     SourceHealth,
     SourceInfo,
@@ -104,10 +105,12 @@ def document(
     rendition: Rendition | None = None,
     has_history: bool = False,
     include_text: bool = True,
+    copies: Sequence[OtherCopy] = (),
 ) -> Document:
     """``include_text``: send ``text`` even when there is HTML (always sent when there is none)."""
     return Document(
         doc_id=doc.doc_id,
+        copies=list(copies),
         source_id=doc.source_id,
         native_id=doc.native_id,
         title=doc.title,

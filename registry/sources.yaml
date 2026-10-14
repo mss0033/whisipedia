@@ -77,7 +77,7 @@ sources:
     status: active
     license: CC-BY-SA-4.0
     legal_basis: open-license
-    access: {adapter: wikimedia-dumps}
+    access: {adapter: wikimedia-dumps, copies: [{source: kiwix-wiktionary-en-all, match: native, why: "the full entry as rendered by Wiktionary"}]}
     update: {strategy: snapshot-retention}
     size: {bytes: 1.6e9, measured: true, as_of: 2026-10-09}
 
@@ -89,7 +89,7 @@ sources:
     status: active
     license: CC-BY-SA-4.0
     legal_basis: open-license
-    access: {adapter: wikimedia-dumps}
+    access: {adapter: wikimedia-dumps, copies: [{source: kiwix-wikisource-en-all, match: native, why: "the complete text as rendered by Wikisource"}]}
     update: {strategy: snapshot-retention}
     size: {bytes: 3.4e9, measured: true, as_of: 2026-10-09}
 
@@ -101,7 +101,7 @@ sources:
     status: active
     license: LicenseRef-PD-US+PG-terms
     legal_basis: public-domain
-    access: {adapter: gutenberg, catalog: "https://www.gutenberg.org/cache/epub/feeds/", reading_copy: gutenberg-zim}
+    access: {adapter: gutenberg, catalog: "https://www.gutenberg.org/cache/epub/feeds/", reading_copy: gutenberg-zim, copies: [{source: gutenberg-zim, match: link, why: "the illustrated edition"}]}
     update: {strategy: mirror}
     size: {txt_zip_bytes: 11e9, full_mirror_bytes: 1.0e12, measured: false, as_of: 2026-10-09}
 
@@ -1706,6 +1706,7 @@ sources:
     access:
       adapter: kiwix-opds
       selector: {name: wikipedia_en-simple_all, flavour: maxi}
+      copies: [{source: wikipedia-top10, match: native, prefix: "en/", why: "the full English Wikipedia article"}]
     update: {strategy: snapshot-retention}
     size: {bytes: 3121061888, measured: true, as_of: '2026-10-11'}
     retention:

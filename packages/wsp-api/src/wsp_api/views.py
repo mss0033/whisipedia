@@ -3,6 +3,7 @@ unwired seams."""
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import threading
 from collections import OrderedDict
@@ -283,6 +284,46 @@ class Library:
 
     def change(self, rec: ChangeRecord) -> Change:
         return convert.change(rec, title=self.title(rec.doc_id))
+
+    def copies(self, doc: DocRecord, spec: SourceSpec | None) -> list[schemas.OtherCopy]:
+        """Other copies of ``doc`` the library holds (registry ``access.copies``): matched by the same
+        native id in another source (``prefix`` put in front), or by a link of ``doc`` into that source.
+
+        The text copies of Gutenberg books carry no pictures while the ZIM edition does, and a
+        Wikisource page from the dumps can be an empty transclusion whose ZIM rendering is complete;
+        search returns the first and nothing pointed at the second (2026-10-14 field exam).
+        """
+        access = spec.raw.get("access") if spec is not None else None
+        rules = cast(Mapping[str, object], access).get("copies") if isinstance(access, Mapping) else None
+        if not isinstance(rules, list):
+            return []
+        out: list[schemas.OtherCopy] = []
+        targets: list[str] | None = None
+        for raw in cast(list[object], rules):
+            if not isinstance(raw, Mapping):
+                continue
+            rule = cast(Mapping[str, object], raw)
+            source, why = str(rule.get("source", "")), str(rule.get("why", "another copy"))
+            if not source or self.s.source(source) is None:
+                continue
+            found: str | None = None
+            if rule.get("match") == "link":
+                if targets is None:
+                    targets = [link.target for link in self.links(doc) if link.target]
+                found = next((t for t in targets if t.startswith(f"wsp:{source}/")), None)
+            else:
+                candidate = f"wsp:{source}/{rule.get('prefix') or ''}{doc.native_id}"
+                with contextlib.suppress(Exception):
+                    if self.exists(DocId(candidate)):
+                        found = candidate
+            if found:
+                native = found.removeprefix("wsp:").split("/", 1)[1]
+                out.append(
+                    schemas.OtherCopy(
+                        doc_id=found, source_id=source, address=address_of(source, native), why=why
+                    )
+                )
+        return out
 
     def links(self, doc: DocRecord) -> list[DocumentLink]:
         """Outbound links, each resolved to a local document when the library holds it: in the store,

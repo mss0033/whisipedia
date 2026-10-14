@@ -168,6 +168,8 @@ export interface Document {
   currency: string | null;
   /** Reader warning to show above the document, e.g. 'Historical document — methods may be outdated or unsafe.' (PLAN D13). Absent when there is nothing to warn about. */
   banner: string | null;
+  /** Other copies of the same work (registry access.copies): an illustrated edition, a complete rendering of a page whose text here is partial. */
+  copies: Array<OtherCopy>;
   /** Set when `html` is another source's page for this title; `vault` then describes that page's file. */
   rendition: Rendition | null;
   /** The stored original file, for documents refined from one (PDFs, maps). */
@@ -390,6 +392,15 @@ export interface OriginalFile {
   inline: boolean;
   /** A JPEG of an image or map scan (`/v1/files/{doc_id}/preview`). */
   preview_url: string | null;
+}
+
+/** Another copy of the same work in the library, and why a reader might prefer it. */
+export interface OtherCopy {
+  doc_id: string;
+  source_id: string;
+  address: string;
+  /** e.g. "the illustrated edition", "the complete text as rendered by Wikisource". */
+  why: string;
 }
 
 export interface ParityStatus {

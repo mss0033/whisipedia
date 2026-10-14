@@ -370,6 +370,35 @@ function rewritePage(html: string, source: string): string {
   return changed ? parsed.body.innerHTML : html;
 }
 
+/** Below this many characters a page's own text is a stub: its other copy is the place to read it. */
+export const STUB_TEXT_CHARS = 1500;
+
+/**
+ * Other copies of the same work (the API's `copies`): the illustrated edition of a Gutenberg text, the
+ * complete Wikisource rendering of an empty transclusion. A page with almost no text of its own says
+ * so first (2026-10-14 field exam: readers landed on the stub and never saw the complete copy).
+ */
+export function copiesNotice(
+  doc: Pick<DocumentResponse, 'copies' | 'text' | 'html'>,
+  names: ReadonlyMap<string, string>,
+): HTMLElement | null {
+  const copies = doc.copies ?? [];
+  if (copies.length === 0) return null;
+  const stub = !doc.html && (doc.text ?? '').trim().length < STUB_TEXT_CHARS;
+  const items = copies.map((c, i) => [
+    i ? ' · ' : null,
+    wspLink(c.address, h('b', null, names.get(c.source_id) ?? c.source_id)),
+    ` (${c.why})`,
+  ]);
+  return h(
+    'div',
+    { class: 'notice copies-notice', role: 'note' },
+    stub ? 'This page has little text here. Read it in ' : 'Also in the library: ',
+    ...items,
+    '.',
+  );
+}
+
 /** A question pool reads better as a drill: offer the Exam Practice Hall. */
 export function practiceNotice(
   doc: Pick<DocumentResponse, 'source_id' | 'native_id' | 'title'>,
@@ -882,6 +911,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
       lookup: (q) => lookupBooks(ctx, q),
     }),
     practiceNotice(doc),
+    copiesNotice(doc, new Map(sources.map((s) => [s.id, s.name]))),
     doc.format === 'html' && doc.html && looksLikeComic(doc.html) && !route.at
       ? comicBar(doc.source_id, doc.native_id, (a) => ctx.app.navigate(a))
       : null,
