@@ -509,3 +509,28 @@ def test_a_suggest_rebuild_is_due_only_for_a_stale_or_old_trie(tmp_path: Path) -
         idx.commit()
         assert not idx.suggest_rebuild_due()
         assert idx.suggest("Cam", limit=1) == ["Camel 0"]
+
+
+def test_a_trie_left_dirty_by_another_process_is_aged_not_rebuilt(tmp_path: Path) -> None:
+    """Release steps are separate processes: a small overlay one step leaves behind (persisted as
+    the dirty flag) must not make the next step's check say "due" on a fresh trie."""
+    from dataclasses import replace as replace_cfg
+
+    cfg = replace_cfg(
+        SMALL, suggest_rebuild_threshold=3, suggest_rebuild_seconds=3600, suggest_open_rebuild_titles=0
+    )
+    with TantivyIndex(tmp_path / "ix", cfg) as idx:
+        idx.upsert([doc("s", "a", "Aardvark", "x")])
+        idx.rebuild_suggest()
+        idx.upsert([doc("s", "b", "Bison", "y")])
+        idx.commit()
+        assert not idx.suggest_rebuild_due()
+    with TantivyIndex(tmp_path / "ix", cfg) as idx:  # the next step
+        assert not idx.suggest_rebuild_due()
+        assert idx.suggest_rebuild_due(now=time.time() + 3601)  # still dirty: due once old
+        idx.upsert([doc("s", "c", "Camel", "z")])
+        idx.commit()
+        assert not idx.suggest_rebuild_due()
+        assert idx.suggest("Cam") == ["Camel"]
+        idx.rebuild_suggest()
+        assert idx.suggest("Bis") == ["Bison"]  # the earlier process's title joins at the rebuild

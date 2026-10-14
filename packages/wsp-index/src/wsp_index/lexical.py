@@ -302,7 +302,10 @@ class TantivyIndex:
         elif TitleTrie.exists(self._suggest_dir):
             self._suggester.replace_base(TitleTrie.open(self._suggest_dir))
             self._trie_stamp = self._trie_file_stamp()
-            self._suggest_stale = dirty
+            # Dirty at open (an earlier process's overlay, persisted only as the flag) is not stale:
+            # this process keeps its own overlay, and suggest_rebuild_due() ages the flag. Treating it
+            # as stale made every release step after a small one rebuild the whole trie (review
+            # 2026-10-14 #1a).
         else:
             self._suggest_stale = True
 

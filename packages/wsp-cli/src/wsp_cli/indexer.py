@@ -143,6 +143,19 @@ def _alias_title(native_id: str, target: str = "") -> str:
     return title.replace("_", " ").strip()
 
 
+def _has_rows(table: Path) -> bool:
+    """Whether a generation's ``redirects.sqlite`` holds any redirect. :meth:`Indexer.refine` creates
+    the table for every generation, so its mere existence marked the trie stale on every release
+    (review 2026-10-14 #1b). Unreadable: assumed to hold some."""
+    if not table.is_file():
+        return False
+    try:
+        with closing(sqlite3.connect(f"file:{table}?mode=ro", uri=True)) as db:
+            return db.execute("SELECT 1 FROM redirects LIMIT 1").fetchone() is not None
+    except sqlite3.Error:
+        return True
+
+
 class Indexer:
     """Owns the local index stores for one run (``close()`` when done)."""
 
@@ -209,18 +222,18 @@ class Indexer:
                 self._feed.close()
 
     def finish(self) -> None:
-        """After a run that changed the index: rebuild the suggest trie once (bulk commits defer it),
-        when a rebuild is due (:meth:`TantivyIndex.suggest_rebuild_due`); a small overlay on a fresh
-        trie waits for the nightly build."""
-        if self._changed:
-            if self.index.suggest_rebuild_due():
-                started = self.clock()
-                self.index.rebuild_suggest()
-                self._say(f"suggest: rebuilt in {self.clock() - started:.1f}s; {memory_line()}")
-            else:
-                self.index.commit()
-                self._say("suggest: rebuild not due (fresh trie, small overlay); left for the nightly build")
-            self._changed = False
+        """Rebuild the suggest trie once (bulk commits defer it) when a rebuild is due
+        (:meth:`TantivyIndex.suggest_rebuild_due`); a small overlay on a fresh trie waits for a later
+        run. Checked even when this run changed nothing, so a nightly build that finds everything
+        indexed still folds a dirty trie once it is old (review 2026-10-14 #1c)."""
+        if self.index.suggest_rebuild_due():
+            started = self.clock()
+            self.index.rebuild_suggest()
+            self._say(f"suggest: rebuilt in {self.clock() - started:.1f}s; {memory_line()}")
+        elif self._changed:
+            self.index.commit()
+            self._say("suggest: rebuild not due (fresh trie, small overlay); left for a later run")
+        self._changed = False
 
     # --- helpers -------------------------------------------------------------------------------
 
@@ -350,7 +363,7 @@ class Indexer:
             self._say(f"  {spec.id}/{generation_id}: id map written")
         _write_durably(self.refinery / spec.id / CURRENT_FILE, generation_id + "\n")
         stats = refresh(self.index, self.feed, old, new, progress=self._say)
-        if any(p.is_file() for p in self._redirect_tables(spec.id, (generation_id, *alias_generations))):
+        if any(_has_rows(p) for p in self._redirect_tables(spec.id, (generation_id, *alias_generations))):
             self.index.mark_suggest_stale()  # its redirects join the trie at the rebuild in finish()
         self.index.commit(rebuild_suggest=False)
         self._changed = True
