@@ -339,6 +339,35 @@ def _index_writer_waiting(
         yield
 
 
+MERGE_TOOL = (
+    Path(__file__).resolve().parents[4] / "tools" / "tantivy-merge" / "target" / "release" / "tantivy-merge"
+)
+
+
+def cmd_index_merge(args: argparse.Namespace, out: TextIO) -> int:
+    """Merge the search index's segments into fewer (``tools/tantivy-merge``), holding the index-writer
+    locks so no refine, release index step or nightly build writes meanwhile. Searches go on: readers
+    switch to the merged segments when ``meta.json`` changes."""
+    import subprocess
+
+    tool = Path(args.tool) if args.tool else MERGE_TOOL
+    if not tool.is_file():
+        out.write(f"error: {tool} is not built; run: cd tools/tantivy-merge && cargo build --release\n")
+        return 2
+    _, cfg, _ = _context(args)
+    directory = bootstrap.paths(cfg).lexical / "tantivy"
+    argv = [str(tool), str(directory), "--target-docs", str(args.target_docs)]
+    if args.dry_run:
+        return subprocess.run([*argv, "--dry-run"], check=False).returncode  # noqa: S603 - our own tool
+    try:
+        with _index_writer_waiting(cfg, out, limit=args.wait_hours * 3600.0):
+            out.write(f"merging {directory}\n")
+            out.flush()
+            return subprocess.run(argv, check=False).returncode  # noqa: S603 - our own tool
+    except LockHeldError as exc:
+        return _busy(exc)
+
+
 def cmd_index_rebuild_lexical(args: argparse.Namespace, out: TextIO) -> int:
     """Build a fresh search index in ``--into`` from the indexed generations (``wsp_cli.relex``)."""
     from wsp_cli.relex import Relexer, relex

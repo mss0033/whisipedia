@@ -368,6 +368,16 @@ def build_parser(argv: Sequence[str] | None = None) -> argparse.ArgumentParser:
         help="skip the spelling vocabulary (run `wsp index spell` after a batch)",
     )
     s = add(
+        "merge",
+        _ops("cmd_index_merge"),
+        "Merge the search index's segments into fewer, larger ones (fewer per-query lookups).",
+        ix_sub,
+    )
+    s.add_argument("--target-docs", type=int, default=35_000_000, help="documents per merged segment")
+    s.add_argument("--dry-run", action="store_true", help="print the plan only")
+    s.add_argument("--wait-hours", type=float, default=2.0, help="how long to wait for the index lock")
+    s.add_argument("--tool", default=None, help="the tantivy-merge binary (default: tools/tantivy-merge)")
+    s = add(
         "rank",
         _ops("cmd_index_rank"),
         "Recompute the link-analysis static rank (PageRank), suggest priors and featured articles.",

@@ -1,0 +1,13 @@
+[package]
+name = "tantivy-merge"
+version = "0.1.0"
+edition = "2021"
+description = "Merge the segments of Whisipedia's Tantivy index into fewer, larger ones (`wsp index merge`)."
+publish = false
+
+[dependencies]
+# Must read and write the same index format as the Python binding (tantivy-py 0.26.2).
+tantivy = "=0.26.2"
+
+[profile.release]
+opt-level = 3

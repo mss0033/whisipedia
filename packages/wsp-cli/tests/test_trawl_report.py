@@ -71,3 +71,17 @@ def test_the_monitor_reads_the_trawler_summary(tmp_path: Path) -> None:
     assert [r.problem for r in t.recent] == ["broken-link: wsp://b/x", "old"]  # newest first
     path.write_text("{torn")
     assert trawler_status(path, NOW) is None
+
+
+def test_index_merge_says_how_to_build_a_missing_tool(tmp_path: Path) -> None:
+    import argparse
+    import io
+
+    from wsp_cli.ops import cmd_index_merge
+
+    out = io.StringIO()
+    args = argparse.Namespace(
+        tool=str(tmp_path / "nope"), config_dir=None, target_docs=10, dry_run=True, wait_hours=0
+    )
+    assert cmd_index_merge(args, out) == 2
+    assert "cargo build --release" in out.getvalue()

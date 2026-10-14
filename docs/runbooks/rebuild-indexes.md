@@ -27,3 +27,18 @@ logs (`gaps.jsonl`, `queries.jsonl`) and the proposals next to it are not derive
    start again (Living's contract).
 5. `wsp doctor`, `wsp search "alan turing"`, open `wsp://home`, then start the services again and
    delete `<index.root>.old`.
+
+## Merging the search index's segments (`wsp index merge`)
+
+Bulk loads leave the Tantivy index in many segments (32 on 2026-10-14); each query walks every
+segment's term dictionary and postings. `wsp index merge` packs them into segments of at most
+`--target-docs` documents (35M by default: 32 became 7) with `tools/tantivy-merge`, a small Rust
+tool on the same Tantivy version as the Python binding (tantivy-py exposes no merge).
+
+- Build once: `cd tools/tantivy-merge && cargo build --release` (its `rust-toolchain.toml` pins
+  Rust 1.90; rustup installs it beside the default toolchain).
+- `wsp index merge --dry-run` prints the plan. Without it, the command waits for the HEAVY and
+  INDEX locks (up to `--wait-hours`), so no refine, release step or nightly build writes meanwhile.
+- Searches keep working: readers switch to the merged segments when `meta.json` changes. The
+  merged segments need free space about the size of what is rewritten until the old files go.
+- Run it in a quiet period: it reads and writes the whole rewritten part of the index (hours).
