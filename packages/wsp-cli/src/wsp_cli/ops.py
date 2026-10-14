@@ -593,6 +593,13 @@ def cmd_owner(args: argparse.Namespace, out: TextIO) -> int:
             elif action == "retry":
                 orch.retry_release(args.source, version, note=args.note or "")
                 out.write(f"{args.source}/{version}: queued for a fresh attempt\n")
+                if orch.store.source_health(args.source).paused:
+                    # A paused source runs no release step: the retry waits until it is resumed
+                    # (2026-10-14: a retried quarantine sat behind its own integrity pause).
+                    out.write(
+                        f"note: {args.source} is paused, so the attempt waits; run "
+                        f"`wsp resume {args.source}` to let it go\n"
+                    )
             else:
                 orch.reject_release(args.source, version, reason=args.note or "rejected by owner")
                 out.write(f"{args.source}/{version}: rejected (quarantined)\n")
