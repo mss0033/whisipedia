@@ -364,7 +364,9 @@ class Indexer:
         _write_durably(self.refinery / spec.id / CURRENT_FILE, generation_id + "\n")
         stats = refresh(self.index, self.feed, old, new, progress=self._say)
         if any(_has_rows(p) for p in self._redirect_tables(spec.id, (generation_id, *alias_generations))):
-            self.index.mark_suggest_stale()  # its redirects join the trie at the rebuild in finish()
+            # Its redirects join the trie at the next due rebuild (within a day), not at once: a full
+            # scan per Kiwix release (they all carry redirects) took 1.5 h each (review 2026-10-14).
+            self.index.mark_suggest_dirty()
         self.index.commit(rebuild_suggest=False)
         self._changed = True
         state[spec.id] = generation_id

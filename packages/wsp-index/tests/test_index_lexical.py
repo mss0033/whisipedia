@@ -553,3 +553,18 @@ def test_a_new_process_folds_a_trie_that_is_only_flagged_dirty(tmp_path: Path) -
         idx.rebuild_suggest()
         assert not idx.suggest_rebuild_due(now=time.time() + 3601)
         assert idx.suggest("Bis") == ["Bison"]
+
+
+def test_new_aliases_mark_the_trie_dirty_not_stale(tmp_path: Path) -> None:
+    """A release with redirects waits for the aged rebuild instead of forcing one."""
+    from dataclasses import replace as replace_cfg
+
+    cfg = replace_cfg(
+        SMALL, suggest_rebuild_threshold=3, suggest_rebuild_seconds=3600, suggest_open_rebuild_titles=0
+    )
+    with TantivyIndex(tmp_path / "ix", cfg) as idx:
+        idx.upsert([doc("s", "a", "Aardvark", "x")])
+        idx.rebuild_suggest()
+        idx.mark_suggest_dirty()
+        assert not idx.suggest_rebuild_due()
+        assert idx.suggest_rebuild_due(now=time.time() + 3601)

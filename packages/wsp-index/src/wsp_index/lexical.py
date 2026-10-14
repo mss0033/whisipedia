@@ -464,6 +464,14 @@ class TantivyIndex:
             self._after_write(len(ids))
         return len(ids)
 
+    def mark_suggest_dirty(self) -> None:
+        """Note that the trie misses something the overlay cannot hold (new redirect aliases) without
+        forcing a rebuild: :meth:`suggest_rebuild_due` ages it, so it is folded within
+        ``suggest_rebuild_seconds`` by a later run instead of by every release step."""
+        with self._lock:
+            self._set_meta("suggest_dirty", "1")
+            self._db.commit()
+
     def mark_suggest_stale(self) -> None:
         """Rebuild the whole suggest trie at the next commit (new ranks, new redirect tables)."""
         with self._lock:
