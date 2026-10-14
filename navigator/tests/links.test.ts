@@ -60,7 +60,8 @@ describe('sanitizeDocumentHtml', () => {
     <font color="red"><b>kept</b></font>
     <h2 id="Legacy">Legacy</h2>
     <img src="https://evil.example/x.png" alt="Portrait" onerror="x()">
-    <img src="/v1/documents/wsp%3Ax/assets/a.png" alt="ok" width="10" height="abc">
+    <img src="/v1/assets/x/2026-01/a.png" alt="ok" width="10" height="abc">
+    <img src="/v1/search?q=a" alt="busy">
     <table><tr><td colspan="2" style="x">cell</td></tr></table>`;
   const { fragment, stats } = sanitizeDocumentHtml(html, ctx);
   const div = document.createElement('div');
@@ -94,7 +95,11 @@ describe('sanitizeDocumentHtml', () => {
     expect(div.querySelector('.broken-image')?.textContent).toBe('[IMAGE: Portrait]');
     const imgs = div.querySelectorAll('img');
     expect(imgs).toHaveLength(1);
-    expect(imgs[0]?.getAttribute('src')).toBe('/v1/documents/wsp%3Ax/assets/a.png');
+    expect(imgs[0]?.getAttribute('src')).toBe('/v1/assets/x/2026-01/a.png');
+    // Another API route as an image source would run that route per viewer: replaced.
+    expect([...div.querySelectorAll('.broken-image')].map((s) => s.textContent)).toContain(
+      '[IMAGE: busy]',
+    );
     expect(imgs[0]?.getAttribute('height')).toBeNull();
     expect(div.querySelector('td')?.getAttribute('colspan')).toBe('2');
   });

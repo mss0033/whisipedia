@@ -16,7 +16,12 @@ export interface ReaderContext {
   /** Chapter asked for: a number, 'all', or undefined (resume, else the first). */
   chapter: number | 'all' | undefined;
   address: string;
+  /** Aborted when the page is left: ends the scroll tracking. */
+  signal?: AbortSignal;
 }
+
+/** Id of the paragraph to resume at; the page result scrolls to it once the page is in place. */
+export const RESUME_ID = 'reader-resume';
 
 const SAVE_EVERY_MS = 1500;
 
@@ -75,11 +80,10 @@ export function renderBook(doc: DocumentResponse, text: string, ctx: ReaderConte
       chapters: chapters.length,
     });
   remember(saved && saved.chapter === open && ctx.chapter === undefined ? saved.paragraph : 0);
-  trackScroll(body, remember);
+  trackScroll(body, remember, open === chapters.length - 1, ctx.signal);
   if (saved && saved.chapter === open && ctx.chapter === undefined && saved.paragraph > 0) {
-    queueMicrotask(() =>
-      body.querySelector(`[data-paragraph="${saved.paragraph}"]`)?.scrollIntoView(),
-    );
+    // The body is not in the document yet: the page result scrolls to this id (pages/document.ts).
+    body.querySelector(`[data-paragraph="${saved.paragraph}"]`)?.setAttribute('id', RESUME_ID);
   }
   return wrap;
 }
@@ -141,16 +145,33 @@ function navigation(
   );
 }
 
-/** Remember the first paragraph on screen as the viewer scrolls, a little after they stop. */
-function trackScroll(body: HTMLElement, remember: (paragraph: number) => void): void {
+/**
+ * Remember the first paragraph on screen as the viewer scrolls, a little after they stop; at the
+ * end of the last chapter, remember the book as finished (paragraph -1, `core/book.ts`).
+ *
+ * The page scrolls inside `main.viewport`, not the window, and an element's scroll event does not
+ * bubble: the listener captures on the document. It ends with the page (`signal`) or, without one,
+ * at the first scroll after the chapter left the document.
+ */
+export function trackScroll(
+  body: HTMLElement,
+  remember: (paragraph: number) => void,
+  lastChapter: boolean,
+  signal?: AbortSignal,
+): void {
   let timer: ReturnType<typeof setTimeout> | null = null;
+  const stop = () => {
+    document.removeEventListener('scroll', onScroll, { capture: true });
+    if (timer) clearTimeout(timer);
+  };
   const onScroll = () => {
     if (!body.isConnected) {
-      window.removeEventListener('scroll', onScroll);
+      stop();
       return;
     }
     if (timer) clearTimeout(timer);
     timer = setTimeout(() => {
+      if (!body.isConnected) return;
       const ps = body.querySelectorAll<HTMLElement>('[data-paragraph]');
       let first = 0;
       for (const p of ps) {
@@ -159,8 +180,13 @@ function trackScroll(body: HTMLElement, remember: (paragraph: number) => void): 
           break;
         }
       }
-      remember(first);
+      const last = ps[ps.length - 1];
+      const atEnd =
+        lastChapter && !!last && last.getBoundingClientRect().bottom <= window.innerHeight;
+      remember(atEnd ? -1 : first);
     }, SAVE_EVERY_MS);
   };
-  window.addEventListener('scroll', onScroll, { passive: true });
+  if (signal?.aborted) return;
+  document.addEventListener('scroll', onScroll, { capture: true, passive: true });
+  signal?.addEventListener('abort', stop, { once: true });
 }

@@ -67,6 +67,7 @@ describe('thread view', () => {
       (b) => b.textContent,
     );
     expect(badges).toEqual(['▲ 37', '▲ 212', '▲ 40', '▲ 5']);
+    expect(body.querySelectorAll('hr').length).toBeGreaterThanOrEqual(3); // one before each answer
     const tags = [...body.querySelectorAll<HTMLAnchorElement>('a[title^="Search "]')].map(
       (a) => a.dataset.wsp,
     );

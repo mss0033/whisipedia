@@ -32,7 +32,7 @@ import {
 import { audioDeck, videoPlayer } from '../ui/player.ts';
 import { parseCase, renderCase } from './legal.ts';
 import { POOL_SOURCE } from './practice.ts';
-import { isBook, type ReaderContext, renderBook } from './reader.ts';
+import { isBook, RESUME_ID, type ReaderContext, renderBook } from './reader.ts';
 import { isThread, threadView } from './threads.ts';
 import type { AppServices, PageContext, PageResult } from './types.ts';
 
@@ -774,7 +774,12 @@ export async function render(ctx: PageContext): Promise<PageResult> {
     const current = await loadDoc(ctx, route.docId, undefined, true);
     content = renderDiff(doc, current);
   } else {
-    const r = renderBody(doc, { app: ctx.app, chapter: route.chapter, address: here });
+    const r = renderBody(doc, {
+      app: ctx.app,
+      chapter: route.chapter,
+      address: here,
+      signal: ctx.signal,
+    });
     content = r.node;
     broken = r.broken;
   }
@@ -817,6 +822,10 @@ export async function render(ctx: PageContext): Promise<PageResult> {
   return {
     title: route.at ? `${doc.title} (as of ${asOfText(doc)})` : doc.title,
     body,
-    scrollTo: route.fragment ? `doc-${route.fragment}` : undefined,
+    scrollTo: route.fragment
+      ? `doc-${route.fragment}`
+      : body.querySelector(`#${RESUME_ID}`)
+        ? RESUME_ID
+        : undefined,
   };
 }

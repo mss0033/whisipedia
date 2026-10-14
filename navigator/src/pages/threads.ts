@@ -65,7 +65,9 @@ export function threadView(root: ParentNode, source: string): ThreadStats {
   for (const a of answers) {
     if (accepted(a)) badge(a, '✓ accepted', 'thread-accepted');
     badge(a, `▲ ${score(a)}`, 'thread-score');
-    block?.append(a); // in the new order, after the answers header
+    // In the new order, after the answers header; a rule between answers (it survives the
+    // sanitiser, where a class would not).
+    block?.append(h('hr', null), a);
   }
   let tags = 0;
   for (const tag of root.querySelectorAll<HTMLAnchorElement>('a.post-tag, a[rel="tag"]')) {

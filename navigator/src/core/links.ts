@@ -202,8 +202,13 @@ const TAG_ATTRS: Record<string, Set<string>> = {
 };
 
 /** Only same-origin API assets may load (CSP would block anything else anyway). */
+/**
+ * Images come only from the library's asset and file routes. Any other `/v1/` path would let an
+ * upstream page make every viewer's browser run a search or a random pick per image (review
+ * 2026-10-14 #9).
+ */
 export function isAllowedImageSrc(src: string): boolean {
-  return /^\/v1\/[^\s]*$/.test(src) && !src.startsWith('//');
+  return /^\/v1\/(assets|files)\/[^\s]*$/.test(src);
 }
 
 export interface SanitizeStats {

@@ -35,7 +35,8 @@ import type { AppServices, PageContext, PageResult } from './types.ts';
 export const POOL_SOURCE = 'ncvec-question-pools';
 type PracticeRoute = Extract<Route, { page: 'practice' }>;
 
-const parsed = new Map<string, { title: string; pool: Pool }>();
+/** Parsed pools by doc id: a pool is fetched once, not at every question (review 2026-10-14 #5). */
+const parsed = new Map<string, { title: string; pool: Pool; address: string }>();
 /** Answers given in the exam of a seed, so moving between its questions keeps them. */
 const exams = new Map<string, Map<string, Letter>>();
 
@@ -54,14 +55,17 @@ function saveProgress(app: AppServices, docId: string, p: Progress): void {
 async function loadPool(
   ctx: PageContext,
   docId: string,
-): Promise<{ title: string; pool: Pool; doc: DocumentResponse }> {
-  const doc = await ctx.app.api.document(docId, { text: true }, ctx.signal);
-  let hit = parsed.get(docId);
-  if (!hit) {
-    hit = { title: doc.title, pool: parsePool(doc.text ?? '', doc.title) };
-    parsed.set(docId, hit);
-  }
-  return { ...hit, doc };
+): Promise<{ title: string; pool: Pool; address: string }> {
+  const hit = parsed.get(docId);
+  if (hit && !ctx.opts.reload) return hit;
+  const doc: DocumentResponse = await ctx.app.api.document(docId, { text: true }, ctx.signal);
+  const fresh = {
+    title: doc.title,
+    pool: parsePool(doc.text ?? '', doc.title),
+    address: doc.address,
+  };
+  parsed.set(docId, fresh);
+  return fresh;
 }
 
 export async function render(ctx: PageContext): Promise<PageResult> {
@@ -87,7 +91,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
     }
     throw err;
   }
-  const { title, pool, doc } = loaded;
+  const { title, pool, address } = loaded;
   if (pool.questions.length === 0) {
     return {
       title,
@@ -97,7 +101,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
         heading: 'Not a question pool',
         message: 'This document has no questions in the pool format (id, answer, four choices).',
         address: ctx.address,
-        suggestions: [wspLink(doc.address, 'Read the document instead')],
+        suggestions: [wspLink(address, 'Read the document instead')],
       }),
     };
   }
@@ -106,7 +110,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
       return { redirect: makeAddress('practice', route.pool, { mode: 'exam', seed: newSeed() }) };
     return exam(ctx, route, docId, title, pool);
   }
-  return study(ctx, route, docId, title, pool, doc);
+  return study(ctx, route, docId, title, pool, address);
 }
 
 /* ----------------------------------- the hall ----------------------------------- */
@@ -193,7 +197,7 @@ function study(
   docId: string,
   title: string,
   pool: Pool,
-  doc: DocumentResponse,
+  address: string,
 ): PageResult {
   const progress = loadProgress(ctx.app, docId);
   const group = route.group
@@ -217,7 +221,7 @@ function study(
         h('span', { class: 'btn-like' }, 'Sit a mock exam'),
       ),
       ' · ',
-      wspLink(doc.address, 'Read the pool'),
+      wspLink(address, 'Read the pool'),
       ' · ',
       wspLink(makeAddress('practice'), 'All pools'),
     ),
@@ -228,7 +232,7 @@ function study(
       card(ctx, route, docId, q, index, questions.length, group?.id ?? null, progress),
     ),
   );
-  return { title: shortTitle(title, pool), body };
+  return { title: shortTitle(title, pool), body, focus: firstChoice(body) };
 }
 
 function shortTitle(title: string, pool: Pool): string {
@@ -382,6 +386,7 @@ function card(
     ),
   );
   el.addEventListener('keydown', (ev) => {
+    if (ev.ctrlKey || ev.altKey || ev.metaKey) return; // Ctrl+C, Ctrl+D, Alt+D: the browser's
     const key = ev.key.toUpperCase();
     const n = Number.parseInt(key, 10);
     const letter = (LETTERS as readonly string[]).includes(key)
@@ -392,13 +397,21 @@ function card(
     if (letter && !buttons[0]!.disabled) {
       ev.preventDefault();
       reveal(letter);
-    } else if ((key === 'N' || ev.key === 'Enter') && buttons[0]!.disabled && next) {
+    } else if (
+      (key === 'N' || (ev.key === 'Enter' && !(ev.target instanceof HTMLAnchorElement))) &&
+      buttons[0]!.disabled &&
+      next
+    ) {
       ev.preventDefault();
       next.click();
     }
   });
-  queueMicrotask(() => buttons[0]?.focus());
   return el;
+}
+
+/** The first choice still open on a card: the page result focuses it once the page is shown. */
+function firstChoice(body: HTMLElement): HTMLElement | undefined {
+  return body.querySelector<HTMLElement>('.practice-choice:not(:disabled)') ?? undefined;
 }
 
 /* ----------------------------------- exam ----------------------------------- */
@@ -525,6 +538,7 @@ function exam(
     ),
   );
   el.addEventListener('keydown', (ev) => {
+    if (ev.ctrlKey || ev.altKey || ev.metaKey) return; // Ctrl+C, Ctrl+D, Alt+D: the browser's
     const key = ev.key.toUpperCase();
     const n = Number.parseInt(key, 10);
     const letter = (LETTERS as readonly string[]).includes(key)
@@ -545,6 +559,5 @@ function exam(
     ),
     el,
   );
-  queueMicrotask(() => buttons[0]?.focus());
-  return { title: heading, body };
+  return { title: heading, body, focus: buttons[0] };
 }

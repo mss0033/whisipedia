@@ -87,3 +87,48 @@ describe('book reader', () => {
     );
   });
 });
+
+describe('reader scroll tracking', () => {
+  it('hears scrolls of the viewport element, marks the end of the last chapter, and stops with the page', async () => {
+    const { vi } = await import('vitest');
+    const { trackScroll } = await import('../src/pages/reader.ts');
+    vi.useFakeTimers();
+    try {
+      document.body.innerHTML = '<main class="viewport"><section></section></main>';
+      const main = document.querySelector('main')!;
+      const body = main.querySelector('section')!;
+      const paras = [0, 1, 2].map((i) => {
+        const p = document.createElement('p');
+        p.dataset.paragraph = String(i);
+        body.append(p);
+        return p;
+      });
+      // Paragraph 0 is above the top; paragraphs 1 and 2 are on screen.
+      const tops = [-200, 100, 400];
+      paras.forEach((p, i) => {
+        p.getBoundingClientRect = () => ({ bottom: tops[i]! + 100 }) as DOMRect;
+      });
+      const seen: number[] = [];
+      const ac = new AbortController();
+      trackScroll(body, (n) => seen.push(n), false, ac.signal);
+      main.dispatchEvent(new Event('scroll')); // does not bubble: only a capturing listener hears it
+      vi.advanceTimersByTime(2000);
+      expect(seen).toEqual([1]);
+
+      const seenLast: number[] = [];
+      trackScroll(body, (n) => seenLast.push(n), true, ac.signal);
+      main.dispatchEvent(new Event('scroll'));
+      vi.advanceTimersByTime(2000);
+      expect(seenLast).toEqual([-1]); // the last paragraph's bottom is on screen: finished
+      expect(seen).toEqual([1, 1]); // the first tracker heard that scroll too
+
+      ac.abort();
+      main.dispatchEvent(new Event('scroll'));
+      vi.advanceTimersByTime(2000);
+      expect(seen).toEqual([1, 1]); // the page left: nothing more is remembered
+      expect(seenLast).toEqual([-1]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
