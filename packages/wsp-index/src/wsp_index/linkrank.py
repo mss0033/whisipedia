@@ -309,9 +309,13 @@ def graph_file(workdir: Path, name: str) -> Path:
     return workdir / _GRAPH_FILES[name]
 
 
+_OBSOLETE_FILES = ("ids.keys.src", "ids.nodes.src")
+"""Scratch names of older versions: nothing reads them, and 3 GB of them sat in ``_rank`` (2026-10-12)."""
+
+
 def _clear(workdir: Path) -> None:
-    """Remove every scratch file of a graph (and the ``*.pairs`` buckets of older versions)."""
-    for name in _GRAPH_FILES.values():
+    """Remove every scratch file of a graph (and the leftovers of older versions)."""
+    for name in (*_GRAPH_FILES.values(), *_OBSOLETE_FILES):
         (workdir / name).unlink(missing_ok=True)
     for pattern in ("*.part", "*.pairs"):
         for path in workdir.glob(pattern):

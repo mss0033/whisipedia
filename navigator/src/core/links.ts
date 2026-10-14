@@ -189,6 +189,8 @@ const KEEP = new Set([
 ]);
 
 const GLOBAL_ATTRS = new Set(['id', 'title', 'lang', 'dir']);
+/** The one data attribute kept: rewrites mark what they added (classes are dropped). */
+export const ROLE_ATTR = 'data-wsp-role';
 const TAG_ATTRS: Record<string, Set<string>> = {
   a: new Set(['href']),
   img: new Set(['src', 'alt', 'width', 'height']),
@@ -272,6 +274,11 @@ export function sanitizeDocumentHtml(
       for (const attr of Array.from(el.attributes)) {
         const name = attr.name.toLowerCase();
         if (name === 'href') continue;
+        if (name === ROLE_ATTR) {
+          // A styling hook set by the page rewrites (threads): a short word, never read aloud.
+          if (/^[a-z-]{1,32}$/.test(attr.value)) copy.setAttribute(ROLE_ATTR, attr.value);
+          continue;
+        }
         if (!GLOBAL_ATTRS.has(name) && !allowed?.has(name)) continue;
         if (name === 'id') copy.setAttribute('id', anchorId(attr.value));
         else copy.setAttribute(name, attr.value);

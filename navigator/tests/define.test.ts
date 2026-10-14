@@ -57,7 +57,8 @@ describe('define', () => {
     await settled(() => !!main().querySelector('.page-document'));
     expect(location.hash).toBe('#wsp://wiktionary-en/sesquipedalian');
     expect(main().querySelector('h1')?.textContent).toBe('sesquipedalian');
-    expect(log.filter((l) => l.includes('/v1/documents/'))).toHaveLength(3); // as typed 404, lower case hit, then the page
+    // One miss, then the hit, whose document the entry page reuses instead of fetching again.
+    expect(log.filter((l) => l.includes('/v1/documents/'))).toHaveLength(2);
     app.navigate('wsp://define/nosuchword');
     await settled(() => location.hash.startsWith('#wsp://search'));
     expect(location.hash).toBe('#wsp://search?q=nosuchword&kind=dictionary');

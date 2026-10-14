@@ -134,12 +134,17 @@ def browse_router(lib: Library) -> APIRouter:
 
     # --- Directory ------------------------------------------------------------------------------
 
-    @r.get("/directory", tags=["navigator"], responses=errors(404))
-    def directory(
+    @r.get("/directory", tags=["navigator"], responses=errors(404, 503))
+    async def directory(
         path: Annotated[
             str, Query(max_length=500, description="`''` (Top), `<domain>`, `<domain>/<source>`, …")
         ] = "",
     ) -> DirectoryPage:
+        # A category page looks up to 200 titles in the Refinery (the NAS since ADR-0011): in the
+        # bounded NAS pool like the other NAS routes, not the shared thread pool (review 2026-10-14).
+        return await lib.nas.run(lambda: _directory(path))
+
+    def _directory(path: str) -> DirectoryPage:
         parts = [p for p in path.strip("/").split("/") if p]
         # Only sites a reader can open (Library.readable_sources); a planned source's address still
         # opens a page saying so, and a directory path to it still resolves, for old bookmarks.

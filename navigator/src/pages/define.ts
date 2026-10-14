@@ -8,6 +8,7 @@
 import { ApiRequestError } from '../api/client.ts';
 import { docIdToAddress, searchAddress } from '../core/address.ts';
 import type { Route } from '../core/router.ts';
+import { rememberDocument } from './document.ts';
 import type { PageContext, PageResult } from './types.ts';
 
 /** Dictionary sites, best copy first. */
@@ -30,13 +31,17 @@ export async function render(ctx: PageContext): Promise<PageResult> {
   const { word } = ctx.route as Extract<Route, { page: 'define' }>;
   const query = word.replace(/_/g, ' ').trim();
   if (!query) return { redirect: searchAddress('', { kind: 'dictionary' }) };
-  const held = new Set((await ctx.app.sources()).map((s) => s.id));
+  // The source list falls back to [] when the library is slow to answer it: then try every
+  // dictionary rather than none (an unknown source answers 404 at once).
+  const known = (await ctx.app.sources()).map((s) => s.id);
+  const held = known.length ? new Set(known) : new Set(DICTIONARY_SOURCES);
   for (const source of DICTIONARY_SOURCES) {
     if (!held.has(source)) continue;
     for (const spelling of spellings(word)) {
       const id = `wsp:${source}/${spelling}`;
       try {
-        await ctx.app.api.document(id, {}, ctx.signal);
+        const doc = await ctx.app.api.document(id, {}, ctx.signal);
+        rememberDocument(id, doc); // the entry page shows it without fetching it again
         return { redirect: docIdToAddress(id) };
       } catch (err) {
         if (err instanceof ApiRequestError && err.status === 404) continue;

@@ -4,7 +4,7 @@
  * Data.
  */
 import { ApiRequestError } from '../api/client.ts';
-import type { DocumentResponse, SourceInfo } from '../api/types.ts';
+import type { DocumentResponse, SearchResults, SourceInfo } from '../api/types.ts';
 import { docIdToAddress, makeAddress, searchAddress } from '../core/address.ts';
 import { diffLines, diffStats } from '../core/diff.ts';
 import { type Child, h } from '../core/dom.ts';
@@ -39,11 +39,20 @@ import { isThread, threadView } from './threads.ts';
 import type { AppServices, PageContext, PageResult } from './types.ts';
 
 type DocRoute = Extract<Route, { page: 'document' }>;
+type SearchHit = SearchResults['hits'][number];
 
-/** Small LRU so Back/Forward are instant. */
-class Lru<V> {
+/**
+ * Small LRU so Back/Forward are instant, bounded by entries and by size: forty 1-2 MB articles
+ * held 100-160 MB of tab memory (review 2026-10-14).
+ */
+export class Lru<V> {
   private readonly map = new Map<string, V>();
-  constructor(private readonly max: number) {}
+  private total = 0;
+  constructor(
+    private readonly max: number,
+    private readonly maxSize = Number.POSITIVE_INFINITY,
+    private readonly sizeOf: (v: V) => number = () => 0,
+  ) {}
   get(k: string): V | undefined {
     const v = this.map.get(k);
     if (v !== undefined) {
@@ -53,13 +62,51 @@ class Lru<V> {
     return v;
   }
   set(k: string, v: V): void {
-    this.map.delete(k);
+    this.delete(k);
     this.map.set(k, v);
-    if (this.map.size > this.max) this.map.delete(this.map.keys().next().value!);
+    this.total += this.sizeOf(v);
+    while (this.map.size > 1 && (this.map.size > this.max || this.total > this.maxSize)) {
+      this.delete(this.map.keys().next().value!);
+    }
+  }
+  delete(k: string): void {
+    const old = this.map.get(k);
+    if (old === undefined) return;
+    this.total -= this.sizeOf(old);
+    this.map.delete(k);
+  }
+  get size(): number {
+    return this.map.size;
   }
 }
 
-const cache = new Lru<DocumentResponse>(40);
+/** UTF-16 code units of a document's bodies, about its bytes in the tab. */
+function docSize(doc: DocumentResponse): number {
+  return 2 * ((doc.html?.length ?? 0) + (doc.text?.length ?? 0)) + 4096;
+}
+
+const cache = new Lru<DocumentResponse>(40, 24 * 1024 * 1024, docSize);
+
+/** A document fetched elsewhere (the dictionary's lookup) served by the next visit instead of again. */
+export function rememberDocument(id: string, doc: DocumentResponse): void {
+  cache.set(`${id}@`, doc);
+}
+
+/**
+ * A catalog card's "does the library hold this book?" search, remembered by title: Back, Forward
+ * and a second visit ran the 2-5 s search again (review 2026-10-14).
+ */
+const lookups = new Lru<Promise<SearchHit[]>>(200);
+
+function lookupBooks(ctx: PageContext, title: string): Promise<SearchHit[]> {
+  const key = title.toLowerCase();
+  const hit = ctx.opts.reload ? undefined : lookups.get(key);
+  if (hit) return hit;
+  const found = ctx.app.api.search({ q: title, kind: 'books', page_size: 5 }).then((r) => r.hits);
+  lookups.set(key, found);
+  found.catch(() => lookups.delete(key)); // a failure is not remembered
+  return found;
+}
 
 /** `text`: also the plain text of an HTML page (only the diff needs it). */
 async function loadDoc(
@@ -811,8 +858,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
     documentWarning(doc),
     catalogNotice(doc, source, {
       bookSources: new Set(sources.filter((s) => s.kind === 'books').map((s) => s.id)),
-      lookup: (q) =>
-        ctx.app.api.search({ q, kind: 'books', page_size: 5 }, ctx.signal).then((r) => r.hits),
+      lookup: (q) => lookupBooks(ctx, q),
     }),
     practiceNotice(doc),
     doc.format === 'html' && doc.html && looksLikeComic(doc.html) && !route.at

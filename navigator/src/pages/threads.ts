@@ -47,9 +47,10 @@ function accepted(el: Element): boolean {
 }
 
 function badge(el: Element, text: string, cls: string): void {
-  // <small> with a title survives the sanitiser (classes do not); the title is the styling hook.
+  // Classes do not survive the sanitiser; data-wsp-role does, and unlike a title it is no tooltip
+  // and is not read aloud.
   const body = el.querySelector('.postcell, .answercell, .js-post-body, .post-text') ?? el;
-  body.prepend(h('small', { class: `thread-badge ${cls}`, title: cls }, text), ' ');
+  body.prepend(h('small', { class: `thread-badge ${cls}`, 'data-wsp-role': cls }, text), ' ');
 }
 
 /** Rewrite a thread in place and say what was done. */

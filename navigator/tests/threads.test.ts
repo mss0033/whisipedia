@@ -41,7 +41,10 @@ describe('thread view', () => {
     expect(order).toEqual(['1', '2']);
     expect(root.querySelector('#question .thread-score')?.textContent).toBe('▲ 3');
     expect(root.querySelector('.accepted-answer .thread-accepted')?.textContent).toBe('✓ accepted');
-    expect(root.querySelector('#question small')?.getAttribute('title')).toBe('thread-score');
+    expect(root.querySelector('#question small')?.getAttribute('data-wsp-role')).toBe(
+      'thread-score',
+    );
+    expect(root.querySelector('#question small')?.hasAttribute('title')).toBe(false);
     const tag = root.querySelector<HTMLAnchorElement>('a.post-tag')!;
     expect(tag.dataset.wsp).toBe('wsp://search?q=dns&source=stackexchange');
     expect(tag.getAttribute('href')).toBe('wsp://search?q=dns&source=stackexchange');
@@ -63,7 +66,7 @@ describe('thread view', () => {
     // The accepted answer (212) leads, then 40, then 5.
     expect(text.indexOf('Both are validators')).toBeLessThan(text.indexOf('Prefer the ETag'));
     expect(text.indexOf('Prefer the ETag')).toBeLessThan(text.indexOf('Send both'));
-    const badges = [...body.querySelectorAll('small[title="thread-score"]')].map(
+    const badges = [...body.querySelectorAll('small[data-wsp-role="thread-score"]')].map(
       (b) => b.textContent,
     );
     expect(badges).toEqual(['▲ 37', '▲ 212', '▲ 40', '▲ 5']);

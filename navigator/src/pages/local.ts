@@ -53,12 +53,13 @@ export async function renderHistory(ctx: PageContext): Promise<PageResult> {
           h(
             'tbody',
             null,
-            ...list.map((e) => {
+            ...list.map((e, i) => {
               const del = h(
                 'button',
                 {
                   type: 'button',
                   class: 'btn btn-small',
+                  'data-action': 'remove',
                   'aria-label': `Remove ${e.title} from history`,
                 },
                 'Remove',
@@ -66,6 +67,8 @@ export async function renderHistory(ctx: PageContext): Promise<PageResult> {
               del.addEventListener('click', () => {
                 history.remove(e.address);
                 draw();
+                // Keep the keyboard where it was: the next row's Remove, else the filter.
+                refocus(table, 'button[data-action="remove"]', i, filter);
               });
               return h(
                 'tr',
@@ -132,6 +135,7 @@ export async function renderHotlist(ctx: PageContext): Promise<PageResult> {
             {
               type: 'button',
               class: 'btn btn-small',
+              'data-action': 'up',
               disabled: i === 0,
               'aria-label': `Move ${b.title} up`,
             },
@@ -142,6 +146,7 @@ export async function renderHotlist(ctx: PageContext): Promise<PageResult> {
             {
               type: 'button',
               class: 'btn btn-small',
+              'data-action': 'down',
               disabled: i === items.length - 1,
               'aria-label': `Move ${b.title} down`,
             },
@@ -149,20 +154,29 @@ export async function renderHotlist(ctx: PageContext): Promise<PageResult> {
           );
           const del = h(
             'button',
-            { type: 'button', class: 'btn btn-small', 'aria-label': `Delete ${b.title}` },
+            {
+              type: 'button',
+              class: 'btn btn-small',
+              'data-action': 'delete',
+              'aria-label': `Delete ${b.title}`,
+            },
             'Delete',
           );
+          // After a redraw, focus follows the item (moved) or its place (deleted).
           up.addEventListener('click', () => {
             hotlist.move(b.address, -1);
             draw();
+            refocusMoved(list, i - 1, 'up');
           });
           down.addEventListener('click', () => {
             hotlist.move(b.address, 1);
             draw();
+            refocusMoved(list, i + 1, 'down');
           });
           del.addEventListener('click', () => {
             hotlist.remove(b.address);
             draw();
+            refocus(list, 'button[data-action="delete"]', i, null);
           });
           return h(
             'li',
@@ -188,4 +202,32 @@ export async function renderHotlist(ctx: PageContext): Promise<PageResult> {
     list,
   );
   return { title: 'Hotlist', body };
+}
+
+/**
+ * After a redraw, put the keyboard focus on the button now at ``index`` among ``selector`` (the
+ * next row, or the last one), else on ``fallback``. Redrawing dropped focus on the page body, so
+ * removing items from the keyboard meant tabbing back through the whole window each time.
+ */
+function refocus(
+  root: ParentNode,
+  selector: string,
+  index: number,
+  fallback: HTMLElement | null,
+): void {
+  const buttons = [...root.querySelectorAll<HTMLButtonElement>(selector)];
+  const target = buttons[Math.min(index, buttons.length - 1)] ?? fallback;
+  target?.focus();
+}
+
+/** Focus the moved item's same arrow, or its other arrow at the top or bottom of the list. */
+function refocusMoved(root: ParentNode, index: number, action: 'up' | 'down'): void {
+  const items = [...root.querySelectorAll('li')];
+  const li = items[index];
+  if (!li) return;
+  const same = li.querySelector<HTMLButtonElement>(`button[data-action="${action}"]`);
+  const other = li.querySelector<HTMLButtonElement>(
+    `button[data-action="${action === 'up' ? 'down' : 'up'}"]`,
+  );
+  (same && !same.disabled ? same : other)?.focus();
 }

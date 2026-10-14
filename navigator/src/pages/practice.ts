@@ -115,6 +115,25 @@ export async function render(ctx: PageContext): Promise<PageResult> {
 
 /* ----------------------------------- the hall ----------------------------------- */
 
+/**
+ * The pools of the hall, found once a session: every visit ran the same 2-5 s search (review
+ * 2026-10-14). Reload (F5) looks again.
+ */
+let hallPools: Promise<SearchHit[]> | null = null;
+
+function poolList(ctx: PageContext): Promise<SearchHit[]> {
+  if (!hallPools || ctx.opts.reload) {
+    const found = ctx.app.api
+      .search({ q: 'question pool', source: POOL_SOURCE, page_size: 20 })
+      .then((r) => r.hits.filter((hit) => !/diagrams?/i.test(hit.title)));
+    found.catch(() => {
+      if (hallPools === found) hallPools = null; // a failure is not remembered
+    });
+    hallPools = found;
+  }
+  return hallPools;
+}
+
 async function hall(ctx: PageContext): Promise<PageResult> {
   const sources = await ctx.app.sources();
   const src = sources.find((s) => s.id === POOL_SOURCE);
@@ -131,11 +150,7 @@ async function hall(ctx: PageContext): Promise<PageResult> {
     );
     return { title: 'Exam Practice Hall', body };
   }
-  const found = await ctx.app.api.search(
-    { q: 'question pool', source: POOL_SOURCE, page_size: 20 },
-    ctx.signal,
-  );
-  const pools = found.hits.filter((hit) => !/diagrams?/i.test(hit.title));
+  const pools = await poolList(ctx);
   const byClass = new Map<string, SearchHit[]>();
   for (const hit of pools) {
     const cls = /\b(Technician|General|Extra)\b/i.exec(hit.title)?.[1] ?? 'Other';
