@@ -392,10 +392,16 @@ def build_vault(
     )
 
 
+INGEST_BUSY_SHARE = 0.25
+"""While the owner uses the library, an ingest keeps this share of its rate: it slows down rather than
+stops. A pause that raised (the scrub's way) failed the seal step of every release in flight and
+counted an attempt against it (2026-10-14 01:07)."""
+
+
 def ingest_pace(cfg: Mapping[str, Any]) -> Callable[[int], None] | None:
     """A rate limit for the bytes an ingest reads and writes (``[vault] ingest_bytes_per_sec``; 0 = none),
-    paused while the owner uses the library (``yield_to_interactive_seconds``): on the NAS, one lane
-    adopting PDFs at the link's full speed starved the API's Refinery reads (2026-10-13)."""
+    a quarter of it while the owner uses the library (``yield_to_interactive_seconds``): on the NAS,
+    one lane adopting PDFs at the link's full speed starved the API's Refinery reads (2026-10-13)."""
     from wsp_core.activity import recently_active
     from wsp_vault.ratelimit import RateLimiter
 
@@ -405,11 +411,14 @@ def ingest_pace(cfg: Mapping[str, Any]) -> Callable[[int], None] | None:
         return None
     marker = activity_marker(cfg)
     window = float(vcfg.get("yield_to_interactive_seconds", 300))
+    full = RateLimiter(rate, burst_seconds=5.0)
+    quiet = RateLimiter(rate * INGEST_BUSY_SHARE, burst_seconds=5.0)
 
-    def busy() -> bool:
-        return window > 0 and recently_active(marker, window)
+    def pace(n: int) -> None:
+        limiter = quiet if window > 0 and recently_active(marker, window) else full
+        limiter.consume(n)
 
-    return RateLimiter(rate, burst_seconds=5.0, should_pause=busy).consume
+    return pace
 
 
 def _has_par2() -> bool:

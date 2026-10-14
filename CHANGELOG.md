@@ -3,6 +3,10 @@
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Fixed: a paced ingest slows down while the library is in use instead of failing (2026-10-14)
+* The ingest limiter paused by raising, the scrub's way; a seal step in flight failed with
+  "the library is in interactive use" and an attempt was counted against the release. Interactive use
+  now slows an ingest to a quarter of its rate.
 ### Fixed: a "Bad address" from the NAS is retried like a timeout (2026-10-14)
 * CIFS answered a read with EFAULT under load; the vault treated it as fatal and three Kiwix releases
   were quarantined after five attempts each (2026-10-13). It is now a transient error: the chunk is

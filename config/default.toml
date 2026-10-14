@@ -11,7 +11,7 @@ parity = true                    # par2 recovery data (needs par2 on PATH); the 
 parity_scope = "all"             # "all" sealed generations | "irreplaceable" (flagged sources + last copies)
 parity_percent = 10
 parity_bytes_per_sec = 150000000 # parity work (verify + par2 input) rate limit
-ingest_bytes_per_sec = 40000000  # ingest copies and hashes over the NAS link the site reads from; 0 = unpaced
+ingest_bytes_per_sec = 40000000  # ingest copies and hashes over the NAS link the site reads from; 0 = unpaced; a quarter of it while the library is in use
 parity_bytes_per_run = 200000000000  # one bounded parity job; the backfill continues in later runs
 parity_max_set_gb = 64           # data per par2 recovery set (a bigger file is a set of its own)
 parity_threads = 2               # par2 -t (leave CPU for the browser and the indexer); 0 = par2 default

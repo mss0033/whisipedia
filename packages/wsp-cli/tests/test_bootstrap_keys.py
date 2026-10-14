@@ -93,3 +93,23 @@ def test_ingest_pace_follows_the_vault_section(tmp_path: Path) -> None:
     pace = ingest_pace(base)
     assert pace is not None
     pace(1024)  # within the burst: returns at once
+
+
+def test_ingest_pace_slows_down_while_the_owner_browses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Interactive use slows an ingest to a share of its rate; it never raises (a seal step that
+    failed on a pause counted an attempt against the release, 2026-10-14)."""
+    from wsp_cli import bootstrap
+
+    def always_busy(path: Path | None, window_seconds: float, *, now: float | None = None) -> bool:
+        return True
+
+    monkeypatch.setattr("wsp_core.activity.recently_active", always_busy)
+    base = {
+        "vault": {"root": str(tmp_path), "ingest_bytes_per_sec": 1e9},
+        "index": {"root": str(tmp_path / "i")},
+    }
+    pace = bootstrap.ingest_pace(base)
+    assert pace is not None
+    pace(4096)  # busy: the slow limiter, still within its burst
