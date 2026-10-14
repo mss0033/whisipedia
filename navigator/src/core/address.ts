@@ -74,9 +74,15 @@ function safeDecode(s: string): string {
   }
 }
 
-/** Encode only what would break parsing; keep addresses human-readable. */
+/**
+ * Encode only what would break parsing; keep addresses human-readable. A trailing `/` is part of
+ * some native ids (`xkcd.com/936/`) and the parser drops literal trailing slashes, so it is written
+ * `%2F` (the API's `encode_native` does the same).
+ */
 export function encodePath(path: string): string {
-  return path.replace(/[%?#\s]/g, (c) => encodeURIComponent(c));
+  const body = path.replace(/[%?#\s]/g, (c) => encodeURIComponent(c));
+  const bare = body.replace(/\/+$/, '');
+  return bare + '%2F'.repeat(body.length - bare.length);
 }
 
 export function parseAddress(input: string): WspAddress | null {

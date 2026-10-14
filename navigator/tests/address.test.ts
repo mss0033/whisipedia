@@ -21,6 +21,20 @@ describe('parseAddress / formatAddress', () => {
     });
   });
 
+  it('round-trips native ids with a trailing slash or a question mark', () => {
+    for (const id of [
+      'wsp:kiwix-xkcd-com-en-all/xkcd.com/936/',
+      'wsp:kiwix-gotquestions-org-en-all/printer.gotquestions.net/GeneratePF?articleId=3547',
+      'wsp:s/a b#c%d//',
+    ]) {
+      const address = docIdToAddress(id);
+      expect(addressToDocId(parseAddress(address)!), address).toBe(id);
+    }
+    expect(docIdToAddress('wsp:kiwix-xkcd-com-en-all/xkcd.com/936/')).toBe(
+      'wsp://kiwix-xkcd-com-en-all/xkcd.com/936%2F',
+    );
+  });
+
   it('accepts doc_id form, aliases, case and trailing slashes', () => {
     expect(normalizeAddress('wsp:rfc/9110')).toBe('wsp://rfc/9110');
     expect(normalizeAddress('WSP://Wikipedia.en/Alan_Turing/')).toBe(

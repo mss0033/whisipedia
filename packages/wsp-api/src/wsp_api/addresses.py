@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from typing import Literal
-from urllib.parse import quote, urlencode
+from urllib.parse import quote, unquote, urlencode
 
 from wsp_api.errors import ApiError
 from wsp_api.schemas import Resolution
@@ -30,8 +30,18 @@ RESERVED = frozenset({*_PAGES, "search"})
 _SEGMENT_SAFE = "!'()*"
 
 
+def encode_native(native_id: str) -> str:
+    """A native id as the path of an address, by the Navigator's rule (``encodePath``): readable, with
+    ``%``, ``?``, ``#`` and spaces escaped, and a trailing ``/`` as ``%2F`` so it survives the parser,
+    which drops trailing slashes. Unescaped, ``…/GeneratePF?articleId=3547`` lost its query and
+    ``xkcd.com/936/`` its slash, and both opened as Not Found (trawler, 2026-10-14)."""
+    body = "".join(quote(c, safe="") if c in "%?#" or c.isspace() else c for c in native_id)
+    stripped = body.rstrip("/")
+    return stripped + "%2F" * (len(body) - len(stripped))
+
+
 def address_of(source_id: str, native_id: str | None = None) -> str:
-    return f"{SCHEME}{source_id}" if native_id is None else f"{SCHEME}{source_id}/{native_id}"
+    return f"{SCHEME}{source_id}" if native_id is None else f"{SCHEME}{source_id}/{encode_native(native_id)}"
 
 
 def encode_segment(value: str) -> str:
@@ -87,11 +97,19 @@ def resolve(
         raise ApiError(404, "address_not_found", f"no site at {SCHEME}{path}")
     if not rest:
         return Resolution(address=address_of(head), kind="source", href=f"/v1/sources/{head}")
-    try:
-        doc_id: DocId = make_doc_id(head, rest)
-    except InvalidDocIdError as exc:
-        raise ApiError(400, "invalid_address", str(exc)) from exc
-    found = exists(doc_id) if exists is not None else services.documents.get(doc_id) is not None
-    if not found:
-        raise ApiError(404, "not_in_library", f"{address_of(head, rest)} is not in the library")
-    return Resolution(address=address_of(head, rest), kind="document", href=document_href(doc_id))
+    rest = unquote(rest)  # the inverse of encode_native (a trailing %2F becomes the slash again)
+
+    def found(native: str) -> DocId | None:
+        try:
+            doc_id: DocId = make_doc_id(head, native)
+        except InvalidDocIdError as exc:
+            raise ApiError(400, "invalid_address", str(exc)) from exc
+        ok = exists(doc_id) if exists is not None else services.documents.get(doc_id) is not None
+        return doc_id if ok else None
+
+    # A typed or older address lost a native id's trailing slash (xkcd.com/936/): try it with one.
+    for native in (rest, rest + "/") if not rest.endswith("/") else (rest,):
+        doc_id = found(native)
+        if doc_id is not None:
+            return Resolution(address=address_of(head, native), kind="document", href=document_href(doc_id))
+    raise ApiError(404, "not_in_library", f"{address_of(head, rest)} is not in the library")

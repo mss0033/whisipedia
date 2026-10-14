@@ -26,7 +26,7 @@ from urllib.parse import quote, unquote, urlsplit
 
 from wsp_api.addresses import address_of
 
-VERSION = 2  # bump when the output changes: rendered pages are cached by it
+VERSION = 3  # bump when the output changes: rendered pages are cached by it
 
 _LINKS = frozenset({("a", "href"), ("area", "href")})
 _ASSETS = frozenset(
@@ -76,11 +76,6 @@ def _resolve(base_native_id: str, href: str, root: str = "") -> tuple[str, str] 
     return norm, parts.fragment
 
 
-def _encode_native(native_id: str) -> str:
-    # Same rule as the Navigator's encodePath: keep addresses readable, escape what breaks parsing.
-    return "".join(quote(c, safe="") if c in "%?#" or c.isspace() else c for c in native_id)
-
-
 class _Rewriter(HTMLParser):
     def __init__(self, source_id: str, generation_id: str, native_id: str, root: str) -> None:
         super().__init__(convert_charrefs=False)
@@ -115,9 +110,7 @@ class _Rewriter(HTMLParser):
                     target = _resolve(self._base, value.strip(), self._root)
                     if target is not None:
                         path, fragment = target
-                        rewritten = address_of(self._source, _encode_native(path)) + (
-                            f"#{fragment}" if fragment else ""
-                        )
+                        rewritten = address_of(self._source, path) + (f"#{fragment}" if fragment else "")
                 elif key in _ASSETS:
                     rewritten = self._asset(value)
                 elif key in _SRCSET:

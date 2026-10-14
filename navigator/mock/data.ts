@@ -1017,7 +1017,7 @@ Status of this Memo
   },
   {
     source_id: 'kiwix-xkcd-com-en-all',
-    native_id: 'xkcd.com/936',
+    native_id: 'xkcd.com/936/',
     title: 'xkcd: Password Strength',
     kind: 'other',
     lang: 'en',

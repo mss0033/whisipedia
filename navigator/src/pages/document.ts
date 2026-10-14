@@ -120,7 +120,17 @@ async function loadDoc(
     const hit = cache.get(key);
     if (hit) return hit;
   }
-  const doc = await ctx.app.api.document(id, { at, text }, ctx.signal);
+  let doc: DocumentResponse;
+  try {
+    doc = await ctx.app.api.document(id, { at, text }, ctx.signal);
+  } catch (err) {
+    // A link or a typed address that lost a native id's trailing slash (`xkcd.com/935` for
+    // `xkcd.com/935/`): one more try with it, as the API's resolver does.
+    if (!(err instanceof ApiRequestError && err.status === 404) || id.endsWith('/')) throw err;
+    doc = await ctx.app.api.document(`${id}/`, { at, text }, ctx.signal).catch(() => {
+      throw err;
+    });
+  }
   cache.set(key, doc);
   return doc;
 }
