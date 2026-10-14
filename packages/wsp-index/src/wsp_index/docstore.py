@@ -75,6 +75,7 @@ class ParquetDocumentStore:
         self._max = max_open_generations
         self._budget = memory_budget
         self._lock = threading.Lock()
+        self._building: dict[tuple[str, str, bool], threading.Lock] = {}
 
     def current(self, source_id: str) -> str | None:
         """The source's current generation, remembered for :data:`CURRENT_TTL` seconds: finding it is
@@ -105,19 +106,34 @@ class ParquetDocumentStore:
             if cached is not None:
                 self._readers.move_to_end(key)
                 return cached
-        gen_dir = generation_dir(self.root, source_id, generation_id)
-        if not is_sealed(gen_dir):
-            return None
-        map_dir = None if self.map_root is None else id_map_dir(self.map_root, gen_dir)
-        reader = RefineryReader(gen_dir, map_ids=current, map_dir=map_dir)
-        with self._lock:
-            self._readers[key] = reader
-            while len(self._readers) > 1 and (
-                len(self._readers) > self._max
-                or sum(map(_reader_cost, self._readers.values())) > self._budget
-            ):
-                self._readers.popitem(last=False)
-        return reader
+            building = self._building.setdefault(key, threading.Lock())
+        # One construction per key: a cold page of hits from one source asks from several pool
+        # threads at once, and each reader reads _SUCCESS and the whole _SHADOW table over the NAS
+        # (review 2026-10-14 #2: eight readers were built for one generation).
+        with building:
+            try:
+                with self._lock:
+                    cached = self._readers.get(key)
+                    if cached is not None:
+                        self._readers.move_to_end(key)
+                        return cached
+                gen_dir = generation_dir(self.root, source_id, generation_id)
+                if not is_sealed(gen_dir):
+                    return None
+                map_dir = None if self.map_root is None else id_map_dir(self.map_root, gen_dir)
+                reader = RefineryReader(gen_dir, map_ids=current, map_dir=map_dir)
+                with self._lock:
+                    self._readers[key] = reader
+                    while len(self._readers) > 1 and (
+                        len(self._readers) > self._max
+                        or sum(map(_reader_cost, self._readers.values())) > self._budget
+                    ):
+                        self._readers.popitem(last=False)
+                return reader
+            finally:
+                with self._lock:
+                    if self._building.get(key) is building:
+                        del self._building[key]
 
     def generations(self, source_id: str) -> list[str]:
         return sealed_generations(self.root, source_id)

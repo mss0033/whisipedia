@@ -624,10 +624,18 @@ class TantivyIndex:
             return age >= self.config.suggest_rebuild_seconds
 
     def rebuild_suggest(self) -> None:
-        """Commit, then fold the overlay into a fresh trie (e.g. on a schedule)."""
+        """Commit, then fold the overlay into a fresh trie (e.g. on a schedule).
+
+        Also when nothing is pending here but the trie is marked dirty: in a new process an earlier
+        process's overlay exists only as that flag (review 2026-10-14 N1: the nightly build logged
+        "rebuilt" and left the flag set every night)."""
         with self._lock:
             self.commit()
-            if self._suggester.pending:
+            if (
+                self._suggester.pending
+                or self._meta("suggest_dirty") == "1"
+                or not TitleTrie.exists(self._suggest_dir)
+            ):
                 self._rebuild_suggest()
 
     def suggest(self, prefix: str, *, limit: int = 10) -> Sequence[str]:

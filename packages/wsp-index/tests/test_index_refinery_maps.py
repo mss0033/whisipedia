@@ -226,3 +226,39 @@ def test_a_page_of_text_and_hash_lookups_runs_side_by_side(
     hashes = store.content_hashes(ids)
     assert set(hashes) == set(ids)
     assert store.texts([ids[0]]) == {ids[0]: texts[ids[0]]}  # one lookup: no pool
+
+
+def test_concurrent_cold_lookups_build_one_reader(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A cold page of hits asks from several threads at once: one reader is built, not one each."""
+    import threading
+    import time
+
+    from wsp_index import docstore
+
+    _write(tmp_path / "nas")
+    store = ParquetDocumentStore(tmp_path / "nas", map_root=tmp_path / "local")
+    built: list[int] = []
+    real = refinery.RefineryReader
+
+    def slow_reader(*args: Any, **kwargs: Any) -> refinery.RefineryReader:
+        built.append(1)
+        time.sleep(0.05)  # long enough for every thread to miss the cache together
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(docstore, "RefineryReader", slow_reader)
+    start = threading.Barrier(8)
+    got: list[object] = []
+
+    def ask() -> None:
+        start.wait()
+        got.append(store.reader("src", "g1", current=True))
+
+    threads = [threading.Thread(target=ask) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(built) == 1
+    assert len({id(r) for r in got}) == 1
+    assert got[0] is not None
+    assert not store._building  # pyright: ignore[reportPrivateUsage]

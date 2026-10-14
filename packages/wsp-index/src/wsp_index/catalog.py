@@ -582,6 +582,7 @@ class RefineryCatalog:
         self._lock = threading.Lock()
         self._entries: dict[str, tuple[float, _Entry | None]] = {}
         self._readers: dict[tuple[str, str], RefineryReader] = {}  # current generation of each source
+        self._building: dict[tuple[str, str], threading.Lock] = {}
         self._current: dict[str, tuple[float, str | None]] = {}  # source -> (asked at, generation)
 
     # --- precomputed data ---
@@ -650,18 +651,29 @@ class RefineryCatalog:
         key = (source_id, gen)
         with self._lock:
             cached = self._readers.get(key)
-        if cached is not None:
-            return cached
-        gen_dir = generation_dir(self.refinery_root, source_id, gen)
-        if not is_sealed(gen_dir):
-            return None
-        map_dir = None if self.map_root is None else id_map_dir(self.map_root, gen_dir)
-        reader = RefineryReader(gen_dir, cache_row_groups=2, map_dir=map_dir)
-        with self._lock:
-            for old in [k for k in self._readers if k[0] == source_id]:
-                del self._readers[old]
-            self._readers[key] = reader
-        return reader
+            if cached is not None:
+                return cached
+            building = self._building.setdefault(key, threading.Lock())
+        with building:  # one construction per key (review 2026-10-14 #2, as in the docstore)
+            try:
+                with self._lock:
+                    cached = self._readers.get(key)
+                if cached is not None:
+                    return cached
+                gen_dir = generation_dir(self.refinery_root, source_id, gen)
+                if not is_sealed(gen_dir):
+                    return None
+                map_dir = None if self.map_root is None else id_map_dir(self.map_root, gen_dir)
+                reader = RefineryReader(gen_dir, cache_row_groups=2, map_dir=map_dir)
+                with self._lock:
+                    for old in [k for k in self._readers if k[0] == source_id]:
+                        del self._readers[old]
+                    self._readers[key] = reader
+                return reader
+            finally:
+                with self._lock:
+                    if self._building.get(key) is building:
+                        del self._building[key]
 
     # --- Catalog ---
 

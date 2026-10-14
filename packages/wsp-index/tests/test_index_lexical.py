@@ -534,3 +534,22 @@ def test_a_trie_left_dirty_by_another_process_is_aged_not_rebuilt(tmp_path: Path
         assert idx.suggest("Cam") == ["Camel"]
         idx.rebuild_suggest()
         assert idx.suggest("Bis") == ["Bison"]  # the earlier process's title joins at the rebuild
+
+
+def test_a_new_process_folds_a_trie_that_is_only_flagged_dirty(tmp_path: Path) -> None:
+    """The nightly build reopens with nothing pending: the flag alone must make it rebuild."""
+    from dataclasses import replace as replace_cfg
+
+    cfg = replace_cfg(
+        SMALL, suggest_rebuild_threshold=3, suggest_rebuild_seconds=3600, suggest_open_rebuild_titles=0
+    )
+    with TantivyIndex(tmp_path / "ix", cfg) as idx:
+        idx.upsert([doc("s", "a", "Aardvark", "x")])
+        idx.rebuild_suggest()
+        idx.upsert([doc("s", "b", "Bison", "y")])
+        idx.commit()
+    with TantivyIndex(tmp_path / "ix", cfg) as idx:
+        assert idx.suggest_rebuild_due(now=time.time() + 3601)
+        idx.rebuild_suggest()
+        assert not idx.suggest_rebuild_due(now=time.time() + 3601)
+        assert idx.suggest("Bis") == ["Bison"]
