@@ -114,7 +114,7 @@ async function readableSources() {
 /** The doc ids checked before, and the summary, rebuilt from results.jsonl. */
 async function load() {
   const seen = new Set();
-  const summary = { updated: null, pages: 0, failed: 0, sources: {}, recent: [] };
+  const summary = { updated: null, pages: 0, failed: 0, with_defects: 0, sources: {}, recent: [] };
   const path = join(OUT, 'results.jsonl');
   if (!existsSync(path)) return { seen, summary };
   const lines = createInterface({ input: createReadStream(path), crlfDelay: Infinity });
@@ -133,7 +133,7 @@ async function load() {
 function tally(summary, r) {
   summary.pages += 1;
   summary.updated = r.ts;
-  summary.sources[r.source] ??= { checked: 0, failed: 0, catalog_without_link: 0 };
+  summary.sources[r.source] ??= { checked: 0, failed: 0, with_defects: 0, catalog_without_link: 0 };
   const s = summary.sources[r.source];
   s.checked += 1;
   if (!r.ok) {
@@ -141,6 +141,10 @@ function tally(summary, r) {
     summary.failed += 1;
     summary.recent.push({ ts: r.ts, address: r.address, source: r.source, problems: r.problems });
     if (summary.recent.length > RECENT_PROBLEMS) summary.recent.shift();
+  }
+  if (r.defects?.length) {
+    s.with_defects = (s.with_defects ?? 0) + 1;
+    summary.with_defects = (summary.with_defects ?? 0) + 1;
   }
   if (r.catalog && !r.catalog.direct) s.catalog_without_link += 1;
 }
@@ -157,7 +161,8 @@ function ownerIdleMs() {
 /** Open one page and say what is wrong with it. */
 async function check(context, address) {
   const page = await context.newPage();
-  const problems = [];
+  const problems = []; // the page does not work: error page, empty, wrong viewer, script error
+  const defects = []; // it works, with a missing image or a link into nothing
   const failedApi = [];
   const scriptErrors = [];
   let doc = null;
@@ -182,8 +187,15 @@ async function check(context, address) {
       () => {
         const root = document.getElementById('app');
         const main = document.querySelector('main');
+        // The "still loading" page retries by itself (a large archive opening, a restart): wait it out.
+        const retrying = /still loading/i.test(
+          main?.querySelector('.page-error h1, .page-error h2')?.textContent ?? '',
+        );
         return (
-          root && !root.classList.contains('is-loading') && main?.querySelector('h1, .page-error')
+          root &&
+          !root.classList.contains('is-loading') &&
+          !retrying &&
+          main?.querySelector('h1, .page-error')
         );
       },
       null,
@@ -262,9 +274,9 @@ async function check(context, address) {
         const r = await context.request.get(`${BASE}${src}`, { headers: HEADERS, timeout: 60_000 });
         const type = r.headers()['content-type'] ?? '';
         if (!r.ok() || !type.startsWith('image/'))
-          problems.push(`image ${r.status()} ${src.slice(0, 120)}`);
+          defects.push(`image ${r.status()} ${src.slice(0, 120)}`);
       } catch {
-        problems.push(`image-timeout ${src.slice(0, 120)}`);
+        defects.push(`image-timeout ${src.slice(0, 120)}`);
       }
     }
   }
@@ -281,10 +293,10 @@ async function check(context, address) {
         headers: HEADERS,
         timeout: 60_000,
       });
-      if (r.status() === 404) problems.push(`broken-link: ${address.slice(0, 160)}`);
-      else if (!r.ok()) problems.push(`link ${r.status()} ${address.slice(0, 160)}`);
+      if (r.status() === 404) defects.push(`broken-link: ${address.slice(0, 160)}`);
+      else if (!r.ok()) defects.push(`link ${r.status()} ${address.slice(0, 160)}`);
     } catch {
-      problems.push(`link-timeout ${address.slice(0, 160)}`);
+      defects.push(`link-timeout ${address.slice(0, 160)}`);
     }
   }
   for (const f of failedApi.slice(0, 5)) problems.push(`api ${f}`);
@@ -292,6 +304,7 @@ async function check(context, address) {
   await page.close().catch(() => undefined);
   return {
     problems,
+    defects,
     ms: Date.now() - started,
     kind: doc?.kind ?? seen?.kind ?? null,
     images: seen?.images.length ?? 0,

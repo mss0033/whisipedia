@@ -5034,6 +5034,12 @@
             "type": "integer",
             "title": "Failed Last Week"
           },
+          "with_defects": {
+            "type": "integer",
+            "title": "With Defects",
+            "description": "Pages that work but have a missing image or a link into nothing.",
+            "default": 0
+          },
           "sources_checked": {
             "type": "integer",
             "title": "Sources Checked"
@@ -5069,6 +5075,7 @@
           "pages",
           "failed",
           "failed_last_week",
+          "with_defects",
           "sources_checked",
           "catalog_without_link",
           "updated",

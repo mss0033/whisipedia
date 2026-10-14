@@ -19,7 +19,8 @@ describe('system monitor', () => {
   it('sums up the trawler and links its problem pages', () => {
     const box = trawlerBox(sys.ops)!;
     expect(box.textContent).toContain('1,440 pages checked in 58 sites');
-    expect(box.textContent).toContain('2 with problems in the last week (3 in all)');
+    expect(box.textContent).toContain('2 failed in the last week (3 in all)');
+    expect(box.textContent).toContain('7 work but have a missing image or a link into nothing');
     expect(box.textContent).toContain('4 catalog card(s) without a direct link');
     expect(box.querySelector('.trawl-list a')?.textContent).toBe(
       'kiwix-learningstatistics-en-all/regression.html',

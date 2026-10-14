@@ -680,6 +680,9 @@ class TrawlerStatus(_Wire):
     pages: int = Field(description="Pages checked so far.")
     failed: int = Field(description="Pages with at least one problem, in all.")
     failed_last_week: int
+    with_defects: int = Field(
+        default=0, description="Pages that work but have a missing image or a link into nothing."
+    )
     sources_checked: int
     catalog_without_link: int = Field(description="Catalog cards that do not link their book directly.")
     updated: datetime | None = None

@@ -655,6 +655,8 @@ export interface TrawlerStatus {
   /** Pages with at least one problem, in all. */
   failed: number;
   failed_last_week: number;
+  /** Pages that work but have a missing image or a link into nothing. */
+  with_defects: number;
   sources_checked: number;
   /** Catalog cards that do not link their book directly. */
   catalog_without_link: number;

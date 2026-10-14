@@ -311,6 +311,7 @@ def trawler_status(path: Path, now: datetime) -> TrawlerStatus | None:
         pages=int(data.get("pages", 0)),
         failed=int(data.get("failed", 0)),
         failed_last_week=failed_week,
+        with_defects=int(data.get("with_defects", 0)),
         sources_checked=len(sources),
         catalog_without_link=sum(int(s.get("catalog_without_link", 0)) for s in sources.values()),
         updated=_dt(str(data.get("updated") or "").replace("Z", "+00:00")),

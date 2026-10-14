@@ -62,6 +62,9 @@ def render(summary: Mapping[str, Any], failures: Sequence[SourceFailures], out: 
         f"trawler: {pages:,} page(s) checked, {failed:,} with problems; "
         f"last {summary.get('updated') or 'never'}\n"
     )
+    defects = int(summary.get("with_defects", 0))
+    if defects:
+        out.write(f"pages that work but have a missing image or a link into nothing: {defects:,}\n")
     sources = cast(Mapping[str, Mapping[str, int]], summary.get("sources") or {})
     cards = sum(int(s.get("catalog_without_link", 0)) for s in sources.values())
     if cards:

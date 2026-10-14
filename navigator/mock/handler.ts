@@ -542,6 +542,7 @@ export function system(): Response<'GET /v1/system'> {
         pages: 1440,
         failed: 3,
         failed_last_week: 2,
+        with_defects: 7,
         sources_checked: 58,
         catalog_without_link: 4,
         updated: '2026-10-09T11:59:00Z',

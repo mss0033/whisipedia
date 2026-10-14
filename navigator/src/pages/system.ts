@@ -106,7 +106,8 @@ export function trawlerBox(ops: Ops | null | undefined): HTMLElement | null {
       'p',
       null,
       `${t.pages.toLocaleString('en-US')} pages checked in ${t.sources_checked} sites; `,
-      `${t.failed_last_week} with problems in the last week (${t.failed} in all). `,
+      `${t.failed_last_week} failed in the last week (${t.failed} in all); `,
+      `${t.with_defects} work but have a missing image or a link into nothing. `,
       t.catalog_without_link
         ? `${t.catalog_without_link} catalog card(s) without a direct link to their book. `
         : null,
