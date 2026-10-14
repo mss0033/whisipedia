@@ -123,8 +123,30 @@ def test_ingest_peers_count_the_live_ingests_and_drop_stale_slots(tmp_path: Path
     slots = tmp_path / "ingest-slots"
     assert ingest_peers(slots) == 1
     (slots / str(os.getppid())).touch()  # another live process
-    (slots / "4000000").touch()  # a pid that cannot exist
+    dead = str(2**22 + 1)  # above this kernel's pid_max (4194304): cannot exist
+    (slots / dead).touch()
     (slots / "notes.txt").touch()  # not a slot
     assert ingest_peers(slots) == 2
-    assert not (slots / "4000000").exists()
+    assert not (slots / dead).exists()
     assert (slots / str(os.getpid())).exists()
+
+
+def test_an_idle_process_with_a_slot_stops_counting(tmp_path: Path) -> None:
+    """The daemon seals in a long-lived process: its slot counts only while it paces, and a slot
+    left untouched for long (a reused pid) goes."""
+    import time
+
+    from wsp_cli.bootstrap import INGEST_SLOT_FORGET, INGEST_SLOT_LIVE, ingest_peers
+
+    slots = tmp_path / "ingest-slots"
+    slots.mkdir()
+    peer = slots / str(os.getppid())  # a live process
+    peer.touch()
+    now = time.time()
+    assert ingest_peers(slots, now=now) == 2
+    os.utime(peer, (now - INGEST_SLOT_LIVE - 1, now - INGEST_SLOT_LIVE - 1))
+    assert ingest_peers(slots, now=now) == 1  # idle: not counted, kept
+    assert peer.exists()
+    os.utime(peer, (now - INGEST_SLOT_FORGET - 1, now - INGEST_SLOT_FORGET - 1))
+    assert ingest_peers(slots, now=now) == 1
+    assert not peer.exists()  # forgotten

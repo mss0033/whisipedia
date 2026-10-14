@@ -402,24 +402,40 @@ counted an attempt against it (2026-10-14 01:07)."""
 
 INGEST_SLOTS_DIR = "ingest-slots"
 INGEST_SLOTS_EVERY = 3.0  # seconds between looks at who else is ingesting
+INGEST_SLOT_LIVE = 30.0
+"""A slot counts only while its owner touches it: every pace() call does (at most every
+:data:`INGEST_SLOTS_EVERY` seconds). The orchestrator daemon seals in its own long-lived process, and
+its slot, kept by pid alone, halved every lane's budget for days while it sat idle; a reused pid
+counted forever (review 2026-10-14 N2, #3)."""
+INGEST_SLOT_FORGET = 600.0  # a slot untouched this long is removed
 
 
-def ingest_peers(slots: Path, *, pid: int | None = None) -> int:
-    """Register this process as an ingest in ``slots`` and count the ingests alive, this one
-    included. A slot is a file named by pid; one whose process is gone is dropped. The budget is
-    shared: three lanes at 40 MB/s each filled the link (2026-10-14 03:30)."""
+def ingest_peers(slots: Path, *, pid: int | None = None, now: float | None = None) -> int:
+    """Register this process as an ingest in ``slots`` and count the ingests pacing now, this one
+    included. A slot is a file named by pid, touched at each look; it counts while it is fresher than
+    :data:`INGEST_SLOT_LIVE` and its process exists. The budget is shared: three lanes at 40 MB/s each
+    filled the link (2026-10-14 03:30)."""
     me = os.getpid() if pid is None else pid
     try:
         slots.mkdir(parents=True, exist_ok=True)
         (slots / str(me)).touch()
+        t = time.time() if now is None else now
         alive = 0
         for slot in slots.iterdir():
             if not slot.name.isdigit():
                 continue
-            if int(slot.name) != me and not Path(f"/proc/{slot.name}").exists():
-                with contextlib.suppress(OSError):
-                    slot.unlink()
-                continue
+            if int(slot.name) != me:
+                try:
+                    age = t - slot.stat().st_mtime
+                except OSError:
+                    continue
+                gone = not Path(f"/proc/{slot.name}").exists()
+                if gone or age > INGEST_SLOT_FORGET:
+                    with contextlib.suppress(OSError):
+                        slot.unlink()
+                    continue
+                if age > INGEST_SLOT_LIVE:
+                    continue
             alive += 1
         return max(1, alive)
     except OSError:
