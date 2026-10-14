@@ -64,6 +64,17 @@ def _strip(address: str) -> str:
     return a
 
 
+def _near_misses(native: str) -> list[str]:
+    """``native`` and what a mistyped or older address may have meant: a trailing slash some native ids
+    end with, and the last part's first letter in the other case (`/Safety` for `/safety`)."""
+    out = [native] if native.endswith("/") else [native, native + "/"]
+    cut = native.rfind("/") + 1
+    first = native[cut : cut + 1]
+    if first and first.swapcase() != first:
+        out.append(native[:cut] + first.swapcase() + native[cut + 1 :])
+    return out
+
+
 def resolve(
     services: Services,
     address: str,
@@ -108,7 +119,7 @@ def resolve(
         return doc_id if ok else None
 
     # A typed or older address lost a native id's trailing slash (xkcd.com/936/): try it with one.
-    for native in (rest, rest + "/") if not rest.endswith("/") else (rest,):
+    for native in _near_misses(rest):
         doc_id = found(native)
         if doc_id is not None:
             return Resolution(address=address_of(head, native), kind="document", href=document_href(doc_id))

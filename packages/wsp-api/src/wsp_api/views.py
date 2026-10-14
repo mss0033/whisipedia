@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import re
 import threading
 from collections import OrderedDict
 from collections.abc import Callable, Mapping, Sequence
@@ -70,6 +71,8 @@ class DocumentView:
     has_history: bool
     rendition: schemas.Rendition | None = None
 
+
+_GENERATION_LIKE = re.compile(r"^\d{4}(-\d{2}){0,2}")  # 2026-08, 2026-10-12r5.b0001 ...
 
 DEFAULT_ZIM_MAX_OPEN = 512
 SNAPSHOT_CACHE_FILE = "library-snapshot.pickle"
@@ -463,6 +466,13 @@ class Library:
     def document(self, did: DocId, at: str | None) -> DocumentView:
         """The document (as of generation ``at``), its HTML and where it lives. Each entry is read once."""
         versions = self.history(did)
+        if at is not None and not _GENERATION_LIKE.match(at):
+            # 'nonsense' sorts after every dated generation, so it showed the current page under a
+            # Time Machine banner (2026-10-14 field exam): say what exists instead.
+            held = ", ".join(g for g, _ in versions[-12:]) or "none"
+            raise ApiError(
+                404, "generation_not_found", f"no generation {at!r} of {did}; versions held: {held}"
+            )
         doc = self.s.documents.get(did, at_generation=at)
         html: str | None = None
         gen: Generation | None = None

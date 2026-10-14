@@ -74,6 +74,14 @@ def test_document_before_first_generation_is_404(client: httpx.Client) -> None:
     assert r.json()["error"]["code"] == "document_not_found"
 
 
+def test_a_version_that_is_not_a_date_is_refused_with_the_versions_held(client: httpx.Client) -> None:
+    r = client.get(document_href(TURING), params={"at": "nonsense"})
+    assert r.status_code == 404
+    err = r.json()["error"]
+    assert err["code"] == "generation_not_found"
+    assert SAMPLE_GEN_1 in err["message"]
+
+
 def test_document_history_oldest_first(client: httpx.Client) -> None:
     hist = HistoryPage.model_validate(client.get(document_href(TURING) + "/history").json())
     assert [v.generation_id for v in hist.items] == [SAMPLE_GEN_1, SAMPLE_GEN_2]

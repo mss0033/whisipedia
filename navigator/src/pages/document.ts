@@ -102,10 +102,22 @@ function lookupBooks(ctx: PageContext, title: string): Promise<SearchHit[]> {
   const key = title.toLowerCase();
   const hit = ctx.opts.reload ? undefined : lookups.get(key);
   if (hit) return hit;
-  const found = ctx.app.api.search({ q: title, kind: 'books', page_size: 5 }).then((r) => r.hits);
+  const found = ctx.app.api.search({ q: title, kind: 'books', page_size: 10 }).then((r) => r.hits);
   lookups.set(key, found);
   found.catch(() => lookups.delete(key)); // a failure is not remembered
   return found;
+}
+
+/** Ids a mistyped or older link may have meant: with a trailing slash, and with the last part's first
+ * letter in the other case. At most two extra requests, only after a 404. */
+export function nearMisses(id: string): string[] {
+  const out: string[] = [];
+  if (!id.endsWith('/')) out.push(`${id}/`);
+  const cut = id.lastIndexOf('/') + 1;
+  const first = id.charAt(cut);
+  const flipped = first === first.toLowerCase() ? first.toUpperCase() : first.toLowerCase();
+  if (flipped !== first) out.push(id.slice(0, cut) + flipped + id.slice(cut + 1));
+  return out;
 }
 
 /** `text`: also the plain text of an HTML page (only the diff needs it). */
@@ -126,10 +138,17 @@ async function loadDoc(
   } catch (err) {
     // A link or a typed address that lost a native id's trailing slash (`xkcd.com/935` for
     // `xkcd.com/935/`): one more try with it, as the API's resolver does.
-    if (!(err instanceof ApiRequestError && err.status === 404) || id.endsWith('/')) throw err;
-    doc = await ctx.app.api.document(`${id}/`, { at, text }, ctx.signal).catch(() => {
-      throw err;
-    });
+    if (!(err instanceof ApiRequestError && err.status === 404)) throw err;
+    // Variants of a near miss, tried in order: the trailing slash some native ids end with
+    // (`xkcd.com/935` for `xkcd.com/935/`), then the other case of the last part's first letter
+    // (`/Safety` for `/safety`, 2026-10-14 field exam).
+    let found: DocumentResponse | null = null;
+    for (const variant of nearMisses(id)) {
+      found = await ctx.app.api.document(variant, { at, text }, ctx.signal).catch(() => null);
+      if (found) break;
+    }
+    if (!found) throw err;
+    doc = found;
   }
   cache.set(key, doc);
   return doc;
@@ -206,6 +225,41 @@ export interface CatalogHelp {
 /** US public domain: a work published in year Y is free from 1 January of Y + 96 (1930 in 2026). */
 export function publicDomainLine(now = new Date()): number {
   return now.getFullYear() - 96;
+}
+
+/**
+ * Sources of complete, readable books, best first. A Wikisource page named after a work is often a
+ * list of its editions: "Moby Dick" sent readers to a disambiguation page while Gutenberg held the
+ * novel (2026-10-14 field exam).
+ */
+const BOOK_SOURCE_RANK = [
+  'gutenberg',
+  'standard-ebooks',
+  'gutenberg-zim',
+  'kiwix-wikisource-en-all',
+  'wikisource-en',
+];
+
+/** The best search hit that is this book: same title (a subtitle or "by" may follow), best source first. */
+export function bestBookMatch<
+  T extends { title: string; doc_id?: string; source_id?: string | null },
+>(hits: readonly T[], key: string): T | undefined {
+  const same = hits.filter((hit) => {
+    const k = titleKey(hit.title);
+    if (/\bdisambiguation\b/.test(k)) return false;
+    return (
+      k === key ||
+      k.startsWith(`${key} by `) ||
+      k.startsWith(`${key} or `) ||
+      k.startsWith(`${key} a `)
+    );
+  });
+  const rank = (hit: T) => {
+    const source = hit.source_id ?? hit.doc_id?.replace(/^wsp:/, '').split('/')[0] ?? '';
+    const i = BOOK_SOURCE_RANK.indexOf(source);
+    return i === -1 ? BOOK_SOURCE_RANK.length : i;
+  };
+  return same.sort((a, b) => rank(a) - rank(b))[0];
 }
 
 function titleKey(title: string): string {
@@ -322,10 +376,7 @@ export function catalogNotice(
   help
     .lookup(title)
     .then((hits) => {
-      const match = hits.find((hit) => {
-        const k = titleKey(hit.title);
-        return k === key || k.startsWith(`${key} by `);
-      });
+      const match = bestBookMatch(hits, key);
       if (match) {
         status.replaceChildren(
           'The library holds it: ',

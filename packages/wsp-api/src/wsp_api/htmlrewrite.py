@@ -26,7 +26,7 @@ from urllib.parse import quote, unquote, urlsplit
 
 from wsp_api.addresses import address_of
 
-VERSION = 3  # bump when the output changes: rendered pages are cached by it
+VERSION = 4  # bump when the output changes: rendered pages are cached by it
 
 _LINKS = frozenset({("a", "href"), ("area", "href")})
 _ASSETS = frozenset(
@@ -53,12 +53,19 @@ _TAGS = frozenset(tag for tag, _ in _LINKS | _ASSETS | _SRCSET)
 _CANDIDATE = re.compile(r"\s*([^\s,][^\s]*?)(\s+[^,]*)?\s*(?:,|$)")
 
 
+_NONE_HOST = "//:None/"
+
+
 def _resolve(base_native_id: str, href: str, root: str = "") -> tuple[str, str] | None:
     """``(path, fragment)`` of a relative reference inside the same container, or None.
 
     ``root`` is the container root inside the source (``""``, or ``"<book>/"`` in a bundle): where a
     root-relative path (``/x``) starts.
     """
+    if href.startswith(_NONE_HOST):
+        # The Stack Exchange ZIMs (sotoki) write some related-question links as "//:None/../../x":
+        # a relative path behind a host that never got filled in (2026-10-14 field exam).
+        href = href[len(_NONE_HOST) :]
     parts = urlsplit(href)
     if parts.scheme or parts.netloc or href.startswith("//"):
         return None

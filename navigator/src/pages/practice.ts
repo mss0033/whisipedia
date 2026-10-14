@@ -243,8 +243,10 @@ function study(
     h(
       'div',
       { class: 'practice-layout' },
-      syllabus(route, pool, progress),
+      // The question first: on a phone and to a screen reader it came after a 40-row syllabus
+      // (2026-10-14 field exam); wide screens still show the syllabus on the left (CSS order).
       card(ctx, route, docId, q, index, questions.length, group?.id ?? null, progress),
+      syllabus(route, pool, progress),
     ),
   );
   return { title: shortTitle(title, pool), body, focus: firstChoice(body) };

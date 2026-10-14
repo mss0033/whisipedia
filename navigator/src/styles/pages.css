@@ -837,6 +837,11 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+@media (min-width: 761px) {
+  .practice-layout > .practice-syllabus {
+    order: -1;
+  }
+}
 .practice-syllabus table {
   width: 100%;
   font-size: 0.92em;

@@ -88,3 +88,9 @@ def test_byte_cache_is_bounded_and_single_flight() -> None:
     assert cache.get("big") is None  # larger than a quarter of the budget: served, not cached
     assert cache.get_or_build("none", lambda: None) is None
     assert cache.get_or_build("none", lambda: b"z") == b"z"  # no negative entries
+
+
+def test_none_host_links_from_stack_exchange_zims_resolve_as_relative() -> None:
+    page = '<a href="//:None/../../questions/134882/undoing-a-git-rebase">Undoing</a>'
+    out = rw(page, native_id="stackoverflow.com_en_all/questions/tagged/git-rebase")
+    assert 'href="wsp://qa/stackoverflow.com_en_all/questions/134882/undoing-a-git-rebase"' in out
