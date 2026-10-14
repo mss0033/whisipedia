@@ -42,6 +42,12 @@ _TAKES_VALUE = frozenset({"--config-dir", "--url"})
 Handler = Callable[[argparse.Namespace, TextIO], int]
 
 
+def _trawl_report(args: argparse.Namespace, out: TextIO) -> int:
+    from wsp_cli.trawl import cmd_trawl_report
+
+    return cmd_trawl_report(args, out)
+
+
 def _ops(name: str) -> Handler:
     """A handler from :mod:`wsp_cli.ops`, imported when the command runs (it loads the index stack)."""
 
@@ -321,6 +327,14 @@ def build_parser(argv: Sequence[str] | None = None) -> argparse.ArgumentParser:
     )
     s.add_argument("--settle-seconds", type=float, default=120.0, help="ignore files modified more recently")
     s.add_argument("--json", action="store_true")
+
+    tr = add("trawl", _usage, "The trawler: library pages checked the way a reader sees them.")
+    tr_sub = tr.add_subparsers(dest="trawl_command", required=True, metavar="COMMAND")
+    s = add(
+        "report", _trawl_report, "What the trawler found; --alerts keeps an alert per failing source.", tr_sub
+    )
+    s.add_argument("--alerts", action="store_true", help="open/resolve trawl:<source> alerts")
+    s.add_argument("--quiet", action="store_true", help="print only alert changes")
 
     ix = add("index", _usage, "Search index tools.")
     ix_sub = ix.add_subparsers(dest="index_command", required=True, metavar="COMMAND")

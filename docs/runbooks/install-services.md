@@ -8,6 +8,7 @@ Whisipedia runs as three systemd **user** units (PLAN §6.5, §12.6), rendered f
 | `whisipedia-orchestrator.service` | `wsp-orchestrator`: discovery, downloads, scrub, parity, drills, curator bots | yes (the only one) |
 | `whisipedia-api.service` | `wsp serve` on `127.0.0.1:8737`, serving `navigator/dist` | loopback only |
 | `whisipedia-index.timer` → `whisipedia-index.service` | nightly `wsp index build` (refine, index, catalog) | none |
+| `whisipedia-trawler.service` | `tools/wsp-trawl`: opens unvisited pages in a headless Chromium, one a minute, pausing while the owner reads; `wsp trawl report` shows what it found | loopback only |
 
 ## Before you start
 

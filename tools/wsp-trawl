@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Run the trawler (navigator/scripts/trawl.mjs) with a Node the user manager can find: $WSP_NODE,
+# else node on PATH, else the newest nvm install (a systemd user unit's PATH has no nvm).
+set -euo pipefail
+repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+node="${WSP_NODE:-}"
+if [[ -z "$node" ]]; then node="$(command -v node || true)"; fi
+if [[ -z "$node" ]]; then
+  node="$(ls -d "$HOME"/.nvm/versions/node/*/bin/node 2>/dev/null | sort -V | tail -n 1 || true)"
+fi
+if [[ -z "$node" || ! -x "$node" ]]; then
+  echo "wsp-trawl: no node found (set WSP_NODE)" >&2
+  exit 1
+fi
+cd "$repo/navigator"
+exec "$node" scripts/trawl.mjs "$@"

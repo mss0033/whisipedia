@@ -23,6 +23,7 @@ UNITS = (
     "whisipedia-api-health.timer",
     "whisipedia-index.service",
     "whisipedia-index.timer",
+    "whisipedia-trawler.service",  # checks unvisited pages as a reader sees them (tools/wsp-trawl)
     "whisipedia-background.slice",  # shared memory/CPU/IO budget of the background units
     "whisipedia-background-fetch.slice",  # the download lanes' share of it (tools/wsp-bg --fetch)
 )
@@ -31,6 +32,7 @@ ENABLE = (
     "whisipedia-api.service",
     "whisipedia-api-health.timer",
     "whisipedia-index.timer",
+    "whisipedia-trawler.service",
 )
 MARKER = "# Rendered by `wsp service install` from deploy/systemd/"
 

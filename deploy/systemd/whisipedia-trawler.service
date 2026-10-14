@@ -1,0 +1,40 @@
+# The trawler (navigator/scripts/trawl.mjs via tools/wsp-trawl): opens library pages nobody has
+# opened yet in a headless Chromium through the real Navigator, one a minute, and records what a
+# reader would find wrong (error pages, empty pages, missing images, the wrong viewer, catalog cards
+# without a direct link). It pauses while the owner uses the library; every request is marked as a
+# background probe. Every hour it runs `wsp trawl report --alerts` (an alert per failing source).
+#
+# Template: `wsp service install` renders @REPO@ and @CONFIG_DIR@ (docs/runbooks/install-services.md).
+
+[Unit]
+Description=Whisipedia trawler (unvisited pages checked the way a reader sees them)
+After=whisipedia-api.service
+
+[Service]
+Type=exec
+WorkingDirectory=@REPO@
+EnvironmentFile=-%h/.config/whisipedia/whisipedia.env
+Environment=WSP_TRAWL_URL=http://127.0.0.1:8737
+Environment=WSP_TRAWL_INTERVAL=60
+Environment=WSP_TRAWL_YIELD=300
+Environment="WSP_TRAWL_REPORT=@REPO@/.venv/bin/wsp --config-dir @CONFIG_DIR@ trawl report --alerts --quiet"
+ExecStart=@REPO@/tools/wsp-trawl
+Restart=on-failure
+RestartSec=10min
+KillMode=control-group
+TimeoutStopSec=60
+Nice=19
+CPUWeight=10
+IOSchedulingClass=idle
+Slice=whisipedia-background.slice
+# Chromium with one renderer, a fresh context every 100 pages.
+MemoryHigh=1G
+MemoryMax=1500M
+OOMScoreAdjust=700
+IPAddressDeny=any
+IPAddressAllow=localhost
+NoNewPrivileges=yes
+UMask=0027
+
+[Install]
+WantedBy=default.target
