@@ -178,6 +178,10 @@ class TantivyConfig:
     source of :class:`TantivyIndex`). Storing measured 1.4 KB a document (105 GB for 76M on
     2026-10-11), and every ranked candidate loaded its whole stored text, which made search slow."""
     suggest_rebuild_threshold: int = 2_000
+    suggest_rebuild_seconds: float = 12 * 3600
+    """A writer folds a small overlay into a fresh trie only when the trie is this old: a full rebuild
+    reads every title of the library (1.5 h over the NAS on 2026-10-14), and one ran after each of a
+    run of 36 small Kiwix releases. The nightly build, with the trie a day old, rebuilds it."""
     """Rebuild the suggest trie at commit when more than this many titles changed since the last build."""
     suggest_max_keys: int = 3_000_000
     """Completion keys in the suggest trie (titles and aliases of the best-ranked documents first):
@@ -599,6 +603,22 @@ class TantivyIndex:
         self._pending_removed.clear()
         self._set_meta("suggest_dirty", "0")
         self._db.commit()
+
+    def suggest_rebuild_due(self, now: float | None = None) -> bool:
+        """Whether :meth:`rebuild_suggest` would be worth its full scan now: the trie is missing or
+        stale beyond the overlay's threshold, or it is dirty and older than ``suggest_rebuild_seconds``.
+        A small dirty overlay on a fresh trie is left for a later writer (the nightly build)."""
+        with self._lock:
+            if not TitleTrie.exists(self._suggest_dir) or self._suggest_stale:
+                return True
+            pending = len(self._pending_suggest) + len(self._pending_removed) + self._suggester.pending
+            if pending > self.config.suggest_rebuild_threshold:
+                return True
+            dirty = pending > 0 or self._meta("suggest_dirty") == "1"
+            if not dirty:
+                return False
+            age = (time.time() if now is None else now) - self._trie_file_stamp()[1] / 1e9  # mtime_ns
+            return age >= self.config.suggest_rebuild_seconds
 
     def rebuild_suggest(self) -> None:
         """Commit, then fold the overlay into a fresh trie (e.g. on a schedule)."""

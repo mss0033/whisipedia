@@ -3,6 +3,14 @@
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Fixed: the ingest budget is shared, and a small release no longer rebuilds the suggest trie (2026-10-14)
+* `[vault] ingest_bytes_per_sec` is the library's budget: the ingests running at once share it (a slot
+  file per process under the state directory), a quarter of it while the owner browses. Three lanes
+  with a budget each had filled the NAS link.
+* A release's index step rebuilt the suggest trie in full after every run, a 1.5-hour scan of every
+  title for a site of a few hundred pages, 36 times in a row for the dormant Kiwix sites. The rebuild
+  runs when it is due: a missing or stale trie, an overlay past its threshold, or a dirty trie older
+  than `suggest_rebuild_seconds` (12 hours); the nightly build folds the rest.
 ### Fixed: a random pick no longer opens every source's reader (2026-10-14)
 * The start page's random and featured picks drew a document by opening a reader for all 57 sources,
   a few NAS round trips each. On a cold API, with the collection lanes loading the link, that took

@@ -20,9 +20,11 @@ Otherwise the in-memory sample library from :mod:`wsp_api.testing.fakes` backs t
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import os
 import re
+import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -398,24 +400,64 @@ stops. A pause that raised (the scrub's way) failed the seal step of every relea
 counted an attempt against it (2026-10-14 01:07)."""
 
 
+INGEST_SLOTS_DIR = "ingest-slots"
+INGEST_SLOTS_EVERY = 3.0  # seconds between looks at who else is ingesting
+
+
+def ingest_peers(slots: Path, *, pid: int | None = None) -> int:
+    """Register this process as an ingest in ``slots`` and count the ingests alive, this one
+    included. A slot is a file named by pid; one whose process is gone is dropped. The budget is
+    shared: three lanes at 40 MB/s each filled the link (2026-10-14 03:30)."""
+    me = os.getpid() if pid is None else pid
+    try:
+        slots.mkdir(parents=True, exist_ok=True)
+        (slots / str(me)).touch()
+        alive = 0
+        for slot in slots.iterdir():
+            if not slot.name.isdigit():
+                continue
+            if int(slot.name) != me and not Path(f"/proc/{slot.name}").exists():
+                with contextlib.suppress(OSError):
+                    slot.unlink()
+                continue
+            alive += 1
+        return max(1, alive)
+    except OSError:
+        return 1
+
+
 def ingest_pace(cfg: Mapping[str, Any]) -> Callable[[int], None] | None:
-    """A rate limit for the bytes an ingest reads and writes (``[vault] ingest_bytes_per_sec``; 0 = none),
-    a quarter of it while the owner uses the library (``yield_to_interactive_seconds``): on the NAS,
-    one lane adopting PDFs at the link's full speed starved the API's Refinery reads (2026-10-13)."""
+    """A rate limit for the bytes an ingest reads and writes (``[vault] ingest_bytes_per_sec``; 0 = none).
+    The budget is the library's, shared by the ingests running at once (:func:`ingest_peers`), and a
+    quarter of it while the owner uses the library (``yield_to_interactive_seconds``): on the NAS, one
+    lane adopting PDFs at the link's full speed starved the API's Refinery reads (2026-10-13), and
+    three lanes with a budget each did the same the next night."""
     from wsp_core.activity import recently_active
     from wsp_vault.ratelimit import RateLimiter
 
     vcfg = section(cfg, "vault")
-    rate = float(vcfg.get("ingest_bytes_per_sec", 40e6))
-    if rate <= 0:
+    budget = float(vcfg.get("ingest_bytes_per_sec", 40e6))
+    if budget <= 0:
         return None
     marker = activity_marker(cfg)
     window = float(vcfg.get("yield_to_interactive_seconds", 300))
-    full = RateLimiter(rate, burst_seconds=5.0)
-    quiet = RateLimiter(rate * INGEST_BUSY_SHARE, burst_seconds=5.0)
+    state = paths(cfg).state_dir
+    slots = None if state is None else state / INGEST_SLOTS_DIR
+    limiters: dict[float, RateLimiter] = {}
+    looked = {"at": float("-inf"), "peers": 1}
 
     def pace(n: int) -> None:
-        limiter = quiet if window > 0 and recently_active(marker, window) else full
+        now = time.monotonic()
+        if slots is not None and now - looked["at"] >= INGEST_SLOTS_EVERY:
+            looked["peers"] = ingest_peers(slots)
+            looked["at"] = now
+        share = budget / looked["peers"]
+        if window > 0 and recently_active(marker, window):
+            share *= INGEST_BUSY_SHARE
+        limiter = limiters.get(share)
+        if limiter is None:
+            limiters.clear()  # the share changed: a fresh bucket at the new rate
+            limiter = limiters[share] = RateLimiter(share, burst_seconds=5.0)
         limiter.consume(n)
 
     return pace

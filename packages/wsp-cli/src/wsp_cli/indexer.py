@@ -208,11 +208,17 @@ class Indexer:
                 self._feed.close()
 
     def finish(self) -> None:
-        """After a run that changed the index: rebuild the suggest trie once (bulk commits defer it)."""
+        """After a run that changed the index: rebuild the suggest trie once (bulk commits defer it),
+        when a rebuild is due (:meth:`TantivyIndex.suggest_rebuild_due`); a small overlay on a fresh
+        trie waits for the nightly build."""
         if self._changed:
-            started = self.clock()
-            self.index.rebuild_suggest()
-            self._say(f"suggest: rebuilt in {self.clock() - started:.1f}s")
+            if self.index.suggest_rebuild_due():
+                started = self.clock()
+                self.index.rebuild_suggest()
+                self._say(f"suggest: rebuilt in {self.clock() - started:.1f}s")
+            else:
+                self.index.commit()
+                self._say("suggest: rebuild not due (fresh trie, small overlay); left for the nightly build")
             self._changed = False
 
     # --- helpers -------------------------------------------------------------------------------

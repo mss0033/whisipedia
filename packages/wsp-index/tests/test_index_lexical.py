@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from collections import Counter
 from collections.abc import Iterator, Sequence
 from dataclasses import replace
@@ -484,3 +485,27 @@ def test_a_new_rank_replaces_every_prior(index: TantivyIndex) -> None:
     assert index.suggest("paris")[0] == "Paris"
     set_rank(index, {make_doc_id("s", "pc"): 0.5, make_doc_id("t", "ph"): 0.2})  # p has no rank now
     assert index.suggest("paris") == ["Paris Commune", "Paris Hilton", "Paris"]
+
+
+def test_a_suggest_rebuild_is_due_only_for_a_stale_or_old_trie(tmp_path: Path) -> None:
+    """A full rebuild reads every title of the library; a few new titles on a fresh trie wait."""
+    from dataclasses import replace as replace_cfg
+
+    # suggest_open_rebuild_titles=0: not "small", so commits keep an overlay instead of rebuilding.
+    cfg = replace_cfg(
+        SMALL, suggest_rebuild_threshold=3, suggest_rebuild_seconds=3600, suggest_open_rebuild_titles=0
+    )
+    with TantivyIndex(tmp_path / "ix", cfg) as idx:  # an empty trie is written on open
+        idx.upsert([doc("s", "a", "Aardvark", "x")])
+        idx.rebuild_suggest()
+        assert not idx.suggest_rebuild_due()  # fresh and clean
+        idx.upsert([doc("s", "b", "Bison", "y")])
+        idx.commit()
+        assert not idx.suggest_rebuild_due()  # one pending title on a fresh trie: not worth the scan
+        assert idx.suggest("Bis") == ["Bison"]  # the overlay serves it meanwhile
+        assert idx.suggest_rebuild_due(now=time.time() + 3601)  # dirty and old: due
+        # An overlay past its threshold is folded by the commit itself (unchanged behaviour).
+        idx.upsert([doc("s", str(i), f"Camel {i}", "z") for i in range(4)])
+        idx.commit()
+        assert not idx.suggest_rebuild_due()
+        assert idx.suggest("Cam", limit=1) == ["Camel 0"]

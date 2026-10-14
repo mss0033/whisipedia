@@ -3,6 +3,7 @@ the owner's real key and ~/.config are never touched."""
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -113,3 +114,17 @@ def test_ingest_pace_slows_down_while_the_owner_browses(
     pace = bootstrap.ingest_pace(base)
     assert pace is not None
     pace(4096)  # busy: the slow limiter, still within its burst
+
+
+def test_ingest_peers_count_the_live_ingests_and_drop_stale_slots(tmp_path: Path) -> None:
+    """The ingest budget is shared by the ingests alive at once; a slot of a dead process is dropped."""
+    from wsp_cli.bootstrap import ingest_peers
+
+    slots = tmp_path / "ingest-slots"
+    assert ingest_peers(slots) == 1
+    (slots / str(os.getppid())).touch()  # another live process
+    (slots / "4000000").touch()  # a pid that cannot exist
+    (slots / "notes.txt").touch()  # not a slot
+    assert ingest_peers(slots) == 2
+    assert not (slots / "4000000").exists()
+    assert (slots / str(os.getpid())).exists()
