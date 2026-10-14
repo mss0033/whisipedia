@@ -673,18 +673,38 @@ class RefineryCatalog:
         return None if entry is None else int(entry.data.get("doc_count", 0))
 
     def random_doc(self, *, sources: Sequence[str] | None, rng: random.Random) -> DocId | None:
-        """A uniformly random live document of ``sources`` (all known sources by default)."""
-        pools = [(s, self._reader(s)) for s in (sorted(sources) if sources else self._known_sources())]
-        sized = [(r, len(r)) for _, r in pools if r is not None and len(r) > 0]
-        total = sum(n for _, n in sized)
-        if total == 0:
-            return None
-        k = rng.randrange(total)
-        for reader, n in sized:
-            if k < n:
-                return DocId(reader.doc_id_at(k))
-            k -= n
-        return None  # pragma: no cover - unreachable
+        """A uniformly random live document of ``sources`` (all known sources by default).
+
+        The source is drawn first, by its document count from the catalog on local disk, and only
+        that source's reader is opened. Opening every source's reader (57 of them, a few NAS round
+        trips each) took a cold API past the start page's deadline while the lanes loaded the link,
+        and the health check restarted it before the readers warmed (2026-10-14 03:00). A source the
+        catalog does not count yet is weighed by its reader, the old way."""
+        candidates = sorted(sources) if sources else self._known_sources()
+        weighted: list[tuple[str, int]] = []
+        for source_id in candidates:
+            entry = self._entry(source_id)
+            n = int(entry.data.get("doc_count", 0)) if entry is not None else 0
+            if n <= 0:
+                reader = self._reader(source_id)
+                n = len(reader) if reader is not None else 0
+            if n > 0:
+                weighted.append((source_id, n))
+        while weighted:
+            total = sum(n for _, n in weighted)
+            k = rng.randrange(total)
+            for i, (source_id, n) in enumerate(weighted):
+                if k >= n:
+                    k -= n
+                    continue
+                reader = self._reader(source_id)
+                if reader is None or len(reader) == 0:
+                    del weighted[i]  # counted by the catalog, gone from the Refinery: draw again
+                    break
+                return DocId(reader.doc_id_at(min(k, len(reader) - 1)))
+            else:  # pragma: no cover - k is always within the total
+                return None
+        return None
 
     def recent(
         self, *, limit: int, sources: Sequence[str] | None = None

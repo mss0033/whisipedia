@@ -3,6 +3,12 @@
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Fixed: a random pick no longer opens every source's reader (2026-10-14)
+* The start page's random and featured picks drew a document by opening a reader for all 57 sources,
+  a few NAS round trips each. On a cold API, with the collection lanes loading the link, that took
+  longer than the start page's deadline and the health check restarted the API before the readers
+  warmed (ten restarts in two hours). The source is drawn from the catalog's local document counts
+  first and only its reader is opened.
 ### Added: question pages read as threads (2026-10-14)
 * A Stack Exchange question page loses the site's own chrome (top bars, header, sidebars, footer); the
   accepted answer comes first and the rest follow by score, each post carries its score, and the

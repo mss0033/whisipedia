@@ -231,3 +231,43 @@ def test_random_picks_ask_the_nas_for_each_source_once_in_a_while(tmp_path: Path
         clock["t"] += 6
         assert cat.random_doc(sources=None, rng=random.Random(9)) is not None
         assert calls["n"] == 4
+
+
+def test_a_cold_random_pick_opens_one_reader_when_the_catalog_counts_the_sources(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Opening every source's reader (a few NAS round trips each) took a cold API past the start
+    page's deadline (2026-10-14); the source is drawn from the catalog's counts first."""
+    import json
+
+    from wsp_index.catalog import CATALOG_FORMAT
+
+    refinery = tmp_path / "refinery"
+    _wiki(refinery)
+    _bundle(refinery)
+    catalog_root = tmp_path / "catalog"
+    catalog_root.mkdir()
+    for source_id, n in (("wikipedia-en-zim", 60), ("kiwix-bundle", 20)):
+        entry: dict[str, object] = {"format": CATALOG_FORMAT, "doc_count": n, "categories": []}
+        (catalog_root / f"{source_id}.json").write_text(json.dumps(entry))
+    feed = SqliteChangeFeed(tmp_path / "changes.sqlite")
+    cat = RefineryCatalog(refinery, catalog_root, feed, sources=["wikipedia-en-zim", "kiwix-bundle"])
+    opened: list[str] = []
+    real = refinery_module.RefineryReader
+
+    class Counting(real):  # type: ignore[misc, valid-type]
+        def __init__(self, gen_dir: Path, **kw: object) -> None:
+            opened.append(gen_dir.parent.name)
+            super().__init__(gen_dir, **kw)  # type: ignore[arg-type]
+
+    monkeypatch.setattr("wsp_index.catalog.RefineryReader", Counting)
+    assert cat.random_doc(sources=None, rng=random.Random(3)) is not None
+    assert len(opened) == 1
+    # Over many picks both sources come up, in proportion to their counts (60 : 20).
+    seen = Counter(
+        DocId(cat.random_doc(sources=None, rng=random.Random(i)) or "").split("/")[0] for i in range(300)
+    )
+    assert set(seen) == {"wsp:wikipedia-en-zim", "wsp:kiwix-bundle"}
+    assert seen["wsp:wikipedia-en-zim"] > seen["wsp:kiwix-bundle"] * 2
+    assert sorted(set(opened)) == ["kiwix-bundle", "wikipedia-en-zim"]  # each reader once, cached
+    feed.close()
