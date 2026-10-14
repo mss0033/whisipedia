@@ -903,3 +903,49 @@
 .pool-list li {
   margin: 0.3em 0;
 }
+
+/* --- the book reader (pages/reader.ts) --- */
+.reader {
+  max-width: 72ch;
+}
+.reader-toc {
+  margin: 0 0 1.2em;
+}
+.reader-toc summary {
+  cursor: pointer;
+  font-weight: bold;
+}
+.reader-toc ol {
+  margin: 0.4em 0 0.4em 1.5em;
+  padding: 0;
+  columns: 2;
+  column-gap: 2em;
+}
+.reader-toc li {
+  break-inside: avoid;
+  margin: 0.15em 0;
+}
+.reader-toc li.is-current {
+  font-weight: bold;
+}
+.reader-where {
+  margin: 0 0 0.6em;
+}
+.reader-where .badge {
+  margin-left: 0.5em;
+}
+.reader-chapter p {
+  line-height: 1.55;
+  margin: 0 0 0.9em;
+}
+.reader-nav {
+  margin: 1.5em 0 0;
+}
+.continue-reading li {
+  margin: 0.3em 0;
+}
+@media (max-width: 600px) {
+  .reader-toc ol {
+    columns: 1;
+  }
+}

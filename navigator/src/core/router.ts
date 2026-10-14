@@ -34,6 +34,8 @@ export type Route =
       at: string | undefined;
       diff: boolean;
       fragment: string;
+      /** A book's chapter (`?ch=3`, `?ch=all`); undefined resumes where the viewer left off. */
+      chapter: number | 'all' | undefined;
     }
   | {
       page: 'practice';
@@ -119,6 +121,7 @@ export function resolveRoute(address: string): Route {
         at: p.at && GENERATION_ID_RE.test(p.at) ? p.at : undefined,
         diff: p.diff === '1',
         fragment: a.fragment,
+        chapter: p.ch === 'all' ? 'all' : /^\d{1,4}$/.test(p.ch ?? '') ? Number(p.ch) : undefined,
       };
     }
   }

@@ -11,6 +11,7 @@ the search-cost ideas that measurement left on the table. Plans here are proposa
 | Exam Practice Hall | `wsp://practice` | NCVEC question pools (7 documents) | Parser in `core/exam.ts`; study by group, mock exams by seed; progress in the browser |
 | The Screening Room | `wsp://screening-room` | any document whose original file is video or audio | Players in `ui/player.ts`, four skins, resume positions; kinds `video`/`audio` in the API |
 | Dictionary lookup | `wsp://define/<word>`, location bar `define`/`def`/`d` | the Wiktionary copies | `pages/define.ts`: headword spellings tried in order, dictionary search as the fallback (2026-10-14) |
+| Book reader | document pages of `kind=books` | Gutenberg, Wikisource, Standard Ebooks | `core/book.ts` + `pages/reader.ts`: chapters from heading lines, contents, prev/next, remembered place, Continue Reading on the start page (2026-10-14) |
 | Catalog cards that know where the book is | Open Library document pages | Open Library works and editions | `catalogNotice` in `pages/document.ts`: held link, same-title lookup, copy elsewhere, or the copyright reason; adapter keeps external ids (2026-10-14) |
 
 ## Designed, not built
@@ -25,10 +26,9 @@ from the book's (translations, subtitles); and a re-refine of Open Library so ca
 2026-10-14 carry their Project Gutenberg and Internet Archive ids (114M records: a few hours of
 background work over the NAS, for the owner to schedule; otherwise the next monthly dump brings them).
 
-### Book reader for `kind=books`
-Gutenberg, Standard Ebooks and Wikisource texts are long: a reader mode with a table of contents from
-headings, reading position per book in the browser, font and measure controls, "continue reading" on the
-start page, and chapter-at-a-time rendering (a 2 MB text renders slowly as one page). Effort: two days.
+### Book reader
+Built 2026-10-14 (see above). Left: font and measure controls (the themes set the type today), and
+chapter detection for books whose headings are not on their own lines.
 
 ### Stack Exchange threads
 The ZIM pages render already; worth adding: accepted answer first, vote counts as badges, the question's

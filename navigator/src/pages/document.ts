@@ -32,6 +32,7 @@ import {
 import { audioDeck, videoPlayer } from '../ui/player.ts';
 import { parseCase, renderCase } from './legal.ts';
 import { POOL_SOURCE } from './practice.ts';
+import { isBook, type ReaderContext, renderBook } from './reader.ts';
 import type { AppServices, PageContext, PageResult } from './types.ts';
 
 type DocRoute = Extract<Route, { page: 'document' }>;
@@ -89,7 +90,13 @@ export function withoutTitleLine(text: string, title: string): string {
   return m && norm(m[1]!) === norm(title) && norm(title) ? text.slice(m[0].length) : text;
 }
 
-export function renderBody(doc: DocumentResponse): { node: HTMLElement; broken: number } {
+export function renderBody(
+  doc: DocumentResponse,
+  reader?: ReaderContext,
+): { node: HTMLElement; broken: number } {
+  if (reader && isBook(doc) && doc.text?.trim()) {
+    return { node: renderBook(doc, withoutTitleLine(doc.text, doc.title), reader), broken: 0 };
+  }
   const wrap = h('div', { class: 'doc-body', lang: doc.lang });
   if (doc.format === 'html' && doc.html) {
     const { fragment, stats } = sanitizeDocumentHtml(doc.html, {
@@ -758,7 +765,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
     const current = await loadDoc(ctx, route.docId, undefined, true);
     content = renderDiff(doc, current);
   } else {
-    const r = renderBody(doc);
+    const r = renderBody(doc, { app: ctx.app, chapter: route.chapter, address: here });
     content = r.node;
     broken = r.broken;
   }

@@ -6,6 +6,7 @@ import { ApiRequestError } from '../api/client.ts';
 import type { Change, Portal, SourceInfo } from '../api/types.ts';
 import { attachSuggest } from '../chrome/suggest.ts';
 import { makeAddress, searchAddress } from '../core/address.ts';
+import { unfinishedBooks } from '../core/book.ts';
 import { h } from '../core/dom.ts';
 import { formatDate, formatNumber, odometer } from '../core/format.ts';
 import {
@@ -18,7 +19,7 @@ import {
   sectionBox,
   wspLink,
 } from '../ui/components.ts';
-import type { PageContext, PageResult } from './types.ts';
+import type { AppServices, PageContext, PageResult } from './types.ts';
 
 async function optional<T>(p: Promise<T>): Promise<T | null> {
   try {
@@ -178,6 +179,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
         )
       : null,
     sectionBox('Feeling Adventurous?', randomButtons),
+    continueReading(app),
   );
 
   const body = h(
@@ -272,4 +274,20 @@ export async function render(ctx: PageContext): Promise<PageResult> {
     ),
   );
   return { title: 'Whisipedia Start Page', body };
+}
+
+/** Books the viewer started and has not finished (the reader remembers the place in this browser). */
+export function continueReading(app: Pick<AppServices, 'storage'>): HTMLElement | null {
+  const books = unfinishedBooks(app.storage).slice(0, 4);
+  if (books.length === 0) return null;
+  return sectionBox(
+    'Continue Reading',
+    h(
+      'ul',
+      { class: 'continue-reading' },
+      books.map((b) =>
+        h('li', null, wspLink(b.address, b.title), ` · chapter ${b.chapter + 1} of ${b.chapters}`),
+      ),
+    ),
+  );
 }

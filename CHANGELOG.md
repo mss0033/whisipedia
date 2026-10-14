@@ -3,6 +3,11 @@
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Added: a book reader (2026-10-14)
+* A plain-text book (Gutenberg, Wikisource, Standard Ebooks) opens a chapter at a time: a table of
+  contents from its heading lines, previous and next, `?ch=all` for the whole text. The Navigator
+  remembers where the viewer is in each book (this browser only) and the Start Page offers to
+  continue. A 2 MB text no longer renders as one page.
 ### Added: wsp://define/<word> goes straight to the dictionary entry (2026-10-14)
 * The location bar takes `define lighthouse`, `def lighthouse` or `d lighthouse`; the Navigator tries the
   Wiktionary copies by headword (as typed, lower case, capitalised) and opens the entry, or searches

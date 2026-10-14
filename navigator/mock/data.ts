@@ -636,6 +636,25 @@ of my undertaking.
 I am already far north of London, and as I walk in the streets of
 Petersburgh, I feel a cold northern breeze play upon my cheeks, which
 braces my nerves and fills me with delight.
+
+LETTER 2
+
+To Mrs. Saville, England.
+
+How slowly the time passes here, encompassed as I am by frost and snow!
+Yet a second step is taken towards my enterprise.
+
+CHAPTER I
+
+I am by birth a Genevese, and my family is one of the most
+distinguished of that republic. My ancestors had been for many years
+counsellors and syndics.
+
+CHAPTER II
+
+We were brought up together; there was not quite a year difference in
+our ages. I need not say that we were strangers to any species of
+disunion or dispute.
 `,
       },
     ],
