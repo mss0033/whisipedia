@@ -350,6 +350,9 @@ function report() {
   });
 }
 
+let stopRequested = false;
+for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => (stopRequested = true));
+
 async function main() {
   mkdirSync(OUT, { recursive: true });
   const { seen, summary } = await load();
@@ -367,13 +370,22 @@ async function main() {
       viewport: { width: 1280, height: 900 },
     });
   let context = await fresh();
-  let sources = await readableSources();
+  // The library may still be starting (the API restarts on deploys): wait for it rather than exit.
+  let sources = null;
+  while (sources === null && !stopRequested) {
+    sources = await readableSources().catch((e) => {
+      log(
+        `trawl: library not answering yet (${String(e.message ?? e).slice(0, 80)}); retrying in 30 s`,
+      );
+      return null;
+    });
+    if (sources === null) await sleep(30_000);
+  }
+  if (sources === null) return;
   let done = 0;
   const exhausted = new Map(); // source -> when it last only drew checked pages
-  let stop = false;
   let reported = 0;
-  for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => (stop = true));
-  while (!stop && (PAGES === 0 || done < PAGES)) {
+  while (!stopRequested && (PAGES === 0 || done < PAGES)) {
     if (ownerIdleMs() < YIELD) {
       await sleep(30_000); // the owner is using the library: wait
       continue;
