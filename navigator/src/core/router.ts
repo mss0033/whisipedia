@@ -46,6 +46,7 @@ export type Route =
       index: number;
     }
   | { page: 'screening' }
+  | { page: 'define'; word: string }
   | { page: 'invalid'; input: string };
 
 function toKind(v: string | undefined): DocKind | undefined {
@@ -91,6 +92,8 @@ export function resolveRoute(address: string): Route {
       return { page: 'offline', url: p.url ?? p.doc ?? '', from: p.from };
     case 'screening-room':
       return { page: 'screening' };
+    case 'define':
+      return { page: 'define', word: a.path };
     case 'practice': {
       const seed = Number.parseInt(p.seed ?? '', 10);
       const index = Number.parseInt(p.n ?? '0', 10);

@@ -10,16 +10,14 @@ the search-cost ideas that measurement left on the table. Plans here are proposa
 |---|---|---|---|
 | Exam Practice Hall | `wsp://practice` | NCVEC question pools (7 documents) | Parser in `core/exam.ts`; study by group, mock exams by seed; progress in the browser |
 | The Screening Room | `wsp://screening-room` | any document whose original file is video or audio | Players in `ui/player.ts`, four skins, resume positions; kinds `video`/`audio` in the API |
+| Dictionary lookup | `wsp://define/<word>`, location bar `define`/`def`/`d` | the Wiktionary copies | `pages/define.ts`: headword spellings tried in order, dictionary search as the fallback (2026-10-14) |
 | Catalog cards that know where the book is | Open Library document pages | Open Library works and editions | `catalogNotice` in `pages/document.ts`: held link, same-title lookup, copy elsewhere, or the copyright reason; adapter keeps external ids (2026-10-14) |
 
 ## Designed, not built
 
-### Dictionary lookup: `wsp://define/<word>`
-A headword goes straight to the entry instead of a 2-3 s search: resolve `wsp:kiwix-wiktionary-en-all/<word>`
-(the HTML Wiktionary; titles are case-sensitive, try the word, then lower case, then the dump-derived
-`wiktionary-en` entry), render only the asked language's section with a toggle for the rest, and fall back
-to a `kind=dictionary` search. A location-bar shortcut (`define serendipity`, `d serendipity`). The
-search page's instant definition box already parses senses; the page reuses it. Effort: a day.
+### Dictionary lookup
+Built 2026-10-14 (see above). Left: a compact entry view that shows only the asked language's section
+with a toggle for the rest (the full Wiktionary page opens today).
 
 ### Open Library cards: what is left
 Built 2026-10-14 (see above). Left: the fuzzy title-and-author match for cards whose title differs

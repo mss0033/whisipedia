@@ -23,6 +23,7 @@ import { GlobalHistory, Hotlist, SessionStack } from './core/history.ts';
 import { type Route, resolveRoute } from './core/router.ts';
 import { SafeStorage } from './core/storage.ts';
 import { THEMES, ThemeManager } from './core/theme.ts';
+import * as definePage from './pages/define.ts';
 import * as directoryPage from './pages/directory.ts';
 import * as documentPage from './pages/document.ts';
 import * as homePage from './pages/home.ts';
@@ -56,6 +57,7 @@ const RENDERERS: Record<Route['page'], PageRenderer> = {
   home: homePage.render,
   practice: practicePage.render,
   screening: screeningPage.render,
+  define: definePage.render,
   directory: directoryPage.render,
   search: searchPage.render,
   whatsnew: whatsnewPage.render,

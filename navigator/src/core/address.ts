@@ -34,6 +34,7 @@ export const BUILTIN_HOSTS = [
   'offline',
   'practice',
   'screening-room',
+  'define',
 ] as const;
 export type BuiltinHost = (typeof BUILTIN_HOSTS)[number];
 
@@ -159,7 +160,7 @@ export function setReadableHosts(hosts: Iterable<string> | null): void {
 
 /** True while the list is unknown (the server answers for itself), else whether `host` is readable. */
 export function isReadableHost(host: string): boolean {
-  return readableHosts === null || readableHosts.has(host);
+  return isBuiltinHost(host) || readableHosts === null || readableHosts.has(host);
 }
 
 /** Instant client-side navigational shortcuts ("rfc 9110", "Q42"). */
@@ -168,6 +169,7 @@ const SHORTCUTS: Array<[RegExp, (m: RegExpExecArray) => string]> = [
   [/^(?:gutenberg|pg)\s*#?\s*(\d+)$/i, (m) => makeAddress('gutenberg', m[1]!)],
   [/^arxiv:?\s*(\d{4}\.\d{4,5}(?:v\d+)?)$/i, (m) => makeAddress('arxiv', m[1]!)],
   [/^(Q[1-9]\d*)$/, (m) => makeAddress('wikidata', m[1]!)],
+  [/^(?:define|def|d)\s+(\S.*)$/i, (m) => makeAddress('define', m[1]!.trim())],
   [/^pmid:?\s*(\d+)$/i, (m) => makeAddress('pubmed', m[1]!)],
 ];
 

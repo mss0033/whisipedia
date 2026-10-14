@@ -105,6 +105,18 @@ export async function renderHelp(ctx: PageContext): Promise<PageResult> {
       wspLink(makeAddress('screening-room'), 'wsp://screening-room'),
       ' is where the library’s film, lectures, recorded radio and music play. A document whose original file is video or audio shows a player in place of the file panel: four skins (Theater 98, Brushed Steel, Desktop 95, Tube 2008) chosen from the player’s menu, resume where you left off, and keys: Space or K play/pause, J and L skip ten seconds, arrows seek and change the volume, M mutes, F fills the screen, 0–9 jump to a tenth. The room lists what to continue and which sites hold media, and its projection test builds a short reel in the browser to try the players before any film is on the shelves.',
     ),
+    h('h2', { id: 'help-define', tabindex: '-1' }, 'Look a word up'),
+    h(
+      'p',
+      null,
+      'Type ',
+      h('code', null, 'define lighthouse'),
+      ' (or ',
+      h('code', null, 'd lighthouse'),
+      ') in the location bar, or open ',
+      h('code', null, 'wsp://define/lighthouse'),
+      ': the Navigator goes straight to the dictionary entry (the Wiktionary copies, headword spelled as typed, in lower case or capitalised), and searches the dictionaries when none has the word.',
+    ),
     h('h2', { id: 'help-search', tabindex: '-1' }, 'Search tips'),
     h(
       'ul',

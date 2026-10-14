@@ -3,6 +3,10 @@
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Added: wsp://define/<word> goes straight to the dictionary entry (2026-10-14)
+* The location bar takes `define lighthouse`, `def lighthouse` or `d lighthouse`; the Navigator tries the
+  Wiktionary copies by headword (as typed, lower case, capitalised) and opens the entry, or searches
+  the dictionaries when none has the word.
 ### Fixed: the health check no longer counts as the owner using the library (2026-10-14)
 * The API health check asks for the start page every two minutes; the activity marker took that for
   interactive use, so the library was "busy" without end: scrub and parity slices never ran and paced
