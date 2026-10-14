@@ -286,6 +286,7 @@ export function search(params: URLSearchParams): Response<'GET /v1/search'> {
     total_is_estimate: false,
     took_ms: Math.round((performance.now() - t0) * 100) / 100 + 18,
     timings_ms: {},
+    scope_note: null,
     intent: nav
       ? 'navigate'
       : /^define\b/.test(lq)

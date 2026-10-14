@@ -1015,7 +1015,9 @@ def pdf_text(path: Path, max_pages: int) -> str:
                 textpage.close()
             finally:
                 page.close()
-        return "\n\f\n".join(out)  # a form feed between pages: policy._edge_banner reads page edges
+        # A form feed between pages: policy._edge_banner reads page edges. U+FFFD (a glyph the PDF does
+        # not map to a character, e.g. the USDA tables' spacing) becomes a space.
+        return "\n\f\n".join(out).replace("\ufffd", " ")
     finally:
         pdf.close()
 

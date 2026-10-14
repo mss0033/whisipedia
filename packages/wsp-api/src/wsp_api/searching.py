@@ -27,7 +27,7 @@ from wsp_api.schemas import DocKind, Hit, KindFacet, SearchResults, SearchScope
 from wsp_api.snapshot import ZIM_ADAPTER
 from wsp_api.views import Library
 from wsp_core.listing import skip_paths, skip_regex
-from wsp_core.model import SearchHit
+from wsp_core.model import SearchHit, SourceSpec, searchable
 
 log = logging.getLogger("wsp.api.search")
 SLOW_SEARCH_MS = 3000.0  # a search slower than this is logged with its stages
@@ -105,6 +105,11 @@ def _count(index: object, q: str, wanted: Sequence[str] | None, at_least: int) -
     return len(cast(Sequence[SearchHit], run(q, limit=max(at_least, 1), offset=0, sources=wanted)))
 
 
+def _access(spec: SourceSpec) -> Mapping[str, object]:
+    raw = spec.raw.get("access")
+    return cast(Mapping[str, object], raw) if isinstance(raw, Mapping) else {}
+
+
 class Searcher:
     def __init__(self, lib: Library) -> None:
         self.lib = lib
@@ -162,11 +167,58 @@ class Searcher:
             return None
         return fixed if _count(self.lib.s.index, fixed, wanted, max(found, 1)) >= max(found, 1) else None
 
+    def searched_instead(
+        self, wanted: Sequence[str] | None
+    ) -> tuple[list[str] | None, list[tuple[str, list[str]]]]:
+        """``wanted`` with each source that is not indexed (registry ``index: false``) replaced by the
+        indexed copy it is searched through, and the replacements made.
+
+        A ZIM edition that renders an indexed dump (wikipedia-en-zim for wikipedia-top10's English
+        pages) or a reader edition of indexed texts (gutenberg-zim) holds nothing in the index, so a
+        search limited to it found nothing, silently (2026-10-14 field exam, three examinees). The copy
+        is named by ``access.searched_as`` or found as a source that borrows its renditions.
+        """
+        if wanted is None:
+            return None, []
+        out: list[str] = []
+        replaced: list[tuple[str, list[str]]] = []
+        for sid in wanted:
+            spec = self.lib.s.source(sid)
+            twins = [] if spec is None or searchable(spec) else self._twins(spec)
+            if twins:
+                out.extend(twins)
+                replaced.append((sid, twins))
+            else:
+                out.append(sid)
+        return list(dict.fromkeys(out)), replaced
+
+    def _twins(self, spec: SourceSpec) -> list[str]:
+        named = _access(spec).get("searched_as")
+        if isinstance(named, list):
+            ids = [str(x) for x in cast(list[object], named)]
+            return [x for x in ids if self.lib.s.source(x) is not None]
+        twins: list[str] = []
+        for other in self.lib.s.sources:
+            rends = _access(other).get("rendition")
+            if isinstance(rends, list) and any(
+                isinstance(r, Mapping) and cast(Mapping[str, object], r).get("source") == spec.id
+                for r in cast(list[object], rends)
+            ):
+                twins.append(other.id)
+        return twins
+
     def run(
         self, q: str, wanted: Sequence[str] | None, kind: DocKind | None, limit: int, offset: int
     ) -> SearchResults:
         t0 = time.perf_counter()
         lib, s = self.lib, self.lib.s
+        wanted, replaced = self.searched_instead(wanted)
+        note = (
+            "; ".join(
+                f"{a} is searched through {', '.join(b)}, which holds the same pages" for a, b in replaced
+            )
+            or None
+        )
         stages: dict[str, float] = {}
 
         def lap(name: str, since: float) -> float:
@@ -232,6 +284,7 @@ class Searcher:
             instant=instant.definition(q, lib.s.documents.get) if offset == 0 else None,
             did_you_mean=did_you_mean,
             low_confidence=low,
+            scope_note=note,
             scope=None
             if routed is None
             else SearchScope(site=routed.site, sources=list(routed.sources), fallback=routed.fallback),

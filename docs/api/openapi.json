@@ -4347,6 +4347,18 @@
             "title": "Low Confidence",
             "description": "True when retrieval found little or nothing.",
             "default": false
+          },
+          "scope_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope Note",
+            "description": "Set when a requested source is not searched itself but through another copy (e.g. the Wikipedia ZIM through the indexed dump of the same articles)."
           }
         },
         "type": "object",
@@ -4367,7 +4379,8 @@
           "instant",
           "did_you_mean",
           "scope",
-          "low_confidence"
+          "low_confidence",
+          "scope_note"
         ],
         "title": "SearchResults"
       },

@@ -354,6 +354,11 @@ class SearchResults(_Wire):
         description="Set when the query named a site (`rfc 9110`): totals and facets count that scope.",
     )
     low_confidence: bool = Field(default=False, description="True when retrieval found little or nothing.")
+    scope_note: str | None = Field(
+        default=None,
+        description="Set when a requested source is not searched itself but through another copy "
+        "(e.g. the Wikipedia ZIM through the indexed dump of the same articles).",
+    )
 
 
 class Suggestions(_Wire):

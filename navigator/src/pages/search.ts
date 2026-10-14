@@ -239,7 +239,10 @@ export function scopeHint(
   sourceNames: ReadonlyMap<string, string>,
 ): HTMLElement | null {
   const scope = resp.scope;
-  if (!scope) return null;
+  if (!scope) {
+    // A site not searched itself (a ZIM reader edition) is searched through its indexed copy.
+    return resp.scope_note ? h('p', { class: 'scope-hint' }, `Note: ${resp.scope_note}.`) : null;
+  }
   const first = scope.sources[0];
   const name = (first && sourceNames.get(first)) ?? scope.site;
   return h(

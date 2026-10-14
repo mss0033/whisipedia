@@ -526,6 +526,8 @@ export interface SearchResults {
   scope: SearchScope | null;
   /** True when retrieval found little or nothing. */
   low_confidence: boolean;
+  /** Set when a requested source is not searched itself but through another copy (e.g. the Wikipedia ZIM through the indexed dump of the same articles). */
+  scope_note: string | null;
 }
 
 export interface SearchScope {

@@ -32,6 +32,13 @@ from wsp_core.banners import banner_for, currency_of
 from wsp_core.model import ChangeRecord, DocRecord, Generation, LedgerEvent, SearchHit, SourceSpec
 
 
+def readable_text(text: str | None) -> str | None:
+    """Stored text as a reader should see it. PDF text extraction writes U+FFFD for glyphs the PDF
+    does not map to a character (the USDA canning tables' spacing: "30\ufffdmin" for "30 min", 310 times
+    in one guide; 2026-10-14 field exam): a space reads right, the replacement character never does."""
+    return text.replace("\ufffd", " ") if text and "\ufffd" in text else text
+
+
 def source_info(
     spec: SourceSpec,
     current: Generation | None,
@@ -106,7 +113,7 @@ def document(
         title=doc.title,
         lang=doc.lang,
         license=doc.license,
-        text=doc.text if include_text or html is None else None,
+        text=readable_text(doc.text) if include_text or html is None else None,
         content_hash=doc.content_hash,
         revision=doc.revision,
         timestamp=doc.timestamp,
