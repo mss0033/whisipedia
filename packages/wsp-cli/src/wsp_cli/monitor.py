@@ -49,6 +49,8 @@ from wsp_core.ports import Vault
 _PROGRESS = re.compile(r"\[#\w+ [^\]]*\]")
 _COMPLETE = "Download complete: "
 _ACTIVE_WINDOW = timedelta(minutes=3)
+CURRENT_TTL = 1800.0  # seconds a source's current generation is remembered (promotions are rare)
+CURRENT_WORKERS = 8
 
 
 # --- SLOs (PLAN §6.6) -------------------------------------------------------------------------------
@@ -360,6 +362,7 @@ class LibraryMonitor:
         self.background = background
         self.trawl_summary = trawl_summary
         self._trawl_cache: tuple[float, TrawlerStatus | None] = (-1.0, None)
+        self._current_cache: dict[str, tuple[float, str | None]] = {}
         self._slow = _Slow()
         self._lock = threading.Lock()
         self._refreshing = False
@@ -454,14 +457,14 @@ class LibraryMonitor:
         offers = {str(r["source_id"]): r for r in self._query("SELECT * FROM upstream_offers")}
         health = {str(r["source_id"]): r for r in self._query("SELECT * FROM sources")}
         slo: list[SourceSlo] = []
-        for spec in sorted(self.sources, key=lambda s: s.id):
-            if spec.status is not SourceStatus.ACTIVE and spec.id not in health:
-                continue
-            current = None
-            if self.vault is not None:
-                with suppress(Exception):
-                    cur = self.vault.current(spec.id)
-                    current = cur.generation_id if cur else None
+        wanted = [
+            s
+            for s in sorted(self.sources, key=lambda s: s.id)
+            if s.status is SourceStatus.ACTIVE or s.id in health
+        ]
+        currents = self._currents([s.id for s in wanted])
+        for spec in wanted:
+            current = currents.get(spec.id)
             row = offers.get(spec.id)
             seen = cast(list[dict[str, Any]], json.loads(row["offers_json"])) if row is not None else None
             observed = _dt(row["observed_at"].replace("Z", "+00:00")) if row is not None else None
@@ -568,6 +571,30 @@ class LibraryMonitor:
         return AutonomyStatus(
             days=round(days, 2), since=since, reset_by=why, critical_open=critical_open, slo_failing=failing
         )
+
+    def _currents(self, source_ids: Sequence[str]) -> dict[str, str | None]:
+        """Each source's current generation id, remembered for :data:`CURRENT_TTL`. Over the NAS one
+        lookup took about 3 s, and the System Monitor's status, built every refresh, did one per source:
+        over 7 minutes, so the page never had operations data (2026-10-14). The stale ones are looked
+        up :data:`CURRENT_WORKERS` at a time."""
+        now = time.monotonic()
+        stale = [s for s in source_ids if now - self._current_cache.get(s, (-1e18, None))[0] >= CURRENT_TTL]
+        if stale and self.vault is not None:
+            vault = self.vault
+
+            def look(sid: str) -> tuple[str, str | None]:
+                try:
+                    cur = vault.current(sid)
+                except Exception:  # an unreadable source shows as without a generation, not as an error
+                    return sid, None
+                return sid, (cur.generation_id if cur else None)
+
+            from concurrent.futures import ThreadPoolExecutor
+
+            with ThreadPoolExecutor(max_workers=CURRENT_WORKERS, thread_name_prefix="ops-current") as pool:
+                for sid, gen in pool.map(look, stale):
+                    self._current_cache[sid] = (now, gen)
+        return {s: self._current_cache.get(s, (0.0, None))[1] for s in source_ids}
 
     def _trawler(self, now: datetime) -> TrawlerStatus | None:
         """The trawler's summary.json, read again only when it changes (the page polls every 5 s)."""

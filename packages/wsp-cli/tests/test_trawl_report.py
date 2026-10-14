@@ -136,3 +136,31 @@ def test_quality_compares_with_the_newest_older_report(tmp_path: Path) -> None:
     assert regression(0.58, before) == pytest.approx(-0.03)
     assert previous_report(tmp_path, "2026-10-01T000000Z.json") is None
     assert regression(0.5, None) is None
+
+
+def test_the_monitor_remembers_current_generations(tmp_path: Path) -> None:
+    from types import SimpleNamespace
+    from typing import Any, cast
+
+    from wsp_cli.monitor import LibraryMonitor
+
+    calls: list[str] = []
+
+    class Vault:
+        def current(self, sid: str) -> Any:
+            calls.append(sid)
+            return SimpleNamespace(generation_id=f"{sid}-g1") if sid != "gone" else None
+
+    mon = LibraryMonitor(
+        sources=[],
+        vault=cast(Any, Vault()),
+        state_db=None,
+        scrub_db=None,
+        proposals=list,
+        downloads_dir=None,
+        disks={},
+        background=False,
+    )
+    assert mon._currents(["a", "b", "gone"]) == {"a": "a-g1", "b": "b-g1", "gone": None}  # pyright: ignore[reportPrivateUsage]
+    assert mon._currents(["a", "b"]) == {"a": "a-g1", "b": "b-g1"}  # pyright: ignore[reportPrivateUsage]
+    assert sorted(calls) == ["a", "b", "gone"]  # asked once each within the TTL
