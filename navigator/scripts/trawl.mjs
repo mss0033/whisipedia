@@ -164,6 +164,7 @@ async function check(context, address) {
   const problems = []; // the page does not work: error page, empty, wrong viewer, script error
   const defects = []; // it works, with a missing image or a link into nothing
   const failedApi = [];
+  const assetMisses = [];
   const scriptErrors = [];
   let doc = null;
   page.on('pageerror', (e) => scriptErrors.push(String(e.message ?? e).slice(0, 200)));
@@ -171,11 +172,11 @@ async function check(context, address) {
     const url = resp.url();
     if (!url.startsWith(`${BASE}/v1/`)) return;
     // 503 is "busy, try again" (an archive opening): the page retries by itself, so not a failure.
-    if (
-      (resp.status() >= 500 && resp.status() !== 503) ||
-      (resp.status() === 404 && url.includes('/v1/assets/'))
-    )
+    if (resp.status() >= 500 && resp.status() !== 503)
       failedApi.push(`${resp.status()} ${url.slice(BASE.length, BASE.length + 160)}`);
+    // A page's own image or stylesheet missing from its archive: the page works, it is a defect.
+    else if (resp.status() === 404 && url.includes('/v1/assets/'))
+      assetMisses.push(`asset 404 ${url.slice(BASE.length, BASE.length + 160)}`);
     if (doc === null && url.includes('/v1/documents/') && resp.ok() && !url.includes('/history')) {
       try {
         doc = await resp.json();
@@ -304,6 +305,7 @@ async function check(context, address) {
     }
   }
   for (const f of failedApi.slice(0, 5)) problems.push(`api ${f}`);
+  for (const a of [...new Set(assetMisses)].slice(0, 5)) defects.push(a);
   for (const e of scriptErrors.slice(0, 3)) problems.push(`script-error: ${e}`);
   await page.close().catch(() => undefined);
   return {
