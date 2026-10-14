@@ -1,0 +1,21 @@
+# The weekly search-quality check (`wsp quality run --alerts`): the gold queries through the running
+# library's API, saved under <state>/quality/; a drop against the previous run opens a warning.
+# Started by whisipedia-quality.timer. Its searches are marked as a background probe.
+#
+# Template: `wsp service install` renders @REPO@ and @CONFIG_DIR@ (docs/runbooks/install-services.md).
+
+[Unit]
+Description=Whisipedia weekly search-quality check
+After=whisipedia-api.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=@REPO@
+EnvironmentFile=-%h/.config/whisipedia/whisipedia.env
+ExecStart=@REPO@/.venv/bin/wsp --config-dir @CONFIG_DIR@ quality run --alerts
+TimeoutStartSec=2h
+Nice=19
+CPUWeight=20
+Slice=whisipedia-background.slice
+MemoryHigh=1G
+MemoryMax=2G

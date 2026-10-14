@@ -1840,6 +1840,59 @@
         ],
         "title": "AlertInfo"
       },
+      "AutonomyStatus": {
+        "properties": {
+          "goal_days": {
+            "type": "integer",
+            "title": "Goal Days",
+            "default": 30
+          },
+          "days": {
+            "type": "number",
+            "title": "Days",
+            "description": "Days since the streak began (0 while a critical alert is open)."
+          },
+          "since": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since",
+            "description": "When the streak began."
+          },
+          "reset_by": {
+            "type": "string",
+            "title": "Reset By",
+            "description": "What began it: the newest critical alert or owner intervention."
+          },
+          "critical_open": {
+            "type": "integer",
+            "title": "Critical Open",
+            "description": "Critical alerts open now (the streak cannot grow)."
+          },
+          "slo_failing": {
+            "type": "integer",
+            "title": "Slo Failing",
+            "description": "Sources behind their freshness SLO now."
+          }
+        },
+        "type": "object",
+        "required": [
+          "goal_days",
+          "days",
+          "since",
+          "reset_by",
+          "critical_open",
+          "slo_failing"
+        ],
+        "title": "AutonomyStatus",
+        "description": "The plan's phase-5 exit (PLAN §14): 30 days unattended, every SLO met, no manual repairs."
+      },
       "BotRun": {
         "properties": {
           "name": {
@@ -3572,6 +3625,17 @@
               }
             ],
             "description": "Null until the trawler has run."
+          },
+          "autonomy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AutonomyStatus"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null without orchestrator data."
           }
         },
         "type": "object",
@@ -3588,7 +3652,8 @@
           "proposals",
           "orchestrator_state",
           "integrity",
-          "trawler"
+          "trawler",
+          "autonomy"
         ],
         "title": "OpsStatus",
         "description": "Operations data for the System Monitor (PLAN §12.6); every part tolerates missing state."

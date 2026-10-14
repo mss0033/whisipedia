@@ -123,3 +123,23 @@
 {"id": "q123", "query": "kim była Maria Skłodowska-Curie", "lang": "pl", "domain": "multilingual", "relevant": {"wsp:wikipedia-en-zim/Marie_Curie": 2}}
 {"id": "q124", "query": "теория относительности Эйнштейна", "lang": "ru", "domain": "multilingual", "relevant": {"wsp:wikipedia-en-zim/Theory_of_relativity": 2, "wsp:wikipedia-en-zim/Albert_Einstein": 1}}
 {"id": "q125", "query": "varför är himlen blå", "lang": "sv", "domain": "multilingual", "relevant": {"wsp:wikipedia-en-zim/Rayleigh_scattering": 2, "wsp:wikipedia-en-zim/Diffuse_sky_radiation": 1}}
+{"id": "q201", "query": "frankenstein mary shelley", "lang": "en", "domain": "library", "relevant": {"wsp:gutenberg/84": 2}}
+{"id": "q202", "query": "pride and prejudice jane austen novel", "lang": "en", "domain": "library", "relevant": {"wsp:gutenberg/1342": 2}}
+{"id": "q203", "query": "moby dick herman melville", "lang": "en", "domain": "library", "relevant": {"wsp:gutenberg/2701": 2}}
+{"id": "q204", "query": "alice's adventures in wonderland", "lang": "en", "domain": "library", "relevant": {"wsp:gutenberg/11": 2}}
+{"id": "q205", "query": "on the origin of species by charles darwin", "lang": "en", "domain": "library", "relevant": {"wsp:gutenberg/1228": 2, "wsp:gutenberg/2009": 2}}
+{"id": "q206", "query": "xkcd password strength comic", "lang": "en", "domain": "library", "relevant": {"wsp:kiwix-xkcd-com-en-all/xkcd.com/936/": 2}}
+{"id": "q207", "query": "rsync man page", "lang": "en", "domain": "library", "relevant": {"wsp:kiwix-www-mankier-com-en-all/www.mankier.com/1/rsync": 2}}
+{"id": "q208", "query": "grep command manual", "lang": "en", "domain": "library", "relevant": {"wsp:kiwix-www-mankier-com-en-all/www.mankier.com/1/grep": 2}}
+{"id": "q209", "query": "tar command options to extract an archive", "lang": "en", "domain": "library", "relevant": {"wsp:kiwix-www-mankier-com-en-all/www.mankier.com/1/tar": 2}}
+{"id": "q210", "query": "pep 8 python style guide", "lang": "en", "domain": "library", "relevant": {"wsp:kiwix-peps-python-en-all/peps.python.org/pep-0008/": 2}}
+{"id": "q211", "query": "the zen of python", "lang": "en", "domain": "library", "relevant": {"wsp:kiwix-peps-python-en-all/peps.python.org/pep-0020/": 2}}
+{"id": "q212", "query": "sesquipedalian", "lang": "en", "domain": "library", "relevant": {"wsp:wiktionary-en/sesquipedalian": 2}}
+{"id": "q213", "query": "ephemeral meaning", "lang": "en", "domain": "library", "relevant": {"wsp:wiktionary-en/ephemeral": 2}}
+{"id": "q214", "query": "metformin side effects", "lang": "en", "domain": "library", "relevant": {"wsp:mdwiki/Metformin": 2, "wsp:kiwix-nhs-uk-en-medicines/www.nhs.uk/medicines/metformin/": 2, "wsp:wikipedia-en-zim/Metformin": 1}}
+{"id": "q215", "query": "asthma treatment", "lang": "en", "domain": "library", "relevant": {"wsp:mdwiki/Asthma": 2, "wsp:wikipedia-en-zim/Asthma": 1}}
+{"id": "q216", "query": "the raven poem by edgar allan poe", "lang": "en", "domain": "library", "relevant": {"wsp:wikisource-en/The_Raven": 2, "wsp:kiwix-wikisource-en-all/The_Raven_(Poe)": 2, "wsp:wikipedia-en-zim/The_Raven": 1}}
+{"id": "q217", "query": "miranda v arizona supreme court decision", "lang": "en", "domain": "library", "relevant": {"wsp:courtlistener/8968349": 2, "wsp:courtlistener/107252": 2, "wsp:wikipedia-en-zim/Miranda_v._Arizona": 1}}
+{"id": "q218", "query": "should I use git merge or git rebase", "lang": "en", "domain": "library", "relevant": {"wsp:stackexchange/stackoverflow.com_en_all/questions/28595991/git-merge-or-git-rebase": 2}}
+{"id": "q219", "query": "pancake recipe", "lang": "en", "domain": "library", "relevant": {"wsp:kiwix-based-cooking-en-all/based.cooking/pancake/": 2}}
+{"id": "q220", "query": "home canning vegetables in a pressure canner", "lang": "en", "domain": "library", "relevant": {"wsp:usda-home-canning/usda-canning:GUIDE04-HomeCan-rev0715": 2}}

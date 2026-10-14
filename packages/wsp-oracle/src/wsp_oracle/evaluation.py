@@ -66,12 +66,68 @@ def load_gold(path: Path = DEFAULT_GOLD) -> list[GoldQuery]:
     return out
 
 
-def ndcg_at(ranked: Sequence[str], relevant: Mapping[str, int], k: int = 10) -> float:
+# The library holds English Wikipedia twice (the ZIM and the top-10 dumps) and lesser copies of many
+# articles (Simple English, MDWiki). A judged article found in another full copy is the same answer;
+# found in a lesser copy it counts as "also relevant". Without this, the live library scored a judged
+# article's twin as a miss (2026-10-14).
+FULL_WIKIPEDIA = ("wsp:wikipedia-en-zim/", "wsp:wikipedia-top10/en/")
+LESSER_COPIES = ("wsp:kiwix-wikipedia-en-simple-all/", "wsp:mdwiki/")
+
+
+def _title(doc_id: str, prefixes: Sequence[str]) -> str | None:
+    for p in prefixes:
+        if doc_id.startswith(p):
+            return doc_id[len(p) :]
+    return None
+
+
+def canonical(doc_id: str) -> str:
+    """One key for every full copy of a Wikipedia article; any other doc id is its own key."""
+    title = _title(doc_id, FULL_WIKIPEDIA)
+    return f"wikipedia:{title}" if title is not None else doc_id
+
+
+def graded(
+    ranked: Sequence[str], relevant: Mapping[str, int]
+) -> tuple[list[str], dict[str, int], dict[str, int]]:
+    """(ranked keys, judged grades, grades for scoring), all by :func:`canonical` key.
+
+    Copies of one article count once, at the first place one appears. A lesser copy of a judged
+    Wikipedia article scores 1 unless that copy was judged itself; it never raises the ideal ranking."""
+    judged: dict[str, int] = {}
+    titles: set[str] = set()
+    for d, g in relevant.items():
+        key = canonical(d)
+        judged[key] = max(judged.get(key, 0), g)
+        title = _title(d, FULL_WIKIPEDIA)
+        if title is not None:
+            titles.add(title)
+    scoring = dict(judged)
+    keys: list[str] = []
+    seen: set[str] = set()
+    for d in ranked:
+        key = canonical(d)
+        lesser = _title(d, LESSER_COPIES)
+        if key not in judged and lesser is not None and lesser in titles:
+            scoring.setdefault(key, 1)
+        if key not in seen:
+            seen.add(key)
+            keys.append(key)
+    return keys, judged, scoring
+
+
+def ndcg_at(
+    ranked: Sequence[str],
+    relevant: Mapping[str, int],
+    k: int = 10,
+    *,
+    ideal_from: Mapping[str, int] | None = None,
+) -> float:
     def gain(g: int) -> float:
         return float(2**g - 1)
 
     dcg = sum(gain(relevant.get(d, 0)) / math.log2(i + 2) for i, d in enumerate(ranked[:k]))
-    ideal = sorted(relevant.values(), reverse=True)[:k]
+    ideal = sorted((relevant if ideal_from is None else ideal_from).values(), reverse=True)[:k]
     idcg = sum(gain(g) / math.log2(i + 2) for i, g in enumerate(ideal))
     return dcg / idcg if idcg > 0 else 0.0
 
@@ -127,13 +183,14 @@ def evaluate(name: str, search: Searcher, gold: Sequence[GoldQuery], *, warmup: 
     domains: dict[str, list[float]] = defaultdict(list)
     for q in gold:
         t0 = time.perf_counter()
-        ranked = list(search(q.query))
+        raw = list(search(q.query))
         ms = (time.perf_counter() - t0) * 1000
-        n, r = ndcg_at(ranked, q.relevant), recall_at(ranked, q.relevant)
-        first = next((i for i, d in enumerate(ranked[:50]) if q.relevant.get(d, 0) > 0), None)
+        ranked, judged, scoring = graded(raw, q.relevant)
+        n, r = ndcg_at(ranked, scoring, ideal_from=judged), recall_at(ranked, judged)
+        first = next((i for i, d in enumerate(ranked[:50]) if scoring.get(d, 0) > 0), None)
         rr.append(0.0 if first is None else 1.0 / (first + 1))
         domains[q.domain].append(n)
-        results.append(QueryResult(q.id, n, r, ms, tuple(ranked[:10])))
+        results.append(QueryResult(q.id, n, r, ms, tuple(raw[:10])))
     lat = [r.latency_ms for r in results]
     return EvalReport(
         name=name,
@@ -267,6 +324,26 @@ def parse_weights(text: str) -> list[tuple[float, float]]:
 # --- CLI ------------------------------------------------------------------------------------------
 
 
+def api_searcher(base_url: str, *, depth: int = 50, timeout: float = 180.0) -> Searcher:
+    """Search the running library over HTTP (no models or index loaded here). Requests are marked as a
+    background probe, so they never count as the owner's use; the user agent is generic."""
+    import urllib.parse
+    import urllib.request
+
+    base = base_url.rstrip("/")
+
+    def search(query: str) -> list[str]:
+        url = f"{base}/v1/search?" + urllib.parse.urlencode({"q": query, "limit": depth})
+        req = urllib.request.Request(  # noqa: S310 - a loopback URL given on the command line
+            url, headers={"X-Whisipedia-Probe": "check", "User-Agent": "Whisipedia-eval/1"}
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 - see above
+            data = cast(dict[str, Any], json.load(resp))
+        return [str(h["doc_id"]) for h in cast(list[dict[str, Any]], data.get("hits") or [])]
+
+    return search
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     from wsp_core.config import load_config
     from wsp_oracle.embedbuild import _find_config_dir  # pyright: ignore[reportPrivateUsage]
@@ -288,7 +365,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     ap.add_argument("--typos", action="store_true", help="spelling ablation: one-typo queries, corrected")
     ap.add_argument("--out", type=Path, default=None, help="write the full JSON report here")
+    ap.add_argument(
+        "--api", default=None, help="evaluate the running library at this URL (e.g. http://127.0.0.1:8737)"
+    )
     args = ap.parse_args(argv)
+    if args.api:
+        report = evaluate("api", api_searcher(args.api), load_gold(args.gold), warmup=0)
+        print(report.summary())
+        for domain, score in sorted(report.by_domain.items()):
+            print(f"  {domain:<14} nDCG@10={score:.3f}")
+        if args.out is not None:
+            payload = {"gold": str(args.gold), "api": args.api, "reports": [asdict(report)]}
+            args.out.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        return 0
 
     cfg: dict[str, Any] = dict(load_config(args.config_dir or _find_config_dir()))
     if args.index_root is not None:

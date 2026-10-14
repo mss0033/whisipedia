@@ -25,6 +25,7 @@ from typing import Any, cast
 
 from wsp_api.schemas import (
     AlertInfo,
+    AutonomyStatus,
     BotRun,
     DiskUsage,
     DomainBudget,
@@ -536,6 +537,36 @@ class LibraryMonitor:
             orchestrator_state=self.state_db is not None and self.state_db.is_file(),
             integrity=self._integrity(slow, now),
             trawler=self._trawler(now),
+            autonomy=self._autonomy(now, alerts, slo),
+        )
+
+    def _autonomy(
+        self, now: datetime, alerts: Sequence[AlertInfo], slo: Sequence[SourceSlo]
+    ) -> AutonomyStatus | None:
+        """The unattended streak: since the newest critical alert or owner intervention (retry, approve,
+        reject), whichever came last; nothing while a critical alert is still open."""
+        if self.state_db is None or not self.state_db.is_file():
+            return None
+        starts: list[tuple[datetime, str]] = []
+        for row in self._query("SELECT key, raised_at FROM alerts WHERE severity = 'critical'"):
+            at = _dt(str(row["raised_at"]).replace("Z", "+00:00"))
+            if at is not None:
+                starts.append((at, f"critical alert {row['key']}"))
+        meta = self._query("SELECT value FROM meta WHERE key = 'last_owner_action'")
+        if meta:
+            with suppress(ValueError, TypeError, KeyError):
+                action = json.loads(str(meta[0]["value"]))
+                at = _dt(str(action["at"]))
+                if at is not None:
+                    starts.append((at, f"owner action: {action['what']}"))
+        critical_open = sum(1 for a in alerts if a.severity == "critical")
+        failing = sum(1 for s in slo if s.within_slo is False and not s.paused)
+        since, why = (
+            max(starts, key=lambda t: t[0]) if starts else (None, "no critical alert or intervention yet")
+        )
+        days = 0.0 if critical_open or since is None else max(0.0, (now - since).total_seconds() / 86400)
+        return AutonomyStatus(
+            days=round(days, 2), since=since, reset_by=why, critical_open=critical_open, slo_failing=failing
         )
 
     def _trawler(self, now: datetime) -> TrawlerStatus | None:

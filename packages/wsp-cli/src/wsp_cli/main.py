@@ -42,6 +42,12 @@ _TAKES_VALUE = frozenset({"--config-dir", "--url"})
 Handler = Callable[[argparse.Namespace, TextIO], int]
 
 
+def _quality_run(args: argparse.Namespace, out: TextIO) -> int:
+    from wsp_cli.quality import cmd_quality_run
+
+    return cmd_quality_run(args, out)
+
+
 def _alerts_digest(args: argparse.Namespace, out: TextIO) -> int:
     from wsp_cli.notify import cmd_alerts_digest
 
@@ -333,6 +339,13 @@ def build_parser(argv: Sequence[str] | None = None) -> argparse.ArgumentParser:
     )
     s.add_argument("--settle-seconds", type=float, default=120.0, help="ignore files modified more recently")
     s.add_argument("--json", action="store_true")
+
+    qu = add("quality", _usage, "Search quality: the gold queries through the running library.")
+    qu_sub = qu.add_subparsers(dest="quality_command", required=True, metavar="COMMAND")
+    s = add("run", _quality_run, "Evaluate search quality now and compare with the previous run.", qu_sub)
+    s.add_argument("--api", default="http://127.0.0.1:8737", help="the running library")
+    s.add_argument("--gold", default=None, help="gold queries (default: the oracle's gold set)")
+    s.add_argument("--alerts", action="store_true", help="open/resolve the quality:regression warning")
 
     al = add("alerts", _usage, "Alerts: what the library wants you to know.")
     al_sub = al.add_subparsers(dest="alerts_command", required=True, metavar="COMMAND")

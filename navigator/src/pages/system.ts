@@ -67,6 +67,35 @@ export function alertsBox(ops: Ops | null | undefined): HTMLElement {
   );
 }
 
+/** The plan's phase-5 milestone: 30 days unattended, every SLO met, no manual repairs. */
+export function autonomyBox(ops: Ops | null | undefined): HTMLElement | null {
+  const a = ops?.autonomy;
+  if (!a) return null;
+  const pct = Math.min(100, Math.round((100 * a.days) / a.goal_days));
+  return sectionBox(
+    'Unattended',
+    h(
+      'p',
+      null,
+      statusLamp(a.critical_open ? 'degraded' : a.slo_failing ? 'stale' : 'ok'),
+      ` ${a.days.toFixed(1)} of ${a.goal_days} days without a critical alert or a manual repair. `,
+      h('progress', { max: '100', value: String(pct), 'aria-label': `${pct}% of the goal` }),
+    ),
+    h(
+      'p',
+      { class: 'fineprint' },
+      a.critical_open
+        ? `${a.critical_open} critical alert(s) open: the count starts once they are resolved. `
+        : a.since
+          ? `Counting since ${formatDateTime(a.since)} (${a.reset_by}). `
+          : `${a.reset_by}. `,
+      a.slo_failing
+        ? `${a.slo_failing} site(s) behind their freshness target.`
+        : 'Every site within its freshness target.',
+    ),
+  );
+}
+
 /** What the trawler found opening pages nobody had opened yet. */
 export function trawlerBox(ops: Ops | null | undefined): HTMLElement | null {
   const t = ops?.trawler;
@@ -111,6 +140,7 @@ export function renderSystem(sys: SystemStatus, names: Map<string, string>): HTM
   return h(
     'div',
     { class: 'sys-grid' },
+    autonomyBox(sys.ops),
     alertsBox(sys.ops),
     trawlerBox(sys.ops),
     sectionBox(

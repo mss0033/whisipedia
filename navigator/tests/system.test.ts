@@ -1,7 +1,7 @@
 // The System Monitor shows open alerts (repeats grouped) and what the trawler found.
 import { describe, expect, it } from 'vitest';
 import { system } from '../mock/handler.ts';
-import { alertsBox, renderSystem, trawlerBox } from '../src/pages/system.ts';
+import { alertsBox, autonomyBox, renderSystem, trawlerBox } from '../src/pages/system.ts';
 
 describe('system monitor', () => {
   const sys = system();
@@ -27,10 +27,19 @@ describe('system monitor', () => {
     expect(trawlerBox(null)).toBeNull();
   });
 
-  it('puts both at the top of the page', () => {
+  it('shows the unattended streak toward the 30-day goal', () => {
+    const box = autonomyBox(sys.ops)!;
+    expect(box.textContent).toContain('3.5 of 30 days without a critical alert or a manual repair');
+    expect(box.textContent).toContain('owner action: retry kiwix-solar/2025-01');
+    expect(box.textContent).toContain('2 site(s) behind their freshness target');
+    expect(box.querySelector('progress')?.getAttribute('value')).toBe('12');
+  });
+
+  it('puts the streak, alerts and trawler at the top of the page', () => {
     const page = renderSystem(sys, new Map());
     const titles = [...page.children].map((c) => c.textContent?.slice(0, 20));
-    expect(titles[0]).toContain('Alerts');
-    expect(titles[1]).toContain('Trawler');
+    expect(titles[0]).toContain('Unattended');
+    expect(titles[1]).toContain('Alerts');
+    expect(titles[2]).toContain('Trawler');
   });
 });

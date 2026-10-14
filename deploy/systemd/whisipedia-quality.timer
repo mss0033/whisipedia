@@ -1,0 +1,11 @@
+# Sundays at 03:17, when nobody is reading; Persistent=true runs it at the next start if the PC was off.
+
+[Unit]
+Description=Whisipedia weekly search-quality check
+
+[Timer]
+OnCalendar=Sun *-*-* 03:17:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

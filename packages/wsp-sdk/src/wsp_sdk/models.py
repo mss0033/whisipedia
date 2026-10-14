@@ -626,6 +626,17 @@ class IntegrityStatus(_Wire):
     pinned_hosts: int = 0
 
 
+class AutonomyStatus(_Wire):
+    """The plan's phase-5 exit (PLAN §14): 30 days unattended, every SLO met, no manual repairs."""
+
+    goal_days: int = 30
+    days: float = Field(description="Days since the streak began (0 while a critical alert is open).")
+    since: datetime | None = Field(default=None, description="When the streak began.")
+    reset_by: str = Field(description="What began it: the newest critical alert or owner intervention.")
+    critical_open: int = Field(description="Critical alerts open now (the streak cannot grow).")
+    slo_failing: int = Field(description="Sources behind their freshness SLO now.")
+
+
 class TrawlProblem(_Wire):
     at: datetime
     address: str
@@ -661,6 +672,7 @@ class OpsStatus(_Wire):
     orchestrator_state: bool = Field(description="False until the orchestrator has created its state DB.")
     integrity: IntegrityStatus | None = Field(default=None, description="Source integrity (ADR-0009).")
     trawler: TrawlerStatus | None = Field(default=None, description="Null until the trawler has run.")
+    autonomy: AutonomyStatus | None = Field(default=None, description="Null without orchestrator data.")
 
 
 class SystemStatus(_Wire):

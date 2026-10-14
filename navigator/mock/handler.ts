@@ -530,6 +530,14 @@ export function system(): Response<'GET /v1/system'> {
       proposals: { open: 0, applied: 0, accepted: 0, rejected: 0, latest: [] },
       orchestrator_state: true,
       integrity: null,
+      autonomy: {
+        goal_days: 30,
+        days: 3.5,
+        since: '2026-10-06T00:00:00Z',
+        reset_by: 'owner action: retry kiwix-solar/2025-01',
+        critical_open: 0,
+        slo_failing: 2,
+      },
       trawler: {
         pages: 1440,
         failed: 3,

@@ -61,3 +61,51 @@ Ideas not done, in order of expected value:
 5. **Scoped searches on huge sources.** `sources=open-library` (114M documents) ran 30 s: the source
    filter is a term query over 114M postings intersected with the words. A `source_key` fast-column
    filter, or routing scoped searches to a per-source index, would fix it.
+
+
+## Measured 2026-10-14 (after the search-cost work)
+
+Every search now reports its stages (`timings_ms` in `/v1/search`; searches over 3 s are logged).
+On the live library (257M documents), new queries on a warm process:
+
+| Stage | Time |
+|---|---|
+| lexical retrieval and fusion | 1.4-3.1 s (3.8-5.9 s right after a restart) |
+| snippets (document text read from the NAS) | 0.3-0.85 s |
+| dense retrieval (beside the lexical part) | 0.3-0.6 s |
+| passages and reranking | under 0.1 s |
+| did-you-mean | 0.15-0.25 s |
+
+What that settled:
+- **Scoped searches on huge sources:** fixed by the earlier work. A search limited to Open Library now
+  takes as long as an unscoped one (2.5-6.6 s), not 30 s. Nothing more to build.
+- **Passages from the index:** the reranker's passages cost under 0.1 s now. The text the snippets
+  need (0.3-0.85 s) would have to be stored in the index, which would roughly double it (170 GB);
+  not worth it.
+- **Fewer segments:** the lexical stage is most of a search, so the merge is the lever:
+  `wsp index merge` (32 segments to 7), first run scheduled for 2026-10-14 23:30.
+
+## Search quality baseline (2026-10-14)
+
+`wsp-oracle-eval --api http://127.0.0.1:8737` runs the 145 gold queries (125 from the Wikipedia
+sample, 20 new ones for books, man pages, PEPs, comics, dictionary, medicine, law, Q&A, recipes and
+canning) through the live API. A judged Wikipedia article counts in either full English copy; a
+Simple English or MDWiki copy counts as also relevant. `wsp quality run --alerts` repeats it every
+Sunday at 03:17 and warns when nDCG@10 falls more than 0.03.
+
+| Measure | Live library |
+|---|---|
+| nDCG@10 | 0.277 |
+| Recall@50 | 0.589 |
+| MRR | 0.380 |
+| latency p50 / p95 | 3.3 s / 6.3 s |
+
+Strongest: navigational queries (0.91), comparisons (0.69), definitions (0.57). Weakest: multilingual
+(0.06), everyday (0.11), geography (0.15), computing (0.16). The main cause is visible in the results:
+Open Library catalog cards took 289 of the 1,450 top-ten places (a search about the storming of the
+Bastille returns book records first), followed by Stack Exchange and Wikibooks pages whose titles
+match the words but not the question.
+
+**Target:** nDCG@10 0.40 on this set (provisional). **Next step:** ranking experiments measured
+against this baseline: demote catalog cards for questions that are not looking for a book, give
+the reranker a deeper and more varied candidate pool, and check the multilingual queries' routing.

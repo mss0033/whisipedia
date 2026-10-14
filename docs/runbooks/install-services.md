@@ -10,6 +10,7 @@ Whisipedia runs as three systemd **user** units (PLAN §6.5, §12.6), rendered f
 | `whisipedia-index.timer` → `whisipedia-index.service` | nightly `wsp index build` (refine, index, catalog) | none |
 | `whisipedia-trawler.service` | `tools/wsp-trawl`: opens unvisited pages in a headless Chromium, one a minute, pausing while the owner reads; `wsp trawl report` shows what it found | loopback only |
 | `whisipedia-digest.timer` → `whisipedia-digest.service` | 09:00 daily: `wsp alerts digest --notify`, the last day's alerts and trawler findings as one Windows notification (critical alerts also show at once, from the orchestrator) | none |
+| `whisipedia-quality.timer` → `whisipedia-quality.service` | Sundays 03:17: `wsp quality run --alerts`, the gold queries through the API; a drop of nDCG@10 opens a warning | loopback only |
 
 ## Before you start
 

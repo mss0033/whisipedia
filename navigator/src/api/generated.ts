@@ -15,6 +15,21 @@ export interface AlertInfo {
   raised_at: string;
 }
 
+/** The plan's phase-5 exit (PLAN §14): 30 days unattended, every SLO met, no manual repairs. */
+export interface AutonomyStatus {
+  goal_days: number;
+  /** Days since the streak began (0 while a critical alert is open). */
+  days: number;
+  /** When the streak began. */
+  since: string | null;
+  /** What began it: the newest critical alert or owner intervention. */
+  reset_by: string;
+  /** Critical alerts open now (the streak cannot grow). */
+  critical_open: number;
+  /** Sources behind their freshness SLO now. */
+  slo_failing: number;
+}
+
 export interface BotRun {
   name: string;
   at: string | null;
@@ -360,6 +375,8 @@ export interface OpsStatus {
   integrity: IntegrityStatus | null;
   /** Null until the trawler has run. */
   trawler: TrawlerStatus | null;
+  /** Null without orchestrator data. */
+  autonomy: AutonomyStatus | null;
 }
 
 /** The stored file a collection document was refined from (a PDF, a scanned map, an archive). */

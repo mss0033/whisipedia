@@ -57,6 +57,7 @@ Guarantees:
 from __future__ import annotations
 
 import contextlib
+import json
 import logging
 import re
 import threading
@@ -122,6 +123,7 @@ LEDGER_KIND_HOLD = "release.hold"
 LEDGER_KIND_WITHHELD = "release.withheld"
 LEDGER_KIND_CRASH = "release.crash"
 LEDGER_KIND_RETRY = "release.retry"
+OWNER_ACTION_META = "last_owner_action"  # JSON {at, what}: the newest retry, approve or reject
 QUARANTINE_DIR = "_quarantine"
 _UNSAFE_GEN_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
 _TERMINAL = (ReleaseState.PROMOTED, ReleaseState.QUARANTINED)
@@ -451,6 +453,13 @@ class ReleasePipeline:
                 n += self._cleanup_workdir(rec) > 0
         return n
 
+    def _owner_acted(self, what: str, subject: str) -> None:
+        """Note the latest owner intervention in the state DB (:data:`OWNER_ACTION_META`): the System
+        Monitor's unattended streak (PLAN §14, phase 5: 30 days with no manual repairs) starts after it.
+        The ledger records the action itself; this is only a cheap pointer to the newest one."""
+        value = json.dumps({"at": self.clock.now().isoformat(), "what": f"{what} {subject}"})
+        self.store.set_meta(OWNER_ACTION_META, value)
+
     def approve(self, source_id: str, version: str, *, note: str = "", force: bool = False) -> ReleaseRecord:
         """Owner override: promote a held release despite the sanity or integrity check.
 
@@ -460,6 +469,7 @@ class ReleasePipeline:
         it would move ``CURRENT`` backwards.
         """
         rec = self._get(source_id, version)
+        self._owner_acted("approve", rec.subject)
         if rec.state is ReleaseState.QUARANTINED and force:  # e.g. superseded: start again, forced
             rec = self.retry_release(source_id, version, note=f"approve --force: {note}")
             self._persist(
@@ -501,6 +511,7 @@ class ReleasePipeline:
     def reject(self, source_id: str, version: str, *, reason: str) -> ReleaseRecord:
         """Owner decision: a held (or otherwise stuck) release is bad. It ends QUARANTINED."""
         rec = self._get(source_id, version)
+        self._owner_acted("reject", rec.subject)
         if rec.state in _TERMINAL:
             raise IllegalTransitionError(f"{rec.subject} is already {rec.state.value}")
         if rec.state is not ReleaseState.FAILED:
@@ -522,6 +533,7 @@ class ReleasePipeline:
         cannot be retried.
         """
         rec = self._get(source_id, version)
+        self._owner_acted("retry", rec.subject)
         if rec.state is ReleaseState.PROMOTED:
             raise IllegalTransitionError(f"{rec.subject} is promoted; nothing to retry")
         if rec.state is not ReleaseState.QUARANTINED and rec.state is not ReleaseState.FAILED:

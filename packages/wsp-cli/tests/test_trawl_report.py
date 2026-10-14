@@ -2,6 +2,8 @@ import io
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import pytest
+
 from wsp_cli.trawl import SourceFailures, recent_failures, render
 
 NOW = datetime(2026, 10, 14, 12, 0, tzinfo=UTC)
@@ -85,3 +87,52 @@ def test_index_merge_says_how_to_build_a_missing_tool(tmp_path: Path) -> None:
     )
     assert cmd_index_merge(args, out) == 2
     assert "cargo build --release" in out.getvalue()
+
+
+def test_the_unattended_streak_starts_after_the_newest_critical_alert_or_owner_action(tmp_path: Path) -> None:
+    import json
+
+    from wsp_cli.monitor import LibraryMonitor
+    from wsp_orchestrator.store import StateStore
+
+    db = tmp_path / "state.sqlite3"
+    store = StateStore(db, check_local=False)
+    store.open_alert("integrity:x", "critical", "bad mirror", {}, NOW - timedelta(days=10))
+    store.resolve_alert("integrity:x", NOW - timedelta(days=9))
+    store.set_meta(
+        "last_owner_action", json.dumps({"at": (NOW - timedelta(days=4)).isoformat(), "what": "retry x/1"})
+    )
+    store.close()
+    mon = LibraryMonitor(
+        sources=[],
+        vault=None,
+        state_db=db,
+        scrub_db=None,
+        proposals=list,
+        downloads_dir=None,
+        disks={},
+        background=False,
+    )
+    a = mon._autonomy(NOW, [], [])  # pyright: ignore[reportPrivateUsage]
+    assert a is not None
+    assert a.days == 4.0
+    assert a.reset_by == "owner action: retry x/1"
+    from wsp_api.schemas import AlertInfo
+
+    open_now = [AlertInfo(key="k", severity="critical", message="m", raised_at=NOW)]
+    assert mon._autonomy(NOW, open_now, []).days == 0.0  # pyright: ignore[reportPrivateUsage, reportOptionalMemberAccess]
+
+
+def test_quality_compares_with_the_newest_older_report(tmp_path: Path) -> None:
+    import json
+
+    from wsp_cli.quality import previous_report, regression
+
+    (tmp_path / "2026-10-07T031700Z.json").write_text(json.dumps({"ndcg10": 0.60}))
+    (tmp_path / "2026-10-14T031700Z.json").write_text(json.dumps({"ndcg10": 0.55}))
+    before = previous_report(tmp_path, "2026-10-21T031700Z.json")
+    assert before == {"ndcg10": 0.55}
+    assert regression(0.50, before) == pytest.approx(0.05)
+    assert regression(0.58, before) == pytest.approx(-0.03)
+    assert previous_report(tmp_path, "2026-10-01T000000Z.json") is None
+    assert regression(0.5, None) is None

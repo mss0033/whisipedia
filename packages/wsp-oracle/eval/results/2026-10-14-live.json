@@ -1,0 +1,2647 @@
+{
+  "gold": "/home/elizabeth/dev/wsp-eval/packages/wsp-oracle/eval/gold/queries.jsonl",
+  "api": "http://127.0.0.1:8737",
+  "reports": [
+    {
+      "name": "api",
+      "queries": 145,
+      "ndcg10": 0.27698377462688006,
+      "recall50": 0.5885057471264368,
+      "mrr": 0.37993839772529014,
+      "p50_ms": 3336.0541529982584,
+      "p95_ms": 6286.643378996814,
+      "p99_ms": 8044.448952001403,
+      "by_domain": {
+        "arts": 0.3081,
+        "compare": 0.6848,
+        "computing": 0.1547,
+        "define": 0.565,
+        "everyday": 0.1059,
+        "geography": 0.1459,
+        "history": 0.2042,
+        "library": 0.3818,
+        "literature": 0.1766,
+        "math": 0.3733,
+        "medicine": 0.2161,
+        "multilingual": 0.055,
+        "nature": 0.3354,
+        "navigate": 0.9087,
+        "people": 0.2175,
+        "science": 0.2954,
+        "society": 0.3396
+      },
+      "results": [
+        {
+          "id": "q001",
+          "ndcg10": 0.13906577763581093,
+          "recall50": 0.5,
+          "latency_ms": 5877.856145998521,
+          "top": [
+            "wsp:wikipedia-top10/en/Cancer_vaccine",
+            "wsp:wikipedia-top10/en/Inverse_vaccine",
+            "wsp:stackexchange/medicalsciences.stackexchange.com_en_all/questions/30923/rationale-for-tuberculosis-vaccines",
+            "wsp:mdwiki/Inverse_vaccine",
+            "wsp:stackexchange/skeptics.stackexchange.com_en_all/questions/45833/do-vaccines-against-childhood-diseases-leave-the-immune-system-less-capable-of",
+            "wsp:stackexchange/medicalsciences.stackexchange.com_en_all/questions/23048/what-is-the-justification-for-bacterial-vaccines-for-which-the-body-has-natura",
+            "wsp:mdwiki/Immune_system",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/Immunology/Vaccines",
+            "wsp:wikipedia-top10/en/Immune_system",
+            "wsp:wikipedia-top10/en/Trained_immunity"
+          ]
+        },
+        {
+          "id": "q002",
+          "ndcg10": 0.0,
+          "recall50": 0.0,
+          "latency_ms": 4469.810691000021,
+          "top": [
+            "wsp:kiwix-wikipedia-en-simple-all/Sky_blue",
+            "wsp:wikipedia-top10/en/Sky_Blue_(disambiguation)",
+            "wsp:wikipedia-top10/en/Sky_blue",
+            "wsp:kiwix-wikipedia-en-simple-all/Blue_Sky",
+            "wsp:kiwix-wikisource-en-all/Blue_Sky",
+            "wsp:wikipedia-top10/en/Sky_Blues",
+            "wsp:wiktionary-en/sky_blue",
+            "wsp:wikipedia-top10/en/Blue_Sky_Blue_(album)",
+            "wsp:wikipedia-top10/en/Blue_Sky_Blue",
+            "wsp:kiwix-curated-t2/wikivoyage_en_all/Mount_Blue_Sky"
+          ]
+        },
+        {
+          "id": "q003",
+          "ndcg10": 0.09180385079206221,
+          "recall50": 0.0,
+          "latency_ms": 5522.177740000188,
+          "top": [
+            "wsp:stackexchange/physics.stackexchange.com_en_all/questions/604686/cause-of-seasons",
+            "wsp:stackexchange/ell.stackexchange.com_en_all/questions/171529/what-causes-seasons-or-what-causes-the-seasons",
+            "wsp:stackexchange/physics.stackexchange.com_en_all/questions/114243/the-reason-s-of-seasons-on-earth",
+            "wsp:kiwix-curated-t2/khanacademy_en_all/9aa884271d1256e3bdf58c5bc57e6e1d",
+            "wsp:kiwix-curated-t2/khanacademy_en_all/26e8325bedf35708bf292e20bf593fb8",
+            "wsp:kiwix-wikisource-en-all/The_New_International_Encyclopædia/Seasons",
+            "wsp:kiwix-wikipedia-en-simple-all/Season",
+            "wsp:kiwix-wikisource-en-all/The_New_Student's_Reference_Work/Seasons",
+            "wsp:stackexchange/physics.stackexchange.com_en_all/questions/234382/seasons-of-earths-orbit",
+            "wsp:open-library/books/OL52555831M"
+          ]
+        },
+        {
+          "id": "q004",
+          "ndcg10": 0.6047365560659389,
+          "recall50": 0.3333333333333333,
+          "latency_ms": 5001.060533999407,
+          "top": [
+            "wsp:mdwiki/Photosynthesis",
+            "wsp:kiwix-wikipedia-en-simple-all/Photosynthesis",
+            "wsp:kiwix-wikisource-en-all/The_New_Student's_Reference_Work/Photosynthesis",
+            "wsp:stackexchange/physics.stackexchange.com_en_all/questions/632228/photosynthesis-relation-to-work-function-and-photoionization",
+            "wsp:pubmed/7857399",
+            "wsp:open-library/books/OL17727005M",
+            "wsp:pubmed/16228591",
+            "wsp:stackexchange/chemistry.stackexchange.com_en_all/questions/23515/how-does-photosynthesis-work",
+            "wsp:stackexchange/biology.stackexchange.com_en_all/questions/112762/how-does-photosynthesis-work-exactly",
+            "wsp:wikipedia-top10/en/Photosynthesis"
+          ]
+        },
+        {
+          "id": "q005",
+          "ndcg10": 0.5296052411645183,
+          "recall50": 0.5,
+          "latency_ms": 4168.217382000876,
+          "top": [
+            "wsp:kiwix-curated-t2/wikiquote_en_all/Dark_matter",
+            "wsp:kiwix-wikipedia-en-simple-all/Dark_matter",
+            "wsp:wikipedia-top10/en/Baryonic_dark_matter",
+            "wsp:wikipedia-top10/en/Dark_matter",
+            "wsp:wikipedia-top10/en/Hot_dark_matter",
+            "wsp:wikipedia-top10/en/Dark_Matter_(disambiguation)",
+            "wsp:mdwiki/Biological_dark_matter",
+            "wsp:wikipedia-top10/en/Warm_dark_matter",
+            "wsp:kiwix-curated-t2/wikiversity_en_all/Dark_matter",
+            "wsp:pubmed/16384292"
+          ]
+        },
+        {
+          "id": "q006",
+          "ndcg10": 0.7496654826074649,
+          "recall50": 1.0,
+          "latency_ms": 2269.2514860027586,
+          "top": [
+            "wsp:wiktionary-en/speed_of_light",
+            "wsp:wikipedia-top10/en/Speed_of_light",
+            "wsp:wikipedia-top10/en/Speed_of_light_(disambiguation)",
+            "wsp:stackexchange/physics.stackexchange.com_en_all/questions/399353/speed-of-light-in-a-perfect-vacuum",
+            "wsp:kiwix-wikipedia-en-simple-all/Light",
+            "wsp:kiwix-wikipedia-en-simple-all/Speed_of_light",
+            "wsp:kiwix-curated-t2/wikiquote_en_all/Speed_of_light",
+            "wsp:pubmed/31798008",
+            "wsp:wikipedia-top10/en/One-way_speed_of_light",
+            "wsp:pubmed/39517850"
+          ]
+        },
+        {
+          "id": "q007",
+          "ndcg10": 0.2803090750529908,
+          "recall50": 0.5,
+          "latency_ms": 3538.5626219940605,
+          "top": [
+            "wsp:stackexchange/physics.stackexchange.com_en_all/questions/530463/forming-black-holes",
+            "wsp:kiwix-wikipedia-en-simple-all/Stellar_black_hole",
+            "wsp:stackexchange/physics.stackexchange.com_en_all/questions/325320/how-stellar-black-holes-are-formed",
+            "wsp:stackexchange/physics.stackexchange.com_en_all/questions/238589/how-is-a-black-hole-formed",
+            "wsp:kiwix-wikipedia-en-simple-all/Black_hole",
+            "wsp:stackexchange/astronomy.stackexchange.com_en_all/questions/7788/black-holes-how-do-they-form",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/General_Astronomy/Supermassive_Black_Holes",
+            "wsp:kiwix-wikipedia-en-simple-all/Supermassive_black_hole",
+            "wsp:stackexchange/physics.stackexchange.com_en_all/questions/187230/how-do-black-hole-jets-form",
+            "wsp:pubmed/15169393"
+          ]
+        },
+        {
+          "id": "q008",
+          "ndcg10": 0.7262287617954056,
+          "recall50": 0.6666666666666666,
+          "latency_ms": 5675.979755003937,
+          "top": [
+            "wsp:wikipedia-top10/en/Natural_selection",
+            "wsp:pubmed/26754289",
+            "wsp:pubmed/24672902",
+            "wsp:wikipedia-top10/en/The_Genetical_Theory_of_Natural_Selection",
+            "wsp:kiwix-curated-t2/wikiquote_en_all/On_the_Origin_of_Species",
+            "wsp:kiwix-curated-t2/wikiquote_en_all/The_Genetical_Theory_of_Natural_Selection",
+            "wsp:mdwiki/Cancer_selection",
+            "wsp:gutenberg/22428",
+            "wsp:kiwix-wikisource-en-all/The_Origin_of_Species_(1872)",
+            "wsp:gutenberg/65779"
+          ]
+        },
+        {
+          "id": "q009",
+          "ndcg10": 0.3333333333333333,
+          "recall50": 1.0,
+          "latency_ms": 2411.8713499992737,
+          "top": [
+            "wsp:kiwix-wikipedia-en-simple-all/Quantum_entanglement",
+            "wsp:wiktionary-en/quantum_entanglement",
+            "wsp:pubmed/32794811",
+            "wsp:wikipedia-top10/en/Entanglement_monotone",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/Quantum_theory_of_observation/Entanglement",
+            "wsp:wikipedia-top10/en/Entanglement_swapping",
+            "wsp:wikipedia-top10/en/Entanglement",
+            "wsp:open-library/works/OL20748747W",
+            "wsp:wikipedia-top10/en/Entanglement_depth",
+            "wsp:pubmed/28009187"
+          ]
+        },
+        {
+          "id": "q010",
+          "ndcg10": 0.17376534287144002,
+          "recall50": 0.5,
+          "latency_ms": 3296.071791999566,
+          "top": [
+            "wsp:stackexchange/physics.stackexchange.com_en_all/questions/210574/nuclear-to-electricity-energy-conversion",
+            "wsp:kiwix-wikipedia-en-simple-all/Nuclear_reactor",
+            "wsp:stackexchange/space.stackexchange.com_en_all/questions/43472/could-a-thermal-nuclear-propulsion-double-as-a-nuclear-reactor",
+            "wsp:pubmed/16340076",
+            "wsp:kiwix-wikipedia-en-simple-all/Breeder_reactor",
+            "wsp:kiwix-curated-t2/wikiversity_en_all/Power_Generation/Nuclear_Power/Part1",
+            "wsp:pubmed/41700946",
+            "wsp:stackexchange/physics.stackexchange.com_en_all/questions/131397/advanced-molten-salt-reactor-is-the-concept-of-designing-a-reactor-that-uses-s",
+            "wsp:stackexchange/physics.stackexchange.com_en_all/questions/78125/waterflow-of-coolant-in-nuclear-reactor",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/FHSST_Physics/Atomic_Nucleus/Nuclear_Reactors"
+          ]
+        },
+        {
+          "id": "q011",
+          "ndcg10": 0.0829071384176138,
+          "recall50": 1.0,
+          "latency_ms": 3265.3820360064856,
+          "top": [
+            "wsp:kiwix-curated-t2/wikibooks_en_all/Half-Life_Computation",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/Introduction_to_Paleoanthropology/Dating_Techniques",
+            "wsp:stackexchange/mathematica.stackexchange.com_en_all/questions/311113/what-is-the-correct-decay-constant-and-half-life-for-carbon-14",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/Historical_Geology/Radiocarbon_dating",
+            "wsp:stackexchange/physics.stackexchange.com_en_all/questions/630894/conceptual-half-life-question",
+            "wsp:pubmed/29570396",
+            "wsp:stackexchange/worldbuilding.stackexchange.com_en_all/questions/97845/limits-of-carbon-dating-and-possible-alternatives",
+            "wsp:kiwix-curated-t2/wikiversity_en_all/WikiJournal_of_Science/Radiocarbon_dating/XML",
+            "wsp:kiwix-wikipedia-en-simple-all/Radiocarbon_dating",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/Planet_Earth/3d._Radiometric_dating:_Using_chemistry_to_tell_time"
+          ]
+        },
+        {
+          "id": "q012",
+          "ndcg10": 0.0,
+          "recall50": 0.5,
+          "latency_ms": 5094.140246997995,
+          "top": [
+            "wsp:kiwix-curated-t2/wikibooks_en_all/Structural_Biochemistry/Nucleic_Acid/DNA/DNA_structure",
+            "wsp:wikipedia-top10/en/The_Double_Helix",
+            "wsp:stackexchange/biology.stackexchange.com_en_all/questions/23851/importance-of-double-helix-dna-structure",
+            "wsp:open-library/books/OL46554793M",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/Structural_Biochemistry/Nucleic_Acid/DNA",
+            "wsp:mdwiki/Double_Helix_Medal",
+            "wsp:wikipedia-top10/en/Double_helix_(disambiguation)",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/Structural_Biochemistry/Nucleic_Acid/DNA/Watson_and_Crick",
+            "wsp:open-library/books/OL38840487M",
+            "wsp:stackexchange/biology.stackexchange.com_en_all/questions/42489/prime-structure-of-dna-double-helix-confusion"
+          ]
+        },
+        {
+          "id": "q013",
+          "ndcg10": 0.0,
+          "recall50": 0.5,
+          "latency_ms": 2389.3937399989227,
+          "top": [
+            "wsp:kiwix-curated-t2/wikibooks_en_all/Earthquakes/Plate_Tectonics",
+            "wsp:open-library/works/OL34038863W",
+            "wsp:open-library/works/OL20156266W",
+            "wsp:open-library/works/OL18593230W",
+            "wsp:open-library/books/OL37303451M",
+            "wsp:open-library/books/OL46553426M",
+            "wsp:open-library/works/OL16132605W",
+            "wsp:open-library/books/OL38826258M",
+            "wsp:open-library/books/OL46088084M",
+            "wsp:open-library/works/OL28363154W"
+          ]
+        },
+        {
+          "id": "q014",
+          "ndcg10": 0.0,
+          "recall50": 0.5,
+          "latency_ms": 2310.5355059960857,
+          "top": [
+            "wsp:kiwix-wikipedia-en-simple-all/Thermodynamic_entropy",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/Physics_with_Calculus/Thermodynamics/Entropy",
+            "wsp:kiwix-curated-t2/wikiquote_en_all/Entropy_(thermodynamics)",
+            "wsp:kiwix-curated-t2/wikiversity_en_all/Introduction_to_thermodynamics/Entropy_and_entropy_generation",
+            "wsp:wikipedia-top10/en/Entropy_unit",
+            "wsp:wikipedia-top10/en/Entropy_(statistical_thermodynamics)",
+            "wsp:kiwix-curated-t2/khanacademy_en_all/da174853136b508eb547c435d3327f68",
+            "wsp:wikipedia-top10/en/Thermodynamic_beta",
+            "wsp:wikipedia-top10/en/Entropy_in_thermodynamics_and_information_theory",
+            "wsp:kiwix-curated-t2/khanacademy_en_all/105bb75d626b5ffb9a993d6af78041ba"
+          ]
+        },
+        {
+          "id": "q015",
+          "ndcg10": 0.720186140567875,
+          "recall50": 1.0,
+          "latency_ms": 2354.9924319959246,
+          "top": [
+            "wsp:kiwix-wikipedia-en-simple-all/Tide",
+            "wsp:kiwix-wiktionary-en-simple-all/tide",
+            "wsp:kiwix-wikisource-en-all/Tides",
+            "wsp:wikipedia-top10/en/Rising_Tide",
+            "wsp:wikipedia-top10/en/Tide",
+            "wsp:wikipedia-top10/en/Tide_clock",
+            "wsp:wikipedia-top10/en/Tides_Foundation",
+            "wsp:mdwiki/Alkaline_tide",
+            "wsp:wiktionary-en/tided",
+            "wsp:wikisource-en/Tides"
+          ]
+        },
+        {
+          "id": "q016",
+          "ndcg10": 0.13770577618809332,
+          "recall50": 0.5,
+          "latency_ms": 4171.32836500241,
+          "top": [
+            "wsp:pubmed/22248017",
+            "wsp:wikipedia-top10/en/Epigenetics_of_diabetes_type_2",
+            "wsp:mdwiki/Type_2_diabetes",
+            "wsp:pubmed/23748249",
+            "wsp:pubmed/14746124",
+            "wsp:pubmed/8033523",
+            "wsp:open-library/books/OL48886691M",
+            "wsp:open-library/books/OL36148380M",
+            "wsp:pubmed/14693978",
+            "wsp:open-library/books/OL48859782M"
+          ]
+        },
+        {
+          "id": "q017",
+          "ndcg10": 0.27541155237618664,
+          "recall50": 0.5,
+          "latency_ms": 2209.572883999499,
+          "top": [
+            "wsp:mdwiki/Penicillin",
+            "wsp:wikipedia-top10/en/Bacteria",
+            "wsp:mdwiki/Eagle_effect",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/Structural_Biochemistry/Three_Domains_of_Life/Bacteria",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/Structural_Biochemistry/Enzyme/Reversible_Inhibitors/Competitive_Inhibitor/Penicillin",
+            "wsp:stackexchange/biology.stackexchange.com_en_all/questions/1518/why-does-penicillin-only-affect-bacterial-cell-walls",
+            "wsp:mdwiki/Discovery_of_penicillin",
+            "wsp:stackexchange/chemistry.stackexchange.com_en_all/questions/1169/are-there-ways-to-predict-which-chemicals-will-kill-certain-bacteria",
+            "wsp:stackexchange/worldbuilding.stackexchange.com_en_all/questions/262484/how-to-harvest-enough-penicillin-in-1346",
+            "wsp:wikipedia-top10/en/Discovery_of_penicillin"
+          ]
+        },
+        {
+          "id": "q018",
+          "ndcg10": 0.2103099178571525,
+          "recall50": 1.0,
+          "latency_ms": 2482.3813590046484,
+          "top": [
+            "wsp:pubmed/16059457",
+            "wsp:mdwiki/Stroke",
+            "wsp:pubmed/27741880",
+            "wsp:pubmed/17315400",
+            "wsp:pubmed/15356883",
+            "wsp:mdwiki/List_of_first_response_mnemonics",
+            "wsp:kiwix-curated-t2/wikiversity_en_all/Stroke",
+            "wsp:open-library/books/OL31809813M",
+            "wsp:wikipedia-top10/en/Road_signs_in_the_Netherlands",
+            "wsp:open-library/books/OL62124612M"
+          ]
+        },
+        {
+          "id": "q019",
+          "ndcg10": 0.0,
+          "recall50": 0.0,
+          "latency_ms": 4503.867110004649,
+          "top": [
+            "wsp:kiwix-nhs-uk-en-medicines/www.nhs.uk/medicines/indapamide/",
+            "wsp:kiwix-nhs-uk-en-medicines/www.nhs.uk/medicines/irbesartan/",
+            "wsp:stackexchange/english.stackexchange.com_en_all/questions/457637/can-help-treat-high-blood-pressure-or-can-help-cure-high-blood-pressure",
+            "wsp:kiwix-nhs-uk-en-medicines/www.nhs.uk/medicines/lisinopril/",
+            "wsp:open-library/works/OL36610373W",
+            "wsp:open-library/books/OL46497212M",
+            "wsp:open-library/books/OL54181554M",
+            "wsp:open-library/books/OL49459941M",
+            "wsp:open-library/works/OL39771921W",
+            "wsp:open-library/authors/OL5593520A"
+          ]
+        },
+        {
+          "id": "q020",
+          "ndcg10": 0.5508231047523733,
+          "recall50": 0.5,
+          "latency_ms": 1636.9009490008466,
+          "top": [
+            "wsp:mdwiki/Malaria",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/Pinyin/Malaria",
+            "wsp:stackexchange/ell.stackexchange.com_en_all/questions/250419/is-it-possible-to-use-transmit-to-instead-of-infect",
+            "wsp:kiwix-wikisource-en-all/Portal:Malaria",
+            "wsp:mdwiki/Airport_malaria",
+            "wsp:mdwiki/Mosquito-malaria_theory",
+            "wsp:wikipedia-top10/en/Malaria",
+            "wsp:stackexchange/biology.stackexchange.com_en_all/questions/44868/can-hiv-be-transmitted-via-mosquitos",
+            "wsp:wikipedia-top10/en/Malaria_prophylaxis",
+            "wsp:stackexchange/biology.stackexchange.com_en_all/questions/58893/first-infection-of-malaria"
+          ]
+        },
+        {
+          "id": "q021",
+          "ndcg10": 0.44917689524762666,
+          "recall50": 0.5,
+          "latency_ms": 2236.765399997239,
+          "top": [
+            "wsp:mdwiki/Pancreas",
+            "wsp:kiwix-wikipedia-en-simple-all/Pancreas",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/English-Hanzi/Pancreas",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/Pinyin/Pancreas",
+            "wsp:kiwix-curated-t2/wikiversity_en_all/English-Chinese/Pancreas",
+            "wsp:mdwiki/Pancreatectomy",
+            "wsp:wikipedia-top10/en/Pancreas_transplantation",
+            "wsp:kiwix-wiktionary-en-simple-all/pancreas",
+            "wsp:mdwiki/Pancreas_transplantation",
+            "wsp:wikipedia-top10/en/Pancreas_(disambiguation)"
+          ]
+        },
+        {
+          "id": "q022",
+          "ndcg10": 0.20438239758848614,
+          "recall50": 0.0,
+          "latency_ms": 2371.052763002808,
+          "top": [
+            "wsp:mdwiki/Virus",
+            "wsp:kiwix-wiktionary-en-simple-all/bacterium",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/English-Hanzi/Virus",
+            "wsp:stackexchange/ell.stackexchange.com_en_all/questions/148586/analyze-the-structure-a-particular-bacterium-that-has-never-encountered-a-part",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/Wikijunior:Biology/Viruses",
+            "wsp:wikipedia-top10/en/Listeria_virus_A511",
+            "wsp:wikipedia-top10/en/Salmonella_virus_SopEphi",
+            "wsp:wikipedia-top10/en/Salmonella_virus_Fels2",
+            "wsp:wikipedia-top10/en/Pseudomonas_virus_phiCTX",
+            "wsp:wikipedia-top10/en/Ralstonia_virus_RSA1"
+          ]
+        },
+        {
+          "id": "q023",
+          "ndcg10": 0.0,
+          "recall50": 1.0,
+          "latency_ms": 2218.5890909968293,
+          "top": [
+            "wsp:mdwiki/Headache",
+            "wsp:wikipedia-top10/en/Headache",
+            "wsp:stackexchange/medicalsciences.stackexchange.com_en_all/questions/3974/can-thinking-too-hard-cause-a-migraine-or-a-headache",
+            "wsp:open-library/works/OL36318414W",
+            "wsp:open-library/books/OL49073589M",
+            "wsp:pubmed/19175775",
+            "wsp:pubmed/9801624",
+            "wsp:mdwiki/Abdominal_migraine",
+            "wsp:gutenberg/61228",
+            "wsp:open-library/works/OL15048732W"
+          ]
+        },
+        {
+          "id": "q024",
+          "ndcg10": 0.0,
+          "recall50": 0.0,
+          "latency_ms": 4126.340499002254,
+          "top": [
+            "wsp:mdwiki/First_aid",
+            "wsp:open-library/books/OL48359132M",
+            "wsp:open-library/works/OL30959806W",
+            "wsp:open-library/works/OL35830444W",
+            "wsp:open-library/books/OL42529576M",
+            "wsp:open-library/works/OL6332060W",
+            "wsp:pubmed/37640177",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/Adventist_Youth_Honors_Answer_Book/First_aid/Heart_attack",
+            "wsp:pubmed/10603875",
+            "wsp:open-library/works/OL36305246W"
+          ]
+        },
+        {
+          "id": "q025",
+          "ndcg10": 0.3333333333333333,
+          "recall50": 0.0,
+          "latency_ms": 3490.890398999909,
+          "top": [
+            "wsp:mdwiki/General_anaesthesia",
+            "wsp:mdwiki/General_anaesthetic",
+            "wsp:mdwiki/Anesthesia",
+            "wsp:pubmed/18735686",
+            "wsp:mdwiki/Twilight_anesthesia",
+            "wsp:mdwiki/Anesthetic",
+            "wsp:wikipedia-top10/en/History_of_general_anesthesia",
+            "wsp:stackexchange/medicalsciences.stackexchange.com_en_all/questions/32090/is-general-anesthesia-an-independent-risk-factor-for-perioperative-ischemia",
+            "wsp:mdwiki/Dental_anesthesia",
+            "wsp:pubmed/6018605"
+          ]
+        },
+        {
+          "id": "q026",
+          "ndcg10": 0.07961179255356228,
+          "recall50": 0.5,
+          "latency_ms": 3362.517305999063,
+          "top": [
+            "wsp:kiwix-curated-t2/wikibooks_en_all/World_History/Causes_and_course_of_the_First_World_War",
+            "wsp:open-library/books/OL4173317M",
+            "wsp:open-library/books/OL14084045M",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/COSTP_World_History_Project/Causes_and_course_of_the_First_World_War",
+            "wsp:open-library/works/OL4314368W",
+            "wsp:stackexchange/history.stackexchange.com_en_all/questions/12305/last-death-caused-by-world-war-i",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/World_War_I/Causes/Franz_Ferdinand",
+            "wsp:open-library/books/OL5703735M",
+            "wsp:open-library/works/OL3542955W",
+            "wsp:kiwix-wikipedia-en-simple-all/Causes_of_World_War_I"
+          ]
+        },
+        {
+          "id": "q027",
+          "ndcg10": 0.27541155237618664,
+          "recall50": 1.0,
+          "latency_ms": 2712.9939340011333,
+          "top": [
+            "wsp:wikipedia-top10/en/Alaric_the_Goth:_Fall_of_the_Western_Roman_Empire",
+            "wsp:open-library/books/OL48633635M",
+            "wsp:open-library/books/OL34594310M",
+            "wsp:open-library/books/OL48626588M",
+            "wsp:open-library/works/OL25728928W",
+            "wsp:wikipedia-top10/en/Decline_and_fall_of_the_Roman_Empire",
+            "wsp:wikipedia-top10/en/Fall_of_the_Western_Roman_Empire",
+            "wsp:open-library/books/OL40130898M",
+            "wsp:open-library/books/OL40130899M",
+            "wsp:stackexchange/history.stackexchange.com_en_all/questions/8850/what-role-did-the-eastern-roman-empire-play-in-the-fall-of-the-western-roman-e"
+          ]
+        },
+        {
+          "id": "q028",
+          "ndcg10": 0.5697222754831122,
+          "recall50": 0.5,
+          "latency_ms": 2009.6934440007317,
+          "top": [
+            "wsp:kiwix-wikipedia-en-simple-all/Great_Pyramid_of_Giza",
+            "wsp:open-library/works/OL5732990W",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/Wikijunior:World_Heritage_Sites/Pyramids_of_Giza",
+            "wsp:wikipedia-top10/en/Great_Sphinx_of_Giza",
+            "wsp:open-library/works/OL500237W",
+            "wsp:wikipedia-top10/en/Great_Pyramid_of_Giza",
+            "wsp:kiwix-wikipedia-en-simple-all/Egyptian_pyramids",
+            "wsp:kiwix-gotquestions-org-en-all/www.gotquestions.org/pyramids-Bible.html",
+            "wsp:wikipedia-top10/en/The_Pyramids_of_Giza:_Facts,_Legends_and_Mysteries",
+            "wsp:open-library/works/OL20227156W"
+          ]
+        },
+        {
+          "id": "q029",
+          "ndcg10": 0.14355885269113103,
+          "recall50": 1.0,
+          "latency_ms": 3403.6187139936374,
+          "top": [
+            "wsp:kiwix-wikipedia-en-simple-all/Cold_war_(term)",
+            "wsp:wikipedia-top10/en/Cold_war_(term)",
+            "wsp:kiwix-curated-t2/wikiversity_en_all/Cold_War_II",
+            "wsp:kiwix-wikipedia-en-simple-all/Cold_War",
+            "wsp:kiwix-curated-t2/khanacademy_en_all/ec87eade17295fb8872f1d59225f391a",
+            "wsp:wikipedia-top10/en/Cold_War_Conflicts",
+            "wsp:wiktionary-en/Cold_War_II",
+            "wsp:wikipedia-top10/en/Cold_War_1994",
+            "wsp:kiwix-wiktionary-en-simple-all/Cold_War",
+            "wsp:wikipedia-top10/en/Cold_War_(disambiguation)"
+          ]
+        },
+        {
+          "id": "q030",
+          "ndcg10": 0.0,
+          "recall50": 1.0,
+          "latency_ms": 2506.2960180002847,
+          "top": [
+            "wsp:open-library/books/OL51782898M",
+            "wsp:open-library/books/OL52000731M",
+            "wsp:wikipedia-top10/en/The_Storming_of_the_Bastille_(Thévenin)",
+            "wsp:open-library/books/OL51789410M",
+            "wsp:open-library/books/OL5047556M",
+            "wsp:open-library/books/OL5047557M",
+            "wsp:open-library/books/OL2190472M",
+            "wsp:wikipedia-top10/en/The_Storming_of_the_Bastille_(painting)",
+            "wsp:open-library/books/OL5117559M",
+            "wsp:open-library/works/OL23220691W"
+          ]
+        },
+        {
+          "id": "q031",
+          "ndcg10": 0.5950427489208391,
+          "recall50": 1.0,
+          "latency_ms": 2660.574217996327,
+          "top": [
+            "wsp:kiwix-wikipedia-en-simple-all/Fall_of_the_Berlin_Wall",
+            "wsp:open-library/works/OL24826137W",
+            "wsp:wiktionary-en/fall_of_the_wall",
+            "wsp:kiwix-curated-t2/wikivoyage_en_all/Berlin_Wall",
+            "wsp:wikipedia-top10/en/Fall_of_the_Berlin_Wall",
+            "wsp:kiwix-curated-t2/wikiquote_en_all/Berlin_Wall",
+            "wsp:open-library/books/OL37371806M",
+            "wsp:open-library/books/OL51328988M",
+            "wsp:stackexchange/photo.stackexchange.com_en_all/questions/95593/is-it-worth-trying-to-process-film-shot-in-1989-fall-of-the-berlin-wall",
+            "wsp:pubmed/35586335"
+          ]
+        },
+        {
+          "id": "q032",
+          "ndcg10": 0.3333333333333333,
+          "recall50": 1.0,
+          "latency_ms": 4080.3895900025964,
+          "top": [
+            "wsp:mdwiki/Black_Death",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/Saylor.org's_Early_Globalizations:_East_Meets_West_(1200s-1600s)/The_Black_Death",
+            "wsp:gutenberg/1739",
+            "wsp:mdwiki/Black_Death_in_England",
+            "wsp:wikipedia-top10/en/Black_Death_in_medieval_culture",
+            "wsp:open-library/works/OL19377255W",
+            "wsp:mdwiki/Consequences_of_the_Black_Death",
+            "wsp:mdwiki/Bubonic_plague",
+            "wsp:open-library/works/OL2973661W",
+            "wsp:open-library/works/OL49838W"
+          ]
+        },
+        {
+          "id": "q033",
+          "ndcg10": 0.07961179255356228,
+          "recall50": 1.0,
+          "latency_ms": 2447.0895620033843,
+          "top": [
+            "wsp:open-library/books/OL34500019M",
+            "wsp:open-library/books/OL28799143M",
+            "wsp:open-library/books/OL38834921M",
+            "wsp:kiwix-curated-t2/wikiquote_en_all/Apollo_11",
+            "wsp:open-library/works/OL28369857W",
+            "wsp:gutenberg/116",
+            "wsp:open-library/works/OL21271115W",
+            "wsp:wikipedia-top10/en/Moon_Landing_(album)",
+            "wsp:wikipedia-top10/en/Apollo_11_missing_tapes",
+            "wsp:kiwix-wikipedia-en-simple-all/Moon_landing"
+          ]
+        },
+        {
+          "id": "q034",
+          "ndcg10": 0.16666666666666666,
+          "recall50": 1.0,
+          "latency_ms": 2618.7123580020852,
+          "top": [
+            "wsp:wikipedia-top10/en/Magna_Carta_(disambiguation)",
+            "wsp:wikipedia-top10/en/Magna_Carta_(band)",
+            "wsp:kiwix-wikipedia-en-simple-all/Magna_Carta",
+            "wsp:wikipedia-top10/en/Magna_Carta_Foundation",
+            "wsp:wikipedia-top10/en/Magna_Carta_Records",
+            "wsp:wikipedia-top10/en/Magna_Carta_Cartel",
+            "wsp:wikipedia-top10/en/Magna_Carta_Island",
+            "wsp:wikipedia-top10/en/Magna_Carta_College",
+            "wsp:wikipedia-top10/en/Magna_Carta_(barge)",
+            "wsp:wikipedia-top10/en/Whittaker_Magna_Carta"
+          ]
+        },
+        {
+          "id": "q035",
+          "ndcg10": 0.2103099178571525,
+          "recall50": 1.0,
+          "latency_ms": 3415.3356359965983,
+          "top": [
+            "wsp:open-library/works/OL32892154W",
+            "wsp:kiwix-wikipedia-en-simple-all/Industrial_Revolution",
+            "wsp:open-library/works/OL18848016W",
+            "wsp:open-library/books/OL22704697M",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/World_History/The_Industrial_Revolution",
+            "wsp:open-library/works/OL36664636W",
+            "wsp:open-library/books/OL49525204M",
+            "wsp:wikipedia-top10/en/Life_in_Great_Britain_during_the_Industrial_Revolution",
+            "wsp:wikipedia-top10/en/Industrious_Revolution",
+            "wsp:stackexchange/worldbuilding.stackexchange.com_en_all/questions/11094/artificial-industrial-revolution"
+          ]
+        },
+        {
+          "id": "q036",
+          "ndcg10": 0.11861329943102608,
+          "recall50": 0.5,
+          "latency_ms": 2368.3108010009164,
+          "top": [
+            "wsp:kiwix-curated-t2/wikiquote_en_all/Genghis_Khan",
+            "wsp:wikipedia-top10/en/Genghis_Khan_(1950_film)",
+            "wsp:wikipedia-top10/en/Genghis_Khan_(TV_programme)",
+            "wsp:kiwix-wikipedia-en-simple-all/Genghis_Khan",
+            "wsp:kiwix-wikipedia-en-simple-all/Genghis_Khan_(1965_movie)",
+            "wsp:open-library/works/OL17704120W",
+            "wsp:wikipedia-top10/en/Genghis_Khan_(video_game)",
+            "wsp:wiktionary-en/Genghis_Khan",
+            "wsp:wikipedia-top10/en/Genghis_Khan_in_popular_culture",
+            "wsp:wikipedia-top10/en/Genghis_Khan_(disambiguation)"
+          ]
+        },
+        {
+          "id": "q037",
+          "ndcg10": 0.0,
+          "recall50": 0.5,
+          "latency_ms": 4359.497149998788,
+          "top": [
+            "wsp:open-library/books/OL37356601M",
+            "wsp:open-library/books/OL53290021M",
+            "wsp:kiwix-gotquestions-org-en-all/printer.gotquestions.net/GeneratePF?articleId=23579",
+            "wsp:open-library/works/OL27426341W",
+            "wsp:open-library/works/OL39146297W",
+            "wsp:open-library/works/OL28378747W",
+            "wsp:kiwix-wikipedia-en-simple-all/Project_Gutenberg",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/Ohio_7th_Grade_World_History/Gutenberg_and_the_Printing_Press",
+            "wsp:open-library/works/OL2945765W",
+            "wsp:open-library/works/OL28409949W"
+          ]
+        },
+        {
+          "id": "q038",
+          "ndcg10": 0.0829071384176138,
+          "recall50": 0.0,
+          "latency_ms": 4300.173695999547,
+          "top": [
+            "wsp:open-library/books/OL1111392M",
+            "wsp:open-library/works/OL1952804W",
+            "wsp:open-library/works/OL1980825W",
+            "wsp:open-library/books/OL382622M",
+            "wsp:open-library/books/OL22843858M",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/Wikijunior:Africa/South_Africa",
+            "wsp:kiwix-wikipedia-en-simple-all/South_Africa",
+            "wsp:open-library/works/OL10917329W",
+            "wsp:kiwix-wikipedia-en-simple-all/Apartheid",
+            "wsp:open-library/books/OL8092692M"
+          ]
+        },
+        {
+          "id": "q039",
+          "ndcg10": 0.1289509357448472,
+          "recall50": 1.0,
+          "latency_ms": 2882.8209130006144,
+          "top": [
+            "wsp:kiwix-curated-t2/wikivoyage_en_all/Lisbon",
+            "wsp:mdwiki/Pharmacy_Museum,_Lisbon",
+            "wsp:kiwix-wikipedia-en-simple-all/Estrela_(Lisbon)",
+            "wsp:kiwix-wikipedia-en-simple-all/Lisbon,_Louisiana",
+            "wsp:kiwix-wikipedia-en-simple-all/Lisbon",
+            "wsp:kiwix-curated-t2/wikiquote_en_all/Lisbon",
+            "wsp:kiwix-curated-t2/wikivoyage_en_all/Lisbon/North",
+            "wsp:kiwix-curated-t2/wikivoyage_en_all/Greater_Lisbon",
+            "wsp:kiwix-curated-t2/wikivoyage_en_all/Lisbon/Baixa",
+            "wsp:kiwix-curated-t2/wikivoyage_en_all/Lisbon_(Maine)"
+          ]
+        },
+        {
+          "id": "q040",
+          "ndcg10": 0.14355885269113103,
+          "recall50": 1.0,
+          "latency_ms": 2574.1334370031836,
+          "top": [
+            "wsp:kiwix-curated-t2/wikivoyage_en_all/Mount_Kilimanjaro",
+            "wsp:wikipedia-top10/en/Kilimanjaro_(disambiguation)",
+            "wsp:kiwix-wikisource-en-all/1911_Encyclopædia_Britannica/Kilimanjaro",
+            "wsp:kiwix-wikipedia-en-simple-all/Mount_Kilimanjaro",
+            "wsp:wikipedia-top10/en/Mount_Kilimanjaro_International_Convention_Centre",
+            "wsp:wiktionary-en/Mount_Kilimanjaro",
+            "wsp:wikipedia-top10/en/Anglican_Diocese_of_Mount_Kilimanjaro",
+            "wsp:wikipedia-top10/en/Kilimanjaro_Region",
+            "wsp:wikipedia-top10/en/Mount_Kilimanjaro_vlei_rat",
+            "wsp:stackexchange/travel.stackexchange.com_en_all/questions/69668/viewing-not-hiking-mount-kilimanjaro-from-arusha"
+          ]
+        },
+        {
+          "id": "q041",
+          "ndcg10": 0.10425656783464912,
+          "recall50": 0.0,
+          "latency_ms": 4676.255680002214,
+          "top": [
+            "wsp:open-library/works/OL5702201W",
+            "wsp:open-library/works/OL5703248W",
+            "wsp:kiwix-wikipedia-en-simple-all/Yangtze_River",
+            "wsp:kiwix-wikipedia-en-simple-all/Amazon_River",
+            "wsp:wikisource-en/The_Empire_and_the_century/The_Longest_River_in_the_World",
+            "wsp:kiwix-wikipedia-en-simple-all/Kapuas_River",
+            "wsp:wikipedia-top10/en/List_of_longest_undammed_rivers",
+            "wsp:gutenberg/78095",
+            "wsp:kiwix-wikisource-en-all/The_Empire_and_the_century/The_Longest_River_in_the_World",
+            "wsp:kiwix-wikipedia-en-simple-all/Onon_(river)"
+          ]
+        },
+        {
+          "id": "q042",
+          "ndcg10": 0.0,
+          "recall50": 0.0,
+          "latency_ms": 8047.691368003143,
+          "top": [
+            "wsp:open-library/works/OL17809984W",
+            "wsp:kiwix-wiktionary-en-simple-all/Australian_Capital_Territory",
+            "wsp:kiwix-wikipedia-en-simple-all/List_of_cities_in_Australia",
+            "wsp:kiwix-curated-t2/wikivoyage_en_all/Capital_Region",
+            "wsp:kiwix-wikipedia-en-simple-all/National_Museum_of_Australia",
+            "wsp:pubmed/12558474",
+            "wsp:kiwix-wiktionary-en-simple-all/South_Australia",
+            "wsp:kiwix-wikipedia-en-simple-all/High_Court_of_Australia",
+            "wsp:kiwix-wikipedia-en-simple-all/RSPCA_Australia",
+            "wsp:kiwix-wikipedia-en-simple-all/Southern_Australia"
+          ]
+        },
+        {
+          "id": "q043",
+          "ndcg10": 0.0,
+          "recall50": 1.0,
+          "latency_ms": 5568.224832000851,
+          "top": [
+            "wsp:open-library/books/OL3753808M",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/Wikijunior:World_Heritage_Sites/Great_Barrier_Reef",
+            "wsp:kiwix-wikisource-en-all/1911_Encyclopædia_Britannica/Great_Barrier_Reef",
+            "wsp:wikipedia-top10/en/Barrier_reef_(disambiguation)",
+            "wsp:wikipedia-top10/en/Great_Barrier_Reef_(disambiguation)",
+            "wsp:open-library/books/OL1392966M",
+            "wsp:kiwix-curated-t2/wikivoyage_en_all/Great_Barrier_Reef",
+            "wsp:wiktionary-en/Great_Barrier_Reef",
+            "wsp:open-library/books/OL23181337M",
+            "wsp:wikipedia-top10/en/1928_Great_Barrier_Reef_expedition"
+          ]
+        },
+        {
+          "id": "q044",
+          "ndcg10": 0.4342006058217361,
+          "recall50": 1.0,
+          "latency_ms": 3549.044334999053,
+          "top": [
+            "wsp:stackexchange/earthscience.stackexchange.com_en_all/questions/2176/how-will-climate-change-affect-the-extent-of-the-sahara-desert",
+            "wsp:mdwiki/Western_Sahara",
+            "wsp:kiwix-wikipedia-en-simple-all/Hot_desert_climate",
+            "wsp:pubmed/18467583",
+            "wsp:pubmed/27538725",
+            "wsp:kiwix-wikipedia-en-simple-all/Sahara",
+            "wsp:pubmed/11381550",
+            "wsp:wikipedia-top10/en/Sahara",
+            "wsp:kiwix-curated-t2/wikivoyage_en_all/Western_Sahara",
+            "wsp:kiwix-curated-t2/wikivoyage_en_all/Deserts"
+          ]
+        },
+        {
+          "id": "q045",
+          "ndcg10": 0.0,
+          "recall50": 0.0,
+          "latency_ms": 3131.4528820003034,
+          "top": [
+            "wsp:kiwix-curated-t2/wikibooks_en_all/Pinyin/Ocean",
+            "wsp:stackexchange/earthscience.stackexchange.com_en_all/questions/22793/is-challenger-deep-really-the-deepest-place-in-the-ocean",
+            "wsp:pubmed/15692042",
+            "wsp:kiwix-wikipedia-en-simple-all/Indian_Ocean",
+            "wsp:pubmed/32867361",
+            "wsp:kiwix-wikisource-en-all/CIA_World_Fact_Book,_2004/Pacific_Ocean",
+            "wsp:wikisource-en/CIA_World_Fact_Book,_2004/Pacific_Ocean",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/Science:_An_Elementary_Teacher’s_Guide/Oceans",
+            "wsp:pubmed/34557759",
+            "wsp:wikipedia-top10/en/Virgin_Oceanic"
+          ]
+        },
+        {
+          "id": "q046",
+          "ndcg10": 0.2103099178571525,
+          "recall50": 0.0,
+          "latency_ms": 3901.1182999965968,
+          "top": [
+            "wsp:stackexchange/worldbuilding.stackexchange.com_en_all/questions/72966/a-clear-map-of-lake-makgadikgadi",
+            "wsp:kiwix-wikipedia-en-simple-all/Lake_Victoria",
+            "wsp:pubmed/37769731",
+            "wsp:wikipedia-top10/en/Lake_Albert_(Africa)",
+            "wsp:kiwix-wikipedia-en-simple-all/Lake_Chad",
+            "wsp:kiwix-curated-t2/wikivoyage_en_all/Lake_Tanganyika",
+            "wsp:open-library/works/OL37010468W",
+            "wsp:pubmed/11839198",
+            "wsp:kiwix-curated-t2/wikiversity_en_all/Geography/Africa",
+            "wsp:kiwix-wikipedia-en-simple-all/Lake"
+          ]
+        },
+        {
+          "id": "q047",
+          "ndcg10": 0.3333333333333333,
+          "recall50": 0.0,
+          "latency_ms": 3457.7384519943735,
+          "top": [
+            "wsp:kiwix-wikipedia-en-simple-all/Andes",
+            "wsp:kiwix-wikipedia-en-simple-all/American_Cordillera",
+            "wsp:wikisource-en/Collier's_New_Encyclopedia_(1921)/Andes",
+            "wsp:kiwix-wikisource-en-all/1911_Encyclopædia_Britannica/Andes",
+            "wsp:wiktionary-en/Mapocho_River",
+            "wsp:kiwix-curated-t2/wikivoyage_en_all/Mountain_ranges",
+            "wsp:wikipedia-top10/en/Mountain_range",
+            "wsp:kiwix-wikisource-en-all/Collier's_New_Encyclopedia_(1921)/Andes",
+            "wsp:kiwix-curated-t2/wikivoyage_en_all/Mountaineering",
+            "wsp:wikipedia-top10/en/Dry_Andes"
+          ]
+        },
+        {
+          "id": "q048",
+          "ndcg10": 0.10425656783464912,
+          "recall50": 0.3333333333333333,
+          "latency_ms": 2032.052405003924,
+          "top": [
+            "wsp:gutenberg/46894",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/CLIL/The_world's_main_volcanoes",
+            "wsp:wikipedia-top10/en/Newberry_Volcano",
+            "wsp:kiwix-wikipedia-en-simple-all/Mount_Vesuvius",
+            "wsp:kiwix-curated-t2/wikivoyage_en_all/Vesuvius",
+            "wsp:wikipedia-top10/en/Late_Visitors_to_Pompeii",
+            "wsp:wikipedia-top10/en/Decade_Volcanoes",
+            "wsp:kiwix-wikisource-en-all/1911_Encyclopædia_Britannica/Vesuvius",
+            "wsp:wikipedia-top10/en/Volcano",
+            "wsp:kiwix-curated-t2/wikivoyage_en_all/Volcanoes"
+          ]
+        },
+        {
+          "id": "q049",
+          "ndcg10": 0.0,
+          "recall50": 0.5,
+          "latency_ms": 3585.352404996229,
+          "top": [
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/23257725/http-static-resources-caching-forever-stategy",
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/4360283/http-cache-control",
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/27290187/http-caching-and-etag-header",
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/3874274/how-to-cache-an-http-post-response",
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/56564341/cache-http-response-despite-no-cache-header-in-response",
+            "wsp:stackexchange/serverfault.com_en_all/questions/979639/is-rfc-7231-the-latest-version-about-the-http-1-1-protocol",
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/68361877/adding-http-response-to-cache",
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/9182692/caching-http-files-with-php",
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/30970314/what-determines-request-equivalence-for-http-caching",
+            "wsp:stackexchange/serverfault.com_en_all/questions/149575/do-all-web-caches-understand-the-cache-control-http-header"
+          ]
+        },
+        {
+          "id": "q050",
+          "ndcg10": 0.3196311965446524,
+          "recall50": 0.5,
+          "latency_ms": 3701.229517995671,
+          "top": [
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/5898940/how-works-public-key-cryptography-on-github",
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/2853889/how-does-public-key-cryptography-work",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/Cryptography/Public_Key_Overview",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/Cryptography/A_Basic_Public_Key_Example",
+            "wsp:wikipedia-top10/en/Public-key_cryptography",
+            "wsp:wikipedia-top10/en/Transient-key_cryptography",
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/1225720/public-key-cryptography-implementation",
+            "wsp:stackexchange/security.stackexchange.com_en_all/questions/50952/public-key-cryptography-key-length",
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/4593040/how-does-public-key-cryptography-work",
+            "wsp:open-library/works/OL12354770W"
+          ]
+        },
+        {
+          "id": "q051",
+          "ndcg10": 0.45573149298455445,
+          "recall50": 1.0,
+          "latency_ms": 3217.589671003225,
+          "top": [
+            "wsp:kiwix-planetmath-org-en-all/planetmath.org/TuringMachine",
+            "wsp:wikipedia-top10/en/Turing_machine_(disambiguation)",
+            "wsp:kiwix-wikipedia-en-simple-all/Turing_machine",
+            "wsp:kiwix-curated-t2/wikiversity_en_all/Introduction_to_Turing_Machines",
+            "wsp:wikipedia-top10/en/Universal_Turing_machine",
+            "wsp:wikipedia-top10/en/Unambiguous_Turing_machine",
+            "wsp:wiktionary-en/deterministic_Turing_machine",
+            "wsp:kiwix-planetmath-org-en-all/planetmath.org/UniversalTuringMachine",
+            "wsp:wiktionary-en/alternating_Turing_machine",
+            "wsp:wikipedia-top10/en/Turing_machine"
+          ]
+        },
+        {
+          "id": "q052",
+          "ndcg10": 0.0,
+          "recall50": 1.0,
+          "latency_ms": 4780.155763000948,
+          "top": [
+            "wsp:kiwix-curated-t2/archlinux_en_all/Domain_name_resolution",
+            "wsp:kiwix-curated-t2/archlinux_en_all/Domain_name_resolution_(Magyar)",
+            "wsp:wiktionary-en/domain_name_service",
+            "wsp:stackexchange/serverfault.com_en_all/questions/1155723/domain-name-resolves-to-ip-address",
+            "wsp:stackexchange/serverfault.com_en_all/questions/23397/resolving-host-names-to-their-domain-name-in-an-internal-bind-domain",
+            "wsp:stackexchange/superuser.com_en_all/questions/1822696/domain-name-system-architecture",
+            "wsp:wikipedia-top10/en/Name_resolution_(computer_systems)",
+            "wsp:stackexchange/unix.stackexchange.com_en_all/questions/479600/systemd-resolved-block-a-domain-name",
+            "wsp:stackexchange/askubuntu.com_en_all/questions/952284/dns-system-is-failing-to-resolve-domain-names-occasionally",
+            "wsp:kiwix-curated-t2/wikiversity_en_all/Domain_Name_System"
+          ]
+        },
+        {
+          "id": "q053",
+          "ndcg10": 0.0,
+          "recall50": 0.0,
+          "latency_ms": 3017.8858619983657,
+          "top": [
+            "wsp:wikipedia-top10/en/TCP",
+            "wsp:wikipedia-top10/en/UDP",
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/19735474/tcp-udp-multiplexing-demultiplexing",
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/7689293/tcp-vs-udp-throughput",
+            "wsp:stackexchange/networkengineering.stackexchange.com_en_all/questions/36200/iperf-tcp-vs-udp",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/Communication_Networks/TCP_and_UDP_Protocols",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/Communication_Networks/TCP_and_UDP_Protocols/UDP",
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/28510330/tcp-and-udp-combined",
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/27428883/tcp-udp-interoperability",
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/17938623/tcp-and-udp-segmentation"
+          ]
+        },
+        {
+          "id": "q054",
+          "ndcg10": 0.27541155237618664,
+          "recall50": 0.5,
+          "latency_ms": 4174.2619200013,
+          "top": [
+            "wsp:kiwix-wikipedia-en-simple-all/World_Wide_Web",
+            "wsp:kiwix-curated-t2/wikiversity_en_all/English-Chinese/World_Wide_Web",
+            "wsp:open-library/books/OL51584780M",
+            "wsp:open-library/works/OL6224501W",
+            "wsp:kiwix-curated-t2/wikiversity_en_all/Web_Science/Part1:_Foundations_of_the_web/Internet_vs_World_Wide_Web/Motivation_and_requirements_for_the_World_Wide_Web",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/A-level_Computing/AQA/Computer_Components,_The_Stored_Program_Concept_and_the_Internet/Structure_of_the_Internet/Internet,_Intranet_and_World_Wide_Web",
+            "wsp:open-library/books/OL37953673M",
+            "wsp:open-library/books/OL37960805M",
+            "wsp:kiwix-curated-t2/wikiversity_en_all/Web_Science/Part1:_Foundations_of_the_web/Web_Architecture",
+            "wsp:kiwix-curated-t2/wikiversity_en_all/Web_Science/Part1:_Foundations_of_the_web/Internet_vs_World_Wide_Web/Summary_of_the_internet_architecture"
+          ]
+        },
+        {
+          "id": "q055",
+          "ndcg10": 0.3333333333333333,
+          "recall50": 1.0,
+          "latency_ms": 2622.175253003661,
+          "top": [
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/4664521/understanding-hash-tables",
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/730620/how-does-a-hash-table-work",
+            "wsp:stackexchange/cs.stackexchange.com_en_all/questions/148558/iterable-hash-table",
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/2556142/chained-hash-tables-vs-open-addressed-hash-tables",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/MIRC_Scripting/BeyondBasics/Hash_Tables",
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/20601948/hash-table-print-stops-working",
+            "wsp:wikipedia-top10/en/Hash_table",
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/15314751/probing-hash-tables",
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/65041829/double-hashing-closed-hashing-hash-table-issue",
+            "wsp:stackexchange/cs.stackexchange.com_en_all/questions/77086/static-hash-tables"
+          ]
+        },
+        {
+          "id": "q056",
+          "ndcg10": 0.16666666666666666,
+          "recall50": 1.0,
+          "latency_ms": 6344.475411999156,
+          "top": [
+            "wsp:kiwix-curated-t2/wikiquote_en_all/Machine_learning",
+            "wsp:wikipedia-top10/en/Machine_Learning_(journal)",
+            "wsp:kiwix-wikipedia-en-simple-all/Machine_learning",
+            "wsp:stackexchange/linguistics.stackexchange.com_en_all/questions/21049/morphology-machine-learning",
+            "wsp:kiwix-curated-t2/wikiversity_en_all/Machine_learning/Unsupervised_Learning",
+            "wsp:wikipedia-top10/en/Machine_learning_control",
+            "wsp:kiwix-curated-t2/wikiversity_en_all/Machine_learning/Supervised_Learning",
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/46785998/machine-learning-systems",
+            "wsp:wikipedia-top10/en/Learning_curve_(machine_learning)",
+            "wsp:stackexchange/english.stackexchange.com_en_all/questions/595699/differences-between-machine-learning-and-machine-learning"
+          ]
+        },
+        {
+          "id": "q057",
+          "ndcg10": 0.12103812696590094,
+          "recall50": 0.6666666666666666,
+          "latency_ms": 4146.490121995157,
+          "top": [
+            "wsp:wikipedia-top10/en/Criticism_of_Linux",
+            "wsp:wikipedia-top10/en/Fedora_Linux",
+            "wsp:kiwix-wikipedia-en-simple-all/Linux",
+            "wsp:wikipedia-top10/en/Astra_Linux",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/The_Linux_Kernel/Multitasking",
+            "wsp:wikipedia-top10/en/Linux_Journal",
+            "wsp:wikipedia-top10/en/Asahi_Linux",
+            "wsp:kiwix-curated-t2/ifixit_en_all/Device/Linux",
+            "wsp:wiktionary-en/Linux",
+            "wsp:kiwix-www-mankier-com-en-all/www.mankier.com/1/ipcs"
+          ]
+        },
+        {
+          "id": "q058",
+          "ndcg10": 0.0,
+          "recall50": 1.0,
+          "latency_ms": 2276.3638269971125,
+          "top": [
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/26488453/algorithm-complexity-of-quicksort",
+            "wsp:wikipedia-top10/en/Sorting_algorithm",
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/74249189/average-case-time-complexity-of-quicksort-algorithm",
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/8029823/time-complexity-of-quicksort-insertion-sort-hybrid-algorithm",
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/11355621/pseudo-quicksort-time-complexity",
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/44609852/quicksort-complexities-in-depth",
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/59867920/quicksort-algorithm-time-complexity-for-a-particular-kind-of-array",
+            "wsp:stackexchange/math.stackexchange.com_en_all/questions/96767/worst-case-complexity-of-the-quicksort-algorithm",
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/29738135/memory-complexity-of-quicksort",
+            "wsp:stackexchange/cs.stackexchange.com_en_all/questions/126981/quicksort-time-complexity"
+          ]
+        },
+        {
+          "id": "q059",
+          "ndcg10": 0.0,
+          "recall50": 0.0,
+          "latency_ms": 3801.0053550024168,
+          "top": [
+            "wsp:pubmed/40648155",
+            "wsp:pubmed/34097606",
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/75151382/transformer-neural-network-architecture-question-query-key-and-value-matrices",
+            "wsp:stackexchange/ai.stackexchange.com_en_all/questions/37152/are-neural-networks-a-strict-special-case-of-a-transformer",
+            "wsp:pubmed/10905811",
+            "wsp:pubmed/39451852",
+            "wsp:pubmed/38400487",
+            "wsp:pubmed/30106710",
+            "wsp:wikipedia-top10/en/Graph_neural_network",
+            "wsp:wikipedia-top10/en/Neural_network_(machine_learning)"
+          ]
+        },
+        {
+          "id": "q060",
+          "ndcg10": 0.0,
+          "recall50": 0.0,
+          "latency_ms": 3047.8285029967083,
+          "top": [
+            "wsp:kiwix-curated-t2/ifixit_en_all/Guide/Getting+WiFi+working/139581",
+            "wsp:open-library/works/OL22959143W",
+            "wsp:open-library/books/OL32106209M",
+            "wsp:open-library/books/OL33535628M",
+            "wsp:open-library/works/OL28369791W",
+            "wsp:stackexchange/raspberrypi.stackexchange.com_en_all/questions/87478/wifi-wifi-sometimes-does-not-work",
+            "wsp:stackexchange/security.stackexchange.com_en_all/questions/182730/work-wifi-nsfw-mistake",
+            "wsp:open-library/books/OL38834791M",
+            "wsp:open-library/books/OL30865648M",
+            "wsp:stackexchange/unix.stackexchange.com_en_all/questions/292663/wifi-suddenly-stopped-working"
+          ]
+        },
+        {
+          "id": "q061",
+          "ndcg10": 0.3393799890800173,
+          "recall50": 1.0,
+          "latency_ms": 1935.7485299988184,
+          "top": [
+            "wsp:wikipedia-top10/en/Keith_Batey",
+            "wsp:open-library/works/OL6046734W",
+            "wsp:open-library/books/OL29361352M",
+            "wsp:open-library/books/OL29790336M",
+            "wsp:open-library/works/OL221830W",
+            "wsp:wikipedia-top10/en/Enigma_machine",
+            "wsp:kiwix-wikipedia-en-simple-all/Enigma_machine",
+            "wsp:wikipedia-top10/en/Shaun_Wylie",
+            "wsp:wikipedia-top10/en/Enigma-M4",
+            "wsp:stackexchange/math.stackexchange.com_en_all/questions/1239455/mathematically-why-was-the-enigma-machine-so-hard-to-crack"
+          ]
+        },
+        {
+          "id": "q062",
+          "ndcg10": 0.6895405204413555,
+          "recall50": 1.0,
+          "latency_ms": 2743.0408299987903,
+          "top": [
+            "wsp:kiwix-wikipedia-en-simple-all/Alan_Turing",
+            "wsp:open-library/works/OL20222785W",
+            "wsp:kiwix-wikisource-en-all/Author:Alan_Mathison_Turing",
+            "wsp:pubmed/17737751",
+            "wsp:kiwix-curated-t2/wikiquote_en_all/Alan_Turing",
+            "wsp:wikipedia-top10/en/Alan_Turing",
+            "wsp:stackexchange/cstheory.stackexchange.com_en_all/questions/11791/alan-turing-documentaries",
+            "wsp:wikipedia-top10/en/Alan_Turing_(sculpture)",
+            "wsp:wikipedia-top10/en/Alan_Turing_Building",
+            "wsp:wikipedia-top10/en/Alan_Turing_Institute"
+          ]
+        },
+        {
+          "id": "q063",
+          "ndcg10": 0.34355515272477377,
+          "recall50": 0.5,
+          "latency_ms": 2567.373404002865,
+          "top": [
+            "wsp:kiwix-planetmath-org-en-all/planetmath.org/AdaLovelace",
+            "wsp:kiwix-wikisource-en-all/Author:Augusta_Ada_Byron",
+            "wsp:wikipedia-top10/en/Ada_Lovelace_Award",
+            "wsp:kiwix-wikipedia-en-simple-all/Lovelace",
+            "wsp:kiwix-wikipedia-en-simple-all/Ada_(programming_language)",
+            "wsp:wikipedia-top10/en/Portrait_of_Ada_Lovelace",
+            "wsp:wikipedia-top10/en/Ada_Lovelace_(microarchitecture)",
+            "wsp:wikipedia-top10/en/Ada_Lovelace",
+            "wsp:kiwix-wikipedia-en-simple-all/Ada_Lovelace",
+            "wsp:pubmed/38177760"
+          ]
+        },
+        {
+          "id": "q064",
+          "ndcg10": 0.0,
+          "recall50": 0.3333333333333333,
+          "latency_ms": 4780.466323994915,
+          "top": [
+            "wsp:open-library/works/OL38508106W",
+            "wsp:pubmed/10505861",
+            "wsp:gutenberg/61622",
+            "wsp:open-library/works/OL21287437W",
+            "wsp:pubmed/15426739",
+            "wsp:open-library/books/OL28821894M",
+            "wsp:open-library/books/OL36484322M",
+            "wsp:open-library/books/OL36102945M",
+            "wsp:pubmed/9806604",
+            "wsp:gutenberg/69617"
+          ]
+        },
+        {
+          "id": "q065",
+          "ndcg10": 0.0,
+          "recall50": 0.5,
+          "latency_ms": 2858.1956919952063,
+          "top": [
+            "wsp:open-library/books/OL53297787M",
+            "wsp:open-library/books/OL37432794M",
+            "wsp:open-library/books/OL36621850M",
+            "wsp:open-library/works/OL27015694W",
+            "wsp:open-library/works/OL39146203W",
+            "wsp:kiwix-curated-t2/apod.nasa.gov_en_all/apod.nasa.gov/apod/ap000723.html",
+            "wsp:open-library/books/OL386405M",
+            "wsp:open-library/books/OL53289864M",
+            "wsp:kiwix-curated-t2/apod.nasa.gov_en_all/apod.nasa.gov/apod/ap960707.html",
+            "wsp:kiwix-curated-t2/apod.nasa.gov_en_all/apod.nasa.gov/apod/ap970906.html"
+          ]
+        },
+        {
+          "id": "q066",
+          "ndcg10": 0.0829071384176138,
+          "recall50": 0.5,
+          "latency_ms": 2437.413365005341,
+          "top": [
+            "wsp:wikipedia-top10/en/The_Death_of_Leonardo_da_Vinci",
+            "wsp:wikipedia-top10/en/Leonardo_da_Vinci's_Greatest_Hits",
+            "wsp:open-library/books/OL13593941M",
+            "wsp:open-library/works/OL695393W",
+            "wsp:open-library/books/OL19387201M",
+            "wsp:open-library/books/OL19771231M",
+            "wsp:open-library/books/OL5914729M",
+            "wsp:pubmed/34595744",
+            "wsp:kiwix-wikipedia-en-simple-all/Leonardo_da_Vinci",
+            "wsp:mdwiki/Science_and_inventions_of_Leonardo_da_Vinci"
+          ]
+        },
+        {
+          "id": "q067",
+          "ndcg10": 0.27541155237618664,
+          "recall50": 0.5,
+          "latency_ms": 4412.180591003562,
+          "top": [
+            "wsp:kiwix-wikipedia-en-simple-all/Theory_of_relativity",
+            "wsp:open-library/books/OL40033008M",
+            "wsp:open-library/works/OL20567755W",
+            "wsp:open-library/works/OL29106647W",
+            "wsp:open-library/works/OL21900010W",
+            "wsp:open-library/works/OL38656588W",
+            "wsp:open-library/works/OL45417854W",
+            "wsp:wikipedia-top10/en/I_Am_Albert_Einstein",
+            "wsp:stackexchange/physics.stackexchange.com_en_all/questions/737599/derivation-of-a-partial-derivative-equation-by-albert-einstein-in-special-theo",
+            "wsp:stackexchange/tex.stackexchange.com_en_all/questions/655698/the-font-of-albert-einstein-s-general-theory-of-relativity"
+          ]
+        },
+        {
+          "id": "q068",
+          "ndcg10": 0.46769666233064794,
+          "recall50": 1.0,
+          "latency_ms": 3583.6086780036567,
+          "top": [
+            "wsp:wikipedia-top10/en/Saint_Cleopatra",
+            "wsp:wikipedia-top10/en/Cleopatra_Thea",
+            "wsp:kiwix-wikipedia-en-simple-all/Cleopatra",
+            "wsp:wikipedia-top10/en/Cleopatra_(Danaid)",
+            "wsp:wikipedia-top10/en/Cleopatra_Wong",
+            "wsp:kiwix-wikisource-en-all/Cleopatra",
+            "wsp:wikipedia-top10/en/Cleopatra_V",
+            "wsp:wikipedia-top10/en/Cleopatra_Selene",
+            "wsp:wikipedia-top10/en/Cleopatra",
+            "wsp:kiwix-wikipedia-en-simple-all/Cleopatra_VII"
+          ]
+        },
+        {
+          "id": "q069",
+          "ndcg10": 0.0,
+          "recall50": 0.5,
+          "latency_ms": 3356.5397139973356,
+          "top": [
+            "wsp:wikipedia-top10/en/Nonviolent_resistance",
+            "wsp:open-library/works/OL29019964W",
+            "wsp:wikipedia-top10/en/National_Campaign_for_Nonviolent_Resistance",
+            "wsp:open-library/works/OL2604540W",
+            "wsp:open-library/works/OL32677315W",
+            "wsp:open-library/books/OL40471385M",
+            "wsp:open-library/books/OL39903384M",
+            "wsp:open-library/books/OL4915234M",
+            "wsp:open-library/works/OL21209964W",
+            "wsp:open-library/works/OL23633838W"
+          ]
+        },
+        {
+          "id": "q070",
+          "ndcg10": 0.09810357436897517,
+          "recall50": 1.0,
+          "latency_ms": 3177.952655001718,
+          "top": [
+            "wsp:open-library/works/OL21962305W",
+            "wsp:open-library/books/OL29954220M",
+            "wsp:open-library/books/OL37485372M",
+            "wsp:open-library/works/OL44180350W",
+            "wsp:open-library/books/OL30051147M",
+            "wsp:kiwix-wikipedia-en-simple-all/Charles_Darwin",
+            "wsp:wikipedia-top10/en/The_Voyage_of_Charles_Darwin",
+            "wsp:kiwix-wikisource-en-all/Author:Charles_Robert_Darwin",
+            "wsp:stackexchange/literature.stackexchange.com_en_all/questions/29447/is-there-any-abridged-version-of-charles-darwin-s-the-voyage-of-the-beagle",
+            "wsp:pubmed/20665232"
+          ]
+        },
+        {
+          "id": "q071",
+          "ndcg10": 0.0,
+          "recall50": 0.5,
+          "latency_ms": 6035.8677040057955,
+          "top": [
+            "wsp:open-library/books/OL54680962M",
+            "wsp:open-library/books/OL56180546M",
+            "wsp:open-library/books/OL29470272M",
+            "wsp:open-library/books/OL19769540M",
+            "wsp:kiwix-wikipedia-en-simple-all/Google_Books",
+            "wsp:wikipedia-top10/en/Mary_Shelley_bibliography",
+            "wsp:open-library/works/OL24262W",
+            "wsp:pubmed/25610958",
+            "wsp:pubmed/15341043",
+            "wsp:kiwix-curated-t2/wikiquote_en_all/Mary_Shelley"
+          ]
+        },
+        {
+          "id": "q072",
+          "ndcg10": 0.24872141525284142,
+          "recall50": 0.5,
+          "latency_ms": 2701.5755100001115,
+          "top": [
+            "wsp:wikipedia-top10/en/Pride_and_Prejudice_and_Zombies",
+            "wsp:kiwix-curated-t2/wikiquote_en_all/Pride_and_Prejudice_and_Zombies_(film)",
+            "wsp:stackexchange/ell.stackexchange.com_en_all/questions/137532/she-wrote-four-letters-to-her-mother",
+            "wsp:wikipedia-top10/en/Pride_&_Prejudice_(2005_film)",
+            "wsp:kiwix-curated-t2/wikiquote_en_all/Pride_and_Prejudice",
+            "wsp:kiwix-wikisource-en-all/Pride_and_Prejudice_(1817)/Chapter_12",
+            "wsp:kiwix-wikisource-en-all/Pride_and_Prejudice_(1817)/Chapter_50",
+            "wsp:kiwix-wikisource-en-all/Pride_and_Prejudice_(1817)/Chapter_24",
+            "wsp:wikipedia-top10/en/Pride_and_Prejudice",
+            "wsp:kiwix-wikisource-en-all/Pride_and_Prejudice_(1817)/Chapter_26"
+          ]
+        },
+        {
+          "id": "q073",
+          "ndcg10": 0.0,
+          "recall50": 0.5,
+          "latency_ms": 2434.0031299943803,
+          "top": [
+            "wsp:pubmed/41001891",
+            "wsp:kiwix-wikipedia-en-simple-all/Hapax_legomenon",
+            "wsp:wikipedia-top10/en/Moby_Dick_-_Rehearsed_(Wednesday_Theatre)",
+            "wsp:wikipedia-top10/en/Moby_Dick_(1930_film)",
+            "wsp:wikipedia-top10/en/Moby_Dick_(1998_miniseries)",
+            "wsp:wikipedia-top10/en/Moby_Dick_(2010_film)",
+            "wsp:open-library/books/OL58243195M",
+            "wsp:wikipedia-top10/en/Moby_Dick—Rehearsed",
+            "wsp:wikipedia-top10/en/Moby_Dick_(1956_film)",
+            "wsp:wikipedia-top10/en/Adaptations_of_Moby-Dick"
+          ]
+        },
+        {
+          "id": "q074",
+          "ndcg10": 0.0,
+          "recall50": 0.0,
+          "latency_ms": 3717.974740997306,
+          "top": [
+            "wsp:wikipedia-top10/en/Prince_Hamlet",
+            "wsp:open-library/works/OL16464554W",
+            "wsp:open-library/books/OL45757005M",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/Essays_in_Early_Modern_Literary_Studies,_1995-2000/A_Romance_of_Electronic_Scholarship;_with_the_True_and_Lamentable_Tragedies_of_Hamlet,_Prince_of_Denmark._Part_1:_The_Words",
+            "wsp:gutenberg/14899",
+            "wsp:kiwix-wikisource-en-all/The_New_Student's_Reference_Work/Hamlet",
+            "wsp:stackexchange/literature.stackexchange.com_en_all/questions/10958/inconsistencies-in-the-character-of-horatio-in-hamlet",
+            "wsp:stackexchange/literature.stackexchange.com_en_all/questions/16889/how-has-knowledge-of-the-ur-hamlet-evolved-over-the-centuries",
+            "wsp:gutenberg/53490",
+            "wsp:gutenberg/35109"
+          ]
+        },
+        {
+          "id": "q075",
+          "ndcg10": 0.6931463232898143,
+          "recall50": 0.5,
+          "latency_ms": 3043.3735979968333,
+          "top": [
+            "wsp:kiwix-wikipedia-en-simple-all/One_Hundred_Years_of_Solitude",
+            "wsp:open-library/works/OL25758073W",
+            "wsp:open-library/books/OL40355682M",
+            "wsp:stackexchange/literature.stackexchange.com_en_all/questions/18741/why-does-rebeca-kill-jose-arcadio-in-one-hundred-years-of-solitude",
+            "wsp:wikipedia-top10/en/One_Hundred_Years_of_Solitude",
+            "wsp:kiwix-wikipedia-en-simple-all/Gabriel_García_Márquez",
+            "wsp:open-library/works/OL762771W",
+            "wsp:open-library/works/OL13909W",
+            "wsp:kiwix-curated-t2/wikiquote_en_all/One_Hundred_Years_of_Solitude",
+            "wsp:kiwix-wikisource-en-all/Author:Alexander_Pope"
+          ]
+        },
+        {
+          "id": "q076",
+          "ndcg10": 0.2943107231069255,
+          "recall50": 0.5,
+          "latency_ms": 3041.925033001462,
+          "top": [
+            "wsp:open-library/books/OL37555863M",
+            "wsp:open-library/books/OL38963771M",
+            "wsp:gutenberg/59306",
+            "wsp:gutenberg/24269",
+            "wsp:gutenberg/1728",
+            "wsp:wikipedia-top10/en/Odyssey",
+            "wsp:gutenberg/26275",
+            "wsp:kiwix-curated-t2/wikiversity_en_all/The_Ancient_World_(HUM_124_-_UNC_Asheville)/Texts/Odyssey/Book_22",
+            "wsp:kiwix-curated-t2/wikiversity_en_all/The_Odyssey",
+            "wsp:wikipedia-top10/en/Homeric_scholarship"
+          ]
+        },
+        {
+          "id": "q077",
+          "ndcg10": 0.0,
+          "recall50": 0.5,
+          "latency_ms": 2759.3550160017912,
+          "top": [
+            "wsp:wikipedia-top10/en/Big_Brother_(British_TV_series)",
+            "wsp:wikipedia-top10/en/1984_(For_the_Love_of_Big_Brother)",
+            "wsp:stackexchange/worldbuilding.stackexchange.com_en_all/questions/125510/what-is-the-earliest-point-in-history-that-big-brother-could-exist",
+            "wsp:wiktionary-en/Big_Brother",
+            "wsp:wikipedia-top10/en/Little_Brother_(Doctorow_novel)",
+            "wsp:wikipedia-top10/en/Big_Brother_(Dutch_TV_series)",
+            "wsp:wikipedia-top10/en/Two_Minutes_Hate",
+            "wsp:wikipedia-top10/en/Big_Brother_(Nineteen_Eighty-Four)",
+            "wsp:wikipedia-top10/en/The_Hunger_Games_(novel)",
+            "wsp:wikipedia-top10/en/Feed_(Anderson_novel)"
+          ]
+        },
+        {
+          "id": "q078",
+          "ndcg10": 0.17376534287144002,
+          "recall50": 0.5,
+          "latency_ms": 3138.7252640051884,
+          "top": [
+            "wsp:wikipedia-top10/en/Starry_Night_(Munch)",
+            "wsp:kiwix-wikipedia-en-simple-all/The_Starry_Night",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/Wikijunior:Famous_Paintings/The_Starry_Night",
+            "wsp:kiwix-curated-t2/apod.nasa.gov_en_all/apod.nasa.gov/apod/ap091011.html",
+            "wsp:kiwix-curated-t2/apod.nasa.gov_en_all/apod.nasa.gov/apod/ap191023.html",
+            "wsp:kiwix-curated-t2/apod.nasa.gov_en_all/apod.nasa.gov/apod/ap200313.html",
+            "wsp:pubmed/28859463",
+            "wsp:kiwix-curated-t2/apod.nasa.gov_en_all/apod.nasa.gov/apod/ap100615.html",
+            "wsp:pubmed/37666706",
+            "wsp:kiwix-curated-t2/apod.nasa.gov_en_all/apod.nasa.gov/apod/ap160918.html"
+          ]
+        },
+        {
+          "id": "q079",
+          "ndcg10": 0.11861329943102608,
+          "recall50": 0.5,
+          "latency_ms": 3399.8741620016517,
+          "top": [
+            "wsp:open-library/works/OL21366781W",
+            "wsp:wikipedia-top10/en/Beethoven's_Ninth_Symphony_CD-ROM",
+            "wsp:kiwix-curated-t2/wikiquote_en_all/Symphony_No._9_(Beethoven)",
+            "wsp:kiwix-wikipedia-en-simple-all/Symphony_No._9_(Beethoven)",
+            "wsp:open-library/books/OL50652691M",
+            "wsp:open-library/books/OL50641460M",
+            "wsp:open-library/books/OL50625522M",
+            "wsp:open-library/works/OL37568555W",
+            "wsp:open-library/works/OL3501119W",
+            "wsp:open-library/works/OL24482792W"
+          ]
+        },
+        {
+          "id": "q080",
+          "ndcg10": 0.8333333333333334,
+          "recall50": 1.0,
+          "latency_ms": 3565.307662000123,
+          "top": [
+            "wsp:kiwix-wikipedia-en-simple-all/Impressionism",
+            "wsp:open-library/works/OL1804331W",
+            "wsp:wikipedia-top10/en/Impressionism",
+            "wsp:wikipedia-top10/en/Synthetic_impressionism",
+            "wsp:wikipedia-top10/en/Impressionism_(disambiguation)",
+            "wsp:open-library/books/OL16956867M",
+            "wsp:open-library/works/OL19318418W",
+            "wsp:kiwix-wikipedia-en-simple-all/Post-impressionism",
+            "wsp:wikipedia-top10/en/California_Impressionism",
+            "wsp:open-library/books/OL15293494M"
+          ]
+        },
+        {
+          "id": "q081",
+          "ndcg10": 0.10654373218155079,
+          "recall50": 0.5,
+          "latency_ms": 4977.315709002141,
+          "top": [
+            "wsp:open-library/books/OL21111872M",
+            "wsp:open-library/works/OL21026474W",
+            "wsp:wikipedia-top10/en/List_of_English_Baroque_composers",
+            "wsp:open-library/books/OL28460262M",
+            "wsp:kiwix-wikipedia-en-simple-all/Baroque_music",
+            "wsp:open-library/works/OL1206406W",
+            "wsp:open-library/books/OL1910289M",
+            "wsp:stackexchange/music.stackexchange.com_en_all/questions/63107/baroque-keyboard-music",
+            "wsp:kiwix-wikipedia-en-simple-all/Renaissance_music",
+            "wsp:kiwix-curated-t2/wikiquote_en_all/Italian_Baroque"
+          ]
+        },
+        {
+          "id": "q082",
+          "ndcg10": 0.0,
+          "recall50": 1.0,
+          "latency_ms": 3668.1043689968647,
+          "top": [
+            "wsp:kiwix-wikipedia-en-simple-all/Pythagorean_theorem/proof",
+            "wsp:kiwix-planetmath-org-en-all/planetmath.org/ProofOfPythagoreanTheorem",
+            "wsp:kiwix-curated-t2/khanacademy_en_all/9cf56a922d8d5d888989b33de9082b30",
+            "wsp:stackexchange/math.stackexchange.com_en_all/questions/2696254/pythagorean-theorem-incomplete-proof",
+            "wsp:wikipedia-top10/en/Garfield's_proof_of_the_Pythagorean_theorem",
+            "wsp:kiwix-planetmath-org-en-all/planetmath.org/ProofOfPythagoreanTheorem1",
+            "wsp:kiwix-planetmath-org-en-all/planetmath.org/ProofOfPythagoreanTheorem12",
+            "wsp:kiwix-planetmath-org-en-all/planetmath.org/GarfieldsProofOfPythagoreanTheorem",
+            "wsp:kiwix-curated-t2/khanacademy_en_all/3497635397905e5ab6f9d1b1820f699a",
+            "wsp:kiwix-curated-t2/khanacademy_en_all/f444c30f51365269ac601b080736db35"
+          ]
+        },
+        {
+          "id": "q083",
+          "ndcg10": 0.38685280723454163,
+          "recall50": 1.0,
+          "latency_ms": 5080.285613999877,
+          "top": [
+            "wsp:kiwix-curated-t2/wikiquote_en_all/Prime_number",
+            "wsp:kiwix-curated-t2/khanacademy_en_all/f382313eb432505c9a4d05e7d90102b5",
+            "wsp:kiwix-wikipedia-en-simple-all/Prime_number_theorem",
+            "wsp:kiwix-curated-t2/khanacademy_en_all/8899e6709cc55730a36958a799c33ae6",
+            "wsp:wikipedia-top10/en/Prime_number",
+            "wsp:kiwix-curated-t2/khanacademy_en_all/ada8df2033ec5eabaed1a044d2568642",
+            "wsp:kiwix-wikipedia-en-simple-all/Largest_known_prime_number",
+            "wsp:wiktionary-en/prime_number",
+            "wsp:kiwix-planetmath-org-en-all/planetmath.org/PrimeNumberTheorem",
+            "wsp:wikipedia-top10/en/Prime_number_theory"
+          ]
+        },
+        {
+          "id": "q084",
+          "ndcg10": 0.07961179255356228,
+          "recall50": 1.0,
+          "latency_ms": 3380.3123200050322,
+          "top": [
+            "wsp:wikipedia-top10/en/Proof_of_Fermat's_Last_Theorem_for_specific_exponents",
+            "wsp:kiwix-planetmath-org-en-all/planetmath.org/AndrewWiles",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/Famous_Theorems_of_Mathematics/Fermat's_last_theorem",
+            "wsp:kiwix-curated-t2/wikiquote_en_all/Andrew_Wiles",
+            "wsp:wikipedia-top10/en/Wiles's_proof_of_Fermat's_Last_Theorem",
+            "wsp:wikipedia-top10/en/Elementary_proof",
+            "wsp:kiwix-curated-t2/wikiquote_en_all/Fermat's_Last_Theorem",
+            "wsp:kiwix-planetmath-org-en-all/planetmath.org/sqrtn2IsIrrationalForNge3proofUsingFermatsLastTheorem",
+            "wsp:kiwix-planetmath-org-en-all/planetmath.org/FermatsLastTheorem",
+            "wsp:kiwix-wikipedia-en-simple-all/Fermat's_Last_Theorem"
+          ]
+        },
+        {
+          "id": "q085",
+          "ndcg10": 0.720186140567875,
+          "recall50": 1.0,
+          "latency_ms": 7173.985189998348,
+          "top": [
+            "wsp:kiwix-wikipedia-en-simple-all/Calculus",
+            "wsp:mdwiki/Calculus_(dental)",
+            "wsp:open-library/books/OL21125966M",
+            "wsp:mdwiki/Calculus_bovis",
+            "wsp:wikipedia-top10/en/Calculus",
+            "wsp:wikipedia-top10/en/Calculus_(disambiguation)",
+            "wsp:kiwix-wikipedia-en-simple-all/Lambda_calculus",
+            "wsp:open-library/books/OL1419541M",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/Calculus/Multivariable_Calculus",
+            "wsp:open-library/works/OL39607892W"
+          ]
+        },
+        {
+          "id": "q086",
+          "ndcg10": 0.7640098914067265,
+          "recall50": 1.0,
+          "latency_ms": 4162.549201995716,
+          "top": [
+            "wsp:kiwix-wikipedia-en-simple-all/Euler's_identity",
+            "wsp:stackexchange/puzzling.stackexchange.com_en_all/questions/91138/euler-s-identity",
+            "wsp:kiwix-curated-t2/wikiquote_en_all/Euler's_identity",
+            "wsp:wikipedia-top10/en/Euler's_identity",
+            "wsp:kiwix-planetmath-org-en-all/planetmath.org/LimerickOnEulersIdentity",
+            "wsp:wiktionary-en/Euler's_identity",
+            "wsp:kiwix-curated-t2/khanacademy_en_all/9cf4c84cbf005982aeac082982565d11",
+            "wsp:stackexchange/math.stackexchange.com_en_all/questions/1488282/analyzing-euler-s-identity",
+            "wsp:stackexchange/math.stackexchange.com_en_all/questions/4503544/euler-s-identity-is-0-python",
+            "wsp:wikipedia-top10/en/Euler's_four-square_identity"
+          ]
+        },
+        {
+          "id": "q087",
+          "ndcg10": 0.2890648263178878,
+          "recall50": 1.0,
+          "latency_ms": 4238.499680999666,
+          "top": [
+            "wsp:open-library/books/OL8064515M",
+            "wsp:open-library/books/OL8064514M",
+            "wsp:stackexchange/math.stackexchange.com_en_all/questions/3127745/remembering-the-golden-ratio",
+            "wsp:pubmed/23175054",
+            "wsp:kiwix-curated-t2/khanacademy_en_all/d32fa1ce8c31540aab509e5cb2580afd",
+            "wsp:wikipedia-top10/en/The_Golden_Ratio_(album)",
+            "wsp:kiwix-planetmath-org-en-all/planetmath.org/GoldenRatio",
+            "wsp:wikipedia-top10/en/Golden_ratio_(disambiguation)",
+            "wsp:wikipedia-top10/en/Golden_ratio_base",
+            "wsp:wikipedia-top10/en/Golden_ratio"
+          ]
+        },
+        {
+          "id": "q088",
+          "ndcg10": 0.0,
+          "recall50": 1.0,
+          "latency_ms": 4249.138849001611,
+          "top": [
+            "wsp:kiwix-wikipedia-en-simple-all/Electoral_college",
+            "wsp:kiwix-wikisource-en-all/The_New_Student's_Reference_Work/Electoral_College",
+            "wsp:stackexchange/politics.stackexchange.com_en_all/questions/11929/how-does-the-electoral-college-work-within-a-state",
+            "wsp:wikipedia-top10/en/Efforts_to_reform_the_United_States_Electoral_College",
+            "wsp:stackexchange/politics.stackexchange.com_en_all/questions/79/in-the-electoral-college-why-can-electors-vote-in-contrast-to-their-pledge-fai",
+            "wsp:kiwix-wikisource-en-all/Electoral_College_Abolition_Amendment_(2005)",
+            "wsp:stackexchange/math.stackexchange.com_en_all/questions/211858/mathematical-analysis-of-the-electoral-college",
+            "wsp:kiwix-wikisource-en-all/Electoral_College_Abolition_Amendment_(1949)",
+            "wsp:stackexchange/politics.stackexchange.com_en_all/questions/57847/how-do-electoral-college-votes-work-with-indian-reservations",
+            "wsp:stackexchange/politics.stackexchange.com_en_all/questions/18674/what-is-the-difference-between-electoral-college-and-electoral-district"
+          ]
+        },
+        {
+          "id": "q089",
+          "ndcg10": 0.0,
+          "recall50": 1.0,
+          "latency_ms": 4313.128752000921,
+          "top": [
+            "wsp:wikipedia-top10/en/Inflation_(disambiguation)",
+            "wsp:open-library/books/OL46036652M",
+            "wsp:open-library/books/OL38717000M",
+            "wsp:wikipedia-top10/en/Inertial_inflation",
+            "wsp:pubmed/10014655",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/IB_Economics/Macroeconomics/Unemployment_and_Inflation",
+            "wsp:wikipedia-top10/en/Monetary_inflation",
+            "wsp:kiwix-curated-t2/khanacademy_en_all/1cb643a971bd57cb99cdee29be8a67b4",
+            "wsp:open-library/works/OL29094202W",
+            "wsp:kiwix-curated-t2/khanacademy_en_all/f6a1e85b4278590d904243338125fe38"
+          ]
+        },
+        {
+          "id": "q090",
+          "ndcg10": 0.16666666666666666,
+          "recall50": 1.0,
+          "latency_ms": 6817.476909003744,
+          "top": [
+            "wsp:wikisource-en/Universal_Declaration_of_Human_Rights",
+            "wsp:wikipedia-top10/en/Universal_Islamic_Declaration_of_Human_Rights",
+            "wsp:kiwix-wikipedia-en-simple-all/Universal_Declaration_of_Human_Rights",
+            "wsp:pubmed/10347381",
+            "wsp:kiwix-wikisource-en-all/Universal_Declaration_of_Human_Rights",
+            "wsp:pubmed/9736195",
+            "wsp:open-library/works/OL35696103W",
+            "wsp:open-library/books/OL33406325M",
+            "wsp:pubmed/14744123",
+            "wsp:pubmed/19537562"
+          ]
+        },
+        {
+          "id": "q091",
+          "ndcg10": 0.5312140199631529,
+          "recall50": 0.5,
+          "latency_ms": 6143.608044003486,
+          "top": [
+            "wsp:kiwix-citizensinformation-ie-en-all/www.citizensinformation.ie/en/government-in-ireland/european-government/european-union/european-union/",
+            "wsp:kiwix-wikipedia-en-simple-all/European_Union",
+            "wsp:kiwix-curated-t2/wikiquote_en_all/European_Parliament",
+            "wsp:kiwix-wikipedia-en-simple-all/European_Parliament",
+            "wsp:wikisource-en/Treaty_on_European_Union/Declarations",
+            "wsp:wikipedia-top10/en/National_parliaments_of_the_European_Union",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/European_Union_Law/Introduction",
+            "wsp:kiwix-citizensinformation-ie-en-all/www.citizensinformation.ie/en/government-in-ireland/european-government/eu-institutions/european-parliament/",
+            "wsp:open-library/works/OL44780426W",
+            "wsp:wikipedia-top10/en/European_Parliament"
+          ]
+        },
+        {
+          "id": "q092",
+          "ndcg10": 1.0,
+          "recall50": 1.0,
+          "latency_ms": 6467.754119003075,
+          "top": [
+            "wsp:wikipedia-top10/en/Supply_and_demand",
+            "wsp:wikipedia-top10/en/Supply_and_Demand_(disambiguation)",
+            "wsp:open-library/works/OL3458406W",
+            "wsp:pubmed/19034166",
+            "wsp:wikisource-en/Options/Supply_and_Demand",
+            "wsp:kiwix-wikisource-en-all/Options/Supply_and_Demand",
+            "wsp:kiwix-curated-t2/khanacademy_en_all/819481987e315dc08da9712fbf4dc91b",
+            "wsp:wiktionary-en/supply_and_demand",
+            "wsp:gutenberg/10612",
+            "wsp:wikipedia-top10/en/Supply_and_Demand_(Amos_Lee_album)"
+          ]
+        },
+        {
+          "id": "q093",
+          "ndcg10": 0.0,
+          "recall50": 0.3333333333333333,
+          "latency_ms": 2742.0464789975085,
+          "top": [
+            "wsp:mdwiki/Yeast",
+            "wsp:stackexchange/cooking.stackexchange.com_en_all/questions/55718/active-dry-yeast-and-rapid-rise-yeast",
+            "wsp:stackexchange/cooking.stackexchange.com_en_all/questions/62323/sugar-and-yeast-proportion-while-making-sweet-bread",
+            "wsp:stackexchange/cooking.stackexchange.com_en_all/questions/112407/making-instant-yeast-rise-higher-more",
+            "wsp:stackexchange/cooking.stackexchange.com_en_all/questions/29070/sourdough-bread-making-without-bakers-yeast",
+            "wsp:pubmed/40543122",
+            "wsp:wikipedia-top10/en/Salt-rising_bread",
+            "wsp:kiwix-wikisource-en-all/The_Pilgrim_Cook_Book/Yeast_Breads",
+            "wsp:kiwix-wikisource-en-all/Things_Mother_Used_to_Make/Breads",
+            "wsp:stackexchange/cooking.stackexchange.com_en_all/questions/64485/making-bread-in-a-bread-maker-using-regular-yeast-not-bread-maker-yeast"
+          ]
+        },
+        {
+          "id": "q094",
+          "ndcg10": 0.0,
+          "recall50": 1.0,
+          "latency_ms": 2462.2469569949317,
+          "top": [
+            "wsp:stackexchange/outdoors.stackexchange.com_en_all/questions/27254/overhand-versus-underhand-loop-in-tying-up-a-bowline-knot",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/Adventist_Youth_Honors_Answer_Book/Knot/Double_bowline",
+            "wsp:stackexchange/outdoors.stackexchange.com_en_all/questions/25205/help-troubleshooting-bowline-knots",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/Knots/Loop_knots/Bowline_on_a_bight",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/Adventist_Youth_Honors_Answer_Book/Knot/Bowline",
+            "wsp:pubmed/23681600",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/Knots/Loop_knots/Triple_bowline",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/Adventist_Youth_Honors_Answer_Book/Knot/Bowline_on_a_bight",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/Knots/Loop_knots/Bowline",
+            "wsp:kiwix-wikipedia-en-simple-all/List_of_knots"
+          ]
+        },
+        {
+          "id": "q095",
+          "ndcg10": 0.13770577618809332,
+          "recall50": 1.0,
+          "latency_ms": 4862.374393997015,
+          "top": [
+            "wsp:kiwix-wiktionary-en-simple-all/refrigerator",
+            "wsp:kiwix-wikipedia-en-simple-all/Pot-in-pot_refrigerator",
+            "wsp:kiwix-wikipedia-en-simple-all/Refrigerator",
+            "wsp:stackexchange/lifehacks.stackexchange.com_en_all/questions/14405/how-to-keep-food-fresh-without-a-refrigerator",
+            "wsp:wiktionary-en/refrigerator",
+            "wsp:stackexchange/cooking.stackexchange.com_en_all/questions/46934/food-safety-question-refrigerator-temperature",
+            "wsp:kiwix-curated-t2/wikiquote_en_all/Cold",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/Wikijunior:How_Things_Work/Refrigerator",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/Adventist_Youth_Honors_Answer_Book/Household_Arts/Food_-_Freezing",
+            "wsp:gutenberg/65793"
+          ]
+        },
+        {
+          "id": "q096",
+          "ndcg10": 0.2388353776606868,
+          "recall50": 0.5,
+          "latency_ms": 2041.2591170024825,
+          "top": [
+            "wsp:kiwix-wiktionary-en-simple-all/espresso",
+            "wsp:stackexchange/coffee.stackexchange.com_en_all/questions/2955/warm-brew-coffee",
+            "wsp:stackexchange/coffee.stackexchange.com_en_all/questions/1951/is-espresso-pre-infusion-included-in-total-brew-timing",
+            "wsp:stackexchange/cooking.stackexchange.com_en_all/questions/20895/coffee-brewing-methods-scientific-analysis",
+            "wsp:stackexchange/cooking.stackexchange.com_en_all/questions/75377/can-i-substitute-decaf-coffee-for-espresso",
+            "wsp:wikipedia-top10/en/Coffee_preparation",
+            "wsp:stackexchange/coffee.stackexchange.com_en_all/questions/296/downsides-of-brewing-espresso-with-high-pressure",
+            "wsp:wikipedia-top10/en/Coffee_extraction",
+            "wsp:stackexchange/coffee.stackexchange.com_en_all/questions/2964/extending-the-japanese-brewing-method-to-espresso",
+            "wsp:wikipedia-top10/en/Espresso"
+          ]
+        },
+        {
+          "id": "q097",
+          "ndcg10": 0.15273311123869335,
+          "recall50": 0.3333333333333333,
+          "latency_ms": 5916.093718005868,
+          "top": [
+            "wsp:stackexchange/physics.stackexchange.com_en_all/questions/334931/how-solar-panels-produce-energy",
+            "wsp:kiwix-wikipedia-en-simple-all/Solar_panel",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/Wikijunior:How_Things_Work/Solar_panel",
+            "wsp:kiwix-citizensinformation-ie-en-all/www.citizensinformation.ie/en/housing/housing-grants-and-schemes/grants-for-home-renovations-and-improvements/grants-for-solar-panels/",
+            "wsp:pubmed/22564663",
+            "wsp:stackexchange/electronics.stackexchange.com_en_all/questions/523298/synchronizing-sine-waves-from-solar-panel-and-grid-electricity",
+            "wsp:open-library/books/OL42418285M",
+            "wsp:stackexchange/physics.stackexchange.com_en_all/questions/434017/do-solar-panels-generate-more-electricity-at-higher-altitudes",
+            "wsp:kiwix-wikipedia-en-simple-all/Solar_car",
+            "wsp:stackexchange/electronics.stackexchange.com_en_all/questions/638663/simplest-solar-panel-home-installation-to-power-electric-heaters"
+          ]
+        },
+        {
+          "id": "q098",
+          "ndcg10": 0.0,
+          "recall50": 0.5,
+          "latency_ms": 4158.696083002724,
+          "top": [
+            "wsp:wiktionary-en/sesquipedalian",
+            "wsp:wiktionary-en/sesquipedalianist",
+            "wsp:wikipedia-top10/en/Sesquipedalian",
+            "wsp:wiktionary-en/sesquipedalians",
+            "wsp:wiktionary-en/sesquipedality",
+            "wsp:stackexchange/english.stackexchange.com_en_all/questions/336118/a-word-that-means-itself",
+            "wsp:wiktionary-en/sesquipedalianisms",
+            "wsp:wiktionary-en/sesquipedale",
+            "wsp:stackexchange/puzzling.stackexchange.com_en_all/questions/52381/something-simple-but-hard-to-say",
+            "wsp:wiktionary-en/sesquipédal"
+          ]
+        },
+        {
+          "id": "q099",
+          "ndcg10": 1.2956176024115138,
+          "recall50": 1.0,
+          "latency_ms": 3027.5805429992033,
+          "top": [
+            "wsp:wikipedia-top10/en/Photosynthesis",
+            "wsp:wikipedia-top10/en/Photosynthesis_(disambiguation)",
+            "wsp:mdwiki/Photosynthesis",
+            "wsp:wiktionary-en/photosynthesis",
+            "wsp:kiwix-wikipedia-en-simple-all/Photosynthesis",
+            "wsp:wikipedia-top10/en/Photosynthesis_system",
+            "wsp:kiwix-curated-t2/khanacademy_en_all/422b0c350dd35d85aa2ebc154dd8b6e7",
+            "wsp:kiwix-wiktionary-en-simple-all/photosynthesis",
+            "wsp:wiktionary-en/anoxygenic_photosynthesis",
+            "wsp:kiwix-curated-t2/khanacademy_en_all/5f1acea22bdb5c85ba627737158b67c5"
+          ]
+        },
+        {
+          "id": "q100",
+          "ndcg10": 0.6309297535714574,
+          "recall50": 1.0,
+          "latency_ms": 2647.2389999980805,
+          "top": [
+            "wsp:wiktionary-en/serendipity",
+            "wsp:wikipedia-top10/en/Serendipity",
+            "wsp:kiwix-curated-t2/wikiquote_en_all/Serendipity",
+            "wsp:wikipedia-top10/en/Serendipity_(disambiguation)",
+            "wsp:pubmed/23962051",
+            "wsp:pubmed/17390434",
+            "wsp:pubmed/2308813",
+            "wsp:wikipedia-top10/en/Serendipity_(film)",
+            "wsp:pubmed/13595060",
+            "wsp:pubmed/3850921"
+          ]
+        },
+        {
+          "id": "q101",
+          "ndcg10": 0.3333333333333333,
+          "recall50": 1.0,
+          "latency_ms": 7746.684188001382,
+          "top": [
+            "wsp:kiwix-wikipedia-en-simple-all/Democracy",
+            "wsp:wikipedia-top10/en/Democracy_(disambiguation)",
+            "wsp:wiktionary-en/democracy",
+            "wsp:kiwix-wikisource-en-all/Democracy",
+            "wsp:kiwix-wiktionary-en-simple-all/democracy",
+            "wsp:kiwix-wiktionary-en-simple-all/democracies",
+            "wsp:kiwix-curated-t2/wikiquote_en_all/Democracy",
+            "wsp:wiktionary-en/pro-democracy",
+            "wsp:kiwix-wikipedia-en-simple-all/Social_democracy",
+            "wsp:kiwix-curated-t2/wikiquote_en_all/Constitutional_democracy"
+          ]
+        },
+        {
+          "id": "q102",
+          "ndcg10": 0.7393459577078507,
+          "recall50": 0.6666666666666666,
+          "latency_ms": 2748.364128994581,
+          "top": [
+            "wsp:wikipedia-top10/en/Alligator",
+            "wsp:kiwix-wikipedia-en-simple-all/Crocodile",
+            "wsp:kiwix-wikipedia-en-simple-all/American_crocodile",
+            "wsp:wikipedia-top10/en/American_crocodile",
+            "wsp:pubmed/28917711",
+            "wsp:kiwix-wikipedia-en-simple-all/Alligator",
+            "wsp:open-library/works/OL20399772W",
+            "wsp:kiwix-curated-t2/wikiquote_en_all/Alligators",
+            "wsp:pubmed/31285664",
+            "wsp:wikipedia-top10/en/Crocodile_clip"
+          ]
+        },
+        {
+          "id": "q103",
+          "ndcg10": 1.0,
+          "recall50": 1.0,
+          "latency_ms": 2866.977568999573,
+          "top": [
+            "wsp:wikipedia-top10/en/Mitosis",
+            "wsp:wikipedia-top10/en/Meiosis",
+            "wsp:kiwix-curated-t2/wikiversity_en_all/Comparison_of_mitosis_and_meiosis",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/AP_Biology/LABORATORY_3._Mitosis_and_Meiosis",
+            "wsp:kiwix-curated-t2/khanacademy_en_all/c2502b8a293157539a1d10a6ca9b3c38",
+            "wsp:stackexchange/biology.stackexchange.com_en_all/questions/15229/meiosis-vs-mitosis",
+            "wsp:stackexchange/biology.stackexchange.com_en_all/questions/41314/mitosis-versus-meiosis-i-what-s-the-difference",
+            "wsp:kiwix-curated-t2/khanacademy_en_all/4c6f45d420be59ed9e9be28884f6f3aa",
+            "wsp:kiwix-curated-t2/khanacademy_en_all/0959c2d744d75e79be6022f0ad4738cb",
+            "wsp:kiwix-curated-t2/khanacademy_en_all/a21a30c635ef5cd186b654f10bd85aeb"
+          ]
+        },
+        {
+          "id": "q104",
+          "ndcg10": 0.0,
+          "recall50": 0.5,
+          "latency_ms": 8044.448952001403,
+          "top": [
+            "wsp:wikipedia-top10/ceb/Python",
+            "wsp:open-library/books/OL29077652M",
+            "wsp:open-library/books/OL3567500M",
+            "wsp:open-library/works/OL19543431W",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/Scheme_Programming/Why_Scheme_rather_than_Java,_Python_or_another_high-level_language?",
+            "wsp:open-library/books/OL21485536M",
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/2447118/programming-in-python-vs-programming-in-java",
+            "wsp:open-library/works/OL5961309W",
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/2112952/python-program-converted-into-java",
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/73857163/how-to-integrate-multiple-programming-languages-vb-java-python"
+          ]
+        },
+        {
+          "id": "q105",
+          "ndcg10": 1.0,
+          "recall50": 1.0,
+          "latency_ms": 2679.940079993685,
+          "top": [
+            "wsp:wikipedia-top10/en/Weather",
+            "wsp:wikipedia-top10/en/Climate",
+            "wsp:stackexchange/english.stackexchange.com_en_all/questions/164153/difference-between-climate-and-weather-please",
+            "wsp:open-library/works/OL2911055W",
+            "wsp:open-library/books/OL18734910M",
+            "wsp:open-library/works/OL5741093W",
+            "wsp:open-library/works/OL28389199W",
+            "wsp:pubmed/21900989",
+            "wsp:open-library/books/OL1561132M",
+            "wsp:pubmed/15008808"
+          ]
+        },
+        {
+          "id": "q106",
+          "ndcg10": 0.0,
+          "recall50": 0.0,
+          "latency_ms": 3726.3532410070184,
+          "top": [
+            "wsp:kiwix-curated-t2/wikiquote_en_all/Alan_Turing",
+            "wsp:kiwix-wikisource-en-all/Author:Alan_Mathison_Turing",
+            "wsp:wikipedia-top10/es/Estatua_de_Alan_Turing",
+            "wsp:kiwix-curated-t2/wikiversity_en_all/Korean/Words/Xternals",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/Accelerando_Technical_Companion",
+            "wsp:stackexchange/cstheory.stackexchange.com_en_all/questions/11797/alan-turing-s-contributions-to-computer-science",
+            "wsp:kiwix-curated-t2/wikiversity_en_all/Artificial_Consciousness/Computer_Science",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/Expert_Systems/Resources",
+            "wsp:kiwix-curated-t2/wikiversity_en_all/Introduction_to_Computers/AI",
+            "wsp:kiwix-wikisource-en-all/Portal:1912"
+          ]
+        },
+        {
+          "id": "q107",
+          "ndcg10": 1.3769765845238193,
+          "recall50": 1.0,
+          "latency_ms": 3614.4948299988755,
+          "top": [
+            "wsp:wikipedia-top10/en/Photosynthesis",
+            "wsp:mdwiki/Photosynthesis",
+            "wsp:kiwix-wikipedia-en-simple-all/Photosynthesis",
+            "wsp:wiktionary-en/photosynthesis",
+            "wsp:open-library/works/OL11730140W",
+            "wsp:pubmed/14287008",
+            "wsp:kiwix-wiktionary-en-simple-all/photosynthesis",
+            "wsp:kiwix-curated-t2/khanacademy_en_all/f1a0736bae5e5e82b000edb8f4317d97",
+            "wsp:wikipedia-top10/en/Aquatic_photosynthesis",
+            "wsp:wikipedia-top10/en/Photosynthesis_(disambiguation)"
+          ]
+        },
+        {
+          "id": "q108",
+          "ndcg10": 1.1289509357448473,
+          "recall50": 1.0,
+          "latency_ms": 2310.216270998353,
+          "top": [
+            "wsp:wikipedia-top10/en/Mount_Everest",
+            "wsp:kiwix-curated-t2/wikivoyage_en_all/Mount_Everest",
+            "wsp:wikipedia-top10/en/Mount_Everest_webcam",
+            "wsp:wiktionary-en/Mount_Everest",
+            "wsp:kiwix-wikipedia-en-simple-all/Mount_Everest",
+            "wsp:courtlistener/6834342",
+            "wsp:open-library/works/OL5712848W",
+            "wsp:kiwix-wikisource-en-all/Mount_Everest:_The_Reconnaissance",
+            "wsp:pubmed/19309969",
+            "wsp:kiwix-wikisource-en-all/1911_Encyclopædia_Britannica/Everest,_Mount"
+          ]
+        },
+        {
+          "id": "q109",
+          "ndcg10": 1.1289509357448473,
+          "recall50": 1.0,
+          "latency_ms": 1857.2211469945614,
+          "top": [
+            "wsp:wikipedia-top10/en/Eiffel_Tower",
+            "wsp:wikipedia-top10/en/Eiffel_Tower_(disambiguation)",
+            "wsp:wiktionary-en/Eiffel_Tower",
+            "wsp:open-library/works/OL16062970W",
+            "wsp:kiwix-wikipedia-en-simple-all/Eiffel_Tower",
+            "wsp:pubmed/34215430",
+            "wsp:stackexchange/codegolf.stackexchange.com_en_all/questions/23581/eiffel-tower-in-3d",
+            "wsp:kiwix-wikipedia-en-simple-all/Gustave_Eiffel",
+            "wsp:wikipedia-top10/en/Eiffel_Tower_(Paris,_Texas)",
+            "wsp:kiwix-wikisource-en-all/1911_Encyclopædia_Britannica/Eiffel_Tower"
+          ]
+        },
+        {
+          "id": "q110",
+          "ndcg10": 0.41311732856427996,
+          "recall50": 0.5,
+          "latency_ms": 3336.0541529982584,
+          "top": [
+            "wsp:mdwiki/Honey",
+            "wsp:stackexchange/biology.stackexchange.com_en_all/questions/20610/do-bees-make-honey-from-fallen-fruit",
+            "wsp:kiwix-wikipedia-en-simple-all/Honey_bee",
+            "wsp:stackexchange/vegetarianism.stackexchange.com_en_all/questions/2567/is-vegan-honey-equivalent-to-the-one-made-by-bees",
+            "wsp:wikipedia-top10/en/Bees_Make_Honey_(film)",
+            "wsp:mdwiki/Quorum_sensing",
+            "wsp:wikipedia-top10/en/Bees_Make_Honey",
+            "wsp:stackexchange/judaism.stackexchange.com_en_all/questions/31154/in-light-of-modern-science-why-is-bee-honey-still-kosher",
+            "wsp:stackexchange/judaism.stackexchange.com_en_all/questions/104505/is-mustard-harmful-to-bees-or-the-honey-making-process",
+            "wsp:stackexchange/worldbuilding.stackexchange.com_en_all/questions/214608/why-can-only-this-race-of-people-called-bees-make-honey-and-beeswax"
+          ]
+        },
+        {
+          "id": "q111",
+          "ndcg10": 0.0,
+          "recall50": 0.0,
+          "latency_ms": 3548.144478998438,
+          "top": [
+            "wsp:kiwix-curated-t2/wikibooks_en_all/Science:_An_Elementary_Teacher’s_Guide/Animals",
+            "wsp:kiwix-wikisource-en-all/The_Washington_Post_(newspaper)/1912/Was_Most_Grotesque_Animal",
+            "wsp:kiwix-wikipedia-en-simple-all/Largest_extinct_animals",
+            "wsp:wikipedia-top10/en/Largest_and_heaviest_animals",
+            "wsp:wikipedia-top10/en/List_of_largest_extinct_lizards",
+            "wsp:wikipedia-top10/en/Largest_prehistoric_animals",
+            "wsp:wikipedia-top10/en/List_of_largest_reptiles",
+            "wsp:stackexchange/biology.stackexchange.com_en_all/questions/108360/how-is-the-biggest-animal-ever-existed-measured",
+            "wsp:mdwiki/Largest_body_part",
+            "wsp:pubmed/19558740"
+          ]
+        },
+        {
+          "id": "q112",
+          "ndcg10": 0.5,
+          "recall50": 1.0,
+          "latency_ms": 4796.343823996722,
+          "top": [
+            "wsp:wikisource-en/The_Encyclopedia_Americana_(1920)/Leaves",
+            "wsp:open-library/works/OL459512W",
+            "wsp:wikipedia-top10/en/Autumn_leaf_color",
+            "wsp:wikisource-en/The_New_Student's_Reference_Work/Autumn_Coloration",
+            "wsp:open-library/works/OL17883680W",
+            "wsp:open-library/works/OL17876351W",
+            "wsp:open-library/works/OL18475714W",
+            "wsp:open-library/works/OL23182076W",
+            "wsp:kiwix-wikisource-en-all/The_New_Student's_Reference_Work/Autumn_Coloration",
+            "wsp:open-library/books/OL31017304M"
+          ]
+        },
+        {
+          "id": "q113",
+          "ndcg10": 0.7640098914067265,
+          "recall50": 1.0,
+          "latency_ms": 2138.719182999921,
+          "top": [
+            "wsp:kiwix-wikipedia-en-simple-all/Bird_migration",
+            "wsp:stackexchange/biology.stackexchange.com_en_all/questions/58433/did-migratory-birds-ancestors-live-in-the-places-of-migration",
+            "wsp:pubmed/11312592",
+            "wsp:wikipedia-top10/en/Bird_migration",
+            "wsp:wikipedia-top10/en/Reverse_migration_(birds)",
+            "wsp:pubmed/36283382",
+            "wsp:pubmed/21232461",
+            "wsp:pubmed/16577282",
+            "wsp:stackexchange/space.stackexchange.com_en_all/questions/30128/how-will-icarus-aboard-the-iss-track-bird-migration",
+            "wsp:stackexchange/biology.stackexchange.com_en_all/questions/56774/how-do-migrating-birds-know-where-to-migrate"
+          ]
+        },
+        {
+          "id": "q114",
+          "ndcg10": 0.0,
+          "recall50": 0.5,
+          "latency_ms": 2294.485964004707,
+          "top": [
+            "wsp:wikipedia-top10/en/Eats,_Shoots_&_Leaves",
+            "wsp:kiwix-wikipedia-en-simple-all/Eats,_Shoots_&_Leaves",
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/41758086/multiprocessing-pandas-eats-memory",
+            "wsp:pubmed/19410042",
+            "wsp:open-library/works/OL1972667W",
+            "wsp:wikipedia-top10/en/Satchidananda_Panda",
+            "wsp:kiwix-wiktionary-en-simple-all/panda",
+            "wsp:kiwix-wikipedia-en-simple-all/Red_panda",
+            "wsp:mdwiki/Feces",
+            "wsp:mdwiki/PANDAS"
+          ]
+        },
+        {
+          "id": "q115",
+          "ndcg10": 0.3333333333333333,
+          "recall50": 0.0,
+          "latency_ms": 1684.3308620009338,
+          "top": [
+            "wsp:mdwiki/Photosynthesis",
+            "wsp:wikipedia-top10/de/Tageslicht",
+            "wsp:wikipedia-top10/de/Waldökologie",
+            "wsp:wikipedia-top10/de/Atmung",
+            "wsp:mdwiki/Metabolism",
+            "wsp:wikipedia-top10/de/Algenhaus",
+            "wsp:mdwiki/Oxygen",
+            "wsp:wikipedia-top10/de/Photosynthese",
+            "wsp:wikipedia-top10/de/Venuskolonisation",
+            "wsp:mdwiki/Chemiosmosis"
+          ]
+        },
+        {
+          "id": "q116",
+          "ndcg10": 0.0,
+          "recall50": 0.0,
+          "latency_ms": 2413.0778319959063,
+          "top": [
+            "wsp:open-library/books/OL3988154M",
+            "wsp:open-library/books/OL20419789M",
+            "wsp:open-library/works/OL2149841W",
+            "wsp:open-library/books/OL18770896M",
+            "wsp:open-library/works/OL10590922W",
+            "wsp:open-library/works/OL1117969W",
+            "wsp:open-library/books/OL5352478M",
+            "wsp:open-library/books/OL19714926M",
+            "wsp:open-library/works/OL4887640W",
+            "wsp:open-library/books/OL438915M"
+          ]
+        },
+        {
+          "id": "q117",
+          "ndcg10": 0.0,
+          "recall50": 0.0,
+          "latency_ms": 2215.2500039956067,
+          "top": [
+            "wsp:wikipedia-top10/fr/La_Joconde_(copie_du_musée_du_Prado)",
+            "wsp:wikipedia-top10/fr/Joconde_Torlonia",
+            "wsp:wikipedia-top10/fr/La_Joconde",
+            "wsp:wikipedia-top10/fr/La_Joconde_nue",
+            "wsp:gutenberg/55072",
+            "wsp:gutenberg/63719",
+            "wsp:wikipedia-top10/fr/Nicolas_Lavreince",
+            "wsp:open-library/works/OL32712736W",
+            "wsp:wikipedia-top10/en/Marianne_Loir",
+            "wsp:kiwix-wikisource-en-all/Monograph_on_Leonardo_da_Vinci's_Mona_Lisa_(1915)"
+          ]
+        },
+        {
+          "id": "q118",
+          "ndcg10": 0.2718689172404152,
+          "recall50": 0.0,
+          "latency_ms": 1868.6037520019454,
+          "top": [
+            "wsp:mdwiki/MRNA_vaccine",
+            "wsp:mdwiki/Vaccine",
+            "wsp:mdwiki/COVID-19_vaccine",
+            "wsp:mdwiki/Conjugate_vaccine",
+            "wsp:mdwiki/Attenuated_vaccine",
+            "wsp:mdwiki/Vaccination",
+            "wsp:wikipedia-top10/fr/Vaccin_(mécanismes_d'action)",
+            "wsp:wikipedia-top10/fr/Vaccin_contre_la_dengue",
+            "wsp:wikipedia-top10/fr/Vaccin",
+            "wsp:wikipedia-top10/fr/Vaccin_contre_le_virus_Ebola"
+          ]
+        },
+        {
+          "id": "q119",
+          "ndcg10": 0.0,
+          "recall50": 0.0,
+          "latency_ms": 2708.6165729997447,
+          "top": [
+            "wsp:stackexchange/es.stackoverflow.com_mul_all/questions/562761/alguien-sabe-como-randomizar-el-orden-de-las-preguntas",
+            "wsp:gutenberg/77746",
+            "wsp:courtlistener/8545649",
+            "wsp:wikipedia-top10/en/Argentina_Sono_Film",
+            "wsp:wikipedia-top10/en/Leopoldo_Torres_Ríos",
+            "wsp:open-library/works/OL32123429W",
+            "wsp:wikipedia-top10/en/María_Botto",
+            "wsp:courtlistener/8563763",
+            "wsp:stackexchange/es.stackoverflow.com_mul_all/questions/99139/problema-con-listview-en-fragment-personalizado-android",
+            "wsp:wikipedia-top10/en/Caupolicán_Ovalles_(filmmaker)"
+          ]
+        },
+        {
+          "id": "q120",
+          "ndcg10": 0.0,
+          "recall50": 0.0,
+          "latency_ms": 3111.6764249964035,
+          "top": [
+            "wsp:gutenberg/44112",
+            "wsp:wikipedia-top10/es/Don_Quijote_(ópera_de_Halffter)",
+            "wsp:wikipedia-top10/es/Cayetano_Hilario",
+            "wsp:wikipedia-top10/es/Álvaro_de_Luna",
+            "wsp:wikipedia-top10/es/Quijote_de_Avellaneda",
+            "wsp:wikipedia-top10/es/Don_(tratamiento)",
+            "wsp:wikipedia-top10/es/Luis_Ricardo_Fors",
+            "wsp:wikipedia-top10/es/San_Manuel_Bueno,_mártir",
+            "wsp:wikipedia-top10/es/El_hombre_de_La_Mancha",
+            "wsp:wikipedia-top10/es/Carlos_Blanco_Hernández"
+          ]
+        },
+        {
+          "id": "q121",
+          "ndcg10": 0.0,
+          "recall50": 0.0,
+          "latency_ms": 2936.181051998574,
+          "top": [
+            "wsp:wikipedia-top10/it/Muffa",
+            "wsp:wikipedia-top10/it/Medicina_del_XIX_secolo",
+            "wsp:wikipedia-top10/it/Storia_della_medicina",
+            "wsp:wikipedia-top10/it/Serendipità",
+            "wsp:wikipedia-top10/it/Storia_della_chirurgia",
+            "wsp:wikipedia-top10/it/XX_secolo",
+            "wsp:wikipedia-top10/it/Chirurgia_moderna",
+            "wsp:wikipedia-top10/it/Vincenzo_Tiberio",
+            "wsp:wikipedia-top10/it/Cronologia_di_biologia_e_biochimica",
+            "wsp:wikipedia-top10/it/Quelle_care_figliole"
+          ]
+        },
+        {
+          "id": "q122",
+          "ndcg10": 0.0,
+          "recall50": 0.0,
+          "latency_ms": 2100.6121629980044,
+          "top": [
+            "wsp:wikipedia-top10/nl/Kerncentrale_Fukushima_II",
+            "wsp:wikipedia-top10/nl/Atomstrojeksport",
+            "wsp:wikipedia-top10/nl/The_China_Syndrome",
+            "wsp:wikipedia-top10/nl/Kerncentrale_Three_Mile_Island",
+            "wsp:wikipedia-top10/nl/BN-800-reactor",
+            "wsp:wikipedia-top10/nl/Kerncentrale_Bataan",
+            "wsp:wikipedia-top10/nl/Kerncentrale_Krim",
+            "wsp:wikipedia-top10/nl/Gemeenschappelijke_Kernenergiecentrale_Nederland",
+            "wsp:wikipedia-top10/nl/CANDU-reactor",
+            "wsp:wikipedia-top10/nl/Kerncentrale_Rivne"
+          ]
+        },
+        {
+          "id": "q123",
+          "ndcg10": 0.0,
+          "recall50": 0.0,
+          "latency_ms": 5320.607890003885,
+          "top": [
+            "wsp:wikipedia-top10/en/Maria_Skłodowska-Curie_Museum",
+            "wsp:open-library/works/OL22331090W",
+            "wsp:open-library/works/OL6392067W",
+            "wsp:open-library/works/OL29269930W",
+            "wsp:open-library/works/OL3858740W",
+            "wsp:open-library/works/OL39961027W",
+            "wsp:open-library/works/OL44003411W",
+            "wsp:open-library/works/OL16714179W",
+            "wsp:wikipedia-top10/en/Maria_Skłodowska-Curie_Park",
+            "wsp:open-library/works/OL4858125W"
+          ]
+        },
+        {
+          "id": "q124",
+          "ndcg10": 0.0,
+          "recall50": 0.0,
+          "latency_ms": 2441.5580640052212,
+          "top": [
+            "wsp:wikipedia-top10/ru/Теория_относительности",
+            "wsp:wikipedia-top10/ru/Специальная_теория_относительности",
+            "wsp:open-library/books/OL50428923M",
+            "wsp:open-library/works/OL37427191W",
+            "wsp:wikipedia-top10/ru/История_теории_относительности",
+            "wsp:open-library/books/OL50434780M",
+            "wsp:wikipedia-top10/ru/Общая_теория_относительности",
+            "wsp:wikipedia-top10/ru/Принцип_относительности",
+            "wsp:wikipedia-top10/ru/Многообразие_Эйнштейна",
+            "wsp:open-library/books/OL50440679M"
+          ]
+        },
+        {
+          "id": "q125",
+          "ndcg10": 0.0,
+          "recall50": 0.0,
+          "latency_ms": 2405.22195900121,
+          "top": [
+            "wsp:open-library/books/OL53325136M",
+            "wsp:wikipedia-top10/en/Himlen_är_oskyldigt_blå",
+            "wsp:gutenberg/39507",
+            "wsp:wikipedia-top10/en/Blå_himlen_blues",
+            "wsp:open-library/works/OL39172349W",
+            "wsp:wiktionary-en/over_skyerne_er_himlen_altid_blå",
+            "wsp:open-library/books/OL53841346M",
+            "wsp:open-library/works/OL1668600W",
+            "wsp:kiwix-curated-t2/wikiquote_en_all/Kenneth_Gärdestad",
+            "wsp:wikipedia-top10/en/Kalendarium_1972–93"
+          ]
+        },
+        {
+          "id": "q201",
+          "ndcg10": 0.0,
+          "recall50": 0.0,
+          "latency_ms": 3713.2632360007847,
+          "top": [
+            "wsp:open-library/works/OL34944569W",
+            "wsp:wikipedia-top10/en/Mary_Shelley's_Frankenstein",
+            "wsp:kiwix-curated-t2/wikiquote_en_all/Mary_Shelley's_Frankenstein_(film)",
+            "wsp:pubmed/7624431",
+            "wsp:open-library/works/OL5097944W",
+            "wsp:stackexchange/literature.stackexchange.com_en_all/questions/17169/otherwise-in-mary-shelley-s-frankenstein",
+            "wsp:wikipedia-top10/en/Mary_Shelley's_Frankenstein_(video_game)",
+            "wsp:open-library/works/OL26921249W",
+            "wsp:open-library/works/OL34455134W",
+            "wsp:open-library/books/OL34361977M"
+          ]
+        },
+        {
+          "id": "q202",
+          "ndcg10": 0.0,
+          "recall50": 0.0,
+          "latency_ms": 4132.480970998586,
+          "top": [
+            "wsp:open-library/books/OL36980156M",
+            "wsp:open-library/books/OL42750946M",
+            "wsp:kiwix-wikipedia-en-simple-all/Pride_and_Prejudice",
+            "wsp:wikipedia-top10/en/Pride_and_Prejudice_(disambiguation)",
+            "wsp:open-library/books/OL41180263M",
+            "wsp:open-library/books/OL35114640M",
+            "wsp:wikipedia-top10/en/Pride_and_Prejudice_and_Zombies",
+            "wsp:gutenberg/37431",
+            "wsp:wikipedia-top10/en/Pride_and_Prejudice_(musical)",
+            "wsp:open-library/books/OL7644177M"
+          ]
+        },
+        {
+          "id": "q203",
+          "ndcg10": 0.0,
+          "recall50": 0.0,
+          "latency_ms": 2710.8084350038553,
+          "top": [
+            "wsp:wikisource-en/Moby-Dick",
+            "wsp:kiwix-wikisource-en-all/Moby-Dick",
+            "wsp:open-library/works/OL41609104W",
+            "wsp:open-library/works/OL3559343W",
+            "wsp:open-library/works/OL17022207W",
+            "wsp:open-library/works/OL9497984W",
+            "wsp:open-library/works/OL31025864W",
+            "wsp:open-library/works/OL39729047W",
+            "wsp:open-library/works/OL30963334W",
+            "wsp:open-library/works/OL18550260W"
+          ]
+        },
+        {
+          "id": "q204",
+          "ndcg10": 0.0,
+          "recall50": 0.0,
+          "latency_ms": 4071.638183995674,
+          "top": [
+            "wsp:open-library/books/OL42197123M",
+            "wsp:wikipedia-top10/en/Alice's_Adventures_in_Wonderland",
+            "wsp:open-library/books/OL46448595M",
+            "wsp:open-library/works/OL40545189W",
+            "wsp:gutenberg/23716",
+            "wsp:gutenberg/19573",
+            "wsp:open-library/books/OL55347358M",
+            "wsp:open-library/books/OL55128861M",
+            "wsp:open-library/works/OL40610723W",
+            "wsp:open-library/books/OL55106844M"
+          ]
+        },
+        {
+          "id": "q205",
+          "ndcg10": 0.0,
+          "recall50": 0.0,
+          "latency_ms": 4744.679154006008,
+          "top": [
+            "wsp:open-library/works/OL40692870W",
+            "wsp:open-library/books/OL56642432M",
+            "wsp:gutenberg/8205",
+            "wsp:open-library/works/OL41715418W",
+            "wsp:open-library/books/OL46616887M",
+            "wsp:open-library/books/OL38433780M",
+            "wsp:open-library/books/OL46652735M",
+            "wsp:open-library/books/OL38450788M",
+            "wsp:open-library/works/OL28081679W",
+            "wsp:open-library/books/OL46696112M"
+          ]
+        },
+        {
+          "id": "q206",
+          "ndcg10": 1.0,
+          "recall50": 1.0,
+          "latency_ms": 2385.0972750005894,
+          "top": [
+            "wsp:kiwix-xkcd-com-en-all/xkcd.com/936/",
+            "wsp:stackexchange/hsm.stackexchange.com_en_all/questions/15152/what-research-articles-were-inspired-by-web-comics",
+            "wsp:stackexchange/skeptics.stackexchange.com_en_all/questions/38478/do-four-random-common-words-make-a-stronger-password-than-passwords-like-tr0ub",
+            "wsp:stackexchange/security.stackexchange.com_en_all/questions/234734/is-password-strength-exclusively-a-function-of-character-set-size-multiplied-b",
+            "wsp:stackexchange/crypto.stackexchange.com_en_all/questions/62597/calculating-entropy-within-xkcd-936-password-strength",
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/23834902/password-strength-xkcd",
+            "wsp:stackexchange/security.stackexchange.com_en_all/questions/97249/password-strength-of-random-words-and-brainflayer",
+            "wsp:stackexchange/security.stackexchange.com_en_all/questions/85724/password-strength-metrics",
+            "wsp:stackexchange/security.stackexchange.com_en_all/questions/6095/xkcd-936-short-complex-password-or-long-dictionary-passphrase",
+            "wsp:stackexchange/elementaryos.stackexchange.com_en_all/questions/63/how-does-elementary-determine-the-strength-of-a-password"
+          ]
+        },
+        {
+          "id": "q207",
+          "ndcg10": 0.3333333333333333,
+          "recall50": 1.0,
+          "latency_ms": 3426.5067080050358,
+          "top": [
+            "wsp:kiwix-www-mankier-com-en-all/www.mankier.com/package/rsync",
+            "wsp:kiwix-www-mankier-com-en-all/www.mankier.com/1/rrsync",
+            "wsp:kiwix-www-mankier-com-en-all/www.mankier.com/package/rsync-rrsync",
+            "wsp:kiwix-www-mankier-com-en-all/www.mankier.com/1/wsrep_sst_rsync",
+            "wsp:kiwix-www-mankier-com-en-all/www.mankier.com/1/rsync-ssl",
+            "wsp:kiwix-www-mankier-com-en-all/www.mankier.com/1/grsync",
+            "wsp:kiwix-www-mankier-com-en-all/www.mankier.com/1/rsync",
+            "wsp:kiwix-www-mankier-com-en-all/www.mankier.com/1/wsrep_sst_rsync_wan",
+            "wsp:kiwix-www-mankier-com-en-all/www.mankier.com/1/mtxrun-rsync",
+            "wsp:kiwix-www-mankier-com-en-all/www.mankier.com/7/cdist-type__rsync"
+          ]
+        },
+        {
+          "id": "q208",
+          "ndcg10": 1.0,
+          "recall50": 1.0,
+          "latency_ms": 2425.7835919997888,
+          "top": [
+            "wsp:kiwix-www-mankier-com-en-all/www.mankier.com/1/grep",
+            "wsp:stackexchange/unix.stackexchange.com_en_all/questions/309755/how-to-read-complete-grep-manual",
+            "wsp:stackexchange/askubuntu.com_en_all/questions/768910/help-with-grep-command-in-terminal",
+            "wsp:stackexchange/unix.stackexchange.com_en_all/questions/725210/why-can-t-i-filter-manual-pages-through-grep-command",
+            "wsp:kiwix-www-mankier-com-en-all/www.mankier.com/1/repo-grep",
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/9542414/grep-command-called-from-python",
+            "wsp:wikipedia-top10/en/Grep",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/Grep",
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/5245973/grep-command-on-solaris-9",
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/24507741/grep-can-t-open-command"
+          ]
+        },
+        {
+          "id": "q209",
+          "ndcg10": 0.5,
+          "recall50": 1.0,
+          "latency_ms": 3865.176851999422,
+          "top": [
+            "wsp:stackexchange/superuser.com_en_all/questions/742543/extract-archived-bz2-files-inside-a-tar-archive-with-a-single-command",
+            "wsp:kiwix-www-mankier-com-en-all/www.mankier.com/1/makeself",
+            "wsp:kiwix-www-mankier-com-en-all/www.mankier.com/1/tar",
+            "wsp:stackexchange/askubuntu.com_en_all/questions/57981/command-line-archive-manager-extracter",
+            "wsp:stackexchange/unix.stackexchange.com_en_all/questions/195779/extracting-archive-by-piping-contents-of-archive-into-the-tar-command",
+            "wsp:kiwix-www-mankier-com-en-all/www.mankier.com/1/ptardiff",
+            "wsp:stackexchange/unix.stackexchange.com_en_all/questions/268273/tar-without-f-option-in-extraction",
+            "wsp:kiwix-docs-python-org-en-all/docs.python.org/3.11/library/tarfile.html",
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/35922782/self-extracting-tar-archive-shell-scripting",
+            "wsp:kiwix-docs-python-org-en-all/docs.python.org/3.12/library/tarfile.html"
+          ]
+        },
+        {
+          "id": "q210",
+          "ndcg10": 1.0,
+          "recall50": 1.0,
+          "latency_ms": 2970.708029002708,
+          "top": [
+            "wsp:kiwix-peps-python-en-all/peps.python.org/pep-0008/",
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/9864543/vim-and-pep-8-style-guide-for-python-code",
+            "wsp:wikipedia-top10/en/Programming_style",
+            "wsp:wikipedia-top10/en/Pylint",
+            "wsp:kiwix-www-mankier-com-en-all/www.mankier.com/package/python3-pycodestyle",
+            "wsp:kiwix-docs-python-org-en-all/devguide.python.org/",
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/9455943/python-white-spaces-style-guide",
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/19103739/which-python-peps-deal-with-code-style",
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/56013709/pandas-vs-pep-style-guide",
+            "wsp:kiwix-peps-python-en-all/peps.python.org/pep-0007/"
+          ]
+        },
+        {
+          "id": "q211",
+          "ndcg10": 0.4306765580733931,
+          "recall50": 1.0,
+          "latency_ms": 2221.9469460032997,
+          "top": [
+            "wsp:kiwix-peps-python-en-all/peps.python.org/pep-0606/",
+            "wsp:stackexchange/mathematica.stackexchange.com_en_all/questions/219718/what-are-the-principles-of-good-design-with-wolfram-language-a-la-zen-of-pytho",
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/21155629/python-zen-only-one-way-to-do-it",
+            "wsp:kiwix-peps-python-en-all/peps.python.org/pep-0020/",
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/71725098/python-interpreter-citing-zen-of-python-in-the-terminal-window",
+            "wsp:kiwix-curated-t2/wikiversity_en_all/Python_Programming/Functions",
+            "wsp:wikipedia-top10/en/Python_syntax_and_semantics",
+            "wsp:kiwix-curated-t2/wikiversity_en_all/Python_Concepts/To_Get_You_Started",
+            "wsp:stackexchange/softwareengineering.stackexchange.com_en_all/questions/148790/is-the-14th-line-of-the-zen-of-python-a-reference-to-dijkstra",
+            "wsp:kiwix-peps-python-en-all/peps.python.org/pep-0348/"
+          ]
+        },
+        {
+          "id": "q212",
+          "ndcg10": 1.0,
+          "recall50": 1.0,
+          "latency_ms": 6286.643378996814,
+          "top": [
+            "wsp:wiktionary-en/sesquipedalian",
+            "wsp:wikipedia-top10/en/Sesquipedalian",
+            "wsp:open-library/works/OL38137829W",
+            "wsp:kiwix-wiktionary-en-simple-all/sesquipedalian",
+            "wsp:stackexchange/puzzling.stackexchange.com_en_all/users/56273/sesquipedalian",
+            "wsp:wiktionary-en/sesquipedalians",
+            "wsp:stackexchange/english.stackexchange.com_en_all/questions/336118/a-word-that-means-itself",
+            "wsp:wiktionary-en/sesquipedalianisms",
+            "wsp:open-library/books/OL40862013M",
+            "wsp:stackexchange/stackoverflow.com_en_all/users/892375/sesquipedalian"
+          ]
+        },
+        {
+          "id": "q213",
+          "ndcg10": 0.0,
+          "recall50": 0.0,
+          "latency_ms": 3687.7336990000913,
+          "top": [
+            "wsp:wikipedia-top10/en/Ephemeral_architecture",
+            "wsp:wikipedia-top10/en/Ephemerality",
+            "wsp:mdwiki/Digital_contact_tracing",
+            "wsp:wikipedia-top10/en/Ephemeral_City",
+            "wsp:wikipedia-top10/en/Ephemeral_art",
+            "wsp:kiwix-gotquestions-org-en-all/www.gotquestions.org/ministers-flame-fire.html",
+            "wsp:pubmed/32572081",
+            "wsp:open-library/books/OL54622430M",
+            "wsp:gutenberg/12359",
+            "wsp:gutenberg/12903"
+          ]
+        },
+        {
+          "id": "q214",
+          "ndcg10": 0.35098520806348704,
+          "recall50": 1.0,
+          "latency_ms": 2705.171433997748,
+          "top": [
+            "wsp:pubmed/550448",
+            "wsp:mdwiki/Metformin",
+            "wsp:stackexchange/medicalsciences.stackexchange.com_en_all/questions/21016/side-effects-or-other-medical-conditions-for-diabetic-patients",
+            "wsp:mdwiki/Sitagliptin/metformin",
+            "wsp:pubmed/12132452",
+            "wsp:mdwiki/Canagliflozin/metformin",
+            "wsp:pubmed/28073907",
+            "wsp:mdwiki/Pioglitazone/metformin",
+            "wsp:pubmed/14624284",
+            "wsp:pubmed/32738838"
+          ]
+        },
+        {
+          "id": "q215",
+          "ndcg10": 0.35583989829307827,
+          "recall50": 1.0,
+          "latency_ms": 3026.300498000637,
+          "top": [
+            "wsp:open-library/books/OL1714615M",
+            "wsp:open-library/works/OL18277885W",
+            "wsp:pubmed/14484787",
+            "wsp:mdwiki/Asthma",
+            "wsp:open-library/books/OL359200M",
+            "wsp:pubmed/7359746",
+            "wsp:pubmed/2869287",
+            "wsp:pubmed/5431759",
+            "wsp:pubmed/18867243",
+            "wsp:pubmed/5697532"
+          ]
+        },
+        {
+          "id": "q216",
+          "ndcg10": 0.4635819942403664,
+          "recall50": 0.6666666666666666,
+          "latency_ms": 3500.663334001729,
+          "top": [
+            "wsp:kiwix-wikipedia-en-simple-all/The_Raven",
+            "wsp:wikisource-en/The_Raven_(Poe)",
+            "wsp:kiwix-wikisource-en-all/The_Raven_(Poe)",
+            "wsp:wikisource-en/Collier's_New_Encyclopedia_(1921)/Poe,_Edgar_Allan",
+            "wsp:wikipedia-top10/en/Edgar_Allan_Poe_in_popular_culture",
+            "wsp:wikipedia-top10/en/Edgar_Allan_Poe_in_television_and_film",
+            "wsp:gutenberg/76996",
+            "wsp:kiwix-wikisource-en-all/1911_Encyclopædia_Britannica/Poe,_Edgar_Allan",
+            "wsp:wikipedia-top10/en/Edgar_Allan_Poe_bibliography",
+            "wsp:wikipedia-top10/en/Poems_by_Edgar_Allan_Poe"
+          ]
+        },
+        {
+          "id": "q217",
+          "ndcg10": 0.400638392722474,
+          "recall50": 1.0,
+          "latency_ms": 3220.0716700026533,
+          "top": [
+            "wsp:kiwix-wikipedia-en-simple-all/Miranda_v._Arizona",
+            "wsp:kiwix-wikisource-en-all/Miranda_v._Arizona",
+            "wsp:wikipedia-top10/en/Ernesto_Miranda",
+            "wsp:wikisource-en/Miranda_v._Arizona",
+            "wsp:courtlistener/8968349",
+            "wsp:open-library/works/OL18173243W",
+            "wsp:open-library/books/OL8160144M",
+            "wsp:open-library/works/OL8580285W",
+            "wsp:kiwix-wikipedia-en-simple-all/Miranda_warning",
+            "wsp:wikipedia-top10/en/History_of_the_Supreme_Court_of_the_United_States"
+          ]
+        },
+        {
+          "id": "q218",
+          "ndcg10": 0.5,
+          "recall50": 1.0,
+          "latency_ms": 4937.632504006615,
+          "top": [
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/57043386/git-rebase-forces-merge",
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/42775831/git-rebase-less-merges",
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/28595991/git-merge-or-git-rebase",
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/66463361/github-rebase-merge-vs-git-rebase-merge",
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/16336014/git-merge-vs-rebase",
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/13610138/git-rebase-or-merge",
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/48025728/git-merge-or-git-pull-rebase",
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/4783599/rebasing-a-git-merge-commit",
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/24174055/git-rebase-after-merge",
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/25670519/git-rebase-preserve-merges-fails"
+          ]
+        },
+        {
+          "id": "q219",
+          "ndcg10": 0.0,
+          "recall50": 0.0,
+          "latency_ms": 5759.268631998566,
+          "top": [
+            "wsp:open-library/books/OL55715115M",
+            "wsp:open-library/works/OL41005111W",
+            "wsp:stackexchange/stackoverflow.com_en_all/questions/66730304/pancake-recipe-expressed-in-semantic-web-triples",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/Cookbook:Pancake",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/Cookbook:Pancakes_(Vegan)",
+            "wsp:kiwix-publicdomainrecipes-com-en-all/publicdomainrecipes.com/danish-pancake/",
+            "wsp:open-library/books/OL30335545M",
+            "wsp:kiwix-curated-t2/wikibooks_en_all/Cookbook:Corn_Pancakes",
+            "wsp:wikipedia-top10/en/Potato_pancake",
+            "wsp:open-library/books/OL57770015M"
+          ]
+        },
+        {
+          "id": "q220",
+          "ndcg10": 0.3010299956639812,
+          "recall50": 1.0,
+          "latency_ms": 2730.3350220026914,
+          "top": [
+            "wsp:open-library/books/OL25673352M",
+            "wsp:open-library/books/OL42517416M",
+            "wsp:open-library/books/OL44360154M",
+            "wsp:open-library/works/OL17103015W",
+            "wsp:gutenberg/66136",
+            "wsp:wikipedia-top10/en/Canning",
+            "wsp:pubmed/22186049",
+            "wsp:kiwix-wikisource-en-all/Home_Canning_of_Fruits_and_Vegetables",
+            "wsp:usda-home-canning/usda-canning:GUIDE04-HomeCan-rev0715",
+            "wsp:kiwix-wikipedia-en-simple-all/Canning"
+          ]
+        }
+      ]
+    }
+  ]
+}
