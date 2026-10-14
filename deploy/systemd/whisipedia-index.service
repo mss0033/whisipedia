@@ -24,10 +24,12 @@ TimeoutStopSec=120
 Nice=19
 CPUWeight=20
 Slice=whisipedia-background.slice
-# The heavy job's share of the slice (deploy/systemd/whisipedia-background.slice): the same as a step
-# unit. A larger rebuild runs by hand with the lanes stopped (tools/wsp-bg, up to 6G).
-MemoryHigh=3G
-MemoryMax=4G
+# The heavy job's share of the slice (deploy/systemd/whisipedia-background.slice). Tantivy's merges
+# and a Wikipedia-sized part need more than 3G: at 3.5G the 2026-10-13 rebuild thrashed for two
+# hours on Wikipedia (MALLOC_ARENA_MAX=2 is already set); 5.5G ran it clean. The slice's MemoryHigh
+# (7G) still caps the job and the lanes together.
+MemoryHigh=6G
+MemoryMax=7G
 OOMScoreAdjust=500
 Environment=WSP_MAX_WORKERS=4
 # Tantivy (Rust) allocates with glibc malloc: with ~50 threads the default per-thread arenas kept
