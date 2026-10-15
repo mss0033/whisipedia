@@ -36,6 +36,33 @@ def page_text(html: str) -> str:
     return _WS_RE.sub(" ", htmllib.unescape(_TAG_RE.sub(" ", body))).strip()
 
 
+_MATH_RE = re.compile(r"<math\b[^>]*?\balttext=\"([^\"]*)\"[^>]*>.*?</math>", re.IGNORECASE | re.DOTALL)
+_MATH_ANY_RE = re.compile(r"<math\b.*?</math>", re.IGNORECASE | re.DOTALL)
+_BLOCK_RE = re.compile(
+    r"<(?:/p|br\s*/?|/h[1-6]|/li|/tr|/dd|/dt|/blockquote|/pre|/div|/table|/caption)\b[^>]*>", re.IGNORECASE
+)
+_DISPLAY_RE = re.compile(r"^\{\\displaystyle\s*(.*)\}$", re.DOTALL)
+
+
+def _tex(alttext: str) -> str:
+    tex = htmllib.unescape(alttext).strip()
+    m = _DISPLAY_RE.match(tex)
+    return f" {(m.group(1) if m else tex).strip()} "
+
+
+def rendered_text(html: str) -> str:
+    """The text a reader sees on a rendered page, paragraphs kept, each formula as its TeX source
+    (the alttext of the MathML). The text of the Wikipedia dumps drops formulas and measurement
+    templates; the ZIM page that renders the article has them (2026-10-14 field exam)."""
+    body = _CODE_RE.sub(" ", _TITLE_RE.sub(" ", html))
+    body = _MATH_RE.sub(lambda m: _tex(m.group(1)), body)
+    body = _MATH_ANY_RE.sub(" ", body)
+    body = _BLOCK_RE.sub("\n", body)
+    text = htmllib.unescape(_TAG_RE.sub(" ", body))
+    lines = (_WS_RE.sub(" ", line).strip() for line in text.split("\n"))
+    return "\n".join(line for line in lines if line)
+
+
 @dataclass(frozen=True, slots=True)
 class Rendered:
     """A page ready to serve: rewritten HTML plus what a live ZIM document needs (title, text, hash)."""

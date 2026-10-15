@@ -22,6 +22,7 @@ import hashlib
 import threading
 import time
 from collections.abc import AsyncGenerator
+from dataclasses import replace
 from typing import Annotated, Any, Literal
 from urllib.parse import unquote
 
@@ -36,6 +37,7 @@ from wsp_api.browse import browse_router
 from wsp_api.errors import ApiError, error_response, errors, install_error_handlers, streamed
 from wsp_api.files import files_router
 from wsp_api.offload import RETRY_AFTER
+from wsp_api.pages import rendered_text
 from wsp_api.routing import RawSegmentRouting
 from wsp_api.schemas import (
     API_VERSION,
@@ -291,8 +293,13 @@ def _v1(lib: Library, settings: ApiSettings) -> APIRouter:
 
         def build() -> bytes:
             view = lib.document(did, at)
+            doc = view.doc
+            if include_text and view.rendition is not None and view.html:
+                # The page shown is another source's rendering (the Wikipedia ZIM for the dump's
+                # article): its text has the figures and formulas the dump text lacks.
+                doc = replace(doc, text=rendered_text(view.html))
             model = convert.document(
-                view.doc,
+                doc,
                 spec=s.source(view.doc.source_id),
                 links=lib.links(view.doc),
                 generation_id=view.generation_id,
