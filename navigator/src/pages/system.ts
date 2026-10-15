@@ -74,12 +74,19 @@ export function autonomyBox(ops: Ops | null | undefined): HTMLElement | null {
   const pct = Math.min(100, Math.round((100 * a.days) / a.goal_days));
   return sectionBox(
     'Unattended',
+    // The days first, then the state on its own line: "STALE 0.2 of 30 days" read as "0.2 stale"
+    // (field exam 2026-10-14).
     h(
       'p',
       null,
-      statusLamp(a.critical_open ? 'degraded' : a.slo_failing ? 'stale' : 'ok'),
-      ` ${a.days.toFixed(1)} of ${a.goal_days} days without a critical alert or a manual repair. `,
+      `${a.days.toFixed(1)} of ${a.goal_days} days without a critical alert or a manual repair. `,
       h('progress', { max: '100', value: String(pct), 'aria-label': `${pct}% of the goal` }),
+    ),
+    h(
+      'p',
+      null,
+      'Library state: ',
+      statusLamp(a.critical_open ? 'degraded' : a.slo_failing ? 'stale' : 'ok'),
     ),
     h(
       'p',
@@ -256,7 +263,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
   const stamp = h(
     'p',
     { class: 'fineprint', 'aria-live': 'off' },
-    `Updated ${new Date().toLocaleTimeString()} · refreshes every ${REFRESH_MS / 1000} s`,
+    `Updated ${formatDateTime(Date.now())} · refreshes every ${REFRESH_MS / 1000} s`,
   );
 
   const timer = setInterval(() => {
@@ -265,7 +272,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
       .system(ctx.signal)
       .then((next) => {
         holder.replaceChildren(renderSystem(next, names));
-        stamp.textContent = `Updated ${new Date().toLocaleTimeString()} · refreshes every ${REFRESH_MS / 1000} s`;
+        stamp.textContent = `Updated ${formatDateTime(Date.now())} · refreshes every ${REFRESH_MS / 1000} s`;
       })
       .catch(() => {
         stamp.textContent = 'Lost contact with the daemon; retrying…';

@@ -34,6 +34,7 @@ describe('system monitor', () => {
     expect(box.textContent).toContain('owner action: retry kiwix-solar/2025-01');
     expect(box.textContent).toContain('2 site(s) behind their freshness target');
     expect(box.querySelector('progress')?.getAttribute('value')).toBe('12');
+    expect(box.textContent).toContain('Library state: STALE');
   });
 
   it('puts the streak, alerts and trawler at the top of the page', () => {
