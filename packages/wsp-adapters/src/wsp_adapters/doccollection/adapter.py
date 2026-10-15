@@ -555,7 +555,7 @@ class DocCollectionAdapter:
                 lang=meta.language or "en",
                 license=license_,
                 text=text,
-                revision=meta.edition_date or None,
+                revision=meta.edition_date or pdf_metadata_date(path) or None,
                 url_native=meta.origin_url or None,
                 html_ref=f"file:{meta.generation or generation_dir.name}/{meta.file}",
                 content_hash=content_hash(text),
@@ -1332,6 +1332,41 @@ def pdf_metadata_title(path: Path) -> str:
         log.debug("no PDF metadata for %s: %s", path.name, exc)
         return ""
     return _meaningful(raw)
+
+
+_PDF_DATE_RE = re.compile(r"^(?:D:)?((?:19|20)\d\d)(\d\d)?(\d\d)?")
+
+
+def pdf_date(raw: str) -> str:
+    """``D:20150709...`` -> ``2015-07-09`` (``2015-07`` or ``2015`` when the rest is missing or bad)."""
+    m = _PDF_DATE_RE.match(raw.strip())
+    if m is None:
+        return ""
+    year, month, day = m.group(1), m.group(2), m.group(3)
+    if month is None or not 1 <= int(month) <= 12:
+        return year
+    if day is None or not 1 <= int(day) <= 31:
+        return f"{year}-{month}"
+    return f"{year}-{month}-{day}"
+
+
+def pdf_metadata_date(path: Path) -> str:
+    """The PDF's own modification (else creation) date, for a document the issuer lists undated: the
+    USDA canning guides read "as of: unknown" (field exam 2026-10-14)."""
+    if path.suffix.lower() != ".pdf":
+        return ""
+    try:
+        import pypdfium2
+
+        pdf = pypdfium2.PdfDocument(str(path))
+        try:
+            meta = pdf.get_metadata_dict()
+        finally:
+            pdf.close()
+    except Exception as exc:  # a damaged PDF has no date to offer
+        log.debug("no PDF metadata for %s: %s", path.name, exc)
+        return ""
+    return pdf_date(str(meta.get("ModDate") or "")) or pdf_date(str(meta.get("CreationDate") or ""))
 
 
 def heading_line(body: str, *, scan_chars: int = 3000) -> str:

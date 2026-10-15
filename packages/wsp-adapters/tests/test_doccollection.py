@@ -941,3 +941,13 @@ def test_archive_items_can_prefer_the_ocr_text_pdf() -> None:
     (ocr,) = resolve(replace(base, extra={"prefer": "text-pdf"}), env)
     assert ocr.url.endswith("/1_text.pdf")
     assert (ocr.size, ocr.md5) == (210, "bb")
+
+
+def test_pdf_dates() -> None:
+    from wsp_adapters.doccollection.adapter import pdf_date
+
+    assert pdf_date("D:20150709142233-04'00'") == "2015-07-09"
+    assert pdf_date("D:201507") == "2015-07"
+    assert pdf_date("2015") == "2015"
+    assert pdf_date("D:20151399") == "2015"
+    assert pdf_date("garbage") == ""
