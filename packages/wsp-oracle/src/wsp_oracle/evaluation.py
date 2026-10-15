@@ -324,22 +324,57 @@ def parse_weights(text: str) -> list[tuple[float, float]]:
 # --- CLI ------------------------------------------------------------------------------------------
 
 
-def api_searcher(base_url: str, *, depth: int = 50, timeout: float = 180.0) -> Searcher:
+_RETRY_STATUSES = frozenset({429, 502, 503, 504})
+
+
+def api_searcher(
+    base_url: str,
+    *,
+    depth: int = 50,
+    timeout: float = 180.0,
+    attempts: int = 6,
+    sleep: Callable[[float], None] | None = None,
+) -> Searcher:
     """Search the running library over HTTP (no models or index loaded here). Requests are marked as a
-    background probe, so they never count as the owner's use; the user agent is generic."""
+    background probe, so they never count as the owner's use; the user agent is generic.
+
+    A busy library answers 503 (or 429) with Retry-After; a run of a few hundred queries must ride that
+    out rather than die on query 150. Up to ``attempts`` tries, waiting Retry-After (capped at 120 s) or
+    an exponential back-off from 5 s; any other HTTP error is raised at once."""
+    import urllib.error
     import urllib.parse
     import urllib.request
 
     base = base_url.rstrip("/")
+    pause = sleep or time.sleep
+
+    def wait_for(err: Exception, attempt: int) -> float:
+        hdr = err.headers.get("Retry-After") if isinstance(err, urllib.error.HTTPError) else None
+        try:
+            secs = float(hdr) if hdr else 0.0
+        except ValueError:
+            secs = 0.0
+        return min(120.0, secs if secs > 0 else 5.0 * (2**attempt))
 
     def search(query: str) -> list[str]:
         url = f"{base}/v1/search?" + urllib.parse.urlencode({"q": query, "limit": depth})
         req = urllib.request.Request(  # noqa: S310 - a loopback URL given on the command line
             url, headers={"X-Whisipedia-Probe": "check", "User-Agent": "Whisipedia-eval/1"}
         )
-        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 - see above
-            data = cast(dict[str, Any], json.load(resp))
-        return [str(h["doc_id"]) for h in cast(list[dict[str, Any]], data.get("hits") or [])]
+        for attempt in range(attempts):
+            try:
+                with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 - see above
+                    data = cast(dict[str, Any], json.load(resp))
+                return [str(h["doc_id"]) for h in cast(list[dict[str, Any]], data.get("hits") or [])]
+            except urllib.error.HTTPError as err:
+                if err.code not in _RETRY_STATUSES or attempt == attempts - 1:
+                    raise
+                pause(wait_for(err, attempt))
+            except (urllib.error.URLError, TimeoutError, ConnectionError) as err:
+                if attempt == attempts - 1:
+                    raise
+                pause(wait_for(err, attempt))
+        raise AssertionError("unreachable")  # pragma: no cover
 
     return search
 
