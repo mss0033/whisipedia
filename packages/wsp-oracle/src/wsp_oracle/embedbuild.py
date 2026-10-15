@@ -100,6 +100,20 @@ class _Doc:
     chunks: tuple[Chunk, ...]
 
 
+PROSE_LETTER_SHARE = 0.45
+
+
+def is_prose(text: str) -> bool:
+    """A passage worth a vector: letters are at least :data:`PROSE_LETTER_SHARE` of its visible
+    characters. Tables of numbers (sight reduction, tide and almanac volumes) embed near every query
+    and crowded out real passages: 337,216 NGA table chunks matched "pressure canning green beans" at
+    0.78 above every USDA guide (2026-10-14)."""
+    visible = [ch for ch in text if not ch.isspace()]
+    if not visible:
+        return False
+    return sum(ch.isalpha() for ch in visible) >= PROSE_LETTER_SHARE * len(visible)
+
+
 def _chunk_one(title: str, text: str, words: int, max_chunks: int, wiki: bool) -> list[tuple[str, str]]:
     return chunk_text(title, text, target_words=words, max_chunks=max_chunks, stop_at_references=wiki) or [
         ("", title)
@@ -165,10 +179,12 @@ def _produce(
                 for r in table.to_pylist():
                     doc_id, title = str(r["doc_id"]), str(r["title"])
                     pairs = _chunk_one(title, str(r["text"]), words, max_chunks, wiki)
-                    chunks = tuple(
+                    numbered = [
                         Chunk(make_chunk_id(doc_id, n), doc_id, n, title, sec, txt)
                         for n, (sec, txt) in enumerate(pairs)
-                    )
+                    ]
+                    # Numbers are kept by position (passage ids stay stable); tables go, one stays.
+                    chunks = tuple(c for c in numbered if is_prose(c.text)) or tuple(numbered[:1])
                     docs.append(
                         _Doc(
                             doc_id,
