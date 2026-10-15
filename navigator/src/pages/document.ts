@@ -372,7 +372,13 @@ export function catalogNotice(
     fallback();
     return el;
   }
-  status.textContent = 'Looking for it among the library’s books…';
+  // The lookup is a search (a second or two): the reader can act at once instead of waiting on a
+  // placeholder (field exam 2026-10-14).
+  status.replaceChildren(
+    'Checking the library’s books for a copy… ',
+    searchLink('search them yourself'),
+    '.',
+  );
   const key = titleKey(title);
   help
     .lookup(title)
