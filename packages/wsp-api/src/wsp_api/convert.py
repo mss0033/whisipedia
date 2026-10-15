@@ -5,8 +5,9 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import re
 from collections.abc import Mapping, Sequence
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import cast
 
 from pydantic import JsonValue
@@ -31,6 +32,21 @@ from wsp_api.schemas import (
 )
 from wsp_core.banners import banner_for, currency_of
 from wsp_core.model import ChangeRecord, DocRecord, Generation, LedgerEvent, SearchHit, SourceSpec
+
+_EDITION_RE = re.compile(r"^(\d{4})(?:-(\d{2})(?:-(\d{2}))?)?$")
+
+
+def edition_time(revision: str | None) -> datetime | None:
+    """A document's date from its edition (``revision`` 1928, 1975-06 or 1992-04-01) when it has no
+    timestamp of its own: maps and collection documents showed "date unknown" while stating
+    "Edition: 1928" (2026-10-14 field exam)."""
+    m = _EDITION_RE.match((revision or "").strip())
+    if m is None:
+        return None
+    try:
+        return datetime(int(m.group(1)), int(m.group(2) or 1), int(m.group(3) or 1), tzinfo=UTC)
+    except ValueError:
+        return None
 
 
 def readable_text(text: str | None) -> str | None:
@@ -119,7 +135,7 @@ def document(
         text=readable_text(doc.text) if include_text or html is None else None,
         content_hash=doc.content_hash,
         revision=doc.revision,
-        timestamp=doc.timestamp,
+        timestamp=doc.timestamp or edition_time(doc.revision),
         url_native=doc.url_native,
         html_ref=doc.html_ref,
         entities=list(doc.entities),
@@ -161,14 +177,16 @@ def hit(
         source_name=(h.source_id or source_id) if spec is None else spec.name,
         kind=DocKind.OTHER if spec is None else sites.kind_of(spec),
         license=_opt_str(meta.get("license")),
-        as_of=ts if isinstance(ts := meta.get("timestamp"), datetime) else None,
+        as_of=ts
+        if isinstance(ts := meta.get("timestamp"), datetime)
+        else edition_time(_opt_str(meta.get("revision"))),
         lang=_opt_str(meta.get("lang")),
         url_native=_opt_str(meta.get("url_native")),
         highlights=list(highlights),
     )
 
 
-_HIT_FIELDS = ("license", "timestamp", "lang", "url_native")
+_HIT_FIELDS = ("license", "timestamp", "lang", "url_native", "revision")
 
 
 def _opt_str(value: object) -> str | None:

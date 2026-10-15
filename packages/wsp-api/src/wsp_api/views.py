@@ -49,7 +49,7 @@ BOOK_INDEX_FILE = "zim-books.json"
 _MAX_LINK_LOOKUPS = 1000
 _MAX_ZIM_LINK_CHECKS = 32  # each opens an archive entry (no content read)
 _HISTORY_CACHE = 2048
-HIT_COLUMNS = ("license", "timestamp", "lang", "url_native")
+HIT_COLUMNS = ("license", "timestamp", "lang", "url_native", "revision")
 
 
 def parse_doc(raw: str) -> DocId:
