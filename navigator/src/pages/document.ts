@@ -997,7 +997,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
       ? h(
           'p',
           { class: 'fineprint broken-note' },
-          `${broken} link(s) on this page point outside the library and are shown as broken links.`,
+          `${broken} link(s) on this page go to websites the library does not hold offline. They are marked, and opening one explains what is missing.`,
         )
       : null,
     route.diff ? null : linksList(doc),
