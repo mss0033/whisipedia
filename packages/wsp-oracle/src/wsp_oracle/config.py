@@ -14,6 +14,12 @@ from typing import Any, cast
 
 DEFAULT_MODELS_DIR = "~/.cache/whisipedia/models"
 DEFAULT_EMBED_MODEL = "intfloat--multilingual-e5-base"
+DEFAULT_SOURCE_WEIGHTS = {
+    "open-library": 0.3,  # catalog cards: no content
+    "pubmed": 0.7,  # research abstracts
+    "stackexchange": 0.85,  # Q&A threads: matched the words, not the question (2026-10-14 field exam)
+    "wikipedia-top10": 1.15,  # the reference article for most questions
+}
 DEFAULT_RERANK_MODEL = "BAAI--bge-reranker-v2-m3"
 
 
@@ -101,7 +107,7 @@ class OracleConfig:
     dense_weight: float = 2.0
     depth: int = 50
     source_priors: Mapping[str, float] = field(default_factory=dict[str, float])
-    source_weights: Mapping[str, float] = field(default_factory=lambda: {"open-library": 0.3, "pubmed": 0.7})
+    source_weights: Mapping[str, float] = field(default_factory=lambda: dict(DEFAULT_SOURCE_WEIGHTS))
     """Final score multipliers per source, after fusion and after reranking (1 = none). Catalog cards
     and research abstracts outranked encyclopedia articles and government manuals for practical
     questions (2026-10-14 field exam: 7 of 9 examinees). Not applied when the query asks for a book
@@ -197,7 +203,7 @@ class OracleConfig:
                 source_priors=_floats(section.get("source_priors", {}), "source_priors"),
                 source_weights=_floats(section["source_weights"], "source_weights")
                 if "source_weights" in section
-                else {"open-library": 0.3, "pubmed": 0.7},
+                else dict(DEFAULT_SOURCE_WEIGHTS),
                 static_rank_weight=float(section.get("static_rank_weight", 0.1)),
                 spelling=bool(section.get("spelling", True)),
                 chunk_words=int(section.get("chunk_words", 200)),

@@ -230,6 +230,13 @@ class OracleSearcher:
                 return h
         return None
 
+    def _pinnable(self, query: str, hit: SearchHit) -> bool:
+        """A down-weighted source (catalog cards, abstracts) never leads by its title alone, unless the
+        query asks for it: "capital of australia" pinned an Open Library record of that title above
+        the article on Canberra (2026-10-14)."""
+        src = hit.source_id or source_of(hit.doc_id)
+        return self.source_weights.get(src, 1.0) >= 1.0 or src in weight_exempt(query)
+
     def _pins(self, route: Route, fused: list[SearchHit], sources: Sequence[str] | None) -> list[SearchHit]:
         """Hits that must lead: the exact title for page-name intents, each side of a comparison."""
         wanted: list[str] = []
@@ -240,9 +247,11 @@ class OracleSearcher:
         pins: list[SearchHit] = []
         for title in wanted:
             key = _title_key(title)
-            hit = next((h for h in fused if _title_key(h.title) == key), None) or self._exact_title(
-                title, sources
-            )
+            hit = next(
+                (h for h in fused if _title_key(h.title) == key and self._pinnable(route.query, h)), None
+            ) or self._exact_title(title, sources)
+            if hit is not None and not self._pinnable(route.query, hit):
+                hit = None
             if hit is not None and all(p.doc_id != hit.doc_id for p in pins):
                 pins.append(hit)
         return pins
@@ -268,6 +277,8 @@ class OracleSearcher:
         for i, h in enumerate(candidates):
             title = _words_of(h.title)
             if h.doc_id in pinned or not words <= set(title) or len(title) > 2 * len(words):
+                continue
+            if not self._pinnable(route.query, h):
                 continue
             key = (not h.lang or primary_lang(h.lang) != lang, len(title), i)
             src = h.source_id or source_of(h.doc_id)

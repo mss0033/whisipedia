@@ -26,3 +26,23 @@ def test_exemptions_follow_the_question() -> None:
     assert weight_exempt("novels by Jane Austen") == {"open-library"}
     assert weight_exempt("clinical trials of metformin") == {"pubmed"}
     assert weight_exempt("how to purify water") == frozenset()
+
+
+def test_a_catalog_card_is_not_pinned_by_its_title_alone() -> None:
+    s = cast(Any, OracleSearcher.__new__(OracleSearcher))
+    s.source_weights = {"open-library": 0.3}
+    card = SearchHit(
+        doc_id=cast(Any, "wsp:open-library/works/OL1W"),
+        score=1.0,
+        title="Capital of Australia",
+        source_id="open-library",
+    )
+    article = SearchHit(
+        doc_id=cast(Any, "wsp:wikipedia-top10/en/Canberra"),
+        score=0.5,
+        title="Canberra",
+        source_id="wikipedia-top10",
+    )
+    assert not OracleSearcher._pinnable(s, "capital of australia", card)  # pyright: ignore[reportPrivateUsage]
+    assert OracleSearcher._pinnable(s, "capital of australia", article)  # pyright: ignore[reportPrivateUsage]
+    assert OracleSearcher._pinnable(s, "the book capital of australia", card)  # pyright: ignore[reportPrivateUsage]
