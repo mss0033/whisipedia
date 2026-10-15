@@ -92,7 +92,9 @@ _TAG = re.compile(r"<[^>]+>")
 
 def plain_snippet(snippet: str) -> str:
     """Index snippets carry HTML highlight markup; the API returns plain text plus ``highlights``."""
-    return html.unescape(_TAG.sub("", snippet)).replace("\ufffd", " ")  # see convert.readable_text
+    return (
+        html.unescape(_TAG.sub("", snippet)).replace("\ufffd", " ").replace("\u00ad", "")
+    )  # see convert.readable_text
 
 
 def highlights(snippet: str, query_terms: Iterable[str]) -> list[tuple[int, int]]:

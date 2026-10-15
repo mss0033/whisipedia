@@ -13,3 +13,11 @@ def test_readable_titles_for_the_start_page() -> None:
     assert _readable("Ångström")
     assert not _readable("\U0003f850")  # supplementary-plane glyph: renders blank
     assert not _readable("")
+
+
+def test_soft_hyphens_and_unmapped_glyphs_are_cleaned() -> None:
+    from wsp_api.convert import readable_text
+
+    assert readable_text("inter­national 30�min") == "international 30 min"
+    assert plain_snippet("the inter­<b>national</b>") == "the international"
+    assert readable_text(None) is None

@@ -1017,7 +1017,7 @@ def pdf_text(path: Path, max_pages: int) -> str:
                 page.close()
         # A form feed between pages: policy._edge_banner reads page edges. U+FFFD (a glyph the PDF does
         # not map to a character, e.g. the USDA tables' spacing) becomes a space.
-        return "\n\f\n".join(out).replace("\ufffd", " ")
+        return "\n\f\n".join(out).replace("\ufffd", " ").replace("\u00ad", "")  # soft hyphens split words
     finally:
         pdf.close()
 

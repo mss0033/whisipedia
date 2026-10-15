@@ -53,8 +53,14 @@ def edition_time(revision: str | None) -> datetime | None:
 def readable_text(text: str | None) -> str | None:
     """Stored text as a reader should see it. PDF text extraction writes U+FFFD for glyphs the PDF
     does not map to a character (the USDA canning tables' spacing: "30\ufffdmin" for "30 min", 310 times
-    in one guide; 2026-10-14 field exam): a space reads right, the replacement character never does."""
-    return text.replace("\ufffd", " ") if text and "\ufffd" in text else text
+    in one guide; 2026-10-14 field exam): a space reads right, the replacement character never does.
+    Soft hyphens (U+00AD) go: invisible in a browser, they split a word for a text reader or a search
+    of the page ("inter\u00adnational")."""
+    if not text:
+        return text
+    if "\ufffd" in text:
+        text = text.replace("\ufffd", " ")
+    return text.replace("\u00ad", "") if "\u00ad" in text else text
 
 
 def source_info(
