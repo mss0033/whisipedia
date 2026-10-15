@@ -5,7 +5,7 @@ libzim) never run inside it. :class:`IsolatedRunner` starts ``python -m wsp_orch
 <module:function>`` as a **transient systemd unit** in ``whisipedia-background.slice``::
 
     systemd-run --user --wait --collect --slice=whisipedia-background.slice
-      -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M -p KillMode=mixed -p TimeoutStopSec=60 ...
+      -p MemoryHigh=5G -p MemoryMax=6G -p MemorySwapMax=1G -p KillMode=mixed -p TimeoutStopSec=60 ...
 
 and reads how it ended:
 
@@ -14,6 +14,8 @@ and reads how it ended:
   kind is raised here (a held lock stays ``BUSY``: the step is deferred, no attempt counted);
 * ``oom-kill``, a signal, a core dump, or no result at all: :class:`ResourceExhaustedError`, which
   the pipeline counts as a crash of that state (alert after two), never as a content failure;
+* held at its memory ceiling with almost no CPU progress for ``stall_seconds`` (30 min): stopped,
+  :class:`ResourceExhaustedError` (a stall is a visible failure, not a silent hang);
 * the unit could not start (e.g. a unit of that name from before a restart is still stopping):
   :class:`ResourceBusyError`.
 
@@ -68,9 +70,11 @@ class UnitLimits:
 
     # One heavy step at a time (the HEAVY lock); sized into whisipedia-background.slice next to the
     # orchestrator and the fetch lanes (deploy/systemd/whisipedia-background.slice, audit 2026-10-12 H1).
-    memory_high: str = "3G"
-    memory_max: str = "4G"
-    memory_swap_max: str = "512M"
+    # 3G/4G held an index step of a small ZIM at its ceiling for ten hours (2026-10-14: the writer,
+    # static rank and id maps alone are ~4 GB); the nightly index job has 6G/7G.
+    memory_high: str = "5G"
+    memory_max: str = "6G"
+    memory_swap_max: str = "1G"
     timeout_stop_sec: int = 60
     cpu_weight: int = 20
     nice: int = 19
@@ -90,6 +94,43 @@ class UnitLimits:
             "IOSchedulingClass=best-effort",
             "IOSchedulingPriority=7",
         ]
+
+
+STALL_SECONDS = 1800.0
+STALL_CPU_SHARE = 0.05  # under 5% of one CPU while held at the ceiling: making no headway
+
+
+class _StallWatch:
+    """Samples a unit's usage; reports a stall when every sample over ``window`` seconds was at the
+    memory ceiling and CPU time grew by less than :data:`STALL_CPU_SHARE` of the wall time."""
+
+    def __init__(self, window: float, every: float) -> None:
+        self.window = window
+        self.every = every
+        self.samples: list[tuple[float, UnitUsage]] = []
+        self.next_at = 0.0
+
+    def due(self, now: float) -> bool:
+        return now >= self.next_at
+
+    def add(self, now: float, usage: UnitUsage | None) -> str | None:
+        self.next_at = now + self.every
+        if usage is None or not usage.throttled:
+            self.samples.clear()  # unknown or not at the ceiling: start over
+            return None
+        self.samples.append((now, usage))
+        first_t, first = self.samples[0]
+        span = now - first_t
+        if span < self.window:
+            return None
+        cpu = usage.cpu_seconds - first.cpu_seconds
+        if cpu < STALL_CPU_SHARE * span:
+            return (
+                f"stalled at its memory ceiling for {span / 60:.0f} min "
+                f"({cpu:.0f} s of CPU); raise [orchestrator.heavy] memory_high/memory_max"
+            )
+        self.samples = [s for s in self.samples if now - s[0] < self.window]
+        return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,11 +160,41 @@ class Launcher(Protocol):
     ) -> ChildProcess: ...
 
 
+@dataclass(frozen=True, slots=True)
+class UnitUsage:
+    """A running unit's CPU time so far and whether it sits at its memory ceiling (``MemoryHigh``)."""
+
+    cpu_seconds: float
+    throttled: bool
+
+
+@runtime_checkable
+class KnowsUsage(Protocol):
+    """Optional launcher capability: a running unit's resource use (``None`` when unknown)."""
+
+    def usage(self, unit: str) -> UnitUsage | None: ...
+
+
 @runtime_checkable
 class KnowsUnits(Protocol):
     """Optional launcher capability: is a unit of this name still running (or stopping)?"""
 
     def unit_running(self, unit: str) -> bool: ...
+
+
+def read_usage(cgroup: Path) -> UnitUsage | None:
+    """:class:`UnitUsage` from a cgroup v2 directory, or ``None`` when it cannot be read."""
+    try:
+        usec = 0
+        for line in (cgroup / "cpu.stat").read_text(encoding="ascii").splitlines():
+            if line.startswith("usage_usec "):
+                usec = int(line.split()[1])
+        current = int((cgroup / "memory.current").read_text(encoding="ascii").strip())
+        high_raw = (cgroup / "memory.high").read_text(encoding="ascii").strip()
+    except (OSError, ValueError):
+        return None
+    high = None if high_raw == "max" else int(high_raw)
+    return UnitUsage(cpu_seconds=usec / 1e6, throttled=high is not None and current >= high * 0.98)
 
 
 # --- systemd-run -------------------------------------------------------------------------------------
@@ -205,6 +276,7 @@ class SystemdRunLauncher:
     log_dir: Path | None = None
 
     def __post_init__(self) -> None:
+        self._cgroups: dict[str, Path] = {}
         self.systemd_run = self.systemd_run or shutil.which("systemd-run")
         self.systemctl = self.systemctl or shutil.which("systemctl")
 
@@ -229,6 +301,29 @@ class SystemdRunLauncher:
         if done.returncode != 0:
             return True
         return done.stdout.strip() not in ("inactive", "failed", "")
+
+    def usage(self, unit: str) -> UnitUsage | None:
+        """CPU time (``cpu.stat``) and ceiling pressure (``memory.current`` at or over ``memory.high``)
+        from the unit's cgroup; ``None`` when either cannot be read."""
+        if self.systemctl is None:
+            return None
+        cg = self._cgroups.get(unit)
+        if cg is None:
+            try:
+                done = subprocess.run(  # noqa: S603 - fixed argv, no shell
+                    [self.systemctl, "--user", "show", "-p", "ControlGroup", "--value", unit],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                    check=False,
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                return None
+            if done.returncode != 0 or not done.stdout.strip():
+                return None
+            cg = Path("/sys/fs/cgroup") / done.stdout.strip().lstrip("/")
+            self._cgroups[unit] = cg
+        return read_usage(cg)
 
     @staticmethod
     def available() -> bool:
@@ -388,7 +483,14 @@ class IsolatedRunner:
         cancel_wait_seconds: float = 3.0,
         env: Mapping[str, str] | None = None,
         cwd: Path | None = None,
+        stall_seconds: float = STALL_SECONDS,
+        sample_seconds: float = 60.0,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
+        """``stall_seconds``: a step held at its memory ceiling that long while using under
+        :data:`STALL_CPU_SHARE` of a CPU is stopped as exhausted (0 = never). On 2026-10-14 an index
+        step sat throttled at MemoryHigh for ten hours (12 min of CPU), holding the heavy lock, and
+        nothing said so."""
         self.workdir = workdir
         self.launcher = launcher if launcher is not None else default_launcher(workdir / "_steps")
         self.limits = limits or UnitLimits()
@@ -398,6 +500,9 @@ class IsolatedRunner:
         self.cancel_wait_seconds = cancel_wait_seconds
         self.env = dict(env or {})
         self.cwd = cwd or Path.cwd()
+        self.stall_seconds = stall_seconds
+        self.sample_seconds = sample_seconds
+        self.clock = clock
 
     def call(
         self,
@@ -453,6 +558,8 @@ class IsolatedRunner:
     def _wait(
         self, proc: ChildProcess, step: str, unit: str, started: float, timeout: float | None
     ) -> ChildExit:
+        watch = _StallWatch(self.stall_seconds, self.sample_seconds) if self.stall_seconds > 0 else None
+        probe = self.launcher if isinstance(self.launcher, KnowsUsage) else None
         while True:
             outcome = proc.wait(self.poll_seconds)
             if outcome is not None:
@@ -462,6 +569,13 @@ class IsolatedRunner:
                 reason = "shutdown"
             elif timeout is not None and time.monotonic() - started > timeout:
                 reason = f"timeout after {timeout:.0f}s"
+            elif watch is not None and probe is not None and watch.due(self.clock()):
+                stalled = watch.add(self.clock(), probe.usage(unit))
+                if stalled:
+                    reason = stalled
+                    log.warning(
+                        "heavy step stalled", extra={"fields": {"step": step, "unit": unit, "why": stalled}}
+                    )
             if reason is None:
                 continue
             proc.stop()

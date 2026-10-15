@@ -166,9 +166,9 @@ def test_systemd_run_command_caps_memory_in_the_background_slice(tmp_path: Path)
     assert "--slice=whisipedia-background.slice" in cmd
     props = {cmd[i + 1] for i, a in enumerate(cmd) if a == "-p"}
     assert {
-        "MemoryHigh=3G",
-        "MemoryMax=4G",
-        "MemorySwapMax=512M",
+        "MemoryHigh=5G",
+        "MemoryMax=6G",
+        "MemorySwapMax=1G",
         "KillMode=mixed",
         "TimeoutStopSec=60",
     } <= props
@@ -230,3 +230,57 @@ def test_classify_taxonomy() -> None:
     assert classify(RuntimeError("bad")) is FailureKind.CONTENT
     assert FailureKind.CONTENT.counts_attempt
     assert not FailureKind.BUSY.counts_attempt
+
+
+class _UsageLauncher(FakeLauncher):
+    """A hanging child whose usage the test scripts: throttled, with ``cpu_rate`` CPU-seconds a second."""
+
+    def __init__(self, now: list[float], cpu_rate: float, throttled: bool = True) -> None:
+        super().__init__(hang=True)
+        self.now, self.cpu_rate, self.throttled = now, cpu_rate, throttled
+
+    def usage(self, unit: str) -> object:
+        from wsp_orchestrator.isolation import UnitUsage
+
+        return UnitUsage(cpu_seconds=self.now[0] * self.cpu_rate, throttled=self.throttled)
+
+
+def _clocked(now: list[float]) -> object:
+    def clock() -> float:
+        now[0] += 30.0  # every look at the clock is half a minute later
+        return now[0]
+
+    return clock
+
+
+def test_a_step_stalled_at_its_memory_ceiling_is_stopped(tmp_path: Path) -> None:
+    now = [0.0]
+    fake = _UsageLauncher(now, cpu_rate=0.01)
+    r = runner(tmp_path, fake, poll_seconds=0.001, cancel_wait_seconds=0.1, clock=_clocked(now))
+    with pytest.raises(ResourceExhaustedError, match="stalled at its memory ceiling"):
+        r.call("index", "wsp_orchestrator.testing:child_echo", {}, key="s/1", timeout=30)
+    assert fake.children[0].stopped.is_set()  # type: ignore[union-attr]
+
+
+@pytest.mark.parametrize(("rate", "throttled"), [(0.5, True), (0.0, False)])
+def test_a_busy_or_unthrottled_step_is_not_a_stall(tmp_path: Path, rate: float, throttled: bool) -> None:
+    now = [0.0]
+    fake = _UsageLauncher(now, cpu_rate=rate, throttled=throttled)
+    r = runner(tmp_path, fake, poll_seconds=0.001, cancel_wait_seconds=0.1, clock=_clocked(now))
+    with pytest.raises(ResourceExhaustedError, match="timeout"):
+        r.call("index", "wsp_orchestrator.testing:child_echo", {}, key="s/1", timeout=1.0)
+
+
+def test_usage_is_read_from_the_cgroup(tmp_path: Path) -> None:
+    from wsp_orchestrator.isolation import read_usage
+
+    (tmp_path / "cpu.stat").write_text("usage_usec 12500000\nuser_usec 1\n")
+    (tmp_path / "memory.current").write_text("3221225000\n")
+    (tmp_path / "memory.high").write_text("3221225472\n")
+    u = read_usage(tmp_path)
+    assert u is not None
+    assert u.cpu_seconds == 12.5
+    assert u.throttled
+    (tmp_path / "memory.high").write_text("max\n")
+    assert read_usage(tmp_path).throttled is False  # type: ignore[union-attr]
+    assert read_usage(tmp_path / "gone") is None

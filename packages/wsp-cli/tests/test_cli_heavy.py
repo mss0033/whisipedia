@@ -188,10 +188,10 @@ def test_heavy_settings_from_config() -> None:
         }
     }
     s = HeavySettings.from_config(cfg)
-    assert (s.limits.memory_max, s.limits.memory_high, s.limits.memory_swap_max) == ("4G", "3G", "512M")
+    assert (s.limits.memory_max, s.limits.memory_high, s.limits.memory_swap_max) == ("4G", "3G", "1G")
     assert s.refine_timeout == 7200
     assert s.index_timeout is None
-    assert HeavySettings.from_config({}).limits.memory_max == "4G"
+    assert HeavySettings.from_config({}).limits.memory_max == "6G"
 
 
 def test_storage_probe(tmp_path: Path) -> None:
