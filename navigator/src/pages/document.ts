@@ -450,6 +450,19 @@ export function copiesNotice(
   );
 }
 
+/** A web archive's placeholder for an embedded player it did not capture (`youtube.fuzzy.replayweb.page/embed/…`): the page reads "YouTube" and nothing else (field exam 2026-10-14). Same rule as wsp_core.listing.REPLAY_STUB. */
+export const REPLAY_STUB = /(?:^|\/)[^/]*\.fuzzy\.replayweb\.page\//;
+
+export function replayStubNotice(doc: Pick<DocumentResponse, 'native_id'>): HTMLElement | null {
+  if (!REPLAY_STUB.test(doc.native_id)) return null;
+  return h(
+    'div',
+    { class: 'notice replay-stub-notice', role: 'note' },
+    h('b', null, 'Not captured. '),
+    'This was an embedded video player on the original site. The archive kept only its frame; the video itself is not in the library.',
+  );
+}
+
 /** A question pool reads better as a drill: offer the Exam Practice Hall. */
 export function practiceNotice(
   doc: Pick<DocumentResponse, 'source_id' | 'native_id' | 'title'>,
@@ -962,6 +975,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
       lookup: (q) => lookupBooks(ctx, q),
     }),
     practiceNotice(doc),
+    replayStubNotice(doc),
     copiesNotice(doc, new Map(sources.map((s) => [s.id, s.name]))),
     doc.format === 'html' && doc.html && looksLikeComic(doc.html) && !route.at
       ? comicBar(doc.source_id, doc.native_id, (a) => ctx.app.navigate(a))

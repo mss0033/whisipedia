@@ -10,6 +10,7 @@ import threading
 from collections import OrderedDict
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import cast
 
@@ -286,7 +287,19 @@ class Library:
         return self.fields(did, HIT_COLUMNS)
 
     def change(self, rec: ChangeRecord) -> Change:
-        return convert.change(rec, title=self.title(rec.doc_id))
+        source_id = rec.doc_id.removeprefix("wsp:").partition("/")[0]
+        return convert.change(
+            rec, title=self.title(rec.doc_id), added_at=self.sealed_at(source_id, rec.generation_id)
+        )
+
+    def sealed_at(self, source_id: str, generation_id: str) -> datetime | None:
+        """When the generation was sealed (the vault view is the server's in-memory snapshot)."""
+        try:
+            gens = self.vault.generations(source_id)
+        except Exception:  # an unreadable source dates nothing; the feed still lists its changes
+            log.debug("no generations for %s", source_id, exc_info=True)
+            return None
+        return next((g.sealed_at for g in gens if g.generation_id == generation_id), None)
 
     def copies(self, doc: DocRecord, spec: SourceSpec | None) -> list[schemas.OtherCopy]:
         """Other copies of ``doc`` the library holds (registry ``access.copies``): matched by the same

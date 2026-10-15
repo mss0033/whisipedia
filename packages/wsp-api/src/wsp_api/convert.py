@@ -193,7 +193,7 @@ def _opt_str(value: object) -> str | None:
     return None if value is None else str(value)
 
 
-def change(c: ChangeRecord, *, title: str | None = None) -> Change:
+def change(c: ChangeRecord, *, title: str | None = None, added_at: datetime | None = None) -> Change:
     source_id, _, native_id = c.doc_id.removeprefix("wsp:").partition("/")
     return Change(
         doc_id=c.doc_id,
@@ -205,6 +205,7 @@ def change(c: ChangeRecord, *, title: str | None = None) -> Change:
         source_id=source_id,
         title=title,
         address=address_of(source_id, native_id),
+        added_at=added_at,
     )
 
 

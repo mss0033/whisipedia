@@ -17,6 +17,18 @@ DEFAULT_SKIP_PATHS: tuple[str, ...] = (
 )
 
 
+# Web-archive ZIMs (warc2zim) keep a placeholder for each embedded player the crawl could not capture:
+# ``youtube.fuzzy.replayweb.page/embed/<id>`` is a page that reads "YouTube" and holds no video. They
+# are not content; feeds and listings leave them out and the reader says what they are (field exam
+# 2026-10-14: the newest What's New item was one).
+REPLAY_STUB = re.compile(r"(?:^|/)[^/]*\.fuzzy\.replayweb\.page/")
+
+
+def is_replay_stub(native_id: str) -> bool:
+    """A web archive's placeholder for an embedded player it did not capture."""
+    return REPLAY_STUB.search(native_id) is not None
+
+
 def skip_paths(access: Mapping[str, object]) -> tuple[str, ...]:
     """The source's listing-path patterns (full match against an entry path inside its book)."""
     raw = access.get("skip_paths")

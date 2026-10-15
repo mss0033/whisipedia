@@ -428,6 +428,7 @@ const CHANGES: Change[] = (() => {
     source_id: d.source_id,
     title: d.title,
     address: address(d),
+    added_at: '2026-10-07T04:00:00Z',
   }));
   out.splice(5, 0, {
     doc_id: 'wsp:wikipedia-en-zim/Retracted_Hoax_Article',
@@ -438,6 +439,7 @@ const CHANGES: Change[] = (() => {
     renamed_from: null,
     source_id: 'wikipedia-en-zim',
     title: 'Retracted Hoax Article',
+    added_at: '2026-10-07T04:00:00Z',
     address: 'wsp://wikipedia-en-zim/Retracted_Hoax_Article',
   });
   return out.reverse(); // built newest first; the feed is oldest first

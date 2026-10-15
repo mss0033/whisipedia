@@ -7,6 +7,7 @@ import { watchChanges } from '../api/changes.ts';
 import type { Change, SourceInfo } from '../api/types.ts';
 import { makeAddress } from '../core/address.ts';
 import { h } from '../core/dom.ts';
+import { formatDate } from '../core/format.ts';
 import { docLink, newBadge, pageHeading, wspLink } from '../ui/components.ts';
 import type { PageContext, PageResult } from './types.ts';
 
@@ -20,11 +21,24 @@ const PAGE = 30;
 const MAX = 500;
 const RENDER_MS = 500;
 
-/** Groups by generation (the library's update cycles), keeping the input order. */
-export function groupByGeneration(changes: Change[]): Map<string, Change[]> {
+/**
+ * Groups by update: one site's edition (its generation), keeping the input
+ * order. A generation id alone ("2024-06") is the publisher's edition, not
+ * when the library took it in, and editions of different sites share ids.
+ */
+export function groupByUpdate(changes: Change[]): Map<string, Change[]> {
   const out = new Map<string, Change[]>();
-  for (const c of changes) out.set(c.generation_id, [...(out.get(c.generation_id) ?? []), c]);
+  for (const c of changes) {
+    const key = `${c.source_id}\u0000${c.generation_id}`;
+    out.set(key, [...(out.get(key) ?? []), c]);
+  }
   return out;
+}
+
+/** "Bookdash · edition 2024-06 · added Oct 11, 2026" */
+export function updateHeading(c: Change, name: string): string {
+  const added = c.added_at ? ` · added ${formatDate(c.added_at)}` : '';
+  return `${name} · edition ${c.generation_id}${added}`;
 }
 
 function item(c: Change, name: (id: string) => string): HTMLLIElement {
@@ -47,12 +61,13 @@ function item(c: Change, name: (id: string) => string): HTMLLIElement {
 function renderGroups(target: HTMLElement, changes: Change[], sources: SourceInfo[]): void {
   const name = (id: string) => sources.find((s) => s.id === id)?.name ?? id;
   target.replaceChildren();
-  for (const [gen, list] of groupByGeneration(changes)) {
+  for (const list of groupByUpdate(changes).values()) {
+    const first = list[0] as Change;
     target.append(
-      h('h2', { class: 'wn-day' }, `Update ${gen}`),
+      h('h2', { class: 'wn-day' }, updateHeading(first, name(first.source_id))),
       h(
         'ul',
-        { class: 'wn-list', dataset: { generation: gen } },
+        { class: 'wn-list', dataset: { generation: first.generation_id } },
         ...list.map((c) => item(c, name)),
       ),
     );

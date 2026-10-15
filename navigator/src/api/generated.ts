@@ -49,6 +49,8 @@ export interface Change {
   /** Document title, if the document is known. */
   title: string | null;
   address: string;
+  /** When the edition holding this change was sealed into the library. */
+  added_at: string | null;
 }
 
 export interface ChangePage {

@@ -2023,6 +2023,19 @@
             "type": "string",
             "title": "Address",
             "default": ""
+          },
+          "added_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Added At",
+            "description": "When the edition holding this change was sealed into the library."
           }
         },
         "type": "object",
@@ -2035,7 +2048,8 @@
           "renamed_from",
           "source_id",
           "title",
-          "address"
+          "address",
+          "added_at"
         ],
         "title": "Change"
       },

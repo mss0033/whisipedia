@@ -69,6 +69,7 @@ from wsp_api.sse import change_events
 from wsp_api.views import Library, parse_doc
 from wsp_api.zimread import ZimUnavailable
 from wsp_core.activity import ActivityMiddleware
+from wsp_core.listing import is_replay_stub
 
 _DESCRIPTION = """\
 Read API of a private offline library. Everything is served from local storage; the server makes no
@@ -378,8 +379,11 @@ def _v1(lib: Library, settings: ApiSettings) -> APIRouter:
     ) -> RecentChanges:
         if source is not None:
             lib.source(source)
-        records, cursor = lib.catalog.recent(limit=limit, sources=[source] if source else None)
-        return RecentChanges(items=[lib.change(c) for c in records], cursor=cursor)
+        # Over-ask: placeholders of uncaptured players and listing pages are not news (field exam
+        # 2026-10-14) and are dropped before the page is cut.
+        records, cursor = lib.catalog.recent(limit=min(limit * 4, 2000), sources=[source] if source else None)
+        shown = [c for c in records if not is_replay_stub(c.doc_id.partition("/")[2])][:limit]
+        return RecentChanges(items=[lib.change(c) for c in shown], cursor=cursor)
 
     @r.get(
         "/changes/stream",

@@ -395,6 +395,9 @@ class Change(_Wire):
     source_id: str = ""
     title: str | None = Field(default=None, description="Document title, if the document is known.")
     address: str = ""
+    added_at: datetime | None = Field(
+        default=None, description="When the edition holding this change was sealed into the library."
+    )
 
 
 class ChangePage(_Wire):

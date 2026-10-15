@@ -348,3 +348,18 @@ def test_a_search_says_where_its_time_went(browse: httpx.Client) -> None:
     assert {"retrieval", "page_snippets", "hit_fields", "navigate", "did_you_mean"} <= set(res.timings_ms)
     assert all(v >= 0 for v in res.timings_ms.values())
     assert sum(v for k, v in res.timings_ms.items() if not k.startswith("oracle.")) <= res.took_ms + 1
+
+
+def test_recent_changes_skip_uncaptured_player_stubs_and_carry_the_seal_date() -> None:
+    """Field exam 2026-10-14: the newest What's New item was a web archive's empty YouTube placeholder,
+    and the list had no dates."""
+    from wsp_core.model import ChangeKind, ChangeRecord
+
+    services = browse_services()
+    stub = make_doc_id("wikipedia-en-zim", "A/youtube.fuzzy.replayweb.page/embed/w4mlQoAVurk")
+    services.changes.publish([ChangeRecord(stub, ChangeKind.ADDED, SAMPLE_GEN_2, None, "h")])
+    with local_client(create_app(services)) as c:
+        recent = RecentChanges.model_validate(c.get("/v1/changes/recent", params={"limit": 2}).json())
+    assert [x.doc_id for x in recent.items] == [ENIGMA, make_doc_id("wikipedia-en-zim", "A/Alan_Turing")]
+    sealed = {g.generation_id: g.sealed_at for g in services.vault.generations("wikipedia-en-zim")}
+    assert recent.items[0].added_at == sealed[SAMPLE_GEN_2]
