@@ -27,3 +27,21 @@ from wsp_core.titles import shown_title
 )
 def test_shown_title(raw: str, shown: str) -> None:
     assert shown_title(raw) == shown
+
+
+@pytest.mark.parametrize(
+    ("native", "stub"),
+    [
+        ("youtube.fuzzy.replayweb.page/embed/w4mlQoAVurk", True),
+        ("www.google.com/maps/embed?pb=!1m14!1m8", True),
+        ("www.google.com/maps/d/embed?mid=1Gei5q", True),
+        ("www.youtube-nocookie.com/embed/abc", True),
+        ("player.vimeo.com/video/123", True),
+        ("bookdash.org/why-we-do-what-we-do", False),
+        ("A/Google_Maps", False),
+    ],
+)
+def test_replay_stubs(native: str, stub: bool) -> None:
+    from wsp_core.listing import is_replay_stub
+
+    assert is_replay_stub(native) is stub

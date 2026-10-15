@@ -21,7 +21,14 @@ DEFAULT_SKIP_PATHS: tuple[str, ...] = (
 # ``youtube.fuzzy.replayweb.page/embed/<id>`` is a page that reads "YouTube" and holds no video. They
 # are not content; feeds and listings leave them out and the reader says what they are (field exam
 # 2026-10-14: the newest What's New item was one).
-REPLAY_STUB = re.compile(r"(?:^|/)[^/]*\.fuzzy\.replayweb\.page/")
+REPLAY_STUB = re.compile(
+    r"(?:^|/)(?:"
+    r"[^/]*\.fuzzy\.replayweb\.page/"  # warc2zim's placeholder for a player it could not capture
+    r"|(?:www\.)?google\.[a-z.]+/maps(?:/d)?/embed"  # an embedded map frame (no map offline)
+    r"|(?:www\.)?youtube(?:-nocookie)?\.com/embed/"
+    r"|player\.vimeo\.com/video/"
+    r")"
+)
 
 
 def is_replay_stub(native_id: str) -> bool:

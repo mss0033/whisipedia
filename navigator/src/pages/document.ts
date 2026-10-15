@@ -460,7 +460,8 @@ export function copiesNotice(
 }
 
 /** A web archive's placeholder for an embedded player it did not capture (`youtube.fuzzy.replayweb.page/embed/…`): the page reads "YouTube" and nothing else (field exam 2026-10-14). Same rule as wsp_core.listing.REPLAY_STUB. */
-export const REPLAY_STUB = /(?:^|\/)[^/]*\.fuzzy\.replayweb\.page\//;
+export const REPLAY_STUB =
+  /(?:^|\/)(?:[^/]*\.fuzzy\.replayweb\.page\/|(?:www\.)?google\.[a-z.]+\/maps(?:\/d)?\/embed|(?:www\.)?youtube(?:-nocookie)?\.com\/embed\/|player\.vimeo\.com\/video\/)/;
 
 export function replayStubNotice(doc: Pick<DocumentResponse, 'native_id'>): HTMLElement | null {
   if (!REPLAY_STUB.test(doc.native_id)) return null;
@@ -468,7 +469,7 @@ export function replayStubNotice(doc: Pick<DocumentResponse, 'native_id'>): HTML
     'div',
     { class: 'notice replay-stub-notice', role: 'note' },
     h('b', null, 'Not captured. '),
-    'This was an embedded video player on the original site. The archive kept only its frame; the video itself is not in the library.',
+    'This was an embedded player (a video or a map) on the original site. The archive kept only its frame; the video or map itself is not in the library.',
   );
 }
 

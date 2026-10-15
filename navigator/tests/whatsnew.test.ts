@@ -35,7 +35,7 @@ describe("What's New", () => {
     const stub = {
       native_id: 'youtube.fuzzy.replayweb.page/embed/w4mlQoAVurk',
     } as DocumentResponse;
-    expect(replayStubNotice(stub)?.textContent).toContain('video itself is not in the library');
+    expect(replayStubNotice(stub)?.textContent).toContain('is not in the library');
     expect(replayStubNotice({ native_id: 'A/Video' } as DocumentResponse)).toBeNull();
   });
 });
