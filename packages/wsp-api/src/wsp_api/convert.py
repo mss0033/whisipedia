@@ -30,7 +30,7 @@ from wsp_api.schemas import (
     SourceInfo,
     VaultLocation,
 )
-from wsp_core.banners import banner_for, currency_of
+from wsp_core.banners import HISTORICAL_BANNER, banner_for, currency_of
 from wsp_core.model import ChangeRecord, DocRecord, Generation, LedgerEvent, SearchHit, SourceSpec
 from wsp_core.titles import shown_title
 
@@ -48,6 +48,15 @@ def edition_time(revision: str | None) -> datetime | None:
         return datetime(int(m.group(1)), int(m.group(2) or 1), int(m.group(3) or 1), tzinfo=UTC)
     except ValueError:
         return None
+
+
+def dated_banner(banner: str | None, when: datetime | None) -> str | None:
+    """The historical notice with the document's year ("Historical document (1975) — ..."): the same
+    sentence on every old page told a reader nothing about this one (2026-10-14 field exam)."""
+    if banner is None or when is None or not banner.startswith(HISTORICAL_BANNER):
+        return banner
+    head, _, tail = HISTORICAL_BANNER.partition(" — ")
+    return f"{head} ({when.year}) — {tail}{banner[len(HISTORICAL_BANNER) :]}"
 
 
 def readable_text(text: str | None) -> str | None:
@@ -157,7 +166,7 @@ def document(
         rendition=rendition,
         has_history=has_history,
         currency=currency_of(doc.meta),
-        banner=banner_for(doc.meta),
+        banner=dated_banner(banner_for(doc.meta), doc.timestamp or edition_time(doc.revision)),
         original=original_of(doc),
     )
 
