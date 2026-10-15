@@ -92,7 +92,7 @@ def test_unit_results_map_to_failure_kinds(
     assert classify(info.value) is kind
     if exit_.result == "oom-kill":
         assert "OOM-killed" in str(info.value)
-        assert "MemoryMax=4G" in str(info.value)
+        assert "MemoryMax=6G" in str(info.value)
 
 
 def test_shutdown_stops_a_running_child_without_waiting_for_it(tmp_path: Path) -> None:
