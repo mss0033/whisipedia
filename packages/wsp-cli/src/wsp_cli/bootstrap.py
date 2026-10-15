@@ -698,14 +698,15 @@ class RefineryDocuments:
 
     def fields(self, doc_id: DocId, columns: Sequence[str]) -> Mapping[str, object] | None:
         from wsp_core.ids import InvalidDocIdError, parse_doc_id
-        from wsp_index.refinery import current_generation
 
         try:
             source_id, _ = parse_doc_id(doc_id)
         except InvalidDocIdError:
             return None
-        gen = current_generation(self.store.root, source_id)
-        reader = None if gen is None else self.store.reader(source_id, gen)
+        # The store remembers the current generation: asking the Refinery is three metadata round trips
+        # on the NAS, 0.4-1.2 s each under load, and a search page asked once per hit (2026-10-14).
+        gen = self.store.current(source_id)
+        reader = None if gen is None else self.store.reader(source_id, gen, current=True)
         return None if reader is None else reader.lookup(doc_id, tuple(columns))
 
 

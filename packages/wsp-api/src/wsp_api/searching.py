@@ -18,7 +18,7 @@ import threading
 import time
 from collections import Counter
 from collections.abc import Callable, Hashable, Mapping, Sequence
-from concurrent.futures import Future
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from typing import Any, cast
 
@@ -32,6 +32,7 @@ from wsp_core.model import SearchHit, SourceSpec, searchable
 log = logging.getLogger("wsp.api.search")
 SLOW_SEARCH_MS = 3000.0  # a search slower than this is logged with its stages
 WINDOW = 200  # hits ranked per query: the page, total and facets are all counted in them
+HIT_FIELD_WORKERS = 6  # header-field reads of one search page run side by side
 SPARSE = 5  # fewer results than this: "did you mean" may correct any unknown or rare word
 
 
@@ -207,6 +208,15 @@ class Searcher:
                 twins.append(other.id)
         return twins
 
+    def hit_fields(self, page: Sequence[SearchHit]) -> list[Mapping[str, object] | None]:
+        """The header fields of each hit on the page, read side by side: each is a row-group read on the
+        NAS (30-80 ms idle, seconds under load), and one after another they were up to 6 s of a search
+        (2026-10-14). The pool is small so one page cannot flood the link."""
+        if len(page) <= 1:
+            return [self.lib.hit_fields(h.doc_id) for h in page]
+        with ThreadPoolExecutor(min(HIT_FIELD_WORKERS, len(page)), thread_name_prefix="wsp-hit") as pool:
+            return list(pool.map(self.lib.hit_fields, [h.doc_id for h in page]))
+
     def run(
         self, q: str, wanted: Sequence[str] | None, kind: DocKind | None, limit: int, offset: int
     ) -> SearchResults:
@@ -239,13 +249,13 @@ class Searcher:
         more = offset + limit < len(shown)
         terms = search.terms(q)
         hits: list[Hit] = []
-        for h in page:
+        for h, doc in zip(page, self.hit_fields(page), strict=True):
             plain = search.plain_snippet(h.snippet)  # index snippets are HTML (<b>…</b>); the API is plain
             hits.append(
                 convert.hit(
                     replace(h, snippet=plain),
                     spec=s.source(h.source_id or h.doc_id[4:].partition("/")[0]),
-                    doc=lib.hit_fields(h.doc_id),
+                    doc=doc,
                     highlights=search.highlights(plain, terms),
                 )
             )
