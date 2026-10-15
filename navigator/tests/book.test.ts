@@ -139,3 +139,32 @@ describe('books as chapters', () => {
     expect(unfinishedBooks(storage)).toEqual([]);
   });
 });
+
+describe('front matter of a book with keyword chapters', () => {
+  it('does not make the title page into chapters', () => {
+    const body = (n: number) => `Text of part ${n} goes on for a while, as text does.`;
+    const text = [
+      'Transcriber’s note: scanned from the original.',
+      'By',
+      'ALFRED P MORGAN',
+      'BOSTON',
+      'LOTHROP, LEE & SHEPARD CO.',
+      'INTRODUCTION',
+      body(0),
+      'ALFRED P. MORGAN',
+      'CHAPTER I',
+      'MAGNETS AND MAGNETISM',
+      body(1),
+      'CHAPTER II',
+      'STATIC ELECTRICITY',
+      body(2),
+    ].join('\n\n');
+    const titles = splitChapters(text, 'The Boy Electrician').map((c) => c.title);
+    expect(titles).toEqual([
+      'The Boy Electrician',
+      'INTRODUCTION',
+      'CHAPTER I · MAGNETS AND MAGNETISM',
+      'CHAPTER II · STATIC ELECTRICITY',
+    ]);
+  });
+});

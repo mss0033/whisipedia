@@ -54,9 +54,22 @@ export function isHeading(p: string): boolean {
   return p === p.toUpperCase() && /[A-Z]/.test(p) && p.length < 60;
 }
 
+/**
+ * Which paragraphs start chapters. A book with enough keyword headings ("CHAPTER I", "INTRODUCTION")
+ * is split on those only, and a capitalised line right after one is its subtitle; otherwise any
+ * capitalised line is a title page's author, publisher or dedication, not a chapter (field exam
+ * 2026-10-14: "ALFRED P MORGAN" was chapter 1 of The Boy Electrician).
+ */
+export function headingFlags(ps: readonly string[]): boolean[] {
+  const any = ps.map(isHeading);
+  const keyword = ps.map((p, i) => any[i]! && HEADING_WORD.test(p));
+  if (keyword.filter(Boolean).length < MIN_HEADINGS) return any;
+  return ps.map((_, i) => keyword[i]! || (any[i]! && i > 0 && keyword[i - 1]!));
+}
+
 export function splitChapters(text: string, bookTitle = ''): Chapter[] {
   const ps = paragraphs(text);
-  const heads = ps.map(isHeading);
+  const heads = headingFlags(ps);
   const runs = runLengths(heads);
   const chapters: Chapter[] = [];
   let current: Chapter = { title: bookTitle || 'Front matter', paragraphs: [] };
