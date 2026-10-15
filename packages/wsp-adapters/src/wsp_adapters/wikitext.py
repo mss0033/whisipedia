@@ -4,8 +4,9 @@ Why not ``mwparserfromhell``: it builds a full node tree in Python and needs rou
 average English Wikipedia article (``parse`` + ``strip_code``), i.e. 10-40 CPU hours for the 7M
 articles of one monthly dump. This module is a handful of linear scans and pre-compiled regexes,
 around 10x faster, with no dependency. The loss is deliberate and small for search and diffing:
-templates (infoboxes, citations, navboxes) are dropped instead of expanded, exactly as
-``strip_code`` does, so the text is the article prose plus headings, lists and table cells.
+templates (infoboxes, citations, navboxes) are dropped instead of expanded, as ``strip_code`` does,
+except the inline ones that carry prose (measurements, quotations, wrappers, symbols), which render as
+their text; so the text is the article prose plus headings, lists and table cells.
 
 Outbound wiki links are collected on the same pass so the Refinery gets ``links`` for free.
 """
@@ -122,6 +123,128 @@ _OTHER_NAMESPACES = frozenset(
         "topic",
     ]
 )
+
+
+_INNER_TEMPLATE_RE = re.compile(r"\{\{([^{}]*)\}\}")
+_RANGE_WORDS = frozenset({"-", "\u2013", "to", "and", "or", "x", "\u00d7", "by", "+/-", "±"})
+_KEEP_FIRST = frozenset(
+    {
+        "nowrap",
+        "nobr",
+        "small",
+        "big",
+        "smaller",
+        "larger",
+        "sic",
+        "abbr",
+        "abbrlink",
+        "ill",
+        "visible anchor",
+        "anchor",
+        "mvar",
+        "math",
+        "var",
+        "em",
+        "strong",
+        "underline",
+        "highlight",
+        "nobold",
+        "noitalic",
+    }
+)
+_QUOTE_NAMES = frozenset(
+    {"quote", "blockquote", "cquote", "quotation", "quote box", "rquote", "bq", "poem quote"}
+)
+_SYMBOLS = {
+    "nbsp": " ",
+    "ndash": "\u2013",
+    "mdash": "—",
+    "=": "=",
+    "!": "|",
+    "spaced ndash": " \u2013 ",
+    "snd": " \u2013 ",
+    "middot": "·",
+    "bull": "•",
+    "pi": "π",
+    "times": "\u00d7",
+    "-": "\u2212",
+    "minus": "\u2212",
+    "dot": "·",
+}
+_RENDER_PASSES = 8
+
+
+def _params(body: str) -> tuple[str, list[str], dict[str, str]]:
+    name, *rest = body.split("|")
+    positional: list[str] = []
+    named: dict[str, str] = {}
+    for part in rest:
+        key, eq, value = part.partition("=")
+        if eq and re.fullmatch(r"\s*[A-Za-z_][\w ]*\s*", key):
+            named[key.strip().lower()] = value.strip()
+        else:
+            positional.append(part.strip())
+    return name.strip().lower().replace("_", " "), positional, named
+
+
+def _render_template(body: str) -> str:
+    """Text of the inline templates that carry prose: measurements ({{convert}}, {{cvt}}, {{val}}),
+    wrappers ({{nowrap}}, {{lang}}, ...), quotations and symbols. Anything else renders as nothing,
+    as before. The 2026-10-14 field exam found boiling times, altitudes and plug gaps missing from
+    Wikipedia text ("boiling should continue for 3 minutes" read "for minutes")."""
+    name, pos, named = _params(body)
+    if name in _SYMBOLS:
+        return _SYMBOLS[name]
+    if name in ("convert", "cvt") and pos:
+        # {{convert|3|km}}, {{convert|1|-|2|ft}}, {{convert|5|x|10|m}}: values and the first unit.
+        out = [pos[0]]
+        i = 1
+        while i + 1 < len(pos) and pos[i].strip() in _RANGE_WORDS:
+            out += [pos[i].strip(), pos[i + 1]]
+            i += 2
+        if i < len(pos):
+            out.append(pos[i])
+        return " ".join(x for x in out if x)
+    if name == "val" and pos:
+        unit = named.get("u") or named.get("ul") or ""
+        value = pos[0] + (f"\u2013{pos[1]}" if len(pos) > 1 and pos[1] else "")
+        return f"{value} {unit}".strip()
+    if name in ("frac", "sfrac") and pos:
+        return (
+            f"{pos[0]} {pos[1]}/{pos[2]}"
+            if len(pos) >= 3
+            else "/".join(pos[:2])
+            if len(pos) == 2
+            else f"1/{pos[0]}"
+        )
+    if name in ("circa", "c.", "ca."):
+        return f"c. {pos[0]}" if pos else "c."
+    if name == "as of" and pos:
+        return "As of " + " ".join(pos[:3])
+    if name in _QUOTE_NAMES:
+        return named.get("text") or named.get("quote") or (pos[0] if pos else "")
+    if name == "lang" and len(pos) >= 2:
+        return pos[1]
+    if name.startswith("lang-") and pos:
+        return pos[0]
+    if name in ("transl", "transliteration") and pos:
+        return pos[-1]
+    if name in _KEEP_FIRST and pos:
+        return pos[0]
+    return ""
+
+
+def _render_inline_templates(text: str) -> str:
+    """Render innermost templates (see :func:`_render_template`) up to :data:`_RENDER_PASSES` levels
+    deep; what remains (the outer templates of unknown kinds) :func:`_strip_templates` removes."""
+    if "{{" not in text:
+        return text
+    for _ in range(_RENDER_PASSES):
+        new = _INNER_TEMPLATE_RE.sub(lambda m: _render_template(m.group(1)), text)
+        if new == text:
+            break
+        text = new
+    return text
 
 
 def _strip_templates(text: str) -> str:
@@ -249,7 +372,7 @@ def wikitext_to_text(wikitext: str, *, capitalize_links: bool = True) -> tuple[s
     text = _NOWIKI_RE.sub(stash, wikitext.replace("\x00", ""))
     text = _COMMENT_RE.sub("", text)
     text = _drop_elements(text)
-    text = _strip_templates(text)
+    text = _strip_templates(_render_inline_templates(text))
     links: list[str] = []
     text = _render_links(text, links, capitalize_links)
     text = _EXT_LINK_RE.sub(lambda m: m.group(1) or "", text)
