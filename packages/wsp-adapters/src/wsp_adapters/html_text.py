@@ -31,6 +31,7 @@ _DROP_SELECTORS = (
     ".mw-authority-control, .side-box, .portalbox, .zim-footer, footer, .mw-footer"
 )
 
+_PM_URL_RE = re.compile(r"\s*https?://(?:www\.)?planetmath\.org/\S*\s*")
 _SPACES_RE = re.compile("[ \t\f\v\u00a0\u200b]+")
 
 
@@ -41,6 +42,14 @@ def html_to_text(html: str | bytes) -> str:
     tree = LexborHTMLParser(_BLOCK_RE.sub(r"\n<\1\2", html))
     for node in tree.css(_DROP_SELECTORS):
         node.decompose()
+    # PlanetMath (LaTeXML + NNexus): link targets printed as typewriter text ("a unique
+    # http://planetmath.org/node/2777fixed point") and favicon clusters of guessed concepts.
+    for node in tree.css("span.ltx_font_typewriter"):
+        if _PM_URL_RE.fullmatch(node.text() or ""):
+            node.decompose()
+    for node in tree.css("sup"):
+        if node.css_first("a.nnexus_concept") is not None and not (node.text() or "").strip():
+            node.decompose()
     # MathML flattened to text reads "x2+y2"; its alttext is the TeX source ("x^{2}+y^{2}").
     for node in tree.css("math"):
         alt = (node.attributes.get("alttext") or "").strip()

@@ -33,6 +33,7 @@ import { audioDeck, videoPlayer } from '../ui/player.ts';
 import { comicBar, comicView, isComic, looksLikeComic } from './comics.ts';
 import { parseCase, renderCase } from './legal.ts';
 import { isManPage, looksLikeManPage, manPageView } from './manpages.ts';
+import { looksLikePlanetMath, planetMathView } from './planetmath.ts';
 import { POOL_SOURCE } from './practice.ts';
 import { isBook, RESUME_ID, type ReaderContext, renderBook } from './reader.ts';
 import { isThread, threadView } from './threads.ts';
@@ -406,7 +407,8 @@ function rewritePage(html: string, source: string): string {
   const thread = html.includes('data-questionid') || html.includes('id="question"');
   const comic = looksLikeComic(html);
   const man = looksLikeManPage(html);
-  if (!thread && !comic && !man) return html;
+  const planet = looksLikePlanetMath(html);
+  if (!thread && !comic && !man && !planet) return html;
   const parsed = new DOMParser().parseFromString(html, 'text/html');
   let changed = false;
   if (thread && isThread(parsed.body)) {
@@ -418,6 +420,7 @@ function rewritePage(html: string, source: string): string {
     changed = true;
   }
   if (man && isManPage(parsed.body) && manPageView(parsed.body) > 0) changed = true;
+  if (planet && planetMathView(parsed.body) > 0) changed = true;
   return changed ? parsed.body.innerHTML : html;
 }
 

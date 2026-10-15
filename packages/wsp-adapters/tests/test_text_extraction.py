@@ -103,3 +103,16 @@ def test_html_to_text_drops_boilerplate_and_keeps_math_source() -> None:
         '<div class="zim-footer">This page is issued from Wikipedia.</div></body>'
     )
     assert html_to_text(html) == "Water\nWater is {\\displaystyle H_{2}O} .\nBare x."
+
+
+def test_planetmath_link_targets_and_concept_clusters_are_dropped() -> None:
+    from wsp_adapters.html_text import html_to_text
+
+    page = (
+        '<p>Every contraction has a unique <span class="ltx_text ltx_font_typewriter">'
+        'http://planetmath.org/node/2777</span><a class="nnexus_concepts" href="javascript:void(0)">'
+        'fixed point</a><sup><a class="nnexus_concept" href="http://planetmath.org/a"><img alt="P"></a>'
+        '<a class="nnexus_concept" href="http://planetmath.org/b"><img alt="P"></a></sup>. '
+        'Run <span class="ltx_text ltx_font_typewriter">ls -l</span>.</p>'
+    )
+    assert html_to_text(page) == "Every contraction has a unique fixed point. Run ls -l."
