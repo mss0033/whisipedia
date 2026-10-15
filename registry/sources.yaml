@@ -1464,7 +1464,7 @@ sources:
   - id: kiwix-irp-fas-org-en-military-medicine
     name: Military Medicine (Kiwix ZIM)
     publisher: Kiwix
-    domain: [education]
+    domain: [medicine, preparedness]
     tier: T2
     status: active
     license: LicenseRef-per-item
@@ -2721,3 +2721,310 @@ sources:
       gfs: {last: 2, monthly: 6, yearly: forever}
     scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
     notes: "Found by the kiwix-opds bot on 2026-10-11 in category 'other'. Owner decision 2026-10-12 (review desk, asked and confirmed) - included unfiltered, a deliberate exception to the content line. Unlike army-pubs-public, this copy carries the weapons, gunnery, demolitions and targeting manuals."
+
+  # --- Added 2026-10-14 from the field exam's coverage gaps (Kiwix catalog, English): modern
+  # textbooks (LibreTexts), appropriate technology, emergency and austere medicine, veterinary care.
+  - id: kiwix-libretexts-org-en-bio
+    name: Biology LibreTexts (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [textbooks, science]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: libretexts.org_en_bio}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 2240000000, measured: false, as_of: '2026-10-14'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    notes: Added from the 2026-10-14 field exam's coverage gaps.
+  - id: kiwix-libretexts-org-en-chem
+    name: Chemistry LibreTexts (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [textbooks, science]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: libretexts.org_en_chem}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 2180000000, measured: false, as_of: '2026-10-14'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    notes: Added from the 2026-10-14 field exam's coverage gaps.
+  - id: kiwix-libretexts-org-en-phys
+    name: Physics LibreTexts (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [textbooks, science]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: libretexts.org_en_phys}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 560000000, measured: false, as_of: '2026-10-14'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    notes: Added from the 2026-10-14 field exam's coverage gaps.
+  - id: kiwix-libretexts-org-en-math
+    name: Mathematics LibreTexts (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [textbooks, science]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: libretexts.org_en_math}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 830000000, measured: false, as_of: '2026-10-14'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    notes: Added from the 2026-10-14 field exam's coverage gaps.
+  - id: kiwix-libretexts-org-en-med
+    name: Medicine LibreTexts (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [medicine, textbooks]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: libretexts.org_en_med}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 1190000000, measured: false, as_of: '2026-10-14'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    notes: Added from the 2026-10-14 field exam's coverage gaps.
+  - id: kiwix-libretexts-org-en-eng
+    name: Engineering LibreTexts (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [textbooks, engineering]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: libretexts.org_en_eng}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 680000000, measured: false, as_of: '2026-10-14'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    notes: Added from the 2026-10-14 field exam's coverage gaps.
+  - id: kiwix-libretexts-org-en-geo
+    name: Geosciences LibreTexts (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [textbooks, science]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: libretexts.org_en_geo}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 1190000000, measured: false, as_of: '2026-10-14'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    notes: Added from the 2026-10-14 field exam's coverage gaps.
+  - id: kiwix-libretexts-org-en-socialsci
+    name: Social Sciences LibreTexts (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [textbooks, education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: libretexts.org_en_socialsci}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 2049999999, measured: false, as_of: '2026-10-14'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    notes: Added from the 2026-10-14 field exam's coverage gaps.
+  - id: kiwix-libretexts-org-en-stats
+    name: Statistics LibreTexts (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [textbooks, science]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: libretexts.org_en_stats}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 220000000, measured: false, as_of: '2026-10-14'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    notes: Added from the 2026-10-14 field exam's coverage gaps.
+  - id: kiwix-libretexts-org-en-workforce
+    name: Workforce LibreTexts (trades and technical training) (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [textbooks, howto]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: libretexts.org_en_workforce}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 510000000, measured: false, as_of: '2026-10-14'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    notes: Added from the 2026-10-14 field exam's coverage gaps.
+  - id: kiwix-libretexts-org-en-biz
+    name: Business LibreTexts (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [textbooks, education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: libretexts.org_en_biz}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 840000000, measured: false, as_of: '2026-10-14'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    notes: Added from the 2026-10-14 field exam's coverage gaps.
+  - id: kiwix-libretexts-org-en-human
+    name: Humanities LibreTexts (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [textbooks, education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: libretexts.org_en_human}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 4430000000, measured: false, as_of: '2026-10-14'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    notes: Added from the 2026-10-14 field exam's coverage gaps.
+  - id: kiwix-libretexts-org-en-k12
+    name: K-12 Education LibreTexts (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [textbooks, education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: libretexts.org_en_k12}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 370000000, measured: false, as_of: '2026-10-14'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    notes: Added from the 2026-10-14 field exam's coverage gaps.
+  - id: kiwix-appropedia-en-all
+    name: Appropedia (appropriate technology, sustainability, development) (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [howto, preparedness]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: appropedia_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 580000000, measured: false, as_of: '2026-10-14'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    notes: Added from the 2026-10-14 field exam's coverage gaps.
+  - id: kiwix-energypedia-en-all
+    name: energypedia (energy access, solar, biogas, cookstoves) (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [howto, engineering]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: energypedia_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 800000000, measured: false, as_of: '2026-10-14'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    notes: Added from the 2026-10-14 field exam's coverage gaps.
+  - id: kiwix-wikem-en-all
+    name: WikEM (emergency medicine) (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [medicine]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: wikem_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 370000000, measured: false, as_of: '2026-10-14'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    notes: Added from the 2026-10-14 field exam's coverage gaps.
+  - id: kiwix-quickguidesformedicine-en-all
+    name: Surviving Residency (quick guides for medicine) (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [medicine]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: quickguidesformedicine_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 530000000, measured: false, as_of: '2026-10-14'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    notes: Added from the 2026-10-14 field exam's coverage gaps.
+  - id: kiwix-zimgit-medicine-en
+    name: Medical Library (zimgit collection of medical manuals) (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [medicine, preparedness]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: zimgit-medicine_en}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 70000000, measured: false, as_of: '2026-10-14'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    notes: Added from the 2026-10-14 field exam's coverage gaps.
+  - id: kiwix-wikivet-net-en-all
+    name: WikiVet (veterinary medicine) (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [medicine, agriculture]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: wikivet.net_en_all}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 60000000, measured: false, as_of: '2026-10-14'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    notes: Added from the 2026-10-14 field exam's coverage gaps.
