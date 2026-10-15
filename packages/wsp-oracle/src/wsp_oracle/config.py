@@ -101,6 +101,11 @@ class OracleConfig:
     dense_weight: float = 2.0
     depth: int = 50
     source_priors: Mapping[str, float] = field(default_factory=dict[str, float])
+    source_weights: Mapping[str, float] = field(default_factory=lambda: {"open-library": 0.3, "pubmed": 0.7})
+    """Final score multipliers per source, after fusion and after reranking (1 = none). Catalog cards
+    and research abstracts outranked encyclopedia articles and government manuals for practical
+    questions (2026-10-14 field exam: 7 of 9 examinees). Not applied when the query asks for a book
+    (catalog) or for research (abstracts): see ``pipeline.weight_exempt``."""
     static_rank_weight: float = 0.1
     """Fusion boost ``1 + w * feature`` from the link-analysis static rank (0 = off)."""
     spelling: bool = True
@@ -139,6 +144,7 @@ class OracleConfig:
             "dense_weight",
             "depth",
             "source_priors",
+            "source_weights",
             "static_rank_weight",
             "spelling",
             "chunk_words",
@@ -189,6 +195,9 @@ class OracleConfig:
                 dense_weight=float(section.get("dense_weight", 2.0)),
                 depth=int(section.get("depth", 50)),
                 source_priors=_floats(section.get("source_priors", {}), "source_priors"),
+                source_weights=_floats(section["source_weights"], "source_weights")
+                if "source_weights" in section
+                else {"open-library": 0.3, "pubmed": 0.7},
                 static_rank_weight=float(section.get("static_rank_weight", 0.1)),
                 spelling=bool(section.get("spelling", True)),
                 chunk_words=int(section.get("chunk_words", 200)),

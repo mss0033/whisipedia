@@ -54,6 +54,10 @@ science = 3.0
 books = 2.0
 education = 2.0
 howto = 2.0
+# Government and extension manuals (canning, aviation, building science, charts): references, not
+# bulk; they ranked below Q&A threads for the questions they answer (2026-10-14 field exam).
+preparedness = 5.0
+agriculture = 4.0
 
 [curator.multilingual]
 # Non-English budget (PLAN D15): for each language, take the highest-value material (registry score

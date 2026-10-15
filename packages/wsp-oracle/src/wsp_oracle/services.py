@@ -213,6 +213,7 @@ def build_oracle(
         passage_text=store.texts if store is not None else None,
         budget_ms=ocfg.budget_ms,
         content_hashes=content_hashes,
+        source_weights=ocfg.source_weights,
     )
     return OracleServices(
         config=ocfg,

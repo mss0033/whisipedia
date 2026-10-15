@@ -117,6 +117,26 @@ def _title_key(title: str) -> str:
     return " ".join(title.replace("_", " ").casefold().split())
 
 
+_BOOK_INTENT = re.compile(
+    r"\b(books?|novels?|editions?|isbn|authors?|publishers?|catalog(ue)?|bibliography|written by)\b", re.I
+)
+_RESEARCH_INTENT = re.compile(
+    r"\b(study|studies|trials?|papers?|journals?|evidence|abstracts?|meta-analysis|research|pubmed|cohort)\b",
+    re.I,
+)
+
+
+def weight_exempt(query: str) -> frozenset[str]:
+    """Sources whose weight a query lifts: the catalog when it looks for a book, abstracts when it
+    looks for research."""
+    out: set[str] = set()
+    if _BOOK_INTENT.search(query):
+        out.add("open-library")
+    if _RESEARCH_INTENT.search(query):
+        out.add("pubmed")
+    return frozenset(out)
+
+
 class OracleSearcher:
     def __init__(
         self,
@@ -133,6 +153,7 @@ class OracleSearcher:
         low_confidence: float = 0.05,
         budget_ms: float = 100.0,
         content_hashes: ContentHashes | None = None,
+        source_weights: Mapping[str, float] | None = None,
     ) -> None:
         """``content_hashes`` (``ParquetDocumentStore.content_hashes``) tells duplicate records from
         distinct documents that share a title; without it no hit is collapsed."""
@@ -150,6 +171,7 @@ class OracleSearcher:
         self.low_confidence = low_confidence
         self.budget_ms = budget_ms
         self.content_hashes = content_hashes
+        self.source_weights = dict(source_weights or {})
         self._pool: ThreadPoolExecutor | None = None
         self._pool_lock = threading.Lock()
 
@@ -252,6 +274,19 @@ class OracleSearcher:
             if src not in best or key < best[src][0]:
                 best[src] = (key, h)
         return [h for _, h in sorted(best.values(), key=lambda t: t[0])]
+
+    def _weigh(self, query: str, hits: list[SearchHit]) -> list[SearchHit]:
+        """Hits scaled by their source's weight (``source_weights``), best first; a source the query
+        asks for by its nature (a book for the catalog, research for abstracts) keeps its score."""
+        if not self.source_weights or not hits:
+            return hits
+        exempt = weight_exempt(query)
+        out: list[SearchHit] = []
+        for h in hits:
+            src = h.source_id or source_of(h.doc_id)
+            w = 1.0 if src in exempt else self.source_weights.get(src, 1.0)
+            out.append(replace(h, score=h.score * w) if w != 1.0 else h)
+        return sorted(out, key=lambda h: -h.score)
 
     def _boost(self, route: Route, fused: list[SearchHit]) -> list[SearchHit]:
         """Soft priors: hits from preferred sources (a site named without an identifier, dictionaries
@@ -363,7 +398,9 @@ class OracleSearcher:
         )
         found = hybrid.fuse(route.lexical or route.dense, limit=depth, sources=sources)
         _dense, best_chunk, timings["dense"] = dense_future.result()
-        fused = _collapse_duplicates(self._boost(route, list(found.hits)), self.content_hashes)
+        fused = _collapse_duplicates(
+            self._boost(route, self._weigh(route.query, list(found.hits))), self.content_hashes
+        )
         t = lap("lexical+fusion", t)
         pins = self._pins(route, fused, sources)
         # Candidates from the lexical window too: a book's long text ranks it below the fusion's cut.
@@ -384,7 +421,7 @@ class OracleSearcher:
         if self.reranker is not None and head:
             display = {h.doc_id: h.snippet for h in head}
             probe = [replace(h, snippet=passages[h.doc_id]) for h in [*pins, *head]]
-            ranked = list(self.reranker.rerank(route.dense or query, probe))
+            ranked = self._weigh(query, list(self.reranker.rerank(route.dense or query, probe)))
             confidence = max((h.score for h in ranked), default=None)
             scores = {h.doc_id: h.score for h in ranked}
             pins = [replace(p, score=scores.get(p.doc_id, p.score)) for p in pins]
