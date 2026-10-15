@@ -32,6 +32,7 @@ from wsp_api.schemas import (
 )
 from wsp_core.banners import banner_for, currency_of
 from wsp_core.model import ChangeRecord, DocRecord, Generation, LedgerEvent, SearchHit, SourceSpec
+from wsp_core.titles import shown_title
 
 _EDITION_RE = re.compile(r"^(\d{4})(?:-(\d{2})(?:-(\d{2}))?)?$")
 
@@ -129,7 +130,7 @@ def document(
         copies=list(copies),
         source_id=doc.source_id,
         native_id=doc.native_id,
-        title=doc.title,
+        title=shown_title(doc.title),
         lang=doc.lang,
         license=doc.license,
         text=readable_text(doc.text) if include_text or html is None else None,
@@ -170,7 +171,7 @@ def hit(
     return Hit(
         doc_id=h.doc_id,
         score=h.score,
-        title=h.title,
+        title=shown_title(h.title),
         snippet=h.snippet,
         source_id=h.source_id or source_id,
         address=address_of(source_id, native_id),
@@ -203,7 +204,7 @@ def change(c: ChangeRecord, *, title: str | None = None, added_at: datetime | No
         new_hash=c.new_hash,
         renamed_from=c.renamed_from,
         source_id=source_id,
-        title=title,
+        title=shown_title(title) if title else title,
         address=address_of(source_id, native_id),
         added_at=added_at,
     )

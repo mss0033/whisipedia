@@ -11,10 +11,27 @@ from typing import Any, cast
 from urllib.parse import unquote, urlsplit
 
 from wsp_adapters.doccollection.policy import DocFacts, normalize_pub_number
+from wsp_core.titles import (  # re-exported: the adapter's modules import them from here
+    _EXT_RE as _EXT_RE,  # pyright: ignore[reportPrivateUsage]
+)
+from wsp_core.titles import (
+    _PCT_RE as _PCT_RE,  # pyright: ignore[reportPrivateUsage]
+)
+from wsp_core.titles import (
+    clean_title as clean_title,
+)
+from wsp_core.titles import (
+    decode_url_text as decode_url_text,
+)
+from wsp_core.titles import (
+    display_title as display_title,
+)
+from wsp_core.titles import (
+    is_filename_title as is_filename_title,
+)
 
 _KEY_BAD = re.compile(r"[^A-Za-z0-9._-]+")
 _NAME_BAD = re.compile(r"[^A-Za-z0-9._-]+")
-_EXT_RE = re.compile(r"\.(pdf|epub|html?|txt|docx?|xml|json|zip|tiff?|jpe?g|png|bundle)$", re.IGNORECASE)
 _GENERIC_TITLES = frozenset(
     {"pdf", "download", "download pdf", "read more", "read report", "view", "here", "link", "full text"}
 )
@@ -30,18 +47,6 @@ def make_key(prefix: str, ident: str, edition: str = "") -> str:
     if edition:
         parts.append(key_part(edition))
     return ":".join(parts)
-
-
-_PCT_RE = re.compile(r"%[0-9A-Fa-f]{2}")
-
-
-def decode_url_text(text: str) -> str:
-    """``%XX`` escapes decoded, repeatedly (a link encoded twice, ``%2520``, decodes to a space)."""
-    for _ in range(3):
-        if not _PCT_RE.search(text):
-            break
-        text = unquote(text)
-    return text
 
 
 def key_stem_from_url(url: str, *, decode: bool = False) -> str:
@@ -70,13 +75,6 @@ def is_generic_title(text: str) -> bool:
     return text.strip().casefold() in _GENERIC_TITLES or len(text.strip()) < 3
 
 
-def is_filename_title(text: str) -> bool:
-    """A title that is a file name: it ends in a file extension, or is one token joined by ``_``/``-``,
-    or still carries URL escapes."""
-    t = text.strip()
-    return bool(_EXT_RE.search(t) or _PCT_RE.search(t) or (" " not in t and re.search(r"[_\-]", t)))
-
-
 def is_fragment(text: str) -> bool:
     """A title that is a piece of a sentence ("being sold on the commercial market"): it starts with a
     lower-case letter, has no capital letter at all, or is too short to name anything."""
@@ -85,36 +83,6 @@ def is_fragment(text: str) -> bool:
     if len(letters) < 3:
         return True
     return letters[0].islower() or not any(c.isupper() for c in letters)
-
-
-def clean_title(text: str) -> str:
-    """A title without file-name debris: escapes decoded, no extension, and, for a file name, ``_`` and
-    ``-`` as spaces ("IS0505 IG.pdf" -> "IS0505 IG")."""
-    t = decode_url_text(text.strip())
-    filename = is_filename_title(t)
-    t = _EXT_RE.sub("", t).strip()
-    if filename:
-        # A space escaped once and slugged ("Programming-20Guide"): the debris of a key.
-        t = re.sub(r"(?<=[A-Za-z])-20(?=[A-Za-z])", " ", t)
-        # One token ("IS0505_IG", "Field-Guide"): every separator is a space. A name with spaces keeps
-        # its hyphens ("Pool 2023-2027").
-        t = re.sub(r"[_\-]+" if " " not in t else r"_+", " ", t)
-    return re.sub(r"\s+", " ", t).strip()
-
-
-# USGS historical topographic sheets: "<ST>_<Place-Name>_<cell id>_<year>_<scale>[_geo]".
-_TOPO_RE = re.compile(r"^([A-Z]{2})[ _]+(.+?)[ _]+(\d{4,7})[ _]+(\d{4})[ _]+(\d{4,7})(?:[ _]+geo)?$")
-
-
-def display_title(text: str) -> str:
-    """:func:`clean_title`, and a human title for file-name patterns the library knows: a USGS sheet
-    "RI East Greenwich 353279 1942 24000 geo" reads "East Greenwich, RI (1942) — 1:24,000 topographic
-    map" (the original stays an alias, so the cell id is searchable)."""
-    t = clean_title(text)
-    if m := _TOPO_RE.match(t.replace("-", " ")):
-        state, place, _cell, year, scale = m.groups()
-        return f"{place.replace('_', ' ').strip()}, {state} ({year}) — 1:{int(scale):,} topographic map"
-    return t
 
 
 def extension_of(url: str, default: str = ".pdf") -> str:
