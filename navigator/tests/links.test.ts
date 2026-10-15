@@ -34,6 +34,9 @@ describe('resolveHref', () => {
       address: 'wsp://wikipedia-en-zim/Enigma_machine#Design',
     });
     expect(resolveHref('#Legacy', ctx)).toEqual({ kind: 'anchor', id: 'Legacy' });
+    for (const nowhere of ['#', '', 'javascript:void(0)', 'javascript:void(0);', 'javascript:']) {
+      expect(resolveHref(nowhere, ctx)).toEqual({ kind: 'none' });
+    }
   });
 
   it('treats everything remote or scripted as not in library', () => {

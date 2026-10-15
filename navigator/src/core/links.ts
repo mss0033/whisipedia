@@ -14,7 +14,12 @@ import { interwikiAddress } from './interwiki.ts';
 export type LinkTarget =
   | { kind: 'local'; address: string }
   | { kind: 'anchor'; id: string }
-  | { kind: 'missing'; original: string; address: string };
+  | { kind: 'missing'; original: string; address: string }
+  /** A link that goes nowhere upstream either (`href="#"`, `javascript:void(0)`): plain text here. */
+  | { kind: 'none' };
+
+/** Upstream placeholders for "no link": the xkcd front page's "Next >" is `href="#"` (field exam 2026-10-14). */
+const NOWHERE = /^(?:#|javascript:\s*(?:void\s*\(\s*0\s*\)\s*;?)?)$/i;
 
 export interface LinkContext {
   sourceId: string;
@@ -40,7 +45,7 @@ export function anchorId(id: string): string {
 /** Resolve one href from a document into the offline web. */
 export function resolveHref(rawHref: string, ctx: LinkContext): LinkTarget {
   const href = rawHref.trim();
-  if (!href) return missing(rawHref, ctx);
+  if (!href || NOWHERE.test(href)) return { kind: 'none' };
 
   const known = ctx.links?.find((l) => l.href === href);
   if (known)
@@ -347,6 +352,9 @@ export function rewriteAnchor(
     case 'anchor':
       a.setAttribute('href', `#${anchorId(target.id)}`);
       a.dataset.anchor = anchorId(target.id);
+      break;
+    case 'none':
+      a.removeAttribute('href');
       break;
     case 'missing':
       if (stats) stats.broken += 1;

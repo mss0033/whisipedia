@@ -363,3 +363,30 @@ def test_recent_changes_skip_uncaptured_player_stubs_and_carry_the_seal_date() -
     assert [x.doc_id for x in recent.items] == [ENIGMA, make_doc_id("wikipedia-en-zim", "A/Alan_Turing")]
     sealed = {g.generation_id: g.sealed_at for g in services.vault.generations("wikipedia-en-zim")}
     assert recent.items[0].added_at == sealed[SAMPLE_GEN_2]
+
+
+def test_a_document_asked_without_its_trailing_slash_is_answered() -> None:
+    """`xkcd.com/` typed or linked relatively reaches the API as `xkcd.com`: no 404 to retry."""
+    from wsp_api.testing.fakes import InMemoryDocumentStore
+    from wsp_core.ids import content_hash
+    from wsp_core.model import DocRecord
+
+    services = browse_services()
+    front = DocRecord(
+        doc_id=make_doc_id("wikipedia-en-zim", "A/Front/"),
+        source_id="wikipedia-en-zim",
+        native_id="A/Front/",
+        title="Front page",
+        lang="en",
+        license="CC-BY-SA-4.0",
+        text="The newest comic.",
+        content_hash=content_hash("The newest comic."),
+    )
+    assert isinstance(services.documents, InMemoryDocumentStore)
+    services.documents.put(SAMPLE_GEN_2, front)
+    with local_client(create_app(services)) as c:
+        r = c.get(document_href(make_doc_id("wikipedia-en-zim", "A/Front")))
+        missing = c.get(document_href(make_doc_id("wikipedia-en-zim", "A/Nowhere")))
+    assert r.status_code == 200
+    assert r.json()["doc_id"] == "wsp:wikipedia-en-zim/A/Front/"
+    assert (missing.status_code, missing.json()["error"]["code"]) == (404, "document_not_found")

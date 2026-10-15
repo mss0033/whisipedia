@@ -69,6 +69,7 @@ from wsp_api.sse import change_events
 from wsp_api.views import Library, parse_doc
 from wsp_api.zimread import ZimUnavailable
 from wsp_core.activity import ActivityMiddleware
+from wsp_core.ids import DocId
 from wsp_core.listing import is_replay_stub
 
 _DESCRIPTION = """\
@@ -293,7 +294,18 @@ def _v1(lib: Library, settings: ApiSettings) -> APIRouter:
         include_text = "text" in (fields or [])
 
         def build() -> bytes:
-            view = lib.document(did, at)
+            try:
+                view = lib.document(did, at)
+            except ApiError as exc:
+                # A typed or relative address loses a native id's trailing slash (`xkcd.com/` for
+                # the front page, `banana-bread/`): answer with that document rather than a 404 the
+                # client must retry (field exam 2026-10-14). The response carries the real doc_id.
+                if exc.status != 404 or exc.code != "document_not_found" or did.endswith("/"):
+                    raise
+                try:
+                    view = lib.document(DocId(did + "/"), at)
+                except ApiError:
+                    raise exc from None
             doc = view.doc
             if include_text and view.rendition is not None and view.html:
                 # The page shown is another source's rendering (the Wikipedia ZIM for the dump's
