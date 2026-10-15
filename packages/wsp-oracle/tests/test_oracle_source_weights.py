@@ -25,6 +25,9 @@ def test_catalog_and_abstracts_are_weighed_down_unless_asked_for() -> None:
 def test_exemptions_follow_the_question() -> None:
     assert weight_exempt("novels by Jane Austen") == {"open-library"}
     assert weight_exempt("clinical trials of metformin") == {"pubmed"}
+    assert weight_exempt("Miranda v. Arizona") == {"courtlistener"}
+    assert weight_exempt("product liability for botulism in canned food") == {"courtlistener"}
+    assert weight_exempt("pressure canning green beans") == frozenset()
     assert weight_exempt("how to purify water") == frozenset()
 
 

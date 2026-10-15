@@ -124,16 +124,23 @@ _RESEARCH_INTENT = re.compile(
     r"\b(study|studies|trials?|papers?|journals?|evidence|abstracts?|meta-analysis|research|pubmed|cohort)\b",
     re.I,
 )
+_LEGAL_INTENT = re.compile(
+    r"\b(v\.?|vs\.?|court|courts|case law|cases?|rulings?|ruled|opinions?|statutes?|laws?|legal|lawsuits?|"
+    r"sued|precedent|plaintiffs?|defendants?|appeals?|judges?|liability|negligence|constitution(al)?)\b",
+    re.I,
+)
 
 
 def weight_exempt(query: str) -> frozenset[str]:
     """Sources whose weight a query lifts: the catalog when it looks for a book, abstracts when it
-    looks for research."""
+    looks for research, court opinions when it asks about the law."""
     out: set[str] = set()
     if _BOOK_INTENT.search(query):
         out.add("open-library")
     if _RESEARCH_INTENT.search(query):
         out.add("pubmed")
+    if _LEGAL_INTENT.search(query):
+        out.add("courtlistener")
     return frozenset(out)
 
 
