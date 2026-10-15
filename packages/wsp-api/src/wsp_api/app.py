@@ -72,6 +72,8 @@ from wsp_core.activity import ActivityMiddleware
 from wsp_core.ids import DocId
 from wsp_core.listing import is_replay_stub
 
+RECENT_SCAN_MAX = 50_000  # changes read back at most to fill one What's New page
+
 _DESCRIPTION = """\
 Read API of a private offline library. Everything is served from local storage; the server makes no
 outbound connections. Errors always use the envelope `{"error": {"code", "message"}}`; `503` (with
@@ -391,10 +393,17 @@ def _v1(lib: Library, settings: ApiSettings) -> APIRouter:
     ) -> RecentChanges:
         if source is not None:
             lib.source(source)
-        # Over-ask: placeholders of uncaptured players and listing pages are not news (field exam
-        # 2026-10-14) and are dropped before the page is cut.
-        records, cursor = lib.catalog.recent(limit=min(limit * 4, 2000), sources=[source] if source else None)
-        shown = [c for c in records if not is_replay_stub(c.doc_id.partition("/")[2])][:limit]
+        # Placeholders of uncaptured players are not news (field exam 2026-10-14) and are dropped
+        # before the page is cut. One web-archive release adds thousands of them at once, so the tail
+        # is read further back until the page is full (a cheap index range; capped).
+        wanted = [source] if source else None
+        ask = limit * 4
+        while True:
+            records, cursor = lib.catalog.recent(limit=ask, sources=wanted)
+            shown = [c for c in records if not is_replay_stub(c.doc_id.partition("/")[2])][:limit]
+            if len(shown) >= limit or len(records) < ask or ask >= RECENT_SCAN_MAX:
+                break
+            ask = min(ask * 8, RECENT_SCAN_MAX)
         return RecentChanges(items=[lib.change(c) for c in shown], cursor=cursor)
 
     @r.get(

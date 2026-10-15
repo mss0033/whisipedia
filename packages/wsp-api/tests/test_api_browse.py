@@ -356,8 +356,10 @@ def test_recent_changes_skip_uncaptured_player_stubs_and_carry_the_seal_date() -
     from wsp_core.model import ChangeKind, ChangeRecord
 
     services = browse_services()
-    stub = make_doc_id("wikipedia-en-zim", "A/youtube.fuzzy.replayweb.page/embed/w4mlQoAVurk")
-    services.changes.publish([ChangeRecord(stub, ChangeKind.ADDED, SAMPLE_GEN_2, None, "h")])
+    stubs = [
+        make_doc_id("wikipedia-en-zim", f"A/youtube.fuzzy.replayweb.page/embed/v{i}") for i in range(40)
+    ]  # more than four times the page: the tail is read further back
+    services.changes.publish([ChangeRecord(s, ChangeKind.ADDED, SAMPLE_GEN_2, None, "h") for s in stubs])
     with local_client(create_app(services)) as c:
         recent = RecentChanges.model_validate(c.get("/v1/changes/recent", params={"limit": 2}).json())
     assert [x.doc_id for x in recent.items] == [ENIGMA, make_doc_id("wikipedia-en-zim", "A/Alan_Turing")]
