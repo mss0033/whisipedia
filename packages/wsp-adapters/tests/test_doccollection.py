@@ -424,6 +424,28 @@ def test_rows_then_detail_page() -> None:
     assert doc.url == "https://apd.mil/epubs/DR_pubs/DR_a/ARN1-FM_5-0-000-WEB-1.pdf"
 
 
+def test_rows_with_a_url_rewrite_need_no_detail_page() -> None:
+    """The RFC index: one row per RFC linking its info page; the text file is fetched directly."""
+    table = b"""<table>
+      <tr><td><a href="/info/rfc9293/"><span>RFC</span> <span>9293</span></a></td>
+          <td>Transmission Control Protocol (TCP)</td><td>August 2022</td></tr>
+      <tr><td><a href="/about/">About</a></td><td>not an RFC</td></tr>
+    </table>"""
+    env = env_for({"https://www.rfc-editor.org/rfc-index.html": table}, origins=("www.rfc-editor.org",))
+    cfg = {
+        "kind": "index-page",
+        "url": "https://www.rfc-editor.org/rfc-index.html",
+        "rows": "tr",
+        "columns": {"pub_number": 0, "title": 1},
+        "url_rewrite": [r"/info/rfc(\d+)/$", r"/rfc/rfc\1.txt"],
+    }
+    (cand,) = list(discover_all([cfg], env))
+    assert cand.url == "https://www.rfc-editor.org/rfc/rfc9293.txt"
+    assert cand.landing_url == "https://www.rfc-editor.org/info/rfc9293/"
+    assert (cand.pub_number, cand.title) == ("RFC 9293", "Transmission Control Protocol (TCP)")
+    assert cand.key == "t:RFC-9293"
+
+
 def test_nga_api_prefers_full_publications() -> None:
     items = [
         {

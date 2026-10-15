@@ -265,14 +265,29 @@ sources:
   - id: rfc
     name: IETF RFCs
     publisher: IETF
-    domain: [standards]
+    domain: [standards, computing]
     tier: T1
-    status: candidate
+    status: active
     license: LicenseRef-IETF-Trust
     legal_basis: bulk-access-terms
-    access: {adapter: rsync-mirror}
-    update: {strategy: mirror}
-    size: {bytes: 2e9, measured: false, as_of: 2026-10-09}
+    # The plain-text RFCs through the document-collection lane (no rsync adapter exists): the RFC
+    # index lists every RFC with its title; each row's text file is fetched at one request a second.
+    # Field exam 2026-10-14: wsp://rfc/9293 was not in the library.
+    access:
+      adapter: doc-collection
+      issuer: IETF RFC Editor
+      key_prefix: rfc
+      origins: [www.rfc-editor.org]
+      rate: {requests_per_second: 1}
+      discovery:
+        - kind: index-page
+          url: "https://www.rfc-editor.org/rfc-index.html"
+          rows: tr
+          columns: {pub_number: 0, title: 1}
+          url_rewrite: ["/info/rfc(\\d+)/$", "/rfc/rfc\\1.txt"]
+      filter: {allow_all: true}
+    update: {cadence: P1M, strategy: snapshot-retention}
+    size: {bytes: 0.6e9, measured: false, as_of: 2026-10-14}
 
   - id: us-code
     name: United States Code (USLM XML)

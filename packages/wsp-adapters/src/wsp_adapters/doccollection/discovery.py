@@ -505,6 +505,11 @@ def _rows(
     columns = cast(Mapping[str, int], cfg.get("columns") or {})
     tree = LexborHTMLParser(html)
     detail_docs = _s(cfg.get("detail_documents"))
+    # [pattern, replacement]: the document's own URL from the row's link, without a detail-page hop
+    # per row (the RFC index links /info/rfc9293/; the text is /rfc/rfc9293.txt). Rows whose link
+    # does not match are skipped.
+    url_rewrite = cast(list[str], cfg.get("url_rewrite") or [])
+    rewrite_rx = re.compile(url_rewrite[0]) if len(url_rewrite) == 2 else None
     for row in tree.css(_s(cfg.get("rows")) or "tr"):
         cells = row.css("td")
         if not cells:
@@ -514,6 +519,11 @@ def _rows(
         if link is None:
             continue
         href = urljoin(page, (link.attributes.get("href") or "").strip())
+        landing = href
+        if rewrite_rx is not None:
+            if not rewrite_rx.search(href):
+                continue
+            href = rewrite_rx.sub(url_rewrite[1], href)
         pub = fields.get("pub_number", "")
         title = fields.get("title", "") or pub
         edition = iso_date(fields.get("date", ""))
@@ -526,7 +536,7 @@ def _rows(
             issuer=env.issuer,
             pub_number=pub,
             edition_date=edition,
-            landing_url=href,
+            landing_url=landing,
             status=fields.get("status", ""),
             discovered_by=_s(cfg.get("label")) or "index-page:rows",
             resolve="detail-page" if detail_docs else "",
