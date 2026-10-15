@@ -454,6 +454,10 @@ sources:
       discovery:
         - {kind: index-page, url: "https://www.ncvec.org/index.php/amateur-question-pools", follow: "/index\\.php/20\\d\\d-?\\s*-?20\\d\\d-", depth: 1, documents: "ncvec\\.org/downloads/.+(Pool|Diagram|Syllabus).*\\.pdf$", upgrade_http: true, dates: true}
       filter: {allow_all: true}
+      # One pool's releases and errata carry no number: the years and class name the series, so the
+      # older release reads "Superseded by ..." (field exam 2026-10-14). Diagram sheets stand alone.
+      currency:
+        series: ['^(?!.*diagram)(?=.*?(20\d\d-20\d\d))(?=.*?\b(technician|general|extra)\b)']
     update: {cadence: P3M, strategy: snapshot-retention}
     size: {bytes: 10e6, measured: false, as_of: 2026-10-10}
     notes: Score 4.2. Each pool is released into the public domain by the committee. Keep superseded pools as history.

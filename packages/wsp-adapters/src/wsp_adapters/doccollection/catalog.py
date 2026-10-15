@@ -151,7 +151,8 @@ def build_catalog(
         by_key[doc.cand.key] = meta_for(doc)
         fresh.add(doc.cand.key)
     labels = assign_currency(
-        [Edition(m.doc_key, m.pub_number, m.edition_date, m.fetched_at) for m in by_key.values()], rules
+        [Edition(m.doc_key, m.pub_number, m.edition_date, m.fetched_at, m.title) for m in by_key.values()],
+        rules,
     )
     out: list[DocumentMeta] = []
     for key in sorted(by_key):

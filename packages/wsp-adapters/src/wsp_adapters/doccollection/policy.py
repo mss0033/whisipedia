@@ -33,6 +33,7 @@ import re
 import unicodedata
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
+from datetime import date
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, cast
@@ -1055,6 +1056,10 @@ class CurrencyRules:
     collection: Currency | None = None  # e.g. every Farmers' Bulletin is historical
     historical_before: str | None = None  # ISO date: older editions are historical
     historical_series_prefix: tuple[str, ...] = ()
+    # Editions of one publication that carry no number: each pattern's groups, matched against the
+    # title, name the series ("2026-2030" + "Technician" for every release of that question pool), so
+    # an older release is labelled superseded (field exam 2026-10-14). Doc keys are not changed.
+    series: tuple[re.Pattern[str], ...] = ()
 
     @staticmethod
     def from_access(acc: Mapping[str, Any]) -> CurrencyRules:
@@ -1065,6 +1070,7 @@ class CurrencyRules:
             collection=Currency(str(collection)) if collection else None,
             historical_before=str(block["historical_before"]) if block.get("historical_before") else None,
             historical_series_prefix=tuple(s.upper() for s in _strs(block.get("historical_series_prefix"))),
+            series=tuple(re.compile(p, re.IGNORECASE) for p in _strs(block.get("series"))),
         )
 
 
@@ -1074,6 +1080,55 @@ class Edition:
     pub_number: str
     edition_date: str  # ISO date or "" when unknown
     fetched_at: str = ""  # when the library fetched it (ISO timestamp): places an undated edition
+    title: str = ""  # matched by ``CurrencyRules.series``
+
+
+_MONTHS = {
+    m: i
+    for i, names in enumerate(
+        (
+            ("jan", "january"),
+            ("feb", "february"),
+            ("mar", "march"),
+            ("apr", "april"),
+            ("may",),
+            ("jun", "june"),
+            ("jul", "july"),
+            ("aug", "august"),
+            ("sep", "sept", "september"),
+            ("oct", "october"),
+            ("nov", "november"),
+            ("dec", "december"),
+        ),
+        start=1,
+    )
+    for m in names
+}
+_NAMED_DATE = re.compile(r"\b([A-Za-z]{3,9})\.?\s+(\d{1,2}),?\s+((?:19|20)\d\d)\b")
+
+
+def title_date(title: str) -> str:
+    """The last "Feb 19 2026" / "December 18, 2025" date in a title as ``YYYY-MM-DD``, else ``""``: the
+    release date of a series edition, for ordering only (edition dates are part of doc keys)."""
+    found = ""
+    for m in _NAMED_DATE.finditer(title):
+        month = _MONTHS.get(m.group(1).lower())
+        if month is None:
+            continue
+        try:
+            found = date(int(m.group(3)), month, int(m.group(2))).isoformat()
+        except ValueError:
+            continue
+    return found
+
+
+def series_of(title: str, rules: CurrencyRules) -> str:
+    """The series a numberless edition belongs to (``CurrencyRules.series``), else ``""``."""
+    for rx in rules.series:
+        if m := rx.search(title):
+            parts = [g.strip().lower() for g in m.groups() if g] or [m.group(0).strip().lower()]
+            return "series:" + " ".join(parts)
+    return ""
 
 
 def edition_order(editions: Sequence[Edition]) -> list[Edition]:
@@ -1110,7 +1165,10 @@ def assign_currency(editions: Sequence[Edition], rules: CurrencyRules) -> dict[s
     """
     groups: dict[str, list[Edition]] = {}
     for ed in editions:
-        groups.setdefault(normalize_pub_number(ed.pub_number) or ed.key, []).append(ed)
+        series = "" if ed.pub_number else series_of(ed.title, rules)
+        if series:  # ordered by the release date the title names (dated editions sort first)
+            ed = replace(ed, edition_date=title_date(ed.title) or ed.edition_date)
+        groups.setdefault(normalize_pub_number(ed.pub_number) or series or ed.key, []).append(ed)
     out: dict[str, CurrencyLabel] = {}
     for pub, eds in groups.items():
         ordered = edition_order(eds)
@@ -1130,7 +1188,7 @@ def assign_currency(editions: Sequence[Edition], rules: CurrencyRules) -> dict[s
             banner = HISTORICAL_BANNER if historical else None
             if currency is Currency.SUPERSEDED and newer is not None and not historical:
                 when = f" ({newer.edition_date})" if newer.edition_date else ""
-                banner = f"Superseded by {newer.pub_number or newer.key}{when}."
+                banner = f"Superseded by {newer.pub_number or newer.title or newer.key}{when}."
             out[ed.key] = CurrencyLabel(
                 currency=currency,
                 historical=historical,
