@@ -1210,6 +1210,9 @@ def fence_path(path: Path) -> Path:
     return path.with_name(path.name + ".fence.npy")
 
 
+_FENCE_MTIME_SLACK_NS = 1_000_000_000
+
+
 def write_fence(path: Path, *, chunk: int = 1 << 22) -> Path:
     """Every :data:`FENCE_STRIDE`-th key of the sidecar at ``path``, as a small ``.npy`` beside it.
 
@@ -1260,11 +1263,13 @@ class StaticRank:
         self._fence = self._load_fence()
 
     def _load_fence(self) -> U64 | None:
-        """The fence if it belongs to this sidecar (as long as expected, newer, first and last keys
-        match); else None and lookups search the key array directly."""
+        """The fence if it belongs to this sidecar (as long as expected, not older, first and last keys
+        match); else None and lookups search the key array directly. "Not older" allows a second:
+        the kernel's multigrain timestamps (Linux 6.13+) can stamp a file written later with a
+        coarser, earlier time (a flaky test, 2026-10-16)."""
         fp = fence_path(self.path)
         try:
-            if fp.stat().st_mtime_ns < self.path.stat().st_mtime_ns:
+            if fp.stat().st_mtime_ns < self.path.stat().st_mtime_ns - _FENCE_MTIME_SLACK_NS:
                 return None
             fence = cast(U64, np.load(fp, mmap_mode=None, allow_pickle=False))
         except (OSError, ValueError):
