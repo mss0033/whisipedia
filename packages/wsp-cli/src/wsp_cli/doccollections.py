@@ -848,6 +848,13 @@ def _pointer(path: Path) -> str | None:
 REFETCH_AFTER = timedelta(days=180)  # a held document with no listed size or checksum is re-checked
 
 
+def _same_place(url: str) -> str:
+    """A URL without its scheme and with its host lower-cased: an http to https move is the same file."""
+    rest = url.split("://", 1)[-1]
+    host, sep, path = rest.partition("/")
+    return host.lower() + sep + path
+
+
 def unchanged(cand: Candidate, held: DocumentMeta | None, *, now: datetime | None = None) -> bool:
     """The listing says ``held`` already has this candidate's bytes, so it is not downloaded again
     (2026-10-12 audit, CA-13): the listing's MD5 matches the stored bytes' MD5, else its size matches.
@@ -855,6 +862,11 @@ def unchanged(cand: Candidate, held: DocumentMeta | None, *, now: datetime | Non
     document is fetched again, so an issuer's quiet correction is not missed forever. The catalog
     refreshes a skipped document's metadata from the listing either way."""
     if held is None or cand.resolve == "git" or not held.sha256:
+        return False
+    if held.origin_url and _same_place(cand.url) != _same_place(held.origin_url):
+        # The key now lists another file (field exam 2026-10-14: the Pilot's Handbook key moved from
+        # its addendum to the full handbook and kept the addendum's bytes). Fetch it; byte-identical
+        # bytes are still recognised after the download and kept as they are.
         return False
     if cand.md5 and held.md5:
         return cand.md5.lower() == held.md5.lower() and (cand.size is None or cand.size == held.bytes)

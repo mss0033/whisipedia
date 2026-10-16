@@ -550,6 +550,16 @@ def test_unchanged_compares_the_listing_with_the_stored_bytes() -> None:
     assert unchanged(cand, held, now=now)  # no size, no checksum: trusted for a while
     assert not unchanged(cand, held, now=now + REFETCH_AFTER)  # then re-checked
     assert not unchanged(cand, None, now=now)
+    # The key now lists another file: fetched again, whatever the listing says (an http->https move
+    # of the same file is not a move).
+    placed = dataclasses.replace(held, origin_url="https://x/addendum.pdf")
+    assert not unchanged(dataclasses.replace(cand, md5="AA", size=10), placed, now=now)
+    assert unchanged(dataclasses.replace(cand, url="https://X/addendum.pdf"), placed, now=now)
+    assert unchanged(
+        dataclasses.replace(cand, url="https://x/addendum.pdf"),
+        dataclasses.replace(placed, origin_url="http://x/addendum.pdf"),
+        now=now,
+    )
 
 
 def test_held_documents_are_proposed_once(tmp_path: Path) -> None:
