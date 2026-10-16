@@ -300,18 +300,29 @@ class OracleSearcher:
         word for word, the longest such title first, then the best ranked; at most one. The query
         "Incident Command System span of control" listed CIMS, NIMS and AIIMS above the article
         Incident Command System, 17th (2026-10-16 field exam). One-word titles never qualify: every
-        question about water holds the title "Water"."""
+        question about water holds the title "Water".
+
+        First, though, a page whose title begins with the whole query (four words or more; the
+        shortest such title): a title too long for a page-name query is asked as a question, and
+        "Pilot's Handbook of Aeronautical Knowledge" led with the handbook's Addendum, not the
+        handbook "Pilot's Handbook of Aeronautical Knowledge, FAA-H-8083-25C (Full Version)"
+        (2026-10-16 field exam)."""
         if route.intent not in (Intent.ASK, Intent.HOW_TO):
             return []
         query = _words_of(route.query)
-        best: tuple[tuple[int, int], SearchHit] | None = None
+        best: tuple[tuple[int, int, int], SearchHit] | None = None
         for i, h in enumerate(candidates):
             title = _words_of(h.title)
-            if h.doc_id in pinned or not 2 <= len(title) < len(query) or not _holds(query, title):
+            if h.doc_id in pinned:
+                continue
+            if len(query) >= 4 and title[: len(query)] == query:
+                key = (0, len(title), i)
+            elif 2 <= len(title) < len(query) and _holds(query, title):
+                key = (1, -len(title), i)
+            else:
                 continue
             if not self._pinnable(route.query, h):
                 continue
-            key = (-len(title), i)
             if best is None or key < best[0]:
                 best = (key, h)
         return [] if best is None else [best[1]]

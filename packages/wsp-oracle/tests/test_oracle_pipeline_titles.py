@@ -215,3 +215,23 @@ def test_a_question_holding_a_title_word_for_word_leads_with_that_page(tmp_path:
     lookup = searcher.router.route("roman republic")
     assert searcher._embedded_title(lookup, hits, set()) == []  # pyright: ignore[reportPrivateUsage]
     idx.close()
+
+
+def test_a_question_that_begins_a_title_leads_with_that_page(library: TantivyIndex) -> None:
+    # 2026-10-16 field exam: five words are asked as a question, and the handbook's Addendum led the
+    # handbook the query names.
+    searcher = _searcher(library)
+    hits = [
+        SearchHit(DocId(f"wsp:faa/{n}"), 1.0, t, "", "faa")
+        for n, t in (
+            ("add", "FAA-H-8083-25C, Pilot\u2019s Handbook of Aeronautical Knowledge Addendum"),
+            ("phak", "Pilot\u2019s Handbook of Aeronautical Knowledge, FAA-H-8083-25C (Full Version)"),
+            ("short", "Pilot\u2019s Handbook"),
+        )
+    ]
+    route = searcher.router.route("Pilot's Handbook of Aeronautical Knowledge")
+    pins = searcher._embedded_title(route, hits, set())  # pyright: ignore[reportPrivateUsage]
+    assert [h.doc_id for h in pins] == ["wsp:faa/phak"]  # before the held, shorter "Pilot's Handbook"
+    three = searcher.router.route("what is knowledge")  # too short to name a title by its start
+    essay = [SearchHit(DocId("wsp:w/k"), 1.0, "What is knowledge? An essay", "", "w")]
+    assert searcher._embedded_title(three, essay, set()) == []  # pyright: ignore[reportPrivateUsage]
