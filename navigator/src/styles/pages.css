@@ -957,6 +957,23 @@
 
 /* --- question-and-answer threads (pages/threads.ts) --- */
 /* The sanitiser drops classes: these rules target what survives (data-wsp-role, titles). */
+.doc-body details[data-wsp-role="navigation"] {
+  border: 1px solid var(--rule);
+  margin: 8px 0;
+  padding: 2px 8px;
+  font-size: 0.9em;
+}
+.doc-body details[data-wsp-role="navigation"] > summary {
+  cursor: pointer;
+}
+@media (min-width: 900px) {
+  .doc-body details[data-wsp-role="navigation"] {
+    float: right;
+    clear: right;
+    max-width: 22rem;
+    margin: 0 0 8px 16px;
+  }
+}
 .doc-body small[data-wsp-role^="thread-"] {
   display: inline-block;
   margin: 0 0.6em 0.4em 0;

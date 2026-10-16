@@ -113,7 +113,6 @@ const DROP = new Set([
   'noscript',
   'template',
   'svg',
-  'math',
   'video',
   'audio',
   'source',
@@ -245,6 +244,109 @@ export interface SanitizeStats {
   removed: number;
 }
 
+const MATHML_NS = 'http://www.w3.org/1998/Math/MathML';
+/** Presentation MathML kept (rebuilt in the MathML namespace): PlanetMath's formulas are MathML only,
+ * and dropping `math` left "Let be a complete metric space" (2026-10-16 field exam). */
+const MATH_TAGS = new Set([
+  'math',
+  'mrow',
+  'mi',
+  'mn',
+  'mo',
+  'ms',
+  'mtext',
+  'mspace',
+  'msup',
+  'msub',
+  'msubsup',
+  'mfrac',
+  'msqrt',
+  'mroot',
+  'mover',
+  'munder',
+  'munderover',
+  'mtable',
+  'mtr',
+  'mtd',
+  'mstyle',
+  'mpadded',
+  'mphantom',
+  'menclose',
+  'mfenced',
+  'semantics',
+]);
+const MATH_ATTRS = new Set([
+  'display',
+  'mathvariant',
+  'stretchy',
+  'fence',
+  'separator',
+  'lspace',
+  'rspace',
+  'accent',
+  'accentunder',
+  'linethickness',
+  'columnalign',
+  'rowalign',
+  'displaystyle',
+  'scriptlevel',
+  'form',
+  'largeop',
+  'movablelimits',
+  'symmetric',
+  'minsize',
+  'maxsize',
+  'width',
+  'height',
+  'depth',
+  'notation',
+  'open',
+  'close',
+  'separators',
+  'alttext',
+]);
+
+/** A formula as MathML (allowlisted elements and attributes, no links), or null to drop it. */
+function sanitizeMath(el: Element): Element | null {
+  // Wikipedia's hidden accessible copy: its fallback image is the formula on screen.
+  if (el.closest('[class*="mwe-math-mathml"]')) return null;
+  const copy = (src: Element): Element | null => {
+    const tag = src.localName.toLowerCase();
+    if (!MATH_TAGS.has(tag)) return null; // annotation, annotation-xml, maction, unknown
+    const out = document.createElementNS(MATHML_NS, tag);
+    for (const attr of Array.from(src.attributes)) {
+      const name = attr.name.toLowerCase();
+      if (MATH_ATTRS.has(name)) out.setAttribute(name, attr.value);
+    }
+    for (const child of Array.from(src.childNodes)) {
+      if (child.nodeType === Node.TEXT_NODE)
+        out.appendChild(document.createTextNode(child.textContent ?? ''));
+      else if (child.nodeType === Node.ELEMENT_NODE) {
+        const c = copy(child as Element);
+        if (c) out.appendChild(c);
+        if (tag === 'semantics') break; // its first child is the presentation; the rest are annotations
+      }
+    }
+    return out;
+  };
+  return copy(el);
+}
+
+/** Classes of navigation-only blocks: a field's sidebar, the navboxes at the end of an article. */
+const NAVIGATION_CLASSES = ['sidebar', 'vertical-navbox', 'navbox'];
+
+function isNavigationBlock(el: Element, tag: string): boolean {
+  return (
+    (tag === 'table' || tag === 'div') && NAVIGATION_CLASSES.some((c) => el.classList.contains(c))
+  );
+}
+
+function navigationTitle(el: Element): string {
+  const head = el.querySelector('.sidebar-title, .navbox-title, caption, th');
+  const text = (head?.textContent ?? '').replace(/\s+/g, ' ').trim();
+  return text.length > 0 && text.length <= 80 ? text : 'Navigation';
+}
+
 export function sanitizeDocumentHtml(
   html: string,
   ctx: LinkContext,
@@ -252,6 +354,9 @@ export function sanitizeDocumentHtml(
   const parsed = new DOMParser().parseFromString(html, 'text/html');
   const out = document.createDocumentFragment();
   const stats: SanitizeStats = { links: 0, broken: 0, removed: 0 };
+  // Navigation blocks, folded: expanded in place, a field's sidebar filled the first screen before
+  // the lead (Gibbs free energy, Arrow's theorem: 2026-10-16 field exam). Inner ones stay as they are.
+  let inNavigation = 0;
 
   const walk = (src: Node, dest: Node): void => {
     for (const child of Array.from(src.childNodes)) {
@@ -264,6 +369,24 @@ export function sanitizeDocumentHtml(
       const tag = el.tagName.toLowerCase();
       if (DROP.has(tag)) {
         stats.removed += 1;
+        continue;
+      }
+      if (tag === 'math') {
+        const math = sanitizeMath(el);
+        if (math) dest.appendChild(math);
+        else stats.removed += 1;
+        continue;
+      }
+      if (inNavigation === 0 && isNavigationBlock(el, tag)) {
+        const box = document.createElement('details');
+        box.setAttribute(ROLE_ATTR, 'navigation');
+        const summary = document.createElement('summary');
+        summary.textContent = navigationTitle(el);
+        box.appendChild(summary);
+        inNavigation += 1;
+        walk({ childNodes: [el] } as unknown as Node, box);
+        inNavigation -= 1;
+        dest.appendChild(box);
         continue;
       }
       if (!KEEP.has(tag)) {

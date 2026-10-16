@@ -445,10 +445,12 @@ export function copiesNotice(
   const copies = doc.copies ?? [];
   if (copies.length === 0) return null;
   const stub = !doc.html && (doc.text ?? '').trim().length < STUB_TEXT_CHARS;
+  // The link names the copy, not the site: "Project Gutenberg (Kiwix ZIM)" as link text read as a
+  // link to that site's front page, which the page's other links with that name are (2026-10-16 field exam).
   const items = copies.map((c, i) => [
     i ? ' · ' : null,
-    wspLink(c.address, h('b', null, names.get(c.source_id) ?? c.source_id)),
-    ` (${c.why})`,
+    wspLink(c.address, h('b', null, c.why)),
+    ` (${names.get(c.source_id) ?? c.source_id})`,
   ]);
   return h(
     'div',
@@ -741,11 +743,34 @@ function siteBanner(doc: DocumentResponse): HTMLElement {
   );
 }
 
+const TIME_MACHINE = 'time-machine';
+
+/** A page with earlier versions says so at the top: the Time Machine box sits at the end, closed, under
+ * the list of links, and readers looking for older versions never found it (2026-10-16 field exam). */
+export function versionsNotice(
+  doc: Pick<DocumentResponse, 'has_history'>,
+  here: string,
+  route: Pick<DocRoute, 'at'>,
+): HTMLElement | null {
+  if (!doc.has_history || route.at !== undefined) return null;
+  return h(
+    'p',
+    { class: 'notice versions-notice', role: 'note' },
+    'This page has earlier versions: ',
+    wspLink(`${here}#${TIME_MACHINE}`, 'open the Time Machine'),
+    ' to read the page as of an earlier date or to see what changed.',
+  );
+}
+
 function timeMachine(ctx: PageContext, doc: DocumentResponse, route: DocRoute): HTMLElement {
   const list = h('div', { class: 'tm-list' }, 'Loading versions…');
   const details = h(
     'details',
-    { class: 'time-machine', open: route.at !== undefined },
+    {
+      class: 'time-machine',
+      id: `doc-${TIME_MACHINE}`,
+      open: route.at !== undefined || route.fragment === TIME_MACHINE,
+    },
     h('summary', null, 'Time Machine: see this page as of an earlier date'),
     list,
   );
@@ -987,6 +1012,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
     practiceNotice(doc),
     replayStubNotice(doc),
     copiesNotice(doc, new Map(sources.map((s) => [s.id, s.name]))),
+    versionsNotice(doc, here, route),
     doc.format === 'html' && doc.html && looksLikeComic(doc.html) && !route.at
       ? comicBar(doc.source_id, doc.native_id, (a) => ctx.app.navigate(a))
       : null,

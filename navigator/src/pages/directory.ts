@@ -51,15 +51,30 @@ export function directoryFromSources(path: string, sources: SourceInfo[]): Direc
   };
 }
 
-/** A category lists its best-known entries only (the catalog keeps a bounded list): say so, and offer
- * the site's own search for the rest. */
-function truncatedNote(shown: number, total: number, sourceId: string): HTMLElement {
+/** A category lists its best-known entries only (the catalog keeps a bounded list): say so, above
+ * the list, with a search box for this site right there. A link to the site's front page was no way
+ * on: readers found no search form and typed addresses instead (2026-10-16 field exam). */
+function truncatedNote(
+  ctx: PageContext,
+  shown: number,
+  total: number,
+  sourceId: string,
+): HTMLElement {
+  const { form } = searchForm({
+    label: 'Find a title in this site:',
+    source: sourceId,
+    onSubmit: (q) => ctx.app.navigate(searchAddress(q, { source: sourceId })),
+  });
   return h(
-    'p',
+    'div',
     { class: 'notice dir-truncated' },
-    `Showing ${formatNumber(shown)} of ${formatNumber(total)} pages in this category. `,
-    wspLink(makeAddress(sourceId), 'Search this site'),
-    ' to find the rest.',
+    h(
+      'p',
+      null,
+      `Showing the ${formatNumber(shown)} best-known of ${formatNumber(total)} pages in this category. `,
+      'Search this site to find any of them:',
+    ),
+    form,
   );
 }
 
@@ -151,6 +166,9 @@ export async function render(ctx: PageContext): Promise<PageResult> {
     dir.entries.length
       ? [
           dir.children.length ? h('hr') : null,
+          dir.total
+            ? truncatedNote(ctx, dir.entries.length, dir.total, dir.entries[0]!.source_id)
+            : null,
           h(
             'ul',
             { class: 'dir-entries' },
@@ -165,9 +183,6 @@ export async function render(ctx: PageContext): Promise<PageResult> {
               ),
             ),
           ),
-          dir.total
-            ? truncatedNote(dir.entries.length, dir.total, dir.entries[0]!.source_id)
-            : null,
         ]
       : null,
     !dir.children.length && !dir.entries.length

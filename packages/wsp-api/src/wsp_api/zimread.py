@@ -163,17 +163,23 @@ class ArchiveCache:
             return len(self._archives)
 
     def get(self, file: str) -> Archive:
+        got = self.get_or_wait(file)
+        return got.result() if isinstance(got, Future) else got
+
+    def get_or_wait(self, file: str) -> Archive | Future[Archive]:
+        """The archive, opened by this call if nobody is opening it; else the future of the open in
+        progress, which the caller must not block a thread on (``ZimWorker``: a cold open of a large
+        archive over SMB takes minutes, and each request waiting on it held one of the worker's few
+        threads, so every other archive of that worker timed out: 2026-10-16 field exam)."""
         with self._lock:
             hit = self._archives.get(file)
             if hit is not None:
                 self._archives.move_to_end(file)
                 return hit
             pending = self._opening.get(file)
-            mine = pending is None
-            if pending is None:
-                pending = self._opening[file] = Future()
-        if not mine:
-            return pending.result()
+            if pending is not None:
+                return pending
+            pending = self._opening[file] = Future()
         try:
             archive = self._open(file)
         except BaseException as exc:

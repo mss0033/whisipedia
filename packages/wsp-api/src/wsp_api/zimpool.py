@@ -205,7 +205,7 @@ class ZimProcessPool:
         *,
         workers: int = 2,
         max_open: int = 16,
-        threads: int = 4,
+        threads: int = 8,  # nearly all I/O waits on the NAS; an opening archive holds only its opener
         timeout: float = 15.0,
         max_pending: int = 64,
         test_ops: bool = False,

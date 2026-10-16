@@ -189,3 +189,38 @@ describe('plain-text documents', () => {
     expect(other?.dataset.wsp?.startsWith('wsp://offline')).toBe(true);
   });
 });
+
+describe('navigation blocks', () => {
+  it('folds a sidebar and a navbox into one closed details each, inner ones kept as they are', () => {
+    const html = `<table class="sidebar nomobile"><tbody><tr><th class="sidebar-title">Thermodynamics</th></tr>
+      <tr><td><table class="sidebar-subgroup"><tbody><tr><td>Branches</td></tr></tbody></table></td></tr></tbody></table>
+      <p>Lead.</p><div class="navbox"><div class="navbox"><span class="navbox-title">Voting</span></div></div>`;
+    const div = document.createElement('div');
+    div.append(sanitizeDocumentHtml(html, ctx).fragment);
+    const boxes = div.querySelectorAll('details[data-wsp-role="navigation"]');
+    expect(boxes.length).toBe(2);
+    expect(boxes[0]?.hasAttribute('open')).toBe(false);
+    expect(boxes[0]?.querySelector('summary')?.textContent).toBe('Thermodynamics');
+    expect(boxes[0]?.querySelectorAll('table').length).toBe(2);
+    expect(boxes[1]?.querySelector('summary')?.textContent).toBe('Voting');
+    expect(div.querySelector('p')?.textContent).toBe('Lead.');
+  });
+});
+
+describe('formulas', () => {
+  it("keeps MathML formulas (allowlisted, in the MathML namespace) and drops Wikipedia's hidden copy", () => {
+    const html = `<p>Let <math alttext="(X,d)" display="inline" onclick="x()"><mrow><mo stretchy="false">(</mo><mi href="https://evil.example/">X</mi><mo>,</mo><mi>d</mi><mo>)</mo></mrow></math> be complete.</p>
+      <p><span class="mwe-math-element"><span class="mwe-math-mathml-inline mwe-math-mathml-a11y"><math><semantics><mi>y</mi><annotation encoding="application/x-tex">y</annotation></semantics></math></span><img src="/v1/assets/w/1/y.svg" alt="y"></span></p>
+      <p><math><semantics><mi>z</mi><annotation encoding="application/x-tex">z</annotation></semantics></math></p>`;
+    const div = document.createElement('div');
+    div.append(sanitizeDocumentHtml(html, ctx).fragment);
+    const maths = div.querySelectorAll('math');
+    expect(maths.length).toBe(2);
+    expect(maths[0]?.namespaceURI).toBe('http://www.w3.org/1998/Math/MathML');
+    expect(maths[0]?.textContent).toBe('(X,d)');
+    expect(maths[0]?.getAttribute('alttext')).toBe('(X,d)');
+    expect(div.innerHTML).not.toMatch(/onclick|evil|annotation/);
+    expect(maths[1]?.textContent).toBe('z');
+    expect(div.querySelector('img')?.getAttribute('alt')).toBe('y');
+  });
+});

@@ -22,9 +22,10 @@ describe('other copies', () => {
     };
     const el = copiesNotice(doc as unknown as DocumentResponse, names)!;
     expect(el.textContent).toContain(
-      'Also in the library: Project Gutenberg (Kiwix ZIM) (the illustrated edition).',
+      'Also in the library: the illustrated edition (Project Gutenberg (Kiwix ZIM)).',
     );
     expect(el.querySelector('a')?.getAttribute('href')).toBe('#wsp://gutenberg-zim/x');
+    expect(el.querySelector('a')?.textContent).toBe('the illustrated edition');
   });
 
   it('sends a reader of a stub to the complete copy', () => {

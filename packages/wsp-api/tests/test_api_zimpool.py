@@ -206,3 +206,54 @@ def test_random_articles_and_warm_opens(pool: ZimProcessPool, zim: str) -> None:
         assert path != "A/Old"
         seen.add(path)
     assert len(seen) > 5  # identical calls in flight are not coalesced into one pick
+
+
+def test_requests_waiting_for_an_archive_to_open_hold_no_thread() -> None:
+    """2026-10-16 field exam: four page requests for an archive still opening (a cold open over SMB
+    takes minutes) held all four threads of its worker; every other archive of that worker timed out."""
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    from types import SimpleNamespace
+
+    from wsp_api.zimread import ArchiveCache
+    from wsp_api.zimworker import _Server  # pyright: ignore[reportPrivateUsage]
+
+    release = threading.Event()
+
+    def opener(file: str) -> object:
+        if file == "slow.zim":
+            assert release.wait(10)
+        if file == "broken.zim":
+            raise OSError("unreadable")
+        return SimpleNamespace(metadata_keys=[], article_count=7)
+
+    replies: list[tuple[int, bool, object]] = []
+    done = threading.Condition()
+
+    class Out:
+        def send(self, reply: tuple[int, bool, object]) -> None:
+            with done:
+                replies.append(reply)
+                done.notify_all()
+
+    pool = ThreadPoolExecutor(2)
+    server = _Server(Out(), 4, False, pool.submit)  # type: ignore[arg-type]
+    server.cache = ArchiveCache(4, opener)  # type: ignore[arg-type]
+    try:
+        for rid in range(1, 6):  # the first opens it; the other four wait without a thread
+            pool.submit(server.handle, (rid, "count", ("slow.zim",)))
+        pool.submit(server.handle, (10, "count", ("fast.zim",)))
+        with done:
+            assert done.wait_for(lambda: any(r[0] == 10 for r in replies), timeout=5)
+        release.set()
+        with done:
+            assert done.wait_for(lambda: len(replies) == 6, timeout=5)
+        assert sorted(r[0] for r in replies if r[1] and r[2] == 7) == [1, 2, 3, 4, 5, 10]
+        for rid in (20, 21):
+            pool.submit(server.handle, (rid, "count", ("broken.zim",)))
+        with done:
+            assert done.wait_for(lambda: len(replies) == 8, timeout=5)
+        assert [r[1] for r in replies[6:]] == [False, False]
+    finally:
+        release.set()
+        pool.shutdown(wait=True)

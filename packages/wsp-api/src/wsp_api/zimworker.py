@@ -17,10 +17,12 @@ import signal
 import sys
 import threading
 import time
-from collections.abc import Sequence
-from concurrent.futures import ThreadPoolExecutor
+from collections.abc import Callable, Sequence
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import suppress
 from multiprocessing.connection import Connection
+
+from libzim.reader import Archive
 
 from wsp_api.zimread import (
     ArchiveCache,
@@ -51,21 +53,55 @@ def harden() -> None:
         pass
 
 
+def _inline(fn: Callable[..., object], *args: object) -> object:
+    return fn(*args)
+
+
+_ARCHIVE_OPS = frozenset({"read", "count", "random"})  # ops whose first argument is an archive to open
+
+
 class _Server:
-    def __init__(self, out: Connection, max_open: int, test_ops: bool) -> None:
+    def __init__(
+        self, out: Connection, max_open: int, test_ops: bool, submit: Callable[..., object] | None = None
+    ) -> None:
         self.out = out
         self.cache = ArchiveCache(max_open)
         self.test_ops = test_ops
         self.send_lock = threading.Lock()
+        # Runs a handler on the worker's thread pool; None runs it inline (tests).
+        self.submit: Callable[..., object] = submit or _inline
 
     def handle(self, msg: tuple[int, str, tuple[object, ...]]) -> None:
         rid, op, args = msg
+        if op in _ARCHIVE_OPS and args:
+            try:
+                got = self.cache.get_or_wait(str(args[0]))
+            except Exception as exc:
+                self._reply(rid, exc)
+                return
+            if isinstance(got, Future):
+                # Another thread is opening the archive: come back when it is open instead of holding
+                # a thread meanwhile (the open itself fails every waiter with its error).
+                got.add_done_callback(lambda f: self._resume(msg, f))
+                return
         try:
             value = self.run(op, args)
         except Exception as exc:
-            reply: tuple[int, bool, object] = (rid, False, (type(exc).__name__, str(exc)[:500]))
+            self._reply(rid, exc)
         else:
-            reply = (rid, True, value)
+            self._send((rid, True, value))
+
+    def _resume(self, msg: tuple[int, str, tuple[object, ...]], opened: Future[Archive]) -> None:
+        exc = opened.exception()
+        if exc is not None:
+            self._reply(msg[0], exc)
+        else:
+            self.submit(self.handle, msg)
+
+    def _reply(self, rid: int, exc: BaseException) -> None:
+        self._send((rid, False, (type(exc).__name__, str(exc)[:500])))
+
+    def _send(self, reply: tuple[int, bool, object]) -> None:
         # If the pool went away, the main loop ends on EOF.
         with self.send_lock, suppress(OSError, ValueError):
             self.out.send(reply)
@@ -101,8 +137,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     harden()
     signal.signal(signal.SIGINT, signal.SIG_IGN)  # Ctrl-C goes to the API; the pool closes us
     inbox = Connection(args.fd_in, writable=False)
-    server = _Server(Connection(args.fd_out, readable=False), args.max_open, args.test_ops)
     pool = ThreadPoolExecutor(max(1, args.threads), thread_name_prefix="zim")
+    server = _Server(Connection(args.fd_out, readable=False), args.max_open, args.test_ops, pool.submit)
     while True:
         try:
             msg = inbox.recv()

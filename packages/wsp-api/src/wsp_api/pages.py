@@ -20,7 +20,10 @@ from dataclasses import dataclass
 from wsp_core.ids import content_hash
 
 _TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
-_TAG_RE = re.compile(r"<[^>]+>")
+# A tag ends at the first `>` outside quotes: Wikipedia's citation ids can hold markup, e.g.
+# id="cite_ref-...<span_title=&quot;Latin&quot;><i_lang=...>intercessio</i>..." (Sulla, 2026-10-16
+# field exam); `<[^>]+>` stopped inside it and the rest of the tag became text.
+_TAG_RE = re.compile(r"""<[A-Za-z/!?](?:[^>"']|"[^"]*"|'[^']*')*>""")
 _CODE_RE = re.compile(r"<(script|style|noscript)\b[^>]*>.*?</\1\s*>", re.IGNORECASE | re.DOTALL)
 _WS_RE = re.compile(r"\s+")
 
@@ -44,6 +47,35 @@ _BLOCK_RE = re.compile(
 _DISPLAY_RE = re.compile(r"^\{\\displaystyle\s*(.*)\}$", re.DOTALL)
 
 
+# Navigation-only blocks (a field's sidebar, the navboxes at the end): the refined text leaves them out
+# (wsp_adapters.html_text); in the page's text they came before the lead, 100+ lines of links
+# (Arrow's impossibility theorem, Gibbs free energy: 2026-10-16 field exam).
+_NAV_CLASSES = frozenset({"navbox", "vertical-navbox", "sidebar"})
+_NAV_OPEN_RE = re.compile(
+    r"""<(table|div)\b(?:[^>"']|"[^"]*"|'[^']*')*?\bclass=["']([^"']*)["'][^>]*>""", re.I
+)
+
+
+def _without_navigation(html: str) -> str:
+    out: list[str] = []
+    pos = 0
+    while True:
+        m = next((m for m in _NAV_OPEN_RE.finditer(html, pos) if _NAV_CLASSES & set(m[2].split())), None)
+        if m is None:
+            out.append(html[pos:])
+            return "".join(out)
+        out.append(html[pos : m.start()])
+        tags = re.compile(rf"<(/?){m[1]}\b[^>]*>", re.I)
+        depth, end = 1, len(html)
+        for t in tags.finditer(html, m.end()):
+            depth += -1 if t[1] else 1
+            if depth == 0:
+                end = t.end()
+                break
+        out.append("\n")
+        pos = end
+
+
 def _tex(alttext: str) -> str:
     tex = htmllib.unescape(alttext).strip()
     m = _DISPLAY_RE.match(tex)
@@ -54,7 +86,7 @@ def rendered_text(html: str) -> str:
     """The text a reader sees on a rendered page, paragraphs kept, each formula as its TeX source
     (the alttext of the MathML). The text of the Wikipedia dumps drops formulas and measurement
     templates; the ZIM page that renders the article has them (2026-10-14 field exam)."""
-    body = _CODE_RE.sub(" ", _TITLE_RE.sub(" ", html))
+    body = _without_navigation(_CODE_RE.sub(" ", _TITLE_RE.sub(" ", html)))
     body = _MATH_RE.sub(lambda m: _tex(m.group(1)), body)
     body = _MATH_ANY_RE.sub(" ", body)
     body = _BLOCK_RE.sub("\n", body)

@@ -132,7 +132,15 @@ describe('Navigator app', () => {
     // A category that lists only its best-known pages says so (audit 2026-10-12 F8).
     app.navigate('wsp://directory/Arts/Literature/Novels');
     await settled(() => !!main().querySelector('.dir-truncated'));
-    expect(main().querySelector('.dir-truncated')?.textContent).toContain('2 of 7,121');
+    expect(main().querySelector('.dir-truncated')?.textContent).toContain('2 best-known of 7,121');
+    // The rest is one search away, scoped to the site (2026-10-16 field exam).
+    const box = main().querySelector<HTMLInputElement>('.dir-truncated input[type="search"]')!;
+    box.value = 'Emma';
+    box.form!.requestSubmit();
+    await settled(() =>
+      document.querySelector<HTMLInputElement>('#location')!.value.startsWith('wsp://search'),
+    );
+    expect(document.querySelector<HTMLInputElement>('#location')!.value).toContain('source=');
     app.navigate('wsp://search?q=define+sesquipedalian');
     await settled(() => !!main().querySelector('.instant-definition'));
     app.navigate('wsp://random?source=rfc');
