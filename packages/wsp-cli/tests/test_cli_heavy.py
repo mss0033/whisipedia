@@ -419,7 +419,12 @@ def test_the_job_inherits_the_heavy_lock_and_nobody_else_can_forge_it(
 
 
 def _api_health(
-    tmp_path: Path, *, started: str, full_avg60: str, unit_memory: tuple[str, str] | None = None
+    tmp_path: Path,
+    *,
+    started: str,
+    full_avg60: str,
+    unit_memory: tuple[str, str] | None = None,
+    code: str = "000",
 ) -> tuple[str, list[str]]:
     """Run tools/wsp-api-health against a fake systemctl and an API that never answers.
     ``unit_memory``: the unit's (memory.current, memory.high) under a fake cgroup root."""
@@ -435,7 +440,7 @@ def _api_health(
             f'#!/bin/sh\necho "$*" >> {calls}\n'
             f'case "$*" in *ControlGroup*) echo /api.service ;; *show*) echo "{started}" ;; esac\n'
         ),
-        "curl": "#!/bin/sh\nprintf 000\n",
+        "curl": f"#!/bin/sh\nprintf {code}\n",
         "sleep": "#!/bin/sh\n",
     }
     for name, text in scripts.items():
@@ -475,6 +480,21 @@ def test_api_health_restarts_a_silent_api_but_not_under_machine_wide_pressure(tm
     assert "memory pressure" in out
     assert "not restarting" in out
     assert not any("restart" in c for c in calls)
+
+
+def test_api_health_leaves_an_api_that_answers_503(tmp_path: Path) -> None:
+    """2026-10-16: the API answered 503 (its NAS was slow); each restart lost its open archives and
+    the next start was slower still, so the check restarted it every few minutes."""
+    from datetime import UTC, datetime, timedelta
+
+    hour_ago = (datetime.now(UTC) - timedelta(hours=1)).strftime("%a %Y-%m-%d %H:%M:%S UTC")
+    out, calls = _api_health(tmp_path, started=hour_ago, full_avg60="1.00", code="503")
+    assert "not restarting" in out
+    assert not any("restart" in c for c in calls)
+    out, calls = _api_health(
+        tmp_path / "m", started=hour_ago, full_avg60="1.00", code="503", unit_memory=("9", "8")
+    )
+    assert calls[-1] == "--user restart whisipedia-api.service"  # at its own ceiling: still restarted
 
 
 def test_api_health_restarts_an_api_at_its_own_ceiling_even_under_pressure(tmp_path: Path) -> None:

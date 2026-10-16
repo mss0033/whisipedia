@@ -12,6 +12,8 @@
 # (audit 2026-10-12, L3). Unless the API's own cgroup is at its MemoryHigh: then the API is what the
 # machine is short of (on 2026-10-13 it sat over its ceiling for 20 minutes, thrashing the whole
 # machine, and the check declined to restart it because of that very pressure).
+#
+# A 503 is an answer (busy, or its storage is slow): no restart, unless the API is at its MemoryHigh.
 URL="${WSP_API_HEALTH_URL:-http://127.0.0.1:8737/v1/portal}"
 TIMEOUT="${WSP_API_HEALTH_TIMEOUT:-60}"
 MAX_PSI="${WSP_API_HEALTH_MAX_PSI:-20}"
@@ -53,6 +55,13 @@ if [ -n "$over" ]; then
   echo "<4>API did not answer $URL within ${TIMEOUT}s twice (last status $code) and $UNIT is at its" \
     "MemoryHigh ($over bytes); restarting it"
   systemctl --user restart "$UNIT"
+  exit 0
+fi
+if [ "$code" = 503 ]; then
+  # It answered: "busy", or its storage (the NAS) did not answer in time. A restart cures neither; it
+  # threw away the open archives and caches, and the next start waited on the same slow NAS, so the
+  # check restarted it again every few minutes (2026-10-16).
+  echo "<4>API answered $URL with 503 twice (busy or slow storage); not restarting $UNIT"
   exit 0
 fi
 if [ -n "$full" ] && [ "$full" -ge "$MAX_PSI" ]; then

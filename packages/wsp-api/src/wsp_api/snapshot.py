@@ -149,9 +149,17 @@ def load_snapshot(path: Path, specs: Sequence[SourceSpec]) -> LibrarySnapshot | 
     except Exception as exc:
         log.warning("ignoring an unreadable library snapshot %s: %s", path, exc)
         return None
-    if version != SNAPSHOT_CACHE_VERSION or {s.id for s in specs} - set(sources):
+    if version != SNAPSHOT_CACHE_VERSION:
         return None
-    return LibrarySnapshot(time.monotonic(), sources, counts)
+    # A source added to the registry since the file was saved is simply not known yet (an empty state
+    # until the first fresh build). Refusing the whole file made every request after a restart wait
+    # for a full build over the NAS: 15+ minutes of 503s after one new source (2026-10-16).
+    ids = {s.id for s in specs}
+    return LibrarySnapshot(
+        time.monotonic(),
+        {k: v for k, v in sources.items() if k in ids},
+        {k: v for k, v in counts.items() if k in ids},
+    )
 
 
 # --- a value refreshed on a period ------------------------------------------------------------------

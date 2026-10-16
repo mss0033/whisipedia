@@ -23,7 +23,15 @@ def test_a_saved_snapshot_loads_for_the_same_sources(tmp_path: Path) -> None:
     assert loaded is not None
     assert loaded.source("a").current == gen
     assert loaded.doc_counts == {"a": 3}
-    assert load_snapshot(path, [_spec("a"), _spec("new-source")]) is None  # the registry changed
+    # The registry changed since: a new source is not known yet, a removed one is forgotten; the rest
+    # is served (2026-10-16: the whole file was refused and requests waited 15+ minutes for a build).
+    grown = load_snapshot(path, [_spec("a"), _spec("new-source")])
+    assert grown is not None
+    assert grown.source("a").current == gen
+    assert grown.source("new-source").current is None
+    shrunk = load_snapshot(path, [_spec("b")])
+    assert shrunk is not None
+    assert (shrunk.sources, shrunk.doc_counts) == ({}, {})
     path.write_bytes(b"not a pickle")
     assert load_snapshot(path, [_spec("a")]) is None
     assert load_snapshot(tmp_path / "missing", [_spec("a")]) is None
