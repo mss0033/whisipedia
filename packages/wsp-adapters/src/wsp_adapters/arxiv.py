@@ -59,6 +59,7 @@ import zstandard
 
 from wsp_adapters._common import access, int_option, plan_missing, upstream_dir, verify_file
 from wsp_adapters._streams import Throttle
+from wsp_adapters.pdftext import page_text
 from wsp_core.ids import content_hash, make_doc_id
 from wsp_core.model import (
     Checksum,
@@ -331,7 +332,7 @@ def pdf_text(path: Path, max_pages: int) -> str:
             page = pdf[i]
             try:
                 textpage = page.get_textpage()
-                out.append(textpage.get_text_range())
+                out.append(page_text(page, textpage))
                 textpage.close()
             finally:
                 page.close()

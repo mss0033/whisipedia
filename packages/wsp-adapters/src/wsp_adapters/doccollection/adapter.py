@@ -88,6 +88,7 @@ from wsp_adapters.doccollection.policy import (
     parse_markings,
 )
 from wsp_adapters.html_text import html_to_text
+from wsp_adapters.pdftext import page_text
 from wsp_core.banners import banner_for
 from wsp_core.ids import content_hash, make_doc_id
 from wsp_core.memory import drop_file_cache
@@ -1011,7 +1012,7 @@ def pdf_text(path: Path, max_pages: int) -> str:
             page = pdf[i]
             try:
                 textpage = page.get_textpage()
-                out.append(textpage.get_text_range())
+                out.append(page_text(page, textpage))
                 textpage.close()
             finally:
                 page.close()

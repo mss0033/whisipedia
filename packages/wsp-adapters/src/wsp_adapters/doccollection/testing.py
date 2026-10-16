@@ -10,8 +10,10 @@ def _escape(text: str) -> str:
     return text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
 
 
-def make_pdf(pages: Sequence[Sequence[str]]) -> bytes:
-    """A valid PDF with one Helvetica text line per string, one page per inner sequence."""
+def make_pdf(pages: Sequence[Sequence[str | tuple[float, float, str]]]) -> bytes:
+    """A valid PDF with one Helvetica text line per string, one page per inner sequence. A line given
+    as ``(x, y, text)`` is drawn there (PDF points from the bottom left); a string is the next line
+    down the left margin."""
     objects: list[bytes] = []
     n_pages = len(pages)
     page_ids = [3 + 2 * i for i in range(n_pages)]
@@ -20,8 +22,13 @@ def make_pdf(pages: Sequence[Sequence[str]]) -> bytes:
     kids = " ".join(f"{p} 0 R" for p in page_ids)
     objects.append(f"<< /Type /Pages /Kids [{kids}] /Count {n_pages} >>".encode())
     for i, lines in enumerate(pages):
+        placed = [
+            line if isinstance(line, tuple) else (50.0, 750.0 - 14 * n, line) for n, line in enumerate(lines)
+        ]
         content = (
-            "BT /F1 11 Tf 50 750 Td " + " ".join(f"({_escape(line)}) Tj 0 -14 Td" for line in lines) + " ET"
+            "BT /F1 11 Tf "
+            + " ".join(f"1 0 0 1 {x:g} {y:g} Tm ({_escape(t)}) Tj" for x, y, t in placed)
+            + " ET"
         )
         page = (
             f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents {page_ids[i] + 1} 0 R "
