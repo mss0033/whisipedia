@@ -226,7 +226,7 @@ def cmd_index_build(args: argparse.Namespace, out: TextIO) -> int:
                 if not args.source:
                     out.write("--refine-again needs --source\n")
                     return 2
-                reports = [ix.refine_again(args.source)]
+                reports = [ix.refine_again(args.source, swap=bool(getattr(args, "swap", False)))]
             else:
                 reports = ix.build([args.source] if args.source else None)
             changed = any(r.upserted or r.deleted or r.refined for r in reports)

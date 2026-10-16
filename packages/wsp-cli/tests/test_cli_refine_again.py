@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from wsp_cli.indexer import PENDING_FILE, REPLACED_DIR, Indexer
+from wsp_cli.indexer import PENDING_FILE, REPLACED_DIR, STAGING_DIR, Indexer
 from wsp_core.ids import content_hash, make_doc_id
 from wsp_core.model import DocRecord, Generation, GenerationStatus, SourceSpec, SourceStatus, Tier
 from wsp_index import SqliteChangeFeed, TantivyIndex
@@ -122,6 +122,41 @@ def test_a_deferred_suggest_rebuild_is_left_for_a_later_run(tmp_path: Path) -> N
         assert ix.refine_again(SID).upserted == 1
         assert rebuilt == []
         assert [h.doc_id for h in ix.index.search("moon")] == [make_doc_id(SID, "tides")]  # committed
+    finally:
+        ix.close()
+
+
+def test_a_copy_in_use_is_staged_and_swapped_in_later(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 2026-10-16: the NAS share refused to rename Gutenberg's refined copy while the API held a file
+    # of it open.
+    adapter = Adapter()
+    ix = indexer(tmp_path, adapter)
+    source_dir = tmp_path / "index" / "refinery" / SID
+    try:
+        ix.build([SID])
+        adapter.full = True
+        real = Indexer._move_aside  # pyright: ignore[reportPrivateUsage]
+
+        def in_use(*_a: object) -> Path:
+            raise PermissionError(13, "Permission denied")
+
+        monkeypatch.setattr(Indexer, "_move_aside", staticmethod(in_use))
+        report = ix.refine_again(SID)
+        assert (report.skipped or "").startswith("staged")
+        assert is_sealed(source_dir / STAGING_DIR / "2026-01")
+        assert ix.index.search("moon") == []  # nothing indexed yet; the old copy still serves
+        assert (ix.refine_again(SID).skipped or "").startswith("staged")  # again: the staged copy is reused
+        monkeypatch.setattr(Indexer, "_move_aside", staticmethod(real))
+        assert (ix.refine_again(SID, swap=True).skipped or "").startswith("swapped")
+        assert not (source_dir / STAGING_DIR / "2026-01").exists()
+        assert (source_dir / REPLACED_DIR / PENDING_FILE).is_file()
+        report = ix.refine_again(SID)  # indexes the swapped-in copy against the replaced one
+        assert (report.upserted, report.deleted) == (1, 0)
+        assert [h.doc_id for h in ix.index.search("moon")] == [make_doc_id(SID, "tides")]
+        assert not (source_dir / REPLACED_DIR / PENDING_FILE).exists()
+        assert ix.refine_again(SID, swap=True).skipped == "nothing staged to swap in"
     finally:
         ix.close()
 

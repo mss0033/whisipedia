@@ -411,6 +411,12 @@ def build_parser(argv: Sequence[str] | None = None) -> argparse.ArgumentParser:
         "and index the changes; the old refined copy is kept under <refinery>/<source>/_replaced/",
     )
     s.add_argument(
+        "--swap",
+        action="store_true",
+        help="with --refine-again: move a copy staged because the old one was in use into place "
+        "(stop the API first; seconds), then run --refine-again again to index it",
+    )
+    s.add_argument(
         "--reindex",
         action="store_true",
         help="with --source: write its indexed generation to the search index again (no change records), "

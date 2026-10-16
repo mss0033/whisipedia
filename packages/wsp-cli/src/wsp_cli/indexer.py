@@ -81,6 +81,7 @@ PROGRESS_EVERY = 10_000
 STATE_FILE = "index-state.json"
 REPLACED_DIR = "_replaced"  # <refinery>/<source>/_replaced/: refined copies a refine-again replaced
 PENDING_FILE = "PENDING"  # in REPLACED_DIR: the replaced copy a refine-again still diffs from
+STAGING_DIR = "_staging"  # <refinery>/<source>/_staging/<gid>: a refine-again waiting for its swap
 
 
 class IndexStateError(RuntimeError):
@@ -278,10 +279,18 @@ class Indexer:
             return part_dir(self.refinery, spec.id, generation_id)
         return generation_dir(self.refinery, spec.id, generation_id)
 
-    def refine(self, spec: SourceSpec, generation: Generation, generation_path: Path) -> RefineResult:
-        """Write the generation's documents to Refinery Parquet (skipped if already sealed)."""
+    def refine(
+        self,
+        spec: SourceSpec,
+        generation: Generation,
+        generation_path: Path,
+        *,
+        directory: Path | None = None,
+    ) -> RefineResult:
+        """Write the generation's documents to Refinery Parquet (skipped if already sealed), in its
+        refined directory or ``directory``."""
         gid = generation.generation_id
-        out_dir = self.refined_dir(spec, gid)
+        out_dir = directory or self.refined_dir(spec, gid)
         if is_sealed(out_dir):
             meta = json.loads((out_dir / SUCCESS_FILE).read_text(encoding="utf-8"))
             return RefineResult(int(meta.get("docs", 0)))
@@ -582,13 +591,19 @@ class Indexer:
         self._say(f"{source_id}: {gid} written again ({stats.upserted:,} documents)")
         return SourceReport(source_id, indexed=gid, upserted=stats.upserted, deleted=stats.deleted)
 
-    def refine_again(self, source_id: str) -> SourceReport:
+    def refine_again(self, source_id: str, *, swap: bool = False) -> SourceReport:
         """Refine the current generation of a source once more and index what changed: the adapter
         learned to read more of the same files (LibreTexts pages were app stubs, 2026-10-16).
 
         The sealed refined copy is moved to ``<source>/_replaced/<generation>-<stamp>`` (the diff base;
         never deleted here) and ``_replaced/PENDING`` names it until the index has the new copy, so an
-        interrupted run resumes from the same base instead of replacing the new copy again."""
+        interrupted run resumes from the same base instead of replacing the new copy again.
+
+        A copy the library is reading cannot be moved: the NAS share refuses to rename a directory
+        with a file open in it, and the API holds Gutenberg's open (2026-10-16). Then the new copy is
+        refined into ``<source>/_staging/<generation>`` and the run stops there; ``swap=True`` (with
+        the API stopped, a matter of seconds) moves the old copy aside and the staged one in, and the
+        next run indexes it."""
         spec = self.specs.get(source_id)
         if spec is None:
             return SourceReport(source_id, skipped="not in the registry")
@@ -601,15 +616,27 @@ class Indexer:
         out_dir = self.refined_dir(spec, gid)
         replaced = out_dir.parent / REPLACED_DIR
         pending = replaced / PENDING_FILE
+        staged = out_dir.parent / STAGING_DIR / gid
         old_dir: Path | None = None
+        if swap:
+            if pending.is_file() or not is_sealed(staged):
+                return SourceReport(source_id, skipped="nothing staged to swap in")
+            old_dir = self._move_aside(out_dir, replaced, gid)
+            staged.rename(out_dir)
+            self._say(f"{source_id}: the staged copy of {gid} swapped in; the next run indexes it")
+            return SourceReport(source_id, skipped="swapped; run --refine-again again to index it")
         if pending.is_file():
             old_dir = replaced / pending.read_text(encoding="utf-8").strip()
             self._say(f"{source_id}: resuming the refine-again from {old_dir.name}")
         elif is_sealed(out_dir):
-            replaced.mkdir(parents=True, exist_ok=True)
-            old_dir = replaced / f"{gid}-{time.strftime('%Y%m%dT%H%M%S', time.gmtime())}"
-            out_dir.rename(old_dir)
-            _write_durably(pending, old_dir.name + "\n")
+            try:
+                old_dir = self._move_aside(out_dir, replaced, gid)
+            except PermissionError:
+                self._say(f"{source_id}: {gid} is in use and cannot be moved; refining into {STAGING_DIR}")
+                self.refine(spec, current, self.vault.generation_path(source_id, gid), directory=staged)
+                return SourceReport(
+                    source_id, skipped="staged; stop the API, run --refine-again --swap, start it again"
+                )
             self._say(f"{source_id}: {gid} moved to {REPLACED_DIR}/{old_dir.name}; refining again")
         result = self.refine(spec, current, self.vault.generation_path(source_id, gid))
         base = old_dir if old_dir is not None and is_sealed(old_dir) else None
@@ -619,6 +646,15 @@ class Indexer:
         return SourceReport(
             source_id, ((gid, result.doc_count or 0),), rep.indexed, rep.upserted, rep.deleted
         )
+
+    @staticmethod
+    def _move_aside(out_dir: Path, replaced: Path, gid: str) -> Path:
+        """Move a sealed refined copy to ``_replaced/`` and name it in ``PENDING``."""
+        replaced.mkdir(parents=True, exist_ok=True)
+        old_dir = replaced / f"{gid}-{time.strftime('%Y%m%dT%H%M%S', time.gmtime())}"
+        out_dir.rename(old_dir)
+        _write_durably(replaced / PENDING_FILE, old_dir.name + "\n")
+        return old_dir
 
     def build(self, source_ids: Sequence[str] | None = None) -> list[SourceReport]:
         """Refine and index the vault's current generation of each source (for a partitioned source,
