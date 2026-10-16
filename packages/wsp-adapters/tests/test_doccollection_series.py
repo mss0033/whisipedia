@@ -40,7 +40,7 @@ def test_series_editions_are_superseded_by_the_newer_release() -> None:
     current = {k for k, v in labels.items() if v.currency is Currency.CURRENT}
     assert current == {"t2", "td", "e4", "g6"}
     assert labels["t1"].superseded_by == "t2"
-    assert labels["t1"].banner == f"Superseded by {TITLES['t2']} (2026-02-19)."
+    assert labels["t1"].banner == f"Superseded by a newer edition: {TITLES['t2']} (2026-02-19)."
     assert labels["g5"].superseded_by == "g6"
 
 
@@ -48,3 +48,20 @@ def test_without_the_rule_nothing_changes() -> None:
     eds = [Edition(k, "", "", "", t) for k, t in TITLES.items()]
     labels = assign_currency(eds, CurrencyRules())
     assert all(v.currency is Currency.CURRENT for v in labels.values())
+
+
+def test_volumes_of_one_publication_are_not_editions_of_each_other() -> None:
+    from wsp_adapters.doccollection.policy import part_of
+
+    pub = "American Practical Navigator (2019 Edition Archive)"
+    eds = [
+        Edition("nga:APN-2019--Bowditch_Vol_1_2019", pub, "2019-01-01", "", pub),
+        Edition("nga:APN-2019--Bowditch_Vol_2_2019", pub, "2021-07-15", "", pub),
+        Edition("nga:APN-2019--Bowditch_Vol_1_2019b", pub, "2021-07-15", "", pub),
+    ]
+    labels = assign_currency(eds, CurrencyRules())
+    assert labels["nga:APN-2019--Bowditch_Vol_2_2019"].currency is Currency.CURRENT
+    assert labels["nga:APN-2019--Bowditch_Vol_1_2019"].superseded_by == "nga:APN-2019--Bowditch_Vol_1_2019b"
+    for word in ("Handbook", "Bookdash", "volcano", "partial", "Part-Time"):
+        assert part_of(Edition(word, "", "", "", word)) == "", word
+    assert part_of(Edition("x", "", "", "", "Field Manual Part II")) == "part ii"

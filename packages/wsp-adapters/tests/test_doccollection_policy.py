@@ -204,7 +204,7 @@ def test_currency_superseded_chain_and_historical_rules() -> None:
     assert labels["army:FM-5-0:2014"].currency is Currency.SUPERSEDED
     assert labels["army:FM-5-0:2014"].superseded_by == "army:FM-5-0:2022"
     assert labels["army:FM-5-0:2010"].superseded_by == "army:FM-5-0:2014"
-    assert labels["army:FM-5-0:2014"].banner == "Superseded by FM 5-0 (2022-11-04)."
+    assert labels["army:FM-5-0:2014"].banner == "Superseded by a newer edition: FM 5-0 (2022-11-04)."
     assert labels["army:FM-6-0:2022"].banner is None
     old = assign_currency(eds, CurrencyRules(historical_before="2012-01-01"))
     assert old["army:FM-5-0:2010"].historical

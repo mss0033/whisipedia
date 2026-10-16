@@ -1122,6 +1122,20 @@ def title_date(title: str) -> str:
     return found
 
 
+_PART_RE = re.compile(
+    r"(?<![A-Za-z])(?:vol(?:ume)?|part|pt|book|bk|tome|section|sect)[\s._-]*((?:\d+)|(?:[ivxlc]+)(?![a-z]))",
+    re.IGNORECASE,
+)
+
+
+def part_of(ed: Edition) -> str:
+    """The volume or part an edition is (``"vol 1"``), from its key or title, else ``""``. Volumes of
+    one publication share its number or name but are not editions of each other: Bowditch's 2019
+    Volume I was labelled superseded by Volume II (field exam round 2)."""
+    m = _PART_RE.search(ed.key) or _PART_RE.search(ed.title)
+    return f"part {m.group(1).lower()}" if m else ""
+
+
 def series_of(title: str, rules: CurrencyRules) -> str:
     """The series a numberless edition belongs to (``CurrencyRules.series``), else ``""``."""
     for rx in rules.series:
@@ -1168,7 +1182,9 @@ def assign_currency(editions: Sequence[Edition], rules: CurrencyRules) -> dict[s
         series = "" if ed.pub_number else series_of(ed.title, rules)
         if series:  # ordered by the release date the title names (dated editions sort first)
             ed = replace(ed, edition_date=title_date(ed.title) or ed.edition_date)
-        groups.setdefault(normalize_pub_number(ed.pub_number) or series or ed.key, []).append(ed)
+        group = normalize_pub_number(ed.pub_number) or series
+        part = part_of(ed) if group else ""
+        groups.setdefault(f"{group}#{part}" if group and part else group or ed.key, []).append(ed)
     out: dict[str, CurrencyLabel] = {}
     for pub, eds in groups.items():
         ordered = edition_order(eds)
@@ -1188,7 +1204,9 @@ def assign_currency(editions: Sequence[Edition], rules: CurrencyRules) -> dict[s
             banner = HISTORICAL_BANNER if historical else None
             if currency is Currency.SUPERSEDED and newer is not None and not historical:
                 when = f" ({newer.edition_date})" if newer.edition_date else ""
-                banner = f"Superseded by {newer.pub_number or newer.title or newer.key}{when}."
+                banner = (
+                    f"Superseded by a newer edition: {newer.pub_number or newer.title or newer.key}{when}."
+                )
             out[ed.key] = CurrencyLabel(
                 currency=currency,
                 historical=historical,
