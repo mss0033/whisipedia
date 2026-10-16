@@ -287,3 +287,29 @@ def test_domain_lookups_are_memoized(tmp_path: Path) -> None:
         v.domain_of("wiki")
     assert v.listings == 1
     assert not memoize_domains(object())
+
+
+def test_archives_other_pages_render_with_open_first() -> None:
+    from wsp_api.snapshot import warm_order
+    from wsp_core.model import SourceSpec, SourceStatus, Tier
+
+    def spec(sid: str, **access: object) -> SourceSpec:
+        return SourceSpec(
+            id=sid,
+            name=sid,
+            tier=Tier.T1,
+            status=SourceStatus.ACTIVE,
+            license="x",
+            legal_basis="x",
+            domain=("encyclopedia",),
+            adapter="kiwix-opds",
+            raw={"access": {"adapter": "kiwix-opds", **access}},
+        )
+
+    specs = [
+        spec("askubuntu"),
+        spec("dump", rendition=[{"lang": "en", "source": "wikipedia-en-zim"}]),
+        spec("stackexchange"),
+        spec("wikipedia-en-zim"),
+    ]
+    assert [s.id for s in warm_order(specs)] == ["wikipedia-en-zim", "askubuntu", "dump", "stackexchange"]

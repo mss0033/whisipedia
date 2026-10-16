@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from types import MethodType
-from typing import Protocol
+from typing import Protocol, cast
 
 from wsp_api.errors import ApiError
 from wsp_api.schemas import OpsStatus, ProposalInfo
@@ -395,7 +395,7 @@ class LibraryState:
         This also opens each current ZIM once, so the first page view does not wait for it."""
         if self.home_finder is None:
             return
-        for spec in self._specs:
+        for spec in warm_order(self._specs):
             cur = snap.source(spec.id).current
             if spec.adapter != ZIM_ADAPTER or cur is None:
                 continue
@@ -411,6 +411,21 @@ class LibraryState:
                 continue
             with self._homes_lock:
                 self._homes[key] = native
+
+
+def warm_order(specs: Sequence[SourceSpec]) -> list[SourceSpec]:
+    """Sources in the order their archives are opened after a start: first the ones other sources'
+    pages render with (``access.rendition``: the Wikipedia, Wiktionary and Wikisource ZIMs), then the
+    rest in registry order. In registry order the 127 GB Wikipedia ZIM opened after Stack Exchange's
+    181 archives, and every encyclopedia page timed out for an hour after each restart (2026-10-16)."""
+    served: set[str] = set()
+    for spec in specs:
+        access = spec.raw.get("access")
+        rules = cast(Mapping[str, object], access).get("rendition") if isinstance(access, Mapping) else None
+        for rule in cast(list[object], rules) if isinstance(rules, list) else []:
+            if isinstance(rule, Mapping):
+                served.add(str(cast(Mapping[str, object], rule).get("source", "")))
+    return sorted(specs, key=lambda s: s.id not in served)  # stable: registry order within each group
 
 
 class SnapshotVault:
