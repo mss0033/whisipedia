@@ -568,3 +568,28 @@ def test_new_aliases_mark_the_trie_dirty_not_stale(tmp_path: Path) -> None:
         idx.mark_suggest_dirty()
         assert not idx.suggest_rebuild_due()
         assert idx.suggest_rebuild_due(now=time.time() + 3601)
+
+
+def test_a_book_is_found_by_its_byline_and_hits_show_its_title(tmp_path: Path) -> None:
+    # 2026-10-16 field exam: "Livy History of Rome" never found the Gutenberg book.
+    idx = TantivyIndex(tmp_path / "lex")
+    body = "The history of the Roman people from the foundation of the city. " * 200
+    book = DocRecord(
+        make_doc_id("gutenberg", "19725"),
+        "gutenberg",
+        "19725",
+        "The History of Rome, Books 01 to 08",
+        "en",
+        "PD",
+        body,
+        meta={"byline": "Livy"},
+    )
+    other = DocRecord(
+        make_doc_id("gutenberg", "1"), "gutenberg", "1", "The History of Rome", "en", "PD", body
+    )
+    idx.upsert([book, other])
+    idx.commit()
+    hits = idx.search("Livy History of Rome")
+    assert hits[0].doc_id == book.doc_id
+    assert hits[0].title == "The History of Rome, Books 01 to 08"
+    idx.close()

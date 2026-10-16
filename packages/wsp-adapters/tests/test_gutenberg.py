@@ -133,6 +133,7 @@ def test_books_with_texts_catalog_only_and_reading_copy(generation_dir: Path, tm
     assert one.text.endswith("It was a dark night.")
     assert "License text" not in one.text
     assert one.aliases == ("Book the First",)
+    assert one.meta == {"byline": "A. Author"}  # searched with the title (wsp_index.lexical)
     assert one.links == ("wsp:gutenberg-zim/Book One.1", "https://en.wikipedia.org/wiki/A_Author")
     assert one.url_native == "https://www.gutenberg.org/ebooks/1"
     assert docs["2"].lang == "fr"
@@ -162,3 +163,15 @@ def test_helpers() -> None:
     assert strip_boilerplate("no markers") == "no markers"
     summary, alternatives, pages = parse_rdf(rdf(5, "Short."))
     assert (summary, alternatives, pages) == ("Short.", (), ("https://en.wikipedia.org/wiki/A_Author",))
+
+
+def test_byline_names_the_authors_as_a_reader_does() -> None:
+    from wsp_adapters.gutenberg import byline
+
+    assert byline("Livy, 59 BCE-16; Spillan, D. (Daniel), -1854 [Translator]") == "Livy"
+    assert byline("Austen, Jane, 1775-1817") == "Jane Austen"
+    assert byline("Shelley, Mary Wollstonecraft, 1797-1851") == "Mary Wollstonecraft Shelley"
+    assert byline("Marx, Karl, 1818-1883; Engels, Friedrich, 1820-1895") == "Karl Marx, Friedrich Engels"
+    assert byline("Homer, 751? BCE-651? BCE; Butler, Samuel, 1835-1902 [Translator]") == "Homer"
+    assert byline("Smith, J. [Editor]") == ""
+    assert byline("") == ""

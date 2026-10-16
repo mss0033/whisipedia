@@ -62,7 +62,7 @@ import numpy.typing as npt
 import tantivy
 
 from wsp_core.ids import DocId
-from wsp_core.model import DocRecord, SearchHit
+from wsp_core.model import BYLINE_META, DocRecord, SearchHit
 from wsp_index.linkrank import RANK_FILE, StaticRank, key64
 from wsp_index.localfs import ensure_local
 from wsp_index.suggest import (
@@ -436,6 +436,10 @@ class TantivyIndex:
                 tdoc.add_unsigned("doc_key", int(key))
                 tdoc.add_unsigned("source_key", self._source_key(doc.source_id))
                 tdoc.add_text(f"title_{route}", doc.title)
+                if doc.meta and (by := doc.meta.get(BYLINE_META, "").strip()):
+                    # A second title value: a book is found by its author as by its title (hits show
+                    # the first value only).
+                    tdoc.add_text(f"title_{route}", by)
                 tdoc.add_text(f"text_{route}", doc.text)
                 if replace:
                     writer.delete_documents_by_term("doc_id", doc.doc_id)

@@ -59,6 +59,7 @@ from wsp_adapters._common import (
 from wsp_adapters._streams import open_bz2
 from wsp_core.ids import InvalidDocIdError, content_hash, make_doc_id
 from wsp_core.model import (
+    BYLINE_META,
     DocRecord,
     FetchPlan,
     FetchResult,
@@ -116,6 +117,37 @@ def strip_boilerplate(text: str) -> str:
     if end is not None:
         text = text[: end.start()]
     return text.strip()
+
+
+_ROLE_RE = re.compile(r"\[([^\]]+)\]\s*$")
+_DATES_RE = re.compile(r"^(?:\d|-|\?|active|fl\.|ca\.|BCE|CE|AD|BC|\s)+", re.IGNORECASE)
+_BYLINE_AUTHORS = 3
+
+
+def byline(authors: str) -> str:
+    """The authors of a catalog row as a reader names them: ``Livy, 59 BCE-16; Spillan, D. (Daniel),
+    -1854 [Translator]`` is ``Livy``; ``Austen, Jane, 1775-1817`` is ``Jane Austen``. Translators,
+    editors and other contributors are left out; at most three authors."""
+    names: list[str] = []
+    for raw in authors.split(";"):
+        raw = raw.strip()
+        role = _ROLE_RE.search(raw)
+        if role is not None:
+            if role[1].strip().casefold() != "author":
+                continue
+            raw = raw[: role.start()].strip()
+        parts = [p.strip() for p in raw.split(",")]
+        parts = [p for p in parts if p and not _DATES_RE.fullmatch(p)]
+        parts = [re.sub(r"\s*\([^)]*\)", "", p).strip() for p in parts]  # "D. (Daniel)" -> "D."
+        parts = [p for p in parts if p]
+        if not parts:
+            continue
+        name = parts[0] if len(parts) == 1 else f"{parts[1]} {parts[0]}"
+        if name not in names:
+            names.append(name)
+        if len(names) == _BYLINE_AUTHORS:
+            break
+    return ", ".join(names)
 
 
 def load_catalog(path: Path) -> dict[int, Book]:
@@ -357,4 +389,7 @@ class _Renderer:
             links=tuple(dict.fromkeys(links)),
             content_hash=content_hash(text),
             aliases=tuple(a for a in book.alternatives if a != book.title),
+            # Searchable with the title (wsp_index.lexical): "Livy History of Rome" found encyclopedia
+            # pages and never the book, whose author was only in its 1.4 M characters of text.
+            meta={BYLINE_META: by} if (by := byline(book.authors)) else {},
         )

@@ -286,6 +286,9 @@ class Generation:
     sealed_at: datetime | None = None
 
 
+BYLINE_META = "byline"  # DocRecord.meta: the authors as a reader names them; searched with the title
+
+
 @dataclass(frozen=True, slots=True)
 class DocRecord:
     """Normalized document emitted by adapters for the Refinery (PLAN §9.1)."""
