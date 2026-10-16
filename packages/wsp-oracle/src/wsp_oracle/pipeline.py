@@ -272,7 +272,9 @@ class OracleSearcher:
         book (Open Library's editions and Stack Exchange users named so outscored its long text in
         BM25), and within Gutenberg a Hungarian translation led the English edition (the reranker's
         scores saturate near 1.0 for every title match; 2026-10-12). Translations and other sites'
-        titles are still found, one per source, after the query language's.
+        titles are still found, one per source, after the query language's. A title with a qualifier
+        in parentheses comes after one without: "new york times" led with "New York Times
+        (disambiguation)" over "The New York Times", both four words (2026-10-16).
         """
         if route.intent not in (Intent.NAVIGATE, Intent.LOOKUP) or not route.title:
             return []
@@ -280,14 +282,14 @@ class OracleSearcher:
         if not words:
             return []
         lang = query_language(route.title.split()) or "en"
-        best: dict[str, tuple[tuple[bool, int, int], SearchHit]] = {}
+        best: dict[str, tuple[tuple[bool, bool, int, int], SearchHit]] = {}
         for i, h in enumerate(candidates):
             title = _words_of(h.title)
             if h.doc_id in pinned or not words <= set(title) or len(title) > 2 * len(words):
                 continue
             if not self._pinnable(route.query, h):
                 continue
-            key = (not h.lang or primary_lang(h.lang) != lang, len(title), i)
+            key = (not h.lang or primary_lang(h.lang) != lang, "(" in h.title, len(title), i)
             src = h.source_id or source_of(h.doc_id)
             if src not in best or key < best[src][0]:
                 best[src] = (key, h)
@@ -302,23 +304,31 @@ class OracleSearcher:
         Incident Command System, 17th (2026-10-16 field exam). One-word titles never qualify: every
         question about water holds the title "Water".
 
+        A page-name query whose own title pins nothing qualifies too: "Kant categorical imperative"
+        put "Categorical" and the Simple English article first and the English Wikipedia article
+        20th (2026-10-16 field exam). Between equal titles the heavier source leads.
+
         First, though, a page whose title begins with the whole query (four words or more; the
         shortest such title): a title too long for a page-name query is asked as a question, and
         "Pilot's Handbook of Aeronautical Knowledge" led with the handbook's Addendum, not the
         handbook "Pilot's Handbook of Aeronautical Knowledge, FAA-H-8083-25C (Full Version)"
         (2026-10-16 field exam)."""
-        if route.intent not in (Intent.ASK, Intent.HOW_TO):
+        if route.intent not in (Intent.ASK, Intent.HOW_TO) and not (
+            route.intent is Intent.LOOKUP and not pinned
+        ):
             return []
         query = _words_of(route.query)
-        best: tuple[tuple[int, int, int], SearchHit] | None = None
+        best: tuple[tuple[int, int, float, int], SearchHit] | None = None
         for i, h in enumerate(candidates):
             title = _words_of(h.title)
             if h.doc_id in pinned:
                 continue
+            src = h.source_id or source_of(h.doc_id)
+            weight = -self.source_weights.get(src, 1.0)  # a tie goes to the reference copy
             if len(query) >= 4 and title[: len(query)] == query:
-                key = (0, len(title), i)
+                key = (0, len(title), weight, i)
             elif 2 <= len(title) < len(query) and _holds(query, title):
-                key = (1, -len(title), i)
+                key = (1, -len(title), weight, i)
             else:
                 continue
             if not self._pinnable(route.query, h):

@@ -204,7 +204,7 @@ def test_a_question_holding_a_title_word_for_word_leads_with_that_page(tmp_path:
     )
     res = searcher.run("Incident Command System span of control")
     assert res.hits[0].doc_id == make_doc_id("wiki", "en/ICS")
-    # The longest held title wins; one-word titles, the whole query and page-name queries never.
+    # The longest held title wins; one-word titles and the whole query never.
     route = searcher.router.route("history of the roman republic and its army")
     hits = [
         SearchHit(DocId(f"wsp:wiki/{t}"), 1.0, t, "", "wiki") for t in ("Rome", "Roman republic", "Republic")
@@ -235,3 +235,34 @@ def test_a_question_that_begins_a_title_leads_with_that_page(library: TantivyInd
     three = searcher.router.route("what is knowledge")  # too short to name a title by its start
     essay = [SearchHit(DocId("wsp:w/k"), 1.0, "What is knowledge? An essay", "", "w")]
     assert searcher._embedded_title(three, essay, set()) == []  # pyright: ignore[reportPrivateUsage]
+
+
+def test_a_page_name_query_holding_a_title_leads_with_the_reference_copy(library: TantivyIndex) -> None:
+    # 2026-10-16 field exam: "Kant categorical imperative" listed "Categorical" and the Simple English
+    # article first and the English Wikipedia article 20th.
+    searcher = _searcher(library)
+    searcher.source_weights = {"wikipedia-top10": 1.15}
+    route = searcher.router.route("Kant categorical imperative")
+    hits = [
+        SearchHit(DocId(f"wsp:{src}/{t}"), 1.0, t.replace("_", " "), "", src)
+        for src, t in (
+            ("wiki", "Categorical"),
+            ("simple", "Categorical_imperative"),
+            ("wikipedia-top10", "Categorical_imperative"),
+        )
+    ]
+    pins = searcher._embedded_title(route, hits, set())  # pyright: ignore[reportPrivateUsage]
+    assert [h.doc_id for h in pins] == ["wsp:wikipedia-top10/Categorical_imperative"]
+    # A query whose own title already pinned a page keeps it alone.
+    assert searcher._embedded_title(route, hits, {"wsp:x/y"}) == []  # pyright: ignore[reportPrivateUsage]
+
+
+def test_a_title_without_a_qualifier_leads_one_with(library: TantivyIndex) -> None:
+    searcher = _searcher(library)
+    route = searcher.router.route("new york times")
+    hits = [
+        SearchHit(DocId(f"wsp:wiki/{n}"), 1.0, t, "", "wiki", lang="en")
+        for n, t in (("d", "New York Times (disambiguation)"), ("t", "The New York Times"))
+    ]
+    pins = searcher._title_pins(route, hits, set())  # pyright: ignore[reportPrivateUsage]
+    assert [h.doc_id for h in pins] == ["wsp:wiki/t"]

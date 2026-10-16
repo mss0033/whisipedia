@@ -824,9 +824,10 @@ class TantivyIndex:
         words = text.split()
         phrase: list[tuple[tantivy.Occur, tantivy.Query]] = []
         if self.config.phrase_boost > 0 and 2 <= len(words) <= PHRASE_MAX_WORDS and '"' not in text:
-            together, _errors = self._index.parse_query_lenient(
-                f'"{" ".join(words)}"~1', fields, field_boosts=boosts
-            )
+            # Body text only: a title holding the words already scores at title_boost, and Open Library
+            # cards titled "New York Times ..." then buried the newspaper's article (2026-10-16).
+            texts = [f for f in fields if f.startswith("text_")]
+            together, _errors = self._index.parse_query_lenient(f'"{" ".join(words)}"~1', texts)
             phrase = [(tantivy.Occur.Should, tantivy.Query.boost_query(together, self.config.phrase_boost))]
         if require_all and len(words) > 1 and '"' not in text:
             every, _errors = self._index.parse_query_lenient(
@@ -970,6 +971,18 @@ class TantivyIndex:
             hits = self._top(searcher, parsed, wide, sources, without=sorted(crowded))
             pool += self._with_sources(searcher, hits)
         pool.sort(key=lambda t: -t[0])  # stable: equal scores keep the order Tantivy gave them
+        # Each document once: a later round finds the uncrowded sources' documents again (another
+        # passage, or the same one), and the copies took their source's places: "new york times" kept
+        # three Wikipedia pages of six places and lost the newspaper's article (2026-10-16).
+        keys = searcher.fast_field_values("doc_key", [a for _, a, _ in pool])
+        seen: set[tuple[int, int] | int] = set()
+        unique: list[tuple[float, tantivy.DocAddress, str]] = []
+        for entry, key in zip(pool, keys, strict=True):
+            mark = int(key) if key is not None else (entry[1].segment_ord, entry[1].doc)
+            if mark not in seen:
+                seen.add(mark)
+                unique.append(entry)
+        pool = unique
         taken: Counter[str] = Counter()
         head: list[tuple[float, tantivy.DocAddress]] = []
         overflow: list[tuple[float, tantivy.DocAddress]] = []

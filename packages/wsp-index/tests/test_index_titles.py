@@ -253,3 +253,26 @@ def test_a_shared_window_runs_the_query_once_unless_a_source_crowds_it_out(
         assert calls["n"] == 2  # big filled the wider window: run again without it
         assert sum(h.source_id == "small" for h in window.hits) == 3
         assert sum(h.source_id == "big" for h in window.hits) == 7
+
+
+def test_a_document_found_again_in_a_later_round_takes_one_place(tmp_path: Path) -> None:
+    # 2026-10-16: the rerun without a crowded source found the other sources' documents again, and the
+    # copies took their places ("new york times" kept three Wikipedia pages of six places).
+    from wsp_index.lexical import DIVERSE_WIDTH
+
+    with TantivyIndex(tmp_path / "ix", SMALL) as idx:
+        # small leads, big crowds the rest of the 10 best, and small is found again without big.
+        idx.upsert([doc("big", f"hi{i}", "Lantern", "lantern oil for the lamp") for i in range(10)])
+        idx.upsert([doc("small", f"s{i}", "Lantern lantern", "lantern lantern") for i in range(3)])
+        idx.upsert(
+            [
+                doc("big", f"lo{i}", "Other", "a lantern and many other words in a longer text")
+                for i in range(10 * DIVERSE_WIDTH)
+            ]
+        )
+        idx.commit()
+        window = idx.search_window("lantern", limit=10, per_source=3)
+        ids = [h.doc_id for h in window.hits]
+        assert len(ids) == len(set(ids))
+        assert sum(h.source_id == "small" for h in window.hits) == 3
+        assert sum(h.source_id == "big" for h in window.hits) == 7
