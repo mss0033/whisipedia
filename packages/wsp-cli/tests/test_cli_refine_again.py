@@ -110,6 +110,22 @@ def test_refine_again_indexes_what_the_adapter_now_reads(tmp_path: Path) -> None
         ix.close()
 
 
+def test_a_deferred_suggest_rebuild_is_left_for_a_later_run(tmp_path: Path) -> None:
+    adapter = Adapter()
+    ix = indexer(tmp_path, adapter)
+    try:
+        ix.build([SID])
+        adapter.full = True
+        ix.defer_suggest = True
+        rebuilt: list[bool] = []
+        ix.index.rebuild_suggest = lambda: rebuilt.append(True)  # type: ignore[method-assign]
+        assert ix.refine_again(SID).upserted == 1
+        assert rebuilt == []
+        assert [h.doc_id for h in ix.index.search("moon")] == [make_doc_id(SID, "tides")]  # committed
+    finally:
+        ix.close()
+
+
 def test_an_interrupted_refine_again_resumes_from_the_same_base(tmp_path: Path) -> None:
     adapter = Adapter()
     ix = indexer(tmp_path, adapter)

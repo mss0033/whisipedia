@@ -399,6 +399,12 @@ def build_parser(argv: Sequence[str] | None = None) -> argparse.ArgumentParser:
         help="skip the spelling vocabulary (run `wsp index spell` after a batch)",
     )
     s.add_argument(
+        "--no-suggest",
+        action="store_true",
+        help="leave the suggest rebuild (about 30 minutes) to a later build: for all but the last "
+        "build of a batch",
+    )
+    s.add_argument(
         "--refine-again",
         action="store_true",
         help="with --source: refine its current generation once more (an adapter now reads more of it) "

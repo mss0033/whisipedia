@@ -194,6 +194,9 @@ class Indexer:
         else:
             self._feed, self._open_feed = None, cast(Callable[[], ChangeFeed], feed)
         self._changed = False  # anything indexed this run (suggest is rebuilt once, in finish())
+        # A batch of builds (one source each) leaves the rebuild to its last one: a full rebuild reads
+        # every indexed title, about 30 minutes whatever the source (2026-10-16).
+        self.defer_suggest = False
         self.user_agent = user_agent
         self.out = out
         self.clock = clock
@@ -227,8 +230,13 @@ class Indexer:
         """Rebuild the suggest trie once (bulk commits defer it) when a rebuild is due
         (:meth:`TantivyIndex.suggest_rebuild_due`); a small overlay on a fresh trie waits for a later
         run. Checked even when this run changed nothing, so a nightly build that finds everything
-        indexed still folds a dirty trie once it is old (review 2026-10-14 #1c)."""
-        if self.index.suggest_rebuild_due():
+        indexed still folds a dirty trie once it is old (review 2026-10-14 #1c). With
+        :attr:`defer_suggest` the changes are committed and the rebuild is left for a later run."""
+        if self.defer_suggest:
+            if self._changed:
+                self.index.commit(rebuild_suggest=False)
+                self._say("suggest: rebuild deferred (--no-suggest); left for a later run")
+        elif self.index.suggest_rebuild_due():
             started = self.clock()
             self.index.rebuild_suggest()
             self._say(f"suggest: rebuilt in {self.clock() - started:.1f}s; {memory_line()}")

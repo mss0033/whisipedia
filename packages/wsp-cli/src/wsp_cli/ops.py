@@ -216,6 +216,7 @@ def cmd_index_build(args: argparse.Namespace, out: TextIO) -> int:
     lay, cfg, specs = _context(args)
     try:
         with _index_writer(cfg), open_indexer(cfg, lay, specs, out) as ix:
+            ix.defer_suggest = bool(getattr(args, "no_suggest", False))
             if getattr(args, "reindex", False):
                 if not args.source:
                     out.write("--reindex needs --source\n")
