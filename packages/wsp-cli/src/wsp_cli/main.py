@@ -404,6 +404,12 @@ def build_parser(argv: Sequence[str] | None = None) -> argparse.ArgumentParser:
         help="with --source: refine its current generation once more (an adapter now reads more of it) "
         "and index the changes; the old refined copy is kept under <refinery>/<source>/_replaced/",
     )
+    s.add_argument(
+        "--reindex",
+        action="store_true",
+        help="with --source: write its indexed generation to the search index again (no change records), "
+        "after the index learned to read more of the same rows",
+    )
     s = add(
         "merge",
         _ops("cmd_index_merge"),

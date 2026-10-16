@@ -136,3 +136,21 @@ def test_refine_again_says_why_it_cannot(tmp_path: Path) -> None:
         assert ix.refine_again("nope").skipped == "not in the registry"
     finally:
         ix.close()
+
+
+def test_reindex_writes_the_indexed_generation_again_without_change_records(tmp_path: Path) -> None:
+    adapter = Adapter()
+    adapter.full = True
+    ix = indexer(tmp_path, adapter)
+    try:
+        ix.build([SID])
+        before = ix.index.num_docs
+        records, _ = ix.feed.since(None, limit=1000)
+        report = ix.reindex(SID)
+        assert (report.indexed, report.upserted, report.skipped) == ("2026-01", 2, None)
+        assert ix.index.num_docs == before  # replaced, not added twice
+        assert [h.doc_id for h in ix.index.search("moon")] == [make_doc_id(SID, "tides")]
+        assert ix.feed.since(None, limit=1000)[0] == records  # no change records
+        assert ix.reindex("nope").skipped == "not in the registry"
+    finally:
+        ix.close()

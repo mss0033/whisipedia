@@ -91,6 +91,40 @@ SCHEMA_FIELDS = 2
 TANTIVY_POINTER = "TANTIVY.txt"
 
 
+PASSAGE_SEP = "\x00"
+"""``<doc id>\\x00<n>``: the n-th passage of a long document (a doc id never holds a NUL: ZIM paths and
+file names cannot). Passages share the document's title, source, language and ``doc_key``; the first
+passage is the document's own entry. Search folds them into the document (:func:`passage_parent`)."""
+PASSAGE_FETCH_SLACK = 1.5  # candidates fetched per place asked for, so folded passages leave no gap
+
+
+def passage_parent(doc_id: str) -> str:
+    """The document a passage id belongs to (any other id is itself)."""
+    return doc_id.split(PASSAGE_SEP, 1)[0]
+
+
+def split_passages(text: str, size: int) -> list[str]:
+    """``text`` in pieces of about ``size`` characters, cut after a line break where there is one in the
+    second half of a piece, else after a space, else hard."""
+    out: list[str] = []
+    start = 0
+    while len(text) - start > size:
+        window = text[start : start + size]
+        cut = window.rfind("\n", size // 2)
+        if cut < 0:
+            cut = window.rfind(" ", size // 2)
+        end = start + (cut + 1 if cut >= 0 else size)
+        out.append(text[start:end])
+        start = end
+    out.append(text[start:])
+    return out
+
+
+def _regex_literal(s: str) -> str:
+    """``s`` as a Tantivy (Rust regex) literal: every non-alphanumeric character as ``\\x{..}``."""
+    return "".join(c if c.isascii() and c.isalnum() else f"\\x{{{ord(c):x}}}" for c in s)
+
+
 def tantivy_dir(lexical: Path) -> Path:
     """The Tantivy index of the lexical directory ``lexical``: the one ``TANTIVY.txt`` names, else
     ``lexical/tantivy``."""
@@ -198,6 +232,11 @@ class TantivyConfig:
     """Weight of the link-analysis static rank added to BM25 (0 switches it off)."""
     rank_depth: int = 100
     """BM25 hits re-sorted with the static rank; deeper hits keep their BM25 order."""
+    passage_min_chars: int = 60_000
+    """A document longer than this is indexed as passages of about :attr:`passage_chars` (0: never).
+    Scored whole, a 1.4M-character book or handbook sank under BM25's length normalisation: "running
+    fix" never found Bowditch, nor "Livy History of Rome" the book (2026-10-16 field exam)."""
+    passage_chars: int = 30_000
     coordination_boost: float = 1.0
     """Extra BM25 weight for documents that match every query word (0 switches it off). Matching is
     any-word, so without it a page holding one rare word plus a source prior can outrank pages about
@@ -427,23 +466,31 @@ class TantivyIndex:
             staged: list[SuggestEntry] = []
             batch = list(docs)
             keys = key64([d.doc_id for d in batch]) if batch else np.zeros(0, np.uint64)
+            min_chars, size = self.config.passage_min_chars, self.config.passage_chars
+            had: set[str] = self._with_passages([d.doc_id for d in batch]) if replace else set()
             for doc, key in zip(batch, keys.tolist(), strict=True):
                 route = self.route(doc.lang)
-                tdoc = tantivy.Document()
-                tdoc.add_text("doc_id", doc.doc_id)
-                tdoc.add_text("source_id", doc.source_id)
-                tdoc.add_text("lang", doc.lang)
-                tdoc.add_unsigned("doc_key", int(key))
-                tdoc.add_unsigned("source_key", self._source_key(doc.source_id))
-                tdoc.add_text(f"title_{route}", doc.title)
-                if doc.meta and (by := doc.meta.get(BYLINE_META, "").strip()):
-                    # A second title value: a book is found by its author as by its title (hits show
-                    # the first value only).
-                    tdoc.add_text(f"title_{route}", by)
-                tdoc.add_text(f"text_{route}", doc.text)
+                # A second title value: a book is found by its author as by its title (hits show the
+                # first value only).
+                by = doc.meta.get(BYLINE_META, "").strip() if doc.meta else ""
+                long = min_chars > 0 and size > 0 and len(doc.text) > min_chars
+                parts = split_passages(doc.text, size) if long else [doc.text]
                 if replace:
                     writer.delete_documents_by_term("doc_id", doc.doc_id)
-                writer.add_document(tdoc)
+                    if doc.doc_id in had:
+                        self._delete_passages(writer, doc.doc_id)
+                for i, part in enumerate(parts):
+                    tdoc = tantivy.Document()
+                    tdoc.add_text("doc_id", doc.doc_id if i == 0 else f"{doc.doc_id}{PASSAGE_SEP}{i}")
+                    tdoc.add_text("source_id", doc.source_id)
+                    tdoc.add_text("lang", doc.lang)
+                    tdoc.add_unsigned("doc_key", int(key))
+                    tdoc.add_unsigned("source_key", self._source_key(doc.source_id))
+                    tdoc.add_text(f"title_{route}", doc.title)
+                    if by:
+                        tdoc.add_text(f"title_{route}", by)
+                    tdoc.add_text(f"text_{route}", part)
+                    writer.add_document(tdoc)
                 if doc.title:
                     aliases = tuple(a for a in doc.aliases if a.strip())
                     staged.append(SuggestEntry(doc.doc_id, doc.title, aliases, 0.0))
@@ -453,13 +500,29 @@ class TantivyIndex:
             self._after_write(n)
         return n
 
+    def _with_passages(self, doc_ids: Sequence[str]) -> set[str]:
+        """The ids among ``doc_ids`` indexed as passages (committed state: one term-set query a batch;
+        a regex delete for every document would cost a term-dictionary walk each)."""
+        if not doc_ids:
+            return set()
+        firsts = {f"{d}{PASSAGE_SEP}1": d for d in doc_ids}
+        found = self.present(list(firsts))
+        return {firsts[f] for f in found}
+
+    def _delete_passages(self, writer: tantivy.IndexWriter, doc_id: str) -> None:
+        pattern = f"{_regex_literal(doc_id)}{_regex_literal(PASSAGE_SEP)}[0-9]+"
+        writer.delete_documents_by_query(tantivy.Query.regex_query(self._schema, "doc_id", pattern))
+
     def delete(self, doc_ids: Iterable[DocId]) -> int:
         """Delete by id. Returns the number of ids processed (unknown ids are not an error)."""
         ids = list(dict.fromkeys(doc_ids))
         with self._lock:
             writer = self._get_writer()
+            had = self._with_passages(ids)
             for doc_id in ids:
                 writer.delete_documents_by_term("doc_id", doc_id)
+                if doc_id in had:
+                    self._delete_passages(writer, doc_id)
             if self._suggest_room(len(ids)):
                 gone = set(ids)
                 # Commit applies removals before upserts, so drop staged upserts of these ids.
@@ -843,7 +906,17 @@ class TantivyIndex:
             clauses.append((tantivy.Occur.MustNot, excluded))
         clauses += self._prior_clauses
         q = parsed if len(clauses) == 1 else tantivy.Query.boolean_query(clauses)
-        return [(float(sc), a) for sc, a in searcher.search(q, n, count=False, offset=0).hits]
+        if self.config.passage_min_chars <= 0:
+            return [(float(sc), a) for sc, a in searcher.search(q, n, count=False, offset=0).hits]
+        # Each document once, at its best passage: asked a little deeper so the folded list still holds
+        # ``n`` documents (fewer only when the query has no more).
+        k = int(n * PASSAGE_FETCH_SLACK) + 1
+        while True:
+            raw = [(float(sc), a) for sc, a in searcher.search(q, k, count=False, offset=0).hits]
+            folded = self._fold_passages(searcher, raw)
+            if len(folded) >= n or len(raw) < k:
+                return folded[:n]
+            k *= 2
 
     def _diverse(
         self,
@@ -955,6 +1028,25 @@ class TantivyIndex:
         hits = self._top(searcher, anyq, n, sources, per_source=per_source)
         return hits, 0, len(hits) < n
 
+    @staticmethod
+    def _fold_passages(
+        searcher: tantivy.Searcher, pool: list[tuple[float, tantivy.DocAddress]]
+    ) -> list[tuple[float, tantivy.DocAddress]]:
+        """Each document once, at its best-placed passage (from the ``doc_key`` fast column: passages
+        share their document's key; no stored document is read)."""
+        if not pool:
+            return pool
+        keys = searcher.fast_field_values("doc_key", [a for _, a in pool])
+        seen: set[int] = set()
+        out: list[tuple[float, tantivy.DocAddress]] = []
+        for hit, key in zip(pool, keys, strict=True):
+            if key is not None:
+                if int(key) in seen:
+                    continue
+                seen.add(int(key))
+            out.append(hit)
+        return out
+
     def _search(
         self,
         query: str,
@@ -993,7 +1085,7 @@ class TantivyIndex:
         hits: list[SearchHit] = []
         for score, doc in scored:
             route = self.route(str(doc.get_first("lang") or ""))
-            doc_id = str(doc.get_first("doc_id"))
+            doc_id = passage_parent(str(doc.get_first("doc_id")))
             hits.append(
                 SearchHit(
                     doc_id=DocId(doc_id),
@@ -1023,7 +1115,7 @@ class TantivyIndex:
         """doc id -> snippet, from the stored text or, when none is stored, from ``texts``."""
         if not docs:
             return {}
-        ids = [str(d.get_first("doc_id")) for d in docs]
+        ids = [passage_parent(str(d.get_first("doc_id"))) for d in docs]
         external: Mapping[str, str] = {}
         if not self.config.store_text:
             if self.texts is None:

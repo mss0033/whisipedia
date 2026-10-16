@@ -216,7 +216,12 @@ def cmd_index_build(args: argparse.Namespace, out: TextIO) -> int:
     lay, cfg, specs = _context(args)
     try:
         with _index_writer(cfg), open_indexer(cfg, lay, specs, out) as ix:
-            if getattr(args, "refine_again", False):
+            if getattr(args, "reindex", False):
+                if not args.source:
+                    out.write("--reindex needs --source\n")
+                    return 2
+                reports = [ix.reindex(args.source)]
+            elif getattr(args, "refine_again", False):
                 if not args.source:
                     out.write("--refine-again needs --source\n")
                     return 2

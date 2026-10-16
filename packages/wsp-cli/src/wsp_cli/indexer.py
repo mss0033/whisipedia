@@ -555,6 +555,25 @@ class Indexer:
 
     # --- whole runs ----------------------------------------------------------------------------
 
+    def reindex(self, source_id: str) -> SourceReport:
+        """Write every document of the indexed generation of a source to the search index again, in
+        place, without change records: the index learned to read more of the same Refinery rows (long
+        documents as passages, the byline of a book; 2026-10-16), which the content diff never sees."""
+        spec = self.specs.get(source_id)
+        if spec is None:
+            return SourceReport(source_id, skipped="not in the registry")
+        if spec.partitioned:
+            return SourceReport(source_id, skipped="reindex is for unpartitioned sources")
+        gid = self._state().get(source_id)
+        gen_dir = generation_dir(self.refinery, source_id, gid) if gid else None
+        if gid is None or gen_dir is None or not is_sealed(gen_dir):
+            return SourceReport(source_id, skipped="not indexed yet")
+        stats = refresh(self.index, None, None, self._reader(gen_dir), progress=self._say)
+        self.index.commit(rebuild_suggest=False)
+        self._changed = True
+        self._say(f"{source_id}: {gid} written again ({stats.upserted:,} documents)")
+        return SourceReport(source_id, indexed=gid, upserted=stats.upserted, deleted=stats.deleted)
+
     def refine_again(self, source_id: str) -> SourceReport:
         """Refine the current generation of a source once more and index what changed: the adapter
         learned to read more of the same files (LibreTexts pages were app stubs, 2026-10-16).

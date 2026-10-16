@@ -593,3 +593,50 @@ def test_a_book_is_found_by_its_byline_and_hits_show_its_title(tmp_path: Path) -
     assert hits[0].doc_id == book.doc_id
     assert hits[0].title == "The History of Rome, Books 01 to 08"
     idx.close()
+
+
+def test_a_long_document_is_found_by_a_passage_deep_inside_and_listed_once(tmp_path: Path) -> None:
+    # 2026-10-16 field exam: "running fix" never found Bowditch (1.4M characters, scored whole).
+    from wsp_index.lexical import PASSAGE_SEP, TantivyConfig, split_passages
+
+    idx = TantivyIndex(tmp_path / "lex", config=TantivyConfig(passage_min_chars=6_000, passage_chars=2_000))
+    filler = "The navigator keeps a careful watch on the weather and the sea.\n" * 300  # ~19k chars
+    long_text = filler + "To plot a running fix, advance the earlier line of position.\n" + filler
+    bowditch = DocRecord(
+        make_doc_id("nga", "bowditch"),
+        "nga",
+        "bowditch",
+        "American Practical Navigator",
+        "en",
+        "PD",
+        long_text,
+    )
+    noise = [
+        DocRecord(
+            make_doc_id("so", f"q{i}"), "so", f"q{i}", f"Fix my build {i}", "en", "CC", "running the fix"
+        )
+        for i in range(30)
+    ]
+    idx.upsert([bowditch, *noise])
+    idx.commit()
+    hits = idx.search('"running fix" line of position advance', limit=40)
+    ids = [h.doc_id for h in hits]
+    assert ids[0] == bowditch.doc_id
+    assert ids.count(bowditch.doc_id) == 1
+    assert not any(PASSAGE_SEP in i for i in ids)
+    assert idx.search("navigator watch weather", limit=5)[0].title == "American Practical Navigator"
+    # Replaced by a short version, then deleted: its passages go with it.
+    idx.upsert([replace(bowditch, text="A short abstract.")])
+    idx.commit()
+    assert [h.doc_id for h in idx.search("running fix advance", limit=40)] == [
+        h.doc_id for h in idx.search("running fix advance", limit=40) if h.doc_id != bowditch.doc_id
+    ]
+    idx.upsert([bowditch])
+    idx.commit()
+    assert idx.search("advance earlier line", limit=3)[0].doc_id == bowditch.doc_id
+    idx.delete([bowditch.doc_id])
+    idx.commit()
+    assert bowditch.doc_id not in [h.doc_id for h in idx.search("navigator weather advance", limit=50)]
+    assert idx.num_docs == 30
+    assert "".join(split_passages(long_text, 2_000)) == long_text
+    idx.close()

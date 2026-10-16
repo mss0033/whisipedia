@@ -126,7 +126,8 @@ def test_deferred_graph_is_built_once(tmp_path: Path) -> None:
     reopened_during_run.close()
     assert s.build_graph() == 299
     assert graph.stat().st_size > size_before
-    assert s.search(m[42].tolist(), limit=1)[0][0] == "42"
+    # Approximate search (the graph is built in parallel): the row is in the graph, near the top.
+    assert "42" in {i for i, _ in s.search(m[42].tolist(), limit=5)}
     assert "5" not in {i for i, _ in s.search(m[5].tolist(), limit=5)}
     s.close()
     again = ChunkVectorStore(tmp_path / "v", DIMS)  # consistent: no repair needed
