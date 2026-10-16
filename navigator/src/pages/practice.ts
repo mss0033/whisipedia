@@ -119,13 +119,35 @@ export async function render(ctx: PageContext): Promise<PageResult> {
  * The pools of the hall, found once a session: every visit ran the same 2-5 s search (review
  * 2026-10-14). Reload (F5) looks again.
  */
-let hallPools: Promise<SearchHit[]> | null = null;
+let hallPools: Promise<HallPool[]> | null = null;
 
-function poolList(ctx: PageContext): Promise<SearchHit[]> {
+/** A pool of the hall; ``superseded``: a newer release replaced it (its edition status, PLAN D13). */
+interface HallPool {
+  hit: SearchHit;
+  superseded: boolean;
+}
+
+function poolList(ctx: PageContext): Promise<HallPool[]> {
   if (!hallPools || ctx.opts.reload) {
     const found = ctx.app.api
       .search({ q: 'question pool', source: POOL_SOURCE, page_size: 20 })
-      .then((r) => r.hits.filter((hit) => !/diagrams?/i.test(hit.title)));
+      .then(async (r) => {
+        const hits = r.hits.filter((hit) => !/diagrams?/i.test(hit.title));
+        // Each pool's edition status (one metadata read each, once a session): the hall listed the
+        // superseded Dec 2025 pool beside the current one with nothing to tell them apart
+        // (2026-10-16 field exam). A failed read leaves a pool unlabelled.
+        const currency = await Promise.all(
+          hits.map((hit) =>
+            ctx.app.api.document(hit.doc_id).then(
+              (d) => d.currency ?? null,
+              () => null,
+            ),
+          ),
+        );
+        return hits
+          .map((hit, i) => ({ hit, superseded: currency[i] === 'superseded' }))
+          .sort((a, b) => Number(a.superseded) - Number(b.superseded));
+      });
     found.catch(() => {
       if (hallPools === found) hallPools = null; // a failure is not remembered
     });
@@ -151,11 +173,11 @@ async function hall(ctx: PageContext): Promise<PageResult> {
     return { title: 'Exam Practice Hall', body };
   }
   const pools = await poolList(ctx);
-  const byClass = new Map<string, SearchHit[]>();
-  for (const hit of pools) {
-    const cls = /\b(Technician|General|Extra)\b/i.exec(hit.title)?.[1] ?? 'Other';
+  const byClass = new Map<string, HallPool[]>();
+  for (const pool of pools) {
+    const cls = /\b(Technician|General|Extra)\b/i.exec(pool.hit.title)?.[1] ?? 'Other';
     const key = cls[0]!.toUpperCase() + cls.slice(1).toLowerCase();
-    byClass.set(key, [...(byClass.get(key) ?? []), hit]);
+    byClass.set(key, [...(byClass.get(key) ?? []), pool]);
   }
   body.append(
     h(
@@ -174,15 +196,16 @@ async function hall(ctx: PageContext): Promise<PageResult> {
       h(
         'ul',
         { class: 'pool-list' },
-        hits.map((hit) =>
+        hits.map(({ hit, superseded }) =>
           h(
             'li',
-            null,
+            superseded ? { class: 'superseded' } : null,
             wspLink(
               makeAddress('practice', nativeOf(hit.doc_id)),
               hit.title.replace(/\.pdf$/i, ''),
             ),
             hit.as_of ? h('span', { class: 'as-of' }, ` · ${formatDate(hit.as_of)}`) : null,
+            superseded ? h('span', { class: 'currency' }, ' · superseded by a newer pool') : null,
           ),
         ),
       ),

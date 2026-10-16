@@ -37,6 +37,13 @@ describe('Exam Practice Hall', () => {
     const link = main().querySelector<HTMLAnchorElement>('.pool-list a')!;
     expect(link.textContent).toContain('2026-2030 Technician Pool');
     expect(link.getAttribute('href')).toContain('#wsp://practice/ncvec');
+    // The superseded pool is labelled and listed after the current one.
+    await settled(() => main().querySelectorAll('.pool-list li').length === 2);
+    const items = [...main().querySelectorAll('.pool-list li')];
+    expect(items[0]?.textContent).toContain('2026-2030');
+    expect(items[0]?.classList.contains('superseded')).toBe(false);
+    expect(items[1]?.textContent).toContain('2022-2026');
+    expect(items[1]?.textContent).toContain('superseded by a newer pool');
   });
 
   it('shows the syllabus and drills a question, remembering the answer', async () => {

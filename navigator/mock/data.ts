@@ -836,6 +836,36 @@ property of some one or other of their daughters.
     },
   },
   {
+    // A pool a newer release replaced: the hall labels it and lists it after the current one.
+    source_id: 'ncvec-question-pools',
+    native_id: 'ncvec:2022-2026-Technician-Pool-Errata:2025',
+    title: '2022-2026 Technician Question Pool Dec 18 2025.pdf',
+    kind: 'other',
+    lang: 'en',
+    license: 'Public domain',
+    url_native: 'https://ncvec.org/downloads/2022-2026%20Technician%20Pool.pdf',
+    format: 'text',
+    currency: 'superseded',
+    versions: [
+      {
+        revision: '2025',
+        timestamp: T('2025-12-18'),
+        text: `2022-2026 Technician Question Pool Dec 18 2025.pdf
+Issuer: NCVEC Question Pool Committee
+
+T1A01 (C) [97.1]
+Which of the following is part of the Basis and Purpose of the Amateur Radio Service?
+A. Providing personal radio communications for as many citizens as possible
+B. Providing communications for international contesting
+C. Advancing skills in the technical and communication phases of the radio art
+D. All these choices are correct
+~~`,
+      },
+    ],
+    links: [],
+    entities: [],
+  },
+  {
     source_id: 'ncvec-question-pools',
     native_id: 'ncvec:2026-2030-Technician-Pool-and-Syllabus-Public-Release:2026',
     title: '2026-2030 Technician Pool and Syllabus Public Release Feb 19 2026.pdf',
