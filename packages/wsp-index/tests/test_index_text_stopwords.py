@@ -24,6 +24,13 @@ def test_only_the_query_language_function_words_go() -> None:
         assert drop_stopwords(q) == q
     assert drop_stopwords("how do vaccines work") == "vaccines work"
     assert drop_stopwords("causes of the cold war") == "causes cold war"
+    # A long query: one English function word is enough, and a possessive's "s" goes.
+    long = "Arrow s impossibility theorem conditions unrestricted domain Pareto independence of irrelevant"
+    assert drop_stopwords(long) == (
+        "Arrow impossibility theorem conditions unrestricted domain Pareto independence irrelevant"
+    )
+    assert drop_stopwords("Doctor Who s") == "Doctor Who"
+    assert drop_stopwords("s") == "s"  # a word on its own is kept
 
 
 def test_explicit_stopwords_still_drop() -> None:

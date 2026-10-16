@@ -228,6 +228,9 @@ def query_language(words: Sequence[str]) -> str | None:
     return "en" if "en" in top else None
 
 
+LONG_QUERY_WORDS = 6
+
+
 def content_terms(text: str) -> list[str]:
     """The query's words without the function words of its own language, in order.
 
@@ -239,8 +242,16 @@ def content_terms(text: str) -> list[str]:
     """
     # whitespace words, punctuation trimmed: a regex \w would split Devanagari at its marks
     raw = [w.strip(_EDGE_PUNCT) for w in text.split()]
-    raw = [w for w in raw if w]
+    # A possessive's "s" (the apostrophe is query syntax: "Arrow's" arrives as "Arrow s") is in
+    # nearly every document: one of the longest posting lists, for no meaning.
+    raw = [w for i, w in enumerate(raw) if w and not (i and w in ("s", "S"))]
     lang = query_language(raw)
+    if lang is None and len(raw) >= LONG_QUERY_WORDS and any(w.casefold() in STOPWORDS["en"] for w in raw):
+        # One English function word decides a long query: two are asked so that "el nino" is not
+        # Spanish scaffolding, but a run of six words or more is no name. "Arrow's impossibility
+        # theorem conditions ... independence of irrelevant alternatives" kept "of" and "s" and took
+        # 23 s on the full index, 1.8 s without them (2026-10-16 field exam).
+        lang = "en"
     stop = STOPWORDS.get(lang, frozenset[str]()) if lang else frozenset[str]()
     question = bool(QUESTION.search(text) or HOW_TO.match(text))
     if not question and 2 * sum(w.casefold() in stop for w in raw) >= len(raw):
