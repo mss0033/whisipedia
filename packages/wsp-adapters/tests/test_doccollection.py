@@ -978,3 +978,11 @@ def test_pdf_dates() -> None:
     assert pdf_date("2015") == "2015"
     assert pdf_date("D:20151399") == "2015"
     assert pdf_date("garbage") == ""
+
+
+def test_words_hyphenated_across_a_pdf_line_are_joined() -> None:
+    # pdfium's U+FFFE line-break hyphen split "following" in Bowditch (2026-10-16 field exam).
+    from wsp_adapters.doccollection.adapter import _LINE_HYPHEN  # pyright: ignore[reportPrivateUsage]
+
+    text = "the fol￾\r\nlowing method; posi￾tion; avail￾ \navable; a real-hyphen word"
+    assert _LINE_HYPHEN.sub("", text) == "the following method; position; availavable; a real-hyphen word"

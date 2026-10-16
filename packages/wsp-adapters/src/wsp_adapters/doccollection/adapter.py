@@ -1017,9 +1017,16 @@ def pdf_text(path: Path, max_pages: int) -> str:
                 page.close()
         # A form feed between pages: policy._edge_banner reads page edges. U+FFFD (a glyph the PDF does
         # not map to a character, e.g. the USDA tables' spacing) becomes a space.
-        return "\n\f\n".join(out).replace("\ufffd", " ").replace("\u00ad", "")  # soft hyphens split words
+        text = "\n\f\n".join(out).replace("\ufffd", " ").replace("\u00ad", "")  # soft hyphens split words
+        return _LINE_HYPHEN.sub("", text)
     finally:
         pdf.close()
+
+
+# pdfium writes U+FFFE for a hyphen that breaks a word at the end of a line ("fol\ufffe\r\nlowing"):
+# the word is joined again. It split "following" and "position" in Bowditch, so neither searching nor
+# finding them worked (2026-10-16 field exam).
+_LINE_HYPHEN = re.compile("\ufffe[ \t]*(?:\r?\n)?")
 
 
 class Extracted(NamedTuple):
