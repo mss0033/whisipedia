@@ -144,6 +144,27 @@ def test_fetch_screens_quarantines_and_ingest_seals(vault: FileVault, tmp_path: 
     assert again.skipped == 1
     assert not (incoming / "_plans" / "targets.d" / "test-pubs-2026-11-10.json").exists()
 
+    # --refetch: the key is downloaded again whatever the listing says; identical bytes stay skipped.
+    import wsp_cli.doccollections as dc
+
+    seen: list[str] = []
+    real = dc.unchanged
+
+    def spy(cand: Candidate, held: object, **kw: object) -> bool:
+        seen.append(cand.key)
+        return real(cand, held, **kw)  # type: ignore[arg-type]
+
+    dc.unchanged = spy  # type: ignore[assignment]
+    try:
+        forced = runner(vault, OBJECTS, tmp_path).run(
+            s, version="2026-12-10", refetch=frozenset({"test:FM-5-0_2022.pdf"})
+        )
+    finally:
+        dc.unchanged = real
+    assert "test:FM-5-0_2022.pdf" not in seen
+    assert forced.fetched == []  # downloaded, byte-identical, not kept
+    assert forced.skipped == 1
+
 
 def test_dry_run_counts_and_renders(tmp_path: Path) -> None:
     s = spec(OBJECTS)

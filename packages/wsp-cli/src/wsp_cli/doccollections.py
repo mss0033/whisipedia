@@ -32,7 +32,7 @@ import subprocess
 import sys
 import tempfile
 from collections import deque
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
@@ -468,7 +468,10 @@ class CollectionFetcher:
         max_pages: int | None = None,
         dry_run: bool = False,
         partition: str | None = None,
+        refetch: Collection[str] = (),
     ) -> FetchReport:
+        """``refetch``: document keys downloaded again even when the listing says the held bytes are
+        current (repair of a record whose metadata outran its file)."""
         coll = collection_spec(spec)
         if coll is None:
             raise bootstrap.ConfigError(f"{spec.id} is not a document collection")
@@ -529,7 +532,7 @@ class CollectionFetcher:
 
         try:
             for cand in docs:
-                if unchanged(cand, held_meta.get(cand.key)):
+                if cand.key not in refetch and unchanged(cand, held_meta.get(cand.key)):
                     report.skipped += 1  # held, and the listing says the same bytes: not downloaded again
                     continue
                 if pool is not None and cand.resolve != "git":
@@ -1144,6 +1147,7 @@ def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
         max_pages=args.max_pages,
         dry_run=args.dry_run,
         partition=partition,
+        refetch=frozenset(getattr(args, "refetch", None) or ()),
     )
     if report.pending:
         out.write(
@@ -1233,6 +1237,12 @@ def register(sub: Any, add: Any) -> None:
     s.add_argument("--limit", type=int, default=None, help="at most this many documents")
     s.add_argument("--max-pages", type=int, default=None, help="listing pages per discoverer")
     s.add_argument("--dry-run", action="store_true", help="discover and classify only")
+    s.add_argument(
+        "--refetch",
+        action="append",
+        metavar="KEY",
+        help="download this document key again even if the held copy looks current (repeatable)",
+    )
     s.add_argument(
         "--partition",
         default=None,
