@@ -16,6 +16,7 @@ from collections import OrderedDict
 from collections.abc import Callable, Hashable
 from concurrent.futures import Future
 from dataclasses import dataclass
+from urllib.parse import unquote
 
 from wsp_core.ids import content_hash
 
@@ -26,6 +27,27 @@ _TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 _TAG_RE = re.compile(r"""<[A-Za-z/!?](?:[^>"']|"[^"]*"|'[^']*')*>""")
 _CODE_RE = re.compile(r"<(script|style|noscript)\b[^>]*>.*?</\1\s*>", re.IGNORECASE | re.DOTALL)
 _WS_RE = re.compile(r"\s+")
+
+
+_HREF_RE = re.compile(r"""<a\b[^>]*?\bhref\s*=\s*["']([^"']+)["']""", re.IGNORECASE)
+_MAX_PAGE_LINKS = 2000
+
+
+def page_links(html: str) -> tuple[str, ...]:
+    """Outbound links of a rendered page, in order, once each: a library address as its document id
+    (``wsp://src/a%20b#x`` -> ``wsp:src/a b``), a web link as it is. In-page anchors are left out."""
+    out: dict[str, None] = {}
+    for m in _HREF_RE.finditer(html):
+        href = htmllib.unescape(m.group(1)).strip()
+        if href.startswith("wsp://"):
+            path = unquote(href[len("wsp://") :].split("#", 1)[0])
+            if "/" in path.strip("/"):
+                out[f"wsp:{path}"] = None
+        elif href.startswith(("http://", "https://")):
+            out[href] = None
+        if len(out) >= _MAX_PAGE_LINKS:
+            break
+    return tuple(out)
 
 
 def page_title(html: str) -> str:

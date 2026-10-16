@@ -41,3 +41,14 @@ def test_navigation_blocks_are_left_out_and_quoted_markup_stays_in_its_tag() -> 
         '<div role="navigation" class="navbox"><div class="navbox">Inner</div>Outer</div><p>After.</p></body>'
     )
     assert rendered_text(html).split("\n") == ["Gibbs free energy is a potential. [1]", "After."]
+
+
+def test_a_rendered_page_lists_its_links() -> None:
+    from wsp_api.pages import page_links
+
+    html = (
+        '<a href="wsp://gutenberg-zim/The%20Boy%20Electrician.63207#ch1">book</a> <a href="#top">top</a>'
+        " <A HREF='https://xkcd.com/about/'>about</A> <a href=\"wsp://gutenberg-zim/The%20Boy%20Electrician.63207\">again</a>"
+        ' <a href="wsp://rfc">a site</a> <a href="mailto:x@y">mail</a>'
+    )
+    assert page_links(html) == ("wsp:gutenberg-zim/The Boy Electrician.63207", "https://xkcd.com/about/")

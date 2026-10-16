@@ -22,7 +22,7 @@ from wsp_api.htmlrewrite import VERSION as REWRITE_VERSION
 from wsp_api.htmlrewrite import rewrite_html
 from wsp_api.offload import Offload
 from wsp_api.originals import FILE_REF, stored_file
-from wsp_api.pages import ByteLRU, Rendered, render
+from wsp_api.pages import ByteLRU, Rendered, page_links, render
 from wsp_api.renditions import (
     Rendition,
     has_renditions,
@@ -378,6 +378,10 @@ class Library:
                         target = did if self._zim_backed(did) and self.exists(did) else self.stand_in(did)
                     except (ApiError, ZimUnavailable):  # busy: show it unresolved rather than fail the page
                         target = None
+                elif did is not None and did.startswith(f"wsp:{doc.source_id}/") and self._zim_backed(did):
+                    # Past the checks: a link inside the page's own archive is taken as held (the archive
+                    # wrote it); "not in library" for each of them sent readers away from pages they have.
+                    target = did
             out.append(DocumentLink(href=href, target=target))
         return out
 
@@ -495,6 +499,9 @@ class Library:
             timestamp=release_time(gen),
             html_ref=f"zim:{native_id}",
             content_hash=page.content_hash,
+            # Read from the page itself: a live page had no links in the API at all, so a reader of
+            # `links` saw none on every Stack Exchange or xkcd page (2026-10-16 field exam).
+            links=page_links(page.html),
         )
         return doc, page, gen
 

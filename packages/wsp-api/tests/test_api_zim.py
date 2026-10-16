@@ -263,3 +263,33 @@ def test_a_mindtouch_app_stub_is_served_as_its_page(tmp_path: Path) -> None:
     bare = store.page("wiki", SAMPLE_GEN_2, "index/page_1")
     assert bare is not None
     assert bare.native_id == "index/page_1"
+
+
+def test_a_live_zim_page_lists_its_links(tmp_path: Path) -> None:
+    # 2026-10-16 field exam: `links` was empty for every page served straight from a ZIM.
+    services = sample_services()
+    zim_rel = "upstream/wikipedia_en_2026-09.zim"
+    _zim(
+        tmp_path / "wikipedia-en-zim" / SAMPLE_GEN_2 / zim_rel,
+        "wikipedia_en",
+        [
+            (
+                "Live_page",
+                "text/html",
+                '<p><a href="Other_page">other</a> <a href="https://x.org/">web</a></p>',
+            ),
+            ("Other_page", "text/html", "<p>other</p>"),
+        ],
+        [],
+    )
+    vault = InMemoryVault(root=tmp_path)
+    art = Artifact("wikipedia-en-zim", SAMPLE_GEN_2, PurePosixPath(zim_rel), 10, "a" * 64, "b" * 64)
+    vault.add(
+        Generation("wikipedia-en-zim", SAMPLE_GEN_2, GenerationStatus.SEALED, artifacts=(art,)), promote=True
+    )
+    with local_client(create_app(replace(services, vault=vault))) as c:
+        links = c.get(document_href(make_doc_id("wikipedia-en-zim", "Live_page"))).json()["links"]
+    assert {x["href"]: x["target"] for x in links} == {
+        "wsp:wikipedia-en-zim/Other_page": "wsp:wikipedia-en-zim/Other_page",
+        "https://x.org/": None,
+    }
