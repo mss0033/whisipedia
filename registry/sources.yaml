@@ -128,7 +128,7 @@ sources:
     publisher: Internet Archive (scans contributed by university libraries)
     domain: [books, history]
     tier: T2
-    status: candidate
+    status: active  # promoted 2026-10-16: fetched and verified (Appian, 2 volumes), fills a field-exam gap
     license: LicenseRef-PD-US
     legal_basis: public-domain
     access:
