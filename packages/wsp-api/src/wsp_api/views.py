@@ -9,7 +9,7 @@ import re
 import threading
 from collections import OrderedDict
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import cast
@@ -23,7 +23,14 @@ from wsp_api.htmlrewrite import rewrite_html
 from wsp_api.offload import Offload
 from wsp_api.originals import FILE_REF, stored_file
 from wsp_api.pages import ByteLRU, Rendered, render
-from wsp_api.renditions import Rendition, release_time, rendition_doc_id, renditions
+from wsp_api.renditions import (
+    Rendition,
+    has_renditions,
+    release_time,
+    rendition_doc_id,
+    renditions,
+    stand_ins,
+)
 from wsp_api.schemas import Change, DocRef, DocumentLink, SourceInfo, VaultLocation
 from wsp_api.seams import DocumentFields, VaultView
 from wsp_api.services import ApiSettings, Services
@@ -71,6 +78,7 @@ class DocumentView:
     vault: VaultLocation | None
     has_history: bool
     rendition: schemas.Rendition | None = None
+    section: str | None = None
 
 
 _GENERATION_LIKE = re.compile(r"^\d{4}(-\d{2}){0,2}")  # 2026-08, 2026-10-12r5.b0001 ...
@@ -271,6 +279,15 @@ class Library:
             log.warning("existence check failed for %s", did, exc_info=True)
             return False
 
+    def stand_in(self, did: DocId) -> DocId | None:
+        """A page of a rendition source that stands in for ``did`` when the library lacks ``did``
+        itself (:func:`wsp_api.renditions.stand_ins`). Raises :class:`ZimUnavailable` when busy."""
+        source_id, native_id = parse_doc_id(did)
+        for alt in stand_ins(self.s.source(source_id), native_id, self.vault):
+            if alt != did and self.exists(alt):
+                return alt
+        return None
+
     def title(self, did: str) -> str | None:
         try:
             parsed = parse_doc(did)
@@ -355,10 +372,10 @@ class Library:
                     did = None
                 if did is not None and self.in_store(did):
                     target = did
-                elif did is not None and zim_checks < _MAX_ZIM_LINK_CHECKS and self._zim_backed(did):
+                elif did is not None and zim_checks < _MAX_ZIM_LINK_CHECKS and self._may_stand_in(did):
                     zim_checks += 1
                     try:
-                        target = did if self.exists(did) else None
+                        target = did if self._zim_backed(did) and self.exists(did) else self.stand_in(did)
                     except (ApiError, ZimUnavailable):  # busy: show it unresolved rather than fail the page
                         target = None
             out.append(DocumentLink(href=href, target=target))
@@ -367,6 +384,10 @@ class Library:
     def _zim_backed(self, did: DocId) -> bool:
         spec = self.s.source(parse_doc_id(did)[0])
         return spec is not None and spec.adapter == ZIM_ADAPTER
+
+    def _may_stand_in(self, did: DocId) -> bool:
+        """A ZIM page, or a page a rendition source may hold in its place: worth one ZIM lookup."""
+        return self._zim_backed(did) or has_renditions(self.s.source(parse_doc_id(did)[0]))
 
     # --- history ---
 
@@ -431,16 +452,17 @@ class Library:
                 page = self.zim.page(source_id, gid, html_ref.removeprefix("zim:"))
                 if page is None:
                     return None
-                base, root, original = page.native_id, page.book_root, page.html
+                base, root, original, section = page.native_id, page.book_root, page.html, page.fragment
             else:
                 found = self.assets.html(source_id, gid, html_ref)
                 if found is None:
                     return None
-                base, root, original = native_id, "", found
-            return render(
+                base, root, original, section = native_id, "", found, ""
+            out = render(
                 original,
                 lambda h: rewrite_html(h, source_id=source_id, generation_id=gid, native_id=base, root=root),
             )
+            return replace(out, section=section) if section else out
 
         return self.pages.get_or_build(key, build)
 
@@ -476,8 +498,10 @@ class Library:
         )
         return doc, page, gen
 
-    def document(self, did: DocId, at: str | None) -> DocumentView:
-        """The document (as of generation ``at``), its HTML and where it lives. Each entry is read once."""
+    def document(self, did: DocId, at: str | None, *, stand_in: bool = True) -> DocumentView:
+        """The document (as of generation ``at``), its HTML and where it lives. Each entry is read once.
+        A current document the library lacks is answered with the page that stands in for it
+        (:meth:`stand_in`); the response then carries that page's own doc_id and address."""
         versions = self.history(did)
         if at is not None and not _GENERATION_LIKE.match(at):
             # 'nonsense' sorts after every dated generation, so it showed the current page under a
@@ -488,13 +512,18 @@ class Library:
             )
         doc = self.s.documents.get(did, at_generation=at)
         html: str | None = None
+        section = ""
         gen: Generation | None = None
         introduced: str | None = None
         if doc is None and at is None:
             live = self.live_zim(did)
             if live is not None:
                 doc, page, gen = live
-                html = page.html
+                html, section = page.html, page.section
+        if doc is None and at is None and stand_in:
+            alt = self.stand_in(did)
+            if alt is not None:
+                return self.document(alt, None, stand_in=False)
         if doc is None:
             where = f" at generation {at}" if at else ""
             raise ApiError(404, "document_not_found", f"no such document{where}: {did}")
@@ -510,13 +539,14 @@ class Library:
             )
             if doc.html_ref and gen is not None and stored_file(doc) is None:
                 page = self.rendered(doc.source_id, gen, doc.html_ref, doc.native_id)
-                html = None if page is None else page.html
+                if page is not None:
+                    html, section = page.html, page.section
             if html is None and at is None:
                 # e.g. the Wikipedia dump (indexed text) rendered with the Kiwix ZIM's page for its title.
                 for alt in renditions(self.s.source(doc.source_id), doc, self.vault):
                     page = self.rendered(alt.source_id, alt.generation, alt.html_ref, alt.html_ref[4:])
                     if page is not None:
-                        html, rendition = page.html, alt
+                        html, rendition, section = page.html, alt, page.section
                         break
         if rendition is not None:  # View Source Data describes the page on screen
             vault = self.vault_location(rendition.generation, rendition.html_ref, rendition.source_id)
@@ -537,6 +567,7 @@ class Library:
                 generation_id=rendition.generation.generation_id,
                 doc_id=rendition_doc_id(rendition),
             ),
+            section=section or None,
         )
 
     def stored_generation(self, doc: DocRecord) -> Generation | None:

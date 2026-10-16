@@ -216,7 +216,13 @@ def cmd_index_build(args: argparse.Namespace, out: TextIO) -> int:
     lay, cfg, specs = _context(args)
     try:
         with _index_writer(cfg), open_indexer(cfg, lay, specs, out) as ix:
-            reports = ix.build([args.source] if args.source else None)
+            if getattr(args, "refine_again", False):
+                if not args.source:
+                    out.write("--refine-again needs --source\n")
+                    return 2
+                reports = [ix.refine_again(args.source)]
+            else:
+                reports = ix.build([args.source] if args.source else None)
             changed = any(r.upserted or r.deleted or r.refined for r in reports)
             if not getattr(args, "no_rank", False) and (changed or not ix.index.rank_path.is_file()):
                 ix.rank()

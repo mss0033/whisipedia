@@ -398,6 +398,12 @@ def build_parser(argv: Sequence[str] | None = None) -> argparse.ArgumentParser:
         action="store_true",
         help="skip the spelling vocabulary (run `wsp index spell` after a batch)",
     )
+    s.add_argument(
+        "--refine-again",
+        action="store_true",
+        help="with --source: refine its current generation once more (an adapter now reads more of it) "
+        "and index the changes; the old refined copy is kept under <refinery>/<source>/_replaced/",
+    )
     s = add(
         "merge",
         _ops("cmd_index_merge"),

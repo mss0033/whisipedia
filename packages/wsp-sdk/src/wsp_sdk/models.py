@@ -236,6 +236,7 @@ class Document(_Wire):
     )
     rendition: Rendition | None = None
     original: OriginalFile | None = None
+    section: str | None = None
 
 
 class DocumentVersion(_Wire):

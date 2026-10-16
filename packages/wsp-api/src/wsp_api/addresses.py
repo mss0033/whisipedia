@@ -9,7 +9,7 @@ from urllib.parse import quote, unquote, urlencode
 from wsp_api.errors import ApiError
 from wsp_api.schemas import Resolution
 from wsp_api.services import Services
-from wsp_core.ids import DocId, InvalidDocIdError, make_doc_id
+from wsp_core.ids import DocId, InvalidDocIdError, make_doc_id, parse_doc_id
 
 SCHEME = "wsp://"
 
@@ -80,11 +80,13 @@ def resolve(
     address: str,
     query: Mapping[str, str],
     exists: Callable[[DocId], bool] | None = None,
+    stand_in: Callable[[DocId], DocId | None] | None = None,
 ) -> Resolution:
     """Resolve an address. ``query`` carries the address's own query string (``wsp://search?q=...``).
 
     ``exists`` decides whether a document is in the library; the API passes ``Library.exists``, which
-    also counts pages served straight from a ZIM (audit #10). Default: the document store."""
+    also counts pages served straight from a ZIM (audit #10). Default: the document store.
+    ``stand_in`` finds another source's page for a document the library lacks (``Library.stand_in``)."""
     path = _strip(address).strip("/")
     head, _, rest = path.partition("/")
     if head == "search":
@@ -123,4 +125,10 @@ def resolve(
         doc_id = found(native)
         if doc_id is not None:
             return Resolution(address=address_of(head, native), kind="document", href=document_href(doc_id))
+    alt = stand_in(make_doc_id(head, rest)) if stand_in is not None else None
+    if alt is not None:
+        alt_source, alt_native = parse_doc_id(alt)
+        return Resolution(
+            address=address_of(alt_source, alt_native), kind="document", href=document_href(alt)
+        )
     raise ApiError(404, "not_in_library", f"{address_of(head, rest)} is not in the library")

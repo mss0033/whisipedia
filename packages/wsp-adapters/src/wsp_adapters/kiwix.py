@@ -54,6 +54,7 @@ from wsp_adapters._common import (
 )
 from wsp_adapters.entries import Entry, Redirect
 from wsp_adapters.html_text import html_to_text
+from wsp_core import mindtouch
 from wsp_core.errors import FetchError
 from wsp_core.ids import content_hash, make_doc_id
 from wsp_core.listing import skip_paths, skip_regex
@@ -609,6 +610,25 @@ class _HtmlTask:
     params: ZimParams
 
 
+_MINDTOUCH: dict[Path, Archive] = {}  # per worker process: the archive of the task at hand
+
+
+def _mindtouch_page(zim: Path, path: str, stub: bytes) -> str | None:
+    """The page a MindTouch app stub stands for (:mod:`wsp_core.mindtouch`), read from its content
+    entry by random access (the stub's own bytes are only the title), or ``None``."""
+    entry = mindtouch.content_entry(path, stub)
+    if entry is None:
+        return None
+    archive = _MINDTOUCH.get(zim)
+    if archive is None:
+        _MINDTOUCH.clear()
+        archive = _MINDTOUCH[zim] = Archive(zim)
+    if not archive.has_entry_by_path(entry):
+        return None
+    content = bytes(archive.get_entry_by_path(entry).get_item().content)
+    return mindtouch.page_html(stub, content, {})  # links do not matter for the text
+
+
 def _read_html(task: _HtmlTask) -> list[DocRow]:
     """Worker: the documents of one run of clusters, as :func:`doc_row` tuples (separate process)."""
     p = task.params
@@ -618,7 +638,8 @@ def _read_html(task: _HtmlTask) -> list[DocRow]:
         if not _stable(blob.path) or (skip is not None and skip.fullmatch(blob.path)):
             continue
         native_id = p.prefix + blob.path
-        text = html_to_text(blob.content)
+        page = _mindtouch_page(task.clusters.scan.zim, blob.path, blob.content)
+        text = html_to_text(blob.content if page is None else page)
         out.append(
             doc_row(
                 DocRecord(

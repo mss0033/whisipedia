@@ -256,6 +256,11 @@ class Document(_Wire):
     original: OriginalFile | None = Field(
         default=None, description="The stored original file, for documents refined from one (PDFs, maps)."
     )
+    section: str | None = Field(
+        default=None,
+        description="Id of the part of `html` this address stands for: the page is a redirect to a section "
+        "of another page (served as that page). Clients scroll to it.",
+    )
 
 
 class DocumentVersion(_Wire):

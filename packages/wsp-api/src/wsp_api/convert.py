@@ -138,6 +138,7 @@ def document(
     has_history: bool = False,
     include_text: bool = True,
     copies: Sequence[OtherCopy] = (),
+    section: str | None = None,
 ) -> Document:
     """``include_text``: send ``text`` even when there is HTML (always sent when there is none)."""
     return Document(
@@ -168,6 +169,7 @@ def document(
         currency=currency_of(doc.meta),
         banner=dated_banner(banner_for(doc.meta), doc.timestamp or edition_time(doc.revision)),
         original=original_of(doc),
+        section=section,
     )
 
 

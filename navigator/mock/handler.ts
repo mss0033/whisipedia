@@ -396,6 +396,7 @@ export function document(
     banner: d.banner ?? null,
     original: d.original ?? null,
     rendition: null,
+    section: null,
   };
 }
 

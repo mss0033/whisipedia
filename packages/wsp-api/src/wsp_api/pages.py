@@ -71,6 +71,7 @@ class Rendered:
     title: str
     text: str
     content_hash: str
+    section: str = ""  # the part of the page its address stands for (a followed section redirect)
 
     @property
     def nbytes(self) -> int:

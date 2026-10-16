@@ -176,6 +176,8 @@ export interface Document {
   rendition: Rendition | null;
   /** The stored original file, for documents refined from one (PDFs, maps). */
   original: OriginalFile | null;
+  /** Id of the part of `html` this address stands for: the page is a redirect to a section of another page (served as that page). Clients scroll to it. */
+  section: string | null;
 }
 
 export interface DocumentLink {

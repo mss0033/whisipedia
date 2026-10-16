@@ -324,6 +324,7 @@ def _v1(lib: Library, settings: ApiSettings) -> APIRouter:
                 has_history=view.has_history,
                 include_text=include_text,
                 copies=lib.copies(view.doc, s.source(view.doc.source_id)),
+                section=view.section,
             )
             return model.model_dump_json().encode("utf-8")
 
@@ -522,7 +523,9 @@ def _go(lib: Library) -> APIRouter:
         redirect: Annotated[bool, Query(description="Answer 307 to the resource instead of JSON.")] = False,
     ) -> Resolution | RedirectResponse:
         query = {k: v for k, v in request.query_params.items() if k != "redirect"}
-        res = await lib.nas.run(lambda: resolve(lib.s, address, query, exists=lib.exists))
+        res = await lib.nas.run(
+            lambda: resolve(lib.s, address, query, exists=lib.exists, stand_in=lib.stand_in)
+        )
         if redirect and res.href is not None:
             return RedirectResponse(res.href, status_code=307)
         return res

@@ -123,6 +123,31 @@ def renditions(spec: SourceSpec | None, doc: DocRecord, vault: _Current) -> Iter
             yield Rendition(target, gen, f"zim:{doc.title.replace(' ', '_')}")
 
 
+def has_renditions(spec: SourceSpec | None) -> bool:
+    return spec is not None and bool(_rules(spec))
+
+
+def stand_ins(spec: SourceSpec | None, native_id: str, vault: _Current) -> Iterator[DocId]:
+    """Pages of the rendition sources that may stand in for a document this source does not hold:
+    the English Wikipedia dump keeps the top articles only, so its link to any other article (IPv6 ->
+    IPv6_stateless_address_autoconfiguration, 2026-10-16 field exam) is a page of the full Kiwix ZIM
+    under the same title. Rule order; the caller checks which exists."""
+    if spec is None:
+        return
+    for rule in _rules(spec):
+        target = str(rule.get("source", ""))
+        if not target or _current(vault, target) is None:
+            continue
+        title = native_id
+        lang = rule.get("lang")
+        if lang:  # the dump's native ids are `<lang>/<Title>`; the ZIM's are the title alone
+            if not native_id.startswith(f"{lang}/"):
+                continue
+            title = native_id[len(lang) + 1 :]
+        if title:
+            yield make_doc_id(target, title.replace(" ", "_"))
+
+
 def borrowed(spec: SourceSpec | None, doc: DocRecord, vault: _Current) -> Rendition | None:
     """The first rendition candidate (see :func:`renditions`)."""
     return next(renditions(spec, doc, vault), None)

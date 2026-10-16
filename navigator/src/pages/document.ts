@@ -1015,10 +1015,12 @@ export async function render(ctx: PageContext): Promise<PageResult> {
   return {
     title: route.at ? `${doc.title} (as of ${asOfText(doc)})` : doc.title,
     body,
-    scrollTo: route.fragment
-      ? `doc-${route.fragment}`
-      : body.querySelector(`#${RESUME_ID}`)
-        ? RESUME_ID
-        : undefined,
+    // A section redirect (IPv6_stateless_address_autoconfiguration) is served as its page: open at the section.
+    scrollTo:
+      route.fragment || doc.section
+        ? `doc-${route.fragment || doc.section}`
+        : body.querySelector(`#${RESUME_ID}`)
+          ? RESUME_ID
+          : undefined,
   };
 }

@@ -119,3 +119,147 @@ def test_page_reports_the_entry_actually_served(tmp_path: Path) -> None:
     assert store.exists("wiki", SAMPLE_GEN_2, "book_b/A/Old")
     assert not store.exists("wiki", SAMPLE_GEN_2, "book_b/A/Missing")
     assert store.home("wiki", SAMPLE_GEN_2) == "_books"
+
+
+STUB = (
+    "<html><head><title>{title}</title>"
+    '<meta http-equiv="refresh" content="0;URL=\'{url}\'" /></head>'
+    '<body><a href="{url}">{title}</a></body></html>'
+)
+
+
+def test_a_section_redirect_stub_is_served_as_the_page_it_points_at(tmp_path: Path) -> None:
+    gen_dir = tmp_path / "wiki" / SAMPLE_GEN_2
+    article = "<html><head><title>IPv6 address</title></head><body><h2 id='SLAAC'>SLAAC</h2></body></html>"
+    _zim(
+        gen_dir / "upstream" / "wiki_en_all_2026-09.zim",
+        "wiki_en_all",
+        [
+            ("A/IPv6_address", "text/html", article),
+            ("A/SLAAC", "text/html", STUB.format(title="SLAAC", url="./IPv6_address#SLAAC")),
+            ("A/Chain", "text/html", STUB.format(title="Chain", url="SLAAC")),
+            ("A/Gone", "text/html", STUB.format(title="Gone", url="./Missing#X")),
+            ("A/Away", "text/html", STUB.format(title="Away", url="https://example.org/x")),
+            ("A/Loop", "text/html", STUB.format(title="Loop", url="./Loop")),
+        ],
+        [],
+    )
+    store = ZimAssetStore(_vault(tmp_path, ["upstream/wiki_en_all_2026-09.zim"]))
+    page = store.page("wiki", SAMPLE_GEN_2, "A/SLAAC")
+    assert page is not None
+    assert (page.native_id, page.html, page.fragment) == ("A/IPv6_address", article, "SLAAC")
+    chained = store.page("wiki", SAMPLE_GEN_2, "A/Chain")
+    assert chained is not None
+    assert (chained.native_id, chained.fragment) == ("A/IPv6_address", "SLAAC")
+    # A stub whose target is absent, or outside the archive, stays itself (its link still shows).
+    for native in ("A/Gone", "A/Away"):
+        kept = store.page("wiki", SAMPLE_GEN_2, native)
+        assert kept is not None
+        assert (kept.native_id, kept.fragment) == (native, "")
+    assert store.page("wiki", SAMPLE_GEN_2, "A/Loop") is None  # never loops
+
+
+def test_a_dump_link_outside_its_articles_is_the_zim_page_for_that_title(tmp_path: Path) -> None:
+    from wsp_api.testing.fakes import SAMPLE_SOURCES
+    from wsp_core.model import DocRecord, SourceSpec, SourceStatus, Tier
+
+    dump = SourceSpec(
+        id="wiki-dump",
+        name="Wikipedia dump (top articles)",
+        tier=Tier.T1,
+        status=SourceStatus.ACTIVE,
+        license="CC-BY-SA-4.0",
+        legal_basis="open-license",
+        domain=("encyclopedia",),
+        adapter="wikimedia-dumps",
+        raw={
+            "access": {
+                "adapter": "wikimedia-dumps",
+                "rendition": [{"lang": "en", "source": "wikipedia-en-zim"}],
+            }
+        },
+    )
+    services = sample_services(sources=(*SAMPLE_SOURCES, dump))
+    zim_rel = "upstream/wikipedia_en_2026-09.zim"
+    article = "<html><head><title>IPv6 address</title></head><body><h2 id='SLAAC'>SLAAC</h2></body></html>"
+    _zim(
+        tmp_path / "wikipedia-en-zim" / SAMPLE_GEN_2 / zim_rel,
+        "wikipedia_en",
+        [
+            ("IPv6_address", "text/html", article),
+            ("IPv6_stateless", "text/html", STUB.format(title="SLAAC", url="./IPv6_address#SLAAC")),
+        ],
+        [],
+    )
+    vault = InMemoryVault(root=tmp_path)
+    art = Artifact("wikipedia-en-zim", SAMPLE_GEN_2, PurePosixPath(zim_rel), 10, "a" * 64, "b" * 64)
+    vault.add(
+        Generation("wikipedia-en-zim", SAMPLE_GEN_2, GenerationStatus.SEALED, artifacts=(art,)), promote=True
+    )
+    ipv6 = DocRecord(
+        make_doc_id("wiki-dump", "en/IPv6"),
+        "wiki-dump",
+        "en/IPv6",
+        "IPv6",
+        "en",
+        "CC-BY-SA-4.0",
+        "IPv6 text",
+        links=("wsp:wiki-dump/en/IPv6_stateless", "wsp:wiki-dump/en/Nowhere"),
+    )
+    services.documents.put(SAMPLE_GEN_2, ipv6)  # type: ignore[attr-defined]
+    with local_client(create_app(replace(services, vault=vault))) as c:
+        links = {x["href"]: x["target"] for x in c.get(document_href(ipv6.doc_id)).json()["links"]}
+        assert links == {
+            "wsp:wiki-dump/en/IPv6_stateless": "wsp:wikipedia-en-zim/IPv6_stateless",
+            "wsp:wiki-dump/en/Nowhere": None,
+        }
+        doc = Document.model_validate(
+            c.get(document_href(make_doc_id("wiki-dump", "en/IPv6_stateless"))).json()
+        )
+        assert doc.doc_id == "wsp:wikipedia-en-zim/IPv6_stateless"
+        assert doc.title == "IPv6 address"
+        assert doc.section == "SLAAC"
+        assert doc.html is not None
+        assert "SLAAC" in doc.html
+        res = c.get("/go/wsp://wiki-dump/en/IPv6_stateless").json()
+        assert res["address"] == "wsp://wikipedia-en-zim/IPv6_stateless"
+        assert c.get("/go/wsp://wiki-dump/en/Nowhere").status_code == 404
+
+
+def test_a_mindtouch_app_stub_is_served_as_its_page(tmp_path: Path) -> None:
+    import json
+
+    stub = (
+        "<html><head><title>Spring and Neap Tides</title>"
+        '<meta http-equiv="refresh" content="0;URL=\'../index.html#/Ocean/Tides\'" />'
+        "</head><body></body></html>"
+    )
+    other = stub.replace("Spring and Neap Tides", "Ocean").replace("#/Ocean/Tides", "#/Ocean")
+    body = (
+        '<p>Spring tides occur at new and full moon. <a href="#/Ocean">Up</a><img src="content/f/a.svg"></p>'
+    )
+    shared = {"pages": [{"id": "1", "title": "Ocean", "path": "Ocean"}, {"id": "2", "path": "Ocean/Tides"}]}
+    _zim(
+        tmp_path / "wiki" / SAMPLE_GEN_2 / "upstream" / "libretexts.org_en_geo_2026-01.zim",
+        "libretexts.org_en_geo",
+        [
+            ("index.html", "text/html", "<html><body><div id='app'></div></body></html>"),
+            ("index/page_2", "text/html", stub),
+            ("index/page_1", "text/html", other),
+            ("content/page_content_2.json", "application/json", json.dumps({"htmlBody": body})),
+            ("content/shared.json", "application/json", json.dumps(shared)),
+            ("content/f/a.svg", "image/svg+xml", SVG),
+        ],
+        [],
+    )
+    store = ZimAssetStore(_vault(tmp_path, ["upstream/libretexts.org_en_geo_2026-01.zim"]))
+    page = store.page("wiki", SAMPLE_GEN_2, "index/page_2")
+    assert page is not None
+    assert page.native_id == "index/page_2"
+    assert "Spring tides occur at new and full moon." in page.html
+    assert '<a href="page_1">Up</a>' in page.html
+    assert '<img src="../content/f/a.svg">' in page.html
+    # No content entry: the stub stays itself, never the app's index page.
+    bare = store.page("wiki", SAMPLE_GEN_2, "index/page_1")
+    assert bare is not None
+    assert bare.native_id == "index/page_1"

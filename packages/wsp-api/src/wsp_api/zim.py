@@ -21,6 +21,8 @@ import html
 import json
 import logging
 import os
+import posixpath
+import re
 import threading
 import time
 from collections import OrderedDict
@@ -29,6 +31,7 @@ from concurrent.futures import Future
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import unquote, urlsplit
 
 from wsp_api.seams import VaultView
 from wsp_api.zimread import (
@@ -40,6 +43,7 @@ from wsp_api.zimread import (
     ZimUnavailable,
     file_book_name,
 )
+from wsp_core import mindtouch
 from wsp_core.model import Asset, GenerationStatus
 
 log = logging.getLogger(__name__)
@@ -47,6 +51,15 @@ log = logging.getLogger(__name__)
 BOOKS_PAGE = "_books"  # native id of the generated book list of a bundle source
 _MAX_LAYOUTS = 512
 _SERVED = (GenerationStatus.SEALED, GenerationStatus.DEGRADED)
+_MAX_STUB_HOPS = 3
+_MAX_PAGE_MAPS = 4  # MindTouch page lists kept (a few MB each for the largest LibreTexts library)
+_STUB_MAX_BYTES = 4096
+# mwoffliner writes a redirect to a *section* as a tiny page that only refreshes to it:
+# `<meta http-equiv="refresh" content="0;URL='./IPv6_address#Stateless_address_autoconfiguration_(SLAAC)'" />`
+_REFRESH = re.compile(
+    r"""<meta\s+http-equiv=["']?refresh["']?\s+content=["']\s*\d+\s*;\s*url\s*=\s*'?([^'">]+)'?\s*["']""",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +82,24 @@ class ZimPage:
     native_id: str
     html: str
     book_root: str  # "" for a single-book source, "<book>/" in a bundle
+    fragment: str = ""  # the section a followed section-redirect stub pointed at
+
+
+def stub_target(page_html: str, path: str) -> tuple[str, str] | None:
+    """``(entry path, fragment)`` a section-redirect stub at ``path`` refreshes to, or ``None`` if the
+    page is not such a stub (big, or no refresh, or a refresh that leaves the archive)."""
+    if len(page_html) > _STUB_MAX_BYTES:
+        return None
+    m = _REFRESH.search(page_html)
+    if m is None:
+        return None
+    url = urlsplit(m[1].strip())
+    if url.scheme or url.netloc or not url.path or url.fragment.startswith("/"):
+        return None  # elsewhere, or a route of a JavaScript app (MindTouch: wsp_core.mindtouch)
+    target = posixpath.normpath(posixpath.join(posixpath.dirname(path), unquote(url.path)))
+    if target.startswith("../") or target in (".", ".."):
+        return None
+    return target.removeprefix("./"), unquote(url.fragment)
 
 
 class BookIndex:
@@ -138,6 +169,7 @@ class ZimAssetStore:
         self.article_counts: dict[tuple[str, str], int] = {}
         self._warm_queue: list[tuple[str, str]] = []
         self._warmer: threading.Thread | None = None
+        self._page_maps: OrderedDict[str, dict[str, str]] = OrderedDict()  # MindTouch: file -> path -> id
         self._lock = threading.Lock()
 
     # --- where things are ---
@@ -336,10 +368,43 @@ class ZimAssetStore:
         if where is None:
             return None
         file, path, root = where
-        data = self._read(file, path, Want.HTML)
-        if data is None or data.content is None:
+        fragment = ""
+        for _ in range(_MAX_STUB_HOPS + 1):
+            data = self._read(file, path, Want.HTML)
+            if data is None or data.content is None:
+                return None
+            text = data.content.decode("utf-8", errors="replace")
+            body = self._mindtouch(file, data.path, text)
+            if body is not None:
+                return ZimPage(root + data.path, body, root, fragment)
+            # A section redirect is served as the page it points at (a link to it was a dead end:
+            # IPv6 -> IPv6_stateless_address_autoconfiguration, 2026-10-16 field exam).
+            hop = stub_target(text, data.path)
+            if hop is None or not self._read(file, hop[0], Want.NONE):
+                return ZimPage(root + data.path, text, root, fragment)
+            path, fragment = hop
+        return None
+
+    def _mindtouch(self, file: str, path: str, stub: str) -> str | None:
+        """The page a MindTouch app stub stands for (``wsp_core.mindtouch``), or ``None``."""
+        entry = mindtouch.content_entry(path, stub)
+        if entry is None:
             return None
-        return ZimPage(root + data.path, data.content.decode("utf-8", errors="replace"), root)
+        content = self._read(file, entry, Want.ANY)
+        if content is None or content.content is None:
+            return None
+        with self._lock:
+            ids = self._page_maps.get(file)
+            if ids is not None:
+                self._page_maps.move_to_end(file)
+        if ids is None:
+            shared = self._read(file, mindtouch.SHARED, Want.ANY)
+            ids = {} if shared is None or shared.content is None else mindtouch.page_ids(shared.content)
+            with self._lock:
+                self._page_maps[file] = ids
+                while len(self._page_maps) > _MAX_PAGE_MAPS:
+                    self._page_maps.popitem(last=False)
+        return mindtouch.page_html(stub, content.content, ids)
 
     def exists(self, source_id: str, generation_id: str, native_id: str) -> bool:
         """An HTML page is there (no content is read)."""

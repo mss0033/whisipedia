@@ -79,6 +79,8 @@ from wsp_vault.ratelimit import RateLimiter
 
 PROGRESS_EVERY = 10_000
 STATE_FILE = "index-state.json"
+REPLACED_DIR = "_replaced"  # <refinery>/<source>/_replaced/: refined copies a refine-again replaced
+PENDING_FILE = "PENDING"  # in REPLACED_DIR: the replaced copy a refine-again still diffs from
 
 
 class IndexStateError(RuntimeError):
@@ -322,7 +324,12 @@ class Indexer:
     # --- index ---------------------------------------------------------------------------------
 
     def index_generation(
-        self, spec: SourceSpec, generation_id: str, *, alias_generations: Sequence[str] = ()
+        self,
+        spec: SourceSpec,
+        generation_id: str,
+        *,
+        alias_generations: Sequence[str] = (),
+        since: Path | None = None,
     ) -> SourceReport:
         """Bring the search index from the last indexed generation of ``spec`` to ``generation_id``.
 
@@ -335,6 +342,9 @@ class Indexer:
         4. the indexed-generation state, last: until it is saved, a re-run resumes the refresh.
 
         The suggest trie is rebuilt once per run, in :meth:`finish`.
+
+        ``since``: the refined copy the index holds, when it is not the indexed generation's own
+        directory (:meth:`refine_again` replaced it): diff from it even if the generation id is the same.
         """
         state = self._state()
         previous = state.get(spec.id)
@@ -352,12 +362,12 @@ class Indexer:
                 f"too (or only {spec.id!r} in it) to index again from the start "
                 "(docs/runbooks/rebuild-indexes.md)"
             )
-        if previous == generation_id:
+        if previous == generation_id and since is None:
             if not (self.root / CATALOG_DIR / f"{spec.id}.json").is_file():
                 self.build_catalog(spec, generation_id)
             return SourceReport(spec.id, indexed=generation_id)
         new = self._reader(new_dir)
-        old_dir = generation_dir(self.refinery, spec.id, previous) if previous else None
+        old_dir = since or (generation_dir(self.refinery, spec.id, previous) if previous else None)
         old = self._reader(old_dir) if old_dir is not None and is_sealed(old_dir) else None
         if self.map_root is not None and ensure_id_map(new_dir, id_map_dir(self.map_root, new_dir)):
             self._say(f"  {spec.id}/{generation_id}: id map written")
@@ -544,6 +554,44 @@ class Indexer:
         return stats
 
     # --- whole runs ----------------------------------------------------------------------------
+
+    def refine_again(self, source_id: str) -> SourceReport:
+        """Refine the current generation of a source once more and index what changed: the adapter
+        learned to read more of the same files (LibreTexts pages were app stubs, 2026-10-16).
+
+        The sealed refined copy is moved to ``<source>/_replaced/<generation>-<stamp>`` (the diff base;
+        never deleted here) and ``_replaced/PENDING`` names it until the index has the new copy, so an
+        interrupted run resumes from the same base instead of replacing the new copy again."""
+        spec = self.specs.get(source_id)
+        if spec is None:
+            return SourceReport(source_id, skipped="not in the registry")
+        if spec.partitioned or not searchable(spec):
+            return SourceReport(source_id, skipped="refine-again is for indexed, unpartitioned sources")
+        current = self.vault.current(source_id)
+        if current is None:
+            return SourceReport(source_id, skipped="no current generation")
+        gid = current.generation_id
+        out_dir = self.refined_dir(spec, gid)
+        replaced = out_dir.parent / REPLACED_DIR
+        pending = replaced / PENDING_FILE
+        old_dir: Path | None = None
+        if pending.is_file():
+            old_dir = replaced / pending.read_text(encoding="utf-8").strip()
+            self._say(f"{source_id}: resuming the refine-again from {old_dir.name}")
+        elif is_sealed(out_dir):
+            replaced.mkdir(parents=True, exist_ok=True)
+            old_dir = replaced / f"{gid}-{time.strftime('%Y%m%dT%H%M%S', time.gmtime())}"
+            out_dir.rename(old_dir)
+            _write_durably(pending, old_dir.name + "\n")
+            self._say(f"{source_id}: {gid} moved to {REPLACED_DIR}/{old_dir.name}; refining again")
+        result = self.refine(spec, current, self.vault.generation_path(source_id, gid))
+        base = old_dir if old_dir is not None and is_sealed(old_dir) else None
+        rep = self.index_generation(spec, gid, since=base)
+        pending.unlink(missing_ok=True)
+        self.finish()
+        return SourceReport(
+            source_id, ((gid, result.doc_count or 0),), rep.indexed, rep.upserted, rep.deleted
+        )
 
     def build(self, source_ids: Sequence[str] | None = None) -> list[SourceReport]:
         """Refine and index the vault's current generation of each source (for a partitioned source,
