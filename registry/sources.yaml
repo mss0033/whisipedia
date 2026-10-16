@@ -77,7 +77,9 @@ sources:
     status: active
     license: CC-BY-SA-4.0
     legal_basis: open-license
-    access: {adapter: wikimedia-dumps, copies: [{source: kiwix-wiktionary-en-all, match: native, why: "the full entry as rendered by Wiktionary"}]}
+    # Pages render with the Kiwix ZIM's HTML (matched by title): the dump's text loses template output
+    # (blank etymologies, empty transclusions; field exam rounds 1-2). Text stays indexed from the dump.
+    access: {adapter: wikimedia-dumps, rendition: [{source: kiwix-wiktionary-en-all}], copies: [{source: kiwix-wiktionary-en-all, match: native, why: "the full entry as rendered by Wiktionary"}]}
     update: {strategy: snapshot-retention}
     size: {bytes: 1.6e9, measured: true, as_of: 2026-10-09}
 
@@ -89,7 +91,9 @@ sources:
     status: active
     license: CC-BY-SA-4.0
     legal_basis: open-license
-    access: {adapter: wikimedia-dumps, copies: [{source: kiwix-wikisource-en-all, match: native, why: "the complete text as rendered by Wikisource"}]}
+    # Pages render with the Kiwix ZIM's HTML (matched by title): the dump's text loses template output
+    # (blank etymologies, empty transclusions; field exam rounds 1-2). Text stays indexed from the dump.
+    access: {adapter: wikimedia-dumps, rendition: [{source: kiwix-wikisource-en-all}], copies: [{source: kiwix-wikisource-en-all, match: native, why: "the complete text as rendered by Wikisource"}]}
     update: {strategy: snapshot-retention}
     size: {bytes: 3.4e9, measured: true, as_of: 2026-10-09}
 
