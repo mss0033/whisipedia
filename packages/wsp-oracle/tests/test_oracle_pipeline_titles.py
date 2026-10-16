@@ -178,3 +178,40 @@ def test_within_a_site_the_query_language_edition_leads(library: TantivyIndex) -
     ids = [h.doc_id for h in searcher.run("huckleberry finn", sources=["gutenberg"]).hits]
     assert ids[0] == BOOK  # the English edition before the Hungarian translation
     assert TRANSLATION in ids[:10]  # which is still found
+
+
+def test_a_question_holding_a_title_word_for_word_leads_with_that_page(tmp_path: Path) -> None:
+    # 2026-10-16 field exam: "Incident Command System span of control" listed CIMS, NIMS and AIIMS
+    # (short pages full of the words) above the article Incident Command System.
+    span = "span of control incident command system " * 6
+    docs = [
+        _doc("wiki", "en/CIMS", "Coordinated Incident Management System", f"{span} New Zealand"),
+        _doc("wiki", "en/NIMS", "National Incident Management System", f"{span} United States"),
+        _doc(
+            "wiki",
+            "en/ICS",
+            "Incident Command System",
+            "A standard command structure. " * 80 + "Span of control",
+        ),
+        _doc("wiki", "en/Control", "Control", f"{span} control theory"),
+        _doc("wiki", "en/Water", "Water", "water " * 30),
+    ]
+    idx = TantivyIndex(tmp_path / "lexical", SMALL)
+    idx.upsert(docs)
+    idx.commit()
+    searcher = OracleSearcher(
+        idx, router=Router.from_sources(["wiki"]), reranker=OverlapReranker(), resolve=idx.lookup
+    )
+    res = searcher.run("Incident Command System span of control")
+    assert res.hits[0].doc_id == make_doc_id("wiki", "en/ICS")
+    # The longest held title wins; one-word titles, the whole query and page-name queries never.
+    route = searcher.router.route("history of the roman republic and its army")
+    hits = [
+        SearchHit(DocId(f"wsp:wiki/{t}"), 1.0, t, "", "wiki") for t in ("Rome", "Roman republic", "Republic")
+    ]
+    assert [h.title for h in searcher._embedded_title(route, hits, set())] == ["Roman republic"]  # pyright: ignore[reportPrivateUsage]
+    water = [SearchHit(DocId("wsp:wiki/Water"), 1.0, "Water", "", "wiki")]
+    assert searcher._embedded_title(searcher.router.route("how to purify water"), water, set()) == []  # pyright: ignore[reportPrivateUsage]
+    lookup = searcher.router.route("roman republic")
+    assert searcher._embedded_title(lookup, hits, set()) == []  # pyright: ignore[reportPrivateUsage]
+    idx.close()

@@ -293,6 +293,29 @@ class OracleSearcher:
                 best[src] = (key, h)
         return [h for _, h in sorted(best.values(), key=lambda t: t[0])]
 
+    def _embedded_title(
+        self, route: Route, candidates: Iterable[SearchHit], pinned: set[str]
+    ) -> list[SearchHit]:
+        """For a question or a how-to, the candidate whose title (two words or more) the query holds
+        word for word, the longest such title first, then the best ranked; at most one. The query
+        "Incident Command System span of control" listed CIMS, NIMS and AIIMS above the article
+        Incident Command System, 17th (2026-10-16 field exam). One-word titles never qualify: every
+        question about water holds the title "Water"."""
+        if route.intent not in (Intent.ASK, Intent.HOW_TO):
+            return []
+        query = _words_of(route.query)
+        best: tuple[tuple[int, int], SearchHit] | None = None
+        for i, h in enumerate(candidates):
+            title = _words_of(h.title)
+            if h.doc_id in pinned or not 2 <= len(title) < len(query) or not _holds(query, title):
+                continue
+            if not self._pinnable(route.query, h):
+                continue
+            key = (-len(title), i)
+            if best is None or key < best[0]:
+                best = (key, h)
+        return [] if best is None else [best[1]]
+
     def _weigh(self, query: str, hits: list[SearchHit]) -> list[SearchHit]:
         """Hits scaled by their source's weight (``source_weights``), best first; a source the query
         asks for by its nature (a book for the catalog, research for abstracts) keeps its score."""
@@ -424,6 +447,7 @@ class OracleSearcher:
         # Candidates from the lexical window too: a book's long text ranks it below the fusion's cut.
         named = self._title_pins(route, [*fused, *found.lexical], {p.doc_id for p in pins})
         pins += named
+        pins += self._embedded_title(route, [*fused, *found.lexical], {p.doc_id for p in pins})
         pinned = {p.doc_id for p in pins}
         rest = [h for h in fused if h.doc_id not in pinned]
         t = lap("titles", t)
@@ -673,6 +697,12 @@ _TITLE_WORDS = re.compile(r"[^\w]+", re.UNICODE)
 _LEADING_ARTICLE = re.compile(r"^(?:a|an|the)\s+")
 _PROJECT = re.compile(r"[-_.]")
 _EMPTY_TEXT = content_hash("")
+
+
+def _holds(words: Sequence[str], part: Sequence[str]) -> bool:
+    """``part`` occurs in ``words`` as consecutive words."""
+    n = len(part)
+    return any(list(words[i : i + n]) == list(part) for i in range(len(words) - n + 1))
 
 
 def _words_of(title: str) -> list[str]:

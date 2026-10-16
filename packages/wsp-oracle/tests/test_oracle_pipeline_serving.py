@@ -151,7 +151,9 @@ def test_reranker_scores_the_matched_passage(lexical: TantivyIndex, store: Chunk
             return list(hits)
 
     s = OracleSearcher(lexical, reranker=Spy(), passage_text=store.texts)  # lexical only
-    s.run("Rayleigh scattering blue sky")
+    # Words in this order: "Rayleigh scattering" in a row would pin the page, and with nothing left to
+    # rerank the reranker would not run.
+    s.run("blue sky scattering Rayleigh")
     passage = seen["wsp:encyclo/Rayleigh_scattering"]
     assert "scatter" in passage.casefold()  # BM25's matching snippet, not merely the lead passage
     assert "<b>" not in passage
