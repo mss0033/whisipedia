@@ -23,7 +23,7 @@ from wsp_core.ids import DocId, InvalidDocIdError, content_hash, parse_doc_id
 from wsp_core.model import DocRecord, SearchHit
 from wsp_core.ports import Embedder, LexicalIndex, Reranker
 from wsp_index import FusionConfig, HybridSearcher
-from wsp_index.text import primary_lang, query_language
+from wsp_index.text import STOPWORDS_EN, primary_lang, query_language
 from wsp_oracle.embedder import encode_queries
 from wsp_oracle.reranker import plain
 from wsp_oracle.router import Intent, Route, Router
@@ -274,7 +274,10 @@ class OracleSearcher:
         scores saturate near 1.0 for every title match; 2026-10-12). Translations and other sites'
         titles are still found, one per source, after the query language's. A title with a qualifier
         in parentheses comes after one without: "new york times" led with "New York Times
-        (disambiguation)" over "The New York Times", both four words (2026-10-16).
+        (disambiguation)" over "The New York Times", both four words (2026-10-16). Words beyond the
+        query count before length, function words not at all ("The New York Times" before "New York
+        Times Index"), and between sources the heavier one leads before the better ranked: Wikiquote's
+        and the Simple English "The New York Times" led the English article.
         """
         if route.intent not in (Intent.NAVIGATE, Intent.LOOKUP) or not route.title:
             return []
@@ -282,15 +285,23 @@ class OracleSearcher:
         if not words:
             return []
         lang = query_language(route.title.split()) or "en"
-        best: dict[str, tuple[tuple[bool, bool, int, int], SearchHit]] = {}
+        best: dict[str, tuple[tuple[bool, bool, int, int, float, int], SearchHit]] = {}
         for i, h in enumerate(candidates):
             title = _words_of(h.title)
             if h.doc_id in pinned or not words <= set(title) or len(title) > 2 * len(words):
                 continue
             if not self._pinnable(route.query, h):
                 continue
-            key = (not h.lang or primary_lang(h.lang) != lang, "(" in h.title, len(title), i)
             src = h.source_id or source_of(h.doc_id)
+            extra = sum(1 for w in title if w not in words and w not in STOPWORDS_EN)
+            key = (
+                not h.lang or primary_lang(h.lang) != lang,
+                "(" in h.title,
+                extra,
+                len(title),
+                -self.source_weights.get(src, 1.0),
+                i,
+            )
             if src not in best or key < best[src][0]:
                 best[src] = (key, h)
         return [h for _, h in sorted(best.values(), key=lambda t: t[0])]

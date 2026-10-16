@@ -262,7 +262,19 @@ def test_a_title_without_a_qualifier_leads_one_with(library: TantivyIndex) -> No
     route = searcher.router.route("new york times")
     hits = [
         SearchHit(DocId(f"wsp:wiki/{n}"), 1.0, t, "", "wiki", lang="en")
-        for n, t in (("d", "New York Times (disambiguation)"), ("t", "The New York Times"))
+        for n, t in (
+            ("d", "New York Times (disambiguation)"),
+            ("i", "New York Times Index"),
+            ("t", "The New York Times"),
+        )
     ]
     pins = searcher._title_pins(route, hits, set())  # pyright: ignore[reportPrivateUsage]
     assert [h.doc_id for h in pins] == ["wsp:wiki/t"]
+    # Between sources, the heavier one leads the better ranked.
+    searcher.source_weights = {"wikipedia-top10": 1.15}
+    copies = [
+        SearchHit(DocId(f"wsp:{src}/t"), 1.0, "The New York Times", "", src, lang="en")
+        for src in ("wikiquote", "simple", "wikipedia-top10")
+    ]
+    pins = searcher._title_pins(route, copies, set())  # pyright: ignore[reportPrivateUsage]
+    assert pins[0].source_id == "wikipedia-top10"
