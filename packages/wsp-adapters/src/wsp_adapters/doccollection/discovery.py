@@ -1158,10 +1158,15 @@ def archive_org(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]
         ident = _s(it.get("identifier"))
         subjects = it.get("subject")
         pub = _pub_number(_s(cfg.get("pub_number")) or None, _s(it.get("title")), ident)
+        title = _s(it.get("title")) or ident
+        volume = _s(it.get("volume")) if cfg.get("title_volume") else ""
+        if volume and volume.casefold() not in title.casefold():
+            # Volumes of one work share its title (Appian's Roman History, v.1 and v.2).
+            title = f"{title.rstrip(' ;,:')}, {volume}"
         yield Candidate(
             key=make_key(env.prefix, ident),
             url=f"https://archive.org/metadata/{quote(ident)}/files",
-            title=_s(it.get("title")) or ident,
+            title=title,
             issuer=env.issuer,
             pub_number=f"{_s(cfg.get('pub_prefix'))}{pub}" if pub else "",
             edition_date=iso_date(_s(it.get("date"))),
@@ -1185,7 +1190,10 @@ def archive_org(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]
 def _archive_items(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[tuple[int, Json]]:
     """``(listing page number, item)`` from the scrape API, or from a complete cached listing."""
     query = _s(cfg.get("query"))
-    fields = "identifier,title,date,item_size,subject,creator,description"
+    # `volume` only where asked (title_volume): the field list keys the cached listing of large collections.
+    fields = "identifier,title,date,item_size,subject,creator,description" + (
+        ",volume" if cfg.get("title_volume") else ""
+    )
     count = int(cfg.get("page_size", 1000))
     whole = env.max_pages is None and env.cache_dir is not None and bool(cfg.get("buckets"))
     cache = None

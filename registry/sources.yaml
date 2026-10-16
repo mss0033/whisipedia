@@ -93,7 +93,7 @@ sources:
     legal_basis: open-license
     # Pages render with the Kiwix ZIM's HTML (matched by title): the dump's text loses template output
     # (blank etymologies, empty transclusions; field exam rounds 1-2). Text stays indexed from the dump.
-    access: {adapter: wikimedia-dumps, rendition: [{source: kiwix-wikisource-en-all}], copies: [{source: kiwix-wikisource-en-all, match: native, why: "the complete text as rendered by Wikisource"}]}
+    access: {adapter: wikimedia-dumps, rendition: [{source: kiwix-wikisource-en-all}], copies: [{source: kiwix-wikisource-en-all, match: native, why: "Wikisource's own rendering of this page, with the text it transcludes"}]}
     update: {strategy: snapshot-retention}
     size: {bytes: 3.4e9, measured: true, as_of: 2026-10-09}
 
@@ -122,6 +122,32 @@ sources:
     update: {cadence: P6M, strategy: snapshot-retention}
     size: {bytes: 253.1e9, measured: true, as_of: 2026-10-10}
     notes: Browsable EPUB/HTML for every book. The raw rsync mirror was too slow (about 150 KB/s); plain text and catalogs come from the gutenberg source's bulk feeds.
+
+  - id: classics-in-translation
+    name: Classics in English translation (public-domain scans)
+    publisher: Internet Archive (scans contributed by university libraries)
+    domain: [books, history]
+    tier: T2
+    status: candidate
+    license: LicenseRef-PD-US
+    legal_basis: public-domain
+    access:
+      adapter: doc-collection
+      issuer: Various (public-domain translations)
+      key_prefix: classics
+      origins: [archive.org]
+      currency: {collection: historical}
+      discovery:
+        # Texts the library lacks elsewhere (no Gutenberg or Wikisource copy). 2026-10-16 field exam:
+        # Appian's Roman History (H. White, 1899) was missing; Wikisource links only external scans.
+        - kind: archive-org
+          query: "identifier:(romanhistoryofap01appi OR romanhistoryofap02appi) AND mediatype:texts"
+          provenance: "university-library scans on archive.org of a translation published in 1899 (public domain worldwide)"
+          title_volume: true
+      filter: {allow_all: true}
+    update: {cadence: P1Y, strategy: snapshot-retention}
+    size: {bytes: 1e8, measured: false, as_of: 2026-10-16}
+    notes: Add a work here only when no Gutenberg or Wikisource text holds it. Appian, The Roman History, tr. Horace White (1899), vol. I (foreign wars) and vol. II (civil wars).
 
   - id: standard-ebooks
     name: Standard Ebooks

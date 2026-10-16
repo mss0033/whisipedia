@@ -523,6 +523,33 @@ def test_archive_org_records_provenance_and_resolves_the_original_pdf() -> None:
     assert (doc.size, doc.md5) == (321, "abc")
 
 
+def test_archive_org_volumes_of_one_work_get_their_volume_in_the_title() -> None:
+    # 2026-10-16 field exam: Appian's Roman History, v.1 and v.2, share one archive.org title.
+    items = [
+        {
+            "identifier": f"romanhistoryofap0{n}appi",
+            "title": "The Roman history of Appian of Alexandria;",
+            "volume": f"v.{n}",
+            "date": "1899",
+        }
+        for n in (1, 2)
+    ]
+    scrape = {"items": [*items, {"identifier": "single", "title": "A single book", "volume": "v.1 of 1"}]}
+    routes = {"https://archive.org/services/search/v1/scrape": json.dumps({**scrape, "total": 3}).encode()}
+    cfg = {"kind": "archive-org", "query": "identifier:x", "provenance": "pd", "title_volume": True}
+    titles = [c.title for c in discover_all([cfg], env_for(routes, origins=("archive.org",)))]
+    assert titles == [
+        "The Roman history of Appian of Alexandria, v.1",
+        "The Roman history of Appian of Alexandria, v.2",
+        "A single book, v.1 of 1",
+    ]
+    plain = [
+        c.title
+        for c in discover_all([{**cfg, "title_volume": False}], env_for(routes, origins=("archive.org",)))
+    ]
+    assert plain[0] == "The Roman history of Appian of Alexandria;"
+
+
 def test_archive_org_buckets_are_stable_whatever_the_listing_order() -> None:
     idents = [f"CIA-RDP{i:05d}" for i in range(40)]
 
