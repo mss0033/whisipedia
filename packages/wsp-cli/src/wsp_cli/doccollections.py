@@ -1134,7 +1134,8 @@ def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
     workdir = (paths.workdir or state_dir()) / "collections"
     runner = CollectionFetcher(
         vault_root,
-        bootstrap.build_fetcher(cfg),
+        # Downloads land on the NAS (_incoming): the library's shared, reader-yielding write budget.
+        bootstrap.build_fetcher(cfg, pace=bootstrap.ingest_pace(cfg)),
         keys=api_keys(cfg),
         user_agent=bootstrap.user_agent(cfg),
         workdir=workdir,

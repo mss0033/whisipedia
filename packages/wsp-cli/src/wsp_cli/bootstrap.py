@@ -493,8 +493,9 @@ def build_ledger(cfg: Mapping[str, Any], signer: Signer) -> JsonlLedger:
     return JsonlLedger(p.ledger_dir, signer, lock_path=lock)
 
 
-def build_fetcher(cfg: Mapping[str, Any]) -> Fetcher:
-    """``HttpFetcher`` (default) or ``Aria2Fetcher`` (``acquirer.fetcher = "aria2"``) from ``[acquirer]``."""
+def build_fetcher(cfg: Mapping[str, Any], *, pace: Callable[[int], None] | None = None) -> Fetcher:
+    """``HttpFetcher`` (default) or ``Aria2Fetcher`` (``acquirer.fetcher = "aria2"``) from ``[acquirer]``.
+    ``pace`` (HTTP only): paces the bytes it writes (:func:`ingest_pace` for downloads into the vault)."""
     from wsp_fetch import Aria2Fetcher, FetchConfig, HttpFetcher, find_aria2c, load_wikimedia_catalog
 
     acq = section(cfg, "acquirer")
@@ -512,7 +513,7 @@ def build_fetcher(cfg: Mapping[str, Any]) -> Fetcher:
         if find_aria2c() is None:
             raise ConfigError("acquirer.fetcher = 'aria2' but aria2c is not on PATH")
         return Aria2Fetcher(fc)
-    return HttpFetcher(fc)
+    return HttpFetcher(fc, pace=pace)
 
 
 def load_adapters() -> dict[str, SourceAdapter]:

@@ -119,7 +119,7 @@ def test_cmd_fetch_returns_the_outcome_code(
     def sources(*a: object) -> list[SourceSpec]:
         return [spec(OBJECTS)]
 
-    def fetcher(*a: object) -> FakeFetcher:
+    def fetcher(*a: object, **k: object) -> FakeFetcher:
         return FakeFetcher(routes(OBJECTS))
 
     def paths(*a: object) -> _Paths:
@@ -150,6 +150,7 @@ class _Paths:
         self.vault_root = vault_root
         self.workdir = workdir
         self.proposals = workdir / "proposals"
+        self.state_dir = None  # no ingest slots: the fetch paces alone
 
     def require_vault(self) -> Path:
         return self.vault_root

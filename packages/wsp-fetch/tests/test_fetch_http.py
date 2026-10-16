@@ -297,3 +297,16 @@ def test_helpers() -> None:
     big = choose_piece_size(100 << 30, FetchConfig())
     assert big == 8 << 20
     assert big % 65536 == 0
+
+
+def test_written_bytes_are_paced_by_the_library_budget(servers: Servers, tmp_path: Path) -> None:
+    # 2026-10-16: six lanes writing into the vault at internet speed starved the API's NAS reads.
+    data = payload(300_000, seed=31)
+    s = servers()
+    s.add("f.bin", data)
+    paced: list[int] = []
+    with HttpFetcher(CFG, pace=paced.append) as f:
+        f.download(remote_for(data, s.url("f.bin")), tmp_path / "f.bin")
+        assert f.get_bytes(s.url("f.bin")) == data  # read into memory, never written: not paced
+    assert (tmp_path / "f.bin").read_bytes() == data
+    assert sum(paced) == len(data)

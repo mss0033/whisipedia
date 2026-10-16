@@ -217,7 +217,19 @@ class _Piece:
 class HttpFetcher:
     """Reference ``Fetcher`` (PLAN §6.5). Thread-safe; host caps apply across concurrent downloads."""
 
-    def __init__(self, config: FetchConfig | None = None, *, transport: httpx.BaseTransport | None = None):
+    def __init__(
+        self,
+        config: FetchConfig | None = None,
+        *,
+        transport: httpx.BaseTransport | None = None,
+        pace: Callable[[int], None] | None = None,
+    ):
+        """``pace``: called with the size of each chunk written, after the bandwidth limit: the library's
+        shared budget for writes to the NAS (``wsp_cli.bootstrap.ingest_pace``), which also yields to a
+        reader. Six collection lanes writing at internet speed made the API's reads take 0.5 s each
+        and pages time out (2026-10-16)."""
+        self._pace = pace
+        self._pace_lock = threading.Lock()
         self.config = config or FetchConfig()
         c = self.config
         self._client = httpx.Client(
@@ -298,6 +310,13 @@ class HttpFetcher:
     def throttle(self, nbytes: int) -> None:
         if self._bucket is not None:
             self._bucket.consume(nbytes)
+
+    def wrote(self, nbytes: int) -> None:
+        """Bytes written to the destination: paced by ``pace`` (one caller at a time: pieces complete
+        on worker threads, and the pace's limiter is not thread-safe)."""
+        if self._pace is not None:
+            with self._pace_lock:
+                self._pace(nbytes)
 
     # --- small documents ---------------------------------------------------------------------
 
@@ -607,6 +626,7 @@ class HttpFetcher:
                     fh.write(chunk)
                     hasher.update(chunk)
                     self.throttle(len(chunk))
+                    self.wrote(len(chunk))
                     got += len(chunk)
                 fh.flush()
                 os.fsync(fh.fileno())
@@ -1243,6 +1263,7 @@ class _SegmentedDownload:
         written = os.pwrite(self.fd, data, offset)
         if written != len(data):
             raise OSError(f"short write at {offset}")
+        self.f.wrote(written)
         with self.cond:
             self.done.add(i)
             m.pieces.append(i)
