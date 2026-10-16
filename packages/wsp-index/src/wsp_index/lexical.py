@@ -95,6 +95,7 @@ PASSAGE_SEP = "\x00"
 """``<doc id>\\x00<n>``: the n-th passage of a long document (a doc id never holds a NUL: ZIM paths and
 file names cannot). Passages share the document's title, source, language and ``doc_key``; the first
 passage is the document's own entry. Search folds them into the document (:func:`passage_parent`)."""
+PHRASE_MAX_WORDS = 6  # longer queries are questions: their words seldom stand together
 PASSAGE_FETCH_SLACK = 1.5  # candidates fetched per place asked for, so folded passages leave no gap
 
 
@@ -241,6 +242,12 @@ class TantivyConfig:
     """Extra BM25 weight for documents that match every query word (0 switches it off). Matching is
     any-word, so without it a page holding one rare word plus a source prior can outrank pages about
     the whole query (``alan turing`` ranked a syndrome named after Allan first; E2E-6)."""
+
+    phrase_boost: float = 3.0
+    """Extra BM25 weight for documents holding the query's words together, in order (one word may
+    come between: a dropped stopword), for queries of 2 to :data:`PHRASE_MAX_WORDS` words; 0 switches
+    it off. Without it "running fix" put "Fix: makecab.exe runs ..." above Bowditch's chapter on the
+    running fix (2026-10-16 field exam); at 1.0 it still did, at 3.0 Bowditch led (live index)."""
 
     def schema_signature(self) -> str:
         """Everything that changes how documents are analyzed: an index built otherwise is refused
@@ -815,11 +822,19 @@ class TantivyIndex:
         fields = [f"{kind}_{lang}" for lang in self._routes for kind in ("title", "text")]
         boosts = {f"title_{lang}": self.config.title_boost for lang in self._routes}
         words = text.split()
+        phrase: list[tuple[tantivy.Occur, tantivy.Query]] = []
+        if self.config.phrase_boost > 0 and 2 <= len(words) <= PHRASE_MAX_WORDS and '"' not in text:
+            together, _errors = self._index.parse_query_lenient(
+                f'"{" ".join(words)}"~1', fields, field_boosts=boosts
+            )
+            phrase = [(tantivy.Occur.Should, tantivy.Query.boost_query(together, self.config.phrase_boost))]
         if require_all and len(words) > 1 and '"' not in text:
             every, _errors = self._index.parse_query_lenient(
                 " ".join(f"+{w}" for w in words), fields, field_boosts=boosts
             )
-            return every
+            if not phrase:
+                return every
+            return tantivy.Query.boolean_query([(tantivy.Occur.Must, every), *phrase])
         parsed, _errors = self._index.parse_query_lenient(text, fields, field_boosts=boosts)
         if self.config.coordination_boost <= 0 or len(words) < 2 or '"' in text:
             return parsed
@@ -830,6 +845,7 @@ class TantivyIndex:
             [
                 (tantivy.Occur.Should, parsed),
                 (tantivy.Occur.Should, tantivy.Query.boost_query(every, self.config.coordination_boost)),
+                *phrase,
             ]
         )
 

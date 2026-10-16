@@ -640,3 +640,22 @@ def test_a_long_document_is_found_by_a_passage_deep_inside_and_listed_once(tmp_p
     assert idx.num_docs == 30
     assert "".join(split_passages(long_text, 2_000)) == long_text
     idx.close()
+
+
+def test_words_standing_together_outrank_the_same_words_apart(tmp_path: Path) -> None:
+    # 2026-10-16 field exam: "running fix" put "Fix: makecab.exe runs ..." above Bowditch's chapter.
+    apart = doc("s", "apart", "Makecab notes", "The installer runs slowly at startup. A fix exists. " * 3)
+    together = doc(
+        "s",
+        "together",
+        "Piloting",
+        "Plot a running fix from two bearings. " + "Navigation by bearings. " * 30,
+    )
+    for boost, first in ((3.0, "together"), (0.0, "apart")):
+        with TantivyIndex(tmp_path / f"ix{boost}", replace(SMALL, phrase_boost=boost)) as idx:
+            idx.upsert([apart, together])
+            idx.commit()
+            assert ids(idx.search("running fix"))[0] == make_doc_id("s", first)
+            assert ids(idx.search_window("running fix", limit=5, partial=False).hits)[0] == make_doc_id(
+                "s", first
+            )
