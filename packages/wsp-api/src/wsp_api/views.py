@@ -600,23 +600,29 @@ class Library:
     def vault_location(self, gen: Generation, html_ref: str | None, source_id: str) -> VaultLocation:
         """The file that holds the page: the stored original, the ZIM archive holding the entry, or the
         generation's only file. Otherwise the generation directory (no size or hashes)."""
-        base = self._vault_rel(gen)
         art: Artifact | None = None
         entry: str | None = None
         if html_ref is not None and html_ref.startswith("zim:"):
             entry = html_ref.removeprefix("zim:")
+            file = None if self.zim is None else self.zim.file_of(source_id, gen.generation_id, entry)
+            if file is not None and Path(file).parent.name == "upstream":
+                # A bundle release reads unchanged books from the release that stored them.
+                holder = Path(file).parent.parent.name
+                if holder != gen.generation_id:
+                    gen = next(
+                        (g for g in self.vault.generations(source_id) if g.generation_id == holder), gen
+                    )
             zims = [a for a in gen.artifacts if a.relpath.suffix == ".zim"]
-            if len(zims) == 1:
+            if file is not None:
+                art = next((a for a in zims if a.relpath.name == Path(file).name), None)
+            elif len(zims) == 1:
                 art = zims[0]
-            elif zims and self.zim is not None:
-                file = self.zim.file_of(source_id, gen.generation_id, entry)
-                name = None if file is None else Path(file).name
-                art = next((a for a in zims if a.relpath.name == name), None)
         elif html_ref is not None and html_ref.startswith(FILE_REF):
             rel = html_ref.removeprefix(FILE_REF).partition("/")[2]
             art = next((a for a in gen.artifacts if str(a.relpath) == rel), None)
         elif len(gen.artifacts) == 1:
             art = gen.artifacts[0]
+        base = self._vault_rel(gen)
         return VaultLocation(
             generation_id=gen.generation_id,
             path=str(base / str(art.relpath)) if art is not None else str(base),

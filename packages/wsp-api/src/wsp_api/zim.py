@@ -17,7 +17,9 @@ processes in production, see :mod:`wsp_api.zimpool`). Lookups never walk the NAS
 
 from __future__ import annotations
 
+import hashlib
 import html
+import itertools
 import json
 import logging
 import os
@@ -26,7 +28,7 @@ import re
 import threading
 import time
 from collections import OrderedDict
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from concurrent.futures import Future
 from contextlib import suppress
 from dataclasses import dataclass, field
@@ -44,7 +46,7 @@ from wsp_api.zimread import (
     file_book_name,
 )
 from wsp_core import mindtouch, youtubezim
-from wsp_core.model import Asset, GenerationStatus
+from wsp_core.model import Asset, Generation, GenerationStatus
 
 log = logging.getLogger(__name__)
 
@@ -54,6 +56,34 @@ _SERVED = (GenerationStatus.SEALED, GenerationStatus.DEGRADED)
 _MAX_STUB_HOPS = 3
 _MAX_PAGE_MAPS = 4  # MindTouch page lists kept (a few MB each for the largest LibreTexts library)
 _STUB_MAX_BYTES = 4096
+# Release ids and file names as the Kiwix adapter writes them (wsp_adapters.kiwix): a bundle release is
+# "<date>-<digest of its file names>", a file "<book>_<YYYY-MM>[a-z].zim".
+_BUNDLE_ID = re.compile(r"^(?P<date>\d{4}-\d{2}[a-z]?)[-+](?P<digest>[0-9a-f]{8})$")
+_ZIM_DATE = re.compile(r"_(\d{4}-\d{2})([a-z]?)\.zim$")
+_MAX_DROPPED_BOOKS = 2
+
+
+def _names_digest(names: Iterable[str]) -> str:
+    return hashlib.sha256("\n".join(sorted(names)).encode()).hexdigest()[:8]
+
+
+def file_release_date(file_name: str) -> str:
+    m = _ZIM_DATE.search(file_name)
+    return m.group(1) + m.group(2) if m else ""
+
+
+def book_key(file_name: str) -> str:
+    return _ZIM_DATE.sub("", file_name).removesuffix(".zim")
+
+
+def _release_order(gen: Generation) -> tuple[str, str, str]:
+    """Release order (``wsp_adapters._common.generation_order_key``): the date the id starts with,
+    then the seal time, then the id."""
+    m = _BUNDLE_ID.match(gen.generation_id)
+    sealed = gen.sealed_at.isoformat() if gen.sealed_at is not None else ""
+    return (m.group("date") if m else gen.generation_id, sealed, gen.generation_id)
+
+
 # mwoffliner writes a redirect to a *section* as a tiny page that only refreshes to it:
 # `<meta http-equiv="refresh" content="0;URL='./IPv6_address#Stateless_address_autoconfiguration_(SLAAC)'" />`
 _REFRESH = re.compile(
@@ -191,14 +221,11 @@ class ZimAssetStore:
             if hit is not None:
                 self._layouts.move_to_end(key)
                 return hit
-        gen = next((g for g in self._vault.generations(source_id) if g.generation_id == generation_id), None)
-        if gen is None or gen.status not in _SERVED:  # never a half-staged generation
+        gens = [g for g in self._vault.generations(source_id) if g.status in _SERVED]
+        gen = next((g for g in gens if g.generation_id == generation_id), None)
+        if gen is None:  # never a half-staged generation
             return None
-        root = self._vault.generation_path(source_id, generation_id)
-        files = [root / str(a.relpath) for a in gen.artifacts if a.relpath.suffix == ".zim"]
-        if not files:  # older generations list no artifacts: the downloaded ZIMs under upstream/
-            with suppress(OSError):
-                files = sorted((root / "upstream").glob("*.zim"))
+        files = self._content(source_id, gen, gens)
         if not files:
             return None
         layout = ZimLayout(
@@ -210,6 +237,52 @@ class ZimAssetStore:
             while len(self._layouts) > _MAX_LAYOUTS:
                 self._layouts.popitem(last=False)
         return layout
+
+    def _own_files(self, source_id: str, gen: Generation) -> dict[str, Path]:
+        """A generation's own ZIMs by book key (the newest build of a book wins)."""
+        root = self._vault.generation_path(source_id, gen.generation_id)
+        files = [root / str(a.relpath) for a in gen.artifacts if a.relpath.suffix == ".zim"]
+        if not files:  # older generations list no artifacts: the downloaded ZIMs under upstream/
+            with suppress(OSError):
+                files = sorted((root / "upstream").glob("*.zim"))
+        own: dict[str, Path] = {}
+        for f in sorted(files, key=lambda f: (file_release_date(f.name), f.name)):
+            own[book_key(f.name)] = f
+        return own
+
+    def _content(self, source_id: str, gen: Generation, gens: Sequence[Generation]) -> list[Path]:
+        """The ZIMs of a generation's release. A bundle release (id ``<date>-<digest>``) stores only its
+        new and changed books and reads the rest from earlier generations, the way the indexer builds
+        it (``wsp_adapters.kiwix.bundle_content``): the Kiwix bundle's October release held Wikiquote
+        alone, and iFixit, Wikibooks and nine more books lost their pages (2026-10-17 census)."""
+        if not _BUNDLE_ID.match(gen.generation_id):
+            return list(self._own_files(source_id, gen).values())
+        me = _release_order(gen)
+        content: dict[str, Path] = {}
+        for g in sorted((g for g in gens if _release_order(g) <= me), key=_release_order):
+            own = self._own_files(source_id, g)
+            carried = {k: p for k, p in content.items() if k not in own}
+            m = _BUNDLE_ID.match(g.generation_id)
+            content = {**carried, **own}
+            if m is None:
+                continue
+            names = [p.name for p in own.values()]
+            for drops in range(min(_MAX_DROPPED_BOOKS, len(carried)) + 1):
+                hit = next(
+                    (
+                        gone
+                        for gone in itertools.combinations(sorted(carried), drops)
+                        if _names_digest([*names, *(carried[k].name for k in carried if k not in gone)])
+                        == m.group("digest")
+                    ),
+                    None,
+                )
+                if hit is not None:
+                    content = {**{k: p for k, p in carried.items() if k not in hit}, **own}
+                    break
+            else:
+                log.warning("%s/%s: its books do not match the release digest", source_id, g.generation_id)
+        return sorted(content.values())
 
     def books(self, source_id: str, generation_id: str) -> list[str]:
         """Book names of a bundle: the ``Name`` of each ZIM once the book index is built, before that the

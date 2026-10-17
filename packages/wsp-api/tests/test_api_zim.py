@@ -1,6 +1,8 @@
 """ZimAssetStore against real (tiny) ZIM files written with libzim, end to end through the API."""
 
+import hashlib
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 
 from wsp_api import create_app
@@ -10,7 +12,7 @@ from wsp_api.schemas import Document
 from wsp_api.testing import local_client
 from wsp_api.testing.fakes import SAMPLE_GEN_2, InMemoryVault, sample_services
 from wsp_api.testing.zims import write_zim
-from wsp_api.zim import ZimAssetStore
+from wsp_api.zim import BOOKS_PAGE, ZimAssetStore
 from wsp_core.ids import make_doc_id
 from wsp_core.model import Artifact, Generation, GenerationStatus
 
@@ -443,3 +445,48 @@ def test_a_site_published_below_a_folder_finds_its_root_relative_files(tmp_path:
         f'<a href="{address_of("wiki", "privacydefence.org/about/")}">About</a>'  # the host's own root first
         '<img src="/v1/assets/wiki/g/nowhere.png">'  # nowhere: as before
     )
+
+
+def test_a_bundle_release_reads_its_unchanged_books_from_earlier_releases(tmp_path: Path) -> None:
+    """The Kiwix bundle's October release stored Wikiquote alone (the other ten books were unchanged):
+    iFixit, Wikibooks and the rest lost their pages, and the bundle's home became Wikiquote's."""
+    old = "2026-09"
+    up = tmp_path / "bundle" / old / "upstream"
+    _zim(up / "ifixit_en_all_2025-12.zim", "ifixit_en_all", [("Guide/Fix", "text/html", "<p>fix</p>")], [])
+    _zim(up / "wikiquote_en_all_2026-07.zim", "wikiquote_en_all", [("Q", "text/html", "<p>old q</p>")], [])
+    names = ["ifixit_en_all_2025-12.zim", "wikiquote_en_all_2026-10.zim"]
+    new = "2026-10-" + hashlib.sha256("\n".join(sorted(names)).encode()).hexdigest()[:8]
+    _zim(
+        tmp_path / "bundle" / new / "upstream" / "wikiquote_en_all_2026-10.zim",
+        "wikiquote_en_all",
+        [("Q", "text/html", "<p>new q</p>")],
+        [],
+    )
+    vault = InMemoryVault(root=tmp_path)
+
+    def gen(gid: str, files: list[str], day: int) -> Generation:
+        arts = tuple(
+            Artifact(
+                "bundle", gid, PurePosixPath(f"upstream/{f}"), size=1, sha256=f"{day}" * 64, blake3="b" * 64
+            )
+            for f in files
+        )
+        return Generation(
+            "bundle",
+            gid,
+            GenerationStatus.SEALED,
+            artifacts=arts,
+            sealed_at=datetime(2026, 10, day, tzinfo=UTC),
+        )
+
+    vault.add(gen(old, ["ifixit_en_all_2025-12.zim", "wikiquote_en_all_2026-07.zim"], 1), promote=True)
+    vault.add(gen(new, ["wikiquote_en_all_2026-10.zim"], 15), promote=True)
+    store = ZimAssetStore(vault)
+    assert store.books("bundle", new) == ["ifixit_en_all", "wikiquote_en_all"]
+    assert store.html("bundle", new, "zim:ifixit_en_all/Guide/Fix") == "<p>fix</p>"
+    assert store.html("bundle", new, "zim:wikiquote_en_all/Q") == "<p>new q</p>"  # the newer build
+    assert store.html("bundle", old, "zim:wikiquote_en_all/Q") == "<p>old q</p>"
+    assert store.home("bundle", new) == BOOKS_PAGE  # a bundle, not Wikiquote's main page
+    held = store.file_of("bundle", new, "ifixit_en_all/Guide/Fix")
+    assert held is not None
+    assert Path(held).parent.parent.name == old
