@@ -147,5 +147,12 @@ describe('Navigator app', () => {
     await settled(() =>
       document.querySelector<HTMLInputElement>('#location')!.value.startsWith('wsp://rfc/'),
     );
+    // A link to a page the library holds opens it rather than "Not in library" (2026-10-17).
+    app.navigate('wsp://offline?url=https%3A%2F%2Fen.wikipedia.org%2Fwiki%2FTuring_machine');
+    await settled(
+      () =>
+        document.querySelector<HTMLInputElement>('#location')!.value ===
+        'wsp://wikipedia-en-zim/Turing_machine',
+    );
   });
 });

@@ -32,6 +32,7 @@ from wsp_api.zimread import (
     page_count,
     random_article,
     read_entry,
+    site_of,
 )
 
 _PR_SET_DUMPABLE = 4
@@ -113,6 +114,10 @@ class _Server:
         if op == "book":
             file = str(args[0])
             return book_name_of(open_archive(file), file)  # not cached: bundles have hundreds of books
+        if op == "site":
+            file = str(args[0])
+            found = site_of(self.cache.get(file), file)
+            return None if found is None else list(found)
         if op == "count":  # opens the archive (kept open) and answers its article count
             return page_count(self.cache.get(str(args[0])))
         if op == "random":

@@ -28,13 +28,14 @@ import re
 import threading
 import time
 from collections import OrderedDict
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from concurrent.futures import Future
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
+from wsp_api.outside import Site
 from wsp_api.seams import VaultView
 from wsp_api.zimread import (
     EntryData,
@@ -207,6 +208,10 @@ class ZimAssetStore:
         self._warmer: threading.Thread | None = None
         self._page_maps: OrderedDict[str, dict[str, str]] = OrderedDict()  # MindTouch: file -> path -> id
         self._main_dirs: dict[str, str | None] = {}  # file -> folder of its main page (site_roots)
+        # The websites the current archives copy (wsp_api.outside), found while warming them;
+        # ``sites_version`` changes with every addition (rendered pages are cached by it).
+        self._sites: dict[tuple[str, str], list[Site]] = {}
+        self.sites_version = 0
         self._roots: dict[str, str | None] = {}  # MindTouch: file -> home page entry
         self._fronts: dict[str, str | None] = {}  # YouTube scraper: file -> generated front page
         self._lock = threading.Lock()
@@ -283,6 +288,34 @@ class ZimAssetStore:
             else:
                 log.warning("%s/%s: its books do not match the release digest", source_id, g.generation_id)
         return sorted(content.values())
+
+    def _note_site(self, source_id: str, generation_id: str, layout: ZimLayout, file: str) -> None:
+        try:
+            found = self.reader.site(file)
+            book = ""
+            if found is not None and layout.single is None:
+                built = self.book_index.get(source_id, generation_id) or self.build_books(
+                    source_id, generation_id
+                )
+                name = next((b for b, f in (built or {}).items() if f == Path(file).name), None)
+                if name is None:
+                    return
+                book = f"{name}/"
+        except Exception as exc:  # an archive whose metadata cannot be read is simply not linked
+            log.warning("could not read which site %s copies: %s", file, exc)
+            return
+        if found is None:
+            return
+        with self._lock:
+            self._sites.setdefault((source_id, generation_id), []).append(
+                Site(found[0], found[1], source_id, book)
+            )
+            self.sites_version += 1
+
+    def sites(self, current: Callable[[str], str | None]) -> list[Site]:
+        """The sites of each source's current generation (``current``: source id -> generation id)."""
+        with self._lock:
+            return [s for (sid, gid), found in self._sites.items() if current(sid) == gid for s in found]
 
     def books(self, source_id: str, generation_id: str) -> list[str]:
         """Book names of a bundle: the ``Name`` of each ZIM once the book index is built, before that the
@@ -382,6 +415,8 @@ class ZimAssetStore:
                 except Exception as exc:  # a bad archive must not stop the others
                     log.warning("could not open %s ahead of time: %s", f, exc)
                     n = None
+                if n is not None:
+                    self._note_site(source_id, generation_id, layout, f)
                 if n is None:
                     known = False
                 else:

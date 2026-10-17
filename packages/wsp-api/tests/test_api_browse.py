@@ -411,3 +411,19 @@ def test_a_document_asked_without_its_trailing_slash_is_answered() -> None:
     assert r.status_code == 200
     assert r.json()["doc_id"] == "wsp:wikipedia-en-zim/A/Front/"
     assert (missing.status_code, missing.json()["error"]["code"]) == (404, "document_not_found")
+
+
+def test_outside_route_names_the_library_copy_or_says_none(browse: httpx.Client) -> None:
+    """The "not in library" page asks first (2026-10-17): an RFC Editor link opens the RFC."""
+    r = browse.get("/v1/outside", params={"url": "https://www.rfc-editor.org/rfc/rfc9110.html"})
+    assert r.status_code == 200
+    assert r.json() == {
+        "url": "https://www.rfc-editor.org/rfc/rfc9110.html",
+        "address": "wsp://rfc/rfc:RFC-9110",  # the document collection's key (rfc:RFC-<n>)
+        "source_id": "rfc",
+    }
+    # the sample's Gutenberg source has no current generation: not held
+    assert browse.get("/v1/outside", params={"url": "https://www.gutenberg.org/ebooks/84"}).status_code == 404
+    miss = browse.get("/v1/outside", params={"url": "https://example.org/nothing"})
+    assert miss.status_code == 404
+    assert miss.json()["error"]["code"] == "not_held"

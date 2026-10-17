@@ -25,6 +25,7 @@ from wsp_api.schemas import (
     FeaturedDoc,
     GapReport,
     OnThisDay,
+    OutsideCopy,
     Portal,
     SourceInfo,
 )
@@ -293,6 +294,20 @@ def browse_router(lib: Library) -> APIRouter:
             name = path.rsplit("/", 1)[-1]
             headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(name, safe='')}"
         return Response(content=found.content, media_type=found.mimetype, headers=headers)
+
+    # --- Outside links ----------------------------------------------------------------------------
+
+    @r.get("/outside", tags=["navigator"], responses=errors(404, 422))
+    def outside_copy(
+        url: Annotated[str, Query(min_length=1, max_length=2048, description="An outside (http/https) URL.")],
+    ) -> OutsideCopy:
+        """The library's copy of an outside URL (``wsp_api.outside``): a Wikipedia article, an RFC, a
+        page of a website the library archives. 404 ``not_held`` when the library has none."""
+        address = lib.outside_url(url)
+        hit = lib.outside().target(url)
+        if address is None or hit is None:
+            raise ApiError(404, "not_held", "the library holds no copy of this address")
+        return OutsideCopy(url=url, address=address, source_id=hit[0][0])
 
     # --- Gaps -----------------------------------------------------------------------------------
 

@@ -1656,6 +1656,73 @@
         }
       }
     },
+    "/v1/outside": {
+      "get": {
+        "tags": [
+          "navigator"
+        ],
+        "summary": "Outside Copy",
+        "description": "The library's copy of an outside URL (``wsp_api.outside``): a Wikipedia article, an RFC, a\npage of a website the library archives. 404 ``not_held`` when the library has none.",
+        "operationId": "outside_copy_v1_outside_get",
+        "parameters": [
+          {
+            "name": "url",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048,
+              "description": "An outside (http/https) URL.",
+              "title": "Url"
+            },
+            "description": "An outside (http/https) URL."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OutsideCopy"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid_request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/gaps": {
       "post": {
         "tags": [
@@ -3780,6 +3847,31 @@
         ],
         "title": "OtherCopy",
         "description": "Another copy of the same work in the library, and why a reader might prefer it."
+      },
+      "OutsideCopy": {
+        "properties": {
+          "url": {
+            "type": "string",
+            "title": "Url",
+            "description": "The outside URL asked about."
+          },
+          "address": {
+            "type": "string",
+            "title": "Address",
+            "description": "The library's copy of it, e.g. `wsp://wikipedia-en-zim/Alan_Turing`."
+          },
+          "source_id": {
+            "type": "string",
+            "title": "Source Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "url",
+          "address",
+          "source_id"
+        ],
+        "title": "OutsideCopy"
       },
       "ParityStatus": {
         "properties": {

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from libzim.writer import (  # pyright: ignore[reportMissingModuleSource]
@@ -39,9 +39,11 @@ def write_zim(
     name: str,
     items: Sequence[tuple[str, str, str]],
     redirects: Sequence[tuple[str, str]] = (),
+    metadata: Mapping[str, str] | None = None,
 ) -> Path:
     """A ZIM at ``path`` with ``Name`` metadata ``name``; ``items`` are ``(path, mimetype, content)``
-    (the first is the main page) and ``redirects`` are ``(path, target)``."""
+    (the first is the main page) and ``redirects`` are ``(path, target)``; ``metadata`` adds more
+    (``Scraper``, ``Source``)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with Creator(path).config_indexing(False, "eng").config_verbose(False) as creator:
         creator.set_mainpath(items[0][0])
@@ -52,4 +54,6 @@ def write_zim(
         creator.add_metadata("Name", name)
         creator.add_metadata("Language", "eng")
         creator.add_metadata("Date", "2026-09-01")
+        for key, value in (metadata or {}).items():
+            creator.add_metadata(key, value)
     return path

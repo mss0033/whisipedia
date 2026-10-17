@@ -69,6 +69,10 @@ class ZimReader(Protocol):
         """The book's ``Name`` metadata, else the dated file name (``wsp_adapters.kiwix.book_name``)."""
         ...
 
+    def site(self, file: str) -> tuple[str, str] | None:
+        """``(kind, host)`` of the website the archive copies (:func:`site_of`), or ``None``."""
+        ...
+
     def random(self, file: str) -> tuple[str, str] | None:
         """``(path, title)`` of a random article of ``file`` (:func:`random_article`)."""
         ...
@@ -120,6 +124,30 @@ def read_entry(archive: Archive, path: str, want: Want) -> EntryData | None:
         if send and item.size > MAX_SEND_BYTES:
             send = False
         return EntryData(entry.path, mimetype, bytes(item.content) if send else None)
+    return None
+
+
+def site_of(archive: Archive, path: Path | str) -> tuple[str, str] | None:
+    """``(kind, host)`` of the website an archive copies (``wsp_api.outside``): ``wiki`` for a
+    MediaWiki copy (mwoffliner, its ``Source`` metadata), ``qa`` for a Stack Exchange site (sotoki,
+    the host its name starts with), ``web`` for a crawled site (zimit: the main page's host)."""
+
+    def meta(key: str) -> str:
+        if key not in archive.metadata_keys:
+            return ""
+        return archive.get_metadata(key).decode("utf-8", errors="replace").strip()
+
+    scraper = meta("Scraper").lower()
+    if "mwoffliner" in scraper:
+        source = meta("Source").lower()
+        return ("wiki", source) if "." in source else None
+    if "sotoki" in scraper:
+        host = book_name_of(archive, path).split("_", 1)[0].lower()
+        return ("qa", host) if "." in host else None
+    if "warc2zim" in scraper or "zimit" in scraper:
+        main = read_entry(archive, "", Want.NONE)
+        host = "" if main is None else main.path.split("/", 1)[0]
+        return ("web", host) if "." in host and " " not in host else None
     return None
 
 
@@ -214,6 +242,9 @@ class InProcessZimReader:
     def book_name(self, file: str) -> str:
         # Not cached: a bundle has hundreds of books and only their names are needed here.
         return book_name_of(self._opener(file), file)
+
+    def site(self, file: str) -> tuple[str, str] | None:
+        return site_of(self._cache.get(file), file)
 
     def warm(self, file: str) -> int | None:
         return page_count(self._cache.get(file))

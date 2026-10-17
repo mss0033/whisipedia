@@ -14,6 +14,7 @@ from datetime import datetime
 from functools import partial
 from pathlib import Path, PurePosixPath
 from typing import cast
+from urllib.parse import quote
 
 from wsp_api import convert, schemas
 from wsp_api.addresses import address_of
@@ -23,6 +24,7 @@ from wsp_api.htmlrewrite import VERSION as REWRITE_VERSION
 from wsp_api.htmlrewrite import rewrite_html
 from wsp_api.offload import Offload
 from wsp_api.originals import FILE_REF, stored_file
+from wsp_api.outside import OutsideLinks
 from wsp_api.pages import ByteLRU, Rendered, page_links, render
 from wsp_api.renditions import (
     Rendition,
@@ -48,6 +50,8 @@ from wsp_core.model import (
     GenerationStatus,
     SearchHit,
     SourceSpec,
+    SourceStatus,
+    searchable,
 )
 from wsp_core.ports import AssetStore, Catalog
 
@@ -157,6 +161,44 @@ class Library:
         self._fields = services.documents if isinstance(services.documents, DocumentFields) else None
         lookup = getattr(services.index, "lookup", None)
         self._index_lookup = cast(Callable[[str], SearchHit | None], lookup) if callable(lookup) else None
+        self._outside: tuple[int, OutsideLinks] | None = None
+
+    # --- outside links ---
+
+    def outside(self) -> OutsideLinks:
+        """Outside URLs the library holds (:mod:`wsp_api.outside`), rebuilt as archives' sites are found."""
+        version = self.zim.sites_version if self.zim is not None else 0
+        cached = self._outside
+        if cached is not None and cached[0] == version:
+            return cached[1]
+
+        def current(source_id: str) -> str | None:
+            gen = self.vault.current(source_id)
+            return None if gen is None else gen.generation_id
+
+        def held(source_id: str) -> bool:
+            spec = self.s.source(source_id)
+            if spec is None or spec.status is not SourceStatus.ACTIVE or current(source_id) is None:
+                return False
+            return spec.adapter == ZIM_ADAPTER or searchable(spec)
+
+        links = OutsideLinks(self.zim.sites(current) if self.zim is not None else (), held)
+        self._outside = (version, links)
+        return links
+
+    def outside_url(self, url: str, *, asset: bool = False) -> str | None:
+        """The library's address of an outside URL (``asset``: the file's asset URL), or ``None``."""
+        hit = self.outside().target(url)
+        if hit is None:
+            return None
+        (source_id, native), fragment = hit
+        if asset:
+            gen = self.vault.current(source_id)
+            spec = self.s.source(source_id)
+            if gen is None or spec is None or spec.adapter != ZIM_ADAPTER:
+                return None
+            return f"/v1/assets/{source_id}/{gen.generation_id}/{quote(native, safe='/')}"
+        return address_of(source_id, native) + (f"#{fragment}" if fragment else "")
 
     @property
     def vault(self) -> VaultView:
@@ -450,7 +492,14 @@ class Library:
     def rendered(self, source_id: str, gen: Generation, html_ref: str, native_id: str) -> Rendered | None:
         """The page ``html_ref`` of a generation, links rewritten; rendered once, then cached by bytes."""
         gid = gen.generation_id
-        key = (source_id, gid, html_ref, native_id, str(REWRITE_VERSION))
+        key = (
+            source_id,
+            gid,
+            html_ref,
+            native_id,
+            str(REWRITE_VERSION),
+            str(self.zim.sites_version if self.zim else 0),
+        )
 
         def build() -> Rendered | None:
             sites: tuple[str, ...] = ()
@@ -477,6 +526,7 @@ class Library:
                     root=root,
                     site_roots=sites,
                     find=find,
+                    outside=self.outside_url,
                 ),
             )
             return replace(out, section=section) if section else out

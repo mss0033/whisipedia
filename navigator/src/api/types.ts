@@ -33,6 +33,7 @@ export type {
   KindFacet,
   MapAnswer,
   OriginalFile,
+  OutsideCopy,
   Portal,
   QueryIntent,
   RecentChanges,

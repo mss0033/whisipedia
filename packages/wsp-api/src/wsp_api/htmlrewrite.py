@@ -16,7 +16,9 @@
   in every path, and one published below a folder (the OPSEC Bible at ``privacydefence.org/opsec/
   bibleprivacy/``) writes ``/assets/logo.png`` for a file under that folder.
 * ``<base>`` is dropped: links are already resolved here, and a base would re-target them.
-* Absolute and scheme-relative URLs are left alone. Clients show them as "not in library".
+* Absolute URLs of sites the library holds (``outside``: Wikipedia, xkcd, an RFC) → the library's
+  copy; a relative path into another site the crawl did not keep → the archive that copies it. Other
+  absolute and scheme-relative URLs are left alone; clients show them as "not in library".
 * ``style`` attributes and ``<style>`` elements are dropped: the Navigator's CSP refuses them anyway,
   and Chrome reports every one as a violation while merely parsing the page (E2E-1).
 
@@ -34,7 +36,7 @@ from urllib.parse import quote, unquote, urlsplit
 
 from wsp_api.addresses import address_of
 
-VERSION = 6  # bump when the output changes: rendered pages are cached by it
+VERSION = 7  # bump when the output changes: rendered pages are cached by it
 
 # Links to these are files (shown by the browser, or saved), not pages. By name, so rewriting needs no
 # lookup per link; a page with such a name (rare) is then offered as a file the asset route refuses.
@@ -73,6 +75,8 @@ _CANDIDATE = re.compile(r"\s*([^\s,][^\s]*?)(\s+[^,]*)?\s*(?:,|$)")
 
 
 _NONE_HOST = "//:None/"
+_ABSOLUTE = re.compile(r"\s*https?://", re.IGNORECASE)
+Outside = Callable[..., str | None]  # (url, *, asset: bool) -> the library's URL for it, or None
 
 
 def _resolve(base_native_id: str, href: str, root: str = "") -> tuple[str, str] | None:
@@ -111,11 +115,14 @@ class _Rewriter(HTMLParser):
         root: str,
         site_roots: Sequence[str],
         find: Callable[[str], str | None] | None,
+        outside: Outside | None = None,
     ) -> None:
         super().__init__(convert_charrefs=False)
         self._source, self._gen, self._base, self._root = source_id, generation_id, native_id, root
         self._site_roots = [r for r in dict.fromkeys(site_roots) if r != root]
         self._find = find
+        self._outside = outside
+        self._seen: dict[tuple[str, bool], str | None] = {}  # (outside url, asset) -> library url
         self._found: dict[str, tuple[str, str] | None] = {}  # root-relative href -> where it is
         self.out: list[str] = []
         self._in_style = False
@@ -143,9 +150,33 @@ class _Rewriter(HTMLParser):
     def _asset_url(self, path: str) -> str:
         return f"/v1/assets/{self._source}/{self._gen}/{quote(path, safe='/')}"
 
+    def _library_url(self, url: str, *, asset: bool) -> str | None:
+        """The library's copy of an outside URL (``outside``), or None."""
+        if self._outside is None:
+            return None
+        key = (url, asset)
+        if key not in self._seen:
+            self._seen[key] = self._outside(url, asset=asset)
+        return self._seen[key]
+
+    def _foreign(self, path: str, *, asset: bool) -> str | None:
+        """A path into another website that this crawl did not keep (``imgs.xkcd.com/comics/x.png`` in a
+        statistics book): the archive that copies that website, if this one does not hold the file."""
+        host = path.split("/", 1)[0]
+        if self._root or self._find is None or "." not in host or host == self._base.split("/", 1)[0]:
+            return None
+        there = self._library_url(f"https://{path}", asset=asset)
+        if there is None or self._find(path) is not None:
+            return None
+        return there
+
     def _asset(self, value: str) -> str | None:
+        if _ABSOLUTE.match(value):
+            return self._library_url(value.strip(), asset=True)
         target = self._target(value)
-        return None if target is None else self._asset_url(target[0])
+        if target is None:
+            return None
+        return self._foreign(target[0], asset=True) or self._asset_url(target[0])
 
     def _srcset(self, value: str) -> str:
         out: list[str] = []
@@ -168,10 +199,15 @@ class _Rewriter(HTMLParser):
                     target = self._target(value)
                     if target is not None:
                         path, fragment = target
-                        if path.lower().endswith(FILES):
-                            rewritten = self._asset_url(path)
-                        else:
-                            rewritten = address_of(self._source, path) + (f"#{fragment}" if fragment else "")
+                        is_file = path.lower().endswith(FILES)
+                        rewritten = self._foreign(path, asset=is_file) or (
+                            self._asset_url(path)
+                            if is_file
+                            else address_of(self._source, path) + (f"#{fragment}" if fragment else "")
+                        )
+                    elif _ABSOLUTE.match(value):
+                        is_file = urlsplit(value.strip()).path.lower().endswith(FILES)
+                        rewritten = self._library_url(value.strip(), asset=is_file)
                 elif key in _ASSETS:
                     rewritten = self._asset(value)
                 elif key in _SRCSET:
@@ -242,12 +278,14 @@ def rewrite_html(
     root: str = "",
     site_roots: Sequence[str] = (),
     find: Callable[[str], str | None] | None = None,
+    outside: Outside | None = None,
 ) -> str:
     """``native_id``: the entry the page was served from (relative URLs resolve against it); ``root``:
     its container root inside the source (``"<book>/"`` in a bundle, else ``""``). ``site_roots`` (each
     ending in ``/``) and ``find`` (the native id of the entry at a path, slash forms tried, or None):
-    where else a root-relative URL may be."""
-    parser = _Rewriter(source_id, generation_id, native_id, root, site_roots, find)
+    where else a root-relative URL may be. ``outside(url, asset=...)``: the library's copy of an outside
+    URL (``wsp_api.outside``): a link to a site the library holds opens there, a picture from it loads."""
+    parser = _Rewriter(source_id, generation_id, native_id, root, site_roots, find, outside)
     parser.feed(text)
     parser.close()
     return "".join(parser.out)

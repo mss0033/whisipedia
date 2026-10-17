@@ -254,6 +254,12 @@ class ZimProcessPool:
         over SMB may take longer than a page view may wait (seen on the real library)."""
         return cast(str, self.call("book", (file,), file, timeout=max(self.timeout, BOOK_TIMEOUT)))
 
+    def site(self, file: str) -> tuple[str, str] | None:
+        found = cast(
+            list[str] | None, self.call("site", (file,), file, timeout=max(self.timeout, BOOK_TIMEOUT))
+        )
+        return None if found is None else (found[0], found[1])
+
     def close(self) -> None:
         with self._lock:
             self._closed = True

@@ -167,6 +167,9 @@ export async function renderHelp(ctx: PageContext): Promise<PageResult> {
 export async function renderOffline(ctx: PageContext): Promise<PageResult> {
   const url = (ctx.route as { url: string }).url;
   const from = (ctx.route as { from: string | undefined }).from;
+  // The library may hold the page after all (a Wikipedia article, an RFC, an archived site): open it.
+  const copy = url ? await ctx.app.api.outsideCopy(url, ctx.signal).catch(() => null) : null;
+  if (copy) return { redirect: copy.address };
   // "The missing link has been noted": report it to the gap miner (PLAN §5.3).
   if (url) void ctx.app.api.reportGap({ href: url, from_doc_id: from ?? ctx.app.lastDocId() });
   let words = '';

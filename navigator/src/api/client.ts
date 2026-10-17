@@ -13,6 +13,7 @@ import type {
   ErrorResponse,
   GapReport,
   HistoryPage,
+  OutsideCopy,
   Portal,
   RecentChanges,
   Routes,
@@ -232,6 +233,17 @@ export class WspClient {
 
   random(source?: string, signal?: AbortSignal): Promise<DocRef> {
     return this.get('GET /v1/random', NO_PATH, { source }, signal);
+  }
+
+  /** The library's copy of an outside URL (a Wikipedia article, an RFC), or null when it holds none. */
+  async outsideCopy(url: string, signal?: AbortSignal): Promise<OutsideCopy | null> {
+    try {
+      return await this.get('GET /v1/outside', NO_PATH, { url }, signal);
+    } catch (err) {
+      if (err instanceof ApiRequestError && (err.code === 'not_held' || err.isMissingRoute))
+        return null;
+      throw err;
+    }
   }
 
   /**

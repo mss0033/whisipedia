@@ -715,6 +715,15 @@ export function handle(
   switch (path) {
     case '/v1/health':
       return ok({ status: 'ok', api_version: API_VERSION, sources: SOURCES.length });
+    case '/v1/outside': {
+      // English Wikipedia links open the mock's article when it has one (wsp_api.outside).
+      const url = params.get('url') ?? '';
+      const m = /^https?:\/\/en\.(?:m\.)?wikipedia\.org\/wiki\/([^#?]+)/.exec(url);
+      const id = m ? `wsp:wikipedia-en-zim/${decodeURIComponent(m[1]!)}` : '';
+      if (!id || !document(id, new URLSearchParams()))
+        return err(404, 'not_held', 'the library holds no copy of this address');
+      return ok({ url, address: `wsp://wikipedia-en-zim/${m![1]}`, source_id: 'wikipedia-en-zim' });
+    }
     case '/v1/search':
       return ok(search(params));
     case '/v1/suggest':

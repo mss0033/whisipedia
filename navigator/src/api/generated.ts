@@ -407,6 +407,14 @@ export interface OtherCopy {
   why: string;
 }
 
+export interface OutsideCopy {
+  /** The outside URL asked about. */
+  url: string;
+  /** The library's copy of it, e.g. `wsp://wikipedia-en-zim/Alan_Turing`. */
+  address: string;
+  source_id: string;
+}
+
 export interface ParityStatus {
   /** `all` or `irreplaceable` (vault.parity_scope). */
   scope: string;
@@ -914,6 +922,16 @@ export interface Routes {
     query: Record<string, never>;
     body: null;
     response: Blob;
+  };
+  /** Outside Copy */
+  'GET /v1/outside': {
+    path: Record<string, never>;
+    query: {
+      /** An outside (http/https) URL. */
+      url: string;
+    };
+    body: null;
+    response: OutsideCopy;
   };
   /** Report Gap */
   'POST /v1/gaps': {
