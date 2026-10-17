@@ -107,6 +107,7 @@ def test_rewrite_sends_outside_links_and_pictures_to_the_library() -> None:
         '<img src="https://imgs.xkcd.com/comics/p_values.png">'
         '<img src="../imgs.xkcd.com/comics/significant.png">'  # the crawl did not keep it
         '<img src="own.png">'
+        '<img src="../xkcd.com/s/logo.png">'  # a copy of an xkcd page here, its logo only in xkcd's archive
         '<a href="https://imgs.xkcd.com/comics/p_values.png">big</a>',
         source_id="lsr",
         generation_id="g",
@@ -120,6 +121,7 @@ def test_rewrite_sends_outside_links_and_pictures_to_the_library() -> None:
         '<img src="/v1/assets/kiwix-xkcd-com-en-all/G/imgs.xkcd.com/comics/p_values.png">'
         '<img src="/v1/assets/kiwix-xkcd-com-en-all/G/imgs.xkcd.com/comics/significant.png">'
         '<img src="/v1/assets/lsr/g/learningstatisticswithr.com/own.png">'
+        '<img src="/v1/assets/kiwix-xkcd-com-en-all/G/xkcd.com/s/logo.png">'
         '<a href="/v1/assets/kiwix-xkcd-com-en-all/G/imgs.xkcd.com/comics/p_values.png">big</a>'
     )
 

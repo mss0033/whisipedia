@@ -147,3 +147,10 @@ test.describe('fixed bug E2E-1', () => {
     await expect(nav.heading).toHaveText(/Alan Turing/);
   });
 });
+
+test('an outside link to a page the library holds opens the library copy', async ({ nav }) => {
+  // 2026-10-17: a link to en.wikipedia.org read "This site is not in the library".
+  await nav.open('wsp://offline?url=https%3A%2F%2Fen.wikipedia.org%2Fwiki%2FTuring_machine');
+  await nav.expectAddress(/^wsp:\/\/wikipedia-en-zim\/Turing_machine$/);
+  await expect(nav.heading).toHaveText(/Turing machine/);
+});

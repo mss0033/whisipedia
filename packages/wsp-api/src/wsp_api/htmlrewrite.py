@@ -163,12 +163,12 @@ class _Rewriter(HTMLParser):
         """A path into another website that this crawl did not keep (``imgs.xkcd.com/comics/x.png`` in a
         statistics book): the archive that copies that website, if this one does not hold the file."""
         host = path.split("/", 1)[0]
-        if self._root or self._find is None or "." not in host or host == self._base.split("/", 1)[0]:
+        if self._root or self._find is None or "." not in host:
             return None
         there = self._library_url(f"https://{path}", asset=asset)
-        if there is None or self._find(path) is not None:
-            return None
-        return there
+        if there is None or there.startswith((f"/v1/assets/{self._source}/", f"wsp://{self._source}/")):
+            return None  # this archive copies that site itself (no lookup for its own pages)
+        return None if self._find(path) is not None else there
 
     def _asset(self, value: str) -> str | None:
         if _ABSOLUTE.match(value):
