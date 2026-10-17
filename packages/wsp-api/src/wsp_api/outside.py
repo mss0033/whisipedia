@@ -161,7 +161,8 @@ class OutsideLinks:
         if site.kind == "wiki":
             return _wiki_title(path, query)
         if site.kind == "qa":
-            m = re.match(r"^/questions/(\d+)/([^/?#]+)", path)
-            return f"questions/{m.group(1)}/{m.group(2)}" if m else None
+            # sotoki keeps "questions/<id>" as a redirect to the question: any slug, or none, or /q/<id>
+            m = re.match(r"^/(?:questions|q)/(\d+)(?:/|$)", path)
+            return f"questions/{m.group(1)}" if m else None
         native = site.host.lower() + unquote(path)
         return f"{native}?{query}" if query else native

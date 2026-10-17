@@ -41,8 +41,9 @@ HELD = {s.source_id for s in SITES} | {
         ("https://en.wikibooks.org/wiki/Cookbook:Bread", (("kiwix-curated-t2", "wikibooks_en_all_maxi/Cookbook:Bread"), "")),
         (
             "https://askubuntu.com/questions/12/how-to-x?noredirect=1",
-            (("stackexchange", "askubuntu.com_en_all/questions/12/how-to-x"), ""),
+            (("stackexchange", "askubuntu.com_en_all/questions/12"), ""),  # sotoki redirects the bare id
         ),
+        ("https://askubuntu.com/q/12", (("stackexchange", "askubuntu.com_en_all/questions/12"), "")),
         ("https://docs.python.org/3/library/http.html", (("kiwix-docs-python-org-en-all", "docs.python.org/3/library/http.html"), "")),
         ("https://xkcd.com/1478/", (("kiwix-xkcd-com-en-all", "xkcd.com/1478/"), "")),
         ("http://www.gutenberg.org/ebooks/1342", (("gutenberg", "1342"), "")),
