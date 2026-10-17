@@ -310,6 +310,17 @@ sources:
       origins: [www.rfc-editor.org]
       rate: {requests_per_second: 1}
       discovery:
+        # Seven early RFCs exist only as scanned PDFs (no .txt, 2026-10-17): listed first, so these
+        # candidates win over the index's rows for the same keys.
+        - kind: list
+          items:
+            - {pub_number: "RFC 8", title: "ARPA Network Functional Specifications", url: "https://www.rfc-editor.org/rfc/rfc8.pdf"}
+            - {pub_number: "RFC 9", title: "Host Software", url: "https://www.rfc-editor.org/rfc/rfc9.pdf"}
+            - {pub_number: "RFC 51", title: "Proposal for a Network Interchange Language", url: "https://www.rfc-editor.org/rfc/rfc51.pdf"}
+            - {pub_number: "RFC 418", title: "Server File Transfer Under TSS/360 At NASA-Ames Research Center", url: "https://www.rfc-editor.org/rfc/rfc418.pdf"}
+            - {pub_number: "RFC 500", title: "Integration of data management systems on a computer network", url: "https://www.rfc-editor.org/rfc/rfc500.pdf"}
+            - {pub_number: "RFC 530", title: "Report on the Survey Project", url: "https://www.rfc-editor.org/rfc/rfc530.pdf"}
+            - {pub_number: "RFC 598", title: "RFC index - December 5, 1973", url: "https://www.rfc-editor.org/rfc/rfc598.pdf"}
         - kind: index-page
           url: "https://www.rfc-editor.org/rfc-index.html"
           rows: tr
