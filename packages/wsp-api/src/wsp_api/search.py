@@ -118,10 +118,22 @@ def _title_hits(services: Services, text: str, source_id: str) -> Sequence[Searc
     return services.index.search(text, limit=20, sources=[source_id])
 
 
-def _native_candidates(rest: str) -> list[str]:
+def _native_candidates(rest: str, key_prefix: str = "") -> list[str]:
     under = rest.replace(" ", "_")
     upper = under[:1].upper() + under[1:]  # MediaWiki titles: "alan turing" is "Alan_turing", a redirect
-    return list(dict.fromkeys([rest, under, upper, f"A/{under}", f"A/{upper}"]))
+    out = [rest, under, upper, f"A/{under}", f"A/{upper}"]
+    if key_prefix:
+        # A document collection keys its documents "<prefix>:<KEY>": the RFCs are "rfc:RFC-9110", so
+        # "rfc 9110" named a page that does not exist (2026-10-17).
+        out += [f"{key_prefix}:{under}", f"{key_prefix}:{key_prefix.upper()}-{under}"]
+    return list(dict.fromkeys(out))
+
+
+def _key_prefix(services: Services, source_id: str) -> str:
+    spec = services.source(source_id)
+    access = spec.raw.get("access") if spec is not None else None
+    prefix = cast(dict[str, object], access).get("key_prefix") if isinstance(access, dict) else None
+    return str(prefix) if isinstance(prefix, str) else ""
 
 
 def navigate_to(
@@ -153,7 +165,7 @@ def navigate_to(
     if not rest:
         return None
     for source_id in sources_named(head, services.sources):
-        for native_id in _native_candidates(rest):
+        for native_id in _native_candidates(rest, _key_prefix(services, source_id)):
             try:
                 doc_id = make_doc_id(source_id, native_id)
             except InvalidDocIdError:

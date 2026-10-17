@@ -204,5 +204,8 @@ That document adds three things to this one: **issuer authority as a hard gate**
 
 ## 14. Re-research cadence
 
+Rounds so far: [ROUND-2026-10-17.md](ROUND-2026-10-17.md) (gap census, Kiwix catalog diff, US Code and
+eCFR, 21 Kiwix archives).
+
 - The **Curator** (PLAN §5) rescores every active source each quarter and runs the discovery bots weekly.
 - This document is regenerated from `registry/sources.yaml` plus the narrative notes each quarter, and the diffs are reviewed in a PR.

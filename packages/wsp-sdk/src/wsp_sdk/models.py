@@ -724,6 +724,12 @@ class GapReport(_Wire):
     from_doc_id: str | None = Field(default=None, max_length=2048, description="Page the link was on.")
 
 
+class OutsideCopy(_Wire):
+    url: str = Field(description="The outside URL asked about.")
+    address: str = Field(description="The library's copy of it, e.g. `wsp://wikipedia-en-zim/Alan_Turing`.")
+    source_id: str
+
+
 # --- Addresses ---------------------------------------------------------------------------------
 
 
