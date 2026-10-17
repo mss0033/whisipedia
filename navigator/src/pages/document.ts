@@ -1056,7 +1056,13 @@ export async function render(ctx: PageContext): Promise<PageResult> {
     timeMachine(ctx, doc, route),
     footer(ctx.app, doc, here),
   );
-  body.querySelector('h1')?.setAttribute('id', 'doc-title');
+  const title = body.querySelector('h1');
+  if (title) {
+    // The page's own id for its heading stays a place to land: TruePrepper's "Skip to content"
+    // points at <h1 id="main"> (2026-10-16 crawl).
+    if (title.id && title.id !== 'doc-title') title.before(h('span', { id: title.id }));
+    title.setAttribute('id', 'doc-title');
+  }
   return {
     title: route.at ? `${doc.title} (as of ${asOfText(doc)})` : doc.title,
     body,

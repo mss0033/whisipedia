@@ -370,3 +370,31 @@ def test_a_youtube_channel_reads_as_pages_not_a_blank_app(tmp_path: Path) -> Non
     listing = store.page("wiki", SAMPLE_GEN_2, "index/endo-AbCd")
     assert listing is not None
     assert '<a href="../index/dka-Ns7x">Diabetic Ketoacidosis</a>' in listing.html
+
+
+def test_a_refresh_to_a_directory_keeps_its_trailing_slash(tmp_path: Path) -> None:
+    """A web archive (zimit) keeps "…/introduction/" with its slash: getbootstrap.com/docs/5.2 refreshed
+    there and showed an empty page (2026-10-16 crawl)."""
+    refresh = (
+        '<html><head><meta http-equiv="refresh" content="0;url=getting-started/introduction/"></head></html>'
+    )
+    _zim(
+        tmp_path / "wiki" / SAMPLE_GEN_2 / "upstream" / "getbootstrap.com_en_all_2026-06.zim",
+        "getbootstrap.com_en_all",
+        [
+            ("getbootstrap.com/docs/5.2/", "text/html", refresh),
+            ("getbootstrap.com/docs/5.2/getting-started/introduction/", "text/html", "<h1>Get started</h1>"),
+            ("getbootstrap.com/docs/5.1/", "text/html", refresh),
+            ("getbootstrap.com/docs/5.1/getting-started/introduction", "text/html", "<h1>Old</h1>"),
+        ],
+        [],
+    )
+    store = ZimAssetStore(_vault(tmp_path, ["upstream/getbootstrap.com_en_all_2026-06.zim"]))
+    page = store.page("wiki", SAMPLE_GEN_2, "getbootstrap.com/docs/5.2/")
+    assert page is not None
+    assert page.html == "<h1>Get started</h1>"
+    assert page.native_id == "getbootstrap.com/docs/5.2/getting-started/introduction/"
+    # the archive without the slash: the refresh still lands
+    older = store.page("wiki", SAMPLE_GEN_2, "getbootstrap.com/docs/5.1/")
+    assert older is not None
+    assert older.html == "<h1>Old</h1>"

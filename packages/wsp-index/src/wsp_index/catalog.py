@@ -166,6 +166,10 @@ def initial_of(title: str) -> tuple[str, str]:
         label = _SCRIPT_BUCKETS[script]
         return label.lower(), label
     base = unicodedata.normalize("NFKD", first)[0].upper()  # accents and Hangul syllables decompose
+    if base.isdigit():  # "½" decomposes to "1", a fraction slash, "2": a number
+        return "0-9", "0-9"
+    if not base.isalpha():  # a letter that decomposes to a space or a mark: the letter itself
+        base = first.upper()
     if "A" <= base <= "Z":
         return base.lower(), base
     return f"u{ord(base):04x}", base

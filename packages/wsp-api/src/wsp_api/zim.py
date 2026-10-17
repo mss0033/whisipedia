@@ -99,7 +99,10 @@ def stub_target(page_html: str, path: str) -> tuple[str, str] | None:
     target = posixpath.normpath(posixpath.join(posixpath.dirname(path), unquote(url.path)))
     if target.startswith("../") or target in (".", ".."):
         return None
-    return target.removeprefix("./"), unquote(url.fragment)
+    # A web archive keeps a directory's trailing slash in its paths ("…/introduction/"): normpath
+    # dropped it and the refresh led nowhere (getbootstrap.com/docs/5.2, 2026-10-16 crawl).
+    slash = "/" if url.path.endswith("/") else ""
+    return target.removeprefix("./") + slash, unquote(url.fragment)
 
 
 class BookIndex:
@@ -387,7 +390,10 @@ class ZimAssetStore:
             # A section redirect is served as the page it points at (a link to it was a dead end:
             # IPv6 -> IPv6_stateless_address_autoconfiguration, 2026-10-16 field exam).
             hop = stub_target(text, data.path)
-            if hop is None or not self._read(file, hop[0], Want.NONE):
+            if hop is not None and not self._read(file, hop[0], Want.NONE):
+                other = hop[0].rstrip("/") if hop[0].endswith("/") else hop[0] + "/"
+                hop = (other, hop[1]) if self._read(file, other, Want.NONE) else None
+            if hop is None:
                 return ZimPage(root + data.path, text, root, fragment)
             path, fragment = hop
         return None

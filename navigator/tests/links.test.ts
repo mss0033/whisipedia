@@ -306,3 +306,28 @@ describe('links a reader cannot see or that lead nowhere (2026-10-16 crawl of 40
     expect(links).toEqual(['aspirin for pain', 'NHS on X']);
   });
 });
+
+describe('a page heading with its own id', () => {
+  it('keeps it as a place to land when it becomes the page title', async () => {
+    const { App } = await import('../src/app.ts');
+    const { WspClient } = await import('../src/api/client.ts');
+    const { MemoryStore, SafeStorage } = await import('../src/core/storage.ts');
+    const { mockFetch, until } = await import('./helpers.ts');
+    document.body.innerHTML = '<div id="app"></div>';
+    const root = document.getElementById('app')!;
+    const app = new App(root, {
+      api: new WspClient({ fetch: mockFetch() }),
+      storage: new SafeStorage(new MemoryStore()),
+    });
+    app.start();
+    app.navigate('wsp://gutenberg-zim/Frankenstein; Or, The Modern Prometheus.84');
+    await until(() => !root.classList.contains('is-loading') && !!root.querySelector('#doc-title'));
+    expect(root.querySelector('main h1')?.id).toBe('doc-title');
+    // TruePrepper's "Skip to content" points at <h1 id="main"> (2026-10-16 crawl)
+    const skip = [...root.querySelectorAll<HTMLAnchorElement>('main a')].find(
+      (a) => a.textContent === 'Skip to content',
+    )!;
+    expect(skip.dataset.anchor).toBe('doc-main');
+    expect(root.querySelector('#doc-main')).not.toBeNull();
+  });
+});

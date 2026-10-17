@@ -26,6 +26,15 @@ def test_initials_in_every_script() -> None:
     assert initial_of("東京") == ("han", "Han")
     assert initial_of("ひらがな") == ("kana", "Kana")
     assert initial_of("한국") == ("u1112", "ᄒ")  # the leading consonant of the syllable
+    # A character that decomposes to a digit or a space: Wiktionary's directory had groups named
+    # "1" beside "0-9" and an invisible " " (2026-10-16 crawl).
+    assert initial_of("½ cup") == ("0-9", "0-9")
+    assert initial_of("¹") == ("0-9", "0-9")
+    for c in map(chr, range(0x80, 0x3000)):
+        if c.isalnum():
+            slug, name = initial_of(c)
+            assert name.strip(), f"{c!r} -> {slug}"
+            assert not name.isdigit() or slug == "0-9", f"{c!r} -> {slug}"
 
 
 def test_featured_per_language_and_ranked_directory(tmp_path: Path) -> None:

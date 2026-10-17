@@ -726,7 +726,8 @@ disunion or dispute.
       {
         revision: '2025-11',
         timestamp: T('2026-09-30'),
-        html: `<h1>Frankenstein; or, the Modern Prometheus</h1>
+        html: `<a href="#main">Skip to content</a>
+<h1 id="main">Frankenstein; or, the Modern Prometheus</h1>
 <p>by Mary Wollstonecraft (Godwin) Shelley</p>
 <h2>CONTENTS</h2>
 <p><a href="#letter1">Letter 1</a> · <a href="#chap01">Chapter 1</a></p>
