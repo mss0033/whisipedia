@@ -77,7 +77,7 @@
             "deny_keywords": {}, "review_keywords": {}, "neutral_phrases": {},
             "allow_documents": {}, "deny_documents": {}, "allow_content_review": {}, "override_safety": {"type": "object"},
             "allow_all": {"type": "boolean"}, "default": {"enum": ["allow", "deny", "review"]},
-            "declassified_ok": {"type": "boolean"}, "builtin_review": {"type": "boolean"}, "allow_image_only": {"type": "boolean"},
+            "declassified_ok": {"type": "boolean"}, "public_issuer": {"type": "boolean"}, "builtin_review": {"type": "boolean"}, "allow_image_only": {"type": "boolean"},
             "distribution": {"type": "object", "additionalProperties": false, "properties": {"require": {"type": "array", "items": {"type": "string"}}}}
           }
         },

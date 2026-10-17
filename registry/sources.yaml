@@ -315,7 +315,9 @@ sources:
           rows: tr
           columns: {pub_number: 0, title: 1}
           url_rewrite: ["/info/rfc(\\d+)/$", "/rfc/rfc\\1.txt"]
-      filter: {allow_all: true}
+      # Every RFC is published openly: words that look like handling markings ("(TS)") are not
+      # markings (71 RFCs, TCP's RFC 9293 among them, were rejected as classified, 2026-10-17).
+      filter: {allow_all: true, public_issuer: true}
     update: {cadence: P1M, strategy: snapshot-retention}
     size: {bytes: 0.6e9, measured: false, as_of: 2026-10-14}
 

@@ -20,6 +20,7 @@ from wsp_adapters.doccollection.adapter import (
     ResolveCache,
     Survey,
     WrongBodyError,
+    body_kind,
     reader_title,
     screen_file,
     screen_text,
@@ -613,3 +614,43 @@ def test_existing_keys_keep_their_spelling_and_decoding_is_opt_in() -> None:
     assert key_stem_from_url(url, decode=True) == "Programming Guide"
     assert title_from_url(url) == "Programming Guide"
     assert clean_title("Guide.pdf") == "Guide"
+
+
+def test_a_public_issuer_is_not_screened_for_markings_but_still_for_content() -> None:
+    """71 RFCs were rejected as classified (2026-10-17): "(TS)" is a Technical Specification in RFC
+    2026 and TCP's timestamp option in RFC 9293. The RFC Editor publishes every RFC openly."""
+    rfc = Extracted(
+        "Transmission Control Protocol (TCP)\nThe Timestamps option (TS) is described in RFC 7323." + FILLER
+    )
+    assert screen_text(rfc, Rules(allow_all=True)).decision.rule == "marking=classified-portion"
+    public = Rules(allow_all=True, public_issuer=True)
+    assert screen_text(rfc, public).decision.verdict is Verdict.ALLOW
+    harmful = Extracted(
+        "Field Manual: Demolition Charges and Calculations\nshaped charges, demolition charges" + FILLER
+    )
+    assert screen_text(harmful, public).decision.verdict is Verdict.DENY  # the deny core still applies
+    assert Rules().merged({"public_issuer": True}).public_issuer
+
+
+def test_a_short_document_that_mentions_an_error_and_an_8_bit_text_are_documents(tmp_path: Path) -> None:
+    """RFC 6 (1,776 bytes) says "Error" near its end and RFC 64 writes "µsec" in Latin-1: both were
+    refused (an error message; binary), with 15 other early RFCs (2026-10-17)."""
+    rfc6 = tmp_path / "rfc6.txt"
+    rfc6.write_bytes(
+        b"Network Working Note   Steve Crocker\nRFC-6   10 April 1969\n\n"
+        + b"We talked about code conversion. " * 40
+        + b"Error checking is done by the IMP.\n"
+    )
+    assert well_formed(rfc6) is None
+    rfc64 = tmp_path / "rfc64.txt"
+    rfc64.write_bytes(
+        b"\n\n\nNetwork Working Group\nThe line takes approximately 12 \xb5sec to settle.\n" * 100
+    )
+    assert body_kind(rfc64) == "text"
+    assert well_formed(rfc64) is None
+    error = tmp_path / "e.txt"
+    error.write_bytes(b"Error 404: the requested document was not found on this server.\n")
+    assert well_formed(error) == "an error message, not a document"
+    blob = tmp_path / "b.txt"
+    blob.write_bytes(b"\x89\x01\x02\x03" * 2000)
+    assert body_kind(blob) == "binary"

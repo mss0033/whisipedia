@@ -449,6 +449,11 @@ class Rules:
     default: Verdict = Verdict.REVIEW
     require: tuple[str, ...] = ()  # distribution requirement: "A", "public-release", "license:<SPDX>"
     declassified_ok: bool = False  # FOIA/declassified sets: classification banners with a release stamp
+    # The issuer publishes every document openly by definition (the RFC Editor): words in the text
+    # that look like handling markings are not markings ("(TS)" is a Technical Specification or TCP's
+    # timestamp option; 71 RFCs, TCP's RFC 9293 and RFC 2026 among them, were rejected as classified,
+    # 2026-10-17). The distribution gate is skipped; the content screen and its deny core still apply.
+    public_issuer: bool = False
     # Built-in noun-level review list (SAFETY_REVIEW): off by default (owner decision 2026-10-11:
     # publicly released material is in scope unless it falls in the narrow deny core above, so a
     # document is never held just for mentioning "chemical" or "combat"). A source may opt in.
@@ -491,6 +496,7 @@ RULE_KEYS = frozenset(
         "default",
         "distribution",
         "declassified_ok",
+        "public_issuer",
         "builtin_review",
         "allow_image_only",
     }
@@ -553,6 +559,8 @@ def _rules_kwargs(data: Mapping[str, Any], *, base: Rules) -> dict[str, Any]:
         out["allow_all"] = bool(data["allow_all"])
     if "declassified_ok" in data:
         out["declassified_ok"] = bool(data["declassified_ok"])
+    if "public_issuer" in data:
+        out["public_issuer"] = bool(data["public_issuer"])
     if "builtin_review" in data:
         out["builtin_review"] = bool(data["builtin_review"])
     if "allow_image_only" in data:
@@ -648,7 +656,7 @@ def classify_metadata(doc: DocFacts, rules: Rules) -> Decision:
     keys = {pub, doc.key, normalize_pub_number(doc.key)} - {""}
     if keys & rules.deny_documents:
         return Decision(Verdict.DENY, "owner=deny")
-    for field_text in (doc.rights, doc.title):
+    for field_text in () if rules.public_issuer else (doc.rights, doc.title):
         if not field_text:
             continue
         marking = parse_markings(field_text)

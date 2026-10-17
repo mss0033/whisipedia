@@ -849,9 +849,15 @@ def _head(path: Path, n: int = _SNIFF_BYTES) -> bytes:
         return fh.read(n)
 
 
+_ERROR_LEAD = 400  # an error body says so at once; RFC 6 (1,776 bytes) says "Error" in its last third
+
+
 def _error_text(head: bytes, size: int) -> bool:
-    """A short text body that reads like an error message."""
-    return size <= _ERROR_BODY_MAX and _ERROR_WORDS_RE.search(head) is not None
+    """A short text body that opens like an error message."""
+    return size <= _ERROR_BODY_MAX and _ERROR_WORDS_RE.search(head[:_ERROR_LEAD]) is not None
+
+
+_CONTROL_RE = re.compile(rb"[\x01-\x08\x0e-\x1a\x1c-\x1f\x7f]")  # not in any text (tab, LF, FF, CR, ESC are)
 
 
 def body_kind(path: Path) -> str:
@@ -874,7 +880,9 @@ def body_kind(path: Path) -> str:
     try:
         head.decode("utf-8")
     except UnicodeDecodeError as exc:
-        if exc.start < len(head) - 4:  # not merely a character cut at the end of the sample
+        # Not merely a character cut at the end of the sample, and not an 8-bit text either (RFC 64
+        # writes "µsec" in Latin-1; seven RFCs were refused as binary, 2026-10-17).
+        if exc.start < len(head) - 4 and _CONTROL_RE.search(head):
             return "binary"
     if stripped[:1] in (b"{", b"["):
         return "json"
@@ -1250,7 +1258,10 @@ def screen_text(got: Extracted, rules: Rules, *, keys: Iterable[str] = ()) -> Sc
     owner_allowed = bool(ids & rules.allow_documents)
     content_released = bool(ids & rules.allow_content_review)
     marking = parse_markings(got.text)
-    gate = check_distribution(marking, rules.require, declassified_ok=rules.declassified_ok)
+    if rules.public_issuer:  # the issuer publishes everything openly (Rules.public_issuer)
+        gate = Decision(Verdict.ALLOW, "marking=public-issuer", Stage.DISTRIBUTION)
+    else:
+        gate = check_distribution(marking, rules.require, declassified_ok=rules.declassified_ok)
     if gate.verdict is Verdict.DENY:
         return Screen(gate, marking, text_found)
     content = classify_content(got.text, rules, overridden=bool(ids & rules.override_safety))
