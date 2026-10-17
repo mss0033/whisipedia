@@ -290,6 +290,28 @@ def test_a_rare_language_reads_only_the_row_groups_holding_it(
     assert len(reads) == 1
 
 
+def test_a_rare_language_that_knows_the_misspellings_does_not_hide_the_correction() -> None:
+    """2026-10-17: the Latin vocabulary (Gutenberg's Latin books) knows "diabetis" and "insulen", so
+    it won over English, which knows neither, and "diabetis insulen" got no "Did you mean"."""
+    s = Speller.from_vocabularies(
+        {
+            # the library's sizes: 58M English tokens, 17M Latin ones
+            "en": {"diabetes": 9380, "insulin": 7469, "the": 58_000_000},
+            "la": {"diabetis": 6, "insulen": 13, "et": 17_000_000},
+        },
+        floors={"en": 3, "la": 3},
+        min_ratio=10,
+    )
+    assert s.correct("diabetis insulen") == "diabetes insulin"
+    # Latin that is Latin stays Latin: no English word is near it
+    s2 = Speller.from_vocabularies(
+        {"en": {"world": 5000}, "la": {"gallia": 900, "divisa": 400}}, floors={"en": 3, "la": 3}, min_ratio=10
+    )
+    chosen = s2.choose(["gallia", "divisa"])
+    assert chosen is not None
+    assert chosen.lang == "la"
+
+
 def test_a_known_word_picks_the_language_without_fuzzy_searches(monkeypatch: pytest.MonkeyPatch) -> None:
     """Fuzzy scoring is for words no language knows: it reads all over a multi-GB file."""
     s = Speller.from_vocabularies(

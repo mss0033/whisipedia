@@ -852,6 +852,19 @@ class Speller:
             key = (score, len(v), v)
             if best is None or key[:2] > best[:2]:
                 best = key
+        if best is not None and most and best[2].lang not in self.prefer:
+            # A language that merely knows more of the words (Latin has "diabetis", and some Latin
+            # book "insulen") is weighed against the preferred one read with its corrections
+            # ("diabetes insulin": far more probable): "diabetis insulen" offered nothing (2026-10-17).
+            # Fuzzy searches for the preferred languages only, and only then.
+            for v, cs in zip(pool, counts, strict=True):
+                if v.lang not in self.prefer:
+                    continue
+                score = self.log_prefer + sum(
+                    math.log(c) - v.log_total if c else v.best(w)[1] for w, c in zip(usable, cs, strict=True)
+                )
+                if score > best[0]:
+                    best = (score, len(v), v)
         return best[2] if best else None
 
     # --- the port ---
