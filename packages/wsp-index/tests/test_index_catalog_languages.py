@@ -20,6 +20,7 @@ def test_initials_in_every_script() -> None:
     assert initial_of("!!! (band)") == ("b", "B")  # leading punctuation skipped
     assert initial_of("...") == ("other", "Other")
     assert initial_of("Émile Zola") == ("e", "E")
+    assert initial_of("ß") == ("s", "S")  # upper-cased "SS" had an initial of its own
     assert initial_of("1984") == ("0-9", "0-9")
     assert initial_of("Берлин") == ("u0411", "Б")  # Cyrillic
     assert initial_of("Λόγος") == ("u039b", "Λ")  # Greek
@@ -46,6 +47,13 @@ def test_initials_in_every_script() -> None:
     assert initial_of("\ua650") == ("script-cyrillic", "Cyrillic")  # an Old Cyrillic letter: the group
     assert initial_of("\u0686") == ("script-arabic", "Arabic")  # an Arabic letter of Persian and Urdu
     assert initial_of("\u10d0") == ("u10d0", "\u10d0")  # Georgian keeps its Mkhedruli letters
+    # a mark's name runs on past its script: the script, or Other ("Arabic Shadda", "Caron" before)
+    assert initial_of("\ufe7c") == ("script-arabic", "Arabic")
+    assert initial_of("\U00011ae5") == ("script-pau-cin-hau", "Pau Cin Hau")
+    assert initial_of("\U0001bc7a") == ("script-duployan", "Duployan")
+    assert initial_of("\u02c7") == ("other", "Other")
+    assert initial_of("\u1900") == ("script-limbu", "Limbu")  # LIMBU VOWEL-CARRIER LETTER
+    assert initial_of("\uff76") == ("kana", "Kana")  # HALFWIDTH KATAKANA LETTER KA folds to its letter
     for c in map(chr, range(0x80, 0x3000)):
         if c.isalnum():
             slug, name = initial_of(c)

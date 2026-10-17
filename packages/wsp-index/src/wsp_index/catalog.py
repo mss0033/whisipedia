@@ -30,6 +30,7 @@ Library of Congress / LCC trees plug in as further providers (TODO: Phase 5+, th
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import heapq
 import json
@@ -195,6 +196,39 @@ def _script_name(name: str) -> str:
     return " ".join(words).title() if words else "Other"
 
 
+# Words that follow a script's name in the names of its letters ("ARABIC LETTER BEH", "CUNEIFORM SIGN A").
+_LETTER_WORDS = frozenset({"LETTER", "SYLLABLE", "SYLLABICS", "IDEOGRAPH", "HIEROGLYPH", "CHARACTER", "SIGN"})
+# First words of presentation forms, not scripts ("CIRCLED KATAKANA A", "HALFWIDTH HANGUL LETTER A").
+_FORMS = frozenset(
+    {"CIRCLED", "PARENTHESIZED", "SQUARED", "NEGATIVE", "FULLWIDTH", "HALFWIDTH", "SUPERSCRIPT",
+     "SUBSCRIPT", "TAG", "TURNED", "REGIONAL", "REPLACEMENT", "OBJECT", "LOVE", "SHORTHAND"}
+)  # fmt: skip
+
+
+@functools.cache
+def _scripts() -> frozenset[str]:
+    """Every script name some letter's character name starts with ("Arabic", "Pau Cin Hau")."""
+    out: set[str] = set()
+    for cp in range(0x20, 0x110000):
+        words = unicodedata.name(chr(cp), "").split(" ")
+        if words[0] not in _FORMS and any(w in _LETTER_WORDS for w in words[1:5]):
+            out.add(_script_name(" ".join(words)))
+    return frozenset(out)
+
+
+def _script_label(name: str) -> str:
+    """The script group of a character name. A mark's name runs on past its script ("ARABIC SHADDA
+    ISOLATED FORM", "PAU CIN HAU RISING TONE") and a letter's may name a variety ("LIMBU VOWEL-CARRIER
+    LETTER", "GEORGIAN MTAVRULI CAPITAL LETTER"): the shortest start of it that names a script with
+    letters, else "Other" ("CARON", "CIRCLED KATAKANA")."""
+    label = _script_name(name)
+    words = label.split(" ")
+    known = _scripts()
+    return next(
+        (" ".join(words[:n]) for n in range(1, len(words) + 1) if " ".join(words[:n]) in known), "Other"
+    )
+
+
 def initial_of(title: str) -> tuple[str, str]:
     """``(slug, display name)`` of a title's directory initial.
 
@@ -214,7 +248,7 @@ def initial_of(title: str) -> tuple[str, str]:
         label = _SCRIPT_BUCKETS[script]
         return label.lower(), label
     folded = unicodedata.normalize("NFKD", first)[0]  # accents and Hangul syllables decompose
-    base = folded if unicodedata.name(folded, "").startswith("GEORGIAN") else folded.upper()
+    base = folded if unicodedata.name(folded, "").startswith("GEORGIAN") else folded.upper()[:1]  # ß: S
     if base.isdigit():  # "½" decomposes to "1", a fraction slash, "2": a number
         return "0-9", "0-9"
     if not base.isalpha():  # a letter that decomposes to a space or a mark: the letter itself
@@ -223,6 +257,9 @@ def initial_of(title: str) -> tuple[str, str]:
         return base.lower(), base
     base_name = unicodedata.name(base, "")
     base_script = base_name.split(" ", 1)[0] if base_name else ""
+    if base_script in _SCRIPT_BUCKETS:  # a halfwidth or other form of a grouped script ("ｶ")
+        label = _SCRIPT_BUCKETS[base_script]
+        return label.lower(), label
     core = _ALPHABETS.get(base_script)
     if core is not None and core[0] <= ord(base) <= core[1]:
         return f"u{ord(base):04x}", base
@@ -236,7 +273,9 @@ def initial_of(title: str) -> tuple[str, str]:
         if not label:
             return "other", "Other"
         return "script-" + "-".join(label.lower().split()), label
-    label = _script_name(base_name or name)
+    label = _script_label(base_name or name)
+    if label == "Other":
+        return "other", "Other"
     return "script-" + "-".join(label.lower().split()), label
 
 
