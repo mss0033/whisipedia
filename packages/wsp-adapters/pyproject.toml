@@ -25,6 +25,7 @@ open-library = "wsp_adapters.openlibrary:OpenLibraryAdapter"
 gutenberg = "wsp_adapters.gutenberg:GutenbergAdapter"
 osm-planet = "wsp_adapters.osm:OsmPlanetAdapter"
 doc-collection = "wsp_adapters.doccollection:DocCollectionAdapter"
+us-law = "wsp_adapters.uslaw:UsLawAdapter"
 
 [dependency-groups]
 dev = ["wsp-core[testing]"]

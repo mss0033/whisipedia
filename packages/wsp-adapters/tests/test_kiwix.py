@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path, PurePosixPath
 
 import pytest
@@ -156,6 +157,20 @@ def test_selector(selector: dict[str, object], expected: list[str]) -> None:
     spec = make_spec("s", {"adapter": "kiwix-opds", "selector": selector})
     chosen = select_entries(parse_opds(OPDS)[0], Selector.from_spec(spec))
     assert [e.file_name for e in chosen] == expected
+
+
+def test_selector_by_tag_takes_a_family_without_a_category() -> None:
+    """DevDocs' 243 books carry no catalog category, only the "devdocs" tag (2026-10-17)."""
+    entries, _ = parse_opds(OPDS)
+    docs = [
+        replace(entries[0], name=f"devdocs_en_{n}", category="", tags=("devdocs", n, "_ftindex:no"))
+        for n in "ab"
+    ]
+    spec = make_spec("s", {"adapter": "kiwix-opds", "selector": {"tag": "devdocs", "lang": "eng"}})
+    sel = Selector.from_spec(spec)
+    assert [e.name for e in select_entries([*entries, *docs], sel)] == ["devdocs_en_a", "devdocs_en_b"]
+    assert not sel.single_book
+    assert sel.queries() == [{"lang": "eng", "tag": "devdocs"}]
 
 
 def test_selector_requires_name_or_category() -> None:

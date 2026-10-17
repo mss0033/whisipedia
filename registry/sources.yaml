@@ -324,24 +324,28 @@ sources:
     publisher: Office of the Law Revision Counsel
     domain: [law]
     tier: T1
-    status: candidate
+    status: active  # 2026-10-17 research round: the us-law adapter reads the OLRC's USLM release
     license: LicenseRef-US-Gov-PD
     legal_basis: public-domain
-    access: {adapter: http-files}
-    update: {strategy: snapshot-retention}
-    size: {bytes: 1e9, measured: false, as_of: 2026-10-09}
+    # The current release point's all-titles zip (xml_uscAll@119-121.zip, 109 MB): one document per
+    # section of the Code, editorial notes left out.
+    access: {adapter: us-law, kind: uscode}
+    update: {cadence: P7D, strategy: snapshot-retention}
+    size: {bytes: 108675360, measured: true, as_of: 2026-10-17}
 
   - id: ecfr-federal-register
-    name: eCFR and Federal Register
-    publisher: US Government Publishing Office
+    name: Electronic Code of Federal Regulations (eCFR)
+    publisher: US Government Publishing Office and Office of the Federal Register
     domain: [law]
     tier: T1
-    status: candidate
+    status: active  # 2026-10-17 research round; the daily Federal Register is not taken (yet)
     license: LicenseRef-US-Gov-PD
     legal_basis: public-domain
-    access: {adapter: http-files}
-    update: {strategy: base-plus-incremental}
-    size: {bytes: 50e9, measured: false, as_of: 2026-10-09}
+    # GovInfo bulk data, one XML file per title (49 titles, 824 MB, updated daily upstream): one
+    # document per section and appendix. A weekly check fetches only the titles that changed.
+    access: {adapter: us-law, kind: ecfr}
+    update: {cadence: P7D, strategy: snapshot-retention}
+    size: {bytes: 824000000, measured: true, as_of: 2026-10-17}
 
   - id: courtlistener
     name: CourtListener bulk data
@@ -3086,3 +3090,395 @@ sources:
     retention:
       gfs: {last: 2, monthly: 6, yearly: forever}
     notes: Added from the 2026-10-14 field exam's coverage gaps.
+  - id: kiwix-theworldfactbook-en-all
+    name: CIA World Factbook 2020 (Kiwix ZIM)
+    publisher: CIA (via Kiwix)
+    domain: [encyclopedia, geography]
+    tier: T1
+    status: active
+    license: Public-Domain-US-Gov
+    legal_basis: public-domain
+    access:
+      adapter: kiwix-opds
+      selector: {name: theworldfactbook_en_all}
+      prefix_books: false
+    update: {strategy: snapshot-retention}
+    size: {bytes: 410000000, measured: false, as_of: '2026-10-17'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    irreplaceable: true
+    notes: "Research round 2026-10-17 (docs/research/ROUND-2026-10-17.md). The CIA discontinued the Factbook in February 2026 and took the site down; this 2020 edition is a copy that no longer exists upstream."
+  - id: kiwix-wikispecies-en-all
+    name: Wikispecies (Kiwix ZIM)
+    publisher: Wikimedia (via Kiwix)
+    domain: [science]
+    tier: T2
+    status: active
+    license: CC-BY-SA-4.0
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: wikispecies_en_all, flavour: maxi}
+      prefix_books: false
+    update: {strategy: snapshot-retention}
+    size: {bytes: 3550000000, measured: false, as_of: '2026-10-17'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    notes: "Research round 2026-10-17 (docs/research/ROUND-2026-10-17.md). Taxonomy of all species (Wikimedia)."
+  - id: kiwix-librepathology-en-all
+    name: Libre Pathology (Kiwix ZIM)
+    publisher: Libre Pathology (via Kiwix)
+    domain: [medicine]
+    tier: T2
+    status: active
+    license: CC-BY-SA-3.0
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: librepathology_en_all, flavour: maxi}
+      prefix_books: false
+    update: {strategy: snapshot-retention}
+    size: {bytes: 100000000, measured: false, as_of: '2026-10-17'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    notes: "Research round 2026-10-17 (docs/research/ROUND-2026-10-17.md). Pathology knowledge base written by pathologists."
+  - id: kiwix-skin-of-color-society-en-all
+    name: Skin of Color Society dermatology (Kiwix ZIM)
+    publisher: Skin of Color Society (via Kiwix)
+    domain: [medicine]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: skin-of-color-society_en_all}
+      prefix_books: false
+    update: {strategy: snapshot-retention}
+    size: {bytes: 1140000000, measured: false, as_of: '2026-10-17'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    notes: "Research round 2026-10-17 (docs/research/ROUND-2026-10-17.md). Dermatology across skin types; Kiwix distributes it with the publisher."
+  - id: kiwix-proofwiki-org-en-all
+    name: ProofWiki (Kiwix ZIM)
+    publisher: ProofWiki (via Kiwix)
+    domain: [science]
+    tier: T2
+    status: active
+    license: CC-BY-SA-3.0
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: proofwiki.org_en_all, flavour: maxi}
+      prefix_books: false
+    update: {strategy: snapshot-retention}
+    size: {bytes: 190000000, measured: false, as_of: '2026-10-17'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    notes: "Research round 2026-10-17 (docs/research/ROUND-2026-10-17.md). Compendium of mathematical proofs."
+  - id: kiwix-artofproblemsolving-en-all
+    name: Art of Problem Solving wiki (Kiwix ZIM)
+    publisher: AoPS (via Kiwix)
+    domain: [education]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: artofproblemsolving_en_all, flavour: maxi}
+      prefix_books: false
+    update: {strategy: snapshot-retention}
+    size: {bytes: 210000000, measured: false, as_of: '2026-10-17'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    notes: "Research round 2026-10-17 (docs/research/ROUND-2026-10-17.md). Competition mathematics problems and solutions."
+  - id: kiwix-freecodecamp-en-rosetta-code
+    name: Rosetta Code tasks (freeCodeCamp) (Kiwix ZIM)
+    publisher: freeCodeCamp (via Kiwix)
+    domain: [computing]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: freecodecamp_en_rosetta-code}
+      prefix_books: false
+    update: {strategy: snapshot-retention}
+    size: {bytes: 10000000, measured: false, as_of: '2026-10-17'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    notes: "Research round 2026-10-17 (docs/research/ROUND-2026-10-17.md). Programming tasks solved across languages."
+  - id: kiwix-zimgit-food-preparation-en
+    name: Food for Preppers (zimgit library) (Kiwix ZIM)
+    publisher: Kiwix zimgit
+    domain: [preparedness]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: zimgit-food-preparation_en}
+      prefix_books: false
+    update: {strategy: snapshot-retention}
+    size: {bytes: 100000000, measured: false, as_of: '2026-10-17'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    notes: "Research round 2026-10-17 (docs/research/ROUND-2026-10-17.md). Recipes and techniques for preparing and storing food."
+  - id: kiwix-zimgit-knots-en
+    name: A Library of Knots (zimgit library) (Kiwix ZIM)
+    publisher: Kiwix zimgit
+    domain: [preparedness]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: zimgit-knots_en}
+      prefix_books: false
+    update: {strategy: snapshot-retention}
+    size: {bytes: 30000000, measured: false, as_of: '2026-10-17'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    notes: "Research round 2026-10-17 (docs/research/ROUND-2026-10-17.md). Knots, lashings, ladders and sutures."
+  - id: kiwix-zimgit-post-disaster-en
+    name: Post Disaster Resource Library (zimgit) (Kiwix ZIM)
+    publisher: Kiwix zimgit
+    domain: [preparedness]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: zimgit-post-disaster_en}
+      prefix_books: false
+    update: {strategy: snapshot-retention}
+    size: {bytes: 640000000, measured: false, as_of: '2026-10-17'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    notes: "Research round 2026-10-17 (docs/research/ROUND-2026-10-17.md). Post-disaster manuals (shelter, sanitation, recovery)."
+  - id: kiwix-zimgit-water-en
+    name: Water Treatment Library (zimgit) (Kiwix ZIM)
+    publisher: Kiwix zimgit
+    domain: [preparedness, water]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: zimgit-water_en}
+      prefix_books: false
+    update: {strategy: snapshot-retention}
+    size: {bytes: 20000000, measured: false, as_of: '2026-10-17'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    notes: "Research round 2026-10-17 (docs/research/ROUND-2026-10-17.md). Water collection and purification manuals (round 3 asks 'water in dry country')."
+  - id: kiwix-wikiciv-en-all
+    name: WikiCiv (Kiwix ZIM)
+    publisher: WikiCiv (via Kiwix)
+    domain: [howto, preparedness]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: wikiciv_en_all, flavour: maxi}
+      prefix_books: false
+    update: {strategy: snapshot-retention}
+    size: {bytes: 5000000, measured: false, as_of: '2026-10-17'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    notes: "Research round 2026-10-17 (docs/research/ROUND-2026-10-17.md). How to rebuild basic technologies from scratch."
+  - id: kiwix-restarters-en-all
+    name: Restarters wiki (repair) (Kiwix ZIM)
+    publisher: The Restart Project (via Kiwix)
+    domain: [howto]
+    tier: T2
+    status: active
+    license: CC-BY-SA-4.0
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: restarters_en_all, flavour: maxi}
+      prefix_books: false
+    update: {strategy: snapshot-retention}
+    size: {bytes: 20000000, measured: false, as_of: '2026-10-17'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    notes: "Research round 2026-10-17 (docs/research/ROUND-2026-10-17.md). How things work and how to fix them."
+  - id: kiwix-gardenology-en-all
+    name: Gardenology plant encyclopedia (Kiwix ZIM)
+    publisher: Gardenology (via Kiwix)
+    domain: [agriculture]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: gardenology_en_all}
+      prefix_books: false
+    update: {strategy: snapshot-retention}
+    size: {bytes: 110000000, measured: false, as_of: '2026-10-17'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    notes: "Research round 2026-10-17 (docs/research/ROUND-2026-10-17.md). Plants and gardening."
+  - id: kiwix-gentoo-en-all
+    name: Gentoo Wiki (Kiwix ZIM)
+    publisher: Gentoo (via Kiwix)
+    domain: [computing]
+    tier: T2
+    status: active
+    license: CC-BY-SA-3.0
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: gentoo_en_all, flavour: maxi}
+      prefix_books: false
+    update: {strategy: snapshot-retention}
+    size: {bytes: 100000000, measured: false, as_of: '2026-10-17'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    notes: "Research round 2026-10-17 (docs/research/ROUND-2026-10-17.md). Linux handbooks and configuration guides."
+  - id: kiwix-openstreetmap-wiki-en-all
+    name: OpenStreetMap Wiki (Kiwix ZIM)
+    publisher: OpenStreetMap (via Kiwix)
+    domain: [geography, computing]
+    tier: T2
+    status: active
+    license: CC-BY-SA-2.0
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: openstreetmap-wiki_en_all, flavour: maxi}
+      prefix_books: false
+    update: {strategy: snapshot-retention}
+    size: {bytes: 1240000000, measured: false, as_of: '2026-10-17'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    notes: "Research round 2026-10-17 (docs/research/ROUND-2026-10-17.md). Map features and tagging: how to read the OSM data the library holds."
+  - id: kiwix-explainxkcd-en-all
+    name: Explain XKCD (Kiwix ZIM)
+    publisher: explainxkcd (via Kiwix)
+    domain: [education]
+    tier: T3
+    status: active
+    license: CC-BY-SA-3.0
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: explainxkcd_en_all, flavour: maxi}
+      prefix_books: false
+    update: {strategy: snapshot-retention}
+    size: {bytes: 150000000, measured: false, as_of: '2026-10-17'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    notes: "Research round 2026-10-17 (docs/research/ROUND-2026-10-17.md). Explanations of the xkcd comics the library holds."
+  - id: kiwix-bogleheads-en-all
+    name: Bogleheads wiki (personal finance) (Kiwix ZIM)
+    publisher: Bogleheads (via Kiwix)
+    domain: [howto]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: bogleheads_en_all, flavour: maxi}
+      prefix_books: false
+    update: {strategy: snapshot-retention}
+    size: {bytes: 10000000, measured: false, as_of: '2026-10-17'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    notes: "Research round 2026-10-17 (docs/research/ROUND-2026-10-17.md). Personal finance and investing."
+  - id: kiwix-finiki-en-all
+    name: Finiki (Canadian personal finance) (Kiwix ZIM)
+    publisher: Finiki (via Kiwix)
+    domain: [howto]
+    tier: T3
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: finiki_en_all, flavour: maxi}
+      prefix_books: false
+    update: {strategy: snapshot-retention}
+    size: {bytes: 5000000, measured: false, as_of: '2026-10-17'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    notes: "Research round 2026-10-17 (docs/research/ROUND-2026-10-17.md). Canadian personal finance."
+  - id: kiwix-scoutwiki-org-en-all
+    name: ScoutWiki (Kiwix ZIM)
+    publisher: ScoutWiki (via Kiwix)
+    domain: [howto]
+    tier: T3
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: scoutwiki.org_en_all, flavour: maxi}
+      prefix_books: false
+    update: {strategy: snapshot-retention}
+    size: {bytes: 30000000, measured: false, as_of: '2026-10-17'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    notes: "Research round 2026-10-17 (docs/research/ROUND-2026-10-17.md). Scouting skills and programmes."
+  - id: kiwix-usda-2015-en
+    name: USDA Complete Guide to Home Canning (web) (Kiwix ZIM)
+    publisher: USDA (via Kiwix)
+    domain: [preparedness, agriculture]
+    tier: T1
+    status: active
+    license: Public-Domain-US-Gov
+    legal_basis: public-domain
+    access:
+      adapter: kiwix-opds
+      selector: {name: usda-2015_en}
+      prefix_books: false
+    update: {strategy: snapshot-retention}
+    size: {bytes: 20000000, measured: false, as_of: '2026-10-17'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    notes: "Research round 2026-10-17 (docs/research/ROUND-2026-10-17.md). The guide as linked pages: round 3 asks for green beans in Guide 4."
+  - id: kiwix-citizendium-org-en-all
+    name: Citizendium (Kiwix ZIM)
+    publisher: Citizendium (via Kiwix)
+    domain: [encyclopedia]
+    tier: T3
+    status: active
+    license: CC-BY-SA-3.0
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: citizendium.org_en_all, flavour: maxi}
+      prefix_books: false
+    update: {strategy: snapshot-retention}
+    size: {bytes: 220000000, measured: false, as_of: '2026-10-17'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    notes: "Research round 2026-10-17 (docs/research/ROUND-2026-10-17.md). Expert-edited encyclopedia."
+  - id: kiwix-devdocs-en
+    name: DevDocs programming documentation (Kiwix ZIMs)
+    publisher: DevDocs (via Kiwix)
+    domain: [computing]
+    tier: T2
+    status: active
+    license: LicenseRef-per-item
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {tag: devdocs, lang: eng}
+      prefix_books: true
+    update: {strategy: snapshot-retention}
+    size: {bytes: 440000000, measured: false, as_of: '2026-10-17'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    notes: "Research round 2026-10-17 (docs/research/ROUND-2026-10-17.md). 243 language and library references (0.44 GB) as one bundle."

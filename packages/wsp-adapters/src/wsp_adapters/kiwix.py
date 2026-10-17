@@ -136,6 +136,7 @@ class Selector:
     flavour: str | None = None
     category: str | None = None
     lang: str | None = None
+    tag: str | None = None  # a catalog tag: DevDocs' 243 books have no category, only the "devdocs" tag
     pinned: Mapping[str, str] = field(default_factory=dict[str, str])  # name -> flavour
 
     @classmethod
@@ -147,21 +148,27 @@ class Selector:
         raw_names = str_list(sel.get("name")) + str_list(sel.get("names"))
         names = tuple(n.split("@", 1)[0] for n in raw_names)
         pinned = {n.split("@", 1)[0]: n.split("@", 1)[1] for n in raw_names if "@" in n}
-        flavour, category, lang = sel.get("flavour"), sel.get("category"), sel.get("lang")
-        if not names and category is None:
-            raise ValueError(f"{spec.id}: selector needs name, names or category")
+        flavour, category, lang, tag = (
+            sel.get("flavour"),
+            sel.get("category"),
+            sel.get("lang"),
+            sel.get("tag"),
+        )
+        if not names and category is None and tag is None:
+            raise ValueError(f"{spec.id}: selector needs name, names, category or tag")
         return cls(
             names=names,
             flavour=None if flavour is None else str(flavour),
             category=None if category is None else str(category),
             lang=None if lang is None else str(lang),
+            tag=None if tag is None else str(tag),
             pinned=pinned,
         )
 
     @property
     def single_book(self) -> bool:
         """True when the source is exactly one book, so native ids need no book prefix."""
-        return len(self.names) == 1 and self.category is None
+        return len(self.names) == 1 and self.category is None and self.tag is None
 
     def queries(self) -> list[dict[str, str]]:
         base: dict[str, str] = {}
@@ -169,6 +176,8 @@ class Selector:
             base["category"] = self.category
         if self.lang is not None:
             base["lang"] = self.lang
+        if self.tag is not None:
+            base["tag"] = self.tag
         return [base | {"name": n} for n in self.names] if self.names else [base]
 
     def matches(self, entry: OpdsEntry) -> bool:
@@ -180,6 +189,8 @@ class Selector:
         elif self.flavour is not None and entry.flavour != self.flavour:
             return False
         if self.category is not None and entry.category != self.category:
+            return False
+        if self.tag is not None and self.tag not in entry.tags:
             return False
         return self.lang is None or self.lang in entry.languages
 
