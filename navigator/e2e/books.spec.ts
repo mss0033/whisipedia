@@ -47,7 +47,8 @@ test('a book is read from its first chapter to its end by Next, with nothing cut
     if (target === 'live' && i > 0) {
       // a chapter ends where a sentence does, not halfway through one
       const last = (await paras.last().innerText()).trim();
-      expect(last, `${title}: ends a sentence`).toMatch(/[.!?”"’'*)\]_—-]$/);
+      // …or with a closing line in capitals ("THE END", "FINIS")
+      expect(last, `${title}: ends a sentence`).toMatch(/[.!?”"’'*)\]_—-]$|^[A-Z][A-Z .]+$/);
     }
     seen.push(title);
     const next = nav.main.getByRole('link', { name: 'Next chapter →' });
@@ -105,9 +106,10 @@ test('"the illustrated edition" opens the same book, and its contents links work
       await link.click();
       await nav.settled();
       await nav.expectAddress(/^wsp:\/\/gutenberg-zim\//);
-      const heading = (await nav.heading.innerText()).toLowerCase().replace(/[’']/g, '');
+      // the window names the page by its document title (a book's heading may be split in two)
+      const opened = (await page.title()).toLowerCase().replace(/[’']/g, '');
       const want = words(title).slice(0, 2);
-      for (const w of want) expect(heading, `"${title}" opened "${heading}"`).toContain(w);
+      for (const w of want) expect(opened, `"${title}" opened "${opened}"`).toContain(w);
       expect(await nav.main.locator('.doc-body').innerText()).not.toMatch(/^\s*$/);
     });
   }
