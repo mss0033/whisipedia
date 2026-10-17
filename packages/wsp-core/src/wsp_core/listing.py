@@ -14,6 +14,9 @@ from collections.abc import Mapping, Sequence
 DEFAULT_SKIP_PATHS: tuple[str, ...] = (
     r"(?:questions|users|tags|badges|unanswered)_page=\d+",
     r"questions/tagged/[^/]+",  # every question with a tag, page by page ("first-aid_page=3")
+    # mwoffliner's resources: a page there describes a file and often holds only the wiki's menus.
+    # Appropedia's 15, titled "null", led meaning-based search for "running fix" (2026-10-16).
+    r"_assets_/.+",
 )
 
 
@@ -53,3 +56,13 @@ def skip_regex(patterns: Sequence[str]) -> str:
     for p in patterns:
         re.compile(p)
     return "|".join(f"(?:{p})" for p in patterns)
+
+
+_DEFAULT = re.compile(skip_regex(DEFAULT_SKIP_PATHS))
+
+
+def is_default_listing(native_id: str) -> bool:
+    """A page the default rule leaves out (a bundle's native id is ``<book>/<entry path>``), for a
+    consumer that does not read the registry: the embedder."""
+    inner = native_id.partition("/")[2]
+    return bool(_DEFAULT.fullmatch(native_id) or (inner and _DEFAULT.fullmatch(inner)))

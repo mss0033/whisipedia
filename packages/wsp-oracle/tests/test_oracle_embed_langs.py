@@ -74,3 +74,40 @@ def test_only_changed_documents_are_read(tmp_path: Path, monkeypatch: object) ->
     assert sum(reads) == 3  # the two unchanged English documents' text was never read
     assert not hasattr(embedbuild, "ProcessPoolExecutor")  # no fork after CUDA
     s.close()
+
+
+def test_pages_with_next_to_nothing_to_say_get_no_vectors(tmp_path: Path) -> None:
+    """2026-10-16: MDWiki's templates and Appropedia's file pages embed near every short query; the
+    nearest passages to "running fix" were "Reflist" and a page of the wiki's menus."""
+    footer = "This article is issued from WikiProjectMed under a free licence. " * 2
+    root = tmp_path / "ref"
+    docs = [
+        doc("w", "Reflist", "Reflist", f"Reflist Documentation [create] [purge] {footer}"),
+        doc("w", "_assets_/f8/File:Main_board.pdf", "null", "Main menu Navigation Main page " * 40),
+        doc("w", "Stub", "Stub", "A short article that still says something about its subject. " * 5),
+    ]
+    with RefineryWriter(root, "w", "g1") as w:
+        w.write(docs)
+    s = ChunkVectorStore(tmp_path / "v", DIMS)
+    emb = HashingEmbedder(DIMS)
+    first = embed_generation(
+        RefineryReader(generation_dir(root, "w", "g1")), s, emb, source_id="w", generation_id="g1"
+    )
+    assert (first.docs_embedded, first.docs_left_out) == (1, 2)
+    assert len(s) == 1
+    assert "left out 2" in first.line()
+    # Recorded: a later run neither reads nor embeds them again.
+    with RefineryWriter(root, "w", "g2") as w:
+        w.write(docs)
+    again = embed_generation(
+        RefineryReader(generation_dir(root, "w", "g2")), s, emb, source_id="w", generation_id="g2"
+    )
+    assert (again.docs_unchanged, again.docs_embedded, again.docs_removed) == (3, 0, 0)
+    # A page that loses its text loses its vectors.
+    with RefineryWriter(root, "w", "g3") as w:
+        w.write([*docs[:2], doc("w", "Stub", "Stub", "Stub. Nothing left.")])
+    embed_generation(
+        RefineryReader(generation_dir(root, "w", "g3")), s, emb, source_id="w", generation_id="g3"
+    )
+    assert len(s) == 0
+    s.close()

@@ -64,7 +64,7 @@ def store(tmp_path: Path) -> Iterator[ChunkVectorStore]:
     emb = HashingEmbedder(DIMS)
     for source in ("encyclo", "dictionary", "rfc"):
         reader = RefineryReader(generation_dir(root, source, "g1"))
-        embed_generation(reader, s, emb, source_id=source, generation_id="g1", chunk_words=50)
+        embed_generation(reader, s, emb, source_id=source, generation_id="g1", chunk_words=50, min_words=0)
     yield s
     s.close()
 
@@ -87,11 +87,13 @@ def test_embed_generation_is_resumable_and_incremental(tmp_path: Path) -> None:
     s = ChunkVectorStore(tmp_path / "v", DIMS)
     emb = HashingEmbedder(DIMS)
     seen: list[EmbedStats] = []
-    first = embed_generation(reader, s, emb, source_id="encyclo", generation_id="g1", progress=seen.append)
+    first = embed_generation(
+        reader, s, emb, source_id="encyclo", generation_id="g1", progress=seen.append, min_words=0
+    )
     assert first.docs_embedded == 8
     assert seen
     assert "encyclo" in seen[-1].line()
-    again = embed_generation(reader, s, emb, source_id="encyclo", generation_id="g1")
+    again = embed_generation(reader, s, emb, source_id="encyclo", generation_id="g1", min_words=0)
     assert (again.docs_embedded, again.docs_unchanged) == (0, 8)
 
     changed = tuple(d for d in CORPUS if d.source_id == "encyclo" and d.native_id != "Lisbon")
@@ -102,11 +104,11 @@ def test_embed_generation_is_resumable_and_incremental(tmp_path: Path) -> None:
         ),
     )
     r2 = write_generation(root, "g2", changed)
-    upd = embed_generation(r2, s, emb, source_id="encyclo", generation_id="g2")
+    upd = embed_generation(r2, s, emb, source_id="encyclo", generation_id="g2", min_words=0)
     assert (upd.docs_embedded, upd.docs_unchanged, upd.docs_removed) == (1, 6, 1)
     assert s.doc_count("encyclo") == 7
     assert s.texts(["wsp:encyclo/Lisbon#0"]) == {}
-    limited = embed_generation(r2, s, emb, source_id="encyclo", generation_id="g3", limit=2)
+    limited = embed_generation(r2, s, emb, source_id="encyclo", generation_id="g3", limit=2, min_words=0)
     assert limited.docs_seen == 2
     assert limited.docs_removed == 0
     s.close()

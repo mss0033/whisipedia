@@ -33,6 +33,7 @@ import numpy.typing as npt
 import pyarrow as pa
 import pyarrow.compute as _pc
 
+from wsp_core.listing import is_default_listing
 from wsp_core.ports import Embedder
 from wsp_index import RefineryReader
 from wsp_index.refinery import configured_root, current_generation, generation_dir
@@ -56,17 +57,21 @@ class EmbedStats:
     docs_embedded: int = 0
     docs_unchanged: int = 0
     docs_removed: int = 0
+    docs_left_out: int = 0
     chunks: int = 0
     total_docs: int = 0
     started: float = field(default_factory=time.monotonic)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
-    def add(self, *, seen: int = 0, embedded: int = 0, unchanged: int = 0, chunks: int = 0) -> None:
+    def add(
+        self, *, seen: int = 0, embedded: int = 0, unchanged: int = 0, left_out: int = 0, chunks: int = 0
+    ) -> None:
         """Counters are updated from the producer and the consumer thread."""
         with self._lock:
             self.docs_seen += seen
             self.docs_embedded += embedded
             self.docs_unchanged += unchanged
+            self.docs_left_out += left_out
             self.chunks += chunks
 
     @property
@@ -85,7 +90,8 @@ class EmbedStats:
             eta = f" eta {rest / 3600:.1f}h"
         return (
             f"{self.source_id} {pct} docs {self.docs_seen:,}/{self.total_docs:,} "
-            f"(embedded {self.docs_embedded:,}, unchanged {self.docs_unchanged:,}) "
+            f"(embedded {self.docs_embedded:,}, unchanged {self.docs_unchanged:,}"
+            f"{f', left out {self.docs_left_out:,}' if self.docs_left_out else ''}) "
             f"chunks {self.chunks:,} @ {self.chunks_per_s:,.0f}/s{eta}"
         )
 
@@ -101,6 +107,20 @@ class _Doc:
 
 
 PROSE_LETTER_SHARE = 0.45
+MIN_DOC_WORDS = 40
+
+
+def worth_a_vector(doc_id: str, title: str, text: str, min_words: int = MIN_DOC_WORDS) -> bool:
+    """A document with something to say: at least ``min_words`` words beyond its title, and not
+    a listing or resource page (:func:`wsp_core.listing.is_default_listing`). Pages with next to no
+    text embed near every short query: MDWiki's templates ("Reflist", "Main other": the title, "
+    Documentation [create] [purge]" and the site's footer, 30 words) and Appropedia's file pages (the
+    wiki's menus) were the nearest passages to "running fix", and Bowditch fell out of the results
+    (2026-10-16). Left out, they are recorded with no passages, so a later run does not read them
+    again; lexical search still finds them."""
+    if is_default_listing(doc_id.partition("/")[2]):
+        return False
+    return len(text.split()) - len(title.split()) >= min_words
 
 
 def is_prose(text: str) -> bool:
@@ -146,6 +166,7 @@ def _produce(
     limit: int | None,
     batch_docs: int,
     langs: frozenset[str] | None = None,
+    min_words: int = MIN_DOC_WORDS,
 ) -> None:
     """Per part: read only ids, hashes and languages; skip unchanged documents; read and chunk the
     rest (title and text of their row groups only) in this thread (~48k chunks/s on one core)."""
@@ -177,14 +198,16 @@ def _produce(
                 table = reader.part_rows(part, positions[np.asarray(todo, dtype=np.int64)], _DOC_COLUMNS)
                 docs: list[_Doc] = []
                 for r in table.to_pylist():
-                    doc_id, title = str(r["doc_id"]), str(r["title"])
-                    pairs = _chunk_one(title, str(r["text"]), words, max_chunks, wiki)
-                    numbered = [
-                        Chunk(make_chunk_id(doc_id, n), doc_id, n, title, sec, txt)
-                        for n, (sec, txt) in enumerate(pairs)
-                    ]
-                    # Numbers are kept by position (passage ids stay stable); tables go, one stays.
-                    chunks = tuple(c for c in numbered if is_prose(c.text)) or tuple(numbered[:1])
+                    doc_id, title, text = str(r["doc_id"]), str(r["title"]), str(r["text"])
+                    chunks: tuple[Chunk, ...] = ()
+                    if worth_a_vector(doc_id, title, text, min_words):
+                        pairs = _chunk_one(title, text, words, max_chunks, wiki)
+                        numbered = [
+                            Chunk(make_chunk_id(doc_id, n), doc_id, n, title, sec, txt)
+                            for n, (sec, txt) in enumerate(pairs)
+                        ]
+                        # Numbers are kept by position (passage ids stay stable); tables go, one stays.
+                        chunks = tuple(c for c in numbered if is_prose(c.text)) or tuple(numbered[:1])
                     docs.append(
                         _Doc(
                             doc_id,
@@ -215,6 +238,7 @@ def embed_generation(
     save_every: int = 250_000,
     limit: int | None = None,
     langs: frozenset[str] | None = None,
+    min_words: int = MIN_DOC_WORDS,
     progress: Callable[[EmbedStats], None] | None = None,
     progress_every_s: float = 10.0,
 ) -> EmbedStats:
@@ -223,7 +247,8 @@ def embed_generation(
     The graph is built once at the end (``ChunkVectorStore.build_graph``); ``save_every`` passages
     only make rows and ids durable, so an interrupted run loses at most that much and resumes.
     With ``limit`` only the first ``limit`` documents are considered and nothing is deleted; with
-    ``langs`` only documents of those languages are embedded or removed.
+    ``langs`` only documents of those languages are embedded or removed. A document with fewer than
+    ``min_words`` words beyond its title gets no vectors (:func:`worth_a_vector`).
     """
     total = limit or count_docs(reader, langs)
     stats = EmbedStats(source_id=source_id, generation_id=generation_id, total_docs=total)
@@ -238,6 +263,7 @@ def embed_generation(
             "limit": limit,
             "batch_docs": batch_docs,
             "langs": langs,
+            "min_words": min_words,
         },
         daemon=True,
         name="embed-producer",
@@ -258,12 +284,15 @@ def embed_generation(
         if replaced:
             store.delete_docs(replaced)
         chunks = [c for d in pending for c in d.chunks]
-        mat = encode_passages(embedder, [c.embed_text() for c in chunks], store.dimensions)
-        store.add_chunks(chunks, mat)
+        if chunks:
+            store.add_chunks(
+                chunks, encode_passages(embedder, [c.embed_text() for c in chunks], store.dimensions)
+            )
         store.record_docs(
             (d.doc_id, d.source_id, d.content_hash, generation_id, len(d.chunks), d.lang) for d in pending
         )
-        stats.add(seen=len(pending), embedded=len(pending), chunks=len(chunks))
+        left_out = sum(1 for d in pending if not d.chunks)
+        stats.add(seen=len(pending), embedded=len(pending) - left_out, left_out=left_out, chunks=len(chunks))
         since_save += len(chunks)
         pending.clear()
         pending_chunks = 0
