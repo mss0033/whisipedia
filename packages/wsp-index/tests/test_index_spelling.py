@@ -341,3 +341,17 @@ def test_a_known_word_picks_the_language_without_fuzzy_searches(monkeypatch: pyt
     chosen = s.choose(["glacier", "calving"])
     assert chosen is not None
     assert chosen.lang == "en"
+
+
+def test_unknown_everywhere_is_corrected_in_the_preferred_language_only() -> None:
+    """2026-10-17: with every word unknown, a tiny vocabulary (Lezgian, 338 words) won the language
+    choice and nothing was corrected; Polish offered "zza" for "zzq"; all 322 languages were searched."""
+    english = {"hypertension": 4520, "medication": 2119, "the": 100_000, "pressure": 9000}
+    tiny = {"гъвечӏи": 3, "zz": 2}
+    polish = {"zza": 50_000, "nie": 90_000, "jest": 80_000}
+    sp = Speller.from_vocabularies({"en": english, "lez": tiny, "pl": polish})
+    assert sp.correct("hypertenshun") == "hypertension"
+    assert sp.correct("zzq") is None  # Polish knows none of it: it does not get to correct it
+    assert sp.correct("nie jest zzq") is None or "zza" in (
+        sp.correct("nie jest zzq") or ""
+    )  # Polish words: Polish may

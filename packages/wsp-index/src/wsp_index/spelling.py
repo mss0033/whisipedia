@@ -681,9 +681,13 @@ class Speller:
         min_ratio: float = 10.0,
         prefer: Sequence[str] = ("en",),
         prefer_weight: float = 100.0,
+        fuzzy_min_words: int = 20_000,
+        fuzzy_languages: int = 12,
     ) -> None:
         """``prefer``: languages assumed ``prefer_weight`` times likelier a priori (the interface
-        language); it only matters when the words themselves do not tell (all unknown everywhere)."""
+        language); it only matters when the words themselves do not tell (all unknown everywhere).
+        Then only the preferred languages are searched for corrections, or, with none of the script,
+        at most ``fuzzy_languages`` vocabularies of at least ``fuzzy_min_words`` words (:meth:`choose`)."""
         kw: dict[str, Any] = {
             "max_distance": max_distance,
             "prefix": prefix,
@@ -692,6 +696,8 @@ class Speller:
         }
         self.prefer = frozenset(prefer)
         self.log_prefer = math.log(max(1.0, prefer_weight))
+        self.fuzzy_min_words = fuzzy_min_words
+        self.fuzzy_languages = fuzzy_languages
         head = bytes(buf[:8])
         self.vocabs: list[Vocabulary] = []
         if head == MAGIC_V1:
@@ -839,6 +845,20 @@ class Speller:
         counts = [[v.count(w) for w in usable] for v in pool]
         known = [sum(1 for c in cs if c) for cs in counts]
         most = max(known)
+        if not most:
+            # Unknown everywhere: each language would be scored by how close its best corrections
+            # come, a fuzzy search per word and language. Only the preferred languages are searched
+            # (else the largest vocabularies): a tiny one (Lezgian's 338 words) scores an unknown word
+            # as likely, so it won and nothing was corrected, searching all 322 held "hypertenshun
+            # medicashun" for 4-11 s, and Polish offered "zza" for "zzq" (2026-10-17). A language
+            # other than the preferred ones corrects a query only when it knows one of its words.
+            keep = [i for i, v in enumerate(pool) if v.lang in self.prefer]
+            if not keep:
+                big = sorted(range(len(pool)), key=lambda i: -len(pool[i]))
+                keep = [i for i in big if len(pool[i]) >= self.fuzzy_min_words][: self.fuzzy_languages]
+            if not keep:
+                return None
+            pool, counts, known = [pool[i] for i in keep], [counts[i] for i in keep], [known[i] for i in keep]
         best: tuple[float, int, Vocabulary] | None = None
         for v, cs, k in zip(pool, counts, known, strict=True):
             if k < most:
