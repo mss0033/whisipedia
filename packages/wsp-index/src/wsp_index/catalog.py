@@ -146,14 +146,62 @@ class PrefixCategories:
 
 
 _SCRIPT_BUCKETS = {"CJK": "Han", "HIRAGANA": "Kana", "KATAKANA": "Kana", "THAI": "Thai", "LAO": "Lao"}
+# Alphabets browsed letter by letter; every other script is one group (Wiktionary's directory listed
+# 11,792 initials: 789 cuneiform signs, 769 Tangut ideographs, 637 Canadian syllabics, ... 2026-10-17).
+# Their core letters; an extended or historic one (Old Cyrillic "Ꙑ", Urdu's letters) goes to the
+# script's group.
+_ALPHABETS = {
+    "CYRILLIC": (0x0400, 0x042F),
+    "GREEK": (0x0391, 0x03A9),
+    "ARABIC": (0x0621, 0x064A),
+    "HEBREW": (0x05D0, 0x05EA),
+    "ARMENIAN": (0x0531, 0x0556),
+    "GEORGIAN": (0x10D0, 0x10FA),  # Mkhedruli; titles are not upper-cased into Mtavruli
+    "HANGUL": (0x1100, 0x1112),  # the modern leading consonants
+}
+# Words of a character name that end its script's name ("CANADIAN SYLLABICS E": Canadian Syllabics).
+_NAME_STOPS = frozenset(
+    {"LETTER", "SYLLABLE", "SIGN", "CHARACTER", "HIEROGLYPH", "CAPITAL", "SMALL", "DIGIT", "NUMBER",
+     "VOWEL", "CONSONANT", "LIGATURE", "SYMBOL", "MARK", "INDEPENDENT", "FINAL", "INITIAL", "MEDIAL",
+     "SUBJOINED", "ISOLATED", "MODIFIER", "COMBINING", "VOCALIC", "ARCHAIC", "CHOSEONG", "JUNGSEONG",
+     "CURRENCY", "NUMERATOR", "DENOMINATOR", "FRACTION", "ACROPHONIC", "NUMERAL", "NUMERIC"}
+)  # fmt: skip
+
+
+# Characters whose names Python's Unicode table does not hold (generated names, newer versions).
+_UNNAMED_BLOCKS = (
+    (0x17000, 0x18AFF, "Tangut"),
+    (0x18D00, 0x18D7F, "Tangut"),
+    (0x18B00, 0x18CFF, "Khitan Small Script"),
+    (0x1B170, 0x1B2FF, "Nushu"),
+    (0x2EBF0, 0x2EE5F, "Han"),
+    (0x31350, 0x323AF, "Han"),
+)
+
+
+def _script_name(name: str) -> str:
+    """The script part of a character name: "LINEAR B SYLLABLE B008 A" -> "Linear B"."""
+    words: list[str] = []
+    for word in name.split(" "):
+        if (
+            word in _NAME_STOPS
+            or word.startswith("IDEOGRAPH")
+            or (words and any(ch.isdigit() for ch in word))
+        ):
+            break
+        words.append(word)
+        if word == "SYLLABICS":  # "CANADIAN SYLLABICS E"
+            break
+    return " ".join(words).title() if words else "Other"
 
 
 def initial_of(title: str) -> tuple[str, str]:
     """``(slug, display name)`` of a title's directory initial.
 
-    The first letter or digit (leading punctuation skipped), accents folded ("Émile" under E),
-    Hangul by its leading consonant, scripts of thousands of characters (Han, Kana, Thai) as one
-    bucket each, and any other alphabet by its own letter (Cyrillic, Greek, Arabic, Devanagari, ...).
+    The first letter or digit (leading punctuation skipped), accents folded ("Émile" under E). A-Z and
+    the letters of the alphabets in :data:`_ALPHABETS` each have their own initial (Hangul by its
+    leading consonant); every other script is one group ("Cuneiform", "Linear B"), and so are the
+    Latin letters beyond A-Z ("Other Latin": ð, þ, ŋ).
     """
     first = next((ch for ch in title.strip() if ch.isalnum()), "")
     if not first:
@@ -165,14 +213,31 @@ def initial_of(title: str) -> tuple[str, str]:
     if script in _SCRIPT_BUCKETS:
         label = _SCRIPT_BUCKETS[script]
         return label.lower(), label
-    base = unicodedata.normalize("NFKD", first)[0].upper()  # accents and Hangul syllables decompose
+    folded = unicodedata.normalize("NFKD", first)[0]  # accents and Hangul syllables decompose
+    base = folded if unicodedata.name(folded, "").startswith("GEORGIAN") else folded.upper()
     if base.isdigit():  # "½" decomposes to "1", a fraction slash, "2": a number
         return "0-9", "0-9"
     if not base.isalpha():  # a letter that decomposes to a space or a mark: the letter itself
         base = first.upper()
     if "A" <= base <= "Z":
         return base.lower(), base
-    return f"u{ord(base):04x}", base
+    base_name = unicodedata.name(base, "")
+    base_script = base_name.split(" ", 1)[0] if base_name else ""
+    core = _ALPHABETS.get(base_script)
+    if core is not None and core[0] <= ord(base) <= core[1]:
+        return f"u{ord(base):04x}", base
+    if base_script == "LATIN" or (not base_script and script == "LATIN"):
+        return "latin-other", "Other Latin"
+    if not base_name and not name:
+        cp = ord(first)
+        label = next((lab for lo, hi, lab in _UNNAMED_BLOCKS if lo <= cp <= hi), "")
+        if label == "Han":
+            return "han", "Han"
+        if not label:
+            return "other", "Other"
+        return "script-" + "-".join(label.lower().split()), label
+    label = _script_name(base_name or name)
+    return "script-" + "-".join(label.lower().split()), label
 
 
 class InitialCategories:

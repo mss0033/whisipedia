@@ -30,6 +30,22 @@ def test_initials_in_every_script() -> None:
     # "1" beside "0-9" and an invisible " " (2026-10-16 crawl).
     assert initial_of("½ cup") == ("0-9", "0-9")
     assert initial_of("¹") == ("0-9", "0-9")
+    # A script of hundreds of signs is one group; Latin letters beyond A-Z are one (2026-10-17:
+    # Wiktionary's directory listed 11,792 initials).
+    assert initial_of("\U00012000") == ("script-cuneiform", "Cuneiform")
+    assert initial_of("\U00017000") == ("script-tangut", "Tangut")
+    assert initial_of("\u1401") == ("script-canadian-syllabics", "Canadian Syllabics")
+    assert initial_of("\U00010000") == ("script-linear-b", "Linear B")
+    assert initial_of("\U00013000") == ("script-egyptian", "Egyptian")
+    assert initial_of("\u1200") == ("script-ethiopic", "Ethiopic")
+    assert initial_of("\u0905") == ("script-devanagari", "Devanagari")
+    assert initial_of("ðæt") == ("latin-other", "Other Latin")
+    assert initial_of("ŋ") == ("latin-other", "Other Latin")
+    assert initial_of("Ж") == ("u0416", "Ж")  # an alphabet keeps its letters
+    assert initial_of("ש") == ("u05e9", "ש")
+    assert initial_of("\ua650") == ("script-cyrillic", "Cyrillic")  # an Old Cyrillic letter: the group
+    assert initial_of("\u0686") == ("script-arabic", "Arabic")  # an Arabic letter of Persian and Urdu
+    assert initial_of("\u10d0") == ("u10d0", "\u10d0")  # Georgian keeps its Mkhedruli letters
     for c in map(chr, range(0x80, 0x3000)):
         if c.isalnum():
             slug, name = initial_of(c)
