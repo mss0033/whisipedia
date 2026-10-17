@@ -849,15 +849,29 @@ def _head(path: Path, n: int = _SNIFF_BYTES) -> bytes:
         return fh.read(n)
 
 
-_ERROR_LEAD = 400  # an error body says so at once; RFC 6 (1,776 bytes) says "Error" in its last third
+_ERROR_LEAD = 400  # an error body says so at once: in its first bytes ...
+_ERROR_LINES = 2  # ... and its first lines (RFC 71's title "... Input Error" is its 3rd line)
+_ERROR_BODY_LINES = 4  # a body this short is all message
 
 
 def _error_text(head: bytes, size: int) -> bool:
-    """A short text body that opens like an error message."""
-    return size <= _ERROR_BODY_MAX and _ERROR_WORDS_RE.search(head[:_ERROR_LEAD]) is not None
+    """A short text body that opens like an error message: the words in its first lines, or anywhere in
+    a body of a few lines. RFC 6 says "Error" in its last third; seven early RFCs whose titles name an
+    error ("Typographical Error in RFC 107") were refused as error bodies (2026-10-17)."""
+    if size > _ERROR_BODY_MAX:
+        return False
+    lines = [ln for ln in head[:_ERROR_LEAD].splitlines() if ln.strip()]
+    if sum(1 for ln in head.splitlines() if ln.strip()) > _ERROR_BODY_LINES:
+        lines = lines[:_ERROR_LINES]
+    return any(_ERROR_WORDS_RE.search(ln) for ln in lines)
 
 
 _CONTROL_RE = re.compile(rb"[\x01-\x08\x0e-\x1a\x1c-\x1f\x7f]")  # not in any text (tab, LF, FF, CR, ESC are)
+# Text padded with NULs (RFC 734: 15% of its bytes, between pages) is still text: what is left once
+# they go must be most of the file, with hardly a control character.
+_TEXT_LEFT = 0.75
+_TEXT_CONTROLS = 0.005
+_XML_RE = re.compile(rb"^\s*<\?xml|</[A-Za-z_]")  # a declaration or a closing tag: not "<GJOURNAL>" (RFC 674)
 
 
 def body_kind(path: Path) -> str:
@@ -876,7 +890,10 @@ def body_kind(path: Path) -> str:
     if _HTML_RE.search(head[:1024]):
         return "html"
     if b"\x00" in head:
-        return "binary"
+        left = head.replace(b"\x00", b"")
+        if len(left) < _TEXT_LEFT * len(head) or len(_CONTROL_RE.findall(left)) > _TEXT_CONTROLS * len(left):
+            return "binary"
+        head, stripped = left, left.lstrip()
     try:
         head.decode("utf-8")
     except UnicodeDecodeError as exc:
@@ -886,7 +903,7 @@ def body_kind(path: Path) -> str:
             return "binary"
     if stripped[:1] in (b"{", b"["):
         return "json"
-    if stripped[:1] == b"<":
+    if stripped[:1] == b"<" and _XML_RE.search(head):
         return "xml"
     return "text"
 
@@ -1076,6 +1093,17 @@ _LETTER_RE = re.compile(r"[^\W\d_]")
 TEXT_SUFFIXES = (".txt", ".xml", ".json", ".md")
 
 
+def plain_text(data: bytes) -> str:
+    """A text file's text: UTF-8, else Windows-1252 (RFC 64's "µsec" is Latin-1); NUL padding dropped."""
+    data = data.replace(b"\x00", b"")
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        if exc.start >= len(data) - 4:  # a character cut at the end of the read
+            return data[: exc.start].decode("utf-8", "replace")
+        return data.decode("cp1252", "replace")
+
+
 def extract_text(path: Path, *, max_pages: int) -> Extracted:
     """Text of a vault file. Its page cache is released afterwards: a refine or a screening reads
     each file once, and on the NAS those pages would stay charged to the job's memory ceiling."""
@@ -1096,7 +1124,7 @@ def _extract_text(path: Path, *, max_pages: int) -> Extracted:
         if b"<html" in lowered or b"<!doctype html" in lowered or suffix in (".html", ".htm"):
             return Extracted(html_to_text(path.read_bytes()[: 16 * 1024 * 1024]))
         if suffix in TEXT_SUFFIXES:
-            return Extracted(path.read_bytes()[: 16 * 1024 * 1024].decode("utf-8", "replace"))
+            return Extracted(plain_text(path.read_bytes()[: 16 * 1024 * 1024]))
         if suffix == ".zip" and head.startswith(b"PK\x03\x04"):  # an archive, not a DOCX/EPUB container
             return Extracted(zip_screen_text(path))
         if suffix == ".docx" and head.startswith(b"PK\x03\x04"):

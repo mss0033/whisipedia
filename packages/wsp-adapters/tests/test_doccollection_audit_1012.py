@@ -21,6 +21,7 @@ from wsp_adapters.doccollection.adapter import (
     Survey,
     WrongBodyError,
     body_kind,
+    extract_text,
     reader_title,
     screen_file,
     screen_text,
@@ -654,3 +655,41 @@ def test_a_short_document_that_mentions_an_error_and_an_8_bit_text_are_documents
     blob = tmp_path / "b.txt"
     blob.write_bytes(b"\x89\x01\x02\x03" * 2000)
     assert body_kind(blob) == "binary"
+
+
+def test_early_rfcs_padded_with_nuls_or_titled_with_an_error_are_documents(tmp_path: Path) -> None:
+    """Twelve early RFCs were still refused (2026-10-17): RFC 71 "Reallocation in Case of Input Error"
+    and six more titled with an error, as error messages; RFC 734 (NUL padding between pages) and
+    three more as binary; RFC 674, opening with an NLS journal tag, as XML."""
+    rfc71 = tmp_path / "rfc71.txt"
+    rfc71.write_bytes(
+        b"\n\nNetwork Working Group                     Tjaart Schipper\n"
+        b"Request for Comments #71                   25 September 1970\n\n"
+        b"            Reallocation in Case of Input Error\n\n"
+        + b"In case of reading a message from the IMP, the length may be lost.\n"
+        * 8
+    )
+    assert well_formed(rfc71) is None
+    short = tmp_path / "s.txt"
+    short.write_bytes(b"\n\nService Unavailable\n\nThe server is down for maintenance.\n")
+    assert well_formed(short) == "an error message, not a document"
+    rfc734 = tmp_path / "rfc734.txt"
+    page = b"SUPDUP Display Protocol\t\t\tPage 1\n" + b"The display is a terminal.\n" * 60
+    rfc734.write_bytes(page + b"\x00" * 300 + page + b"\x1a")
+    assert body_kind(rfc734) == "text"
+    assert well_formed(rfc734) is None
+    assert extract_text(rfc734, max_pages=1).text == (page + page + b"\x1a").decode()
+    rfc674 = tmp_path / "rfc674.txt"
+    rfc674.write_bytes(
+        b"\n\n<GJOURNAL>31484.NLS;1, 12-DEC-74 04:32 XXX ;;;; Title:\n" + b"Text of the RFC.\n" * 50
+    )
+    assert body_kind(rfc674) == "text"
+    xml = tmp_path / "x.txt"
+    xml.write_bytes(b"<Error><Code>NoSuchKey</Code></Error>")
+    assert body_kind(xml) == "xml"
+    image = tmp_path / "i.txt"
+    image.write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR" + bytes(range(256)) * 16)
+    assert body_kind(image) == "binary"
+    latin1 = tmp_path / "rfc64.txt"
+    latin1.write_bytes(b"The line takes approximately 12 \xb5sec to settle.\n" * 20)
+    assert "12 \u00b5sec" in extract_text(latin1, max_pages=1).text
