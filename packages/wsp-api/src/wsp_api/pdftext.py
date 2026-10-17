@@ -9,9 +9,12 @@ so the document is reopened every :data:`PAGES_PER_OPEN` pages, and reading stop
 
 from __future__ import annotations
 
+import re
 import time
 from collections.abc import Callable
 
+# pdfium writes U+FFFE for a hyphen that breaks a word at a line's end ("fol\ufffe\r\nlowing"): joined.
+_LINE_HYPHEN = re.compile("\ufffe[ \t]*(?:\r?\n)?")
 PAGES_PER_OPEN = 10
 MAX_PAGES = 400
 SECONDS = 60.0
@@ -51,4 +54,12 @@ def pdf_text(
                 page.close()
     finally:
         pdf.close()
-    return "\f".join(out).replace("\r\n", "\n").replace("￾", "").replace("­", "")
+    return clean("\f".join(out))
+
+
+def clean(text: str) -> str:
+    """pdfium's text as the refiner reads it (``wsp_adapters.doccollection``): U+FFFD, a glyph the PDF
+    maps to no character (the USDA canning guide's spaces: "Recommended\ufffdprocess\ufffdtime"), is a
+    space; a line-end hyphen joins its word again; soft hyphens go."""
+    text = text.replace("\r\n", "\n").replace("\ufffd", " ").replace("\u00ad", "")
+    return _LINE_HYPHEN.sub("", text)
