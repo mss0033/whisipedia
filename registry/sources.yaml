@@ -310,8 +310,9 @@ sources:
       origins: [www.rfc-editor.org]
       rate: {requests_per_second: 1}
       discovery:
-        # Seven early RFCs exist only as scanned PDFs (no .txt, 2026-10-17): listed first, so these
-        # candidates win over the index's rows for the same keys.
+        # RFCs published only as PDF (2026-10-17): seven have no .txt at all; six have a .txt that only
+        # says the RFC "is available only in PostScript form" (NTP 1119 and 1129, OSPF 1131). Listed
+        # first, so these candidates win over the index's rows for the same keys.
         - kind: list
           items:
             - {pub_number: "RFC 8", title: "ARPA Network Functional Specifications", url: "https://www.rfc-editor.org/rfc/rfc8.pdf"}
@@ -321,14 +322,21 @@ sources:
             - {pub_number: "RFC 500", title: "Integration of data management systems on a computer network", url: "https://www.rfc-editor.org/rfc/rfc500.pdf"}
             - {pub_number: "RFC 530", title: "Report on the Survey Project", url: "https://www.rfc-editor.org/rfc/rfc530.pdf"}
             - {pub_number: "RFC 598", title: "RFC index - December 5, 1973", url: "https://www.rfc-editor.org/rfc/rfc598.pdf"}
+            - {pub_number: "RFC 570", title: "Experimental input mapping between NVT ASCII and UCSB On Line System", url: "https://www.rfc-editor.org/rfc/rfc570.pdf"}
+            - {pub_number: "RFC 1119", title: "Network Time Protocol (version 2) specification and implementation", url: "https://www.rfc-editor.org/rfc/rfc1119.pdf"}
+            - {pub_number: "RFC 1124", title: "Policy issues in interconnecting networks", url: "https://www.rfc-editor.org/rfc/rfc1124.pdf"}
+            - {pub_number: "RFC 1128", title: "Measured performance of the Network Time Protocol in the Internet system", url: "https://www.rfc-editor.org/rfc/rfc1128.pdf"}
+            - {pub_number: "RFC 1129", title: "Internet Time Synchronization: The Network Time Protocol", url: "https://www.rfc-editor.org/rfc/rfc1129.pdf"}
+            - {pub_number: "RFC 1131", title: "OSPF specification", url: "https://www.rfc-editor.org/rfc/rfc1131.pdf"}
         - kind: index-page
           url: "https://www.rfc-editor.org/rfc-index.html"
           rows: tr
           columns: {pub_number: 0, title: 1}
           url_rewrite: ["/info/rfc(\\d+)/$", "/rfc/rfc\\1.txt"]
       # Every RFC is published openly: words that look like handling markings ("(TS)") are not
-      # markings (71 RFCs, TCP's RFC 9293 among them, were rejected as classified, 2026-10-17).
-      filter: {allow_all: true, public_issuer: true}
+      # markings (71 RFCs, TCP's RFC 9293 among them, were rejected as classified, 2026-10-17). A
+      # scan without a text layer (RFC 500) is kept for its title and pages.
+      filter: {allow_all: true, public_issuer: true, allow_image_only: true}
     update: {cadence: P1M, strategy: snapshot-retention}
     size: {bytes: 0.6e9, measured: false, as_of: 2026-10-14}
 
