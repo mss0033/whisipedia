@@ -549,6 +549,7 @@ CHECKSUM_ONLY_ADAPTERS = frozenset(
         "gutenberg",
         "osm-planet",
         "us-law",  # the OLRC's and GovInfo's own XML of federal law: nothing in it to screen
+        "dailymed",  # NLM's own release of FDA drug labels, MD5-checked
     }
 )
 SCREENED_ADAPTERS = frozenset({"doc-collection"})  # policy screened by document_screen()

@@ -3482,3 +3482,23 @@ sources:
     retention:
       gfs: {last: 2, monthly: 6, yearly: forever}
     notes: "Research round 2026-10-17 (docs/research/ROUND-2026-10-17.md). 243 language and library references (0.44 GB) as one bundle."
+  - id: dailymed
+    name: DailyMed FDA drug labels
+    publisher: US National Library of Medicine (FDA Structured Product Labels)
+    domain: [medicine]
+    tier: T1
+    status: active
+    license: LicenseRef-US-Gov-PD
+    legal_basis: public-domain
+    # The full SPL release: prescription prescribing information, OTC Drug Facts, vaccines and other
+    # biologics (the remainder set) and animal drugs; homeopathic labels are left out. One document
+    # per label; a repackaged label with the same text is read once (wsp_adapters.dailymed).
+    access:
+      adapter: dailymed
+      sets: [human_rx, human_otc, remainder, animal]
+    update: {cadence: P3M, strategy: snapshot-retention}
+    size: {bytes: 51700000000, measured: true, as_of: '2026-10-17'}
+    # Tens of thousands of labels, many of one drug: below the encyclopedic medical sources, so a
+    # question about a drug finds MDWiki or MedlinePlus first and the label beside them.
+    rank_prior: 3.0
+    notes: "Research round 2026-10-17 (docs/research/ROUND-2026-10-17.md). Prescribing information for every FDA-listed drug: indications, dosing, warnings, interactions."
