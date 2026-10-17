@@ -93,7 +93,7 @@ test('a link to a page outside the library is shown broken, with its target on h
   await broken.hover();
   await expect(nav.status).toHaveText(/^Not in library: https?:\/\//);
   await expect(
-    nav.main.getByText(/link\(s\) on this page point outside the library/),
+    nav.main.getByText(/link\(s\) on this page go to websites the library does not hold offline/),
   ).toBeVisible();
   // Remote images are replaced by a period placeholder, never fetched.
   await expect(nav.main.getByRole('img', { name: /^Image not in library/ })).toBeVisible();
