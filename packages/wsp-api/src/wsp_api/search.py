@@ -118,6 +118,22 @@ def _title_hits(services: Services, text: str, source_id: str) -> Sequence[Searc
     return services.index.search(text, limit=20, sources=[source_id])
 
 
+# A legal citation names one section (2026-10-17: "26 USC 501" searched for the words instead).
+_CITATIONS = (
+    (
+        re.compile(
+            r"^(\d+a?)\s*(?:U\.?\s?S\.?\s?C\.?(?:\s?A\.?)?|USCA?)\s*(?:§+|sec(?:tion|\.)?)?\s*([0-9]+[0-9A-Za-z-]*)$",
+            re.I,
+        ),
+        "us-code",
+    ),
+    (
+        re.compile(r"^(\d+)\s*C\.?\s?F\.?\s?R\.?\s*(?:§+|sec(?:tion|\.)?)?\s*([0-9]+\.[0-9A-Za-z-]+)$", re.I),
+        "ecfr-federal-register",
+    ),
+)
+
+
 def _native_candidates(rest: str, key_prefix: str = "") -> list[str]:
     under = rest.replace(" ", "_")
     upper = under[:1].upper() + under[1:]  # MediaWiki titles: "alan turing" is "Alan_turing", a redirect
@@ -154,6 +170,10 @@ def navigate_to(
         except InvalidDocIdError:
             return None
         return doc_id if _check(doc_id) else None
+    for rx, source_id in _CITATIONS:
+        if (m := rx.match(q)) and services.source(source_id) is not None:
+            doc_id = make_doc_id(source_id, f"t{m.group(1)}/s{m.group(2)}")
+            return doc_id if _check(doc_id) else None
     if _QID.match(q) and services.source("wikidata") is not None:
         doc_id = make_doc_id("wikidata", q)
         return doc_id if _check(doc_id) else None
