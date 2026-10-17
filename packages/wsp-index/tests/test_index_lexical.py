@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import time
 from collections import Counter
 from collections.abc import Iterator, Sequence
 from dataclasses import replace
@@ -33,6 +32,12 @@ def index(tmp_path: Path) -> Iterator[TantivyIndex]:
     idx = SnippetIndex(tmp_path / "ix", SMALL)
     yield idx
     idx.close()
+
+
+def an_hour_on(idx: TantivyIndex) -> float:
+    """An hour and a second after the suggest trie was written, by the file's own clock: measured from
+    ``time.time()`` the trie's age went wrong when WSL stepped its clock back during a run (2026-10-17)."""
+    return idx._trie_file_stamp()[1] / 1e9 + 3601  # pyright: ignore[reportPrivateUsage]
 
 
 def ids(hits: Sequence[SearchHit]) -> list[str]:
@@ -503,7 +508,7 @@ def test_a_suggest_rebuild_is_due_only_for_a_stale_or_old_trie(tmp_path: Path) -
         idx.commit()
         assert not idx.suggest_rebuild_due()  # one pending title on a fresh trie: not worth the scan
         assert idx.suggest("Bis") == ["Bison"]  # the overlay serves it meanwhile
-        assert idx.suggest_rebuild_due(now=time.time() + 3601)  # dirty and old: due
+        assert idx.suggest_rebuild_due(now=an_hour_on(idx))  # dirty and old: due
         # An overlay past its threshold is folded by the commit itself (unchanged behaviour).
         idx.upsert([doc("s", str(i), f"Camel {i}", "z") for i in range(4)])
         idx.commit()
@@ -526,7 +531,7 @@ def test_a_release_step_leaves_a_large_overlay_on_a_fresh_trie_to_the_nightly(tm
         assert not idx.suggest_rebuild_due(overlay=False)  # a release step's: the trie is fresh
         idx.commit(rebuild_suggest=False)
         assert idx._meta("suggest_dirty") == "1"  # pyright: ignore[reportPrivateUsage]  # for the nightly
-        assert idx.suggest_rebuild_due(now=time.time() + 3601, overlay=False)  # dirty and old: due
+        assert idx.suggest_rebuild_due(now=an_hour_on(idx), overlay=False)  # dirty and old: due
 
 
 def test_a_trie_left_dirty_by_another_process_is_aged_not_rebuilt(tmp_path: Path) -> None:
@@ -545,7 +550,7 @@ def test_a_trie_left_dirty_by_another_process_is_aged_not_rebuilt(tmp_path: Path
         assert not idx.suggest_rebuild_due()
     with TantivyIndex(tmp_path / "ix", cfg) as idx:  # the next step
         assert not idx.suggest_rebuild_due()
-        assert idx.suggest_rebuild_due(now=time.time() + 3601)  # still dirty: due once old
+        assert idx.suggest_rebuild_due(now=an_hour_on(idx))  # still dirty: due once old
         idx.upsert([doc("s", "c", "Camel", "z")])
         idx.commit()
         assert not idx.suggest_rebuild_due()
@@ -567,9 +572,9 @@ def test_a_new_process_folds_a_trie_that_is_only_flagged_dirty(tmp_path: Path) -
         idx.upsert([doc("s", "b", "Bison", "y")])
         idx.commit()
     with TantivyIndex(tmp_path / "ix", cfg) as idx:
-        assert idx.suggest_rebuild_due(now=time.time() + 3601)
+        assert idx.suggest_rebuild_due(now=an_hour_on(idx))
         idx.rebuild_suggest()
-        assert not idx.suggest_rebuild_due(now=time.time() + 3601)
+        assert not idx.suggest_rebuild_due(now=an_hour_on(idx))
         assert idx.suggest("Bis") == ["Bison"]
 
 
@@ -585,7 +590,7 @@ def test_new_aliases_mark_the_trie_dirty_not_stale(tmp_path: Path) -> None:
         idx.rebuild_suggest()
         idx.mark_suggest_dirty()
         assert not idx.suggest_rebuild_due()
-        assert idx.suggest_rebuild_due(now=time.time() + 3601)
+        assert idx.suggest_rebuild_due(now=an_hour_on(idx))
 
 
 def test_a_book_is_found_by_its_byline_and_hits_show_its_title(tmp_path: Path) -> None:
