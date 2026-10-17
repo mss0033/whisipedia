@@ -69,3 +69,35 @@ def test_a_mindtouch_page_is_refined_from_its_content_entry(tmp_path: Path) -> N
     assert "Spring tides occur during the new and full moons." in docs["index/page_2"].text
     assert "Neap tides come at the quarter moons." in docs["index/page_2"].text  # a reused page's text
     assert "new and full moons" not in docs["index/page_3"].text  # no content entry: the stub as it is
+
+
+def test_a_nautilus_archive_is_refined_as_its_catalogue(tmp_path: Path) -> None:
+    """The USDA canning guide's eight PDFs were neither listed nor searchable (2026-10-17)."""
+    from adapters_testkit import pages_pdf
+
+    path = tmp_path / "usda-2015_en_2025-04.zim"
+    database = (
+        "var DATABASE = [{'_id': '00004', 'ti': 'Part 4', 'dsc': 'Vegetables', 'aut': 'USDA', "
+        "'fp': ['GUIDE04.pdf']}];"
+    )
+    with Creator(path).config_indexing(False, "eng").config_verbose(False) as creator:
+        creator.set_mainpath("home")
+        creator.add_item(_Item("home", "text/html", "<html><title>{{ title }}</title></html>", "home"))
+        creator.add_item(_Item("database.js", "application/javascript", database))
+        pdf = pages_pdf(["Green beans: pressure canner", "Process 20 minutes"]).decode("latin-1")
+        creator.add_item(_Item("files/GUIDE04.pdf", "application/pdf", pdf))
+        creator.add_metadata("Name", "usda-2015_en")
+        creator.add_metadata("Language", "eng")
+        creator.add_metadata("Scraper", "nautiluszim 1.1.1")
+    with WorkerPool(1) as pool:
+        docs = {
+            e.native_id: e
+            for e in read_zim(path, zim_params(path, "usda", "PD", False), workdir=tmp_path / "w", pool=pool)
+            if isinstance(e, DocRecord)
+        }
+    doc = docs["nautilus/00004"]
+    assert doc.title == "Part 4: Vegetables"
+    assert doc.html_ref == "zim:nautilus/00004"
+    assert "Green beans: pressure canner" in doc.text
+    assert "Process 20 minutes" in doc.text
+    assert "By USDA" in doc.text

@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from adapters_testkit import make_ctx, make_spec
+from adapters_testkit import make_ctx, make_spec, pages_pdf
 from doc_fixtures import EXPORT_WARNING, PUBLIC_A, RESTRICTED_C, make_pdf, md5, s3_listing
 
 from wsp_adapters import available_adapters, load_adapter
@@ -989,29 +989,7 @@ def test_words_hyphenated_across_a_pdf_line_are_joined() -> None:
 
 
 def _pages_pdf(n: int) -> bytes:
-    """A PDF of ``n`` pages reading "Page <i>" (Helvetica), written by hand with a correct xref."""
-    objs = ["<< /Type /Catalog /Pages 2 0 R >>", ""]
-    kids: list[str] = []
-    for i in range(n):
-        page, content = 4 + 2 * i, 5 + 2 * i
-        kids.append(f"{page} 0 R")
-        stream = f"BT /F1 24 Tf 72 700 Td (Page {i + 1}) Tj ET"
-        objs.append(
-            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
-            f"/Resources << /Font << /F1 3 0 R >> >> /Contents {content} 0 R >>"
-        )
-        objs.append(f"<< /Length {len(stream)} >>\nstream\n{stream}\nendstream")
-    objs[1] = f"<< /Type /Pages /Kids [{' '.join(kids)}] /Count {n} >>"
-    objs.insert(2, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
-    out, offsets = b"%PDF-1.4\n", list[int]()
-    for k, body in enumerate(objs, start=1):
-        offsets.append(len(out))
-        out += f"{k} 0 obj\n{body}\nendobj\n".encode()
-    xref = len(out)
-    out += f"xref\n0 {len(objs) + 1}\n0000000000 65535 f \n".encode()
-    out += b"".join(f"{o:010d} 00000 n \n".encode() for o in offsets)
-    out += f"trailer\n<< /Size {len(objs) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode()
-    return out
+    return pages_pdf([f"Page {i + 1}" for i in range(n)])
 
 
 def test_a_pdf_is_reopened_every_few_pages_and_read_within_a_time_budget(

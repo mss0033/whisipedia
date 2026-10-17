@@ -36,6 +36,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 from wsp_api.outside import Site
+from wsp_api.pdftext import pdf_text
 from wsp_api.seams import VaultView
 from wsp_api.zimread import (
     EntryData,
@@ -46,7 +47,7 @@ from wsp_api.zimread import (
     ZimUnavailable,
     file_book_name,
 )
-from wsp_core import mindtouch, youtubezim
+from wsp_core import mindtouch, nautilus, youtubezim
 from wsp_core.model import Asset, Generation, GenerationStatus
 
 log = logging.getLogger(__name__)
@@ -208,6 +209,7 @@ class ZimAssetStore:
         self._warmer: threading.Thread | None = None
         self._page_maps: OrderedDict[str, mindtouch.Pages] = OrderedDict()  # MindTouch: file -> page list
         self._main_dirs: dict[str, str | None] = {}  # file -> folder of its main page (site_roots)
+        self._catalogues: dict[str, list[nautilus.Item] | None] = {}  # file -> nautilus catalogue
         # The websites the current archives copy (wsp_api.outside), found while warming them;
         # ``sites_version`` changes with every addition (rendered pages are cached by it).
         self._sites: dict[tuple[str, str], list[Site]] = {}
@@ -485,6 +487,10 @@ class ZimAssetStore:
         if where is None:
             return None
         file, path, root = where
+        if (catalogue := self._nautilus(file)) is not None and (
+            path in ("", nautilus.HOME, f"{nautilus.HOME}.html") or path.startswith(nautilus.ITEM_PREFIX)
+        ):
+            return self._nautilus_page(source_id, file, path, root, catalogue)
         if path == mindtouch.APP_SHELL:
             if (home := self._mindtouch_root(file)) is not None:
                 path = home  # a link to the app ("../index.html", the main entry) is its home page
@@ -547,6 +553,35 @@ class ZimAssetStore:
             if candidate and self._read(file, candidate, Want.NONE) is not None:
                 return root + candidate
         return None
+
+    def _nautilus(self, file: str) -> list[nautilus.Item] | None:
+        """The catalogue of a nautilus archive (``wsp_core.nautilus``), ``None`` for any other."""
+        with self._lock:
+            if file in self._catalogues:
+                return self._catalogues[file]
+        found = self._read(file, nautilus.DATABASE, Want.ANY)
+        catalogue = nautilus.items(found.content) if found is not None and found.content else []
+        result = catalogue or None
+        with self._lock:
+            self._catalogues[file] = result
+        return result
+
+    def _nautilus_page(
+        self, source_id: str, file: str, path: str, root: str, catalogue: list[nautilus.Item]
+    ) -> ZimPage | None:
+        """A nautilus archive's front page (``home``), or a document's page with its files' text."""
+        if not path.startswith(nautilus.ITEM_PREFIX):
+            name = self.names.get(source_id, source_id).removesuffix(" (Kiwix ZIM)")
+            return ZimPage(root + nautilus.HOME, nautilus.home_html(name, "", catalogue), root)
+        item = next((i for i in catalogue if i.path == path), None)
+        if item is None:
+            return None
+        texts: dict[str, str] = {}
+        for name in item.files:
+            data = self._read(file, nautilus.FILES + name, Want.ANY)
+            if data is not None and data.content is not None and data.mimetype.startswith("application/pdf"):
+                texts[name] = pdf_text(data.content)
+        return ZimPage(root + item.path, nautilus.item_html(item, texts), root)
 
     def _mindtouch(self, file: str, path: str, stub: str) -> str | None:
         """The page a MindTouch app stub stands for (``wsp_core.mindtouch``), or ``None``."""

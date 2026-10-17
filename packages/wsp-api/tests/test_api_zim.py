@@ -492,3 +492,43 @@ def test_a_bundle_release_reads_its_unchanged_books_from_earlier_releases(tmp_pa
     held = store.file_of("bundle", new, "ifixit_en_all/Guide/Fix")
     assert held is not None
     assert Path(held).parent.parent.name == old
+
+
+def test_a_nautilus_archive_is_served_as_its_catalogue(tmp_path: Path) -> None:
+    """Its app shell is an unrendered template; its documents are PDFs (2026-10-17)."""
+    from wsp_api.testing.zims import tiny_pdf
+
+    database = (
+        "var DATABASE = [{'_id': '00004', 'ti': 'Part 4', 'dsc': 'Vegetables', 'aut': '', 'fp': ['G4.pdf']}];"
+    )
+    _zim(
+        tmp_path / "wiki" / SAMPLE_GEN_2 / "upstream" / "usda-2015_en_2025-04.zim",
+        "usda-2015_en",
+        [
+            (
+                "home",
+                "text/html",
+                "<html><title>{{ title }}</title><body>{% if x %}{% endif %}</body></html>",
+            ),
+            ("database.js", "application/javascript", database),
+            (
+                "files/G4.pdf",
+                "application/pdf",
+                tiny_pdf(["Green beans", "Process 20 minutes"]).decode("latin-1"),
+            ),
+        ],
+        [],
+    )
+    store = ZimAssetStore(_vault(tmp_path, ["upstream/usda-2015_en_2025-04.zim"]))
+    store.names = {"wiki": "USDA Complete Guide to Home Canning (web) (Kiwix ZIM)"}
+    assert store.home("wiki", SAMPLE_GEN_2) == "home"
+    home = store.page("wiki", SAMPLE_GEN_2, "home")
+    assert home is not None
+    assert "<h1>USDA Complete Guide to Home Canning (web)</h1>" in home.html
+    assert '<a href="nautilus/00004">Part 4: Vegetables</a>' in home.html
+    item = store.page("wiki", SAMPLE_GEN_2, "nautilus/00004")
+    assert item is not None
+    assert '<a href="../files/G4.pdf">G4.pdf</a>' in item.html
+    assert "Green beans" in item.html
+    assert "Process 20 minutes" in item.html
+    assert store.page("wiki", SAMPLE_GEN_2, "nautilus/99999") is None

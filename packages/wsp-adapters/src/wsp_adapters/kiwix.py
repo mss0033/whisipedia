@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import hashlib
 import itertools
+import logging
 import re
 import tempfile
 import xml.etree.ElementTree as ET
@@ -52,9 +53,10 @@ from wsp_adapters._common import (
     verify_file,
     workers_for,
 )
+from wsp_adapters.doccollection.adapter import DEFAULT_PDF_MAX_PAGES, pdf_text
 from wsp_adapters.entries import Entry, Redirect
 from wsp_adapters.html_text import html_to_text
-from wsp_core import mindtouch, youtubezim
+from wsp_core import mindtouch, nautilus, youtubezim
 from wsp_core.errors import FetchError
 from wsp_core.ids import content_hash, make_doc_id
 from wsp_core.listing import skip_paths, skip_regex
@@ -70,6 +72,8 @@ from wsp_core.model import (
     Verdict,
 )
 from wsp_core.ports import Ctx
+
+log = logging.getLogger(__name__)
 
 CATALOG_URL = "https://library.kiwix.org/catalog/v2/entries"
 ZIM_FORMAT = "zim"
@@ -719,5 +723,54 @@ def read_zim(path: Path, params: ZimParams, *, workdir: Path, pool: WorkerPool) 
             for source, target in pairs:
                 if _stable(source):
                     yield Redirect(params.prefix + source, params.prefix + target)
+        yield from nautilus_documents(path, params, root)
     finally:
         zimscan.remove_scan(root)
+
+
+def nautilus_documents(path: Path, params: ZimParams, workdir: Path) -> Iterator[DocRecord]:
+    """The documents of a nautilus archive's catalogue (:mod:`wsp_core.nautilus`), each with the text
+    of its files: they are PDFs, not the archive's web pages, so nothing else would read them."""
+    archive = Archive(path)
+    if not _metadata(archive, "Scraper").startswith(nautilus.SCRAPER) or not archive.has_entry_by_path(
+        nautilus.DATABASE
+    ):
+        return
+    catalogue = nautilus.items(bytes(archive.get_entry_by_path(nautilus.DATABASE).get_item().content))
+    for item in catalogue:
+        texts: list[str] = []
+        for name in item.files:
+            entry_path = nautilus.FILES + name
+            if not archive.has_entry_by_path(entry_path):
+                continue
+            entry = archive.get_entry_by_path(entry_path)
+            if not entry.get_item().mimetype.startswith("application/pdf"):
+                continue
+            tmp = workdir / f"nautilus-{item.id}.pdf"
+            tmp.write_bytes(bytes(entry.get_item().content))
+            try:
+                texts.append(pdf_text(tmp, DEFAULT_PDF_MAX_PAGES))
+            except Exception as exc:  # an unreadable PDF: the document keeps its catalogue text
+                log.warning("%s: %s unreadable: %s", path.name, entry_path, exc)
+            finally:
+                tmp.unlink(missing_ok=True)
+        head = [item.heading]
+        if item.description and item.description not in item.heading:
+            head.append(item.description)
+        if item.author:
+            head.append(f"By {item.author}")
+        text = "\n\n".join(["\n".join(head), *texts])
+        native_id = params.prefix + item.path
+        yield DocRecord(
+            doc_id=make_doc_id(params.source_id, native_id),
+            source_id=params.source_id,
+            native_id=native_id,
+            title=item.heading,
+            lang=params.lang,
+            license=params.license,
+            text=text,
+            revision=params.revision,
+            timestamp=params.timestamp,
+            html_ref=f"zim:{native_id}",
+            content_hash=content_hash(text),
+        )
