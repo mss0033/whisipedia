@@ -17,6 +17,17 @@ DEFAULT_SKIP_PATHS: tuple[str, ...] = (
     # mwoffliner's resources: a page there describes a file and often holds only the wiki's menus.
     # Appropedia's 15, titled "null", led meaning-based search for "running fix" (2026-10-16).
     r"_assets_/.+",
+    # A web archive's (zimit) copies of third-party frames: a robot check, a map, a player or a share
+    # button the crawl could not capture. Each is a page with no text; the trawler found Cloudflare's
+    # challenge frame and GitHub buttons listed as documents (2026-10-17 gap census).
+    r"[^/]*\.fuzzy\.replayweb\.page/.*",
+    r"(?:www\.)?google\.[a-z.]+/(?:recaptcha|maps(?:/d)?/embed)(?:[/?].*)?",
+    r"challenges\.cloudflare\.com/.*",
+    r"ghbtns\.com/.*",
+    r"(?:embed\.spotify\.com|platform\.twitter\.com|player\.vimeo\.com|www\.facebook\.com/plugins)/.*",
+    r"(?:www\.)?youtube(?:-nocookie)?\.com/embed/.*",
+    r"docs\.google\.com/.+/pubchart.*",
+    r"[^?]+/media/oembed\?.*",  # Drupal's embedded-video frame
 )
 
 

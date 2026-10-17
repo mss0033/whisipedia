@@ -548,6 +548,7 @@ CHECKSUM_ONLY_ADAPTERS = frozenset(
         "open-library",
         "gutenberg",
         "osm-planet",
+        "us-law",  # the OLRC's and GovInfo's own XML of federal law: nothing in it to screen
     }
 )
 SCREENED_ADAPTERS = frozenset({"doc-collection"})  # policy screened by document_screen()
