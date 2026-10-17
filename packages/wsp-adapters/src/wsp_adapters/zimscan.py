@@ -29,9 +29,10 @@ nibble: 1 none, 2 zlib, 3 bzip2, 4 xz, 5 zstd; ``0x10`` = 64-bit blob offsets) f
 
 Entries are exposed as libzim exposes them: the user entries are namespace ``C`` and paths carry
 no namespace (the new namespace scheme, ``minor >= 1``); a title is the stored title, or the path
-when the stored title is empty. Archives with the old scheme (``minor == 0``, none in the vault as
-of 2026-10-11, and not produced by Kiwix since 2021) raise :class:`ZimFormatError` rather than be
-read by an untested path.
+when the stored title is empty. In an archive of the old scheme (``minor == 0``: Finiki 2024-06 and
+Art of Problem Solving 2021-03 were refused as such, 2026-10-17) the articles are namespace ``A``,
+and libzim gives every path with its namespace (``A/Main_Page``, ``I/logo.png``): so do these
+entries, which keeps the pages' relative links (``../I/logo.png``) resolving.
 """
 
 from __future__ import annotations
@@ -139,10 +140,19 @@ def _namespace(fh: BinaryIO, header: ZimHeader, index: int) -> int:
     return fh.read(1)[0]
 
 
+def user_namespace(header: ZimHeader) -> str:
+    """The namespace of the archive's articles: ``C``, or ``A`` in the old scheme."""
+    return "C" if header.new_namespace_scheme else "A"
+
+
+def path_prefix(header: ZimHeader) -> str:
+    """What libzim puts before a stored path: nothing, or the namespace in the old scheme."""
+    return "" if header.new_namespace_scheme else f"{user_namespace(header)}/"
+
+
 def user_range(fh: BinaryIO, header: ZimHeader) -> tuple[int, int]:
-    """Entry indexes libzim exposes as user entries: namespace ``C``."""
-    if not header.new_namespace_scheme:
-        raise ZimFormatError(f"old namespace scheme (ZIM {header.major}.{header.minor}) is not supported")
+    """Entry indexes of the user entries (articles): namespace ``C`` (``A`` in the old scheme)."""
+    ns = ord(user_namespace(header))
 
     def lower_bound(ns: int) -> int:
         lo, hi = 0, header.entry_count
@@ -154,7 +164,7 @@ def user_range(fh: BinaryIO, header: ZimHeader) -> tuple[int, int]:
                 hi = mid
         return lo
 
-    return lower_bound(ord("C")), lower_bound(ord("C") + 1)
+    return lower_bound(ns), lower_bound(ns + 1)
 
 
 def cluster_offsets(fh: BinaryIO, header: ZimHeader, *, dirents_at: int = 0) -> npt.NDArray[np.uint64]:
@@ -317,6 +327,11 @@ class Scan:
     @property
     def windows(self) -> range:
         return range((self.stop - self.first + self.window - 1) // self.window)
+
+    @property
+    def prefix(self) -> str:
+        """Before every path (``A/`` in the old namespace scheme)."""
+        return path_prefix(self.header)
 
     def window_dir(self, w: int) -> Path:
         return self.root / f"w{w:06d}"
@@ -495,6 +510,7 @@ class _Strings:
     """Paths and titles of one scanned window (memory-mapped raw dirents)."""
 
     def __init__(self, scan: Scan, w: int) -> None:
+        self.prefix = scan.prefix
         raw = scan.window_dir(w) / "dirents.bin"
         self.raw = np.memmap(raw, dtype=np.uint8, mode="r") if raw.stat().st_size else np.zeros(0, np.uint8)
         self.ps = scan.load(w, "path_start")
@@ -502,13 +518,15 @@ class _Strings:
         self.te = scan.load(w, "title_end")
 
     def path(self, local: int) -> str:
-        return self.raw[int(self.ps[local]) : int(self.pe[local])].tobytes().decode("utf-8", "replace")
+        return self.prefix + self.raw[int(self.ps[local]) : int(self.pe[local])].tobytes().decode(
+            "utf-8", "replace"
+        )
 
     def path_title(self, local: int) -> tuple[str, str]:
         path = self.path(local)
         start, end = int(self.pe[local]) + 1, int(self.te[local])
         title = self.raw[start:end].tobytes().decode("utf-8", "replace")
-        return path, title or path
+        return path, title or path[len(self.prefix) :]  # libzim's title: the stored path
 
 
 # --- redirects ------------------------------------------------------------------------------------
@@ -547,7 +565,7 @@ def read_redirects(task: RedirectTask) -> list[tuple[str, str]]:
                 if w not in strings:
                     strings[w] = _Strings(scan, w)
                 out.append((path, strings[w].path(tl)))
-            else:  # a target outside namespace C (not written by libzim): read its dirent directly
+            else:  # a target outside the articles' namespace: read its dirent directly
                 if fh is None:
                     fh = scan.zim.open("rb")
                 out.append((path, _dirent_path(fh, scan, target)))
@@ -565,6 +583,7 @@ def _dirent_path(fh: BinaryIO, scan: Scan, index: int) -> str:
     head = fh.read(16)
     mime = int.from_bytes(head[:2], "little")
     start = 12 if mime == REDIRECT_MIME else (8 if mime >= DELETED_MIME else 16)
+    namespace = "" if scan.header.new_namespace_scheme else f"{chr(head[3])}/"
     fh.seek(ptr + start)
     data = b""
     while b"\0" not in data:
@@ -572,4 +591,4 @@ def _dirent_path(fh: BinaryIO, scan: Scan, index: int) -> str:
         if not chunk:
             raise ZimFormatError("unterminated path")
         data += chunk
-    return data.split(b"\0", 1)[0].decode("utf-8", "replace")
+    return namespace + data.split(b"\0", 1)[0].decode("utf-8", "replace")

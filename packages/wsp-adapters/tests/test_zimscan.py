@@ -147,9 +147,81 @@ def test_header_errors(tmp_path: Path, zim: Path) -> None:
     bad.write_bytes(b"\0" * 80)
     with bad.open("rb") as fh, pytest.raises(zimscan.ZimFormatError, match="magic"):
         zimscan.read_header(fh)
-    old = tmp_path / "old.zim"
-    data = bytearray(zim.read_bytes())
-    struct.pack_into("<H", data, 6, 0)  # minor version 0: the old namespace scheme
-    old.write_bytes(bytes(data))
-    with old.open("rb") as fh, pytest.raises(zimscan.ZimFormatError, match="old namespace scheme"):
-        zimscan.user_range(fh, zimscan.read_header(fh))
+
+
+def _old_scheme(path: Path) -> Path:
+    """A ZIM 5.0 archive (the old namespace scheme), written by hand: libzim's writer no longer can.
+    Articles in ``A`` (one with an empty title), a redirect, a redirect to an image, a stylesheet in
+    ``-``, an image in ``I`` and metadata in ``M``; one uncompressed cluster."""
+    html = "text/html", "text/css", "image/png", "text/plain"
+    entries = sorted(  # (namespace, path, title, mime index or redirect target path, body)
+        [
+            ("-", "style.css", "", 1, b"p{}"),
+            ("A", "Main_Page", "Main Page", 0, b"<html><body><p>Welcome to the old wiki.</p></body></html>"),
+            ("A", "Dividend", "Dividend", 0, b"<html><body><p>A dividend is a payment.</p></body></html>"),
+            ("A", "No_title", "", 0, b"<html><body><p>Stored without a title.</p></body></html>"),
+            ("A", "DIV", "DIV", "A/Dividend", b""),
+            ("A", "Logo", "Logo", "I/logo.png", b""),
+            ("I", "logo.png", "", 2, b"\x89PNG...."),
+            ("M", "Title", "", 3, b"Old wiki"),
+        ]
+    )
+    index = {f"{ns}/{p}": i for i, (ns, p, *_rest) in enumerate(entries)}
+    blobs = [e[4] for e in entries if not isinstance(e[3], str)]
+    blob_of = {i: n for n, i in enumerate(i for i, e in enumerate(entries) if not isinstance(e[3], str))}
+    mimes = b"".join(m.encode() + b"\0" for m in html) + b"\0"
+    n = len(entries)
+    path_ptr = 80 + len(mimes)
+    title_ptr = path_ptr + 8 * n
+    dirents_at = title_ptr + 4 * n
+    dirents: list[bytes] = []
+    for i, (ns, p, title, mime, _body) in enumerate(entries):
+        names = p.encode() + b"\0" + title.encode() + b"\0"
+        if isinstance(mime, str):
+            dirents.append(struct.pack("<HBcII", 0xFFFF, 0, ns.encode(), 0, index[mime]) + names)
+        else:
+            dirents.append(struct.pack("<HBcIII", mime, 0, ns.encode(), 0, 0, blob_of[i]) + names)
+    offsets: list[int] = []
+    at = dirents_at
+    for d in dirents:
+        offsets.append(at)
+        at += len(d)
+    table = [4 * (len(blobs) + 1)]
+    for b in blobs:
+        table.append(table[-1] + len(b))
+    cluster = b"\x01" + struct.pack(f"<{len(table)}I", *table) + b"".join(blobs)
+    cluster_at = at
+    cluster_ptr = cluster_at + len(cluster)
+    checksum_at = cluster_ptr + 8
+    titles = sorted(range(n), key=lambda i: (entries[i][0], entries[i][2] or entries[i][1]))
+    header = struct.pack(
+        "<IHH16sIIQQQQIIQ", zimscan.MAGIC, 5, 0, b"u" * 16, n, 1, path_ptr, title_ptr, cluster_ptr,
+        80, index["A/Main_Page"], 0xFFFFFFFF, checksum_at,
+    )  # fmt: skip
+    body = (
+        header
+        + mimes
+        + struct.pack(f"<{n}Q", *offsets)
+        + struct.pack(f"<{n}I", *titles)
+        + b"".join(dirents)
+        + cluster
+        + struct.pack("<Q", cluster_at)
+    )
+    path.write_bytes(body + hashlib.md5(body).digest())
+    return path
+
+
+def test_the_old_namespace_scheme_reads_as_libzim_reads_it(tmp_path: Path) -> None:
+    """Finiki (2024-06) and Art of Problem Solving (2021-03) were refused as ZIM 5.0 (2026-10-17)."""
+    zim = _old_scheme(tmp_path / "oldwiki_en_all_2024-06.zim")
+    archive = Archive(zim)
+    assert not archive.has_new_namespace_scheme
+    assert archive.main_entry.get_item().path == "A/Main_Page"
+    work = tmp_path / "work"
+    work.mkdir()
+    rows = _new(zim, work, workers=1)
+    assert set(rows) == _oracle(zim)
+    assert {r[1] for r in rows if r[0] == "D"} == {"A/Main_Page", "A/Dividend", "A/No_title"}
+    assert next(r for r in rows if r[1] == "A/No_title")[:3] == ("D", "A/No_title", "No_title")
+    assert ("R", "A/DIV", "A/Dividend", "") in rows
+    assert ("R", "A/Logo", "I/logo.png", "") in rows  # a target outside the articles' namespace
