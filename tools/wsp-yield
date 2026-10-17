@@ -1,0 +1,101 @@
+#!/bin/sh
+# Keep the PC usable when the whole machine runs short of memory (run by whisipedia-yield.service).
+#
+# 2026-10-16 20:25: the owner's Android emulator, Gradle and editor, together with the library's API
+# and background jobs, outgrew 16 GB of RAM and 8 GB of swap. The machine thrashed for minutes (load
+# 60) before the kernel's OOM killer took the background jobs, and the owner had to restart WSL. Every
+# cgroup ceiling held; it was their sum, with the owner's own programs, that did not fit.
+#
+# Every WSP_YIELD_INTERVAL seconds (default 5) this reads /proc/meminfo and /proc/pressure/memory:
+#   short: MemAvailable under WSP_YIELD_MIN_AVAIL_MB (default 1024), or "full avg10" (the share of the
+#          last 10 s in which every task waited for memory) at least WSP_YIELD_MAX_PSI percent (30)
+#   calm:  MemAvailable at least WSP_YIELD_CALM_AVAIL_MB (default 3072) and "full avg10" under 5
+# Short: freeze whisipedia-background.slice. Its units stop running and allocating, and their pages
+# can be swapped out; the API is outside it and keeps serving. Calm again: thaw it.
+# Still short after WSP_YIELD_STOP_TICKS checks (default 6, 30 s): stop the background jobs that can
+# be resumed (tools/wsp-bg jobs such as the download lanes, the trawler, the nightly index and the
+# quality run), which frees their memory, and thaw the rest (the orchestrator).
+# Then, after WSP_YIELD_RESUME_TICKS calm checks in a row (default 120, 10 min), start
+# WSP_YIELD_RESUME_UNITS (default: the trawler, and whisipedia-resume.service, which restarts the lanes
+# where they stopped). The nightly index waits for its timer.
+#
+# WSP_YIELD_MEMINFO, WSP_YIELD_PRESSURE and WSP_YIELD_TICKS (stop after that many checks) are for tests.
+INTERVAL="${WSP_YIELD_INTERVAL:-5}"
+MIN_AVAIL_MB="${WSP_YIELD_MIN_AVAIL_MB:-1024}"
+MAX_PSI="${WSP_YIELD_MAX_PSI:-30}"
+CALM_AVAIL_MB="${WSP_YIELD_CALM_AVAIL_MB:-3072}"
+CALM_PSI=5
+STOP_TICKS="${WSP_YIELD_STOP_TICKS:-6}"
+RESUME_TICKS="${WSP_YIELD_RESUME_TICKS:-120}"
+RESUME_UNITS="${WSP_YIELD_RESUME_UNITS:-whisipedia-trawler.service whisipedia-resume.service}"
+MEMINFO="${WSP_YIELD_MEMINFO:-/proc/meminfo}"
+PRESSURE="${WSP_YIELD_PRESSURE:-/proc/pressure/memory}"
+TICKS="${WSP_YIELD_TICKS:-0}"
+SLICE=whisipedia-background.slice
+STOPPABLE="whisipedia-job-* whisipedia-trawler.service whisipedia-index.service whisipedia-quality.service"
+
+state=calm  # calm | frozen | stopped
+since=0     # checks spent in this state (frozen) or calm in a row (stopped)
+tick=0
+
+reading() {
+  avail_mb=$(awk '$1 == "MemAvailable:" { printf "%d", $2 / 1024 }' "$MEMINFO" 2>/dev/null)
+  full=$(awk '$1 == "full" { for (i = 2; i <= NF; i++) if ($i ~ /^avg10=/) { sub(/^avg10=/, "", $i); printf "%d", $i } }' \
+    "$PRESSURE" 2>/dev/null)
+  avail_mb="${avail_mb:-999999}" full="${full:-0}"  # unreadable: assume calm, never act on a guess
+}
+
+thaw() {
+  systemctl --user thaw "$SLICE" 2>/dev/null || true
+}
+
+# A unit stopped while frozen would wait for its stop timeout: thaw first, then stop at once.
+stop_jobs() {
+  # shellcheck disable=SC2086 # the unit patterns are meant to be split
+  units=$(systemctl --user list-units --plain --no-legend --state=active $STOPPABLE | awk '{ print $1 }')
+  thaw
+  [ -n "$units" ] || return 0
+  # shellcheck disable=SC2086
+  systemctl --user stop --no-block $units
+  echo "<4>still short of memory after $STOP_TICKS checks: stopped" $units
+}
+
+# Never leave the slice frozen behind: not when this stops, and not after a restart that lost the state.
+trap 'thaw; exit 0' TERM INT
+thaw
+
+while :; do
+  reading
+  short="" calm=""
+  [ "$avail_mb" -lt "$MIN_AVAIL_MB" ] || [ "$full" -ge "$MAX_PSI" ] && short=1
+  [ "$avail_mb" -ge "$CALM_AVAIL_MB" ] && [ "$full" -lt "$CALM_PSI" ] && calm=1
+  case "$state" in
+    calm)
+      if [ -n "$short" ]; then
+        systemctl --user freeze "$SLICE" 2>/dev/null || true
+        echo "<4>machine short of memory (available ${avail_mb} MB, full avg10=${full}%): froze $SLICE"
+        state=frozen since=0
+      fi ;;
+    frozen)
+      since=$((since + 1))
+      if [ -n "$calm" ]; then
+        thaw
+        echo "memory available again (${avail_mb} MB, full avg10=${full}%): thawed $SLICE"
+        state=calm
+      elif [ -n "$short" ] && [ "$since" -ge "$STOP_TICKS" ]; then
+        stop_jobs
+        state=stopped since=0
+      fi ;;
+    stopped)
+      if [ -n "$calm" ]; then since=$((since + 1)); else since=0; fi
+      if [ "$since" -ge "$RESUME_TICKS" ]; then
+        # shellcheck disable=SC2086
+        systemctl --user start --no-block $RESUME_UNITS
+        echo "memory calm for $RESUME_TICKS checks (${avail_mb} MB available): started" $RESUME_UNITS
+        state=calm
+      fi ;;
+  esac
+  tick=$((tick + 1))
+  [ "$TICKS" -gt 0 ] && [ "$tick" -ge "$TICKS" ] && break
+  sleep "$INTERVAL"
+done

@@ -1,0 +1,21 @@
+# Keeps the PC usable when the whole machine runs short of memory (tools/wsp-yield): freezes the
+# background slice, stops its resumable jobs if that is not enough, and starts them again once memory
+# has been calm for 10 minutes. The API is left alone (tools/wsp-api-health looks after it).
+#
+# Template: `wsp service install` renders @REPO@ and @CONFIG_DIR@ (docs/runbooks/install-services.md).
+
+[Unit]
+Description=Whisipedia yield (pauses background work while the machine is short of memory)
+
+[Service]
+Type=exec
+ExecStart=@REPO@/tools/wsp-yield
+Restart=always
+RestartSec=10
+# Outside the background slice it freezes.
+MemoryMax=64M
+CPUWeight=200
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=default.target

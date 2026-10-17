@@ -522,3 +522,90 @@ def test_api_health_waits_when_the_start_time_is_unknown(tmp_path: Path, started
     out, calls = _api_health(tmp_path, started=started, full_avg60="0.00")
     assert out == ""
     assert not any("restart" in c for c in calls)
+
+
+def _yield(tmp_path: Path, readings: list[tuple[int, int]], active: str = "") -> tuple[str, list[str]]:
+    """Run tools/wsp-yield for one check per reading of (MemAvailable MB, "full avg10" percent), with a
+    fake systemctl (``active``: its list of active units) and a fake sleep that moves to the next
+    reading."""
+    import subprocess
+
+    from test_cli_autonomy import ROOT
+
+    fakebin = tmp_path / "bin"
+    fakebin.mkdir(parents=True)
+    calls = tmp_path / "calls"
+    meminfo, pressure, step = tmp_path / "meminfo", tmp_path / "memory", tmp_path / "step"
+    for i, (avail_mb, full) in enumerate(readings):
+        (tmp_path / f"meminfo.{i}").write_text(f"MemTotal: 16000000 kB\nMemAvailable: {avail_mb * 1024} kB\n")
+        (tmp_path / f"memory.{i}").write_text(
+            f"some avg10={full}.00 avg60=0.00 avg300=0.00 total=1\n"
+            f"full avg10={full}.50 avg60=0.00 avg300=0.00 total=1\n"
+        )
+    scripts = {
+        "systemctl": (
+            f'#!/bin/sh\necho "$*" >> {calls}\ncase "$*" in *list-units*) printf "{active}" ;; esac\n'
+        ),
+        "sleep": (
+            f"#!/bin/sh\nn=$(( $(cat {step}) + 1 ))\necho $n > {step}\n"
+            f"cp {tmp_path}/meminfo.$n {meminfo}; cp {tmp_path}/memory.$n {pressure}\n"
+        ),
+    }
+    for name, text in scripts.items():
+        (fakebin / name).write_text(text)
+        (fakebin / name).chmod(0o755)
+    step.write_text("0\n")
+    (meminfo).write_text((tmp_path / "meminfo.0").read_text())
+    (pressure).write_text((tmp_path / "memory.0").read_text())
+    env = {
+        "PATH": f"{fakebin}:/usr/bin:/bin",
+        "WSP_YIELD_MEMINFO": str(meminfo),
+        "WSP_YIELD_PRESSURE": str(pressure),
+        "WSP_YIELD_TICKS": str(len(readings)),
+        "WSP_YIELD_STOP_TICKS": "2",
+        "WSP_YIELD_RESUME_TICKS": "3",
+    }
+    done = subprocess.run(
+        [str(ROOT / "tools" / "wsp-yield")], capture_output=True, text=True, env=env, check=True
+    )
+    lines = calls.read_text().splitlines() if calls.exists() else []
+    assert lines[0] == "--user thaw whisipedia-background.slice"  # never left frozen by a restart
+    return done.stdout, lines[1:]
+
+
+CALM, SHORT, SQUEEZED, MIDDLING = (8000, 0), (600, 2), (5000, 60), (2000, 2)
+
+
+def test_yield_leaves_a_calm_machine_alone(tmp_path: Path) -> None:
+    out, calls = _yield(tmp_path, [CALM, MIDDLING, CALM])
+    assert out == ""
+    assert calls == []
+
+
+def test_yield_freezes_the_background_while_memory_is_short_and_thaws_it_after(tmp_path: Path) -> None:
+    """2026-10-16 20:25: the machine thrashed for minutes before the OOM killer took the background
+    jobs, and the owner had to restart WSL."""
+    out, calls = _yield(tmp_path, [CALM, SHORT, MIDDLING, CALM, CALM])
+    assert calls == ["--user freeze whisipedia-background.slice", "--user thaw whisipedia-background.slice"]
+    assert "froze" in out
+    assert "thawed" in out
+    out, calls = _yield(tmp_path / "psi", [SQUEEZED, CALM])  # memory left, but every task waits for it
+    assert calls == ["--user freeze whisipedia-background.slice", "--user thaw whisipedia-background.slice"]
+
+
+def test_yield_stops_the_resumable_jobs_when_freezing_is_not_enough_and_resumes_them(tmp_path: Path) -> None:
+    active = "whisipedia-job-collections-cia.service loaded active running lane\\n"
+    active += "whisipedia-trawler.service loaded active running trawler\\n"
+    out, calls = _yield(tmp_path, [SHORT, SHORT, SHORT, CALM, MIDDLING, CALM, CALM, CALM, CALM], active)
+    assert calls[0] == "--user freeze whisipedia-background.slice"
+    assert calls[1].startswith("--user list-units ")
+    assert "whisipedia-job-*" in calls[1]
+    # Thawed before the stop: a frozen unit would sit out its stop timeout.
+    assert calls[2:4] == [
+        "--user thaw whisipedia-background.slice",
+        "--user stop --no-block whisipedia-job-collections-cia.service whisipedia-trawler.service",
+    ]
+    # Calm, then not calm (the count starts again), then three calm checks in a row.
+    assert calls[4:] == ["--user start --no-block whisipedia-trawler.service whisipedia-resume.service"]
+    assert "stopped" in out
+    assert "started" in out

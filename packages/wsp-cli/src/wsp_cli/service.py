@@ -24,6 +24,7 @@ UNITS = (
     "whisipedia-index.service",
     "whisipedia-index.timer",
     "whisipedia-trawler.service",  # checks unvisited pages as a reader sees them (tools/wsp-trawl)
+    "whisipedia-yield.service",  # pauses background work while the machine is short of memory
     "whisipedia-digest.service",  # the morning alert digest as a Windows notification
     "whisipedia-digest.timer",
     "whisipedia-quality.service",  # the weekly search-quality check (wsp quality run)
@@ -37,6 +38,7 @@ ENABLE = (
     "whisipedia-api-health.timer",
     "whisipedia-index.timer",
     "whisipedia-trawler.service",
+    "whisipedia-yield.service",
     "whisipedia-digest.timer",
     "whisipedia-quality.timer",
 )
