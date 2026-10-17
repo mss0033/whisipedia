@@ -7,6 +7,7 @@ import random
 import secrets
 from collections.abc import Callable, Sequence
 from typing import Annotated
+from urllib.parse import quote
 
 from fastapi import APIRouter, Query, Request, Response
 
@@ -44,6 +45,15 @@ SERVED_MIMETYPES = frozenset(
         "image/svg+xml",
         "image/x-icon",
         "image/vnd.microsoft.icon",
+    }
+)
+# Files a page offers to save (htmlrewrite.DOWNLOADS): served as attachments, never shown inline.
+DOWNLOAD_MIMETYPES = frozenset(
+    {
+        "application/epub+zip",
+        "application/pdf",
+        "application/x-mobipocket-ebook",
+        "application/vnd.amazon.ebook",
     }
 )
 _BLURB = 280
@@ -251,8 +261,13 @@ def browse_router(lib: Library) -> APIRouter:
         response_class=Response,
         responses={
             200: {
-                "description": "The image, with a long-lived cache header (generations are immutable).",
-                "content": {"image/*": {"schema": {"type": "string", "format": "binary"}}},
+                "description": "The image, with a long-lived cache header (generations are immutable); "
+                "an EPUB or PDF the page offers is sent as an attachment.",
+                "content": {
+                    "image/*": {"schema": {"type": "string", "format": "binary"}},
+                    "application/epub+zip": {"schema": {"type": "string", "format": "binary"}},
+                    "application/pdf": {"schema": {"type": "string", "format": "binary"}},
+                },
             }
         }
         | errors(404, 503),
@@ -260,13 +275,16 @@ def browse_router(lib: Library) -> APIRouter:
     async def asset(source_id: str, generation_id: str, path: str) -> Response:
         lib.source(source_id)
         found = await lib.nas.run(lambda: lib.assets.asset(source_id, generation_id, path))
-        if found is None or found.mimetype.split(";")[0].strip() not in SERVED_MIMETYPES:
-            raise ApiError(404, "asset_not_found", f"no image at {source_id}/{generation_id}/{path}")
-        return Response(
-            content=found.content,
-            media_type=found.mimetype,
-            headers={"Cache-Control": "public, max-age=31536000, immutable"},
-        )
+        kind = found.mimetype.split(";")[0].strip() if found is not None else ""
+        if found is None or (kind not in SERVED_MIMETYPES and kind not in DOWNLOAD_MIMETYPES):
+            raise ApiError(
+                404, "asset_not_found", f"no image or download at {source_id}/{generation_id}/{path}"
+            )
+        headers = {"Cache-Control": "public, max-age=31536000, immutable"}
+        if kind in DOWNLOAD_MIMETYPES:
+            name = path.rsplit("/", 1)[-1]
+            headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(name, safe='')}"
+        return Response(content=found.content, media_type=found.mimetype, headers=headers)
 
     # --- Gaps -----------------------------------------------------------------------------------
 

@@ -224,3 +224,46 @@ describe('formulas', () => {
     expect(div.querySelector('img')?.getAttribute('alt')).toBe('y');
   });
 });
+
+describe('the Gutenberg cover page (2026-10-16 field exam)', () => {
+  const cover = {
+    sourceId: 'gutenberg-zim',
+    nativeId: "Alice's Adventures in Wonderland_cover.11",
+    links: [],
+  };
+  const render = (html: string) => {
+    const div = document.createElement('div');
+    div.append(sanitizeDocumentHtml(html, cover).fragment);
+    return div;
+  };
+
+  it('saves the EPUB instead of opening it as a page, and names icon-only links', () => {
+    const div = render(
+      `<a title="Alice's Adventures in Wonderland: EPUB" href="/v1/assets/gutenberg-zim/2025-11/Alice%27s%20Adventures%20in%20Wonderland.11.epub"> <i class="fa fa-download fa-6x"></i> </a>` +
+        `<a title="Alice's Adventures in Wonderland: HTML" href="wsp://gutenberg-zim/Alice%27s%20Adventures%20in%20Wonderland.11"> <i class="fa fa-html5"></i> </a>`,
+    );
+    const [epub, html] = [...div.querySelectorAll('a')];
+    expect(epub!.getAttribute('href')).toBe(
+      '/v1/assets/gutenberg-zim/2025-11/Alice%27s%20Adventures%20in%20Wonderland.11.epub',
+    );
+    expect(epub!.getAttribute('download')).toBe("Alice's Adventures in Wonderland.11.epub");
+    expect(epub!.dataset.wsp).toBeUndefined(); // the browser saves it; the Navigator does not route it
+    expect(epub!.textContent).toBe("Alice's Adventures in Wonderland: EPUB");
+    expect(html!.textContent).toBe("Alice's Adventures in Wonderland: HTML");
+    expect(html!.dataset.wsp).toBe("wsp://gutenberg-zim/Alice's%20Adventures%20in%20Wonderland.11");
+  });
+
+  it('does not offer a download outside the library’s assets', () => {
+    expect(resolveHref('/v1/assets/../search?q=x', cover).kind).toBe('missing');
+    expect(resolveHref('/v1/files/x.epub', cover).kind).toBe('local');
+  });
+
+  it('turns the author button into a search for the author’s books', async () => {
+    const { authorButtons } = await import('../src/pages/document.ts');
+    const body = document.createElement('div');
+    body.innerHTML = '<a class="author-btn" data-author-name="Lewis Carroll">Lewis Carroll</a>';
+    expect(authorButtons(body, 'gutenberg-zim')).toBe(1);
+    const a = render(body.innerHTML).querySelector('a')!;
+    expect(a.dataset.wsp).toBe('wsp://search?q=Lewis+Carroll&source=gutenberg-zim');
+  });
+});

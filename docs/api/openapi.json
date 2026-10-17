@@ -1591,9 +1591,21 @@
         ],
         "responses": {
           "200": {
-            "description": "The image, with a long-lived cache header (generations are immutable).",
+            "description": "The image, with a long-lived cache header (generations are immutable); an EPUB or PDF the page offers is sent as an attachment.",
             "content": {
               "image/*": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "application/epub+zip": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "application/pdf": {
                 "schema": {
                   "type": "string",
                   "format": "binary"

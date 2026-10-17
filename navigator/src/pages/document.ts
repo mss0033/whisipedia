@@ -414,9 +414,11 @@ function rewritePage(html: string, source: string): string {
   const comic = looksLikeComic(html);
   const man = looksLikeManPage(html);
   const planet = looksLikePlanetMath(html);
-  if (!thread && !comic && !man && !planet) return html;
+  const authors = html.includes('data-author-name');
+  if (!thread && !comic && !man && !planet && !authors) return html;
   const parsed = new DOMParser().parseFromString(html, 'text/html');
   let changed = false;
+  if (authors && authorButtons(parsed.body, source) > 0) changed = true;
   if (thread && isThread(parsed.body)) {
     threadView(parsed.body, source);
     changed = true;
@@ -428,6 +430,23 @@ function rewritePage(html: string, source: string): string {
   if (man && isManPage(parsed.body) && manPageView(parsed.body) > 0) changed = true;
   if (planet && planetMathView(parsed.body) > 0) changed = true;
   return changed ? parsed.body.innerHTML : html;
+}
+
+/**
+ * The Gutenberg ZIM's author button (`<a class="author-btn" data-author-name="Lewis Carroll">`) opens
+ * the author's books with the archive's script, which the Navigator does not run: a search for the
+ * author in the same source instead of a link that went nowhere (2026-10-16 field exam).
+ */
+export function authorButtons(body: HTMLElement, source: string): number {
+  let n = 0;
+  for (const a of body.querySelectorAll<HTMLAnchorElement>('a[data-author-name]:not([href])')) {
+    const name = a.dataset.authorName?.trim();
+    if (!name) continue;
+    a.setAttribute('href', searchAddress(name, { source }));
+    a.title = `Books by ${name}`;
+    n++;
+  }
+  return n;
 }
 
 /** Below this many characters a page's own text is a stub: its other copy is the place to read it. */

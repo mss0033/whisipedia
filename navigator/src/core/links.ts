@@ -16,7 +16,9 @@ export type LinkTarget =
   | { kind: 'anchor'; id: string }
   | { kind: 'missing'; original: string; address: string }
   /** A link that goes nowhere upstream either (`href="#"`, `javascript:void(0)`): plain text here. */
-  | { kind: 'none' };
+  | { kind: 'none' }
+  /** A file of the archive to save, not a page (a Gutenberg book's EPUB): `/v1/assets/…`. */
+  | { kind: 'download'; path: string; name: string };
 
 /** Upstream placeholders for "no link": the xkcd front page's "Next >" is `href="#"` (field exam 2026-10-14). */
 const NOWHERE = /^(?:#|javascript:\s*(?:void\s*\(\s*0\s*\)\s*;?)?)$/i;
@@ -46,6 +48,14 @@ export function anchorId(id: string): string {
 export function resolveHref(rawHref: string, ctx: LinkContext): LinkTarget {
   const href = rawHref.trim();
   if (!href || NOWHERE.test(href)) return { kind: 'none' };
+
+  if (href.startsWith('/v1/assets/')) {
+    // The server writes a link to an archive's download (EPUB, PDF) as its asset URL.
+    const path = allowedImagePath(href);
+    if (!path) return missing(href, ctx);
+    const name = decodeURIComponent(path.split('?')[0]!.split('/').pop() ?? '') || 'download';
+    return { kind: 'download', path, name };
+  }
 
   const known = ctx.links?.find((l) => l.href === href);
   if (known)
@@ -219,7 +229,7 @@ export function isAllowedImageSrc(src: string): boolean {
 }
 
 /**
- * The path an image source resolves to when it is one of the library's assets, else null. Checked
+ * The path an image source (or a download link) resolves to when it is one of the library's assets, else null. Checked
  * after resolving: `/v1/assets/../search` or `%2e%2e` would pass a check of the raw string and then
  * load `/v1/search` (review 2026-10-14 B). Sanitised pages never need `/v1/files/` (whole originals).
  */
@@ -416,6 +426,17 @@ export function sanitizeDocumentHtml(
         if (href !== null) rewriteAnchor(copy as HTMLAnchorElement, href, ctx, stats);
       }
       walk(el, copy);
+      if (
+        tag === 'a' &&
+        copy.hasAttribute('href') &&
+        !copy.textContent?.trim() &&
+        !copy.querySelector('img')
+      ) {
+        // An icon-font link (`<i class="fa fa-download">`) is empty once classes go: name it by its
+        // title (the Gutenberg cover page's EPUB and HTML links were invisible, 2026-10-16 field exam).
+        const label = el.getAttribute('title')?.trim() || copy.getAttribute('download') || 'link';
+        copy.textContent = label;
+      }
       dest.appendChild(copy);
     }
   };
@@ -478,6 +499,10 @@ export function rewriteAnchor(
       break;
     case 'none':
       a.removeAttribute('href');
+      break;
+    case 'download':
+      a.setAttribute('href', target.path);
+      a.setAttribute('download', target.name);
       break;
     case 'missing':
       if (stats) stats.broken += 1;

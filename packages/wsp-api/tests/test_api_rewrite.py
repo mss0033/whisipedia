@@ -56,6 +56,14 @@ def test_svg_images_links_scripts_and_media_go_through_the_asset_route() -> None
     )
 
 
+def test_a_link_to_an_ebook_file_is_a_download_not_a_page() -> None:
+    page = "Alice's Adventures in Wonderland_cover.11"
+    out = rw('<a href="Alice%27s%20Adventures%20in%20Wonderland.11.epub"><i class="fa"></i></a>', page)
+    assert out == f'<a href="{A}Alice%27s%20Adventures%20in%20Wonderland.11.epub"><i class="fa"></i></a>'
+    assert rw('<a href="Book.11">x</a>', page) == '<a href="wsp://qa/Book.11">x</a>'
+    assert rw('<a href="files/Manual.PDF">x</a>', "A/P") == f'<a href="{A}A/files/Manual.PDF">x</a>'
+
+
 def test_base_is_dropped_and_everything_else_is_kept() -> None:
     assert rw('<base href="https://evil.example/"><a href="x">x</a>', "A/P") == '<a href="wsp://qa/A/x">x</a>'
     src = '<p class="x">A &amp; B &#169;<!-- c --><br/></p>'

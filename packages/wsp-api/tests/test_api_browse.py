@@ -122,6 +122,16 @@ def test_asset_route_serves_images_only(browse: httpx.Client) -> None:
     assert browse.get(f"/v1/assets/nope/{SAMPLE_GEN_2}/x.png").json()["error"]["code"] == "source_not_found"
 
 
+def test_asset_route_sends_an_ebook_as_a_download(browse: httpx.Client) -> None:
+    """The Gutenberg ZIM's cover page offers each book's EPUB (2026-10-16 field exam: the link opened
+    "not found"): it is saved, never shown in the page."""
+    r = browse.get(f"/v1/assets/wikipedia-en-zim/{SAMPLE_GEN_2}/Enigma%27s%20Book.11.epub")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "application/epub+zip"
+    assert r.headers["content-disposition"] == "attachment; filename*=UTF-8''Enigma%27s%20Book.11.epub"
+    assert any("sandbox" in p for p in r.headers.get_list("content-security-policy"))
+
+
 # --- search ------------------------------------------------------------------------------------
 
 

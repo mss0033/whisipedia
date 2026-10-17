@@ -108,6 +108,9 @@ def browse_services() -> Services:
             ("wikipedia-en-zim", SAMPLE_GEN_2, "A/Enigma_machine"): Asset(ENIGMA_HTML.encode(), "text/html"),
             ("wikipedia-en-zim", SAMPLE_GEN_2, "I/enigma.png"): Asset(PIXEL_PNG, "image/png"),
             ("wikipedia-en-zim", SAMPLE_GEN_2, "I/evil.js"): Asset(b"alert(1)", "application/javascript"),
+            ("wikipedia-en-zim", SAMPLE_GEN_2, "Enigma's Book.11.epub"): Asset(
+                b"PK\x03\x04epub", "application/epub+zip"
+            ),
         }
     )
     catalog = CategorizedCatalog(

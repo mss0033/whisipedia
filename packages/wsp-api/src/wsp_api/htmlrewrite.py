@@ -1,6 +1,8 @@
 """Rewrite original document HTML (ZIM) into the offline web, keeping everything else byte-for-byte.
 
-* Links (``<a href>``, ``<area href>``) relative to the page → ``wsp://<source>/<native id>[#fragment]``.
+* Links (``<a href>``, ``<area href>``) relative to the page → ``wsp://<source>/<native id>[#fragment]``;
+  a link to a file to save (``.epub``, ``.pdf``: :data:`DOWNLOADS`) → its asset URL, which the asset
+  route serves as a download (the Gutenberg cover page's EPUB link opened a "not found" page).
 * Everything else a page loads by URL (``<img src>``, ``srcset`` candidates, ``<source>``, SVG
   ``<image href>``/``xlink:href``, ``<link href>``, ``<script src>``, media, ``<object data>``,
   frames) relative to the page → ``/v1/assets/<source>/<generation>/<path>``. The asset route serves
@@ -26,7 +28,9 @@ from urllib.parse import quote, unquote, urlsplit
 
 from wsp_api.addresses import address_of
 
-VERSION = 4  # bump when the output changes: rendered pages are cached by it
+VERSION = 5  # bump when the output changes: rendered pages are cached by it
+
+DOWNLOADS = (".epub", ".pdf", ".mobi", ".azw3")  # links to these are files to save, not pages
 
 _LINKS = frozenset({("a", "href"), ("area", "href")})
 _ASSETS = frozenset(
@@ -117,7 +121,10 @@ class _Rewriter(HTMLParser):
                     target = _resolve(self._base, value.strip(), self._root)
                     if target is not None:
                         path, fragment = target
-                        rewritten = address_of(self._source, path) + (f"#{fragment}" if fragment else "")
+                        if path.lower().endswith(DOWNLOADS):
+                            rewritten = self._asset(value)
+                        else:
+                            rewritten = address_of(self._source, path) + (f"#{fragment}" if fragment else "")
                 elif key in _ASSETS:
                     rewritten = self._asset(value)
                 elif key in _SRCSET:
