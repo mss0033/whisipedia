@@ -29,13 +29,16 @@ from __future__ import annotations
 
 import re
 from collections.abc import Collection, Mapping, Sequence
+from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import date
 
 from wsp_core.model import Generation, GenerationStatus
 from wsp_core.partitions import group_by_partition
 
-_DATE_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})")
+# The day must end there: a Kiwix bundle release is "<YYYY-MM>-<8 hex digest>" ("2026-10-70d64628" is
+# not 70 October; pruning the bundle failed on it from 2026-10-16), and a digest may start with digits.
+_DATE_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})(?![0-9a-f])")
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,7 +112,8 @@ def generation_date(g: Generation) -> date:
     """Date a generation represents: a leading ``YYYY-MM-DD`` in its id, else its seal time."""
     m = _DATE_RE.match(g.generation_id)
     if m:
-        return date(int(m[1]), int(m[2]), int(m[3]))
+        with suppress(ValueError):  # not a calendar date after all
+            return date(int(m[1]), int(m[2]), int(m[3]))
     if g.sealed_at is not None:
         return g.sealed_at.date()
     raise ValueError(f"cannot date generation {g.source_id}/{g.generation_id}")

@@ -73,6 +73,11 @@ def test_generation_date() -> None:
     sealed = datetime(2026, 3, 4, tzinfo=UTC)
     assert generation_date(Generation("s", "2026-10-01T00", SEALED)) == date(2026, 10, 1)
     assert generation_date(Generation("s", "r42", SEALED, sealed_at=sealed)) == date(2026, 3, 4)
+    # Kiwix bundle releases: "<YYYY-MM>-<digest>" is dated by its seal (pruning failed on day 70)
+    assert generation_date(Generation("s", "2026-10-70d64628", SEALED, sealed_at=sealed)) == date(2026, 3, 4)
+    assert generation_date(Generation("s", "2026-10-26596a80", SEALED, sealed_at=sealed)) == date(2026, 3, 4)
+    assert generation_date(Generation("s", "2026-10-12-r2", SEALED)) == date(2026, 10, 12)
+    assert generation_date(Generation("s", "2026-02-31", SEALED, sealed_at=sealed)) == date(2026, 3, 4)
     with pytest.raises(ValueError, match="cannot date"):
         generation_date(Generation("s", "r42", SEALED))
 
