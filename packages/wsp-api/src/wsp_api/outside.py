@@ -135,7 +135,17 @@ class OutsideLinks:
         return len(self._sites)
 
     def site(self, host: str) -> Site | None:
-        return self._sites.get(_host(host))
+        """The site that copies ``host``: its own, else (a crawled site) its parent domain's, since a
+        crawl keeps the subdomains it fetched under their own names (xkcd.com holds imgs.xkcd.com)."""
+        host = _host(host)
+        found = self._sites.get(host)
+        labels = host.split(".")
+        for i in range(1, len(labels) - 1):
+            if found is not None:
+                break
+            parent = self._sites.get(".".join(labels[i:]))
+            found = parent if parent is not None and parent.kind == "web" else None
+        return found
 
     def target(self, url: str) -> tuple[Target, str] | None:
         """``((source id, native id), fragment)`` of the library's copy of ``url``, or ``None``."""
@@ -150,7 +160,7 @@ class OutsideLinks:
             found = rule(host, path, query)
             if found is not None:
                 return (found, parts.fragment) if self._held(found[0]) else None
-        site = self._sites.get(host)
+        site = self.site(host)
         if site is None or not self._held(site.source_id):
             return None
         native = self._native(site, host, path, query)
@@ -164,5 +174,5 @@ class OutsideLinks:
             # sotoki keeps "questions/<id>" as a redirect to the question: any slug, or none, or /q/<id>
             m = re.match(r"^/(?:questions|q)/(\d+)(?:/|$)", path)
             return f"questions/{m.group(1)}" if m else None
-        native = site.host.lower() + unquote(path)
+        native = (host if _host(site.host) != host else site.host.lower()) + unquote(path)
         return f"{native}?{query}" if query else native

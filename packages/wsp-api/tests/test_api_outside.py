@@ -18,7 +18,6 @@ SITES = [
     Site("qa", "askubuntu.com", "stackexchange", "askubuntu.com_en_all/"),
     Site("web", "docs.python.org", "kiwix-docs-python-org-en-all"),
     Site("web", "xkcd.com", "kiwix-xkcd-com-en-all"),
-    Site("web", "imgs.xkcd.com", "kiwix-xkcd-com-en-all"),
 ]
 HELD = {s.source_id for s in SITES} | {
     "gutenberg",
@@ -46,6 +45,8 @@ HELD = {s.source_id for s in SITES} | {
         ("https://askubuntu.com/q/12", (("stackexchange", "askubuntu.com_en_all/questions/12"), "")),
         ("https://docs.python.org/3/library/http.html", (("kiwix-docs-python-org-en-all", "docs.python.org/3/library/http.html"), "")),
         ("https://xkcd.com/1478/", (("kiwix-xkcd-com-en-all", "xkcd.com/1478/"), "")),
+        # a subdomain of a crawled site is in that site's archive under its own name
+        ("https://imgs.xkcd.com/comics/p_values.png", (("kiwix-xkcd-com-en-all", "imgs.xkcd.com/comics/p_values.png"), "")),
         ("http://www.gutenberg.org/ebooks/1342", (("gutenberg", "1342"), "")),
         ("https://www.rfc-editor.org/rfc/rfc9110.html#section-9", (("rfc", "rfc:RFC-9110"), "section-9")),
         ("https://datatracker.ietf.org/doc/html/rfc791", (("rfc", "rfc:RFC-791"), "")),
@@ -67,7 +68,8 @@ def test_an_outside_url_the_library_holds(url: str, target: object) -> None:
 @pytest.mark.parametrize(
     "url",
     [
-        "https://de.wikipedia.org/wiki/Paris",  # not held
+        "https://de.wikipedia.org/wiki/Paris",  # not held (and a wiki's parent domain is not its site)
+        "https://com/x",
         "https://example.org/x",
         "mailto:someone@example.org",
         "https://askubuntu.com/users/5/someone",  # a Q&A site's pages other than questions
