@@ -400,7 +400,12 @@ export function sanitizeDocumentHtml(
         continue;
       }
       if (!KEEP.has(tag)) {
-        walk(el, dest); // unwrap unknown wrappers (font, center, custom tags, ...)
+        // Unwrap unknown wrappers (font, center, main, custom tags, ...), keeping an id as a place to
+        // land: "Skip to content" and contents links pointed at a <main id> that was gone (2026-10-16).
+        const id = el.getAttribute('id');
+        if (id)
+          dest.appendChild(Object.assign(document.createElement('span'), { id: anchorId(id) }));
+        walk(el, dest);
         continue;
       }
       if (tag === 'img') {
@@ -434,14 +439,49 @@ export function sanitizeDocumentHtml(
       ) {
         // An icon-font link (`<i class="fa fa-download">`) is empty once classes go: name it by its
         // title (the Gutenberg cover page's EPUB and HTML links were invisible, 2026-10-16 field exam).
-        const label = el.getAttribute('title')?.trim() || copy.getAttribute('download') || 'link';
+        // A page of the library with no name is named by its address; a link out of the library
+        // with no name (a share button, a social icon) is left out: there is nothing to see or follow.
+        const label =
+          el.getAttribute('title')?.trim() ||
+          el.getAttribute('aria-label')?.trim() ||
+          copy.getAttribute('download') ||
+          (copy.dataset.wsp && !copy.dataset.missing ? addressLabel(copy.dataset.wsp) : '');
+        if (!label) {
+          stats.removed += 1;
+          continue;
+        }
         copy.textContent = label;
       }
       dest.appendChild(copy);
     }
   };
   walk(parsed.body, out);
+  // A link to a place in the page that is not there (a dropped navigation bar) is plain text.
+  const ids = new Set([...out.querySelectorAll('[id]')].map((e) => e.id));
+  for (const a of out.querySelectorAll<HTMLAnchorElement>('a[data-anchor]')) {
+    if (!ids.has(a.dataset.anchor!)) {
+      a.removeAttribute('href');
+      delete a.dataset.anchor;
+    }
+  }
   return { fragment: out, stats };
+}
+
+/** "wsp://site/a/b_c%20d" -> "b c d": a name for a link that has none. */
+function addressLabel(address: string): string {
+  const tail =
+    address
+      .replace(/[?#].*$/, '')
+      .replace(/\/+$/, '')
+      .split('/')
+      .pop() ?? '';
+  let name = tail;
+  try {
+    name = decodeURIComponent(tail);
+  } catch {
+    /* keep it as written */
+  }
+  return name.replace(/[_]+/g, ' ').trim() || address;
 }
 
 function sanitizeImage(el: Element, stats: SanitizeStats): Node {

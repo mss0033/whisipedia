@@ -267,3 +267,42 @@ describe('the Gutenberg cover page (2026-10-16 field exam)', () => {
     expect(a.dataset.wsp).toBe('wsp://search?q=Lewis+Carroll&source=gutenberg-zim');
   });
 });
+
+describe('links a reader cannot see or that lead nowhere (2026-10-16 crawl of 400 pages)', () => {
+  const site = {
+    sourceId: 'kiwix-nhs-uk-en-medicines',
+    nativeId: 'www.nhs.uk/medicines/',
+    links: [],
+  };
+  const render = (html: string) => {
+    const div = document.createElement('div');
+    div.append(sanitizeDocumentHtml(html, site).fragment);
+    return div;
+  };
+
+  it('keeps the id of an unwrapped element, so "Skip to content" lands', () => {
+    const div = render(
+      '<a href="#maincontent">Skip to content</a><main id="maincontent"><p>Medicines A to Z</p></main>',
+    );
+    const a = div.querySelector('a')!;
+    expect(a.dataset.anchor).toBe('doc-maincontent');
+    expect(div.querySelector('#doc-maincontent')).not.toBeNull();
+  });
+
+  it('makes a link to a place that is not in the page plain text', () => {
+    const div = render('<a href="#nav-a-z">A to Z</a><p>text</p>');
+    const a = div.querySelector('a')!;
+    expect(a.hasAttribute('href')).toBe(false);
+    expect(a.textContent).toBe('A to Z');
+  });
+
+  it('names an empty link to a library page and leaves out an empty link out of the library', () => {
+    const div = render(
+      '<a href="https://www.facebook.com/nhs"><i class="fa fa-facebook"></i></a>' +
+        '<a href="medicines/aspirin_for_pain"><svg></svg></a>' +
+        '<a href="https://x.com/nhs" aria-label="NHS on X"><i></i></a>',
+    );
+    const links = [...div.querySelectorAll('a')].map((a) => a.textContent);
+    expect(links).toEqual(['aspirin for pain', 'NHS on X']);
+  });
+});
