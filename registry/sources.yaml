@@ -3502,3 +3502,22 @@ sources:
     # question about a drug finds MDWiki or MedlinePlus first and the label beside them.
     rank_prior: 3.0
     notes: "Research round 2026-10-17 (docs/research/ROUND-2026-10-17.md). Prescribing information for every FDA-listed drug: indications, dosing, warnings, interactions."
+  - id: ncbi-bookshelf
+    name: NCBI Bookshelf open-access books (StatPearls, GeneReviews, WHO and CDC books)
+    publisher: US National Library of Medicine (NCBI Bookshelf)
+    domain: [medicine]
+    tier: T1
+    status: active
+    license: LicenseRef-per-item  # each document carries its book's licence (CC BY-NC-ND, CC BY-NC-SA IGO, PD)
+    legal_basis: open-license
+    # The LitArch open-access subset (the sanctioned bulk channel): StatPearls (~9,000 clinical
+    # review articles), GeneReviews and every WHO and CDC book in it (527 books). The other 9,000
+    # titles are mostly health-technology assessments; add them by NBK id or publisher.
+    access:
+      adapter: ncbi-bookshelf
+      books: [NBK430685, NBK1116]
+      publishers: [World Health Organization, Centers for Disease Control and Prevention (US)]
+      standalone: [NBK430685, NBK1116]
+    update: {cadence: P1M, strategy: snapshot-retention}
+    size: {bytes: 7200000000, measured: false, as_of: '2026-10-17'}
+    notes: "Research round 2026-10-17 (docs/research/ROUND-2026-10-17.md). Size: StatPearls 2.05 GB, GeneReviews 0.64 GB, 525 WHO and CDC books ≈ 4.5 GB (sampled)."
