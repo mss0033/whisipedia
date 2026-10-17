@@ -409,7 +409,7 @@ def test_a_site_published_below_a_folder_finds_its_root_relative_files(tmp_path:
     site = "privacydefence.org/opsec/bibleprivacy/"
     page = (
         '<a href="/.">Home</a><img src="/assets/logo.png"><a href="/opsec/vpn/">VPN</a>'
-        '<a href="/about/">About</a><img src="/nowhere.png">'
+        '<a href="/about/">About</a><img src="/nowhere.png"><a href="/opsec/standard">S</a>'
     )
     _zim(
         tmp_path / "wiki" / SAMPLE_GEN_2 / "upstream" / "privacydefence.org_en_opsecbible_2026-09.zim",
@@ -419,6 +419,7 @@ def test_a_site_published_below_a_folder_finds_its_root_relative_files(tmp_path:
             (f"{site}opsec/sensitivevm/index.html", "text/html", page),
             (f"{site}assets/logo.png", "image/png", "png"),
             (f"{site}opsec/vpn/", "text/html", "<h1>VPN</h1>"),
+            (f"{site}opsec/standard/index.html", "text/html", "<h1>Standard</h1>"),
             ("privacydefence.org/about/", "text/html", "<h1>About</h1>"),
         ],
         [],
@@ -444,6 +445,7 @@ def test_a_site_published_below_a_folder_finds_its_root_relative_files(tmp_path:
         f'<a href="{address_of("wiki", f"{site}opsec/vpn/")}">VPN</a>'
         f'<a href="{address_of("wiki", "privacydefence.org/about/")}">About</a>'  # the host's own root first
         '<img src="/v1/assets/wiki/g/nowhere.png">'  # nowhere: as before
+        f'<a href="{address_of("wiki", f"{site}opsec/standard/index.html")}">S</a>'
     )
 
 

@@ -498,7 +498,8 @@ class ZimAssetStore:
         return tuple(out)
 
     def find(self, source_id: str, generation_id: str, native_id: str) -> str | None:
-        """The native id of the entry at ``native_id`` or its other slash form (any type), else None."""
+        """The native id of the entry at ``native_id``, its other slash form or its folder's
+        ``index.html`` (a crawled site's "/opsec/x" is "…/opsec/x/index.html"), any type; else None."""
         try:
             where = self._locate(source_id, generation_id, native_id)
         except ZimUnavailable:
@@ -506,7 +507,8 @@ class ZimAssetStore:
         if where is None:
             return None
         file, path, root = where
-        for candidate in (path, path.rstrip("/") if path.endswith("/") else path + "/"):
+        bare = path.rstrip("/")
+        for candidate in (path, bare if path.endswith("/") else path + "/", f"{bare}/index.html"):
             if candidate and self._read(file, candidate, Want.NONE) is not None:
                 return root + candidate
         return None
