@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  type Chapter,
   forgetPosition,
   isHeading,
+  MAX_PARAGRAPH_CHARS,
+  PAGE_CHARS,
+  pages,
   paragraphs,
   positionOf,
   rememberPosition,
@@ -166,5 +170,203 @@ describe('front matter of a book with keyword chapters', () => {
       'CHAPTER I · MAGNETS AND MAGNETISM',
       'CHAPTER II · STATIC ELECTRICITY',
     ]);
+  });
+});
+
+/** Every paragraph of the text, once each, as a chapter title or a paragraph: nothing cut off. */
+function readsWhole(text: string, chapters: Chapter[]): void {
+  const shown = chapters.flatMap((c) => [
+    ...(c.page && c.page.index > 0 ? [] : [c.title]),
+    ...c.paragraphs,
+  ]);
+  const flat = (p: string) => p.replace(/\s+/g, ' ').replace(/\]$/, '');
+  const want = paragraphs(text).map(flat);
+  const got = shown.map(flat).filter((t) => want.includes(t) || !t.includes(' · '));
+  for (const p of want) expect(got.join('\n')).toContain(p);
+}
+
+describe('real books (2026-10-16 field exam: chapters cut off mid-sentence)', () => {
+  const prose = (n: number) =>
+    `This is the text of part ${n}, which goes on for a good while and ends as sentences do. `.repeat(
+      14,
+    );
+
+  it('does not end a chapter at a signature or a notice that finishes a sentence', () => {
+    // Famous Americans of Recent Times: "…Is the sincere wish of" / "THEO. BURR ALSTON."
+    const text = [
+      'By A. Writer.',
+      'CHAPTER I',
+      prose(1),
+      'The letter closed: "Is the sincere wish of',
+      'THEO. BURR ALSTON."',
+      'She never wrote again.',
+      'It was as follows:--',
+      '"COMMERCIAL.',
+      'CHAPTER II',
+      prose(2),
+      'CHAPTER III',
+      prose(3),
+    ].join('\n\n');
+    const chapters = splitChapters(text, 'Book');
+    expect(chapters.map((c) => c.title)).toEqual([
+      'Book',
+      'CHAPTER I',
+      'CHAPTER II',
+      'CHAPTER III',
+    ]);
+    expect(chapters[1]!.paragraphs).toContain('THEO. BURR ALSTON."');
+    readsWhole(text, chapters);
+  });
+
+  it('folds a contents list of entries and summaries back where it stands', () => {
+    // The Tragedies of the Medici: "CHAPTER I" / "_The Pazzi Conspiracy_--…" in the contents
+    const list = [1, 2, 3, 4].flatMap((n) => [
+      `CHAPTER ${'I'.repeat(n)}`,
+      `_Summary ${n}_--names--and more names.`,
+    ]);
+    const text = [
+      'By A. Writer.',
+      'PREFACE',
+      prose(0),
+      'CONTENTS',
+      ...list,
+      ...[1, 2, 3, 4].flatMap((n) => [`CHAPTER ${'I'.repeat(n)}`, prose(n)]),
+    ].join('\n\n');
+    const chapters = splitChapters(text, 'The Tragedies');
+    expect(chapters.map((c) => c.title)).toEqual([
+      'The Tragedies',
+      'PREFACE',
+      'CHAPTER I',
+      'CHAPTER II',
+      'CHAPTER III',
+      'CHAPTER IIII',
+    ]);
+    expect(chapters[1]!.paragraphs).toContain('_Summary 3_--names--and more names.');
+    readsWhole(text, chapters);
+  });
+
+  it('reads a long chapter title in capitals as a heading (Les Misérables)', () => {
+    const long =
+      'CHAPTER VII—WHICH EXPLAINS HOW THE PORTER CAME TO BE THERE THAT M. FAUCHELEVENT SHOULD HAVE ENTERED WITH SOMETHING UNDER HIS ARM';
+    expect(isHeading(long)).toBe(true);
+    expect(isHeading(long.toLowerCase())).toBe(false);
+  });
+
+  it('takes a chapter heading from an illustration caption and not a caption in capitals', () => {
+    // Pride and Prejudice: "[Illustration: ·PRIDE AND PREJUDICE·" … "Chapter I.]"
+    const text = [
+      'By A. Writer.',
+      'CHAPTER IV',
+      prose(0),
+      '[Illustration: ·PRIDE AND PREJUDICE·',
+      'Chapter I.]',
+      prose(1),
+      '[Illustration:',
+      '“SOME OF OUR CAVALRY CAUGHT HIM” (p. 12).]',
+      prose(2),
+      'Chapter II.',
+      prose(3),
+    ].join('\n\n');
+    const chapters = splitChapters(text, 'P');
+    expect(chapters.map((c) => c.title)).toEqual(['P', 'CHAPTER IV', 'Chapter I.', 'Chapter II.']);
+    readsWhole(text, chapters);
+  });
+
+  it('keeps a stage note from turning a play’s first scene into a contents list', () => {
+    // Shakespeare: "SCENE: Partly in France…" / "ACT I" / "SCENE I. Rossillon…"
+    const text = [
+      'SCENE: Partly in France, and partly in Tuscany.',
+      'ACT I',
+      'SCENE I. Rossillon. A room in the Countess’s palace.',
+      prose(1),
+      'SCENE II. Paris.',
+      prose(2),
+      'ACT II',
+      'SCENE I. Paris.',
+      prose(3),
+    ].join('\n\n');
+    expect(splitChapters(text, 'Play').map((c) => c.title)).toEqual([
+      'Play',
+      'ACT I · SCENE I. Rossillon. A room in the Countess’s palace.',
+      'SCENE II. Paris.',
+      'ACT II · SCENE I. Paris.',
+    ]);
+  });
+
+  it('splits on numbered chapters inside BOOKs (The Filigree Ball)', () => {
+    const text = [
+      'By A. Writer.',
+      'BOOK I THE FORBIDDEN ROOM',
+      'I. “THE MOORE HOUSE?”',
+      prose(1),
+      'II. I ENTER',
+      prose(2),
+      'BOOK II THE LAW',
+      'III. DETAILS',
+      prose(3),
+      'BOOK III THE HOUSE OF DOOM',
+      'IV. IN TAMPA',
+      prose(4),
+      'She was by',
+      'L. FRANK BAUM',
+    ].join('\n\n');
+    expect(splitChapters(text, 'F').map((c) => c.title)).toEqual([
+      'F',
+      'BOOK I THE FORBIDDEN ROOM · I. “THE MOORE HOUSE?”',
+      'II. I ENTER',
+      'BOOK II THE LAW · III. DETAILS',
+      'BOOK III THE HOUSE OF DOOM · IV. IN TAMPA',
+    ]);
+  });
+
+  it('keeps the lines of verse and joins the lines of prose', () => {
+    const wrapped = 'word '.repeat(400).replace(/(.{68}) /g, '$1\n');
+    const verse =
+      'Shall I compare thee\nto a summer’s day?\nThou art more lovely\nand more temperate.';
+    const ps = paragraphs(`${wrapped}\n\n${verse}`);
+    expect(ps[0]).not.toContain('\n');
+    expect(ps[1]).toBe(verse);
+  });
+
+  it('cuts a block of verses with no blank line at sentence ends (World English Bible)', () => {
+    const verses = Array.from(
+      { length: 600 },
+      (_, i) => `001:${i} He shall burn the whole on the altar, for a burnt offering.`,
+    ).join('\n');
+    const ps = paragraphs(verses);
+    expect(ps.length).toBeGreaterThan(5);
+    expect(Math.max(...ps.map((p) => p.length))).toBeLessThan(MAX_PARAGRAPH_CHARS);
+    expect(ps.join(' ')).toBe(verses.replace(/\n/g, ' '));
+  });
+});
+
+describe('pages', () => {
+  it('reads a long chapter a page at a time, evenly, at paragraph ends, losing nothing', () => {
+    const para = (n: number) => `Paragraph ${n} ${'x'.repeat(990)}`;
+    const long: Chapter = {
+      title: 'One',
+      paragraphs: Array.from({ length: 250 }, (_, i) => para(i)),
+    };
+    const short: Chapter = { title: 'Two', paragraphs: ['short'] };
+    const units = pages([long, short], 60_000);
+    expect(units.map((u) => u.page?.of)).toEqual([5, 5, 5, 5, 5, undefined]);
+    expect(units.map((u) => u.page?.index)).toEqual([0, 1, 2, 3, 4, undefined]);
+    expect(units.slice(0, 5).flatMap((u) => u.paragraphs)).toEqual(long.paragraphs);
+    for (const u of units.slice(0, 5)) {
+      expect(u.title).toBe('One');
+      expect(u.paragraphs.join('').length).toBeLessThanOrEqual(PAGE_CHARS);
+      expect(u.paragraphs.join('').length).toBeGreaterThan(40_000);
+    }
+    expect(units[5]).toBe(short);
+  });
+
+  it('keeps folded headings with the page they fall on', () => {
+    const c: Chapter = {
+      title: 'C',
+      paragraphs: ['a'.repeat(700), 'HEADING', 'b'.repeat(700)],
+      subheads: [1],
+    };
+    const units = pages([c], 800);
+    expect(units.map((u) => u.subheads ?? [])).toEqual([[], [0]]);
   });
 });

@@ -1,13 +1,13 @@
 /**
  * The book reader: a plain-text book (kind `books`) shown a chapter at a time with a table of
  * contents, previous/next, and the place the viewer left off remembered in this browser
- * (`core/book.ts`). `?ch=N` picks a chapter, `?ch=all` the whole text at once.
+ * (`core/book.ts`). A long chapter, or a long book with no chapters, is read a page at a time.
+ * `?ch=N` picks a chapter or page (counted together, from 0), `?ch=all` the whole text at once.
  */
 import type { DocumentResponse } from '../api/types.ts';
 import { makeAddress } from '../core/address.ts';
-import { type Chapter, positionOf, rememberPosition, splitChapters } from '../core/book.ts';
+import { type Chapter, pages, positionOf, rememberPosition, splitChapters } from '../core/book.ts';
 import { h } from '../core/dom.ts';
-import { renderPlainText } from '../core/text.ts';
 import { wspLink } from '../ui/components.ts';
 import type { AppServices } from './types.ts';
 
@@ -42,10 +42,11 @@ export function chapterToOpen(
 }
 
 export function renderBook(doc: DocumentResponse, text: string, ctx: ReaderContext): HTMLElement {
-  const chapters = splitChapters(text, doc.title);
+  const book = splitChapters(text, doc.title);
+  const chapters = pages(book);
   const wrap = h('div', { class: 'doc-body reader', lang: doc.lang });
   if (chapters.length < 2) {
-    wrap.append(renderPlainText(text, false));
+    wrap.append(chapterBody(chapters[0]!, false));
     return wrap;
   }
   const saved = positionOf(ctx.app.storage, doc.doc_id);
@@ -53,22 +54,28 @@ export function renderBook(doc: DocumentResponse, text: string, ctx: ReaderConte
   const here = (ch: number | 'all') => makeAddress(doc.source_id, doc.native_id, { ch });
   wrap.append(tableOfContents(chapters, open, here));
   if (open === 'all') {
-    for (const [i, c] of chapters.entries()) wrap.append(chapterNode(c, i, false));
+    for (const [i, c] of book.entries()) wrap.append(chapterNode(c, i, false));
     return wrap;
   }
   const chapter = chapters[open]!;
   const body = chapterNode(chapter, open, true);
+  const number = chapterNumbers(chapters);
+  const page = chapter.page;
+  const where = [
+    book.length > 1 ? `Chapter ${number[open]! + 1} of ${book.length}` : '',
+    page ? `${book.length > 1 ? ' · page' : 'Page'} ${page.index + 1} of ${page.of}` : '',
+  ].join('');
   wrap.append(
     h(
       'p',
       { class: 'reader-where' },
-      `Chapter ${open + 1} of ${chapters.length}`,
+      where,
       saved && saved.chapter === open && ctx.chapter === undefined
         ? h('span', { class: 'badge' }, 'where you left off')
         : null,
     ),
     body,
-    navigation(open, chapters.length, here),
+    navigation(chapters, open, here),
   );
   const remember = (paragraph: number) =>
     rememberPosition(ctx.app.storage, {
@@ -78,6 +85,7 @@ export function renderBook(doc: DocumentResponse, text: string, ctx: ReaderConte
       chapter: open,
       paragraph,
       chapters: chapters.length,
+      where,
     });
   remember(saved && saved.chapter === open && ctx.chapter === undefined ? saved.paragraph : 0);
   trackScroll(body, remember, open === chapters.length - 1, ctx.signal);
@@ -88,16 +96,39 @@ export function renderBook(doc: DocumentResponse, text: string, ctx: ReaderConte
   return wrap;
 }
 
+/** For each page, the number (from 0) of the chapter it is part of. */
+function chapterNumbers(units: readonly Chapter[]): number[] {
+  let n = -1;
+  return units.map((u) => (u.page && u.page.index > 0 ? n : ++n));
+}
+
+/** The first words of a page: what a contents line says of a page of a book with no chapters. */
+function opening(c: Chapter): string {
+  const words = (c.paragraphs[0] ?? '').split(/\s+/).slice(0, 8).join(' ');
+  return words.length < (c.paragraphs[0] ?? '').length ? `${words}…` : words;
+}
+
+/** Paragraphs of a chapter: folded headings as subheadings, verse with its lines. */
+function chapterBody(chapter: Chapter, numbered: boolean): HTMLElement {
+  const box = h('div', { class: 'reader-text' });
+  const subheads = new Set(chapter.subheads ?? []);
+  for (const [i, p] of chapter.paragraphs.entries()) {
+    const attrs: Record<string, string> = {};
+    if (numbered) attrs['data-paragraph'] = String(i);
+    if (p.includes('\n')) attrs.class = 'verse';
+    box.append(h(subheads.has(i) ? 'h3' : 'p', attrs, p));
+  }
+  return box;
+}
+
 function chapterNode(chapter: Chapter, index: number, single: boolean): HTMLElement {
-  const section = h(
+  const continued = chapter.page && chapter.page.index > 0;
+  return h(
     'section',
     { class: 'reader-chapter', id: `chapter-${index + 1}` },
-    h('h2', null, chapter.title),
+    h('h2', null, continued ? `${chapter.title} (continued)` : chapter.title),
+    chapterBody(chapter, single),
   );
-  for (const [i, p] of chapter.paragraphs.entries()) {
-    section.append(h('p', single ? { 'data-paragraph': String(i) } : null, p));
-  }
-  return section;
 }
 
 function tableOfContents(
@@ -105,17 +136,28 @@ function tableOfContents(
   open: number | 'all',
   here: (ch: number | 'all') => string,
 ): HTMLElement {
-  const items = chapters.map((c, i) =>
-    h(
-      'li',
-      { class: i === open ? 'is-current' : '' },
-      i === open ? h('b', null, c.title) : wspLink(here(i), c.title),
-    ),
-  );
+  // One line per chapter, at its first page; a book with no chapters lists its pages by their opening.
+  const number = chapterNumbers(chapters);
+  const count = number.at(-1)! + 1;
+  const current = open === 'all' ? -1 : number[open]!;
+  const items = chapters.flatMap((c, i) => {
+    if (count > 1 && c.page && c.page.index > 0) return [];
+    const title =
+      count > 1
+        ? c.title + (c.page ? ` (${c.page.of} pages)` : '')
+        : `Page ${i + 1}: ${opening(c)}`;
+    const isCurrent = count > 1 ? number[i] === current : i === open;
+    const label = i === open ? h('b', null, title) : wspLink(here(i), title);
+    return [h('li', { class: isCurrent ? 'is-current' : '' }, label)];
+  });
   return h(
     'details',
     { class: 'reader-toc', open: open === 'all' ? undefined : '' },
-    h('summary', null, `Contents (${chapters.length} chapters)`),
+    h(
+      'summary',
+      null,
+      count > 1 ? `Contents (${count} chapters)` : `Contents (${chapters.length} pages)`,
+    ),
     h('ol', null, items),
     h(
       'p',
@@ -127,20 +169,25 @@ function tableOfContents(
   );
 }
 
+/** Previous and next: a page of the same chapter when there is one, else the chapter. */
 function navigation(
+  units: readonly Chapter[],
   open: number,
-  count: number,
   here: (ch: number | 'all') => string,
 ): HTMLElement {
+  const page = units[open]!.page;
+  const prevPage = !!page && page.index > 0;
+  const nextPage = !!page && page.index + 1 < page.of;
+  const paged = !!page && page.of === units.length; // a book with no chapters: pages only
   return h(
     'p',
     { class: 'reader-nav' },
     open > 0
-      ? wspLink(here(open - 1), '← Previous chapter')
-      : h('span', { class: 'dim' }, 'First chapter'),
+      ? wspLink(here(open - 1), prevPage ? '← Previous page' : '← Previous chapter')
+      : h('span', { class: 'dim' }, paged ? 'First page' : 'First chapter'),
     ' · ',
-    open + 1 < count
-      ? wspLink(here(open + 1), 'Next chapter →')
+    open + 1 < units.length
+      ? wspLink(here(open + 1), nextPage ? 'Next page →' : 'Next chapter →')
       : h('span', { class: 'dim' }, 'The end'),
   );
 }

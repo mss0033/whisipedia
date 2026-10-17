@@ -286,7 +286,12 @@ export function continueReading(app: Pick<AppServices, 'storage'>): HTMLElement 
       'ul',
       { class: 'continue-reading' },
       books.map((b) =>
-        h('li', null, wspLink(b.address, b.title), ` · chapter ${b.chapter + 1} of ${b.chapters}`),
+        h(
+          'li',
+          null,
+          wspLink(b.address, b.title),
+          ` · ${b.where ? b.where[0]!.toLowerCase() + b.where.slice(1) : `chapter ${b.chapter + 1} of ${b.chapters}`}`,
+        ),
       ),
     ),
   );

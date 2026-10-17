@@ -943,6 +943,14 @@
   line-height: 1.55;
   margin: 0 0 0.9em;
 }
+/* verse, a list, an address: the book's own lines (core/book.ts paragraphs) */
+.reader-chapter p.verse {
+  white-space: pre-line;
+}
+.reader-chapter h3 {
+  font-size: 1em;
+  margin: 1.2em 0 0.5em;
+}
 .reader-nav {
   margin: 1.5em 0 0;
 }

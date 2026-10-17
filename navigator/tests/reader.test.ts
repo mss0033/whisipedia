@@ -132,3 +132,82 @@ describe('reader scroll tracking', () => {
     }
   });
 });
+
+describe('reading a long book a page at a time (2026-10-16 field exam)', () => {
+  const para = (n: number) => `Paragraph ${n}. ${'The story goes on. '.repeat(50)}`;
+  const doc = (text: string) =>
+    ({
+      doc_id: 'wsp:gutenberg/1',
+      source_id: 'gutenberg',
+      native_id: '1',
+      title: 'Long',
+      lang: 'en',
+      kind: 'books',
+      format: 'text',
+      text,
+    }) as unknown as import('../src/api/types.ts').DocumentResponse;
+  const read = async (text: string, chapter: number | undefined) => {
+    const { renderBook } = await import('../src/pages/reader.ts');
+    const storage = new SafeStorage(new MemoryStore());
+    const node = renderBook(doc(text), text, {
+      app: { storage },
+      chapter,
+      address: 'wsp://gutenberg/1',
+    });
+    return { node, storage };
+  };
+  const chapter = (title: string, n: number) =>
+    [title, ...Array.from({ length: n }, (_, i) => para(i))].join('\n\n');
+  // Front matter, a short chapter, a chapter of ~200,000 characters, a short chapter.
+  const BOOK_TEXT = [
+    'By A. Writer.',
+    chapter('CHAPTER I', 5),
+    chapter('CHAPTER II', 200),
+    chapter('CHAPTER III', 5),
+  ].join('\n\n');
+
+  it('cuts a long chapter into pages with next page, then next chapter', async () => {
+    const { node, storage } = await read(BOOK_TEXT, 2);
+    expect(node.querySelector('.reader-where')?.textContent).toBe('Chapter 3 of 4 · page 1 of 4');
+    expect(node.querySelector('.reader-nav')?.textContent).toBe('← Previous chapter · Next page →');
+    const toc = [...node.querySelectorAll('.reader-toc li')].map((li) => li.textContent);
+    expect(toc).toEqual(['Long', 'CHAPTER I', 'CHAPTER II (4 pages)', 'CHAPTER III']);
+    expect(positionOf(storage, 'wsp:gutenberg/1')).toMatchObject({
+      where: 'Chapter 3 of 4 · page 1 of 4',
+    });
+    const last = (await read(BOOK_TEXT, 5)).node;
+    expect(last.querySelector('.reader-chapter h2')?.textContent).toBe('CHAPTER II (continued)');
+    expect(last.querySelector('.reader-nav')?.textContent).toBe('← Previous page · Next chapter →');
+    expect(last.querySelector('.reader-toc li.is-current')?.textContent).toBe(
+      'CHAPTER II (4 pages)',
+    );
+    // every paragraph of the chapter is on one of its pages, in order
+    const seen: string[] = [];
+    for (let ch = 2; ch <= 5; ch++) {
+      const { node: page } = await read(BOOK_TEXT, ch);
+      seen.push(...[...page.querySelectorAll('.reader-chapter p')].map((p) => p.textContent!));
+    }
+    expect(seen).toEqual(Array.from({ length: 200 }, (_, i) => para(i).trim()));
+  });
+
+  it('reads a long book with no chapters by pages listed by their opening words', async () => {
+    const text = Array.from({ length: 200 }, (_, i) => para(i)).join('\n\n');
+    const { node } = await read(text, undefined);
+    expect(node.querySelector('.reader-where')?.textContent).toBe('Page 1 of 4');
+    expect(node.querySelector('.reader-toc summary')?.textContent).toBe('Contents (4 pages)');
+    expect(node.querySelector('.reader-toc li:nth-child(2)')?.textContent).toMatch(
+      /^Page 2: Paragraph \d+\. The story goes on\. The story…$/,
+    );
+    expect(node.querySelector('.reader-nav')?.textContent).toBe('First page · Next page →');
+  });
+
+  it('keeps a short book with no chapters on one page, verse with its lines', async () => {
+    const text = `${'A line of prose that fills the width of the text as prose does. '.repeat(30).replace(/(.{60,68}) /g, '$1\n')}\n\nThe sea is calm tonight.\nThe tide is full, the moon lies fair`;
+    const { node } = await read(text, undefined);
+    expect(node.querySelector('.reader-nav')).toBeNull();
+    const verse = node.querySelector('p.verse');
+    expect(verse?.textContent).toBe(
+      'The sea is calm tonight.\nThe tide is full, the moon lies fair',
+    );
+  });
+});
