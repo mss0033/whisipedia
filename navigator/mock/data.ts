@@ -53,6 +53,8 @@ export interface FixtureDoc {
   banner?: string;
   /** The stored file a collection document was refined from. */
   original?: OriginalFile;
+  /** Other copies of the same work (registry access.copies): `[source, native id, why]`. */
+  copies?: Array<[string, string, string]>;
 }
 
 const T = (d: string) => `${d}T00:00:00Z`;
@@ -132,7 +134,22 @@ export const SOURCES: FixtureSource[] = [
     bytes: 71.9e9,
     as_of: T('2026-09-30'),
     health: 'ok',
-    related: ['wikisource-en', 'standard-ebooks'],
+    related: ['wikisource-en', 'standard-ebooks', 'gutenberg-zim'],
+  },
+  {
+    id: 'gutenberg-zim',
+    name: 'Project Gutenberg (Kiwix ZIM)',
+    publisher: 'Kiwix',
+    kind: 'books',
+    domain: ['books'],
+    license: 'Public domain (US)',
+    tier: 'T2',
+    description: 'The illustrated HTML editions of Project Gutenberg books, as packaged by Kiwix.',
+    doc_count: 75_957,
+    bytes: 253e9,
+    as_of: T('2026-09-30'),
+    health: 'ok',
+    related: ['gutenberg'],
   },
   {
     id: 'standard-ebooks',
@@ -691,6 +708,61 @@ disunion or dispute.
     links: [],
     entities: ['Q150827', 'Q47152'],
     aliases: ['books by mary shelley', 'frankenstein'],
+    copies: [
+      ['gutenberg-zim', 'Frankenstein; Or, The Modern Prometheus.84', 'the illustrated edition'],
+    ],
+  },
+  {
+    // The Kiwix ZIM names book pages "<title>.<ebook number>"; its author pages are "<name>.<author id>".
+    source_id: 'gutenberg-zim',
+    native_id: 'Frankenstein; Or, The Modern Prometheus.84',
+    title: 'Frankenstein; Or, The Modern Prometheus',
+    kind: 'books',
+    lang: 'en',
+    license: 'Public domain (US)',
+    url_native: 'https://www.gutenberg.org/ebooks/84',
+    format: 'html',
+    versions: [
+      {
+        revision: '2025-11',
+        timestamp: T('2026-09-30'),
+        html: `<h1>Frankenstein; or, the Modern Prometheus</h1>
+<p>by Mary Wollstonecraft (Godwin) Shelley</p>
+<h2>CONTENTS</h2>
+<p><a href="#letter1">Letter 1</a> · <a href="#chap01">Chapter 1</a></p>
+<h2 id="letter1">Letter 1</h2>
+<p>You will rejoice to hear that no disaster has accompanied the commencement of an enterprise.</p>
+${'<p>I am already far north of London, and as I walk in the streets of Petersburgh, I feel a cold northern breeze play upon my cheeks.</p>\n'.repeat(40)}
+<h2 id="chap01">Chapter 1</h2>
+<p>I am by birth a Genevese, and my family is one of the most distinguished of that republic.</p>`,
+      },
+    ],
+    links: [],
+    entities: [],
+  },
+  {
+    // A long book with no chapter headings (the King James Bible is 4.3 MB of them): read by pages.
+    source_id: 'gutenberg',
+    native_id: '9999',
+    title: 'A Long Book Without Chapters',
+    kind: 'books',
+    lang: 'en',
+    license: 'Public domain (US)',
+    url_native: 'https://www.gutenberg.org/ebooks/9999',
+    format: 'text',
+    versions: [
+      {
+        revision: '2024-11-01',
+        timestamp: T('2026-09-30'),
+        text: Array.from(
+          { length: 160 },
+          (_, i) =>
+            `Paragraph ${i + 1}. ${'The road went on and on, past fields and farms and the long low hills. '.repeat(10)}`,
+        ).join('\n\n'),
+      },
+    ],
+    links: [],
+    entities: [],
   },
   {
     source_id: 'gutenberg',

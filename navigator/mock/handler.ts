@@ -358,7 +358,12 @@ export function document(
     d.format === 'html' ? `upstream/${d.source_id}_${gen.slice(0, 7)}.zim` : 'upstream/texts.tar';
   return {
     doc_id: id,
-    copies: [],
+    copies: (d.copies ?? []).map(([source_id, native, why]) => ({
+      doc_id: `wsp:${source_id}/${native}`,
+      source_id,
+      address: `wsp://${source_id}/${encodeURI(native)}`,
+      why,
+    })),
     source_id: d.source_id,
     native_id: d.native_id,
     title: d.title,
