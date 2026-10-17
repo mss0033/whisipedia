@@ -60,6 +60,24 @@ def page_ids(shared: bytes) -> dict[str, str]:
     return out
 
 
+APP_SHELL = "index.html"  # the app itself: an empty <div id="app"> without its script
+
+
+def root_page(shared: bytes) -> str | None:
+    """Entry of the library's home page (``index/page_<id>`` of ``rootPagePath``), or ``None``: the
+    archive's main entry is the app shell, empty without the app ("Enter site" on every LibreTexts
+    library opened a blank page, 2026-10-16 field exam)."""
+    try:
+        data: object = json.loads(shared)
+    except ValueError:
+        return None
+    root = cast(Mapping[str, Any], data).get("rootPagePath") if isinstance(data, Mapping) else None
+    if not isinstance(root, str):
+        return None
+    pid = page_ids(shared).get(root)
+    return None if pid is None else f"index/page_{pid}"
+
+
 def page_html(stub: str | bytes, content: bytes, ids: Mapping[str, str]) -> str | None:
     """The page a stub stands for: its title and the body from ``content`` (the page's content JSON),
     links and images made relative to the stub. ``None`` if ``content`` has no body."""

@@ -238,7 +238,10 @@ def test_a_mindtouch_app_stub_is_served_as_its_page(tmp_path: Path) -> None:
     body = (
         '<p>Spring tides occur at new and full moon. <a href="#/Ocean">Up</a><img src="content/f/a.svg"></p>'
     )
-    shared = {"pages": [{"id": "1", "title": "Ocean", "path": "Ocean"}, {"id": "2", "path": "Ocean/Tides"}]}
+    shared = {
+        "rootPagePath": "Ocean",
+        "pages": [{"id": "1", "title": "Ocean", "path": "Ocean"}, {"id": "2", "path": "Ocean/Tides"}],
+    }
     _zim(
         tmp_path / "wiki" / SAMPLE_GEN_2 / "upstream" / "libretexts.org_en_geo_2026-01.zim",
         "libretexts.org_en_geo",
@@ -263,6 +266,12 @@ def test_a_mindtouch_app_stub_is_served_as_its_page(tmp_path: Path) -> None:
     bare = store.page("wiki", SAMPLE_GEN_2, "index/page_1")
     assert bare is not None
     assert bare.native_id == "index/page_1"
+    # The main entry is the app shell, blank without its script: the library's home page instead
+    # ("Enter site" on every LibreTexts library opened a blank page, 2026-10-16 field exam).
+    assert store.home("wiki", SAMPLE_GEN_2) == "index/page_1"
+    shell = store.page("wiki", SAMPLE_GEN_2, "index.html")
+    assert shell is not None
+    assert shell.native_id == "index/page_1"
 
 
 def test_a_live_zim_page_lists_its_links(tmp_path: Path) -> None:
@@ -293,3 +302,71 @@ def test_a_live_zim_page_lists_its_links(tmp_path: Path) -> None:
         "wsp:wikipedia-en-zim/Other_page": "wsp:wikipedia-en-zim/Other_page",
         "https://x.org/": None,
     }
+
+
+def test_a_youtube_channel_reads_as_pages_not_a_blank_app(tmp_path: Path) -> None:
+    """2026-10-16 field exam: "Enter site" on Quick Guides for Medicine (openZIM's YouTube scraper)
+    opened a blank page, and every video page was blank too: they are stubs of a JavaScript app."""
+    import json
+
+    def stub(title: str, route: str) -> str:
+        return (
+            f"<html><head><title>{title}</title>"
+            f'<meta http-equiv="refresh" content="0;URL=\'../index.html#/{route}\'" />'
+            "</head><body></body></html>"
+        )
+
+    entry = {
+        "slug": "dka-Ns7x",
+        "title": "Diabetic Ketoacidosis",
+        "thumbnailPath": "videos/Ns7/video.webp",
+        "duration": "PT17M19S",
+    }
+    video = {
+        "id": "Ns7",
+        "title": "Diabetic Ketoacidosis",
+        "description": "Fluids first.\n\nThen insulin & potassium.",
+        "publicationDate": "2020-01-01T17:10:18Z",
+        "thumbnailPath": "videos/Ns7/video.webp",
+        "duration": "PT17M19S",
+        "chapterList": [
+            {"startTime": 0, "title": "<Untitled Chapter 1>"},
+            {"startTime": 95, "title": "Fluids"},
+        ],
+    }
+    playlist = {"slug": "endo-AbCd", "title": "Endocrine", "description": "", "videos": [entry]}
+    _zim(
+        tmp_path / "wiki" / SAMPLE_GEN_2 / "upstream" / "quickguides_en_all_2026-06.zim",
+        "quickguides_en_all",
+        [
+            ("index.html", "text/html", "<html><body><div id='app'></div></body></html>"),
+            ("index/dka-Ns7x", "text/html", stub("Diabetic Ketoacidosis", "watch/dka-Ns7x?list=endo-AbCd")),
+            ("index/endo-AbCd", "text/html", stub("Endocrine", "playlist/endo-AbCd")),
+            ("videos/dka-Ns7x.json", "application/json", json.dumps(video)),
+            ("playlists/endo-AbCd.json", "application/json", json.dumps(playlist)),
+            ("home_playlists.json", "application/json", json.dumps({"playlists": [playlist]})),
+            (
+                "channel.json",
+                "application/json",
+                json.dumps({"title": "Surviving Residency", "channelDescription": "Quick guides."}),
+            ),
+        ],
+        [],
+    )
+    store = ZimAssetStore(_vault(tmp_path, ["upstream/quickguides_en_all_2026-06.zim"]))
+    front = store.page("wiki", SAMPLE_GEN_2, "index.html")
+    assert front is not None
+    assert "<h1>Surviving Residency</h1>" in front.html
+    assert '<a href="index/endo-AbCd">Endocrine</a>' in front.html
+    assert '<a href="index/dka-Ns7x">Diabetic Ketoacidosis</a> (17:19)' in front.html
+    page = store.page("wiki", SAMPLE_GEN_2, "index/dka-Ns7x")
+    assert page is not None
+    assert "<h1>Diabetic Ketoacidosis</h1>" in page.html
+    assert "<p>Then insulin &amp; potassium.</p>" in page.html
+    assert '<img src="../videos/Ns7/video.webp"' in page.html
+    assert "<li>1:35 Fluids</li>" in page.html
+    assert "Untitled" not in page.html
+    assert "does not play videos" in page.html
+    listing = store.page("wiki", SAMPLE_GEN_2, "index/endo-AbCd")
+    assert listing is not None
+    assert '<a href="../index/dka-Ns7x">Diabetic Ketoacidosis</a>' in listing.html

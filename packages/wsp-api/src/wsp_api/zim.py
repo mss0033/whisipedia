@@ -43,7 +43,7 @@ from wsp_api.zimread import (
     ZimUnavailable,
     file_book_name,
 )
-from wsp_core import mindtouch
+from wsp_core import mindtouch, youtubezim
 from wsp_core.model import Asset, GenerationStatus
 
 log = logging.getLogger(__name__)
@@ -170,6 +170,8 @@ class ZimAssetStore:
         self._warm_queue: list[tuple[str, str]] = []
         self._warmer: threading.Thread | None = None
         self._page_maps: OrderedDict[str, dict[str, str]] = OrderedDict()  # MindTouch: file -> path -> id
+        self._roots: dict[str, str | None] = {}  # MindTouch: file -> home page entry
+        self._fronts: dict[str, str | None] = {}  # YouTube scraper: file -> generated front page
         self._lock = threading.Lock()
 
     # --- where things are ---
@@ -368,13 +370,18 @@ class ZimAssetStore:
         if where is None:
             return None
         file, path, root = where
+        if path == mindtouch.APP_SHELL:
+            if (home := self._mindtouch_root(file)) is not None:
+                path = home  # a link to the app ("../index.html", the main entry) is its home page
+            elif (front := self._youtube_home(file)) is not None:
+                return ZimPage(root + path, front, root)
         fragment = ""
         for _ in range(_MAX_STUB_HOPS + 1):
             data = self._read(file, path, Want.HTML)
             if data is None or data.content is None:
                 return None
             text = data.content.decode("utf-8", errors="replace")
-            body = self._mindtouch(file, data.path, text)
+            body = self._mindtouch(file, data.path, text) or self._youtube(file, data.path, text)
             if body is not None:
                 return ZimPage(root + data.path, body, root, fragment)
             # A section redirect is served as the page it points at (a link to it was a dead end:
@@ -393,18 +400,52 @@ class ZimAssetStore:
         content = self._read(file, entry, Want.ANY)
         if content is None or content.content is None:
             return None
+        return mindtouch.page_html(stub, content.content, self._mindtouch_maps(file)[0])
+
+    def _youtube(self, file: str, path: str, stub: str) -> str | None:
+        """The page a YouTube-scraper app stub stands for (``wsp_core.youtubezim``), or ``None``."""
+        entry = youtubezim.content_entry(path, stub)
+        if entry is None:
+            return None
+        content = self._read(file, entry, Want.ANY)
+        return None if content is None or content.content is None else youtubezim.page_html(content.content)
+
+    def _youtube_home(self, file: str) -> str | None:
+        """The front page of a YouTube-scraper archive (its app shell is empty), or ``None``."""
+        with self._lock:
+            if file in self._fronts:
+                return self._fronts[file]
+        home = self._read(file, youtubezim.HOME, Want.ANY)
+        front = None
+        if home is not None and home.content is not None:
+            channel = self._read(file, "channel.json", Want.ANY)
+            front = youtubezim.home_html(home.content, None if channel is None else channel.content)
+        with self._lock:
+            self._fronts[file] = front
+        return front
+
+    def _mindtouch_maps(self, file: str) -> tuple[dict[str, str], str | None]:
+        """``({page path: page id}, home page entry)`` of a MindTouch archive (both empty for any
+        other archive), from ``content/shared.json``, read once per archive."""
         with self._lock:
             ids = self._page_maps.get(file)
             if ids is not None:
                 self._page_maps.move_to_end(file)
-        if ids is None:
-            shared = self._read(file, mindtouch.SHARED, Want.ANY)
-            ids = {} if shared is None or shared.content is None else mindtouch.page_ids(shared.content)
-            with self._lock:
-                self._page_maps[file] = ids
-                while len(self._page_maps) > _MAX_PAGE_MAPS:
-                    self._page_maps.popitem(last=False)
-        return mindtouch.page_html(stub, content.content, ids)
+                return ids, self._roots.get(file)
+        shared = self._read(file, mindtouch.SHARED, Want.ANY)
+        raw = None if shared is None else shared.content
+        ids = {} if raw is None else mindtouch.page_ids(raw)
+        home = None if raw is None else mindtouch.root_page(raw)
+        with self._lock:
+            self._page_maps[file] = ids
+            self._roots[file] = home
+            while len(self._page_maps) > _MAX_PAGE_MAPS:
+                gone, _ = self._page_maps.popitem(last=False)
+                self._roots.pop(gone, None)
+        return ids, home
+
+    def _mindtouch_root(self, file: str) -> str | None:
+        return self._mindtouch_maps(file)[1]
 
     def exists(self, source_id: str, generation_id: str, native_id: str) -> bool:
         """An HTML page is there (no content is read)."""
@@ -429,6 +470,8 @@ class ZimAssetStore:
                 self.build_books_soon(source_id, generation_id)
             return BOOKS_PAGE
         data = self._read(layout.single, "", Want.NONE)
+        if data is not None and data.path == mindtouch.APP_SHELL:
+            return self._mindtouch_root(layout.single) or data.path
         return None if data is None else data.path
 
     def _books_page(self, source_id: str, generation_id: str) -> str | None:

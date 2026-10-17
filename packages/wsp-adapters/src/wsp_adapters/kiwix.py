@@ -54,7 +54,7 @@ from wsp_adapters._common import (
 )
 from wsp_adapters.entries import Entry, Redirect
 from wsp_adapters.html_text import html_to_text
-from wsp_core import mindtouch
+from wsp_core import mindtouch, youtubezim
 from wsp_core.errors import FetchError
 from wsp_core.ids import content_hash, make_doc_id
 from wsp_core.listing import skip_paths, skip_regex
@@ -614,18 +614,23 @@ _MINDTOUCH: dict[Path, Archive] = {}  # per worker process: the archive of the t
 
 
 def _mindtouch_page(zim: Path, path: str, stub: bytes) -> str | None:
-    """The page a MindTouch app stub stands for (:mod:`wsp_core.mindtouch`), read from its content
-    entry by random access (the stub's own bytes are only the title), or ``None``."""
+    """The page a MindTouch (:mod:`wsp_core.mindtouch`) or YouTube-scraper (:mod:`wsp_core.youtubezim`)
+    app stub stands for, read from its content entry by random access (the stub's own bytes are only
+    the title), or ``None``."""
     entry = mindtouch.content_entry(path, stub)
-    if entry is None:
+    video = None if entry is not None else youtubezim.content_entry(path, stub)
+    want = entry if entry is not None else video
+    if want is None:
         return None
     archive = _MINDTOUCH.get(zim)
     if archive is None:
         _MINDTOUCH.clear()
         archive = _MINDTOUCH[zim] = Archive(zim)
-    if not archive.has_entry_by_path(entry):
+    if not archive.has_entry_by_path(want):
         return None
-    content = bytes(archive.get_entry_by_path(entry).get_item().content)
+    content = bytes(archive.get_entry_by_path(want).get_item().content)
+    if video is not None:  # a YouTube-scraper stub (wsp_core.youtubezim): the video's description
+        return youtubezim.page_html(content)
     return mindtouch.page_html(stub, content, {})  # links do not matter for the text
 
 
