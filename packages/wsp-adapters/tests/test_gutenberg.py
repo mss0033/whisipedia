@@ -88,9 +88,15 @@ def generation_dir(tmp_path: Path) -> Path:
         zim_up / "gutenberg_mul_all_2025-11.zim",
         name="gutenberg_mul_all",
         articles=[
+            # Author pages are "<author>.<author id>" and author ids overlap ebook numbers: author 1
+            # sorts before book 1, and author 3 has no book of that number with an HTML edition.
+            ("A. Author.1", "A. Author", "<p>an author</p>"),
             ("Book One.1", "Book One", "<p>Book one</p>"),
             ("Book One_cover.1", "Book One", "<p>cover</p>"),
             ("Livre Deux.2", "Livre Deux", "<p>deux</p>"),
+            ("Livre Deux_cover.2", "Livre Deux", "<p>couverture</p>"),
+            ("Audio Three_cover.3", "Audio Three", "<p>audio</p>"),
+            ("Someone Else.4", "Someone Else", "<p>an author with no book 4</p>"),
         ],
     )
     (shelf / "gutenberg-zim" / "CURRENT.txt").write_text("2025-11\n")
@@ -138,7 +144,9 @@ def test_books_with_texts_catalog_only_and_reading_copy(generation_dir: Path, tm
     assert one.url_native == "https://www.gutenberg.org/ebooks/1"
     assert docs["2"].lang == "fr"
     assert docs["2"].text.endswith("Pas de marqueurs ici.")
+    assert docs["2"].links[0] == "wsp:gutenberg-zim/Livre Deux.2"
     assert docs["3"].text.endswith("Catalog record only: no plain-text edition in the feed.")
+    assert docs["3"].links[0] == "wsp:gutenberg-zim/Audio Three_cover.3"  # no HTML edition: its cover page
     assert "type Sound" in docs["3"].text
     assert (tmp_path / "work" / "gutenberg-zim-paths.json").is_file()
 
@@ -175,3 +183,13 @@ def test_byline_names_the_authors_as_a_reader_does() -> None:
     assert byline("Homer, 751? BCE-651? BCE; Butler, Samuel, 1835-1902 [Translator]") == "Homer"
     assert byline("Smith, J. [Editor]") == ""
     assert byline("") == ""
+
+
+def test_an_author_page_is_never_a_books_illustrated_edition(generation_dir: Path, tmp_path: Path) -> None:
+    from wsp_adapters.gutenberg import reading_copy_zim, zim_book_paths
+
+    zim = reading_copy_zim(generation_dir, "gutenberg-zim")
+    assert zim is not None
+    paths = zim_book_paths(zim, tmp_path / "paths.json")
+    assert paths == {1: "Book One.1", 2: "Livre Deux.2", 3: "Audio Three_cover.3"}
+    assert zim_book_paths(zim, tmp_path / "paths.json") == paths  # from the cache

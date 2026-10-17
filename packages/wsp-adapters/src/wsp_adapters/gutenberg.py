@@ -24,7 +24,9 @@ without a plain text (audio books, some collections) still get a catalog-only do
 ``gutenberg-zim``, found next to this source as ``<domain>/<reading_copy>/CURRENT.txt``), each book
 links to its ZIM page: the ZIM names book pages ``<title>.<id>``, so one pass over the ZIM's paths
 builds ``id -> path``, cached as JSON in ``ctx.workdir``. ``links`` then holds
-``wsp:gutenberg-zim/<path>``, the Navigator's illustrated EPUB/HTML copy of the same book.
+``wsp:gutenberg-zim/<path>``, the Navigator's illustrated EPUB/HTML copy of the same book. Author
+pages are named the same way, ``<author>.<author id>``, and author ids overlap ebook numbers: only a
+number with a ``<title>_cover.<id>`` page is a book.
 """
 
 from __future__ import annotations
@@ -81,6 +83,7 @@ TEXTS = "txt-files.tar.zip"
 _TXT_RE = re.compile(r"(?:^|/)pg(\d+)\.txt$")
 _RDF_RE = re.compile(r"(?:^|/)pg(\d+)\.rdf$")
 _ZIM_BOOK_RE = re.compile(r"\.(\d+)$")
+_ZIM_PATHS_RULE = 2  # in the cache key: a cache built by an earlier rule is built again
 _START_RE = re.compile(r"^\*\*\* ?START OF (THE|THIS) PROJECT GUTENBERG.*$", re.MULTILINE | re.IGNORECASE)
 _END_RE = re.compile(r"^\*\*\* ?END OF (THE|THIS) PROJECT GUTENBERG.*$", re.MULTILINE | re.IGNORECASE)
 _NS = {
@@ -238,8 +241,15 @@ def reading_copy_zim(generation_dir: Path, source_id: str) -> Path | None:
 
 
 def zim_book_paths(zim: Path, cache: Path) -> dict[int, str]:
-    """``ebook number -> ZIM path`` of each book's main page (``<title>.<id>``), cached as JSON."""
-    key = f"{zim.name}:{zim.stat().st_size}"
+    """``ebook number -> ZIM path`` of each book's main page (``<title>.<id>``), cached as JSON.
+
+    A book is a number with a cover page (``<title>_cover.<id>``): ``Katherine Mary Barrow.2701`` is
+    an author's page and ``Moby Dick; Or, The Whale.2701`` the book, and taking the first path by
+    number linked a third of the books to an author (2026-10-16 field exam: "the illustrated edition"
+    of Moby Dick and Pride and Prejudice opened author pages). A book with no HTML edition (an audio
+    book) has its cover page only; that is its page then.
+    """
+    key = f"{zim.name}:{zim.stat().st_size}:{_ZIM_PATHS_RULE}"
     if cache.is_file():
         try:
             data = json.loads(cache.read_text(encoding="utf-8"))
@@ -250,12 +260,21 @@ def zim_book_paths(zim: Path, cache: Path) -> dict[int, str]:
     from libzim.reader import Archive  # imported on use: only the linking pass needs it
 
     archive = Archive(zim)
-    paths: dict[int, str] = {}
+    covers: dict[int, str] = {}
+    pages: set[str] = set()
     for i in range(archive.all_entry_count):
         path = archive._get_entry_by_id(i).path  # pyright: ignore[reportPrivateUsage]
         match = _ZIM_BOOK_RE.search(path)
-        if match is not None and "_cover." not in path:
-            paths.setdefault(int(match.group(1)), path)
+        if match is None:
+            continue
+        if path.endswith(f"_cover.{match.group(1)}"):
+            covers.setdefault(int(match.group(1)), path)
+        else:
+            pages.add(path)
+    paths: dict[int, str] = {}
+    for number, cover in covers.items():
+        page = f"{cover.removesuffix(f'_cover.{number}')}.{number}"
+        paths[number] = page if page in pages else cover
     cache.parent.mkdir(parents=True, exist_ok=True)
     tmp = cache.with_name(cache.name + ".partial")
     tmp.write_text(json.dumps({"zim": key, "paths": paths}), encoding="utf-8")
