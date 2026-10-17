@@ -47,7 +47,7 @@ from wsp_api.zimread import (
     ZimUnavailable,
     file_book_name,
 )
-from wsp_core import mindtouch, nautilus, youtubezim
+from wsp_core import fcc, mindtouch, nautilus, youtubezim
 from wsp_core.model import Asset, Generation, GenerationStatus
 
 log = logging.getLogger(__name__)
@@ -494,7 +494,7 @@ class ZimAssetStore:
         if path == mindtouch.APP_SHELL:
             if (home := self._mindtouch_root(file)) is not None:
                 path = home  # a link to the app ("../index.html", the main entry) is its home page
-            elif (front := self._youtube_home(file)) is not None:
+            elif (front := self._youtube_home(file) or self._fcc_home(source_id, file)) is not None:
                 return ZimPage(root + path, front, root)
         fragment = ""
         for _ in range(_MAX_STUB_HOPS + 1):
@@ -502,7 +502,11 @@ class ZimAssetStore:
             if data is None or data.content is None:
                 return None
             text = data.content.decode("utf-8", errors="replace")
-            body = self._mindtouch(file, data.path, text) or self._youtube(file, data.path, text)
+            body = (
+                self._mindtouch(file, data.path, text)
+                or self._youtube(file, data.path, text)
+                or self._fcc(file, data.path, text)
+            )
             if body is not None:
                 return ZimPage(root + data.path, body, root, fragment)
             # A section redirect is served as the page it points at (a link to it was a dead end:
@@ -606,6 +610,21 @@ class ZimAssetStore:
             return None
         content = self._read(file, entry, Want.ANY)
         return None if content is None or content.content is None else youtubezim.page_html(content.content)
+
+    def _fcc(self, file: str, path: str, stub: str) -> str | None:
+        """The challenge a freeCodeCamp-scraper app stub stands for (``wsp_core.fcc``), or ``None``."""
+        entry = fcc.content_entry(path, stub)
+        if entry is None:
+            return None
+        content = self._read(file, entry, Want.ANY)
+        return None if content is None or content.content is None else fcc.page_html(content.content)
+
+    def _fcc_home(self, source_id: str, file: str) -> str | None:
+        """The front page of a freeCodeCamp-scraper archive: every challenge (its app shell is empty)."""
+        index = self._read(file, fcc.INDEX, Want.ANY)
+        if index is None or index.content is None:
+            return None
+        return fcc.home_html(self.names.get(source_id, source_id).removesuffix(" (Kiwix ZIM)"), index.content)
 
     def _youtube_home(self, file: str) -> str | None:
         """The front page of a YouTube-scraper archive (its app shell is empty), or ``None``."""

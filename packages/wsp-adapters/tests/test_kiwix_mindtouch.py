@@ -101,3 +101,28 @@ def test_a_nautilus_archive_is_refined_as_its_catalogue(tmp_path: Path) -> None:
     assert "Green beans: pressure canner" in doc.text
     assert "Process 20 minutes" in doc.text
     assert "By USDA" in doc.text
+
+
+def test_a_freecodecamp_challenge_is_refined_from_its_markdown(tmp_path: Path) -> None:
+    """Rosetta Code's 160 tasks were their titles alone (2026-10-17)."""
+    path = tmp_path / "freecodecamp_en_rosetta-code_2026-08.zim"
+    stub = (
+        '<html><head><title>Soundex</title><meta http-equiv="refresh" '
+        "content=\"0;URL='../../../index.html#rosetta-code/challenges/5a23'\" /></head><body></body></html>"
+    )
+    md = "---\ntitle: Soundex\n---\n\n# --description--\n\nSoundex codes similar sounding names.\n"
+    with Creator(path).config_indexing(False, "eng").config_verbose(False) as creator:
+        creator.set_mainpath("index/rosetta-code/challenges/5a23.html")
+        creator.add_item(_Item("index/rosetta-code/challenges/5a23.html", "text/html", stub, "Soundex"))
+        creator.add_item(_Item("content/curriculum/rosetta-code/challenges/5a23.md", "text/markdown", md))
+        creator.add_metadata("Name", "freecodecamp_en_rosetta-code")
+        creator.add_metadata("Language", "eng")
+    with WorkerPool(1) as pool:
+        docs = {
+            e.native_id: e
+            for e in read_zim(
+                path, zim_params(path, "fcc", "BSD-3-Clause", False), workdir=tmp_path / "w", pool=pool
+            )
+            if isinstance(e, DocRecord)
+        }
+    assert "Soundex codes similar sounding names." in docs["index/rosetta-code/challenges/5a23.html"].text

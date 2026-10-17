@@ -56,7 +56,7 @@ from wsp_adapters._common import (
 from wsp_adapters.doccollection.adapter import DEFAULT_PDF_MAX_PAGES, pdf_text
 from wsp_adapters.entries import Entry, Redirect
 from wsp_adapters.html_text import html_to_text
-from wsp_core import mindtouch, nautilus, youtubezim
+from wsp_core import fcc, mindtouch, nautilus, youtubezim
 from wsp_core.errors import FetchError
 from wsp_core.ids import content_hash, make_doc_id
 from wsp_core.listing import skip_paths, skip_regex
@@ -635,7 +635,8 @@ def _mindtouch_page(zim: Path, path: str, stub: bytes) -> str | None:
     the title), or ``None``."""
     entry = mindtouch.content_entry(path, stub)
     video = None if entry is not None else youtubezim.content_entry(path, stub)
-    want = entry if entry is not None else video
+    challenge = None if entry is not None or video is not None else fcc.content_entry(path, stub)
+    want = entry or video or challenge
     if want is None:
         return None
     archive = _MINDTOUCH.get(zim)
@@ -647,6 +648,8 @@ def _mindtouch_page(zim: Path, path: str, stub: bytes) -> str | None:
     content = bytes(archive.get_entry_by_path(want).get_item().content)
     if video is not None:  # a YouTube-scraper stub (wsp_core.youtubezim): the video's description
         return youtubezim.page_html(content)
+    if challenge is not None:  # a freeCodeCamp-scraper stub (wsp_core.fcc): the challenge
+        return fcc.page_html(content)
     pages = _PAGES.get(zim)
     if pages is None:
         _PAGES.clear()
