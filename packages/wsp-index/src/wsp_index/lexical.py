@@ -689,17 +689,21 @@ class TantivyIndex:
         self._set_meta("suggest_dirty", "0")
         self._db.commit()
 
-    def suggest_rebuild_due(self, now: float | None = None) -> bool:
+    def suggest_rebuild_due(self, now: float | None = None, *, overlay: bool = True) -> bool:
         """Whether :meth:`rebuild_suggest` would be worth its full scan now: the trie is missing or
         stale beyond the overlay's threshold, or it is dirty and older than ``suggest_rebuild_seconds``.
-        A small dirty overlay on a fresh trie is left for a later writer (the nightly build)."""
+        A small dirty overlay on a fresh trie is left for a later writer (the nightly build).
+
+        ``overlay=False`` leaves a large overlay on a fresh trie to that writer too: a release step
+        indexes one source, and a full rebuild (35 minutes, reading every source's titles from the
+        NAS) after each of 22 new sources held the queue for hours (2026-10-17)."""
         with self._lock:
-            if not TitleTrie.exists(self._suggest_dir) or self._suggest_stale:
+            if not TitleTrie.exists(self._suggest_dir):
                 return True
             pending = len(self._pending_suggest) + len(self._pending_removed) + self._suggester.pending
-            if pending > self.config.suggest_rebuild_threshold:
+            if overlay and (self._suggest_stale or pending > self.config.suggest_rebuild_threshold):
                 return True
-            dirty = pending > 0 or self._meta("suggest_dirty") == "1"
+            dirty = self._suggest_stale or pending > 0 or self._meta("suggest_dirty") == "1"
             if not dirty:
                 return False
             age = (time.time() if now is None else now) - self._trie_file_stamp()[1] / 1e9  # mtime_ns

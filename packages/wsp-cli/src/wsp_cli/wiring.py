@@ -486,7 +486,7 @@ def index_child(payload: Mapping[str, Any]) -> dict[str, Any]:
                 report = ix.index_partitioned(ctx.spec, include=ctx.generation.generation_id)
             else:
                 report = ix.index_generation(ctx.spec, ctx.generation.generation_id)
-            ix.finish()  # one suggest rebuild, after the step's commits
+            ix.finish(release_step=True)  # a suggest rebuild only when the trie is missing or old
         finally:
             ix.close()
     return {"indexed": report.indexed, "upserted": report.upserted, "deleted": report.deleted}

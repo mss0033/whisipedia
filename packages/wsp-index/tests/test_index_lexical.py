@@ -511,6 +511,24 @@ def test_a_suggest_rebuild_is_due_only_for_a_stale_or_old_trie(tmp_path: Path) -
         assert idx.suggest("Cam", limit=1) == ["Camel 0"]
 
 
+def test_a_release_step_leaves_a_large_overlay_on_a_fresh_trie_to_the_nightly(tmp_path: Path) -> None:
+    """22 new sources each forced a 35-minute full rebuild in their release steps (2026-10-17)."""
+    from dataclasses import replace as replace_cfg
+
+    cfg = replace_cfg(
+        SMALL, suggest_rebuild_threshold=3, suggest_rebuild_seconds=3600, suggest_open_rebuild_titles=0
+    )
+    with TantivyIndex(tmp_path / "ix", cfg) as idx:
+        idx.upsert([doc("s", "a", "Aardvark", "x")])
+        idx.rebuild_suggest()
+        idx.upsert([doc("s", str(i), f"Camel {i}", "z") for i in range(5)])  # past the threshold: stale
+        assert idx.suggest_rebuild_due()  # the nightly's rule: fold it now
+        assert not idx.suggest_rebuild_due(overlay=False)  # a release step's: the trie is fresh
+        idx.commit(rebuild_suggest=False)
+        assert idx._meta("suggest_dirty") == "1"  # pyright: ignore[reportPrivateUsage]  # for the nightly
+        assert idx.suggest_rebuild_due(now=time.time() + 3601, overlay=False)  # dirty and old: due
+
+
 def test_a_trie_left_dirty_by_another_process_is_aged_not_rebuilt(tmp_path: Path) -> None:
     """Release steps are separate processes: a small overlay one step leaves behind (persisted as
     the dirty flag) must not make the next step's check say "due" on a fresh trie."""

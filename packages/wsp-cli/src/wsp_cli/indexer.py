@@ -227,23 +227,26 @@ class Indexer:
             if self._feed is not None:
                 self._feed.close()
 
-    def finish(self) -> None:
+    def finish(self, *, release_step: bool = False) -> None:
         """Rebuild the suggest trie once (bulk commits defer it) when a rebuild is due
         (:meth:`TantivyIndex.suggest_rebuild_due`); a small overlay on a fresh trie waits for a later
         run. Checked even when this run changed nothing, so a nightly build that finds everything
         indexed still folds a dirty trie once it is old (review 2026-10-14 #1c). With
-        :attr:`defer_suggest` the changes are committed and the rebuild is left for a later run."""
+        :attr:`defer_suggest` the changes are committed and the rebuild is left for a later run.
+        ``release_step`` (the orchestrator's index step for one release): a fresh trie is not rebuilt
+        for a large overlay; the nightly build folds it once the trie is old."""
         if self.defer_suggest:
             if self._changed:
                 self.index.commit(rebuild_suggest=False)
                 self._say("suggest: rebuild deferred (--no-suggest); left for a later run")
-        elif self.index.suggest_rebuild_due():
+        elif self.index.suggest_rebuild_due(overlay=not release_step):
             started = self.clock()
             self.index.rebuild_suggest()
             self._say(f"suggest: rebuilt in {self.clock() - started:.1f}s; {memory_line()}")
         elif self._changed:
-            self.index.commit()
-            self._say("suggest: rebuild not due (fresh trie, small overlay); left for a later run")
+            # A release step leaves even a stale trie (a large overlay) to the nightly build.
+            self.index.commit(rebuild_suggest=not release_step)
+            self._say("suggest: rebuild not due (fresh trie); left for a later run")
         self._changed = False
 
     # --- helpers -------------------------------------------------------------------------------
