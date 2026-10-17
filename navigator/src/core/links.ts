@@ -18,7 +18,7 @@ export type LinkTarget =
   /** A link that goes nowhere upstream either (`href="#"`, `javascript:void(0)`): plain text here. */
   | { kind: 'none' }
   /** A file of the archive to save, not a page (a Gutenberg book's EPUB): `/v1/assets/…`. */
-  | { kind: 'download'; path: string; name: string };
+  | { kind: 'download'; path: string; name: string; view: boolean };
 
 /** Upstream placeholders for "no link": the xkcd front page's "Next >" is `href="#"` (field exam 2026-10-14). */
 const NOWHERE = /^(?:#|javascript:\s*(?:void\s*\(\s*0\s*\)\s*;?)?)$/i;
@@ -40,6 +40,9 @@ function missing(original: string, ctx?: LinkContext): LinkTarget {
   return { kind: 'missing', original, address };
 }
 
+/** Files a browser shows by itself (the asset route serves these inline). */
+const VIEWABLE = /\.(png|jpe?g|gif|webp|avif|bmp|svg|ico)$/i;
+
 export function anchorId(id: string): string {
   return ANCHOR_PREFIX + id;
 }
@@ -50,11 +53,12 @@ export function resolveHref(rawHref: string, ctx: LinkContext): LinkTarget {
   if (!href || NOWHERE.test(href)) return { kind: 'none' };
 
   if (href.startsWith('/v1/assets/')) {
-    // The server writes a link to an archive's download (EPUB, PDF) as its asset URL.
+    // The server writes a link to a file in an archive (EPUB, PDF, a picture, sheet music) as its
+    // asset URL. A picture opens to look at; anything else is saved.
     const path = allowedImagePath(href);
     if (!path) return missing(href, ctx);
     const name = decodeURIComponent(path.split('?')[0]!.split('/').pop() ?? '') || 'download';
-    return { kind: 'download', path, name };
+    return { kind: 'download', path, name, view: VIEWABLE.test(name) };
   }
 
   const known = ctx.links?.find((l) => l.href === href);
@@ -542,7 +546,10 @@ export function rewriteAnchor(
       break;
     case 'download':
       a.setAttribute('href', target.path);
-      a.setAttribute('download', target.name);
+      if (target.view) {
+        a.setAttribute('target', '_blank');
+        a.setAttribute('rel', 'noopener');
+      } else a.setAttribute('download', target.name);
       break;
     case 'missing':
       if (stats) stats.broken += 1;

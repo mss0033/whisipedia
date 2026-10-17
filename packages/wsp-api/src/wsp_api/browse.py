@@ -47,13 +47,20 @@ SERVED_MIMETYPES = frozenset(
         "image/vnd.microsoft.icon",
     }
 )
-# Files a page offers to save (htmlrewrite.DOWNLOADS): served as attachments, never shown inline.
-DOWNLOAD_MIMETYPES = frozenset(
+# A page, a script or a stylesheet is never an asset: the API serves pages through the page route, and
+# code from an upstream container must not run (or style) at our origin. Every other type a page links
+# to (htmlrewrite.FILES: PDFs, EPUBs, sheet music, recordings, data) is sent as a download.
+REFUSED_MIMETYPES = frozenset(
     {
-        "application/epub+zip",
-        "application/pdf",
-        "application/x-mobipocket-ebook",
-        "application/vnd.amazon.ebook",
+        "text/html",
+        "application/xhtml+xml",
+        "text/css",
+        "text/javascript",
+        "application/javascript",
+        "application/x-javascript",
+        "application/ecmascript",
+        "text/ecmascript",
+        "application/wasm",
     }
 )
 _BLURB = 280
@@ -262,7 +269,8 @@ def browse_router(lib: Library) -> APIRouter:
         responses={
             200: {
                 "description": "The image, with a long-lived cache header (generations are immutable); "
-                "an EPUB or PDF the page offers is sent as an attachment.",
+                "any other file a page links to (EPUB, PDF, a recording, sheet music) is sent as an "
+                "attachment. Pages, scripts and stylesheets are never served here.",
                 "content": {
                     "image/*": {"schema": {"type": "string", "format": "binary"}},
                     "application/epub+zip": {"schema": {"type": "string", "format": "binary"}},
@@ -276,12 +284,12 @@ def browse_router(lib: Library) -> APIRouter:
         lib.source(source_id)
         found = await lib.nas.run(lambda: lib.assets.asset(source_id, generation_id, path))
         kind = found.mimetype.split(";")[0].strip() if found is not None else ""
-        if found is None or (kind not in SERVED_MIMETYPES and kind not in DOWNLOAD_MIMETYPES):
+        if found is None or kind in REFUSED_MIMETYPES:
             raise ApiError(
                 404, "asset_not_found", f"no image or download at {source_id}/{generation_id}/{path}"
             )
         headers = {"Cache-Control": "public, max-age=31536000, immutable"}
-        if kind in DOWNLOAD_MIMETYPES:
+        if kind not in SERVED_MIMETYPES:
             name = path.rsplit("/", 1)[-1]
             headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(name, safe='')}"
         return Response(content=found.content, media_type=found.mimetype, headers=headers)

@@ -46,6 +46,7 @@ const HEADERS = { 'X-Whisipedia-Probe': 'check' };
 const PAGE_TIMEOUT = 120_000; // a cold NAS page can take a minute
 const IMAGES_CHECKED = 8;
 const LINKS_CHECKED = 3; // in-library links followed per page (an existence check, not a visit)
+const FILES_CHECKED = 2; // links to a file in the archive (a PDF, a picture, sheet music) fetched per page
 // Pages drawn by the Navigator itself: their links are never documents.
 const BUILTIN = new Set([
   'home',
@@ -234,6 +235,9 @@ async function check(context, address) {
         links: [...(main?.querySelectorAll('.doc-body a[data-wsp]:not([data-missing])') ?? [])]
           .map((a) => a.getAttribute('data-wsp') ?? '')
           .filter((x) => x.startsWith('wsp://')),
+        files: [...(main?.querySelectorAll('.doc-body a[href^="/v1/assets/"]') ?? [])].map(
+          (a) => a.getAttribute('href') ?? '',
+        ),
         brokenLinks: Number(
           /^(\d+)/.exec(main?.querySelector('.broken-note')?.textContent ?? '')?.[1] ?? 0,
         ),
@@ -302,6 +306,15 @@ async function check(context, address) {
       else if (!r.ok()) defects.push(`link ${r.status()} ${address.slice(0, 160)}`);
     } catch {
       defects.push(`link-timeout ${address.slice(0, 160)}`);
+    }
+  }
+  // A few of its links to files the archive holds (66 of 133 dead links on 2026-10-17 were these).
+  for (const href of shuffle([...new Set(seen?.files ?? [])]).slice(0, FILES_CHECKED)) {
+    try {
+      const r = await context.request.get(`${BASE}${href}`, { headers: HEADERS, timeout: 60_000 });
+      if (!r.ok()) defects.push(`file ${r.status()} ${href.slice(0, 160)}`);
+    } catch {
+      defects.push(`file-timeout ${href.slice(0, 160)}`);
     }
   }
   for (const f of failedApi.slice(0, 5)) problems.push(`api ${f}`);

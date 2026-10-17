@@ -11,6 +11,7 @@ from collections import OrderedDict
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
+from functools import partial
 from pathlib import Path, PurePosixPath
 from typing import cast
 
@@ -452,11 +453,15 @@ class Library:
         key = (source_id, gid, html_ref, native_id, str(REWRITE_VERSION))
 
         def build() -> Rendered | None:
-            if self.zim is not None and html_ref.startswith("zim:"):
-                page = self.zim.page(source_id, gid, html_ref.removeprefix("zim:"))
+            sites: tuple[str, ...] = ()
+            find: Callable[[str], str | None] | None = None
+            if (zim := self.zim) is not None and html_ref.startswith("zim:"):
+                page = zim.page(source_id, gid, html_ref.removeprefix("zim:"))
                 if page is None:
                     return None
                 base, root, original, section = page.native_id, page.book_root, page.html, page.fragment
+                sites = page.site_roots
+                find = partial(zim.find, source_id, gid)
             else:
                 found = self.assets.html(source_id, gid, html_ref)
                 if found is None:
@@ -464,7 +469,15 @@ class Library:
                 base, root, original, section = native_id, "", found, ""
             out = render(
                 original,
-                lambda h: rewrite_html(h, source_id=source_id, generation_id=gid, native_id=base, root=root),
+                lambda h: rewrite_html(
+                    h,
+                    source_id=source_id,
+                    generation_id=gid,
+                    native_id=base,
+                    root=root,
+                    site_roots=sites,
+                    find=find,
+                ),
             )
             return replace(out, section=section) if section else out
 

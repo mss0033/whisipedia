@@ -83,6 +83,9 @@ class ZimPage:
     html: str
     book_root: str  # "" for a single-book source, "<book>/" in a bundle
     fragment: str = ""  # the section a followed section-redirect stub pointed at
+    # Where else a root-relative URL of the page may be (htmlrewrite): its host folder in a crawled
+    # site, and the folder the archive's main page is in.
+    site_roots: tuple[str, ...] = ()
 
 
 def stub_target(page_html: str, path: str) -> tuple[str, str] | None:
@@ -173,6 +176,7 @@ class ZimAssetStore:
         self._warm_queue: list[tuple[str, str]] = []
         self._warmer: threading.Thread | None = None
         self._page_maps: OrderedDict[str, dict[str, str]] = OrderedDict()  # MindTouch: file -> path -> id
+        self._main_dirs: dict[str, str | None] = {}  # file -> folder of its main page (site_roots)
         self._roots: dict[str, str | None] = {}  # MindTouch: file -> home page entry
         self._fronts: dict[str, str | None] = {}  # YouTube scraper: file -> generated front page
         self._lock = threading.Lock()
@@ -394,8 +398,44 @@ class ZimAssetStore:
                 other = hop[0].rstrip("/") if hop[0].endswith("/") else hop[0] + "/"
                 hop = (other, hop[1]) if self._read(file, other, Want.NONE) else None
             if hop is None:
-                return ZimPage(root + data.path, text, root, fragment)
+                return ZimPage(
+                    root + data.path, text, root, fragment, self._site_roots(file, data.path, root)
+                )
             path, fragment = hop
+        return None
+
+    def _site_roots(self, file: str, path: str, root: str) -> tuple[str, ...]:
+        """``<host>/`` of a crawled page (``example.org/a/b``), then the main page's folder."""
+        out: list[str] = []
+        first = path.split("/", 1)[0]
+        if "/" in path and "." in first and " " not in first:
+            out.append(f"{root}{first}/")
+        with self._lock:
+            known = file in self._main_dirs
+            main_dir = self._main_dirs.get(file)
+        if not known:
+            data = self._read(file, "", Want.NONE)
+            main_dir = (
+                None if data is None or "/" not in data.path else data.path[: data.path.rindex("/") + 1]
+            )
+            with self._lock:
+                self._main_dirs[file] = main_dir
+        if main_dir and f"{root}{main_dir}" not in out:
+            out.append(f"{root}{main_dir}")
+        return tuple(out)
+
+    def find(self, source_id: str, generation_id: str, native_id: str) -> str | None:
+        """The native id of the entry at ``native_id`` or its other slash form (any type), else None."""
+        try:
+            where = self._locate(source_id, generation_id, native_id)
+        except ZimUnavailable:
+            return None
+        if where is None:
+            return None
+        file, path, root = where
+        for candidate in (path, path.rstrip("/") if path.endswith("/") else path + "/"):
+            if candidate and self._read(file, candidate, Want.NONE) is not None:
+                return root + candidate
         return None
 
     def _mindtouch(self, file: str, path: str, stub: str) -> str | None:

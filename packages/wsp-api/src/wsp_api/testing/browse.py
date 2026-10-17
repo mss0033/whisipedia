@@ -111,6 +111,8 @@ def browse_services() -> Services:
             ("wikipedia-en-zim", SAMPLE_GEN_2, "Enigma's Book.11.epub"): Asset(
                 b"PK\x03\x04epub", "application/epub+zip"
             ),
+            ("wikipedia-en-zim", SAMPLE_GEN_2, "I/tune.mid"): Asset(b"MThd", "audio/midi"),
+            ("wikipedia-en-zim", SAMPLE_GEN_2, "I/s.css"): Asset(b"body{}", "text/css"),
         }
     )
     catalog = CategorizedCatalog(

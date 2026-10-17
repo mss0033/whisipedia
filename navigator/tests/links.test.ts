@@ -253,6 +253,19 @@ describe('the Gutenberg cover page (2026-10-16 field exam)', () => {
     expect(html!.dataset.wsp).toBe("wsp://gutenberg-zim/Alice's%20Adventures%20in%20Wonderland.11");
   });
 
+  it('opens a linked picture to look at and saves sheet music (files the archive holds)', () => {
+    const div = render(
+      `<a href="/v1/assets/kiwix-x/2026-09/site.org/Graphics/sharpsBass.png">Bass clef</a>` +
+        `<a href="/v1/assets/kiwix-x/2026-09/site.org/ftp/wtk2prelude1.mid">MIDI</a>`,
+    );
+    const [png, mid] = [...div.querySelectorAll('a')];
+    expect(png!.getAttribute('target')).toBe('_blank');
+    expect(png!.getAttribute('rel')).toBe('noopener');
+    expect(png!.hasAttribute('download')).toBe(false);
+    expect(mid!.getAttribute('download')).toBe('wtk2prelude1.mid');
+    expect(mid!.hasAttribute('target')).toBe(false);
+  });
+
   it('does not offer a download outside the library’s assets', () => {
     expect(resolveHref('/v1/assets/../search?q=x', cover).kind).toBe('missing');
     expect(resolveHref('/v1/files/x.epub', cover).kind).toBe('local');

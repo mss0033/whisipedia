@@ -4,7 +4,8 @@ from dataclasses import replace
 from pathlib import Path, PurePosixPath
 
 from wsp_api import create_app
-from wsp_api.addresses import document_href
+from wsp_api.addresses import address_of, document_href
+from wsp_api.htmlrewrite import rewrite_html
 from wsp_api.schemas import Document
 from wsp_api.testing import local_client
 from wsp_api.testing.fakes import SAMPLE_GEN_2, InMemoryVault, sample_services
@@ -398,3 +399,47 @@ def test_a_refresh_to_a_directory_keeps_its_trailing_slash(tmp_path: Path) -> No
     older = store.page("wiki", SAMPLE_GEN_2, "getbootstrap.com/docs/5.1/")
     assert older is not None
     assert older.html == "<h1>Old</h1>"
+
+
+def test_a_site_published_below_a_folder_finds_its_root_relative_files(tmp_path: Path) -> None:
+    """The OPSEC Bible lives at privacydefence.org/opsec/bibleprivacy/ but writes "/assets/logo.png" and
+    "/opsec/x" for files under that folder: every logo and menu link was dead (2026-10-17 census)."""
+    site = "privacydefence.org/opsec/bibleprivacy/"
+    page = (
+        '<a href="/.">Home</a><img src="/assets/logo.png"><a href="/opsec/vpn/">VPN</a>'
+        '<a href="/about/">About</a><img src="/nowhere.png">'
+    )
+    _zim(
+        tmp_path / "wiki" / SAMPLE_GEN_2 / "upstream" / "privacydefence.org_en_opsecbible_2026-09.zim",
+        "privacydefence.org_en_opsecbible",
+        [
+            (site, "text/html", "<h1>The OPSEC Bible</h1>"),
+            (f"{site}opsec/sensitivevm/index.html", "text/html", page),
+            (f"{site}assets/logo.png", "image/png", "png"),
+            (f"{site}opsec/vpn/", "text/html", "<h1>VPN</h1>"),
+            ("privacydefence.org/about/", "text/html", "<h1>About</h1>"),
+        ],
+        [],
+    )
+    store = ZimAssetStore(_vault(tmp_path, ["upstream/privacydefence.org_en_opsecbible_2026-09.zim"]))
+    found = store.page("wiki", SAMPLE_GEN_2, f"{site}opsec/sensitivevm/index.html")
+    assert found is not None
+    assert found.site_roots == ("privacydefence.org/", site)
+    assert store.find("wiki", SAMPLE_GEN_2, site.rstrip("/")) == site
+    assert store.find("wiki", SAMPLE_GEN_2, f"{site}assets/logo.png") == f"{site}assets/logo.png"
+    assert store.find("wiki", SAMPLE_GEN_2, "nope") is None
+    out = rewrite_html(
+        found.html,
+        source_id="wiki",
+        generation_id="g",
+        native_id=found.native_id,
+        site_roots=found.site_roots,
+        find=lambda p: store.find("wiki", SAMPLE_GEN_2, p),
+    )
+    assert out == (
+        f'<a href="{address_of("wiki", site)}">Home</a>'
+        f'<img src="/v1/assets/wiki/g/{site}assets/logo.png">'
+        f'<a href="{address_of("wiki", f"{site}opsec/vpn/")}">VPN</a>'
+        f'<a href="{address_of("wiki", "privacydefence.org/about/")}">About</a>'  # the host's own root first
+        '<img src="/v1/assets/wiki/g/nowhere.png">'  # nowhere: as before
+    )

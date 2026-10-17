@@ -115,7 +115,7 @@ def test_asset_route_serves_images_only(browse: httpx.Client) -> None:
     csp = r.headers.get_list("content-security-policy")
     assert csp[0].startswith("default-src 'self'")
     assert any("sandbox" in p for p in csp)
-    for path in ("I/evil.js", "A/Enigma_machine", "I/missing.png"):
+    for path in ("I/evil.js", "I/s.css", "A/Enigma_machine", "I/missing.png"):
         bad = browse.get(f"/v1/assets/wikipedia-en-zim/{SAMPLE_GEN_2}/{path}")
         assert bad.status_code == 404
         assert bad.json()["error"]["code"] == "asset_not_found"
@@ -130,6 +130,15 @@ def test_asset_route_sends_an_ebook_as_a_download(browse: httpx.Client) -> None:
     assert r.headers["content-type"] == "application/epub+zip"
     assert r.headers["content-disposition"] == "attachment; filename*=UTF-8''Enigma%27s%20Book.11.epub"
     assert any("sandbox" in p for p in r.headers.get_list("content-security-policy"))
+
+
+def test_asset_route_sends_any_other_file_a_page_links_to_as_a_download(browse: httpx.Client) -> None:
+    """Sheet music, recordings and data files in an archive (2026-10-17 trawl: dead links)."""
+    r = browse.get(f"/v1/assets/wikipedia-en-zim/{SAMPLE_GEN_2}/I/tune.mid")
+    assert r.status_code == 200
+    assert r.content == b"MThd"
+    assert r.headers["content-disposition"] == "attachment; filename*=UTF-8''tune.mid"
+    assert r.headers["x-content-type-options"] == "nosniff"
 
 
 # --- search ------------------------------------------------------------------------------------

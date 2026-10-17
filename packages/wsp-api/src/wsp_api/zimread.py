@@ -25,6 +25,9 @@ from typing import Protocol
 from libzim.reader import Archive, Entry
 
 MAX_REDIRECTS = 5
+# Bytes an entry may have to be sent whole (Want.ANY): a file a page links to is read into memory and
+# passed between processes, so a film in a video archive is left out (found, without content).
+MAX_SEND_BYTES = 256 * 1024 * 1024
 ZIM_DATE_RE = re.compile(r"_(\d{4}-\d{2})[a-z]?\.zim$")  # "_2026-07", "_2026-07a" (a re-release)
 
 
@@ -114,6 +117,8 @@ def read_entry(archive: Archive, path: str, want: Want) -> EntryData | None:
         item = entry.get_item()
         mimetype = str(item.mimetype)
         send = want is Want.ANY or (want is Want.HTML and mimetype.startswith("text/html"))
+        if send and item.size > MAX_SEND_BYTES:
+            send = False
         return EntryData(entry.path, mimetype, bytes(item.content) if send else None)
     return None
 

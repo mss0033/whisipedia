@@ -1591,7 +1591,7 @@
         ],
         "responses": {
           "200": {
-            "description": "The image, with a long-lived cache header (generations are immutable); an EPUB or PDF the page offers is sent as an attachment.",
+            "description": "The image, with a long-lived cache header (generations are immutable); any other file a page links to (EPUB, PDF, a recording, sheet music) is sent as an attachment. Pages, scripts and stylesheets are never served here.",
             "content": {
               "image/*": {
                 "schema": {

@@ -64,6 +64,54 @@ def test_a_link_to_an_ebook_file_is_a_download_not_a_page() -> None:
     assert rw('<a href="files/Manual.PDF">x</a>', "A/P") == f'<a href="{A}A/files/Manual.PDF">x</a>'
 
 
+def test_a_link_to_any_file_the_archive_holds_goes_to_the_asset_route() -> None:
+    """66 of the 133 dead links the trawler found (2026-10-17) were files the archive holds — sheet
+    music, recordings, pictures, feeds — which the page route never serves."""
+    page = "www.mutopiaproject.org/cgibin/piece-info.cgi"
+    for name in ("x.mid", "x-a4.ps.gz", "x.ly", "x.ily", "x.png", "x.JPG", "feed.xml", "notes.txt", "a.ogg"):
+        assert (
+            rw(f'<a href="../ftp/{name}">f</a>', page)
+            == f'<a href="{A}www.mutopiaproject.org/ftp/{name}">f</a>'
+        )
+    assert (
+        rw('<a href="../ftp/index.html">f</a>', page)
+        == '<a href="wsp://qa/www.mutopiaproject.org/ftp/index.html">f</a>'
+    )
+    assert (
+        rw('<a href="../ftp/BachJS/">f</a>', page)
+        == '<a href="wsp://qa/www.mutopiaproject.org/ftp/BachJS">f</a>'
+    )
+
+
+def test_root_relative_urls_try_the_site_roots_only_when_missing() -> None:
+    seen: list[str] = []
+
+    def find(path: str) -> str | None:
+        seen.append(path)
+        return {"h.org/sub/x.png": "h.org/sub/x.png", "h.org/y": "h.org/y/"}.get(path)
+
+    def rr(html: str) -> str:
+        return rewrite_html(
+            html,
+            source_id="qa",
+            generation_id="g",
+            native_id="h.org/sub/p/q.html",
+            site_roots=("h.org/", "h.org/sub/"),
+            find=find,
+        )
+
+    assert (
+        rr('<img src="/x.png"><img src="/x.png">')
+        == f'<img src="{A}h.org/sub/x.png"><img src="{A}h.org/sub/x.png">'
+    )
+    assert seen == ["x.png", "h.org/x.png", "h.org/sub/x.png"]  # looked up once for the page
+    assert rr('<a href="/y#s">y</a>') == '<a href="wsp://qa/h.org/y%2F#s">y</a>'  # the entry's own slash
+    assert (
+        rr('<a href="z.html">z</a>') == '<a href="wsp://qa/h.org/sub/p/z.html">z</a>'
+    )  # relative: no lookup
+    assert "z.html" not in " ".join(seen)
+
+
 def test_base_is_dropped_and_everything_else_is_kept() -> None:
     assert rw('<base href="https://evil.example/"><a href="x">x</a>', "A/P") == '<a href="wsp://qa/A/x">x</a>'
     src = '<p class="x">A &amp; B &#169;<!-- c --><br/></p>'
