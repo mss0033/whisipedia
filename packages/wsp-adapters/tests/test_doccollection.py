@@ -986,3 +986,59 @@ def test_words_hyphenated_across_a_pdf_line_are_joined() -> None:
 
     text = "the fol￾\r\nlowing method; posi￾tion; avail￾ \navable; a real-hyphen word"
     assert _LINE_HYPHEN.sub("", text) == "the following method; position; availavable; a real-hyphen word"
+
+
+def _pages_pdf(n: int) -> bytes:
+    """A PDF of ``n`` pages reading "Page <i>" (Helvetica), written by hand with a correct xref."""
+    objs = ["<< /Type /Catalog /Pages 2 0 R >>", ""]
+    kids: list[str] = []
+    for i in range(n):
+        page, content = 4 + 2 * i, 5 + 2 * i
+        kids.append(f"{page} 0 R")
+        stream = f"BT /F1 24 Tf 72 700 Td (Page {i + 1}) Tj ET"
+        objs.append(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+            f"/Resources << /Font << /F1 3 0 R >> >> /Contents {content} 0 R >>"
+        )
+        objs.append(f"<< /Length {len(stream)} >>\nstream\n{stream}\nendstream")
+    objs[1] = f"<< /Type /Pages /Kids [{' '.join(kids)}] /Count {n} >>"
+    objs.insert(2, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
+    out, offsets = b"%PDF-1.4\n", list[int]()
+    for k, body in enumerate(objs, start=1):
+        offsets.append(len(out))
+        out += f"{k} 0 obj\n{body}\nendobj\n".encode()
+    xref = len(out)
+    out += f"xref\n0 {len(objs) + 1}\n0000000000 65535 f \n".encode()
+    out += b"".join(f"{o:010d} 00000 n \n".encode() for o in offsets)
+    out += f"trailer\n<< /Size {len(objs) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode()
+    return out
+
+
+def test_a_pdf_is_reopened_every_few_pages_and_read_within_a_time_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """FEMA's CAD-drawing PDF grew the nightly refine past its memory ceiling (2026-10-17): pdfium keeps
+    every parsed page until the document closes, and some pages take seconds each."""
+    import pypdfium2
+
+    from wsp_adapters.doccollection import adapter as dc
+
+    path = tmp_path / "drawings.pdf"
+    path.write_bytes(_pages_pdf(25))
+    opened: list[str] = []
+    real = pypdfium2.PdfDocument
+
+    def counting(src: str) -> pypdfium2.PdfDocument:
+        opened.append(src)
+        return real(src)
+
+    monkeypatch.setattr(pypdfium2, "PdfDocument", counting)
+    text = dc.pdf_text(path, 100)
+    assert [p for p in text.split("\n\f\n")] == [f"Page {i}" for i in range(1, 26)]
+    assert len(opened) == 3  # pages 1-10, 11-20, 21-25
+
+    ticks = iter(range(1000))
+    late = dc.pdf_text(path, 100, seconds=4.5, clock=lambda: float(next(ticks)))
+    pages = late.split("\n\f\n")
+    assert pages[:-1] == [f"Page {i}" for i in range(1, 5)]  # the clock passes 4.5 s before page 5
+    assert pages[-1] == "[Pages 5-25 of this PDF were not read: its drawings take too long to read.]"

@@ -1001,14 +1001,39 @@ def well_formed(path: Path) -> str | None:
     return None
 
 
-def pdf_text(path: Path, max_pages: int) -> str:
-    """Text of the first ``max_pages`` pages (pypdfium2, one page in memory at a time)."""
+# pdfium keeps what it parsed of each page (drawings, fonts, images) until the document is closed:
+# FEMA's "Seismic Design of Rigid Wall-Flexible Diaphragm Buildings" (CAD drawings) grew the nightly
+# refine past its 7 GB ceiling and the kernel killed it, so no source after it was indexed
+# (2026-10-17). Reopening the document every few pages lets that memory go; a document past its
+# time budget keeps the text read so far and says which pages were not read.
+PAGES_PER_OPEN = 10
+PDF_SECONDS = 300.0
+
+
+def pdf_text(
+    path: Path, max_pages: int, *, seconds: float = PDF_SECONDS, clock: Callable[[], float] = time.monotonic
+) -> str:
+    """Text of the first ``max_pages`` pages (pypdfium2, one page in memory at a time), read for at
+    most ``seconds``."""
     import pypdfium2  # imported on use: only PDF documents need it
 
     pdf = pypdfium2.PdfDocument(str(path))
     try:
         out: list[str] = []
-        for i in range(min(len(pdf), max_pages)):
+        pages = min(len(pdf), max_pages)
+        started = clock()
+        for i in range(pages):
+            if clock() - started > seconds:
+                log.warning(
+                    "%s: text read for %.0f s; pages %d-%d left unread", path.name, seconds, i + 1, pages
+                )
+                out.append(
+                    f"[Pages {i + 1}-{pages} of this PDF were not read: its drawings take too long to read.]"
+                )
+                break
+            if i and i % PAGES_PER_OPEN == 0:
+                pdf.close()
+                pdf = pypdfium2.PdfDocument(str(path))
             page = pdf[i]
             try:
                 textpage = page.get_textpage()
