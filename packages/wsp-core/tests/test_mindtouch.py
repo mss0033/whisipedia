@@ -41,3 +41,52 @@ def test_the_page_is_its_body_with_links_and_images_relative_to_the_stub() -> No
     assert mindtouch.page_html(STUB, b'{"other": 1}', {}) is None
     assert mindtouch.page_ids(b"[]") == {}
     assert mindtouch.page_ids(b"{bad") == {}
+
+
+GROWTH = "Bookshelves/Calculus/Stewart/03%3A_Rules/3.08%3A_Growth"
+
+
+def test_a_reuse_widget_holds_the_page_it_names() -> None:
+    """12,021 of LibreTexts Mathematics' 38,184 pages lacked the parts a content-reuse widget fills
+    in, and 546 were empty (2026-10-17)."""
+    pages = mindtouch.Pages(
+        {
+            "Bookshelves/Calculus/Calculus_(OpenStax)/04:_Apps/4.7E:_Exercises": "11",
+            "Bookshelves/Calculus/Stewart/03:_Rules/3.08:_Growth": "12",
+            "Courses/A/1:_Intro/Exercises": "13",
+            "Courses/B/1:_Intro/Exercises": "14",  # the same last two parts twice: never by tail
+        }
+    )
+    assert pages.find("Bookshelves/Calculus/Stewart/03%3A_Rules/3.08%3A_Growth") == "12"
+    assert (
+        pages.find("Bookshelves/Calculus/Book:_Calculus_(OpenStax)/04:_Apps/4.7E:_Exercises") == "11"
+    )  # renamed book
+    assert pages.find("Somewhere/Else/04:_Apps/4.7E:_Exercises") == "11"  # by its chapter and page
+    assert pages.find("Courses/C/1:_Intro/Exercises") is None
+    bodies = {
+        "12": {
+            "htmlBody": "<p>Growth is exponential.</p>"
+            f'<div class="mt-contentreuse-widget" data-page="{GROWTH}"></div>'
+        },
+        "11": {"htmlBody": "<p>Exercise 1.</p>"},
+    }
+
+    def load(pid: str) -> bytes | None:
+        return json.dumps(bodies[pid]).encode() if pid in bodies else None
+
+    widget = f'<div class="mt-contentreuse-widget" data-page="{GROWTH}" data-section="">'
+    body = (
+        f'<p>Intro.</p>{widget}<div class="mt-include"></div></div><div class="mt-contentreuse-widget"></div>'
+    )
+    out = mindtouch.expand_reuse(body, pages, load)
+    # the reused page (which names itself again: not repeated) inside the widget; an empty widget stays
+    assert out == (
+        f"<p>Intro.</p>{widget}<p>Growth is exponential.</p>"
+        f'<div class="mt-contentreuse-widget" data-page="{GROWTH}"></div>'
+        '<div class="mt-include"></div></div><div class="mt-contentreuse-widget"></div>'
+    )
+    page = mindtouch.page_html(
+        STUB, json.dumps({"htmlBody": body}).encode(), pages.ids, pages=pages, load=load
+    )
+    assert page is not None
+    assert "Growth is exponential." in page

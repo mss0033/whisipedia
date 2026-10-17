@@ -206,7 +206,7 @@ class ZimAssetStore:
         self.article_counts: dict[tuple[str, str], int] = {}
         self._warm_queue: list[tuple[str, str]] = []
         self._warmer: threading.Thread | None = None
-        self._page_maps: OrderedDict[str, dict[str, str]] = OrderedDict()  # MindTouch: file -> path -> id
+        self._page_maps: OrderedDict[str, mindtouch.Pages] = OrderedDict()  # MindTouch: file -> page list
         self._main_dirs: dict[str, str | None] = {}  # file -> folder of its main page (site_roots)
         # The websites the current archives copy (wsp_api.outside), found while warming them;
         # ``sites_version`` changes with every addition (rendered pages are cached by it).
@@ -556,7 +556,13 @@ class ZimAssetStore:
         content = self._read(file, entry, Want.ANY)
         if content is None or content.content is None:
             return None
-        return mindtouch.page_html(stub, content.content, self._mindtouch_maps(file)[0])
+        pages = self._mindtouch_maps(file)[0]
+
+        def load(page_id: str) -> bytes | None:
+            found = self._read(file, mindtouch.content_path(page_id), Want.ANY)
+            return None if found is None else found.content
+
+        return mindtouch.page_html(stub, content.content, pages.ids, pages=pages, load=load)
 
     def _youtube(self, file: str, path: str, stub: str) -> str | None:
         """The page a YouTube-scraper app stub stands for (``wsp_core.youtubezim``), or ``None``."""
@@ -580,25 +586,25 @@ class ZimAssetStore:
             self._fronts[file] = front
         return front
 
-    def _mindtouch_maps(self, file: str) -> tuple[dict[str, str], str | None]:
-        """``({page path: page id}, home page entry)`` of a MindTouch archive (both empty for any
-        other archive), from ``content/shared.json``, read once per archive."""
+    def _mindtouch_maps(self, file: str) -> tuple[mindtouch.Pages, str | None]:
+        """``(page list, home page entry)`` of a MindTouch archive (both empty for any other archive),
+        from ``content/shared.json``, read once per archive."""
         with self._lock:
-            ids = self._page_maps.get(file)
-            if ids is not None:
+            pages = self._page_maps.get(file)
+            if pages is not None:
                 self._page_maps.move_to_end(file)
-                return ids, self._roots.get(file)
+                return pages, self._roots.get(file)
         shared = self._read(file, mindtouch.SHARED, Want.ANY)
         raw = None if shared is None else shared.content
-        ids = {} if raw is None else mindtouch.page_ids(raw)
+        pages = mindtouch.Pages({} if raw is None else mindtouch.page_ids(raw))
         home = None if raw is None else mindtouch.root_page(raw)
         with self._lock:
-            self._page_maps[file] = ids
+            self._page_maps[file] = pages
             self._roots[file] = home
             while len(self._page_maps) > _MAX_PAGE_MAPS:
                 gone, _ = self._page_maps.popitem(last=False)
                 self._roots.pop(gone, None)
-        return ids, home
+        return pages, home
 
     def _mindtouch_root(self, file: str) -> str | None:
         return self._mindtouch_maps(file)[1]

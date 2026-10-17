@@ -622,6 +622,7 @@ class _HtmlTask:
 
 
 _MINDTOUCH: dict[Path, Archive] = {}  # per worker process: the archive of the task at hand
+_PAGES: dict[Path, mindtouch.Pages] = {}  # and its MindTouch page list (reuse widgets)
 
 
 def _mindtouch_page(zim: Path, path: str, stub: bytes) -> str | None:
@@ -642,7 +643,27 @@ def _mindtouch_page(zim: Path, path: str, stub: bytes) -> str | None:
     content = bytes(archive.get_entry_by_path(want).get_item().content)
     if video is not None:  # a YouTube-scraper stub (wsp_core.youtubezim): the video's description
         return youtubezim.page_html(content)
-    return mindtouch.page_html(stub, content, {})  # links do not matter for the text
+    pages = _PAGES.get(zim)
+    if pages is None:
+        _PAGES.clear()
+        shared = mindtouch.SHARED
+        raw = (
+            bytes(archive.get_entry_by_path(shared).get_item().content)
+            if archive.has_entry_by_path(shared)
+            else b"{}"
+        )
+        pages = _PAGES[zim] = mindtouch.Pages(mindtouch.page_ids(raw))
+
+    def load(page_id: str) -> bytes | None:
+        path = mindtouch.content_path(page_id)
+        return (
+            bytes(archive.get_entry_by_path(path).get_item().content)
+            if archive.has_entry_by_path(path)
+            else None
+        )
+
+    # links do not matter for the text; the pages a widget reuses do
+    return mindtouch.page_html(stub, content, {}, pages=pages, load=load)
 
 
 def _read_html(task: _HtmlTask) -> list[DocRow]:

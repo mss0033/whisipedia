@@ -40,7 +40,10 @@ def test_a_mindtouch_page_is_refined_from_its_content_entry(tmp_path: Path) -> N
         '<meta http-equiv="refresh" content="0;URL=\'../index.html#/Ocean/Tides\'" />'
         "</head><body></body></html>"
     )
-    body = "<p>Spring tides occur during the new and full moons.</p>"
+    body = (
+        "<p>Spring tides occur during the new and full moons.</p>"
+        '<div class="mt-contentreuse-widget" data-page="Ocean/Neap%3A_Tides"></div>'
+    )
     with Creator(path).config_indexing(False, "eng").config_verbose(False) as creator:
         creator.set_mainpath("index/page_2")
         creator.add_item(_Item("index/page_2", "text/html", stub, "Spring and Neap Tides"))
@@ -48,6 +51,10 @@ def test_a_mindtouch_page_is_refined_from_its_content_entry(tmp_path: Path) -> N
         creator.add_item(
             _Item("content/page_content_2.json", "application/json", json.dumps({"htmlBody": body}))
         )
+        reused = {"htmlBody": "<p>Neap tides come at the quarter moons.</p>"}
+        creator.add_item(_Item("content/page_content_9.json", "application/json", json.dumps(reused)))
+        shared = {"pages": [{"id": 2, "path": "Ocean/Tides"}, {"id": 9, "path": "Ocean/Neap:_Tides"}]}
+        creator.add_item(_Item("content/shared.json", "application/json", json.dumps(shared)))
         creator.add_metadata("Name", "libretexts.org_en_geo")
         creator.add_metadata("Language", "eng")
     with WorkerPool(1) as pool:
@@ -60,4 +67,5 @@ def test_a_mindtouch_page_is_refined_from_its_content_entry(tmp_path: Path) -> N
         }
     assert docs["index/page_2"].title == "Spring and Neap Tides"
     assert "Spring tides occur during the new and full moons." in docs["index/page_2"].text
+    assert "Neap tides come at the quarter moons." in docs["index/page_2"].text  # a reused page's text
     assert "new and full moons" not in docs["index/page_3"].text  # no content entry: the stub as it is
