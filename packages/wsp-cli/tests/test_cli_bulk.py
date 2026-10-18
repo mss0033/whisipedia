@@ -53,6 +53,7 @@ class Downloads(FakeFetcher):
     def __init__(self, routes: dict[str, bytes], fail: set[str] | None = None) -> None:
         super().__init__(routes)
         self.fail = fail or set()
+        self.write_fail: set[str] = set()
         self.downloaded: list[str] = []
 
     def download(self, remote: RemoteFile, dest: Path) -> Any:
@@ -60,6 +61,8 @@ class Downloads(FakeFetcher):
             from wsp_core.errors import FetchError
 
             raise FetchError(f"{remote.url}: reset")
+        if remote.name in self.write_fail:
+            raise OSError(14, "Bad address")
         self.downloaded.append(remote.name)
         dest.write_bytes(self.routes[remote.url])
 
@@ -119,6 +122,15 @@ def test_a_failed_file_fails_the_run_and_a_rerun_continues(vault: tuple[Path, Do
     fetcher.downloaded.clear()
     assert run()[0] == bulk.EXIT_OK
     assert fetcher.downloaded == ["a.tar.gz"]
+
+
+def test_a_failed_write_fails_that_file_not_the_run(vault: tuple[Path, Downloads]) -> None:
+    _, fetcher = vault
+    fetcher.write_fail = {"a.tar.gz"}
+    rc, text = run()
+    assert rc == bulk.EXIT_FAILED
+    assert "a.tar.gz: FAILED" in text
+    assert fetcher.downloaded == ["b.tar.gz"]
 
 
 def test_only_fetches_the_matching_files(vault: tuple[Path, Downloads]) -> None:

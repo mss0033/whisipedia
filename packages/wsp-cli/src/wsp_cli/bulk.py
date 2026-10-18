@@ -117,7 +117,7 @@ def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
             continue
         try:
             fetcher.download(remote, dest)
-        except FetchError as exc:
+        except (FetchError, OSError) as exc:  # OSError: the NAS refused a write (EFAULT, 2026-10-18)
             failed += 1
             out.write(f"  {remote.name}: FAILED {exc}\n")
             continue
