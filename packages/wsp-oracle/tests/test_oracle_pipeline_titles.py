@@ -306,3 +306,25 @@ def test_a_question_names_a_page_no_candidate_is_and_not_a_number(tmp_path: Path
     held = [SearchHit(make_doc_id("wiki", "en/10_Days"), 1.0, "10 Days", "", "wiki")]
     assert searcher._embedded_title(days, held, set()) == []  # pyright: ignore[reportPrivateUsage]
     idx.close()
+
+
+def test_a_programming_name_asks_for_its_documentation(library: TantivyIndex) -> None:
+    # 2026-10-17 field exam: Stack Overflow threads about functools.lru_cache, Array.prototype.flat(),
+    # rsync --delete and highway=residential buried the reference pages for 7 of 11 questions.
+    from wsp_oracle.pipeline import asks_for_reference
+
+    searcher = _searcher(library)
+    searcher.source_weights = {"stackexchange": 0.85}
+    hits = [
+        SearchHit(DocId("wsp:stackexchange/q1"), 1.0, "lru_cache typed", "", "stackexchange"),
+        SearchHit(DocId("wsp:docs/functools"), 0.7, "functools", "", "docs"),
+    ]
+    named = searcher._weigh("functools.lru_cache typed=True", hits)  # pyright: ignore[reportPrivateUsage]
+    assert [h.doc_id for h in named] == ["wsp:docs/functools", "wsp:stackexchange/q1"]
+    plain = searcher._weigh("how to cache results in python", hits)  # pyright: ignore[reportPrivateUsage]
+    assert plain[0].doc_id == "wsp:stackexchange/q1"
+    assert asks_for_reference("rsync --delete")
+    assert asks_for_reference("find(1)")
+    assert not asks_for_reference("how do I fix this functools.lru_cache error")
+    assert not asks_for_reference("26 U.S.C. 501")
+    assert not asks_for_reference("Python 3.11")

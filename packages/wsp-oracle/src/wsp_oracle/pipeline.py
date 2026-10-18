@@ -132,6 +132,30 @@ _LEGAL_INTENT = re.compile(
 )
 
 
+# A programming name in the query asks for its reference page: "functools.lru_cache",
+# "Array.prototype.flat()", "rsync --delete", "highway=residential", "find(1)". Stack Overflow threads
+# about the name buried the documentation for 7 of 11 such questions (2026-10-17 field exam).
+_CODE_NAME = re.compile(
+    r"(?<![\w.])[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*\.[a-z_]\w{2,}(?:\(\))?"  # dotted, a real last name
+    r"|(?<![\w-])--?[a-z][\w-]{2,}"  # an option
+    r"|\b[a-z_:]+=[\w*]+"  # a key=value tag
+    r"|\b\w+\(\)"  # a call
+    r"|\b[a-z][\w.-]*\([1-9]\)"  # a man page
+)
+_QA_INTENT = re.compile(
+    r"\b(errors?|exceptions?|fails?|failing|failed|crash\w*|not working|doesn'?t work|why does|"
+    r"stack ?overflow|stack ?exchange|how (?:do|can) i fix|warnings?|bug)\b",
+    re.I,
+)
+QA_SOURCES = frozenset({"stackexchange"})
+REFERENCE_QA_WEIGHT = 0.7  # times the Q&A source's own weight, for a query naming a programming name
+
+
+def asks_for_reference(query: str) -> bool:
+    """The query names a programming name and does not ask about a failure: the documentation first."""
+    return bool(_CODE_NAME.search(query)) and not _QA_INTENT.search(query)
+
+
 def weight_exempt(query: str) -> frozenset[str]:
     """Sources whose weight a query lifts: the catalog when it looks for a book, abstracts when it
     looks for research, court opinions when it asks about the law."""
@@ -389,10 +413,13 @@ class OracleSearcher:
         if not self.source_weights or not hits:
             return hits
         exempt = weight_exempt(query)
+        reference = asks_for_reference(query)
         out: list[SearchHit] = []
         for h in hits:
             src = h.source_id or source_of(h.doc_id)
             w = 1.0 if src in exempt else self.source_weights.get(src, 1.0)
+            if reference and src in QA_SOURCES:
+                w *= REFERENCE_QA_WEIGHT
             out.append(replace(h, score=h.score * w) if w != 1.0 else h)
         return sorted(out, key=lambda h: -h.score)
 
