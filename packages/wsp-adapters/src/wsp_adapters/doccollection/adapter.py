@@ -54,6 +54,7 @@ from typing import Any, NamedTuple, cast
 from urllib.parse import urlsplit
 
 from wsp_adapters._common import access, upstream_dir, verify_file
+from wsp_adapters.doccollection import tei
 from wsp_adapters.doccollection.catalog import FetchedDoc, build_catalog, excluded_by, write_catalog
 from wsp_adapters.doccollection.discovery import (
     DiscoverEnv,
@@ -136,6 +137,8 @@ class CollectionConfig:
     # Documents in other formats are not fetched, and stored ones leave the index (CA-11).
     formats: tuple[str, ...] = ()
     decode_url_keys: bool = False  # access.decode_url_keys (see DiscoverEnv)
+    # ``access.reader``: how a repository snapshot's files become documents (wsp_adapters.doccollection.tei)
+    reader: str = ""
 
     @staticmethod
     def from_spec(spec: SourceSpec, repo_root: Path = REPO_ROOT) -> CollectionConfig:
@@ -147,7 +150,11 @@ class CollectionConfig:
         formats: object = acc.get("formats") or []
         if not isinstance(formats, list):
             raise ValueError(f"{spec.id}: access.formats must be a list of file extensions, got {formats!r}")
+        reader = str(acc.get("reader") or "")
+        if reader and reader not in tei.READERS:
+            raise ValueError(f"{spec.id}: access.reader must be one of {sorted(tei.READERS)}, got {reader!r}")
         return CollectionConfig(
+            reader=reader,
             formats=tuple(str(f).lower().lstrip(".") for f in cast(list[object], formats)),
             decode_url_keys=bool(acc.get("decode_url_keys", False)),
             issuer=str(acc.get("issuer") or spec.raw.get("publisher") or spec.name),
@@ -543,6 +550,9 @@ class DocCollectionAdapter:
             if path is None:
                 log.warning("%s: %s not found in any generation", spec.id, meta.file)
                 continue
+            if cfg.reader and path.suffix == ".zip":
+                yield from self._snapshot_documents(spec, cfg, meta, path)
+                continue
             body = document_text(path, max_pages=cfg.pdf_max_pages)
             title = reader_title(meta, path, body)
             text = catalog_header(meta, title=title) + ("\n\n" + body if body else "")
@@ -561,6 +571,26 @@ class DocCollectionAdapter:
                 html_ref=f"file:{meta.generation or generation_dir.name}/{meta.file}",
                 content_hash=content_hash(text),
                 aliases=tuple(dict.fromkeys(a for a in (meta.pub_number, listed_as) if a and a != title)),
+                meta=meta.record_meta(),
+            )
+
+    def _snapshot_documents(
+        self, spec: SourceSpec, cfg: CollectionConfig, meta: DocumentMeta, path: Path
+    ) -> Iterator[DocRecord]:
+        """The documents ``cfg.reader`` finds in a repository snapshot (FRUS volumes, Perseus texts)."""
+        for d in tei.read_snapshot(path, cfg.reader):
+            native = f"{meta.doc_key}/{d.key}"
+            yield DocRecord(
+                doc_id=make_doc_id(spec.id, native),
+                source_id=spec.id,
+                native_id=native,
+                title=d.title,
+                lang=d.lang,
+                license=meta.license or spec.license,
+                text=d.text,
+                revision=d.date or meta.edition_date or None,
+                url_native=d.url or meta.origin_url or None,
+                content_hash=content_hash(d.text),
                 meta=meta.record_meta(),
             )
 

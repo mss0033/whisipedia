@@ -1356,7 +1356,12 @@ def git_repo(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
             landing_url=f"https://github.com/{owner}/{name}",
             discovered_by="git",
             resolve="git",
-            extra={"default_branch": _s(info.get("default_branch"))},
+            # snapshot: the default branch's files as one zip (a shallow clone), not a mirror bundle of
+            # every commit (FRUS's history is 14.5 GB; its refiner reads the files only)
+            extra={
+                "default_branch": _s(info.get("default_branch")),
+                "snapshot": "1" if cfg.get("snapshot") else "",
+            },
         )
 
 

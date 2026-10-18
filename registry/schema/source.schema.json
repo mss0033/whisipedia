@@ -91,7 +91,8 @@
         "mirrors_required": {},
         "endpoints": {"type": "array"},
         "oai_endpoint": {"type": "string"},
-        "decode_url_keys": {"type": "boolean", "description": "decode %XX escapes before a URL becomes a document key; changes keys, so only for sources with no stored documents"}
+        "decode_url_keys": {"type": "boolean", "description": "decode %XX escapes before a URL becomes a document key; changes keys, so only for sources with no stored documents"},
+        "reader": {"enum": ["tei-frus", "tei-cts"], "description": "how a doc-collection's repository snapshot (git discovery with snapshot: true) becomes documents (wsp_adapters.doccollection.tei)"}
       }
     }
   }

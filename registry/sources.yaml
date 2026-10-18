@@ -1136,11 +1136,43 @@ sources:
     status: candidate
     license: LicenseRef-US-Gov-PD
     legal_basis: public-domain
-    access: {adapter: git-mirror, endpoints: ["https://github.com/HistoryAtState/frus"]}
-    index: false  # stored as a git bundle; no refine adapter reads bundles yet (2026-10-12 audit, CA-12)
-    update: {cadence: P3M, strategy: mirror}
+    access:
+      adapter: doc-collection
+      issuer: US Department of State, Office of the Historian
+      key_prefix: frus
+      endpoints: ["https://github.com/HistoryAtState/frus"]  # the git allow-list
+      origins: [github.com, api.github.com]
+      reader: tei-frus  # one document per FRUS document (wsp_adapters.doccollection.tei)
+      discovery:
+        - {kind: git, repos: ["https://github.com/HistoryAtState/frus"], snapshot: true}
+      filter: {allow_all: true, public_issuer: true}  # declassified documents keep their old markings
+    update: {cadence: P3M, strategy: snapshot-retention}
     size: {bytes: 14.83e9, measured: true, as_of: 2026-10-10}
-    notes: Score 4.6. The repository README states the files are in the public domain. Size is the GitHub repository size.
+    notes: Score 4.6. The repository README states the files are in the public domain. Size is the GitHub repository size (history included; the snapshot is the default branch's files only). Refined since 2026-10-17 (CA-12).
+
+  - id: perseus-classics
+    name: Perseus Digital Library classics in English translation (canonical-greekLit, canonical-latinLit)
+    publisher: Perseus Digital Library, Tufts University
+    domain: [books, history]
+    tier: T1
+    status: candidate
+    license: CC-BY-SA-4.0
+    legal_basis: open-license
+    access:
+      adapter: doc-collection
+      issuer: Perseus Digital Library, Tufts University
+      key_prefix: perseus
+      endpoints: ["https://github.com/PerseusDL/canonical-greekLit", "https://github.com/PerseusDL/canonical-latinLit"]
+      origins: [github.com, api.github.com]
+      reader: tei-cts  # the English translations, one document per book
+      discovery:
+        - kind: git
+          repos: ["https://github.com/PerseusDL/canonical-greekLit", "https://github.com/PerseusDL/canonical-latinLit"]
+          snapshot: true
+      filter: {allow_all: true}
+    update: {cadence: P6M, strategy: snapshot-retention}
+    size: {bytes: 1.26e9, measured: true, as_of: 2026-10-17}
+    notes: Repository sizes from the GitHub API (873 MB + 387 MB, history included). Clean translations the 2026-10-17 field exam asked for (Appian's Civil Wars, tr. Horace White); classics-in-translation holds scans of some of the same.
 
   - id: nawcwd-tp8347
     name: Electronic Warfare and Radar Systems Engineering Handbook (NAWCWD TP 8347)

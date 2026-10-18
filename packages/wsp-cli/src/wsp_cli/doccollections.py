@@ -604,6 +604,8 @@ class CollectionFetcher:
         if repo is None or repo not in repos:
             raise ValueError(f"{cand.url} is not a repository the registry lists ({sorted(repos)})")
         dest_dir.mkdir(parents=True, exist_ok=True)
+        if cand.extra.get("snapshot"):
+            return self._git_snapshot(cand, repo, dest_dir, rules)
         mirror = self.workdir / "git" / cand.key.replace(":", "_")
         if mirror.is_dir():
             self._git("remote", "update", "--prune", cwd=mirror)
@@ -617,6 +619,26 @@ class CollectionFetcher:
         self._git("bundle", "create", str(partial), "--all", cwd=mirror)
         partial.replace(bundle)
         return bundle, screen
+
+    def _git_snapshot(self, cand: Candidate, repo: str, dest_dir: Path, rules: Rules) -> tuple[Path, Screen]:
+        """The default branch's files as one zip (``git archive``), from a shallow clone kept up to date
+        with a shallow fetch, screened like a bundle (its README and file paths)."""
+        branch = str(cand.extra.get("default_branch") or "HEAD")
+        clone = self.workdir / "git" / (cand.key.replace(":", "_") + ".shallow")
+        if clone.is_dir():
+            self._git("fetch", "--depth", "1", "origin", f"+{branch}:{branch}", cwd=clone)
+        else:
+            clone.parent.mkdir(parents=True, exist_ok=True)
+            args = ["clone", "--bare", "--depth", "1", "--single-branch", "--no-local"]
+            if branch != "HEAD":
+                args += ["--branch", branch]
+            self._git(*args, f"https://github.com/{repo}.git", str(clone))
+        screen = screen_text(self._repo_screen_text(clone), rules, keys=(cand.key, cand.pub_number))
+        snapshot = dest_dir / (cand.file_name.rsplit(".", 1)[0] + ".zip")
+        partial = snapshot.with_name(snapshot.name + ".partial")
+        self._git("archive", "--format=zip", "-o", str(partial), branch, cwd=clone)
+        partial.replace(snapshot)
+        return snapshot, screen
 
     def _repo_screen_text(self, mirror: Path) -> Extracted:
         """What the gate reads of a repository: the default branch's README, then its file paths.
@@ -652,7 +674,7 @@ class CollectionFetcher:
         *,
         screen: Screen | None = None,
     ) -> None:
-        if path.suffix != ".bundle":
+        if screen is None and path.suffix != ".bundle":
             try:
                 # A name guessed ".pdf" gets its real office/zip/text suffix; an error or landing page
                 # in its place is a failed download, retried next run (CA-2).

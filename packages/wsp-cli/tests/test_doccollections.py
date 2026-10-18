@@ -6,6 +6,7 @@ import dataclasses
 import io
 import json
 import subprocess
+import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
@@ -363,6 +364,48 @@ def test_git_repository_is_screened_by_readme_and_paths(
     fetcher = CollectionFetcher(tmp_path / "vault", FakeFetcher(), keys={}, user_agent="t", workdir=tmp_path)
     got = fetcher._repo_screen_text(repo)  # pyright: ignore[reportPrivateUsage]
     assert screen_text(got, Rules(allow_all=True)).decision.verdict.value == verdict
+
+
+def test_a_snapshot_is_the_default_branch_files_as_one_zip(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """FRUS's history is 14.5 GB and its refiner reads the files only (2026-10-17): ``snapshot: true``
+    keeps a shallow clone and stores ``git archive`` of the default branch."""
+    readme = "Foreign Relations of the United States volumes. " * 4
+    repo = _local_repo(tmp_path / "repo", {"README.md": readme, "volumes/frus1.xml": "<TEI/>"})
+    branch = subprocess.run(
+        ["git", "-C", str(repo), "branch", "--show-current"], check=True, capture_output=True, text=True
+    ).stdout.strip()
+    fetcher = CollectionFetcher(
+        tmp_path / "vault", FakeFetcher(), keys={}, user_agent="t", workdir=tmp_path / "w"
+    )
+    cand = Candidate(
+        key="frus:HistoryAtState-frus",
+        url="https://github.com/HistoryAtState/frus.git",
+        title="FRUS",
+        issuer="i",
+        resolve="git",
+        extra={"default_branch": branch, "snapshot": "1"},
+    )
+    clone = tmp_path / "w" / "git" / "frus_HistoryAtState-frus.shallow"  # kept from an earlier run
+    subprocess.run(["git", "clone", "-q", "--bare", f"file://{repo}", str(clone)], check=True)
+    real = fetcher._git  # pyright: ignore[reportPrivateUsage]
+
+    def local_fetch(
+        *args: str, cwd: Path | None = None, capture: bool = False
+    ) -> str:  # https only in real runs
+        if args[0] == "fetch":
+            subprocess.run(["git", "-C", str(cwd), *args], check=True, capture_output=True)
+            return ""
+        return real(*args, cwd=cwd, capture=capture)
+
+    monkeypatch.setattr(fetcher, "_git", local_fetch)
+    bundle = fetcher._git_bundle  # pyright: ignore[reportPrivateUsage]
+    path, screen = bundle(cand, tmp_path / "out", Rules(allow_all=True), frozenset({"historyatstate/frus"}))
+    assert path.suffix == ".zip"
+    with zipfile.ZipFile(path) as z:
+        assert sorted(z.namelist()) == ["README.md", "volumes/", "volumes/frus1.xml"]
+    assert screen.decision.verdict.value == "allow"
 
 
 @dataclass(frozen=True, slots=True)
