@@ -328,3 +328,34 @@ def test_a_programming_name_asks_for_its_documentation(library: TantivyIndex) ->
     assert not asks_for_reference("how do I fix this functools.lru_cache error")
     assert not asks_for_reference("26 U.S.C. 501")
     assert not asks_for_reference("Python 3.11")
+
+
+def test_of_the_same_title_the_query_language_preferred_and_heaviest_source(tmp_path: Path) -> None:
+    # 2026-10-17: "who was genghis khan" led with Citizendium's page (the only one among the
+    # candidates); ten Wikipedias share the title and the English one was not in the first ten matches.
+    docs = [
+        _doc("citizendium", "Genghis_Khan", "Genghis Khan", "Mongol ruler."),
+        *(_doc("wiki", f"{lang}/Genghis_Khan", "Genghis Khan", "Khan.", lang) for lang in ("de", "sv", "fr")),
+        _doc("wiki", "en/Genghis_Khan", "Genghis Khan", "Founder of the Mongol Empire."),
+        _doc("dict", "ephemeral", "ephemeral", "Lasting a short time."),
+        _doc("wiki", "en/Ephemeral", "Ephemeral", "May refer to."),
+    ]
+    idx = TantivyIndex(tmp_path / "lexical", SMALL)
+    idx.upsert(docs)
+    idx.commit()
+    searcher = OracleSearcher(
+        idx, router=Router.from_sources(["wiki", "dict", "citizendium"]), resolve=idx.lookup
+    )
+    searcher.source_weights = {"wiki": 1.15}
+    route = searcher.router.route("who was genghis khan")
+    held = [
+        SearchHit(make_doc_id("citizendium", "Genghis_Khan"), 1.0, "Genghis Khan", "", "citizendium", "en")
+    ]
+    best = searcher._best_titled(route, "Genghis Khan", held, None)  # pyright: ignore[reportPrivateUsage]
+    assert best is not None
+    assert best.doc_id == make_doc_id("wiki", "en/Genghis_Khan")
+    define = replace(searcher.router.route("define ephemeral"), prefer=("dict",))
+    word = searcher._best_titled(define, "ephemeral", [], None)  # pyright: ignore[reportPrivateUsage]
+    assert word is not None
+    assert word.doc_id == make_doc_id("wiki", "en/Ephemeral")  # the article; the definition box has the gloss
+    idx.close()

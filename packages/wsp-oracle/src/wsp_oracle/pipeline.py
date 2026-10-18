@@ -42,8 +42,10 @@ LANG_BOOST = 1.15  # multiplies fused scores below the reranked head
 SOURCE_SHARE = 8
 """One source takes at most 1/8 of the lexical window while other sources have matches (``per_source``)."""
 TITLE_PINS = 8
-NAMED_RUNS = 8  # runs of a question's words looked up as titles (each one title-list lookup)
 """Near-exact titles pinned after the exact one for a page-name query, one per source, at most."""
+NAMED_RUNS = 8  # runs of a question's words looked up as titles (each one title-list lookup)
+DICTIONARY_PROJECTS = frozenset({"wiktionary"})
+TITLED_DEPTH = 30  # title matches read to choose among same-titled pages (ten Wikipedias share titles)
 
 
 def source_of(doc_id: str) -> str:
@@ -245,24 +247,57 @@ class OracleSearcher:
         dense, best = self._dense(route, depth, sources)
         return dense, best, round((time.perf_counter() - t) * 1000, 3)
 
-    def _exact_title(self, title: str, sources: Sequence[str] | None) -> SearchHit | None:
+    def _titled(self, title: str, sources: Sequence[str] | None) -> list[SearchHit]:
+        """Pages titled ``title`` (case and spacing aside), from a title search ``TITLED_DEPTH`` deep."""
         key = _title_key(title)
         if not key:
-            return None
+            return []
         # Snippet-free: a pin's snippet is cut with the page's (``with_snippets``); ``search`` read ten
         # documents' texts over the NAS for one title (1-2 s of a query, 2026-10-13).
         fast = getattr(self.lexical, "search_hits", None)
         found = (
-            fast(title, limit=10, sources=sources)
+            fast(title, limit=TITLED_DEPTH, sources=sources)
             if callable(fast)
-            else self.lexical.search(title, limit=10, sources=sources)
+            else self.lexical.search(title, limit=TITLED_DEPTH, sources=sources)
         )
-        # Between the same title in several sources the heavier one: the question naming "root cellar"
-        # opened Wiktionary's entry, not the encyclopedia's article (2026-10-17 field exam).
-        same = [h for h in cast(Sequence[SearchHit], found) if _title_key(h.title) == key]
-        if not same:
+        return [h for h in cast(Sequence[SearchHit], found) if _title_key(h.title) == key]
+
+    def _best_titled(
+        self, route: Route, title: str, held: Sequence[SearchHit], sources: Sequence[str] | None
+    ) -> SearchHit | None:
+        """Of the pages titled ``title`` (``held`` among the candidates, then a title search), the one
+        to show first: in the query's language, then the heaviest source, then the best ranked. Not
+        the source a route prefers: "define photosynthesis" and "map of Lisbon" want the encyclopedia's
+        article first (the definition box and the map have their own places; quality run 2026-10-17).
+        Ten Wikipedias, Citizendium, Wikiquote and Simple English all hold "Genghis Khan": the
+        candidates had Citizendium's and the first title matches never the English Wikipedia's, so
+        "who was genghis khan" led with Citizendium (2026-10-17); a heavy source the title search
+        missed is searched on its own. "root cellar" opened Wiktionary's entry, not the article."""
+        key = _title_key(title)
+        seen: set[str] = set()
+        pool: list[SearchHit] = []
+        heavy = [s for s, w in self.source_weights.items() if w > 1.0 and (sources is None or s in sources)]
+        found = self._titled(title, sources)
+        if heavy and not any((h.source_id or source_of(h.doc_id)) in heavy for h in found):
+            # the reference copy may be past the first matches (every Wikipedia language has the title)
+            found += self._titled(title, heavy)
+        for h in [*held, *found]:
+            if h.doc_id in seen or _title_key(h.title) != key or not self._pinnable(route.query, h):
+                continue
+            if route.intent is not Intent.DEFINE and _is_dictionary(h):
+                continue  # "how does general anesthesia work" opened Wiktionary's entry (2026-10-17)
+            seen.add(h.doc_id)
+            pool.append(h)
+        if not pool:
             return None
-        return max(same, key=lambda h: self.source_weights.get(h.source_id or source_of(h.doc_id), 1.0))
+        lang = query_language((route.title or route.query).split()) or "en"
+
+        def rank(item: tuple[int, SearchHit]) -> tuple[bool, float, int]:
+            i, h = item
+            src = h.source_id or source_of(h.doc_id)
+            return (bool(h.lang) and primary_lang(h.lang) != lang, -self.source_weights.get(src, 1.0), i)
+
+        return min(enumerate(pool), key=rank)[1]
 
     def _pinnable(self, query: str, hit: SearchHit) -> bool:
         """A down-weighted source (catalog cards, abstracts) never leads by its title alone, unless the
@@ -281,11 +316,8 @@ class OracleSearcher:
         pins: list[SearchHit] = []
         for title in wanted:
             key = _title_key(title)
-            hit = next(
-                (h for h in fused if _title_key(h.title) == key and self._pinnable(route.query, h)), None
-            ) or self._exact_title(title, sources)
-            if hit is not None and not self._pinnable(route.query, hit):
-                hit = None
+            held = [h for h in fused if _title_key(h.title) == key]
+            hit = self._best_titled(route, title, held, sources)
             if hit is not None and all(p.doc_id != hit.doc_id for p in pins):
                 pins.append(hit)
         return pins
@@ -373,16 +405,22 @@ class OracleSearcher:
                 key = (1, -len(title), weight, i)
             else:
                 continue
-            if not self._pinnable(route.query, h):
+            if not self._pinnable(route.query, h) or _is_dictionary(h):
                 continue
             if best is None or key < best[0]:
                 best = (key, h)
         if best is None and route.intent in (Intent.ASK, Intent.HOW_TO):
-            found = self._named_in_query(query, sources)
+            found = self._named_in_query(route, query, sources)
             return [] if found is None or found.doc_id in pinned else [found]
-        return [] if best is None else [best[1]]
+        if best is None:
+            return []
+        # the same title from the query's language and the heaviest source, if another holds it
+        chosen = self._best_titled(route, best[1].title, [best[1]], sources) or best[1]
+        return [] if chosen.doc_id in pinned else [chosen]
 
-    def _named_in_query(self, query: Sequence[str], sources: Sequence[str] | None) -> SearchHit | None:
+    def _named_in_query(
+        self, route: Route, query: Sequence[str], sources: Sequence[str] | None
+    ) -> SearchHit | None:
         """A page the question names that no candidate is: its words as a title the library holds.
         "root cellar relative humidity range recommended for storing root vegetables" never reached
         Wikipedia's Root cellar among the candidates (long texts about vegetables outscored it;
@@ -402,8 +440,8 @@ class OracleSearcher:
             phrase = " ".join(run)
             titles = cast(Sequence[str], suggest(phrase, limit=5))
             if any(_title_key(t) == phrase for t in titles):
-                hit = self._exact_title(phrase, sources)
-                if hit is not None and self._pinnable(" ".join(query), hit):
+                hit = self._best_titled(route, phrase, [], sources)
+                if hit is not None:
                     return hit
         return None
 
@@ -428,19 +466,21 @@ class OracleSearcher:
         for "define", maps for "where is") score ``PREFER_BOOST`` times higher."""
         if not route.prefer and not route.prefer_sources:
             return fused
-        exact = frozenset(route.prefer_sources)
-        projects = frozenset(route.prefer)
-
-        def preferred(h: SearchHit) -> bool:
-            src = h.source_id or source_of(h.doc_id)
-            if src in exact or _project(src) in projects:
-                return True
-            # A bundle's book is the first part of the native id ("kiwix-curated-t2/wikibooks_en_all/...").
-            book, sep, _ = h.doc_id.removeprefix(f"wsp:{src}/").partition("/")
-            return bool(sep) and _project(book) in projects
-
-        boosted = [replace(h, score=h.score * PREFER_BOOST) if preferred(h) else h for h in fused]
+        preferred = OracleSearcher._preferred  # a static rule: tests call this without a searcher
+        boosted = [replace(h, score=h.score * PREFER_BOOST) if preferred(route, h) else h for h in fused]
         return sorted(boosted, key=lambda h: -h.score)
+
+    @staticmethod
+    def _preferred(route: Route, h: SearchHit) -> bool:
+        """From a source the route prefers: a site named as a soft prior, a dictionary for "define"."""
+        if not route.prefer and not route.prefer_sources:
+            return False
+        src = h.source_id or source_of(h.doc_id)
+        if src in route.prefer_sources or _project(src) in route.prefer:
+            return True
+        # A bundle's book is the first part of the native id ("kiwix-curated-t2/wikibooks_en_all/...").
+        book, sep, _ = h.doc_id.removeprefix(f"wsp:{src}/").partition("/")
+        return bool(sep) and _project(book) in route.prefer
 
     def _passages(self, hits: Sequence[SearchHit], best_chunk: Mapping[str, str]) -> dict[str, str]:
         """What the reranker scores per hit: the passage that matched. For a dense hit its best
@@ -794,9 +834,18 @@ _EMPTY_TEXT = content_hash("")
 
 
 def _named(title: Sequence[str]) -> bool:
-    """Two words or more of a title are names, not numbers or function words: a question holding
-    "10 days" did not name the disambiguation page "10 Days" (2026-10-17 field exam)."""
-    return sum(1 for w in title if w not in STOPWORDS_EN and not any(c.isdigit() for c in w)) >= 2
+    """A title worth taking from a question's words: not function words only, and not a number with
+    one word ("10 days", "20 mg"): "... zinc 20 mg 10 days" led with the disambiguation page "10 Days"
+    (2026-10-17 field exam), while "Carbon-14" and "Apollo 11" are the pages their questions name."""
+    if not any(w not in STOPWORDS_EN for w in title):
+        return False
+    return not (len(title) == 2 and any(c.isdigit() for c in title[0]))
+
+
+def _is_dictionary(h: SearchHit) -> bool:
+    """A dictionary's entry (Wiktionary, either edition): the page for "define", not for a question."""
+    src = h.source_id or source_of(h.doc_id)
+    return _project(src) in DICTIONARY_PROJECTS or _project(src.removeprefix("kiwix-")) in DICTIONARY_PROJECTS
 
 
 def _holds(words: Sequence[str], part: Sequence[str]) -> bool:

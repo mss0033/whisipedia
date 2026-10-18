@@ -20,6 +20,8 @@ DEFAULT_SOURCE_WEIGHTS = {
     "stackexchange": 0.85,  # Q&A threads: matched the words, not the question (2026-10-14 field exam)
     "courtlistener": 0.5,  # court opinions: a canning lawsuit outranked the USDA guide (2026-10-14)
     "wikipedia-top10": 1.15,  # the reference article for most questions
+    # a smaller, older encyclopedia: its "Alan Turing" and "Genghis Khan" led Wikipedia's (2026-10-17)
+    "kiwix-citizendium-org-en-all": 0.9,
 }
 DEFAULT_RERANK_MODEL = "BAAI--bge-reranker-v2-m3"
 
