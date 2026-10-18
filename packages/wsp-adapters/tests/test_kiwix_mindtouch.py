@@ -126,3 +126,28 @@ def test_a_freecodecamp_challenge_is_refined_from_its_markdown(tmp_path: Path) -
             if isinstance(e, DocRecord)
         }
     assert "Soundex codes similar sounding names." in docs["index/rosetta-code/challenges/5a23.html"].text
+
+
+def test_translated_pages_carry_their_own_language(tmp_path: Path) -> None:
+    """WikEM's "SIRS/de" and ready.gov's ``<html lang="ru">`` pages ranked as English (2026-10-17)."""
+    path = tmp_path / "wikem_en_all_maxi_2026-07.zim"
+    page = '<html lang="{}"><head><title>t</title></head><body><p>Inflammatory response {}.</p></body></html>'
+    with Creator(path).config_indexing(False, "eng").config_verbose(False) as creator:
+        creator.set_mainpath("SIRS")
+        creator.add_item(_Item("SIRS", "text/html", page.format("en", "one")))
+        creator.add_item(_Item("SIRS/de", "text/html", page.format("en", "two")))
+        creator.add_item(_Item("Orphan/it", "text/html", page.format("en", "three")))
+        creator.add_item(_Item("ru/node/154", "text/html", page.format("ru", "four")))
+        creator.add_item(_Item("es/agua", "text/html", page.format("es-US", "five")))
+        creator.add_metadata("Name", "wikem_en_all")
+        creator.add_metadata("Language", "eng")
+    with WorkerPool(1) as pool:
+        docs = {
+            e.native_id: e.lang
+            for e in read_zim(
+                path, zim_params(path, "wikem", "CC-BY-SA-3.0", False), workdir=tmp_path / "w", pool=pool
+            )
+            if isinstance(e, DocRecord)
+        }
+    # "Orphan/it" has no "Orphan" page: a subpage, not a translation
+    assert docs == {"SIRS": "en", "SIRS/de": "de", "Orphan/it": "en", "ru/node/154": "ru", "es/agua": "es-us"}

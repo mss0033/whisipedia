@@ -95,6 +95,10 @@ _LANG3TO1 = {
     "por": "pt", "ron": "ro", "rus": "ru", "spa": "es", "swe": "sv", "tha": "th", "tur": "tr",
     "ukr": "uk", "vie": "vi", "zho": "zh",
 }  # fmt: skip
+_LANGS1 = frozenset(_LANG3TO1.values())
+# A translated page of a MediaWiki with the Translate extension: "SIRS/de" beside "SIRS"
+_TRANSLATION = re.compile(r"(.+)/([a-z]{2,3}(?:-[a-z]{2,4})?)")
+_HTML_LANG = re.compile(rb"<html\b[^>]*?\slang=[\"']?([A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*)", re.I)
 
 
 @dataclass(frozen=True, slots=True)
@@ -684,6 +688,9 @@ def _read_html(task: _HtmlTask) -> list[DocRow]:
         native_id = p.prefix + blob.path
         page = _mindtouch_page(task.clusters.scan.zim, blob.path, blob.content)
         text = html_to_text(blob.content if page is None else page)
+        lang = (
+            page_lang(blob.content, p.lang) or _translation_lang(task.clusters.scan.zim, blob.path) or p.lang
+        )
         out.append(
             doc_row(
                 DocRecord(
@@ -691,7 +698,7 @@ def _read_html(task: _HtmlTask) -> list[DocRow]:
                     source_id=p.source_id,
                     native_id=native_id,
                     title=blob.title,
-                    lang=p.lang,
+                    lang=lang,
                     license=p.license,
                     text=text,
                     revision=p.revision,
@@ -702,6 +709,36 @@ def _read_html(task: _HtmlTask) -> list[DocRow]:
             )
         )
     return out
+
+
+def page_lang(content: bytes, archive_lang: str) -> str | None:
+    """The language a page declares (``<html lang="ru">``) when it is not the archive's, or ``None``.
+
+    A website archive tags every page with one language: ready.gov's Russian and Chinese pages
+    ranked as English above the English ones (2026-10-17 field exam).
+    """
+    m = _HTML_LANG.search(content[:4096])
+    if m is None:
+        return None
+    tag = m.group(1).decode("ascii").lower()
+    return None if tag.split("-")[0] == archive_lang.split("-")[0] or tag == "und" else tag
+
+
+def _translation_lang(zim: Path, path: str) -> str | None:
+    """The language of a translated page ("SIRS/de" beside "SIRS"), or ``None``.
+
+    MediaWiki's Translate extension keeps each translation as a subpage named by its language code,
+    and the archive tags every page with the wiki's language: WikEM's machine translations ranked as
+    English beside the English pages, five of eight hits for "sepsis qsofa" (2026-10-17 field exam).
+    """
+    m = _TRANSLATION.fullmatch(path)
+    if m is None or m.group(2).split("-")[0] not in _LANGS1:
+        return None
+    archive = _MINDTOUCH.get(zim)
+    if archive is None:
+        _MINDTOUCH.clear()
+        archive = _MINDTOUCH[zim] = Archive(zim)
+    return m.group(2) if archive.has_entry_by_path(m.group(1)) else None
 
 
 def read_zim(path: Path, params: ZimParams, *, workdir: Path, pool: WorkerPool) -> Iterator[Entry]:
