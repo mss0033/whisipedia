@@ -552,6 +552,7 @@ CHECKSUM_ONLY_ADAPTERS = frozenset(
         "dailymed",  # NLM's own release of FDA drug labels, MD5-checked
         "ncbi-bookshelf",  # NLM's open-access book archives (chosen books, licence read per book)
         "map-tiles",  # PMTiles archives: MD5 (whole) or our SHA-256 after a read-back (cuts); no documents
+        "american-stories",  # newspaper OCR of the Library of Congress's public scans, LFS SHA-256
     }
 )
 SCREENED_ADAPTERS = frozenset({"doc-collection"})  # policy screened by document_screen()
