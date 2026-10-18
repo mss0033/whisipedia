@@ -10,15 +10,21 @@ def _escape(text: str) -> str:
     return text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
 
 
-def make_pdf(pages: Sequence[Sequence[str | tuple[float, float, str]]]) -> bytes:
+def make_pdf(
+    pages: Sequence[Sequence[str | tuple[float, float, str]]],
+    outline: Sequence[tuple[int, str, int]] = (),
+) -> bytes:
     """A valid PDF with one Helvetica text line per string, one page per inner sequence. A line given
     as ``(x, y, text)`` is drawn there (PDF points from the bottom left); a string is the next line
-    down the left margin."""
+    down the left margin. ``outline``: bookmarks ``(level, title, page index)`` in order, level 0 or
+    1 (a level-1 entry belongs to the level-0 entry before it)."""
     objects: list[bytes] = []
     n_pages = len(pages)
     page_ids = [3 + 2 * i for i in range(n_pages)]
     font_id = 3 + 2 * n_pages
-    objects.append(b"<< /Type /Catalog /Pages 2 0 R >>")
+    root_id = font_id + 1
+    catalog = "<< /Type /Catalog /Pages 2 0 R" + (f" /Outlines {root_id} 0 R" if outline else "") + " >>"
+    objects.append(catalog.encode())
     kids = " ".join(f"{p} 0 R" for p in page_ids)
     objects.append(f"<< /Type /Pages /Kids [{kids}] /Count {n_pages} >>".encode())
     for i, lines in enumerate(pages):
@@ -38,6 +44,8 @@ def make_pdf(pages: Sequence[Sequence[str | tuple[float, float, str]]]) -> bytes
         data = content.encode("latin-1")
         objects.append(b"<< /Length %d >>\nstream\n" % len(data) + data + b"\nendstream")
     objects.append(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
+    if outline:
+        objects += _outline_objects(outline, root_id, page_ids)
     out = bytearray(b"%PDF-1.4\n")
     offsets: list[int] = []
     for num, body in enumerate(objects, start=1):
@@ -49,6 +57,42 @@ def make_pdf(pages: Sequence[Sequence[str | tuple[float, float, str]]]) -> bytes
         out += b"%010d 00000 n \n" % off
     out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objects) + 1, xref)
     return bytes(out)
+
+
+def _outline_objects(
+    outline: Sequence[tuple[int, str, int]], root_id: int, page_ids: Sequence[int]
+) -> list[bytes]:
+    """The /Outlines tree of :func:`make_pdf`: object ``root_id``, then one object per entry."""
+    ids = [root_id + 1 + i for i in range(len(outline))]
+    parent: list[int] = []
+    for i, (level, _title, _page) in enumerate(outline):
+        if level == 0:
+            parent.append(root_id)
+        else:
+            parent.append(next(ids[j] for j in range(i - 1, -1, -1) if outline[j][0] == 0))
+    kids: dict[int, list[int]] = {}
+    for i, par in enumerate(parent):
+        kids.setdefault(par, []).append(ids[i])
+    out = [
+        f"<< /Type /Outlines /First {kids[root_id][0]} 0 R /Last {kids[root_id][-1]} 0 R "
+        f"/Count {len(kids[root_id])} >>".encode()
+    ]
+    for i, (_level, title, page) in enumerate(outline):
+        siblings = kids[parent[i]]
+        k = siblings.index(ids[i])
+        fields = [
+            f"/Title ({_escape(title)})",
+            f"/Parent {parent[i]} 0 R",
+            f"/Dest [{page_ids[page]} 0 R /Fit]",
+        ]
+        if k > 0:
+            fields.append(f"/Prev {siblings[k - 1]} 0 R")
+        if k + 1 < len(siblings):
+            fields.append(f"/Next {siblings[k + 1]} 0 R")
+        if mine := kids.get(ids[i]):
+            fields.append(f"/First {mine[0]} 0 R /Last {mine[-1]} 0 R /Count {len(mine)}")
+        out.append(("<< " + " ".join(fields) + " >>").encode())
+    return out
 
 
 def md5(data: bytes) -> str:

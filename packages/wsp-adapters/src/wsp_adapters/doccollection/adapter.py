@@ -89,7 +89,7 @@ from wsp_adapters.doccollection.policy import (
     parse_markings,
 )
 from wsp_adapters.html_text import html_to_text
-from wsp_adapters.pdftext import page_text
+from wsp_adapters.pdftext import Section, outline_marks, page_text, plan_sections
 from wsp_core.banners import banner_for
 from wsp_core.ids import content_hash, make_doc_id
 from wsp_core.memory import drop_file_cache
@@ -553,6 +553,9 @@ class DocCollectionAdapter:
             if cfg.reader and path.suffix == ".zip":
                 yield from self._snapshot_documents(spec, cfg, meta, path)
                 continue
+            if path.suffix.lower() == ".pdf" and (sections := long_pdf_sections(path, cfg.pdf_max_pages)):
+                yield from self._section_documents(spec, meta, path, generation_dir, sections)
+                continue
             body = document_text(path, max_pages=cfg.pdf_max_pages)
             title = reader_title(meta, path, body)
             text = catalog_header(meta, title=title) + ("\n\n" + body if body else "")
@@ -572,6 +575,55 @@ class DocCollectionAdapter:
                 content_hash=content_hash(text),
                 aliases=tuple(dict.fromkeys(a for a in (meta.pub_number, listed_as) if a and a != title)),
                 meta=meta.record_meta(),
+            )
+
+    def _section_documents(
+        self, spec: SourceSpec, meta: DocumentMeta, path: Path, generation_dir: Path, sections: list[Section]
+    ) -> Iterator[DocRecord]:
+        """A PDF longer than ``pdf_max_pages`` as its chapters (:func:`wsp_adapters.pdftext.plan_sections`),
+        each read whole, and the book itself: its catalog header and its contents, under the id the
+        whole PDF always had."""
+        front = pdf_text(path, max_pages=min(FRONT_MATTER_PAGES, sections[0].stop))
+        title = reader_title(meta, path, front)
+        license_ = meta.license or spec.license
+        revision = meta.edition_date or pdf_metadata_date(path) or None
+        html_ref = f"file:{meta.generation or generation_dir.name}/{meta.file}"
+        record_meta = meta.record_meta()
+        contents = "\n".join(f"{s.title} (page {s.start + 1})" for s in sections)
+        text = catalog_header(meta, title=title) + "\n\nContents\n" + contents
+        listed_as = clean_title(meta.title) if meta.title else ""
+        yield DocRecord(
+            doc_id=make_doc_id(spec.id, meta.doc_key),
+            source_id=spec.id,
+            native_id=meta.doc_key,
+            title=title,
+            lang=meta.language or "en",
+            license=license_,
+            text=text,
+            revision=revision,
+            url_native=meta.origin_url or None,
+            html_ref=html_ref,
+            content_hash=content_hash(text),
+            aliases=tuple(dict.fromkeys(a for a in (meta.pub_number, listed_as) if a and a != title)),
+            meta={**record_meta, "pages": f"1-{sections[-1].stop}"},
+        )
+        for section in sections:
+            body = pdf_text(path, max_pages=section.stop - section.start, first=section.start)
+            text = f"{title}\n{section.title} (pages {section.start + 1}-{section.stop})\n\n{body}"
+            native = f"{meta.doc_key}/p{section.start + 1}"
+            yield DocRecord(
+                doc_id=make_doc_id(spec.id, native),
+                source_id=spec.id,
+                native_id=native,
+                title=f"{section.title} — {title}",
+                lang=meta.language or "en",
+                license=license_,
+                text=text,
+                revision=revision,
+                url_native=f"{meta.origin_url}#page={section.start + 1}" if meta.origin_url else None,
+                html_ref=html_ref,
+                content_hash=content_hash(text),
+                meta={**record_meta, "pages": f"{section.start + 1}-{section.stop}", "part_of": meta.doc_key},
             )
 
     def _snapshot_documents(
@@ -1066,18 +1118,23 @@ PDF_SECONDS = 300.0
 
 
 def pdf_text(
-    path: Path, max_pages: int, *, seconds: float = PDF_SECONDS, clock: Callable[[], float] = time.monotonic
+    path: Path,
+    max_pages: int,
+    *,
+    first: int = 0,
+    seconds: float = PDF_SECONDS,
+    clock: Callable[[], float] = time.monotonic,
 ) -> str:
-    """Text of the first ``max_pages`` pages (pypdfium2, one page in memory at a time), read for at
-    most ``seconds``."""
+    """Text of ``max_pages`` pages from page ``first`` (0-based; pypdfium2, one page in memory at a
+    time), read for at most ``seconds``."""
     import pypdfium2  # imported on use: only PDF documents need it
 
     pdf = pypdfium2.PdfDocument(str(path))
     try:
         out: list[str] = []
-        pages = min(len(pdf), max_pages)
+        pages = min(len(pdf), first + max_pages)
         started = clock()
-        for i in range(pages):
+        for i in range(first, pages):
             if clock() - started > seconds:
                 log.warning(
                     "%s: text read for %.0f s; pages %d-%d left unread", path.name, seconds, i + 1, pages
@@ -1086,7 +1143,7 @@ def pdf_text(
                     f"[Pages {i + 1}-{pages} of this PDF were not read: its drawings take too long to read.]"
                 )
                 break
-            if i and i % PAGES_PER_OPEN == 0:
+            if i > first and (i - first) % PAGES_PER_OPEN == 0:
                 pdf.close()
                 pdf = pypdfium2.PdfDocument(str(path))
             page = pdf[i]
@@ -1270,6 +1327,22 @@ def zip_member_texts(path: Path) -> list[tuple[str, Extracted]]:
                 continue
             out.append((name, checked_front_matter(text[: 4 * ZIP_MEMBER_CHARS])))
     return out
+
+
+def long_pdf_sections(path: Path, max_pages: int) -> list[Section]:
+    """The sections of a PDF longer than ``max_pages`` pages; ``[]`` for a shorter one (read whole) or
+    one that does not open."""
+    import pypdfium2
+
+    try:
+        pdf = pypdfium2.PdfDocument(str(path))
+    except pypdfium2.PdfiumError:
+        return []
+    try:
+        n = len(pdf)
+        return plan_sections(n, outline_marks(pdf)) if n > max_pages else []
+    finally:
+        pdf.close()
 
 
 def document_text(path: Path, *, max_pages: int) -> str:

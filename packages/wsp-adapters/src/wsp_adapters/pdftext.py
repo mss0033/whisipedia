@@ -14,8 +14,10 @@ character is kept exactly once; only the order of whole lines changes.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
 from statistics import median
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     import pypdfium2
@@ -93,3 +95,100 @@ def _gutter(boxes: list[Box], width: float) -> float | None:
     if best is None or best[0] > MAX_CROSSING * len(boxes):
         return None
     return best[1]
+
+
+# --- sections of a long PDF ------------------------------------------------------------------------
+#
+# A PDF read whole is one document, and only its first pages were read (``pdf_max_pages``): Lessons
+# in Industrial Instrumentation is 3,311 pages, and 88 % of it never reached the index (2026-10-18).
+# A long PDF is read as its chapters instead: the outline's top entries (or the entries under a
+# single top entry that wraps the book), a chapter longer than SECTION_PAGES split at its own
+# entries, and what is still too long, or a PDF with no outline, in runs of SECTION_PAGES pages.
+
+SECTION_PAGES = 100
+OUTLINE_DEPTH = 3  # outline levels read: chapters, sections, subsections
+TOC_MAX_DEPTH = 15
+INTRO_PAGES = 3  # pages before a split chapter's first entry that stay with that entry
+
+
+@dataclass(frozen=True, slots=True)
+class Section:
+    """Pages ``start`` to ``stop - 1`` (0-based) of a PDF, under ``title``."""
+
+    title: str
+    start: int
+    stop: int
+
+
+Mark = tuple[int, str, int]  # (outline level, title, page index)
+
+
+def outline_marks(pdf: pypdfium2.PdfDocument) -> list[Mark]:
+    """The outline entries of ``pdf`` that name a page in it, in outline order."""
+    n = len(pdf)
+    marks: list[Mark] = []
+    # pdfium's own depth limit: a smaller one prints a line per subtree it skips (thousands a book).
+    toc = cast(Iterable[Any], pdf.get_toc(max_depth=TOC_MAX_DEPTH))  # pyright: ignore[reportUnknownMemberType]
+    for bookmark in toc:
+        level = int(bookmark.level)
+        if level >= OUTLINE_DEPTH:
+            continue
+        dest = bookmark.get_dest()
+        index = dest.get_index() if dest is not None else None
+        title = " ".join(str(bookmark.get_title() or "").split())
+        if index is not None and 0 <= int(index) < n and title:
+            marks.append((level, title, int(index)))
+    return marks
+
+
+def plan_sections(n_pages: int, marks: Sequence[Mark], *, chunk: int = SECTION_PAGES) -> list[Section]:
+    """The sections of an ``n_pages`` PDF with outline ``marks`` (see above); every page in exactly
+    one section, in page order."""
+    if n_pages <= 0:
+        return []
+    top = _starts(marks, 0)
+    if len(top) < 2:  # one entry wraps the book: its children are the chapters
+        top = _starts(marks, 1)
+    if not top:
+        return _runs("Pages", 0, n_pages, chunk)
+    if top[0][1] > 0:
+        top.insert(0, ("Front matter", 0))
+    out: list[Section] = []
+    for i, (title, start) in enumerate(top):
+        stop = top[i + 1][1] if i + 1 < len(top) else n_pages
+        if stop - start <= chunk:
+            out.append(Section(title, start, stop))
+            continue
+        level = next((lv for lv, t, p in marks if t == title and p == start), 0)
+        inner = [(t, p) for lv, t, p in marks if lv == level + 1 and start < p < stop]
+        inner = [(t, p) for k, (t, p) in enumerate(inner) if k == 0 or p > inner[k - 1][1]]
+        if inner and inner[0][1] - start <= INTRO_PAGES:  # a chapter's title page: part of its first section
+            inner[0] = (inner[0][0], start)
+            cuts = inner
+        else:
+            cuts = [(title, start), *inner]
+        for k, (t, p) in enumerate(cuts):
+            end = cuts[k + 1][1] if k + 1 < len(cuts) else stop
+            name = t if t == title else f"{title}: {t}"
+            out += [Section(name, p, end)] if end - p <= chunk else _runs(name, p, end, chunk)
+    return out
+
+
+def _starts(marks: Sequence[Mark], level: int) -> list[tuple[str, int]]:
+    """The entries of one outline level by page, an entry on the same page as the one before dropped."""
+    out: list[tuple[str, int]] = []
+    for lv, title, page in marks:
+        if lv == level and (not out or page > out[-1][1]):
+            out.append((title, page))
+    return out
+
+
+def _runs(title: str, start: int, stop: int, chunk: int) -> list[Section]:
+    """``start..stop`` in runs of ``chunk`` pages, each titled with its page numbers."""
+    out: list[Section] = []
+    for a in range(start, stop, chunk):
+        b = min(stop, a + chunk)
+        out.append(
+            Section(f"{title} (pages {a + 1}-{b})" if title != "Pages" else f"Pages {a + 1}-{b}", a, b)
+        )
+    return out
