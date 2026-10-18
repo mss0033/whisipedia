@@ -466,10 +466,8 @@ def write_archive(
         staged.unlink(missing_ok=True)
 
 
-def assemble_archive(
-    path: Path,
+def archive_prefix(
     entries: list[Entry],
-    data_file: Path,
     *,
     data_length: int,
     contents: int,
@@ -477,9 +475,9 @@ def assemble_archive(
     tile_compression: Compression,
     metadata: Mapping[str, object] | None,
     bounds: tuple[float, float, float, float],
-) -> Header:
-    """Write a clustered archive at ``path`` from tile ``entries`` (sorted by id, offsets into
-    ``data_file``) and the first ``data_length`` bytes of ``data_file``; renamed into place whole."""
+) -> tuple[Header, bytes]:
+    """The header, directories and metadata of a clustered archive whose tile data (``data_length``
+    bytes, the offsets of ``entries``) follows them: everything before the tile data."""
     if not entries:
         raise ValueError("an archive needs at least one tile")
     root, leaves = _directories(entries)
@@ -499,13 +497,31 @@ def assemble_archive(
         min_lon=bounds[0], min_lat=bounds[1], max_lon=bounds[2], max_lat=bounds[3],
         center_zoom=zooms[0], center_lon=lon, center_lat=lat,
     )  # fmt: skip
+    return h, serialize_header(h) + root + meta + leaves
+
+
+def assemble_archive(
+    path: Path,
+    entries: list[Entry],
+    data_file: Path,
+    *,
+    data_length: int,
+    contents: int,
+    tile_type: TileType,
+    tile_compression: Compression,
+    metadata: Mapping[str, object] | None,
+    bounds: tuple[float, float, float, float],
+) -> Header:
+    """Write a clustered archive at ``path`` from tile ``entries`` (sorted by id, offsets into
+    ``data_file``) and the first ``data_length`` bytes of ``data_file``; renamed into place whole."""
+    h, prefix = archive_prefix(
+        entries, data_length=data_length, contents=contents, tile_type=tile_type,
+        tile_compression=tile_compression, metadata=metadata, bounds=bounds,
+    )  # fmt: skip
     tmp = path.with_name(path.name + ".tmp")
     remaining = data_length
     with tmp.open("wb") as out, data_file.open("rb") as data:
-        out.write(serialize_header(h))
-        out.write(root)
-        out.write(meta)
-        out.write(leaves)
+        out.write(prefix)
         while remaining > 0 and (chunk := data.read(min(1 << 20, remaining))):
             out.write(chunk)
             remaining -= len(chunk)

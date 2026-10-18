@@ -208,7 +208,7 @@ def test_a_cut_keeps_exactly_the_window_and_its_bytes(tmp_path: Path) -> None:
         a.close()
         s.close()
     assert check_cut(tmp_path / "cut.pmtiles", Cut(min_zoom=6, max_zoom=8), result.entries) is None
-    assert not (tmp_path / "work" / "cut.pmtiles.data").exists()  # staging cleaned up
+    assert not (tmp_path / "work" / "cut.pmtiles.building").exists()  # built in place, then renamed
 
 
 def test_a_cut_that_fails_halfway_resumes_where_it_stopped(

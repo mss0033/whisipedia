@@ -10,11 +10,12 @@ checkpointed as they land, so a failure costs one chunk and a rerun continues.
    merged into chunks (gaps under :data:`GAP` bytes are read through, chunks stop at
    :data:`CHUNK_BYTES`). A clustered archive stores tiles in id order, lowest zoom first, so a zoom
    window is a few long runs of bytes.
-2. **Fetch.** Each chunk is read with a ``Range`` request and written at its place in a staging file
+2. **Fetch.** Each chunk is read with a ``Range`` request and written at its place in the new archive,
    sized up front; a state file records the chunks done. The plan is recomputed on resume and must
    match the state's fingerprint.
-3. **Assemble.** The selected tiles' entries, their offsets moved to the staging file's, become a new
-   clustered archive (:func:`wsp_core.pmtiles.assemble_archive`) with the upstream metadata.
+   The new archive's header and directories (the selected tiles, their offsets moved) are known from
+   the plan and written first, with the upstream metadata (:func:`wsp_core.pmtiles.archive_prefix`),
+   so each chunk is written once, at its final place: a cut needs its own size on disk, not twice.
 """
 
 from __future__ import annotations
@@ -31,7 +32,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
-from wsp_core.pmtiles import Archive, Entry, assemble_archive, first_id, id_to_zxy
+from wsp_core.pmtiles import Archive, Entry, archive_prefix, first_id, id_to_zxy
 
 GAP = 256 * 1024
 CHUNK_BYTES = 64 * 1024 * 1024
@@ -182,43 +183,69 @@ def cut_archive(
     threads: int = THREADS,
     progress: Callable[[int, int, int], None] | None = None,
 ) -> CutResult:
-    """Cut ``window`` out of the archive ``read`` reads into ``dest``, staging in ``work``; resumable.
+    """Cut ``window`` out of the archive ``read`` reads into ``dest``, built in ``work``; resumable.
 
-    ``progress(chunks done, chunks, bytes done)`` is called as chunks land."""
+    The new archive's header and directories are known from the plan, so they are written first and
+    each chunk lands at its final place in ``<work>/<name>.building``, which becomes ``dest`` when every
+    chunk is in: the cut needs its own size on disk once, not twice. ``progress(chunks done, chunks,
+    bytes done)`` is called as chunks land."""
     work.mkdir(parents=True, exist_ok=True)
     archive = Archive(read)
     plan = plan_cut(archive, window)
-    data_offset = archive.header.data_offset
-    staging = work / (dest.name + ".data")
+    h = archive.header
+    entries = sorted(
+        (
+            Entry(tile_id, plan.new_offset(off), length, run)
+            for tile_id, off, length, run in zip(plan.ids, plan.offsets, plan.lengths, plan.runs, strict=True)
+        ),
+        key=lambda e: e.tile_id,
+    )
+    bbox = window.bbox or h.bounds
+    bounds = (
+        max(h.min_lon, bbox[0]),
+        max(h.min_lat, bbox[1]),
+        min(h.max_lon, bbox[2]),
+        min(h.max_lat, bbox[3]),
+    )
+    _header, prefix = archive_prefix(
+        entries, data_length=plan.total, contents=len(set(plan.offsets)), tile_type=h.tile_type,
+        tile_compression=h.tile_compression, metadata=archive.metadata(), bounds=bounds,
+    )  # fmt: skip
+    building = work / (dest.name + ".building")
     state_path = work / (dest.name + ".state.json")
+    fingerprint = f"{plan.fingerprint}-{len(prefix)}"
+    size = len(prefix) + plan.total
     done: set[int] = set()
-    if state_path.is_file() and staging.is_file():
+    if state_path.is_file() and building.is_file():
         try:
             state = json.loads(state_path.read_text())
-            if state.get("fingerprint") == plan.fingerprint and staging.stat().st_size == plan.total:
+            if state.get("fingerprint") == fingerprint and building.stat().st_size == size:
                 done = {int(i) for i in state.get("done", [])}
         except (OSError, ValueError):
             done = set()
     if not done:
-        with staging.open("wb") as f:
-            f.truncate(plan.total)
+        with building.open("wb") as f:
+            f.truncate(size)
     lock = threading.Lock()
-    fd = os.open(staging, os.O_WRONLY)
+    fd = os.open(building, os.O_WRONLY)
 
     def save() -> None:
         tmp = state_path.with_name(state_path.name + ".tmp")
-        tmp.write_text(json.dumps({"fingerprint": plan.fingerprint, "done": sorted(done)}))
+        tmp.write_text(json.dumps({"fingerprint": fingerprint, "done": sorted(done)}))
         tmp.replace(state_path)
+
+    def put(blob: bytes | memoryview, at: int) -> None:
+        view = memoryview(blob)
+        written = 0
+        while written < len(view):
+            written += os.pwrite(fd, view[written:], at + written)
 
     def fetch(i: int) -> None:
         start, length = plan.chunks[i]
-        blob = read(data_offset + start, length)
+        blob = read(h.data_offset + start, length)
         if len(blob) != length:
             raise OSError(f"chunk {i}: {len(blob)} of {length} bytes")
-        written = 0
-        view = memoryview(blob)
-        while written < length:
-            written += os.pwrite(fd, view[written:], plan.bases[i] + written)
+        put(blob, len(prefix) + plan.bases[i])
         with lock:
             done.add(i)
             if progress:
@@ -228,6 +255,7 @@ def cut_archive(
                 save()
 
     try:
+        put(prefix, 0)
         todo = [i for i in range(len(plan.chunks)) if i not in done]
         with ThreadPoolExecutor(max_workers=max(1, threads), thread_name_prefix="mapcut") as pool:
             for future in [pool.submit(fetch, i) for i in todo]:
@@ -237,26 +265,6 @@ def cut_archive(
         os.close(fd)
         with lock:
             save()
-    entries = sorted(
-        (
-            Entry(tile_id, plan.new_offset(off), length, run)
-            for tile_id, off, length, run in zip(plan.ids, plan.offsets, plan.lengths, plan.runs, strict=True)
-        ),
-        key=lambda e: e.tile_id,
-    )
-    h = archive.header
-    bbox = window.bbox or h.bounds
-    bounds = (
-        max(h.min_lon, bbox[0]),
-        max(h.min_lat, bbox[1]),
-        min(h.max_lon, bbox[2]),
-        min(h.max_lat, bbox[3]),
-    )
-    assemble_archive(
-        dest, entries, staging, data_length=plan.total, contents=len(set(plan.offsets)),
-        tile_type=h.tile_type, tile_compression=h.tile_compression, metadata=archive.metadata(),
-        bounds=bounds,
-    )  # fmt: skip
-    staging.unlink(missing_ok=True)
+    building.replace(dest)
     state_path.unlink(missing_ok=True)
     return CutResult(dest, len(entries), dest.stat().st_size, len(plan.chunks))
