@@ -18,7 +18,12 @@ export interface Chapter {
   subheads?: number[];
   /** Of a chapter cut into pages: this page (from 0) and how many. */
   page?: { index: number; of: number };
+  /** The volume ("Vol. II") a book in volumes put the chapter in, from its title page. */
+  volume?: string;
 }
+
+/** "VOL. II.", "Volume 3": a volume's title page line. */
+const VOLUME = /^(?:vol\.?|volume)\s+([ivxlc]+|\d{1,2})\.?$/i;
 
 const HEADING_WORD =
   /^(chapter|letter|book|part|volume|canto|act|scene|stave|prologue|epilogue|introduction|preface|appendix|conclusion|lecture|section|sermon|lesson|essay)\b/i;
@@ -199,7 +204,10 @@ export function splitChapters(text: string, bookTitle = ''): Chapter[] {
   let headings = 0;
   let started = false; // a heading before any body text is a title line, not a chapter
   const seen = new Set<string>();
+  let volume = '';
   for (const [i, p] of ps.entries()) {
+    const vol = VOLUME.exec(flat(p).trim());
+    if (vol) volume = `Vol. ${vol[1]!.toUpperCase()}`;
     const heading = heads[i]! && started;
     // A run of heading lines is a contents list (Moby Dick lists its 135 chapters up front): its
     // lines read as paragraphs of the chapter they are in, not as chapters. Real chapters have
@@ -212,7 +220,11 @@ export function splitChapters(text: string, bookTitle = ''): Chapter[] {
     if (heading && !inList) {
       headings++;
       chapters.push(current);
-      current = { title: flat(p).replace(/\]$/, ''), paragraphs: [] };
+      current = {
+        title: flat(p).replace(/\]$/, ''),
+        paragraphs: [],
+        ...(volume ? { volume } : {}),
+      };
     } else {
       current.paragraphs.push(p);
       if (!heads[i]) started = true;
@@ -269,6 +281,7 @@ export function splitChapters(text: string, bookTitle = ''): Chapter[] {
         title: `${carry.title} · ${c.title}`,
         paragraphs: [...carry.paragraphs, ...c.paragraphs],
         ...(subheads.length ? { subheads } : {}),
+        ...(c.volume ? { volume: c.volume } : {}),
       };
       carry = null;
     }
@@ -276,7 +289,22 @@ export function splitChapters(text: string, bookTitle = ''): Chapter[] {
     else out.push(chapter);
   }
   if (carry) fold(out.at(-1)!, carry);
-  return out.length < 2 ? [{ title: bookTitle || 'Text', paragraphs: ps }] : out;
+  return out.length < 2 ? [{ title: bookTitle || 'Text', paragraphs: ps }] : withVolumes(out);
+}
+
+/**
+ * Chapters of a book in volumes are named with their volume when their titles repeat: Pride and
+ * Prejudice's contents listed "CHAPTER I." three times (2026-10-17 field exam).
+ */
+function withVolumes(chapters: Chapter[]): Chapter[] {
+  const vols = new Map<string, Set<string>>();
+  for (const c of chapters) {
+    if (!c.volume) continue;
+    const k = c.title.toLowerCase();
+    vols.set(k, (vols.get(k) ?? new Set()).add(c.volume));
+  }
+  if (![...vols.values()].some((v) => v.size > 1)) return chapters;
+  return chapters.map((c) => (c.volume ? { ...c, title: `${c.volume} · ${c.title}` } : c));
 }
 
 /**

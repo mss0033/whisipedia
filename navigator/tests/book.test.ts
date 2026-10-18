@@ -417,3 +417,35 @@ describe('long Title Case chapter titles and a contents list with summaries (Gib
     expect(titles.filter((t) => t.startsWith('Chapter V:'))).toHaveLength(1);
   });
 });
+
+describe('a book in volumes (Pride and Prejudice, 2026-10-17)', () => {
+  const words = (n: number) => `${'Text '.repeat(250)}${n}.`;
+  const vol = (v: string) => [
+    'PRIDE AND PREJUDICE.',
+    'In Three Volumes.',
+    `VOL. ${v}.`,
+    'London: 1813.',
+  ];
+  const text = [
+    ...vol('I'),
+    'CHAPTER I.',
+    words(1),
+    'CHAPTER II.',
+    words(2),
+    ...vol('II'),
+    'CHAPTER I.',
+    words(3),
+    'CHAPTER II.',
+    words(4),
+  ].join('\n\n');
+
+  it('names repeated chapters with their volume', () => {
+    const titles = splitChapters(text, 'P&P').map((c) => c.title);
+    expect(titles.slice(1)).toEqual([
+      'Vol. I · CHAPTER I.',
+      'Vol. I · CHAPTER II.',
+      'Vol. II · CHAPTER I.',
+      'Vol. II · CHAPTER II.',
+    ]);
+  });
+});
