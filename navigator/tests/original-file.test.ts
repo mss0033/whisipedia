@@ -27,6 +27,33 @@ describe('original file panel', () => {
     expect(el.querySelector('a[target="_blank"]')).not.toBeNull();
   });
 
+  it('opens a chapter of a long PDF at its first page', () => {
+    const el = originalPanel(
+      {
+        title: 'Closed-loop control — Lessons In Industrial Instrumentation',
+        kind: 'other',
+        url_native: 'https://ibiblio.org/kuphaldt/socratic/sinst/book/liii.pdf#page=2370',
+        original: {
+          url: '/v1/files/liii',
+          name: 'liii.pdf',
+          media_type: 'application/pdf',
+          inline: true,
+          preview_url: null,
+        },
+      },
+      base,
+    )!;
+    expect(el.querySelector('iframe')!.getAttribute('src')).toBe(
+      'http://lib.test/v1/files/liii#page=2370',
+    );
+    expect(el.querySelector('a[target="_blank"]')!.getAttribute('href')).toBe(
+      'http://lib.test/v1/files/liii#page=2370',
+    );
+    expect(el.querySelector('a[download]')!.getAttribute('href')).toBe(
+      'http://lib.test/v1/files/liii',
+    );
+  });
+
   it('shows a map scan through its preview', () => {
     const el = originalPanel({
       title: 'Boston South 1:24,000',

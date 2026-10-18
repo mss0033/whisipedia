@@ -642,9 +642,18 @@ export interface MediaContext {
  */
 export const MAP_SHEET_MAX_TEXT = 2000;
 
+/**
+ * The page a chapter of a long PDF starts on (its ``url_native`` ends ``#page=N``), as a fragment for
+ * the whole file: the chapter opens there, not at the book's first page (LIII is 3,311 pages).
+ */
+export function pageFragment(urlNative: string | null | undefined): string {
+  const m = /#page=(\d+)$/.exec(urlNative ?? '');
+  return m ? `#page=${m[1]}` : '';
+}
+
 export function originalPanel(
   doc: Pick<DocumentResponse, 'original' | 'title' | 'kind'> &
-    Partial<Pick<DocumentResponse, 'text'>>,
+    Partial<Pick<DocumentResponse, 'text' | 'url_native'>>,
   urlOf: (path: string) => string = (path) => path,
   media?: MediaContext,
 ): HTMLElement | null {
@@ -654,6 +663,8 @@ export function originalPanel(
   const playable = mediaKindOf(o.media_type, o.name);
   if (playable && media) return mediaPanel(doc, o, url, playable, media);
   const kind = fileKind(o.media_type, o.name);
+  const pdf = o.media_type === 'application/pdf';
+  const at = pdf ? url + pageFragment(doc.url_native) : url;
   const links = h(
     'p',
     { class: 'original-links' },
@@ -661,12 +672,11 @@ export function originalPanel(
     h('code', null, o.name),
     ` (${kind}) · `,
     o.inline || o.preview_url
-      ? [h('a', { href: url, target: '_blank', rel: 'noopener' }, 'Open in a new window'), ' · ']
+      ? [h('a', { href: at, target: '_blank', rel: 'noopener' }, 'Open in a new window'), ' · ']
       : null,
     h('a', { href: url, download: o.name }, 'Download'),
   );
   // A map is a picture: show the rendered sheet (it opens the full file); other PDFs read in the viewer.
-  const pdf = o.media_type === 'application/pdf';
   const sheet = doc.kind === 'maps' && (doc.text ?? '').length <= MAP_SHEET_MAX_TEXT;
   const picture = o.preview_url && (!pdf || sheet);
   let view: HTMLElement | null = null;
@@ -679,7 +689,7 @@ export function originalPanel(
   } else if (o.media_type === 'application/pdf') {
     view = h('iframe', {
       class: 'original-frame',
-      src: url,
+      src: at,
       title: `${doc.title} (${kind})`,
       loading: 'lazy',
     });
