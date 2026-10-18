@@ -129,10 +129,12 @@ describe('Navigator app', () => {
       app.navigate(addr);
       await settled(() => !!main().querySelector(sel));
     }
-    // A category that lists only its best-known pages says so (audit 2026-10-12 F8).
+    // A category that lists only some of its pages says so (audit 2026-10-12 F8).
     app.navigate('wsp://directory/Arts/Literature/Novels');
     await settled(() => !!main().querySelector('.dir-truncated'));
-    expect(main().querySelector('.dir-truncated')?.textContent).toContain('2 best-known of 7,121');
+    expect(main().querySelector('.dir-truncated')?.textContent).toContain(
+      'Showing 2 of the 7,121 pages',
+    );
     // The rest is one search away, scoped to the site (2026-10-16 field exam).
     const box = main().querySelector<HTMLInputElement>('.dir-truncated input[type="search"]')!;
     box.value = 'Emma';

@@ -63,6 +63,22 @@ describe('original file panel', () => {
     expect(originalPanel({ title: 'x', kind: 'other', original: null })).toBeNull();
   });
 
+  it('does not say a text file cannot be shown (it is, below)', () => {
+    const el = originalPanel({
+      title: 'Internet Protocol',
+      kind: 'papers',
+      original: {
+        url: '/v1/files/r',
+        name: 'RFC-791.txt',
+        media_type: 'text/plain',
+        inline: false,
+        preview_url: null,
+      },
+    })!;
+    expect(el.textContent).not.toContain('cannot show');
+    expect(el.querySelector('h2')?.textContent).toBe('Text of the file');
+  });
+
   it('shows a map PDF as its rendered sheet, not a viewer', () => {
     const el = originalPanel({
       title: 'RI East Greenwich 1942',
@@ -202,5 +218,29 @@ describe('an empty text document', () => {
     const { node } = renderBody({ ...doc, format: 'text', html: null, text: '', original: null });
     expect(node.textContent).toContain('no text of its own');
     expect(node.querySelector('a')?.dataset.wsp).toContain('wsp://search?q=');
+  });
+});
+
+describe('a front page with no way in (2026-10-17 field exam)', () => {
+  it('points to the site’s shelves when it links to almost none of its pages', async () => {
+    const { deadEndNotice } = await import('../src/pages/document.ts');
+    const source = {
+      id: 'aops',
+      home_doc_id: 'wsp:aops/A/Main_Page',
+      domain: ['education'],
+      doc_count: 11529,
+    };
+    const doc = { doc_id: 'wsp:aops/A/Main_Page', source_id: 'aops' };
+    const bare = document.createElement('div');
+    bare.innerHTML = '<p>Popular Topics</p><a data-wsp="wsp://aops/A/One">one</a>';
+    const note = deadEndNotice(doc, source, bare);
+    expect(note?.textContent).toContain('few of the site’s 11,529 pages');
+    expect(note?.querySelector('a')?.dataset.wsp).toBe('wsp://directory/education/aops');
+    const linked = document.createElement('div');
+    linked.innerHTML = ['A', 'B', 'C']
+      .map((x) => `<a data-wsp="wsp://aops/A/${x}">${x}</a>`)
+      .join('');
+    expect(deadEndNotice(doc, source, linked)).toBeNull();
+    expect(deadEndNotice({ ...doc, doc_id: 'wsp:aops/A/Other' }, source, bare)).toBeNull();
   });
 });

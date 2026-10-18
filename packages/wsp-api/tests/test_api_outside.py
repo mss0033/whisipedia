@@ -35,6 +35,7 @@ HELD = {s.source_id for s in SITES} | {
         ("https://en.wikipedia.org/wiki/Alan_Turing#Early_life", (("wikipedia-en-zim", "Alan_Turing"), "Early_life")),
         ("https://en.m.wikipedia.org/wiki/Enigma%20machine", (("wikipedia-en-zim", "Enigma_machine"), "")),
         ("https://en.wikipedia.org/w/index.php?title=Turing_test", (("wikipedia-en-zim", "Turing_test"), "")),
+        ("https://en.wikipedia.org/wiki/?title=Turing_test&oldid=1234", (("wikipedia-en-zim", "Turing_test"), "")),
         ("https://www.appropedia.org/Solar_cooker", (("kiwix-appropedia-en-all", "Solar_cooker"), "")),
         ("https://appropedia.org/Solar_cooker", (("kiwix-appropedia-en-all", "Solar_cooker"), "")),
         # interlanguage links keep the language in the title (Simple Wiktionary's front page)

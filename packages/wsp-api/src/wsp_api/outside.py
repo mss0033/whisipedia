@@ -122,9 +122,9 @@ def _host(netloc: str) -> str:
 
 
 def _wiki_title(path: str, query: str) -> str | None:
-    if path.startswith("/wiki/"):
+    if path.startswith("/wiki/") and len(path) > len("/wiki/"):
         title = path[len("/wiki/") :]
-    elif path in ("/w/index.php", "/index.php"):
+    elif path in ("/w/index.php", "/index.php", "/wiki/"):  # "/wiki/?title=X&oldid=N" (citations)
         title = " ".join(parse_qs(query).get("title", []))
     elif path.count("/") == 1 and len(path) > 1:  # Appropedia, energypedia: /<Title>
         title = path[1:]

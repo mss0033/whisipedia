@@ -71,7 +71,8 @@ function truncatedNote(
     h(
       'p',
       null,
-      `Showing the ${formatNumber(shown)} best-known of ${formatNumber(total)} pages in this category. `,
+      // not "best-known": a site without link data lists its first titles A-Z (2026-10-17 field exam)
+      `Showing ${formatNumber(shown)} of the ${formatNumber(total)} pages in this category. `,
       'Search this site to find any of them:',
     ),
     form,

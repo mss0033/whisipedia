@@ -36,7 +36,7 @@ from urllib.parse import quote, unquote, urlsplit
 
 from wsp_api.addresses import address_of
 
-VERSION = 8  # bump when the output changes: rendered pages are cached by it
+VERSION = 9  # bump when the output changes: rendered pages are cached by it
 
 # Links to these are files (shown by the browser, or saved), not pages. By name, so rewriting needs no
 # lookup per link; a page with such a name (rare) is then offered as a file the asset route refuses.

@@ -8,7 +8,7 @@ import type { DocumentResponse, SearchResults, SourceInfo } from '../api/types.t
 import { docIdToAddress, makeAddress, searchAddress } from '../core/address.ts';
 import { diffLines, diffStats } from '../core/diff.ts';
 import { type Child, h } from '../core/dom.ts';
-import { formatDate } from '../core/format.ts';
+import { formatDate, formatNumber } from '../core/format.ts';
 import { sanitizeDocumentHtml } from '../core/links.ts';
 import {
   formatLabel,
@@ -683,19 +683,25 @@ export function originalPanel(
       loading: 'lazy',
     });
   }
+  // A text file is shown below as it is: no "cannot show" (every RFC said so, 2026-10-17 field exam).
+  const text = o.media_type.startsWith('text/plain');
   return h(
     'section',
     { class: 'original', 'aria-label': 'Original file' },
     links,
     view,
-    view
+    view || text
       ? null
       : h(
           'p',
           { class: 'fineprint' },
           'Your browser cannot show this kind of file here; download it to open it.',
         ),
-    h('h2', { class: 'original-text-heading' }, 'Text extracted from the file'),
+    h(
+      'h2',
+      { class: 'original-text-heading' },
+      text ? 'Text of the file' : 'Text extracted from the file',
+    ),
   );
 }
 
@@ -942,6 +948,36 @@ function footer(app: AppServices, doc: DocumentResponse, address: string): HTMLE
   );
 }
 
+/** Fewer links into its own site than this on a site's front page: it is no way in. */
+export const DEAD_END_LINKS = 3;
+
+/**
+ * A site's front page that links to almost none of its pages (the archive kept the page but not its
+ * links: AoPS's "Popular Topics" are plain text) points to the site's shelves and a random page
+ * (2026-10-17 field exam: "the only way in is Random page").
+ */
+export function deadEndNotice(
+  doc: Pick<DocumentResponse, 'doc_id' | 'source_id'>,
+  source: Pick<SourceInfo, 'id' | 'home_doc_id' | 'domain' | 'doc_count'> | undefined,
+  content: Element,
+): HTMLElement | null {
+  if (!source || source.home_doc_id !== doc.doc_id || !source.domain[0]) return null;
+  const own = [...content.querySelectorAll<HTMLAnchorElement>('a[data-wsp]')].filter((a) =>
+    (a.dataset.wsp ?? '').startsWith(`wsp://${doc.source_id}/`),
+  );
+  if (new Set(own.map((a) => a.dataset.wsp)).size >= DEAD_END_LINKS) return null;
+  return h(
+    'p',
+    { class: 'notice dead-end-notice', role: 'note' },
+    source.doc_count
+      ? `This front page links to few of the site’s ${formatNumber(source.doc_count)} pages. `
+      : 'This front page links to few of the site’s pages. ',
+    wspLink(makeAddress('directory', `${source.domain[0]}/${source.id}`), 'Browse this site'),
+    ' · ',
+    wspLink(makeAddress('random', '', { source: source.id }), 'Random page'),
+  );
+}
+
 export async function render(ctx: PageContext): Promise<PageResult> {
   const route = ctx.route as DocRoute;
   let doc: DocumentResponse;
@@ -1031,6 +1067,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
     }),
     practiceNotice(doc),
     replayStubNotice(doc),
+    route.at ? null : deadEndNotice(doc, source, content),
     copiesNotice(doc, new Map(sources.map((s) => [s.id, s.name]))),
     versionsNotice(doc, here, route),
     doc.format === 'html' && doc.html && looksLikeComic(doc.html) && !route.at
