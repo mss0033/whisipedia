@@ -394,6 +394,75 @@ sources:
     size: {bytes: 2.9e12, measured: false, as_of: '2026-10-18'}
     notes: "458 regional archives (9.6 TB in full, z13-18) where an open national model exists; cut at z16 (~1.2 m/px), about 30 % of their bytes (6-14-26: 264 GB in full, 20 GB to z15). One partition per archive."
 
+  # --- Research round 2026-10-18 (docs/research/ROUND-2026-10-18.md) -------------------------
+  - id: kuphaldt-model
+    name: Modular Electronics Learning (ModEL), Tony R. Kuphaldt
+    publisher: Tony R. Kuphaldt
+    domain: [textbooks, engineering, electronics]
+    tier: T1
+    status: candidate
+    license: CC-BY-4.0
+    legal_basis: open-license
+    access:
+      adapter: doc-collection
+      issuer: Tony R. Kuphaldt (Modular Electronics Learning project)
+      key_prefix: model
+      origins: [ibiblio.org]
+      rate: {requests_per_second: 1}
+      formats: [pdf]
+      discovery:
+        - kind: index-page
+          url: https://ibiblio.org/kuphaldt/socratic/model/
+          documents: 'ibiblio\.org/kuphaldt/socratic/model/[^/]+\.pdf$'
+      filter: {allow_all: true}
+    update: {cadence: P6M, strategy: snapshot-retention}
+    size: {bytes: 1.0e9, measured: false, as_of: '2026-10-18'}
+    notes: "246 module PDFs (2026-10-18): DC and AC circuits, semiconductors, amplifiers, digital logic, RF, modulation, measurement, troubleshooting. Each module carries its CC BY 4.0 licence in its last appendix."
+
+  - id: kuphaldt-instrumentation
+    name: Lessons In Industrial Instrumentation, Tony R. Kuphaldt
+    publisher: Tony R. Kuphaldt
+    domain: [textbooks, engineering, electronics]
+    tier: T1
+    status: candidate
+    license: CC-BY-4.0
+    legal_basis: open-license
+    access:
+      adapter: doc-collection
+      issuer: Tony R. Kuphaldt
+      key_prefix: liii
+      origins: [ibiblio.org]
+      discovery:
+        - kind: list
+          items:
+            - {pub_number: LIII, title: "Lessons In Industrial Instrumentation", url: "https://ibiblio.org/kuphaldt/socratic/sinst/book/liii.pdf"}
+      filter: {allow_all: true}
+    update: {cadence: P1Y, strategy: snapshot-retention}
+    size: {bytes: 6.0e7, measured: false, as_of: '2026-10-18'}
+    notes: "Sensors, signals, control loops and their troubleshooting: the diagnosis side of electronics."
+
+  - id: stull-practical-meteorology
+    name: "Practical Meteorology: An Algebra-based Survey of Atmospheric Science, Roland Stull"
+    publisher: University of British Columbia
+    domain: [textbooks, science, weather]
+    tier: T1
+    status: candidate
+    license: CC-BY-NC-SA-4.0
+    legal_basis: open-license
+    access:
+      adapter: doc-collection
+      issuer: Roland Stull, University of British Columbia
+      key_prefix: prmet
+      origins: [www.eoas.ubc.ca]
+      discovery:
+        - kind: list
+          items:
+            - {pub_number: PrMet v1.02b, title: "Practical Meteorology (whole book, v1.02b)", url: "https://www.eoas.ubc.ca/books/Practical_Meteorology/prmet102/Practical_Meteorology-v1.02b-WholeBookColor.pdf"}
+      filter: {allow_all: true}
+    update: {cadence: P1Y, strategy: snapshot-retention}
+    size: {bytes: 8.2e7, measured: false, as_of: '2026-10-18'}
+    notes: "The free meteorology textbook (UBC): thermodynamics, clouds, storms, forecasting, numerical weather prediction. Non-commercial licence: fits a personal library."
+
   - id: rfc
     name: IETF RFCs
     publisher: IETF
