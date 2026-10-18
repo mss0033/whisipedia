@@ -54,6 +54,15 @@ ECFR_TITLES = tuple(t for t in range(1, 51) if t != 35)  # title 35 (Panama Cana
 USLM = "{http://xml.house.gov/schemas/uslm/1.0}"
 _ALL_TITLES = re.compile(r'href="([^"]*xml_uscAll@([0-9]+-[0-9A-Za-z]+)\.zip)"')
 _SECTION_ID = re.compile(r"^/us/usc/t([0-9]+a?)/s([^/]+)$")
+# a reference names a section or a part of one: "/us/usc/t26/s509/a/2" is section 509(a)(2)
+_REF_ID = re.compile(r"^/us/usc/t([0-9]+a?)/s([^/]+)(?:/.*)?$")
+# "section 509(a)(2)", "section 1795 of title 12", "section 170(b) of this title"; a section "of the
+# Social Security Act" (or any other act) is not a section of the Code and is left alone
+TEXT_REF = re.compile(
+    r"\bsection\s+((?>\d+[A-Za-z]*(?:-\d+[A-Za-z]*)?))(?:\([0-9A-Za-z]+\))*+"
+    r"(?:\s+of\s+(title\s+(\d+a?)|this\s+title)\b"
+    r"|(?!\s+of\s+(?:the|such|that|this|Public|chapter|subtitle|part|subpart)\b))"
+)
 _TITLE_FILE = re.compile(r"usc([0-9]+a?)\.xml$")
 _WS = re.compile(r"[ \t\r\f\v]+")
 _BLANKS = re.compile(r"\n\s*\n+")
@@ -70,6 +79,9 @@ _ECFR_BLOCKS = frozenset(
     {"P", "FP", "HD", "HD1", "HD2", "HD3", "EXTRACT", "NOTE", "CITA", "FTNT", "ROW", "GPOTABLE"}
 )
 _ECFR_SKIP = frozenset({"SECAUTH", "PRTPAGE"})
+# rows whose cells ran together: "Less than 10,000 feet MSL3 statute miles500 feet below" (14 CFR
+# 91.155, 2026-10-17 field exam); USLM's <tr> and the eCFR's GPO <ROW> and HTML <TR>
+_ROWS = frozenset({"tr", "TR", "ROW", "BOXHD"})
 
 
 def _tag(el: ET.Element) -> str:
@@ -83,6 +95,10 @@ def _text(el: ET.Element, blocks: frozenset[str], skip: frozenset[str]) -> str:
     def walk(node: ET.Element) -> None:
         tag = _tag(node)
         if tag in skip:
+            return
+        if tag in _ROWS:  # a table row: its cells on one line, "Class E | 3 statute miles | 500 feet below."
+            cells = (_WS.sub(" ", " ".join("".join(c.itertext()).split())).strip() for c in node)
+            out.append("\n" + " | ".join(c for c in cells if c) + "\n")
             return
         block = tag in blocks
         if block:
@@ -170,8 +186,10 @@ def _uscode_section(el: ET.Element, source_id: str, license_: str) -> DocRecord 
     if status and status not in ("operational",) and status.lower() not in text.lower():
         text += f"\n\n[{status.capitalize()}]"
     links: list[str] = []
+    for ref_match in TEXT_REF.finditer(text):
+        links.append(make_doc_id(source_id, f"t{ref_match.group(3) or title}/s{ref_match.group(1)}"))
     for ref in el.iter(f"{USLM}ref"):
-        target = _SECTION_ID.match(ref.get("href", ""))
+        target = _REF_ID.match(ref.get("href", ""))
         if target is not None and not _inside_notes(el, ref):
             links.append(make_doc_id(source_id, f"t{target.group(1)}/s{target.group(2)}"))
     return _record(
@@ -181,7 +199,7 @@ def _uscode_section(el: ET.Element, source_id: str, license_: str) -> DocRecord 
         f"{citation}: {heading}" if heading else citation,
         text,
         f"https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title{title}-section{number}&num=0&edition=prelim",
-        links=tuple(dict.fromkeys(links)),
+        links=tuple(link for link in dict.fromkeys(links) if not link.endswith(f"/t{title}/s{number}")),
         aliases=(f"{title} USC {number}", f"{title} U.S.C. {number}", f"Title {title} section {number}"),
         meta={"citation": citation},
     )

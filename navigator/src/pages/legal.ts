@@ -11,6 +11,8 @@
  * Shown as plain monospaced text, a short order ("C. A. 5th Cir. Certiorari denied.") read like a
  * metadata card and a long opinion lost its paragraphs.
  */
+
+import { docIdToAddress } from '../core/address.ts';
 import { h } from '../core/dom.ts';
 import { linkify } from '../core/text.ts';
 
@@ -169,4 +171,50 @@ export function renderCase(c: CaseText): HTMLElement {
     ),
     body,
   );
+}
+
+// "section 509(a)(2)", "section 1795 of title 12", "section 170(b) of this title" (wsp_adapters.uslaw.TEXT_REF)
+const SECTION_RE =
+  /\bsection\s+(\d+[A-Za-z]*(?:-\d+[A-Za-z]*)?)(?:\([0-9A-Za-z]+\))*(?:\s+of\s+(?:title\s+(\d+a?)|this\s+title)\b)?/g;
+/** A section "of the Social Security Act" (or any act) is not a section of the Code. */
+const OF_ACT_RE = /^\s+of\s+(?:the|such|that|this|Public|chapter|subtitle|part|subpart)\b/;
+
+/**
+ * The cross references of a US Code section as links ("section 509(a)(2)" opens 26 U.S.C. 509).
+ * The XML marks few of them; the adapter lists the sections the text cites, and only those the
+ * library holds become links (2026-10-17 field exam: 26 U.S.C. 501 named section 509 as plain text).
+ */
+export function linkCodeSections(
+  root: HTMLElement,
+  docId: string,
+  links: ReadonlyArray<{ href: string; target?: string | null }>,
+): void {
+  const own = /^wsp:us-code\/t([0-9]+a?)\//.exec(docId)?.[1];
+  if (!own) return;
+  const held = new Set(links.filter((l) => l.target).map((l) => l.href));
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes: Text[] = [];
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    if (!n.parentElement?.closest('a')) nodes.push(n as Text);
+  }
+  for (const node of nodes) {
+    const text = node.data;
+    const f = document.createDocumentFragment();
+    let pos = 0;
+    for (const m of text.matchAll(SECTION_RE)) {
+      const i = m.index ?? 0;
+      const end = i + m[0].length;
+      const ofTitle = /\sof\s/.test(m[0]);
+      if (!ofTitle && OF_ACT_RE.test(text.slice(end))) continue;
+      const id = `wsp:us-code/t${m[2] ?? own}/s${m[1]}`;
+      if (!held.has(id)) continue;
+      if (i > pos) f.appendChild(document.createTextNode(text.slice(pos, i)));
+      const addr = docIdToAddress(id);
+      f.appendChild(h('a', { href: `#${addr}`, dataset: { wsp: addr } }, m[0]));
+      pos = end;
+    }
+    if (pos === 0) continue;
+    if (pos < text.length) f.appendChild(document.createTextNode(text.slice(pos)));
+    node.replaceWith(f);
+  }
 }

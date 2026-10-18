@@ -31,7 +31,7 @@ import {
 } from '../ui/components.ts';
 import { audioDeck, videoPlayer } from '../ui/player.ts';
 import { comicBar, comicView, isComic, looksLikeComic } from './comics.ts';
-import { parseCase, renderCase } from './legal.ts';
+import { linkCodeSections, parseCase, renderCase } from './legal.ts';
 import { isManPage, looksLikeManPage, manPageView } from './manpages.ts';
 import { looksLikePlanetMath, planetMathView } from './planetmath.ts';
 import { POOL_SOURCE } from './practice.ts';
@@ -205,6 +205,7 @@ export function renderBody(
   // Court opinions: a caption and paragraphs (pages/legal.ts), not raw text.
   const opinion = doc.kind === 'law' ? parseCase(doc.text ?? '', doc.title) : null;
   wrap.appendChild(opinion ? renderCase(opinion) : renderPlainText(text, isPreformatted(doc)));
+  if (doc.source_id === 'us-code') linkCodeSections(wrap, doc.doc_id, doc.links);
   return { node: wrap, broken: wrap.querySelectorAll('.broken-link').length };
 }
 

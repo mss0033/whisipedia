@@ -93,6 +93,23 @@ def test_us_code_sections_are_documents_and_quoted_sections_are_not() -> None:
     assert docs["t26/s502"].text.endswith("Repealed. Pub. L. 1–1")
 
 
+def test_cross_references_in_the_text_and_to_parts_of_sections_are_links() -> None:
+    """Few references are marked in the XML: 26 U.S.C. 501 named section 509 as plain text and its
+    two links went to other titles; "/us/usc/t30/s902/d" (a subsection) was no link (2026-10-17)."""
+    xml = f"""<uscDoc {NS} identifier="/us/usc/t26"><main><title identifier="/us/usc/t26">
+<section identifier="/us/usc/t26/s501"><num value="501">§ 501.</num><heading> Exempt</heading>
+<content>Under section 509(a)(2), section 1795 of title 12, section 170(b) of this title, section 401(a)
+of the Social Security Act, this section and <ref href="/us/usc/t30/s902/d">30 U.S.C. 902(d)</ref>.</content>
+</section></title></main></uscDoc>"""
+    (doc,) = uscode_sections(xml.encode(), "us-code", "PD")
+    assert doc.links == (
+        "wsp:us-code/t26/s509",
+        "wsp:us-code/t12/s1795",
+        "wsp:us-code/t26/s170",
+        "wsp:us-code/t30/s902",
+    )
+
+
 def test_ecfr_sections_and_appendices_carry_their_part() -> None:
     docs = {d.native_id: d for d in ecfr_sections(ECFR.encode(), 21, "ecfr", "PD")}
     assert sorted(docs) == ["t21/appendix-Appendix-A-to-Part-101", "t21/s101.1", "t21/s101.2", "t21/s102.5"]
@@ -166,3 +183,15 @@ class TestEcfrContract(_Unverifiable, SourceAdapterContract):
         for t in ECFR_TITLES:
             (up / ecfr_name(t)).write_bytes(ECFR.encode())
         return up.parent
+
+
+def test_table_cells_are_kept_apart() -> None:
+    """14 CFR 91.155's minima read "Less than 10,000 feet MSL3 statute miles500 feet below" (2026-10-17)."""
+    xml = """<DLPSTEXTCLASS><DIV5 N="91" TYPE="PART"><HEAD>PART 91</HEAD>
+<DIV8 N="§ 91.155" TYPE="SECTION"><HEAD>§ 91.155 Basic VFR weather minimums.</HEAD><DIV><TABLE>
+<TR><TH>Airspace</TH><TH>Flight visibility</TH><TH>Distance from clouds</TH></TR>
+<TR><TD>Less than 10,000 feet MSL</TD><TD>3 statute miles</TD><TD>500 feet below.
+</TD></TR><TR><TD> </TD><TD></TD><TD>1,000 feet above.</TD></TR></TABLE></DIV></DIV8></DIV5></DLPSTEXTCLASS>"""
+    (doc,) = ecfr_sections(xml.encode(), 14, "ecfr", "PD")
+    assert "Airspace | Flight visibility | Distance from clouds" in doc.text
+    assert "Less than 10,000 feet MSL | 3 statute miles | 500 feet below.\n\n1,000 feet above." in doc.text

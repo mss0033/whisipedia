@@ -63,3 +63,24 @@ describe('paragraphs across page breaks', () => {
     ).toEqual(['This case arose when Deal *80 ran up to her.', 'A new paragraph.']);
   });
 });
+
+describe('US Code cross references', () => {
+  it('links the sections the library holds, in this title or another', async () => {
+    const { linkCodeSections } = await import('../src/pages/legal.ts');
+    const p = document.createElement('p');
+    p.textContent =
+      'under section 509(a)(2) (relating to x), section 1795 of title 12, section 401(a) of the Social Security Act, and section 9999.';
+    linkCodeSections(p, 'wsp:us-code/t26/s501', [
+      { href: 'wsp:us-code/t26/s509', target: 'wsp:us-code/t26/s509' },
+      { href: 'wsp:us-code/t12/s1795', target: 'wsp:us-code/t12/s1795' },
+      { href: 'wsp:us-code/t26/s401', target: 'wsp:us-code/t26/s401' },
+      { href: 'wsp:us-code/t26/s9999', target: null },
+    ]);
+    const links = [...p.querySelectorAll('a')].map((a) => [a.textContent, a.dataset.wsp]);
+    expect(links).toEqual([
+      ['section 509(a)(2)', 'wsp://us-code/t26/s509'],
+      ['section 1795 of title 12', 'wsp://us-code/t12/s1795'],
+    ]);
+    expect(p.textContent).toContain('section 401(a) of the Social Security Act');
+  });
+});
