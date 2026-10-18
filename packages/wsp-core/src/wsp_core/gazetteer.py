@@ -6,8 +6,9 @@ not work on the NAS): a table of places, an FTS5 index of their names and aliase
 their positions. ``rank`` orders places of the same name: a country before a town of that name, a
 city of millions before a village (:func:`place_rank`).
 
-Searches are prefix searches on the last word ("interl" finds Interlaken), best rank first among the
-matches, an exact name first of all. Nearby places come from the R*Tree, nearest first.
+Searches are prefix searches on the last word ("interl" finds Interlaken), the most important
+matches first; a name spelled as asked gains a bonus, not precedence. Nearby places come from the
+R*Tree, nearest first.
 """
 
 from __future__ import annotations
@@ -47,7 +48,12 @@ KIND_RANK = {
 }  # fmt: skip
 DEFAULT_RANK = 20  # a feature with a Wikidata id (museum, peak, park, ...)
 MAX_LIMIT = 50
-CANDIDATES = 400  # FTS matches re-ranked per search
+CANDIDATES = 400  # FTS matches re-ranked per search, the most important first
+# A name spelled as asked counts for about a step in KIND_RANK, not for everything: "Tokyo" is the
+# capital (named 東京都, Tokyo in its aliases), not a hamlet named Tokyo; the candidates came in text
+# match order, which put hamlets named New York before the city (2026-10-18).
+EXACT_BONUS = 30.0
+PREFIX_BONUS = 10.0
 
 
 def place_rank(kind: str, population: int | None, has_article: bool) -> float:
@@ -174,12 +180,17 @@ class Gazetteer:
             self._rows(
                 "SELECT p.osm, p.name, p.kind, p.lat, p.lon, p.rank, p.population, p.qid, p.wikipedia "
                 "FROM names JOIN places p ON p.id = names.rowid WHERE names MATCH ? "
-                "ORDER BY names.rank LIMIT ?",
+                "ORDER BY p.rank DESC LIMIT ?",
                 (q, CANDIDATES),
             )
         )
         want = _fold(text.strip())
-        found.sort(key=lambda p: (_fold(p.name) != want, not _fold(p.name).startswith(want), -p.rank))
+
+        def score(p: Place) -> float:
+            name = _fold(p.name)
+            return p.rank + (EXACT_BONUS if name == want else PREFIX_BONUS if name.startswith(want) else 0.0)
+
+        found.sort(key=score, reverse=True)
         return found[:limit]
 
     def nearby(self, lat: float, lon: float, *, radius_m: float = 5000, limit: int = 10) -> list[Place]:

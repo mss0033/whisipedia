@@ -134,6 +134,18 @@ PLANET = [
     (3, (7.85, 46.69), {"name": "Bench", "amenity": "bench"}),
     (4, (-73.88, 42.62), {"name": "Interlaken", "place": "village"}),
     (5, (8.54, 47.37), {"name": "Zürich", "place": "city", "population": "421878", "name:en": "Zurich"}),
+    (
+        6,
+        (139.69, 35.69),
+        {
+            "name": "東京都",
+            "place": "city",
+            "population": "14000000",
+            "name:en": "Tokyo",
+            "wikipedia": "ja:東京都",
+        },
+    ),
+    (7, (142.84, -5.80), {"name": "Tokyo", "place": "hamlet"}),
 ]  # fmt: skip  (id, (lon, lat), tags)
 
 
@@ -155,9 +167,9 @@ def test_the_gazetteer_finds_places_by_name_prefix_and_nearby(tmp_path: Path) ->
     pump = _paced_fifo(pbf, fifo, 50.0)
     places = list(read_gazetteer_places(str(fifo)))
     assert pump.wait(timeout=10) == 0
-    assert {p.osm for p in places} == {"node/1", "node/2", "node/4", "node/5"}  # the bench is neither
+    assert {p.osm for p in places} == {f"node/{i}" for i in (1, 2, 4, 5, 6, 7)}  # the bench is neither
     db = tmp_path / "places.sqlite"
-    assert write_gazetteer(db, places) == 4
+    assert write_gazetteer(db, places) == 6
     gz = Gazetteer(db)
     found = gz.search("interl")
     assert [p.osm for p in found] == ["node/1", "node/4"]  # the town of 5,700 before the village
@@ -165,6 +177,8 @@ def test_the_gazetteer_finds_places_by_name_prefix_and_nearby(tmp_path: Path) ->
     assert gz.search("zurich")[0].name == "Zürich"  # diacritics folded
     assert gz.search("インターラーケン")[0].osm == "node/1"  # an alias
     assert gz.search("") == []
+    # The capital, by its English name, before a hamlet spelled exactly so (2026-10-18).
+    assert [p.osm for p in gz.search("Tokyo")] == ["node/6", "node/7"]
     near = gz.nearby(46.69, 7.86, radius_m=20_000)
     assert [p.osm for p in near] == ["node/1", "node/2"]
     assert near[0].distance_m is not None
