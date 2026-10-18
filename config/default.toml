@@ -12,6 +12,8 @@ parity_scope = "all"             # "all" sealed generations | "irreplaceable" (f
 parity_percent = 10
 parity_bytes_per_sec = 150000000 # parity work (verify + par2 input) rate limit
 ingest_bytes_per_sec = 40000000  # the library's budget for ingest copies and hashes over the NAS link, shared by the ingests running at once; 0 = unpaced; a quarter while the library is in use
+maps_bytes_per_sec = 0           # map downloads' own budget (`wsp maps fetch`; ingests with pace_pool = "maps"), apart from the ingests'; 0 = they share ingest_bytes_per_sec
+pace_pool = ""                   # "maps": this process paces from maps_bytes_per_sec (the maps lane sets WSP__VAULT__PACE_POOL=maps for its seals)
 parity_bytes_per_run = 200000000000  # one bounded parity job; the backfill continues in later runs
 parity_max_set_gb = 64           # data per par2 recovery set (a bigger file is a set of its own)
 parity_threads = 2               # par2 -t (leave CPU for the browser and the indexer); 0 = par2 default

@@ -61,6 +61,12 @@ catalog document per archive is). Discovery kinds:
 
 Archives land in the vault like any upstream file; nothing on the NAS is written by hand.
 
+**Write budget.** Map downloads and their seals pace from their own `[vault] maps_bytes_per_sec`
+(owner, 2026-10-18), in their own pool of peers: at a share of the ingests' 40 MB/s, which five lanes
+split, the 139 GB basemap came in at 8 MB/s, and 12 TB would have taken months. `wsp maps fetch`
+uses it; the maps lane runs its `wsp ingest` seals with `WSP__VAULT__PACE_POOL=maps`. A quarter of it
+while the library is in use, like every write into the vault.
+
 ## 4. Serving (`wsp_api.maps`)
 
 * `wsp_core.pmtiles`: a PMTiles v3 reader (header, varint directories, leaf directories, Hilbert tile

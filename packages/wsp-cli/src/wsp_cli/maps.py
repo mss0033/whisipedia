@@ -174,7 +174,7 @@ def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
     dest_dir = incoming / spec.id / version
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / part.name
-    pace = bootstrap.ingest_pace(cfg)
+    pace = bootstrap.ingest_pace(cfg, pool="maps")
     if part.cut is None:
         checksum = Checksum("md5", part.md5) if part.md5 else None
         write_plan(incoming, spec, version, part, checksum, part.size)

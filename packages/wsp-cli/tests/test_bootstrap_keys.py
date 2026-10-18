@@ -150,3 +150,29 @@ def test_an_idle_process_with_a_slot_stops_counting(tmp_path: Path) -> None:
     os.utime(peer, (now - INGEST_SLOT_FORGET - 1, now - INGEST_SLOT_FORGET - 1))
     assert ingest_peers(slots, now=now) == 1
     assert not peer.exists()  # forgotten
+
+
+def test_map_jobs_pace_from_their_own_budget_and_pool(tmp_path: Path) -> None:
+    """``pool="maps"`` paces from ``maps_bytes_per_sec`` in its own slot pool, so the ingest lanes do
+    not split the map budget (owner, 2026-10-18); with no maps budget it shares the ingest one."""
+    from wsp_cli.bootstrap import INGEST_SLOTS_DIR, MAPS_SLOTS_DIR, ingest_pace
+
+    state = tmp_path / "state"
+    base = {
+        "vault": {"root": str(tmp_path), "ingest_bytes_per_sec": 0, "maps_bytes_per_sec": 1e9},
+        "index": {"root": str(tmp_path / "i")},
+        "orchestrator": {"state_db": str(state / "orchestrator.db")},
+    }
+    assert ingest_pace(base) is None  # the ingest budget is off
+    pace = ingest_pace(base, pool="maps")
+    assert pace is not None
+    pace(1024)
+    by_key = ingest_pace({**base, "vault": {**base["vault"], "pace_pool": "maps"}})
+    assert by_key is not None
+    assert {p.name for p in (state / MAPS_SLOTS_DIR).iterdir()} == {str(os.getpid())}
+    assert not (state / INGEST_SLOTS_DIR).exists()
+    shared = {**base, "vault": {"root": str(tmp_path), "ingest_bytes_per_sec": 1e9}}
+    shared_pace = ingest_pace(shared, pool="maps")
+    assert shared_pace is not None
+    shared_pace(1024)
+    assert (state / INGEST_SLOTS_DIR / str(os.getpid())).exists()  # no maps budget: the ingest pool

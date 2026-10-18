@@ -408,6 +408,7 @@ counted an attempt against it (2026-10-14 01:07)."""
 
 
 INGEST_SLOTS_DIR = "ingest-slots"
+MAPS_SLOTS_DIR = "maps-slots"  # the map jobs' own pool (``[vault] maps_bytes_per_sec``)
 INGEST_SLOTS_EVERY = 3.0  # seconds between looks at who else is ingesting
 INGEST_SLOT_LIVE = 30.0
 """A slot counts only while its owner touches it: every pace() call does (at most every
@@ -449,23 +450,32 @@ def ingest_peers(slots: Path, *, pid: int | None = None, now: float | None = Non
         return 1
 
 
-def ingest_pace(cfg: Mapping[str, Any]) -> Callable[[int], None] | None:
+def ingest_pace(cfg: Mapping[str, Any], *, pool: str | None = None) -> Callable[[int], None] | None:
     """A rate limit for the bytes an ingest reads and writes (``[vault] ingest_bytes_per_sec``; 0 = none).
     The budget is the library's, shared by the ingests running at once (:func:`ingest_peers`), and a
     quarter of it while the owner uses the library (``yield_to_interactive_seconds``): on the NAS, one
     lane adopting PDFs at the link's full speed starved the API's Refinery reads (2026-10-13), and
-    three lanes with a budget each did the same the next night."""
+    three lanes with a budget each did the same the next night.
+
+    ``pool`` (default ``[vault] pace_pool``) ``"maps"`` paces from ``maps_bytes_per_sec`` instead,
+    shared only by the map downloads and seals: terabytes of tiles at a fifth of the ingest budget
+    took months (owner raised it 2026-10-18). 0 there = the map jobs share the ingest budget."""
     from wsp_core.activity import recently_active
     from wsp_vault.ratelimit import RateLimiter
 
     vcfg = section(cfg, "vault")
     budget = float(vcfg.get("ingest_bytes_per_sec", 40e6))
+    slots_dir = INGEST_SLOTS_DIR
+    if (pool if pool is not None else str(vcfg.get("pace_pool", ""))) == "maps":
+        maps_budget = float(vcfg.get("maps_bytes_per_sec", 0))
+        if maps_budget > 0:
+            budget, slots_dir = maps_budget, MAPS_SLOTS_DIR
     if budget <= 0:
         return None
     marker = activity_marker(cfg)
     window = float(vcfg.get("yield_to_interactive_seconds", 300))
     state = paths(cfg).state_dir
-    slots = None if state is None else state / INGEST_SLOTS_DIR
+    slots = None if state is None else state / slots_dir
     limiters: dict[float, RateLimiter] = {}
     looked = {"at": float("-inf"), "peers": 1}
 
