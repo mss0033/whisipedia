@@ -9,7 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from wsp_adapters.maptiles import Cut, check_cut, expected_entries, map_parts
+from wsp_adapters.mapcut import Window, cut_archive
+from wsp_adapters.maptiles import Cut, check_cut, map_parts
 from wsp_cli.maps import _paced_fifo, read_gazetteer_places  # pyright: ignore[reportPrivateUsage]
 from wsp_core.gazetteer import Gazetteer, fts_query, place_rank, write_gazetteer
 from wsp_core.mapsources import MapConfigError
@@ -97,8 +98,6 @@ def test_explicit_parts_and_bad_entries() -> None:
 def test_a_cut_is_checked_against_its_zooms_and_the_reported_entries(tmp_path: Path) -> None:
     path = tmp_path / "cut.pmtiles"
     write_archive(path, [(13, 0, 0, b"a"), (14, 0, 0, b"b")], tile_type=TileType.WEBP)
-    log = "extract.go:441: Region tiles 9, result tile entries 2\n"
-    assert expected_entries(log) == 2
     assert check_cut(path, Cut(max_zoom=14), 2) is None
     assert "above the cut" in (check_cut(path, Cut(max_zoom=13), 2) or "")
     assert "reported 3" in (check_cut(path, Cut(max_zoom=14), 3) or "")
@@ -160,3 +159,101 @@ def test_the_gazetteer_finds_places_by_name_prefix_and_nearby(tmp_path: Path) ->
     assert near[0].distance_m < 1000
     assert place_rank("place=city", 421_878, False) > place_rank("place=town", 5_700, True)
     assert fts_query('new "yo') == '"new" "yo"*'
+
+
+def _source(tmp_path: Path) -> Path:
+    import random
+
+    rng = random.Random(5)
+    tiles = [
+        (z, x, y, rng.randbytes(rng.randint(30, 300)))
+        for z in range(0, 8)
+        for x in range(1 << z)
+        for y in range(1 << z)
+    ]
+    tiles += [(8, x, 0, b"sea") for x in range(256)]  # one stored tile, run-length encoded
+    src = tmp_path / "src.pmtiles"
+    write_archive(src, tiles, tile_type=TileType.WEBP, metadata={"attribution": "test"})
+    return src
+
+
+def test_a_cut_keeps_exactly_the_window_and_its_bytes(tmp_path: Path) -> None:
+    from wsp_core.pmtiles import Archive
+
+    src = _source(tmp_path)
+    data = src.read_bytes()
+    reads: list[int] = []
+
+    def read(off: int, n: int) -> bytes:
+        reads.append(n)
+        return data[off : off + n]
+
+    window = Window(min_zoom=6, max_zoom=8, bbox=(0.0, 0.0, 90.0, 85.0))
+    result = cut_archive(read, window, tmp_path / "cut.pmtiles", tmp_path / "work")
+    a, s = Archive.open_file(tmp_path / "cut.pmtiles"), Archive.open_file(src)
+    try:
+        assert (a.header.min_zoom, a.header.max_zoom) == (6, 8)
+        assert a.metadata() == {"attribution": "test"}
+        assert result.entries == a.header.tile_entries
+        for z in (6, 7, 8):
+            n = 1 << z
+            for x in range(n):
+                for y in range(n):
+                    west, east = x / n * 360 - 180, (x + 1) / n * 360 - 180
+                    north_half = y < n // 2  # tiles wholly south of the equator are outside
+                    want = s.tile(z, x, y) if (east > 0 and west < 90 and north_half) else None
+                    assert a.tile(z, x, y) == want, (z, x, y)
+        assert a.tile(5, 16, 10) is None  # below the window
+    finally:
+        a.close()
+        s.close()
+    assert check_cut(tmp_path / "cut.pmtiles", Cut(min_zoom=6, max_zoom=8), result.entries) is None
+    assert not (tmp_path / "work" / "cut.pmtiles.data").exists()  # staging cleaned up
+
+
+def test_a_cut_that_fails_halfway_resumes_where_it_stopped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import wsp_adapters.mapcut as mapcut
+
+    monkeypatch.setattr(mapcut, "CHUNK_BYTES", 2048)
+    monkeypatch.setattr(mapcut, "GAP", 0)
+    src = _source(tmp_path)
+    data = src.read_bytes()
+    calls = {"n": 0, "fail_after": 12}
+
+    def flaky(off: int, n: int) -> bytes:
+        calls["n"] += 1
+        if calls["fail_after"] and calls["n"] > calls["fail_after"]:
+            raise OSError("stream reset")
+        return data[off : off + n]
+
+    window = Window(min_zoom=0, max_zoom=7)
+    with pytest.raises(OSError, match="stream reset"):
+        cut_archive(flaky, window, tmp_path / "cut.pmtiles", tmp_path / "work", threads=1)
+    state = json.loads((tmp_path / "work" / "cut.pmtiles.state.json").read_text())
+    assert state["done"]  # some chunks landed and were recorded
+    fetched_before = len(state["done"])
+    calls.update(n=0, fail_after=0)
+    seen: list[int] = []
+
+    def counting(off: int, n: int) -> bytes:
+        seen.append(off)
+        return data[off : off + n]
+
+    result = cut_archive(counting, window, tmp_path / "cut.pmtiles", tmp_path / "work", threads=1)
+    plan_chunks = result.chunks
+    # The rerun read the directories again but only the chunks not yet done.
+    assert len(seen) < plan_chunks + 10
+    assert plan_chunks - fetched_before <= len(seen)
+    from wsp_core.pmtiles import Archive
+
+    a, s = Archive.open_file(tmp_path / "cut.pmtiles"), Archive.open_file(src)
+    try:
+        for z in range(0, 8):
+            for x in range(1 << z):
+                for y in range(1 << z):
+                    assert a.tile(z, x, y) == s.tile(z, x, y)
+    finally:
+        a.close()
+        s.close()

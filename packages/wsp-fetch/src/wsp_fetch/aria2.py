@@ -159,6 +159,9 @@ class Aria2Fetcher:
     def get_bytes(self, url: str, *, max_bytes: int = 64 * 1024 * 1024) -> bytes:
         return self._http.get_bytes(url, max_bytes=max_bytes)
 
+    def get_range(self, url: str, start: int, length: int) -> bytes:
+        return self._http.get_range(url, start, length)
+
     def download(self, remote: RemoteFile, dest: Path) -> FetchReport:
         return self.fetch(remote, dest)
 

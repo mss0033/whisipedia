@@ -12,7 +12,7 @@ A part is
 
 * a whole upstream archive, checked against its published MD5 (the Protomaps build, Mapterhorn's
   smaller regional files), or
-* a **cut** of one (``pmtiles extract`` with a zoom range and/or a bounding box). PMTiles stores a
+* a **cut** of one (a zoom range and/or a bounding box (:mod:`wsp_adapters.mapcut`)). PMTiles stores a
   clustered archive's tiles in tile-id order, lowest zoom first, so a zoom cap reads only the bytes
   it keeps: Mapterhorn's 264 GB ``6-14-26`` is 20 GB up to z15. A cut has no upstream checksum; it
   is checked by reading it back (:func:`check_cut`) and stored with our own SHA-256.
@@ -200,18 +200,9 @@ def map_parts(spec_access: Mapping[str, Any], get_bytes: Callable[[str], bytes])
     return out
 
 
-_ENTRIES = re.compile(r"result tile entries (\d+)")
-
-
-def expected_entries(log_text: str) -> int | None:
-    """The tile-entry count ``pmtiles extract`` reports for its result."""
-    found = _ENTRIES.findall(log_text)
-    return int(found[-1]) if found else None
-
-
 def check_cut(path: Path, cut: Cut, entries: int | None) -> str | None:
     """A problem with a cut archive, or None: it must open, stay within the cut's zooms, and hold the
-    tile entries the extract reported."""
+    tile entries the cut planned."""
     try:
         archive = Archive.open_file(path)
     except (OSError, PMTilesError) as exc:
@@ -264,7 +255,6 @@ __all__ = [
     "MapSource",
     "MapTilesAdapter",
     "check_cut",
-    "expected_entries",
     "map_parts",
     "map_source",
 ]

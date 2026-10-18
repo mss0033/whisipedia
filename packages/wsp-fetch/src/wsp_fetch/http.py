@@ -365,6 +365,48 @@ class HttpFetcher:
             except httpx.TransportError as exc:
                 raise _RetryableError(f"{type(exc).__name__}: {exc}") from exc
 
+    def get_range(self, url: str, start: int, length: int) -> bytes:
+        """Bytes ``start``..``start+length-1`` of ``url`` (a 206 for exactly that range; retried).
+
+        For readers of random-access files over HTTP (map archives cut by ``wsp maps fetch``): a server
+        that ignores ``Range`` or answers another range is an error, never a silent whole body."""
+        if length <= 0:
+            return b""
+        end = start + length - 1
+
+        def once() -> bytes:
+            with self.host_slot(url):
+                try:
+                    with self._client.stream("GET", url, headers={"Range": f"bytes={start}-{end}"}) as r:
+                        self._observe(url, r)
+                        if r.status_code == 200:
+                            raise _RetryableError("server ignored Range", fatal_for_mirror=True)
+                        _raise_for_status(r)
+                        cr = _CONTENT_RANGE.match(r.headers.get("Content-Range", ""))
+                        if (
+                            r.status_code != 206
+                            or cr is None
+                            or (int(cr.group(1)), int(cr.group(2))) != (start, end)
+                        ):
+                            raise _RetryableError(
+                                f"bad partial response {r.status_code} {r.headers.get('Content-Range', '')}",
+                                fatal_for_mirror=True,
+                            )
+                        out = bytearray()
+                        for chunk in r.iter_raw():
+                            self.check_cancelled()
+                            out += chunk
+                            self.throttle(len(chunk))
+                            if len(out) > length:
+                                raise _RetryableError("server sent more bytes than requested")
+                except httpx.TransportError as exc:
+                    raise _RetryableError(f"{type(exc).__name__}: {exc}") from exc
+            if len(out) != length:
+                raise _RetryableError(f"short read: {len(out)}/{length} bytes")
+            return bytes(out)
+
+        return self._retrying(f"GET {url} bytes={start}-{end}", once, self.config.max_attempts)
+
     def head(self, url: str) -> RemoteHead:
         """``HEAD`` with redirects followed (optional ``SupportsHead`` capability of the port)."""
 

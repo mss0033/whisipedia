@@ -7,10 +7,11 @@ cut of one), with sizes. ``fetch --source S --partition P`` downloads that part 
 then seals it. ``<cycle>`` is upstream's version when it has one (a Protomaps build date), else today.
 
 A whole archive is downloaded by the library's fetcher (resumable, MD5-checked against upstream,
-paced like every write into the vault). A cut is made by ``pmtiles extract`` (go-pmtiles: ``[maps]
-pmtiles`` in the config, ``$WSP_PMTILES``, or ``pmtiles`` on ``PATH``) on the local work disk, read
-back (:func:`wsp_adapters.maptiles.check_cut`), then copied into ``_incoming`` with its SHA-256, which
-the ingest checks again. Either way the file appears under its final name only when it is whole.
+paced like every write into the vault). A cut is read chunk by chunk with
+``Range`` requests into the local work disk (:mod:`wsp_adapters.mapcut`: resumable, a rerun continues
+where a failure stopped), read back (:func:`wsp_adapters.maptiles.check_cut`), then copied into
+``_incoming`` with its SHA-256, which the ingest checks again. Either way the file appears under its
+final name only when it is whole.
 
 ``gazetteer`` builds the Atlas's place index (:mod:`wsp_core.gazetteer`) from the OpenStreetMap planet
 in the vault: named nodes that are a settlement or locality or carry a Wikidata id. The planet is read
@@ -25,7 +26,6 @@ import hashlib
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -35,8 +35,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TextIO, cast
 
-from wsp_adapters.maptiles import MapConfigError, MapPart, check_cut, expected_entries, map_parts, map_source
+from wsp_adapters.maptiles import MapConfigError, MapPart, check_cut, map_parts, map_source
 from wsp_cli import bootstrap
+from wsp_core.errors import FetchError
 from wsp_core.gazetteer import Place, place_rank, write_gazetteer
 from wsp_core.model import Checksum, RemoteFile, SourceSpec
 from wsp_core.partitions import PartitionError, check_partition, partition_generation_id
@@ -95,14 +96,6 @@ def _part_json(p: MapPart) -> dict[str, object]:
         "bounds": p.bounds,
         "zooms": p.zooms,
     }
-
-
-def pmtiles_binary(cfg: Mapping[str, Any]) -> str | None:
-    configured = str(bootstrap.section(cfg, "maps").get("pmtiles") or os.environ.get("WSP_PMTILES") or "")
-    if configured:
-        path = Path(configured).expanduser()
-        return str(path) if path.is_file() and os.access(path, os.X_OK) else None
-    return shutil.which("pmtiles")
 
 
 def _sealed(vault_root: Path, spec: SourceSpec, version: str) -> bool:
@@ -193,26 +186,40 @@ def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
             fetcher.download(remote, dest)
         out.write(f"{spec.id}/{version}: {part.name} {_gb(dest.stat().st_size)} downloaded\n")
     elif not dest.is_file():
-        binary = pmtiles_binary(cfg)
-        if binary is None:
-            print(
-                "error: pmtiles (go-pmtiles) not found: set [maps] pmtiles or $WSP_PMTILES", file=sys.stderr
-            )
-            return EXIT_REFUSED
+        from wsp_adapters.mapcut import Window, cut_archive
+
         work = (paths.workdir or Path.home() / ".cache" / "whisipedia") / "maps"
-        work.mkdir(parents=True, exist_ok=True)
         local = work / part.name
-        local.unlink(missing_ok=True)
-        cmd = [binary, "extract", *part.cut.args(), part.url, str(local)]
-        out.write(f"{spec.id}/{version}: {' '.join(cmd[1:])}\n")
+        cut = part.cut
+        window = Window(cut.min_zoom, cut.max_zoom, cut.bbox)
+        fetcher = bootstrap.build_fetcher(cfg)
+        get_range = getattr(fetcher, "get_range", None)
+        if not callable(get_range):
+            print("error: this fetcher cannot read byte ranges (acquirer.fetcher)", file=sys.stderr)
+            return EXIT_REFUSED
+        out.write(f"{spec.id}/{version}: cutting {' '.join(cut.args())} from {part.url}\n")
         out.flush()
-        done = subprocess.run(cmd, capture_output=True, text=True, check=False)  # noqa: S603 - our configured binary
-        log = done.stdout + done.stderr
-        if done.returncode != 0 or not local.is_file():
-            out.write(f"failed: pmtiles extract exited {done.returncode}: {log.strip()[-800:]}\n")
-            local.unlink(missing_ok=True)
+        last = [0.0]
+
+        def progress(done: int, total: int, nbytes: int) -> None:
+            now = time.monotonic()
+            if now - last[0] >= 60 or done == total:
+                last[0] = now
+                out.write(f"  {done}/{total} chunks, {_gb(nbytes)}\n")
+                out.flush()
+
+        try:
+            result = cut_archive(
+                lambda off, n: cast(Callable[[str, int, int], bytes], get_range)(part.url, off, n),
+                window,
+                local,
+                work,
+                progress=progress,
+            )
+        except (OSError, ValueError, FetchError) as exc:
+            out.write(f"failed: {part.name}: {exc} (a rerun continues where this stopped)\n")
             return EXIT_FAILED
-        problem = check_cut(local, part.cut, expected_entries(log))
+        problem = check_cut(local, part.cut, result.entries)
         if problem:
             out.write(f"failed: {part.name}: {problem}\n")
             local.unlink(missing_ok=True)

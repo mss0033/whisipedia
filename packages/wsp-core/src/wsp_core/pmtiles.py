@@ -310,6 +310,7 @@ class Archive:
         self.root = parse_directory(decompress(root, h.internal_compression))
         self._leaves: OrderedDict[tuple[int, int], list[Entry]] = OrderedDict()
         self._leaf_cache = leaf_cache
+        self._leaf_span: tuple[int, bytes] | None = None
         self._lock = threading.Lock()
 
     @classmethod
@@ -335,14 +336,24 @@ class Archive:
             else {}
         )
 
-    def _leaf(self, offset: int, length: int) -> list[Entry]:
+    def preload_leaves(self, offset: int, length: int) -> None:
+        """Read ``length`` bytes of the leaf section at ``offset`` in one request; leaves inside it
+        are then parsed from memory (for walks over many leaves, such as a cut)."""
+        self._leaf_span = (offset, self._read(self.header.leaf_offset + offset, length))
+
+    def leaf(self, offset: int, length: int) -> list[Entry]:
+        """The entries of the leaf directory at ``offset`` (relative to the leaf section); cached."""
         key = (offset, length)
         with self._lock:
             hit = self._leaves.get(key)
             if hit is not None:
                 self._leaves.move_to_end(key)
                 return hit
-        raw = self._read(self.header.leaf_offset + offset, length)
+        span = self._leaf_span
+        if span is not None and span[0] <= offset and offset + length <= span[0] + len(span[1]):
+            raw = span[1][offset - span[0] : offset - span[0] + length]
+        else:
+            raw = self._read(self.header.leaf_offset + offset, length)
         entries = parse_directory(decompress(raw, self.header.internal_compression))
         with self._lock:
             self._leaves[key] = entries
@@ -363,7 +374,7 @@ class Archive:
                 return None
             if e.run_length > 0:
                 return h.data_offset + e.offset, e.length
-            entries = self._leaf(e.offset, e.length)
+            entries = self.leaf(e.offset, e.length)
         raise PMTilesError("directories nest too deep")
 
     def tile(self, z: int, x: int, y: int) -> bytes | None:
@@ -447,34 +458,59 @@ def write_archive(
                     seen[key] = (offset, len(blob))
                 offset += len(blob)
                 contents += 1
-        if not entries:
-            raise ValueError("an archive needs at least one tile")
-        root, leaves = _directories(entries)
-        meta = gzip.compress(json.dumps(dict(metadata or {})).encode(), mtime=0)
-        zooms = [id_to_zxy(e.tile_id)[0] for e in (entries[0], entries[-1])]
-        lon = (bounds[0] + bounds[2]) / 2
-        lat = (bounds[1] + bounds[3]) / 2
-        h = Header(
-            root_offset=HEADER_LEN, root_length=len(root),
-            metadata_offset=HEADER_LEN + len(root), metadata_length=len(meta),
-            leaf_offset=HEADER_LEN + len(root) + len(meta), leaf_length=len(leaves),
-            data_offset=HEADER_LEN + len(root) + len(meta) + len(leaves), data_length=offset,
-            addressed_tiles=sum(e.run_length for e in entries), tile_entries=len(entries),
-            tile_contents=contents, clustered=True, internal_compression=Compression.GZIP,
-            tile_compression=tile_compression, tile_type=tile_type,
-            min_zoom=zooms[0], max_zoom=zooms[1],
-            min_lon=bounds[0], min_lat=bounds[1], max_lon=bounds[2], max_lat=bounds[3],
-            center_zoom=zooms[0], center_lon=lon, center_lat=lat,
+        return assemble_archive(
+            path, entries, staged, data_length=offset, contents=contents, tile_type=tile_type,
+            tile_compression=tile_compression, metadata=metadata, bounds=bounds,
         )  # fmt: skip
-        tmp = path.with_name(path.name + ".tmp")
-        with tmp.open("wb") as out, staged.open("rb") as data:
-            out.write(serialize_header(h))
-            out.write(root)
-            out.write(meta)
-            out.write(leaves)
-            while chunk := data.read(1 << 20):
-                out.write(chunk)
-        tmp.replace(path)
-        return h
     finally:
         staged.unlink(missing_ok=True)
+
+
+def assemble_archive(
+    path: Path,
+    entries: list[Entry],
+    data_file: Path,
+    *,
+    data_length: int,
+    contents: int,
+    tile_type: TileType,
+    tile_compression: Compression,
+    metadata: Mapping[str, object] | None,
+    bounds: tuple[float, float, float, float],
+) -> Header:
+    """Write a clustered archive at ``path`` from tile ``entries`` (sorted by id, offsets into
+    ``data_file``) and the first ``data_length`` bytes of ``data_file``; renamed into place whole."""
+    if not entries:
+        raise ValueError("an archive needs at least one tile")
+    root, leaves = _directories(entries)
+    meta = gzip.compress(json.dumps(dict(metadata or {})).encode(), mtime=0)
+    zooms = [id_to_zxy(e.tile_id)[0] for e in (entries[0], entries[-1])]
+    lon = (bounds[0] + bounds[2]) / 2
+    lat = (bounds[1] + bounds[3]) / 2
+    h = Header(
+        root_offset=HEADER_LEN, root_length=len(root),
+        metadata_offset=HEADER_LEN + len(root), metadata_length=len(meta),
+        leaf_offset=HEADER_LEN + len(root) + len(meta), leaf_length=len(leaves),
+        data_offset=HEADER_LEN + len(root) + len(meta) + len(leaves), data_length=data_length,
+        addressed_tiles=sum(e.run_length for e in entries), tile_entries=len(entries),
+        tile_contents=contents, clustered=True, internal_compression=Compression.GZIP,
+        tile_compression=tile_compression, tile_type=tile_type,
+        min_zoom=zooms[0], max_zoom=zooms[1],
+        min_lon=bounds[0], min_lat=bounds[1], max_lon=bounds[2], max_lat=bounds[3],
+        center_zoom=zooms[0], center_lon=lon, center_lat=lat,
+    )  # fmt: skip
+    tmp = path.with_name(path.name + ".tmp")
+    remaining = data_length
+    with tmp.open("wb") as out, data_file.open("rb") as data:
+        out.write(serialize_header(h))
+        out.write(root)
+        out.write(meta)
+        out.write(leaves)
+        while remaining > 0 and (chunk := data.read(min(1 << 20, remaining))):
+            out.write(chunk)
+            remaining -= len(chunk)
+    if remaining:
+        tmp.unlink(missing_ok=True)
+        raise ValueError(f"{data_file} is {remaining} bytes short of the tile data")
+    tmp.replace(path)
+    return h
