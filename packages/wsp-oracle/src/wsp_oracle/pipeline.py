@@ -233,10 +233,12 @@ class OracleSearcher:
             if callable(fast)
             else self.lexical.search(title, limit=10, sources=sources)
         )
-        for h in cast(Sequence[SearchHit], found):
-            if _title_key(h.title) == key:
-                return h
-        return None
+        # Between the same title in several sources the heavier one: the question naming "root cellar"
+        # opened Wiktionary's entry, not the encyclopedia's article (2026-10-17 field exam).
+        same = [h for h in cast(Sequence[SearchHit], found) if _title_key(h.title) == key]
+        if not same:
+            return None
+        return max(same, key=lambda h: self.source_weights.get(h.source_id or source_of(h.doc_id), 1.0))
 
     def _pinnable(self, query: str, hit: SearchHit) -> bool:
         """A down-weighted source (catalog cards, abstracts) never leads by its title alone, unless the

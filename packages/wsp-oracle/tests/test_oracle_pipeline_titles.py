@@ -286,6 +286,7 @@ def test_a_question_names_a_page_no_candidate_is_and_not_a_number(tmp_path: Path
     veg = "store root vegetables humidity range recommended storing " * 20
     docs = [
         *(_doc("wiki", f"en/Veg{i}", f"Vegetable storage {i}", veg) for i in range(12)),
+        _doc("dict", "root_cellar", "root cellar", "A cellar for storing root vegetables."),
         _doc("wiki", "en/Root_cellar", "Root cellar", "An underground room. " * 5),
         _doc("wiki", "en/10_Days", "10 Days", "may refer to films"),
     ]
@@ -293,8 +294,9 @@ def test_a_question_names_a_page_no_candidate_is_and_not_a_number(tmp_path: Path
     idx.upsert(docs)
     idx.commit()
     searcher = OracleSearcher(
-        idx, router=Router.from_sources(["wiki"]), reranker=OverlapReranker(), resolve=idx.lookup
+        idx, router=Router.from_sources(["wiki", "dict"]), reranker=OverlapReranker(), resolve=idx.lookup
     )
+    searcher.source_weights = {"wiki": 1.15}  # the encyclopedia's article, not the dictionary's entry
     route = searcher.router.route(
         "root cellar relative humidity range recommended for storing root vegetables"
     )
