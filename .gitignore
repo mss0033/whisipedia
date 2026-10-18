@@ -9,6 +9,8 @@ config/registry.local.yaml
 # Never commit corpus data
 *.zim
 *.pbf
+# ...but the Atlas's glyph fixtures are protobuf too (mock/fixtures/maps/fonts).
+!navigator/mock/fixtures/maps/fonts/**/*.pbf
 *.bz2
 *.7z
 *.zst

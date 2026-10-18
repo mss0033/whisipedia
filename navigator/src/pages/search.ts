@@ -23,6 +23,7 @@ import {
   searchForm,
   wspLink,
 } from '../ui/components.ts';
+import { atlasPin, upgradeMiniMaps } from './atlas.ts';
 import type { AppServices, PageContext, PageResult } from './types.ts';
 
 type SearchRoute = Extract<Route, { page: 'search' }>;
@@ -154,6 +155,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
     renderResultsPage(resp, route, sourceName, new Map(sources.map((x) => [x.id, x.name]))),
     h('div', { class: 'results-footer' }, bottom.form),
   );
+  void upgradeMiniMaps(body, ctx);
   return { title: `${ENGINE_NAME} Search: ${route.query}`, body };
 }
 
@@ -444,10 +446,26 @@ export function instantBox(a: InstantAnswer): HTMLElement {
         h(
           'div',
           { class: 'map-row' },
-          locator(a),
+          // The world locator; a live map of the library's tiles replaces it when it holds them.
+          h(
+            'div',
+            {
+              class: 'minimap',
+              dataset: { lat: String(a.lat), lon: String(a.lon), zoom: String(a.zoom) },
+            },
+            locator(a),
+          ),
           h('p', null, formatCoord(a), h('br'), a.description ?? ''),
         ),
-        more('Open the map'),
+        h(
+          'p',
+          { class: 'instant-more' },
+          wspLink(atlasPin(a.lat, a.lon, a.zoom), 'Open in the Atlas »'),
+          ' · ',
+          docLink(a.doc_id, 'The place »'),
+          ' ',
+          licenseBadge(a.license),
+        ),
       );
   }
 }

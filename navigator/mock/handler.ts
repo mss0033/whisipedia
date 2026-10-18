@@ -5,6 +5,7 @@
  * Used by the Vite dev/preview middleware (mock/vite-plugin.ts) and by tests.
  * Deterministic except for /v1/random (without `seed`) and uptime.
  */
+
 import type {
   Change,
   DocKind,
@@ -15,6 +16,7 @@ import type {
   SourceInfo,
 } from '../src/api/types.ts';
 import { DESCRIPTIONS, DIRECTORY, DOCS, type FixtureDoc, GENERATION, SOURCES } from './data.ts';
+import { nearby, places, tilesets } from './maps.ts';
 
 type Response<K extends keyof Routes> = Routes[K]['response'];
 
@@ -750,6 +752,12 @@ export function handle(
       const r = directory(params);
       return r ? ok(r) : err(404, 'category_not_found', 'no such category');
     }
+    case '/v1/maps/tilesets':
+      return ok(tilesets());
+    case '/v1/maps/places':
+      return ok(places(params));
+    case '/v1/maps/nearby':
+      return ok(nearby(params));
     case '/v1/random': {
       const r = random(params);
       return r ? ok(r) : err(404, 'empty', 'no pages to pick from');

@@ -4,6 +4,7 @@
  */
 import type { DocKind } from '../api/types.ts';
 import { DOC_KINDS } from '../api/types.ts';
+import { type AtlasRoute, parseAtlas } from '../atlas/view-state.ts';
 import { addressToDocId, parseAddress } from './address.ts';
 
 export type Route =
@@ -49,6 +50,7 @@ export type Route =
     }
   | { page: 'screening' }
   | { page: 'define'; word: string }
+  | { page: 'atlas'; atlas: AtlasRoute }
   | { page: 'invalid'; input: string };
 
 function toKind(v: string | undefined): DocKind | undefined {
@@ -96,6 +98,12 @@ export function resolveRoute(address: string): Route {
       return { page: 'screening' };
     case 'define':
       return { page: 'define', word: a.path };
+    case 'atlas': {
+      // `wsp://maps/relation/62422` named an OpenStreetMap place before the Atlas took `maps`.
+      if (/^(node|way|relation)\/\d+$/.test(a.path))
+        return resolveRoute(`wsp://osm-planet/${a.path}`);
+      return { page: 'atlas', atlas: parseAtlas(a.path, p) };
+    }
     case 'practice': {
       const seed = Number.parseInt(p.seed ?? '', 10);
       const index = Number.parseInt(p.n ?? '0', 10);

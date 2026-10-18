@@ -9,6 +9,8 @@ import { wspMockApi } from './mock/vite-plugin.ts';
  */
 export const CSP = [
   "default-src 'self'",
+  // The Atlas's map controls draw their icons from data: SVGs (maplibre-gl.css).
+  "img-src 'self' data:",
   // The Screening Room's projection test plays a reel made in the page (a blob: URL).
   "media-src 'self' blob:",
   "base-uri 'none'",

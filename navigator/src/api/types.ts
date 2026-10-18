@@ -34,6 +34,8 @@ export type {
   MapAnswer,
   OriginalFile,
   OutsideCopy,
+  PlaceHit,
+  Places,
   Portal,
   QueryIntent,
   RecentChanges,
@@ -44,6 +46,8 @@ export type {
   SourcePage,
   Suggestions,
   SystemStatus,
+  Tileset,
+  Tilesets,
   VaultLocation,
 } from './generated.ts';
 export { API_VERSION } from './generated.ts';

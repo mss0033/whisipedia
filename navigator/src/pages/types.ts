@@ -22,6 +22,8 @@ export interface AppServices {
   /** Per-viewer conveniences (reading positions, practice progress); never relied on. */
   readonly storage: SafeStorage;
   navigate(address: string, opts?: NavOptions): void;
+  /** Show a new address for the page on screen (a map moved) without loading anything. */
+  replaceAddress(address: string): void;
   sources(): Promise<SourceInfo[]>;
   /** Transient status bar message. */
   status(text: string): void;

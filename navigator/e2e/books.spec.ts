@@ -38,9 +38,14 @@ test('a book is read from its first chapter to its end by Next, with nothing cut
   const chapters = await toc.count();
   expect(chapters, 'a table of contents').toBeGreaterThan(3);
   const seen: string[] = [];
+  // A title page before the first chapter is the front matter, not "Chapter 1" (2026-10-17: Pride
+  // and Prejudice's CHAPTER I read "Chapter 2 of 62").
+  let front = false;
   for (let i = 0; i < chapters + 2; i++) {
     const where = await nav.main.locator('.reader-where').innerText();
-    expect(where).toContain(`Chapter ${i + 1} of ${chapters}`);
+    if (i === 0 && where.includes('Front matter')) front = true;
+    else if (front) expect(where).toContain(`Chapter ${i} of ${chapters - 1}`);
+    else expect(where).toContain(`Chapter ${i + 1} of ${chapters}`);
     const title = await nav.main.locator('.reader-chapter h2').innerText();
     const paras = nav.main.locator('.reader-chapter p');
     expect(await paras.count(), `${title}: has text`).toBeGreaterThan(0);

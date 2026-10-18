@@ -23,6 +23,7 @@ import { GlobalHistory, Hotlist, SessionStack } from './core/history.ts';
 import { type Route, resolveRoute } from './core/router.ts';
 import { SafeStorage } from './core/storage.ts';
 import { THEMES, ThemeManager } from './core/theme.ts';
+import * as atlasPage from './pages/atlas.ts';
 import * as definePage from './pages/define.ts';
 import * as directoryPage from './pages/directory.ts';
 import * as documentPage from './pages/document.ts';
@@ -58,6 +59,7 @@ const RENDERERS: Record<Route['page'], PageRenderer> = {
   practice: practicePage.render,
   screening: screeningPage.render,
   define: definePage.render,
+  atlas: atlasPage.render,
   directory: directoryPage.render,
   search: searchPage.render,
   whatsnew: whatsnewPage.render,
@@ -192,6 +194,13 @@ export class App implements AppServices {
 
   navigate(address: string, opts: NavOptions = {}): void {
     void this.load(address, 'push', opts);
+  }
+
+  replaceAddress(address: string): void {
+    const title = this.currentTitle;
+    this.stack.replace(address, title);
+    history.replaceState({ pos: this.stack.position }, '', `#${address}`);
+    this.setLocation(address);
   }
 
   /* ------------------------------ lifecycle ----------------------------- */

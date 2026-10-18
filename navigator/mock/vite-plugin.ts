@@ -6,6 +6,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Connect, Plugin } from 'vite';
 import { handle } from './handler.ts';
+import { mapBinary } from './maps.ts';
 
 async function readBody(req: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
@@ -25,6 +26,18 @@ export function mockMiddleware(latencyMs = 25): Connect.NextHandleFunction {
     const url = new URL(req.url ?? '/', 'http://mock.invalid');
     if (!url.pathname.startsWith('/v1/')) {
       next();
+      return;
+    }
+    const binary = req.method === 'GET' ? mapBinary(url.pathname) : null;
+    if (binary) {
+      // Tiles, glyphs and sprites are bytes, not JSON.
+      const headers: Record<string, string> = { 'Cache-Control': 'no-store' };
+      if ('bytes' in binary) {
+        headers['Content-Type'] = binary.contentType;
+        if (binary.encoding) headers['Content-Encoding'] = binary.encoding;
+      }
+      res.writeHead(binary.status, headers);
+      res.end('bytes' in binary ? binary.bytes : undefined);
       return;
     }
     void (async () => {

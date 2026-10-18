@@ -41,7 +41,8 @@ describe('parseAddress / formatAddress', () => {
       'wsp://wikipedia-en-zim/Alan_Turing',
     );
     expect(normalizeAddress('wsp://')).toBe('wsp://home');
-    expect(normalizeAddress('wsp://maps/relation/1')).toBe('wsp://osm-planet/relation/1');
+    expect(normalizeAddress('wsp://osm/relation/1')).toBe('wsp://osm-planet/relation/1');
+    expect(normalizeAddress('wsp://maps/@1,2,3z')).toBe('wsp://atlas/@1,2,3z');
   });
 
   it('keeps native ids with slashes and encodes only what breaks parsing', () => {

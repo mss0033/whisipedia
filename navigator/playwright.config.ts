@@ -74,7 +74,15 @@ export default defineConfig({
       use: {
         ...devices['Desktop Chrome'],
         viewport: { width: 1280, height: 900 },
-        launchOptions: executablePath ? { executablePath } : {},
+        launchOptions: {
+          ...(executablePath ? { executablePath } : {}),
+          // WebGL in headless Chromium for the Atlas: software rendering (SwiftShader).
+          args: [
+            '--use-angle=swiftshader',
+            '--enable-unsafe-swiftshader',
+            '--ignore-gpu-blocklist',
+          ],
+        },
       },
     },
   ],

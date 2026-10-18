@@ -14,6 +14,7 @@ import type {
   GapReport,
   HistoryPage,
   OutsideCopy,
+  Places,
   Portal,
   RecentChanges,
   Routes,
@@ -23,6 +24,7 @@ import type {
   SourcePage,
   Suggestions,
   SystemStatus,
+  Tilesets,
 } from './types.ts';
 
 export class ApiRequestError extends Error {
@@ -221,6 +223,27 @@ export class WspClient {
 
   system(signal?: AbortSignal): Promise<SystemStatus> {
     return this.get('GET /v1/system', NO_PATH, {}, signal);
+  }
+
+  /** The map tilesets the library holds (the Atlas). */
+  tilesets(signal?: AbortSignal): Promise<Tilesets> {
+    return this.get('GET /v1/maps/tilesets', NO_PATH, {}, signal);
+  }
+
+  /** Named places matching `q` (the gazetteer); 503 until it is built. */
+  places(q: string, limit = 10, signal?: AbortSignal): Promise<Places> {
+    return this.get('GET /v1/maps/places', NO_PATH, { q, limit }, signal);
+  }
+
+  /** Named places within `radius` metres of a point, nearest first. */
+  nearby(
+    lat: number,
+    lon: number,
+    radius = 5000,
+    limit = 10,
+    signal?: AbortSignal,
+  ): Promise<Places> {
+    return this.get('GET /v1/maps/nearby', NO_PATH, { lat, lon, radius, limit }, signal);
   }
 
   portal(signal?: AbortSignal): Promise<Portal> {

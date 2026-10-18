@@ -54,7 +54,12 @@ test('a plain-language query in the location bar: results, filters, paging, back
     await link.click();
     await nav.settled();
     await nav.expectAddress(/[?&]kind=/);
-    await expect(filters.getByText(label, { exact: true })).toHaveAttribute('aria-current', 'page');
+    // The kind's count is the filtered search's own (or none when not exact; 2026-10-17): match its name.
+    const kindName = label.replace(/\s*\([\d,]+\+?\)$/, '');
+    const current = filters.locator('[aria-current="page"]');
+    await expect(current).toHaveText(
+      new RegExp(`^${kindName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s*\\(|$)`),
+    );
     await expect(results.getByRole('listitem').first()).toBeVisible();
     await page.getByRole('button', { name: /^Back\b/ }).click();
     await nav.settled();

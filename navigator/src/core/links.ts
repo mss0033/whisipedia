@@ -47,6 +47,27 @@ export function anchorId(id: string): string {
   return ANCHOR_PREFIX + id;
 }
 
+/**
+ * The Atlas address of a `geo:` URI (RFC 5870: `geo:46.6833,7.85`, `geo:46.68,7.85,560;u=30`; the
+ * common `?z=12` zoom too), pinned, or null when it holds no coordinates.
+ */
+export function geoAddress(uri: string): string | null {
+  const m =
+    /^geo:(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)(?:,-?\d+(?:\.\d+)?)?(?:;[^?]*)?(?:\?(.*))?$/i.exec(
+      uri.trim(),
+    );
+  if (!m) return null;
+  const lat = Number(m[1]);
+  const lon = Number(m[2]);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180)
+    return null;
+  if (lat === 0 && lon === 0 && m[3]) return null; // geo:0,0?q=place: a search, not a point
+  const z = Number(new URLSearchParams(m[3] ?? '').get('z'));
+  const zoom = Number.isFinite(z) && z >= 1 && z <= 21 ? z : 13;
+  const r = (v: number) => String(Number(v.toFixed(6)));
+  return `wsp://atlas/@${r(lat)},${r(lon)},${zoom}z?pin=${r(lat)},${r(lon)}`;
+}
+
 /** Resolve one href from a document into the offline web. */
 export function resolveHref(rawHref: string, ctx: LinkContext): LinkTarget {
   const href = rawHref.trim();
@@ -76,6 +97,11 @@ export function resolveHref(rawHref: string, ctx: LinkContext): LinkTarget {
   if (scheme === 'wsp') {
     const n = normalizeAddress(href);
     return n ? { kind: 'local', address: n } : missing(href, ctx);
+  }
+  if (scheme === 'geo') {
+    // Coordinates (RFC 5870): every Wikipedia article's "Coordinates" link. The Atlas shows them.
+    const at = geoAddress(href);
+    return at ? { kind: 'local', address: at } : missing(href, ctx);
   }
   if (scheme === 'http' || scheme === 'https') {
     const mirrored = interwikiAddress(href); // a Wikimedia page the library holds
