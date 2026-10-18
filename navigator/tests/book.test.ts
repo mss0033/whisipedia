@@ -370,3 +370,50 @@ describe('pages', () => {
     expect(units.map((u) => u.subheads ?? [])).toEqual([[], [0]]);
   });
 });
+
+describe('long Title Case chapter titles and a contents list with summaries (Gibbon, 2026-10-17)', () => {
+  const body = (n: number) =>
+    Array.from({ length: 8 }, (_, i) => `Text ${n}.${i} ${'word '.repeat(60)}.`);
+  const head = (n: string, t: string, part: string) => `Chapter ${n}: ${t}.—Part ${part}.`;
+  const t6 = 'Death Of Severus, Tyranny Of Caracalla, Usurpation Of Marcinus';
+  const t1 = 'The Extent Of The Empire In The Age Of The Antonines';
+  const text = [
+    'Contents',
+    head('I', t1, 'I'),
+    'The Extent And Military Force Of The Empire.',
+    head('V', 'Sale Of The Empire To Didius Julianus', 'II'),
+    head('VI', t6, 'I'),
+    'The Death Of Severus.—Tyranny Of Caracalla.—Follies Of Elagabalus.',
+    head('VI', t6, 'II'),
+    head('VI', t6, 'III'),
+    head('VI', t6, 'IV'),
+    'Preface',
+    ...body(0),
+    head('I', t1, 'I'),
+    ...body(1),
+    head('V', 'Sale Of The Empire To Didius Julianus', 'II'),
+    ...body(5),
+    head('VI', t6, 'I'),
+    ...body(61),
+    head('VI', t6, 'II'),
+    ...body(62),
+    head('VI', t6, 'III'),
+    ...body(63),
+    head('VI', t6, 'IV'),
+    ...body(64),
+  ].join('\n\n');
+
+  it('reads every chapter, and the contents stay in the front matter', () => {
+    const titles = splitChapters(text, 'Gibbon').map((c) => c.title);
+    expect(titles[0]).toBe('Gibbon');
+    expect(titles.slice(-6)).toEqual([
+      head('I', t1, 'I'),
+      head('V', 'Sale Of The Empire To Didius Julianus', 'II'),
+      head('VI', t6, 'I'),
+      head('VI', t6, 'II'),
+      head('VI', t6, 'III'),
+      head('VI', t6, 'IV'),
+    ]);
+    expect(titles.filter((t) => t.startsWith('Chapter V:'))).toHaveLength(1);
+  });
+});

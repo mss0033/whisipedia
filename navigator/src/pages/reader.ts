@@ -61,8 +61,14 @@ export function renderBook(doc: DocumentResponse, text: string, ctx: ReaderConte
   const body = chapterNode(chapter, open, true);
   const number = chapterNumbers(chapters);
   const page = chapter.page;
+  // The front matter (before the first heading) is chapter 0 of the split, not "Chapter 1": CHAPTER I
+  // of Pride and Prejudice read "Chapter 2 of 62" (2026-10-17 field exam).
   const where = [
-    book.length > 1 ? `Chapter ${number[open]! + 1} of ${book.length}` : '',
+    book.length > 1
+      ? number[open] === 0
+        ? 'Front matter'
+        : `Chapter ${number[open]!} of ${book.length - 1}`
+      : '',
     page ? `${book.length > 1 ? ' · page' : 'Page'} ${page.index + 1} of ${page.of}` : '',
   ].join('');
   wrap.append(

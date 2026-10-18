@@ -112,14 +112,25 @@ export function paragraphs(text: string): string[] {
 
 const flat = (p: string) => p.replace(/\n/g, ' ');
 
+/**
+ * "Chapter VI: Death Of Severus, Tyranny Of Caracalla, Usurpation Of Marcinus.—Part I.": a numbered
+ * keyword heading in Title Case may be as long as one in capitals. Gibbon's longer chapter titles
+ * were read as text, and chapters VI and VII were pages of chapter V (2026-10-17 field exam).
+ */
+function numberedTitle(p: string): boolean {
+  if (!/^\p{L}+\s+(?:[IVXLC]+|\d{1,3})\b[.:]?/u.test(p)) return false;
+  const words = p.split(/\s+/).filter((w) => /^\p{L}{4,}/u.test(w));
+  return words.length > 0 && words.every((w) => /^\p{Lu}/u.test(w));
+}
+
 /** Whether a paragraph reads as a chapter heading. */
 export function isHeading(para: string): boolean {
   const p = flat(para).replace(/\]$/, '');
   const caps = p === p.toUpperCase() && /[A-Z]/.test(p);
   if (strong(p)) {
     // "CHAPTER 91. The Pequod Meets the Rose-Bud."
-    if (p.length <= MAX_HEADING_CHARS) return p.split(/\s+/).length <= 12;
-    return caps && p.length <= MAX_CAPS_HEADING_CHARS;
+    if (p.length <= MAX_HEADING_CHARS) return p.split(/\s+/).length <= 12 || numberedTitle(p);
+    return (caps || numberedTitle(p)) && p.length <= MAX_CAPS_HEADING_CHARS;
   }
   if (p.length > MAX_HEADING_CHARS) return false;
   if (/[.!?]$/.test(p) && p.split(/\s+/).length > 6) return false; // a short sentence in capitals is still a sentence
@@ -242,7 +253,10 @@ export function splitChapters(text: string, bookTitle = ''): Chapter[] {
     const k = key(c.title);
     later.set(k, later.get(k)! - 1);
     const small = textLength(c) < MIN_CHAPTER_CHARS;
-    const entry = small && later.get(k)! > 0;
+    // Lines naming chapters still to come: a stretch of a contents list whose entries carry summaries
+    // (Gibbon: "Chapter VI: … Part I." and a paragraph of its subjects), too long to be "small".
+    const echoes = c.paragraphs.filter((p) => isHeading(p) && (later.get(key(p)) ?? 0) > 0).length;
+    const entry = later.get(k)! > 0 && (small || echoes >= 3);
     if (i > 0 && small && next && GROUP_WORD.test(c.title) && !carry) {
       carry = c;
       continue;

@@ -45,12 +45,12 @@ describe('book reader', () => {
       'CHAPTER I',
       'CHAPTER II',
     ]);
-    expect(main().querySelector('.reader-where')?.textContent).toContain('Chapter 1 of 5');
+    expect(main().querySelector('.reader-where')?.textContent).toContain('Front matter');
     expect(main().querySelector('.reader-chapter h2')?.textContent).toContain('Frankenstein');
     expect(main().querySelector('.reader-nav')?.textContent).toContain('Next chapter');
     main().querySelector<HTMLAnchorElement>('.reader-nav a')!.click();
     await settled(
-      () => main().querySelector('.reader-where')?.textContent?.includes('Chapter 2') ?? false,
+      () => main().querySelector('.reader-where')?.textContent?.includes('Chapter 1 of 4') ?? false,
     );
     expect(main().querySelector('.reader-chapter h2')?.textContent).toBe('LETTER 1');
     expect(main().querySelector('.reader-chapter p')?.textContent).toContain('To Mrs. Saville');
@@ -73,7 +73,7 @@ describe('book reader', () => {
     await settled(() => !!main().querySelector('.continue-reading'));
     const item = main().querySelector('.continue-reading li')!;
     expect(item.textContent).toContain('Frankenstein');
-    expect(item.textContent).toContain('chapter 4 of 5');
+    expect(item.textContent).toContain('chapter 3 of 4');
     expect(item.querySelector('a')?.dataset.wsp).toBe(BOOK);
   });
 
@@ -168,12 +168,12 @@ describe('reading a long book a page at a time (2026-10-16 field exam)', () => {
 
   it('cuts a long chapter into pages with next page, then next chapter', async () => {
     const { node, storage } = await read(BOOK_TEXT, 2);
-    expect(node.querySelector('.reader-where')?.textContent).toBe('Chapter 3 of 4 · page 1 of 4');
+    expect(node.querySelector('.reader-where')?.textContent).toBe('Chapter 2 of 3 · page 1 of 4');
     expect(node.querySelector('.reader-nav')?.textContent).toBe('← Previous chapter · Next page →');
     const toc = [...node.querySelectorAll('.reader-toc li')].map((li) => li.textContent);
     expect(toc).toEqual(['Long', 'CHAPTER I', 'CHAPTER II (4 pages)', 'CHAPTER III']);
     expect(positionOf(storage, 'wsp:gutenberg/1')).toMatchObject({
-      where: 'Chapter 3 of 4 · page 1 of 4',
+      where: 'Chapter 2 of 3 · page 1 of 4',
     });
     const last = (await read(BOOK_TEXT, 5)).node;
     expect(last.querySelector('.reader-chapter h2')?.textContent).toBe('CHAPTER II (continued)');
