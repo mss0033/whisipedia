@@ -292,6 +292,108 @@ sources:
     update: {strategy: base-plus-incremental}
     size: {planet_pbf_bytes: 95.2e9, measured: true, as_of: 2026-10-09}
 
+  # --- Atlas map tiles (docs/components/maps.md; owner request 2026-10-18, budget 12 TB) ---------
+  - id: maps-basemap-osm
+    name: OpenStreetMap basemap tiles (Protomaps planet build)
+    publisher: Protomaps (from OpenStreetMap)
+    domain: [geography, maps]
+    tier: T1
+    status: candidate
+    license: ODbL-1.0
+    legal_basis: open-license
+    index: false
+    access:
+      adapter: map-tiles
+      partitioned: true
+      tileset: basemap
+      tile_kind: vector
+      priority: 0
+      attribution: "© OpenStreetMap contributors · Protomaps"
+      discovery: {kind: protomaps-builds, url: "https://build-metadata.protomaps.dev/builds.json", files: "https://build.protomaps.com/"}
+    update: {cadence: P1M, strategy: snapshot-retention}
+    size: {bytes: 138978594030, measured: true, as_of: '2026-10-18'}
+    notes: "Vector tiles z0-15 of the whole planet (roads, buildings, land use, water, places, POIs), one archive, daily builds with MD5 and BLAKE3; drawn by the Atlas to z22."
+
+  - id: maps-assets
+    name: Basemap fonts and sprites (protomaps/basemaps-assets)
+    publisher: Protomaps
+    domain: [maps]
+    tier: T1
+    status: candidate
+    license: OFL-1.1 AND MIT
+    legal_basis: open-license
+    index: false
+    access:
+      adapter: doc-collection
+      issuer: Protomaps
+      key_prefix: basemaps-assets
+      endpoints: [https://github.com/protomaps/basemaps-assets]
+      origins: [github.com, api.github.com]
+      discovery:
+        - kind: git
+          repos: [https://github.com/protomaps/basemaps-assets]
+          snapshot: true
+      filter: {allow_all: true}
+    update: {cadence: P6M, strategy: snapshot-retention}
+    size: {bytes: 6.3e6, measured: true, as_of: '2026-10-18'}
+    notes: "Noto Sans glyph ranges (SIL OFL) and sprites (derived from MIT-licensed tangrams/icons) the basemap style draws its labels and icons with; read by the API from the snapshot zip."
+
+  - id: maps-terrain-world
+    name: World terrain tiles z0-12 (Mapterhorn)
+    publisher: Mapterhorn
+    domain: [geography, maps]
+    tier: T1
+    status: candidate
+    license: LicenseRef-Mapterhorn-attribution
+    legal_basis: open-license
+    index: false
+    access:
+      adapter: map-tiles
+      partitioned: true
+      tileset: terrain
+      tile_kind: raster-dem
+      encoding: terrarium
+      priority: 0
+      attribution: "© Mapterhorn (mapterhorn.com/attribution): Copernicus GLO-30 and national elevation models"
+      discovery:
+        kind: parts
+        parts:
+          - {partition: z0-10, url: "https://download.mapterhorn.com/planet.pmtiles", max_zoom: 10}
+          - {partition: z11, url: "https://download.mapterhorn.com/planet.pmtiles", min_zoom: 11, max_zoom: 11}
+          - {partition: z12-w180, url: "https://download.mapterhorn.com/planet.pmtiles", min_zoom: 12, max_zoom: 12, bbox: [-180, -85.0511, -90, 85.0511]}
+          - {partition: z12-w90, url: "https://download.mapterhorn.com/planet.pmtiles", min_zoom: 12, max_zoom: 12, bbox: [-90, -85.0511, 0, 85.0511]}
+          - {partition: z12-e0, url: "https://download.mapterhorn.com/planet.pmtiles", min_zoom: 12, max_zoom: 12, bbox: [0, -85.0511, 90, 85.0511]}
+          - {partition: z12-e90, url: "https://download.mapterhorn.com/planet.pmtiles", min_zoom: 12, max_zoom: 12, bbox: [90, -85.0511, 180, 85.0511]}
+    update: {cadence: P1Y, strategy: snapshot-retention}
+    size: {bytes: 355579263191, measured: true, as_of: '2026-10-18'}
+    notes: "Terrarium-encoded elevation (512 px WebP), the whole Earth to z12 (~19 m/px). Split in six parts (32, 60, 42, 63, 85, 73 GB by dry run) so no part outgrows the local work disk."
+
+  - id: maps-terrain-regional
+    name: High-resolution terrain tiles z13-16 (Mapterhorn regional archives)
+    publisher: Mapterhorn
+    domain: [geography, maps]
+    tier: T2
+    status: candidate
+    license: LicenseRef-Mapterhorn-attribution
+    legal_basis: open-license
+    index: false
+    access:
+      adapter: map-tiles
+      partitioned: true
+      tileset: terrain
+      tile_kind: raster-dem
+      encoding: terrarium
+      priority: 10
+      attribution: "© Mapterhorn (mapterhorn.com/attribution): national LiDAR and elevation models"
+      discovery:
+        kind: pmtiles-list
+        url: "https://download.mapterhorn.com/download_urls.json"
+        min_zoom: 13
+        cut: {max_zoom: 16}
+    update: {cadence: P1Y, strategy: snapshot-retention}
+    size: {bytes: 2.9e12, measured: false, as_of: '2026-10-18'}
+    notes: "458 regional archives (9.6 TB in full, z13-18) where an open national model exists; cut at z16 (~1.2 m/px), about 30 % of their bytes (6-14-26: 264 GB in full, 20 GB to z15). One partition per archive."
+
   - id: rfc
     name: IETF RFCs
     publisher: IETF

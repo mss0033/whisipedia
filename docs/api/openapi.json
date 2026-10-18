@@ -1337,6 +1337,472 @@
         }
       }
     },
+    "/v1/maps/places": {
+      "get": {
+        "tags": [
+          "maps"
+        ],
+        "summary": "Places",
+        "description": "Named places (OpenStreetMap) matching ``q``, the most important first.",
+        "operationId": "places_v1_maps_places_get",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "description": "A place name; the last word is a prefix.",
+              "title": "Q"
+            },
+            "description": "A place name; the last word is a prefix."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 1,
+              "default": 10,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Places"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid_request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/maps/nearby": {
+      "get": {
+        "tags": [
+          "maps"
+        ],
+        "summary": "Nearby",
+        "description": "Named places within ``radius`` metres of a point, nearest first.",
+        "operationId": "nearby_v1_maps_nearby_get",
+        "parameters": [
+          {
+            "name": "lat",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "maximum": 90,
+              "minimum": -90,
+              "title": "Lat"
+            }
+          },
+          {
+            "name": "lon",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "maximum": 180,
+              "minimum": -180,
+              "title": "Lon"
+            }
+          },
+          {
+            "name": "radius",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "maximum": 200000,
+              "exclusiveMinimum": 0,
+              "description": "Metres.",
+              "default": 5000,
+              "title": "Radius"
+            },
+            "description": "Metres."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 1,
+              "default": 10,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Places"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid_request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/maps/tilesets": {
+      "get": {
+        "tags": [
+          "maps"
+        ],
+        "summary": "Tilesets",
+        "description": "The tilesets the library holds now, with their tile URL templates.",
+        "operationId": "tilesets_v1_maps_tilesets_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Tilesets"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/maps/tiles/{tileset}/{z}/{x}/{y}": {
+      "get": {
+        "tags": [
+          "maps"
+        ],
+        "summary": "Tile",
+        "description": "One tile. 204 for an empty vector tile; a raster or terrain tile only coarser data covers\nis cut from that data.",
+        "operationId": "tile_v1_maps_tiles__tileset___z___x___y__get",
+        "parameters": [
+          {
+            "name": "tileset",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{0,31}$",
+              "title": "Tileset"
+            }
+          },
+          {
+            "name": "z",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 24,
+              "minimum": 0,
+              "title": "Z"
+            }
+          },
+          {
+            "name": "x",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "title": "X"
+            }
+          },
+          {
+            "name": "y",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d+(\\.(mvt|pbf|webp|png|jpg))?$",
+              "title": "Y"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "bad_request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid_request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/maps/glyphs/{fontstack}/{range_}": {
+      "get": {
+        "tags": [
+          "maps"
+        ],
+        "summary": "Glyphs",
+        "description": "Glyphs of a font stack (MapLibre asks for \"Noto Sans Regular\" or \"A,B\"): the first font held.",
+        "operationId": "glyphs_v1_maps_glyphs__fontstack___range___get",
+        "parameters": [
+          {
+            "name": "fontstack",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Fontstack"
+            }
+          },
+          {
+            "name": "range_",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Range "
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid_request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/maps/sprites/{version}/{name}": {
+      "get": {
+        "tags": [
+          "maps"
+        ],
+        "summary": "Sprites",
+        "description": "A sprite sheet (``light.json``, ``dark@2x.png``, ...).",
+        "operationId": "sprites_v1_maps_sprites__version___name__get",
+        "parameters": [
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Version"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid_request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/portal": {
       "get": {
         "tags": [
@@ -3942,6 +4408,107 @@
         ],
         "title": "ParityStatus"
       },
+      "PlaceHit": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind",
+            "description": "`place=city`, `natural=peak`, ..."
+          },
+          "lat": {
+            "type": "number",
+            "title": "Lat"
+          },
+          "lon": {
+            "type": "number",
+            "title": "Lon"
+          },
+          "population": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Population"
+          },
+          "wikidata": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wikidata"
+          },
+          "wikipedia": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wikipedia",
+            "description": "OpenStreetMap's `wikipedia` tag, \"en:Interlaken\"."
+          },
+          "osm": {
+            "type": "string",
+            "title": "Osm",
+            "description": "`node/123`"
+          },
+          "distance_m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Distance M",
+            "description": "From the point asked about (nearby only)."
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "kind",
+          "lat",
+          "lon",
+          "population",
+          "wikidata",
+          "wikipedia",
+          "osm",
+          "distance_m"
+        ],
+        "title": "PlaceHit"
+      },
+      "Places": {
+        "properties": {
+          "places": {
+            "items": {
+              "$ref": "#/components/schemas/PlaceHit"
+            },
+            "type": "array",
+            "title": "Places"
+          }
+        },
+        "type": "object",
+        "required": [
+          "places"
+        ],
+        "title": "Places"
+      },
       "Portal": {
         "properties": {
           "date": {
@@ -5170,6 +5737,140 @@
           "ops"
         ],
         "title": "SystemStatus"
+      },
+      "Tileset": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "`basemap`, `terrain`, `imagery`, ..."
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind",
+            "description": "`vector`, `raster` or `raster-dem`."
+          },
+          "encoding": {
+            "type": "string",
+            "title": "Encoding",
+            "description": "`terrarium` or `mapbox` for raster-dem; empty otherwise."
+          },
+          "tile_type": {
+            "type": "string",
+            "title": "Tile Type",
+            "description": "`mvt`, `webp`, `png`, `jpeg`."
+          },
+          "tile_size": {
+            "type": "integer",
+            "title": "Tile Size",
+            "description": "Pixels per raster tile side (512 for Mapterhorn); 512 for vector."
+          },
+          "min_zoom": {
+            "type": "integer",
+            "title": "Min Zoom"
+          },
+          "max_zoom": {
+            "type": "integer",
+            "title": "Max Zoom",
+            "description": "Highest zoom the API serves; the browser overzooms beyond."
+          },
+          "held_max_zoom": {
+            "type": "integer",
+            "title": "Held Max Zoom",
+            "description": "Highest zoom any archive holds (somewhere)."
+          },
+          "bounds": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Bounds",
+            "description": "min_lon, min_lat, max_lon, max_lat of everything held."
+          },
+          "archives": {
+            "type": "integer",
+            "title": "Archives"
+          },
+          "attribution": {
+            "type": "string",
+            "title": "Attribution"
+          },
+          "tiles": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tiles",
+            "description": "URL template, `{z}/{x}/{y}`."
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "encoding",
+          "tile_type",
+          "tile_size",
+          "min_zoom",
+          "max_zoom",
+          "held_max_zoom",
+          "bounds",
+          "archives",
+          "attribution",
+          "tiles"
+        ],
+        "title": "Tileset"
+      },
+      "Tilesets": {
+        "properties": {
+          "tilesets": {
+            "items": {
+              "$ref": "#/components/schemas/Tileset"
+            },
+            "type": "array",
+            "title": "Tilesets"
+          },
+          "glyphs": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Glyphs",
+            "description": "Glyph URL template, or null when no fonts are held."
+          },
+          "sprite": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sprite",
+            "description": "Sprite base URL (MapLibre appends .json/.png), or null."
+          },
+          "fonts": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Fonts",
+            "description": "Font stacks the glyphs cover."
+          }
+        },
+        "type": "object",
+        "required": [
+          "tilesets",
+          "glyphs",
+          "sprite",
+          "fonts"
+        ],
+        "title": "Tilesets"
       },
       "TrawlProblem": {
         "properties": {

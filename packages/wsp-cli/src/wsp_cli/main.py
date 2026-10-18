@@ -36,7 +36,11 @@ from wsp_sdk import WspApiError, WspClient
 
 DEFAULT_HOST = "127.0.0.1"  # = wsp_api.services.DEFAULT_HOST
 DEFAULT_PORT = 8737  # = wsp_api.services.DEFAULT_PORT
-LAZY_GROUPS = {"collections": "wsp_cli.doccollections", "plan": "wsp_cli.multilingual"}
+LAZY_GROUPS = {
+    "collections": "wsp_cli.doccollections",
+    "plan": "wsp_cli.multilingual",
+    "maps": "wsp_cli.maps",
+}
 _TAKES_VALUE = frozenset({"--config-dir", "--url"})
 
 Handler = Callable[[argparse.Namespace, TextIO], int]

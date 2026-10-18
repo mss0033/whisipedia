@@ -430,6 +430,26 @@ export interface ParityStatus {
   last_run: Record<string, JsonValue> | null;
 }
 
+export interface PlaceHit {
+  name: string;
+  /** `place=city`, `natural=peak`, ... */
+  kind: string;
+  lat: number;
+  lon: number;
+  population: number | null;
+  wikidata: string | null;
+  /** OpenStreetMap's `wikipedia` tag, "en:Interlaken". */
+  wikipedia: string | null;
+  /** `node/123` */
+  osm: string;
+  /** From the point asked about (nearby only). */
+  distance_m: number | null;
+}
+
+export interface Places {
+  places: Array<PlaceHit>;
+}
+
 /** Start page content (`wsp://home`, PLAN §10.2). */
 export interface Portal {
   date: string;
@@ -665,6 +685,40 @@ export interface SystemStatus {
   ops: OpsStatus | null;
 }
 
+export interface Tileset {
+  /** `basemap`, `terrain`, `imagery`, ... */
+  id: string;
+  /** `vector`, `raster` or `raster-dem`. */
+  kind: string;
+  /** `terrarium` or `mapbox` for raster-dem; empty otherwise. */
+  encoding: string;
+  /** `mvt`, `webp`, `png`, `jpeg`. */
+  tile_type: string;
+  /** Pixels per raster tile side (512 for Mapterhorn); 512 for vector. */
+  tile_size: number;
+  min_zoom: number;
+  /** Highest zoom the API serves; the browser overzooms beyond. */
+  max_zoom: number;
+  /** Highest zoom any archive holds (somewhere). */
+  held_max_zoom: number;
+  /** min_lon, min_lat, max_lon, max_lat of everything held. */
+  bounds: Array<number>;
+  archives: number;
+  attribution: string;
+  /** URL template, `{z}/{x}/{y}`. */
+  tiles: Array<string>;
+}
+
+export interface Tilesets {
+  tilesets: Array<Tileset>;
+  /** Glyph URL template, or null when no fonts are held. */
+  glyphs: string | null;
+  /** Sprite base URL (MapLibre appends .json/.png), or null. */
+  sprite: string | null;
+  /** Font stacks the glyphs cover. */
+  fonts: Array<string>;
+}
+
 export interface TrawlProblem {
   at: string;
   address: string;
@@ -882,6 +936,69 @@ export interface Routes {
     query: Record<string, never>;
     body: null;
     response: null;
+  };
+  /** Places */
+  'GET /v1/maps/places': {
+    path: Record<string, never>;
+    query: {
+      /** A place name; the last word is a prefix. */
+      q: string;
+      limit?: number | undefined;
+    };
+    body: null;
+    response: Places;
+  };
+  /** Nearby */
+  'GET /v1/maps/nearby': {
+    path: Record<string, never>;
+    query: {
+      lat: number;
+      lon: number;
+      /** Metres. */
+      radius?: number | undefined;
+      limit?: number | undefined;
+    };
+    body: null;
+    response: Places;
+  };
+  /** Tilesets */
+  'GET /v1/maps/tilesets': {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: null;
+    response: Tilesets;
+  };
+  /** Tile */
+  'GET /v1/maps/tiles/{tileset}/{z}/{x}/{y}': {
+    path: {
+      tileset: string;
+      z: number;
+      x: number;
+      y: string;
+    };
+    query: Record<string, never>;
+    body: null;
+    response: unknown;
+  };
+  /** Glyphs */
+  'GET /v1/maps/glyphs/{fontstack}/{range_}': {
+    path: {
+      fontstack: string;
+      range_: string;
+    };
+    query: Record<string, never>;
+    body: null;
+    response: unknown;
+  };
+  /** Sprites */
+  'GET /v1/maps/sprites/{version}/{name}': {
+    path: {
+      version: string;
+      name: string;
+    };
+    query: Record<string, never>;
+    body: null;
+    response: unknown;
   };
   /** Portal */
   'GET /v1/portal': {

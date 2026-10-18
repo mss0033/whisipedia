@@ -40,6 +40,7 @@ const KNOWN = new Set([
   'format',
   'minLength',
   'maxLength',
+  'pattern', // validation only: no TypeScript shape
   'minItems',
   'maxItems',
   'minimum',

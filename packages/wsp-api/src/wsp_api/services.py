@@ -75,6 +75,7 @@ class ApiSettings:
     snapshot_seconds: float = 0.0
     ops_seconds: float = 0.0  # operations status, proposals and ledger tail (background: period)
     cache_dir: Path | None = None  # local disk for derived data (the ZIM book index); None: memory only
+    gazetteer: Path | None = None  # the Atlas's place index (wsp maps gazetteer); None: no place search
     # ZIM reads: worker processes so a SIGBUS from the NAS cannot kill the API (wsp_api.zimpool);
     # 0 reads in-process (tests, the sample backend, the CLI).
     zim_workers: int = 0

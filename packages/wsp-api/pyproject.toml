@@ -7,7 +7,8 @@ dependencies = [
   "wsp-core",
   "fastapi>=0.143",  # native telemetry switch (we turn it off)
   "httpx>=0.27",
-  "libzim>=3.6",  # ZIM HTML and images for documents (wsp_api.zim)
+  "libzim>=3.6",
+  "numpy>=2",  # terrain tiles cut from coarser ones (wsp_api.maps)  # ZIM HTML and images for documents (wsp_api.zim)
   "pydantic>=2.9",
   "pillow>=11",
   "pypdfium2>=4.30",

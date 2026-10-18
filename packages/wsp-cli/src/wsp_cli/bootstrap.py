@@ -145,7 +145,14 @@ def api_settings(cfg: Mapping[str, Any], lay: Layout, *, static_dir: Path | None
         snapshot_seconds=every,
         ops_seconds=every,
         cache_dir=api_cache_dir(cfg),
+        gazetteer=gazetteer_file(cfg),
     )
+
+
+def gazetteer_file(cfg: Mapping[str, Any]) -> Path | None:
+    """``<index.root>/gazetteer/places.sqlite`` (written by ``wsp maps gazetteer``), or None."""
+    root = paths(cfg).index_root
+    return None if root is None else root / "gazetteer" / "places.sqlite"
 
 
 def serve_settings(cfg: Mapping[str, Any], lay: Layout, *, static_dir: Path | None = None) -> ApiSettings:
