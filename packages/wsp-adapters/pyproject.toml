@@ -29,6 +29,7 @@ us-law = "wsp_adapters.uslaw:UsLawAdapter"
 dailymed = "wsp_adapters.dailymed:DailyMedAdapter"
 ncbi-bookshelf = "wsp_adapters.bookshelf:BookshelfAdapter"
 map-tiles = "wsp_adapters.maptiles:MapTilesAdapter"
+american-stories = "wsp_adapters.americanstories:AmericanStoriesAdapter"
 
 [dependency-groups]
 dev = ["wsp-core[testing]"]

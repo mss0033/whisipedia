@@ -576,6 +576,29 @@ sources:
     access: {adapter: http-files}
     update: {strategy: base-plus-incremental}
     size: {bytes: 2e12, measured: false, as_of: 2026-10-09}
+    notes: "Page OCR of 23.8 M pages in 3,010 batches (2.47 TB, loc.gov datasets portal). Its article-level text is held as american-stories; the page OCR waits until a reader needs the columns American Stories left out."
+
+  - id: american-stories
+    name: American Stories (Chronicling America, article by article)
+    publisher: Melissa Dell et al., Harvard University (from the Library of Congress's Chronicling America)
+    domain: [news, history]
+    tier: T2
+    status: candidate
+    license: CC-BY-4.0
+    legal_basis: open-license
+    # Owner approved 2026-10-18 (D11: a derived copy of a public record). 1770-1963, one archive per
+    # year (340 GB): each article found on the page by a layout model, its OCR as the text. Fetched
+    # with `wsp bulk fetch` (larger than the local disk); the index reads an era at a time
+    # (index_years): the whole set is about 370 GB of text and 300 M articles.
+    access:
+      adapter: american-stories
+      index_years: [1770, 1865]
+    update: {cadence: P1Y, strategy: snapshot-retention}
+    size: {bytes: 340384594535, measured: true, as_of: '2026-10-18'}
+    # Uncorrected OCR of old newsprint, 300 M articles: no bonus, so a question finds the references
+    # first and the newspaper of the day beside them.
+    rank_prior: 0
+    notes: "Research round 2026-10-18 (docs/research/ROUND-2026-10-18.md). Each article links to its page scan on loc.gov."
 
   - id: stanford-encyclopedia-philosophy
     name: Stanford Encyclopedia of Philosophy

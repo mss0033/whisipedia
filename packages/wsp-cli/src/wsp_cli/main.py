@@ -40,6 +40,7 @@ LAZY_GROUPS = {
     "collections": "wsp_cli.doccollections",
     "plan": "wsp_cli.multilingual",
     "maps": "wsp_cli.maps",
+    "bulk": "wsp_cli.bulk",
 }
 _TAKES_VALUE = frozenset({"--config-dir", "--url"})
 
