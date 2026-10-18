@@ -35,7 +35,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TextIO, cast
 
-from wsp_adapters.maptiles import MapConfigError, MapPart, check_cut, map_parts, map_source
+from wsp_adapters.maptiles import Cut, MapConfigError, MapPart, check_cut, map_parts, map_source
 from wsp_cli import bootstrap
 from wsp_core.errors import FetchError
 from wsp_core.gazetteer import Place, place_rank, write_gazetteer
@@ -126,6 +126,12 @@ def write_plan(
     return path
 
 
+def reusable_cut(local: Path, cut: Cut) -> bool:
+    """A finished cut in the work directory (renamed into place, so whole) that fits ``cut``."""
+    building = local.with_name(local.name + ".building")
+    return local.is_file() and not building.exists() and check_cut(local, cut, None) is None
+
+
 def copy_hashed(src: Path, dest: Path, pace: Callable[[int], None] | None) -> str:
     """Copy ``src`` to ``dest`` (via ``dest.partial``, renamed when whole); its SHA-256."""
     tmp = dest.with_name(dest.name + ".partial")
@@ -208,18 +214,24 @@ def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
                 out.write(f"  {done}/{total} chunks, {_gb(nbytes)}\n")
                 out.flush()
 
-        try:
-            result = cut_archive(
-                lambda off, n: cast(Callable[[str, int, int], bytes], get_range)(part.url, off, n),
-                window,
-                local,
-                work,
-                progress=progress,
-            )
-        except (OSError, ValueError, FetchError) as exc:
-            out.write(f"failed: {part.name}: {exc} (a rerun continues where this stopped)\n")
-            return EXIT_FAILED
-        problem = check_cut(local, part.cut, result.entries)
+        entries: int | None = None
+        if reusable_cut(local, cut):
+            # Cut by an earlier run that stopped while copying it into _incoming: only the copy is left.
+            out.write(f"  {local.name}: cut by an earlier run, {_gb(local.stat().st_size)}\n")
+        else:
+            try:
+                result = cut_archive(
+                    lambda off, n: cast(Callable[[str, int, int], bytes], get_range)(part.url, off, n),
+                    window,
+                    local,
+                    work,
+                    progress=progress,
+                )
+            except (OSError, ValueError, FetchError) as exc:
+                out.write(f"failed: {part.name}: {exc} (a rerun continues where this stopped)\n")
+                return EXIT_FAILED
+            entries = result.entries
+        problem = check_cut(local, part.cut, entries)
         if problem:
             out.write(f"failed: {part.name}: {problem}\n")
             local.unlink(missing_ok=True)

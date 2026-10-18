@@ -200,9 +200,20 @@ def map_parts(spec_access: Mapping[str, Any], get_bytes: Callable[[str], bytes])
     return out
 
 
+def _within(
+    bounds: tuple[float, float, float, float], bbox: tuple[float, float, float, float], eps: float = 1e-6
+) -> tuple[bool, bool, bool, bool]:
+    return (
+        bounds[0] >= bbox[0] - eps,
+        bounds[1] >= bbox[1] - eps,
+        bounds[2] <= bbox[2] + eps,
+        bounds[3] <= bbox[3] + eps,
+    )
+
+
 def check_cut(path: Path, cut: Cut, entries: int | None) -> str | None:
-    """A problem with a cut archive, or None: it must open, stay within the cut's zooms, and hold the
-    tile entries the cut planned."""
+    """A problem with a cut archive, or None: it must open, stay within the cut's zooms and window,
+    and hold the tile entries the cut planned (``entries``; None: not known)."""
     try:
         archive = Archive.open_file(path)
     except (OSError, PMTilesError) as exc:
@@ -213,6 +224,8 @@ def check_cut(path: Path, cut: Cut, entries: int | None) -> str | None:
             return f"max zoom {h.max_zoom} above the cut's {cut.max_zoom}"
         if cut.min_zoom is not None and h.min_zoom < cut.min_zoom:
             return f"min zoom {h.min_zoom} below the cut's {cut.min_zoom}"
+        if cut.bbox is not None and not all(_within(h.bounds, cut.bbox)):  # another window's cut
+            return f"bounds {h.bounds} outside the cut's {cut.bbox}"
         if entries is not None and h.tile_entries != entries:
             return f"{h.tile_entries} tile entries, the extract reported {entries}"
         if not h.clustered:

@@ -11,7 +11,7 @@ import pytest
 
 from wsp_adapters.mapcut import Window, cut_archive
 from wsp_adapters.maptiles import Cut, check_cut, map_parts
-from wsp_cli.maps import _paced_fifo, read_gazetteer_places  # pyright: ignore[reportPrivateUsage]
+from wsp_cli.maps import _paced_fifo, read_gazetteer_places, reusable_cut  # pyright: ignore[reportPrivateUsage]
 from wsp_core.gazetteer import Gazetteer, fts_query, place_rank, write_gazetteer
 from wsp_core.mapsources import MapConfigError
 from wsp_core.pmtiles import TileType, write_archive
@@ -103,6 +103,18 @@ def test_a_cut_is_checked_against_its_zooms_and_the_reported_entries(tmp_path: P
     assert "reported 3" in (check_cut(path, Cut(max_zoom=14), 3) or "")
     (tmp_path / "junk.pmtiles").write_bytes(b"<html>")
     assert "not a readable archive" in (check_cut(tmp_path / "junk.pmtiles", Cut(max_zoom=14), None) or "")
+
+
+def test_a_finished_cut_is_reused_and_a_half_built_or_foreign_one_is_not(tmp_path: Path) -> None:
+    """A lane stopped while copying a 60 GB cut into _incoming must not cut it again (2026-10-18)."""
+    local = tmp_path / "planet-z11.pmtiles"
+    write_archive(local, [(11, 0, 0, b"a")], tile_type=TileType.WEBP, bounds=(-180, -85, -90, 85))
+    assert reusable_cut(local, Cut(min_zoom=11, max_zoom=11, bbox=(-180, -85.0511, -90, 85.0511)))
+    assert not reusable_cut(local, Cut(min_zoom=12, max_zoom=12))  # another part's zooms
+    assert not reusable_cut(local, Cut(max_zoom=11, bbox=(0, -85, 90, 85)))  # another window
+    (tmp_path / "planet-z11.pmtiles.building").write_bytes(b"")
+    assert not reusable_cut(local, Cut(max_zoom=11))  # a cut in progress
+    assert not reusable_cut(tmp_path / "none.pmtiles", Cut(max_zoom=11))
 
 
 PLANET = [
