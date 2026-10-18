@@ -278,3 +278,29 @@ def test_a_title_without_a_qualifier_leads_one_with(library: TantivyIndex) -> No
     ]
     pins = searcher._title_pins(route, copies, set())  # pyright: ignore[reportPrivateUsage]
     assert pins[0].source_id == "wikipedia-top10"
+
+
+def test_a_question_names_a_page_no_candidate_is_and_not_a_number(tmp_path: Path) -> None:
+    # 2026-10-17 field exam: "root cellar relative humidity ..." never reached the article Root cellar
+    # (long texts about vegetables outscored it), and "... zinc 20 mg 10 days" led with "10 Days".
+    veg = "store root vegetables humidity range recommended storing " * 20
+    docs = [
+        *(_doc("wiki", f"en/Veg{i}", f"Vegetable storage {i}", veg) for i in range(12)),
+        _doc("wiki", "en/Root_cellar", "Root cellar", "An underground room. " * 5),
+        _doc("wiki", "en/10_Days", "10 Days", "may refer to films"),
+    ]
+    idx = TantivyIndex(tmp_path / "lexical", SMALL)
+    idx.upsert(docs)
+    idx.commit()
+    searcher = OracleSearcher(
+        idx, router=Router.from_sources(["wiki"]), reranker=OverlapReranker(), resolve=idx.lookup
+    )
+    route = searcher.router.route(
+        "root cellar relative humidity range recommended for storing root vegetables"
+    )
+    found = searcher._embedded_title(route, [], set())  # pyright: ignore[reportPrivateUsage]
+    assert [h.doc_id for h in found] == [make_doc_id("wiki", "en/Root_cellar")]
+    days = searcher.router.route("diarrhoea children oral rehydration zinc 20 mg 10 days")
+    held = [SearchHit(make_doc_id("wiki", "en/10_Days"), 1.0, "10 Days", "", "wiki")]
+    assert searcher._embedded_title(days, held, set()) == []  # pyright: ignore[reportPrivateUsage]
+    idx.close()

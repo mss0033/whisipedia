@@ -42,6 +42,7 @@ LANG_BOOST = 1.15  # multiplies fused scores below the reranked head
 SOURCE_SHARE = 8
 """One source takes at most 1/8 of the lexical window while other sources have matches (``per_source``)."""
 TITLE_PINS = 8
+NAMED_RUNS = 8  # runs of a question's words looked up as titles (each one title-list lookup)
 """Near-exact titles pinned after the exact one for a page-name query, one per source, at most."""
 
 
@@ -307,7 +308,11 @@ class OracleSearcher:
         return [h for _, h in sorted(best.values(), key=lambda t: t[0])]
 
     def _embedded_title(
-        self, route: Route, candidates: Iterable[SearchHit], pinned: set[str]
+        self,
+        route: Route,
+        candidates: Iterable[SearchHit],
+        pinned: set[str],
+        sources: Sequence[str] | None = None,
     ) -> list[SearchHit]:
         """For a question or a how-to, the candidate whose title (two words or more) the query holds
         word for word, the longest such title first, then the best ranked; at most one. The query
@@ -338,7 +343,7 @@ class OracleSearcher:
             weight = -self.source_weights.get(src, 1.0)  # a tie goes to the reference copy
             if len(query) >= 4 and title[: len(query)] == query:
                 key = (0, len(title), weight, i)
-            elif 2 <= len(title) < len(query) and _holds(query, title):
+            elif 2 <= len(title) < len(query) and _named(title) and _holds(query, title):
                 key = (1, -len(title), weight, i)
             else:
                 continue
@@ -346,7 +351,35 @@ class OracleSearcher:
                 continue
             if best is None or key < best[0]:
                 best = (key, h)
+        if best is None and route.intent in (Intent.ASK, Intent.HOW_TO):
+            found = self._named_in_query(query, sources)
+            return [] if found is None or found.doc_id in pinned else [found]
         return [] if best is None else [best[1]]
+
+    def _named_in_query(self, query: Sequence[str], sources: Sequence[str] | None) -> SearchHit | None:
+        """A page the question names that no candidate is: its words as a title the library holds.
+        "root cellar relative humidity range recommended for storing root vegetables" never reached
+        Wikipedia's Root cellar among the candidates (long texts about vegetables outscored it;
+        2026-10-17 field exam). The title list answers which runs of the query are titles; the
+        longest, then the first in the query, is looked up."""
+        runs: list[list[str]] = []
+        for n in (3, 2):
+            for i in range(len(query) - n + 1):
+                run = list(query[i : i + n])
+                if run[0] in STOPWORDS_EN or run[-1] in STOPWORDS_EN or not _named(run):
+                    continue
+                runs.append(run)
+        suggest = getattr(self.lexical, "suggest", None)
+        if not callable(suggest):
+            return None
+        for run in runs[:NAMED_RUNS]:
+            phrase = " ".join(run)
+            titles = cast(Sequence[str], suggest(phrase, limit=5))
+            if any(_title_key(t) == phrase for t in titles):
+                hit = self._exact_title(phrase, sources)
+                if hit is not None and self._pinnable(" ".join(query), hit):
+                    return hit
+        return None
 
     def _weigh(self, query: str, hits: list[SearchHit]) -> list[SearchHit]:
         """Hits scaled by their source's weight (``source_weights``), best first; a source the query
@@ -479,7 +512,7 @@ class OracleSearcher:
         # Candidates from the lexical window too: a book's long text ranks it below the fusion's cut.
         named = self._title_pins(route, [*fused, *found.lexical], {p.doc_id for p in pins})
         pins += named
-        pins += self._embedded_title(route, [*fused, *found.lexical], {p.doc_id for p in pins})
+        pins += self._embedded_title(route, [*fused, *found.lexical], {p.doc_id for p in pins}, sources)
         pinned = {p.doc_id for p in pins}
         rest = [h for h in fused if h.doc_id not in pinned]
         t = lap("titles", t)
@@ -729,6 +762,12 @@ _TITLE_WORDS = re.compile(r"[^\w]+", re.UNICODE)
 _LEADING_ARTICLE = re.compile(r"^(?:a|an|the)\s+")
 _PROJECT = re.compile(r"[-_.]")
 _EMPTY_TEXT = content_hash("")
+
+
+def _named(title: Sequence[str]) -> bool:
+    """Two words or more of a title are names, not numbers or function words: a question holding
+    "10 days" did not name the disambiguation page "10 Days" (2026-10-17 field exam)."""
+    return sum(1 for w in title if w not in STOPWORDS_EN and not any(c.isdigit() for c in w)) >= 2
 
 
 def _holds(words: Sequence[str], part: Sequence[str]) -> bool:
