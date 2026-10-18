@@ -357,6 +357,23 @@ def _lang(languages: Iterable[str]) -> str:
     return next(iter(languages), "") or "und"
 
 
+# A record that is not a text says what it is in its title: three "Pride and Prejudice" audiobooks
+# (catalog cards with no text) led the novel in a title search (2026-10-17 field exam).
+KIND_LABELS = {
+    "Sound": "audiobook",
+    "StillImage": "images",
+    "Image": "images",
+    "MovingImage": "video",
+    "Dataset": "data",
+    "Collection": "collection",
+}
+
+
+def display_title(book: Book) -> str:
+    label = KIND_LABELS.get(book.kind or "")
+    return f"{book.title} ({label})" if label and not book.title.endswith(f"({label})") else book.title
+
+
 @dataclass(frozen=True, slots=True)
 class _Renderer:
     source_id: str
@@ -365,7 +382,8 @@ class _Renderer:
     zim_paths: Mapping[int, str]
 
     def __call__(self, book: Book, raw: str | None) -> DocRecord:
-        header = [book.title]
+        title = display_title(book)
+        header = [title]
         if book.authors:
             header.append(f"By {book.authors}")
         facts = [
@@ -399,7 +417,7 @@ class _Renderer:
             doc_id=make_doc_id(self.source_id, native),
             source_id=self.source_id,
             native_id=native,
-            title=book.title,
+            title=title,
             lang=_lang(book.languages),
             license=self.license,
             text=text,

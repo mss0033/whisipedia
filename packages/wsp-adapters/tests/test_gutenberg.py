@@ -148,6 +148,9 @@ def test_books_with_texts_catalog_only_and_reading_copy(generation_dir: Path, tm
     assert docs["3"].text.endswith("Catalog record only: no plain-text edition in the feed.")
     assert docs["3"].links[0] == "wsp:gutenberg-zim/Audio Three_cover.3"  # no HTML edition: its cover page
     assert "type Sound" in docs["3"].text
+    # an audiobook's title says so: three audiobooks led the novel in a title search (2026-10-17)
+    assert docs["3"].title == "Audio Three (audiobook)"
+    assert docs["1"].title == "Book One"
     assert (tmp_path / "work" / "gutenberg-zim-paths.json").is_file()
 
 
