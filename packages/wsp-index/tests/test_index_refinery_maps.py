@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
@@ -95,6 +96,31 @@ def test_map_dir_changes_when_the_generation_is_refined_again(tmp_path: Path) ->
     assert second != first
     assert second.parent == tmp_path / "local" / "src"
     assert second.name.startswith("g1-")
+
+
+def test_a_refine_again_with_the_same_seal_gets_a_fresh_map(tmp_path: Path) -> None:
+    """The same documents in the same number of parts write the same seal; the rows moved, so the old
+    map must not be used (2026-10-18: lookups read row group 30 of a file of 23, searches failed)."""
+    gen = _write(tmp_path / "nas")
+    first = id_map_dir(tmp_path / "local", gen)
+    assert RefineryReader(gen, map_dir=first).get(DOCS[30].doc_id) is not None  # the map is written
+    seal = (gen / SUCCESS_FILE).read_bytes()
+    again = tmp_path / "again"
+    with RefineryWriter(again, "src", "g1", row_group_rows=3) as w:  # another row-group layout
+        w.write([doc("src", d.doc_id.split("/", 1)[1], d.title, d.text) for d in DOCS])
+    redone = generation_dir(again, "src", "g1")
+    same = {k: v for k, v in json.loads(seal).items() if k != "written"}
+    assert {
+        k: v for k, v in json.loads((redone / SUCCESS_FILE).read_bytes()).items() if k != "written"
+    } == same
+    shutil.rmtree(gen)
+    shutil.move(redone, gen)  # the swap of a staged refine
+    second = id_map_dir(tmp_path / "local", gen)
+    assert second != first
+    for d in DOCS:
+        got = RefineryReader(gen, map_dir=second).get(d.doc_id)
+        assert got is not None
+        assert got.text == d.text
 
 
 def test_partition_generations_are_filed_under_their_source(tmp_path: Path) -> None:

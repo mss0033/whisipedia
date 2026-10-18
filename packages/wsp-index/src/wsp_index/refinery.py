@@ -141,8 +141,8 @@ def id_map_dir(map_root: Path, gen_dir: Path) -> Path:
     """Where the id-map sidecar of the sealed ``gen_dir`` lives under a local ``map_root``.
 
     ``<map_root>/<source>/<generation>-<stamp>``: the stamp hashes the generation's path and seal
-    marker, so a generation refined again under the same id (a format bump) gets a fresh map instead
-    of a stale one that happens to have the same length.
+    marker, so a generation refined again under the same id gets a fresh map instead of a stale one
+    that happens to have the same length (the seal names when it was written: :func:`_write_success`).
     """
     seal = (gen_dir / SUCCESS_FILE).read_bytes()
     stamp = hashlib.blake2b(str(gen_dir.resolve()).encode("utf-8") + b"\0" + seal, digest_size=8).hexdigest()
@@ -417,8 +417,13 @@ def _write_ids(directory: Path, h: npt.NDArray[np.uint64], loc: npt.NDArray[np.u
 
 
 def _write_success(directory: Path, success: Mapping[str, object]) -> None:
+    """Seal ``directory``. The seal names when it was written: a generation refined again with the same
+    documents in the same number of parts wrote the very same seal, so :func:`id_map_dir` kept the old
+    id map and lookups read row groups that no longer existed (LibreTexts, 2026-10-18: "row_group_indices
+    is 30 ... num_row_groups(23)", searches failed)."""
     partial = directory / (SUCCESS_FILE + ".partial")
-    partial.write_text(json.dumps(dict(success), sort_keys=True) + "\n", encoding="utf-8")
+    sealed = {**success, "written": datetime.now(UTC).isoformat(timespec="microseconds")}
+    partial.write_text(json.dumps(sealed, sort_keys=True) + "\n", encoding="utf-8")
     _atomic_replace(partial, directory / SUCCESS_FILE)
 
 
