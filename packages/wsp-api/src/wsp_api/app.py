@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
+import re
 import threading
 import time
 from collections.abc import AsyncGenerator
@@ -100,6 +101,9 @@ _TELEMETRY_OFF: TelemetryConfig = {
 
 GZIP_MIN_BYTES = 1024
 DOCUMENT_CACHE = "private, no-cache"  # revalidate with the ETag: `has_history` and link targets change
+_RFC_SHORT = re.compile(
+    r"wsp:rfc/0*(\d{1,5})"
+)  # `wsp:rfc/9110`, the address readers type, for `rfc:RFC-9110`
 
 Limit = Annotated[int, Query(ge=1, le=200, description="Page size.")]
 Cursor = Annotated[str | None, Query(description="Opaque cursor from a previous page's `next_cursor`.")]
@@ -302,10 +306,17 @@ def _v1(lib: Library, settings: ApiSettings) -> APIRouter:
                 # A typed or relative address loses a native id's trailing slash (`xkcd.com/` for
                 # the front page, `banana-bread/`): answer with that document rather than a 404 the
                 # client must retry (field exam 2026-10-14). The response carries the real doc_id.
-                if exc.status != 404 or exc.code != "document_not_found" or did.endswith("/"):
+                # An RFC is keyed `rfc:RFC-9110`, but readers, the Navigator's links in an RFC's
+                # text and the location bar say `wsp:rfc/9110` (every RFC-to-RFC link was dead,
+                # 2026-10-17 trawl).
+                if exc.status != 404 or exc.code != "document_not_found":
+                    raise
+                short = _RFC_SHORT.fullmatch(did)
+                other = f"wsp:rfc/rfc:RFC-{int(short.group(1))}" if short else did + "/"
+                if other.endswith("//"):
                     raise
                 try:
-                    view = lib.document(DocId(did + "/"), at)
+                    view = lib.document(DocId(other), at)
                 except ApiError:
                     raise exc from None
             doc = view.doc

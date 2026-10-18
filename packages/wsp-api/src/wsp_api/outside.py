@@ -51,6 +51,14 @@ def _rfc(host: str, path: str, query: str) -> Target | None:
     return ("rfc", f"rfc:RFC-{m.group(1)}") if m else None
 
 
+def _rfc_doi(host: str, path: str, query: str) -> Target | None:
+    """An RFC's DOI (``doi.org/10.17487/RFC9293``): Wikipedia cites RFCs by DOI beside the title link."""
+    if host not in ("doi.org", "dx.doi.org"):
+        return None
+    m = re.match(r"^/10\.17487/rfc0*(\d+)/?$", unquote(path), re.I)
+    return ("rfc", f"rfc:RFC-{m.group(1)}") if m else None
+
+
 def _pubmed(host: str, path: str, query: str) -> Target | None:
     if host == "pubmed.ncbi.nlm.nih.gov":
         m = re.match(r"^/(\d+)/?$", path)
@@ -96,7 +104,16 @@ def _ecfr(host: str, path: str, query: str) -> Target | None:
     return ("ecfr-federal-register", f"t{m.group(1)}/s{m.group(2)}") if m else None
 
 
-RULES: tuple[Rule, ...] = (_gutenberg, _rfc, _pubmed, _open_library, _courtlistener, _us_code, _ecfr)
+RULES: tuple[Rule, ...] = (
+    _gutenberg,
+    _rfc,
+    _rfc_doi,
+    _pubmed,
+    _open_library,
+    _courtlistener,
+    _us_code,
+    _ecfr,
+)
 
 
 def _host(netloc: str) -> str:
@@ -115,6 +132,20 @@ def _wiki_title(path: str, query: str) -> str | None:
         return None
     title = unquote(title).replace(" ", "_")
     return title or None
+
+
+_WIKI_HOST = re.compile(r"^([a-z]{2,3}(?:-[a-z]+)?|simple)\.((?:m\.)?wik[a-z]+\.org)$")
+
+
+def _language_prefix(host: str, path: str) -> tuple[str, str]:
+    """``simple.wikipedia.org/wiki/en:`` is English Wikipedia's main page and ``…/wiki/fr:Paris``
+    French Wikipedia's article: Wikimedia's interlanguage links keep the language in the title.
+    Simple Wiktionary's front page linked every sister project this way (2026-10-17 trawl)."""
+    wiki = _WIKI_HOST.match(host)
+    m = re.match(r"^/wiki/([a-z]{2,3}(?:-[a-z]+)?|simple):(.*)$", unquote(path)) if wiki else None
+    if wiki is None or m is None:
+        return host, path
+    return f"{m.group(1)}.{wiki.group(2)}", "/wiki/" + (m.group(2) or "Main_Page")
 
 
 class OutsideLinks:
@@ -160,6 +191,7 @@ class OutsideLinks:
             found = rule(host, path, query)
             if found is not None:
                 return (found, parts.fragment) if self._held(found[0]) else None
+        host, path = _language_prefix(host, path)
         site = self.site(host)
         if site is None or not self._held(site.source_id):
             return None

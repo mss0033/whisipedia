@@ -427,3 +427,30 @@ def test_outside_route_names_the_library_copy_or_says_none(browse: httpx.Client)
     miss = browse.get("/v1/outside", params={"url": "https://example.org/nothing"})
     assert miss.status_code == 404
     assert miss.json()["error"]["code"] == "not_held"
+
+
+def test_an_rfc_asked_by_its_number_is_answered() -> None:
+    """RFCs are keyed `rfc:RFC-9110`; links in an RFC's text and typed addresses say `wsp:rfc/9110`
+    and every RFC-to-RFC link was a 404 (2026-10-17 trawl)."""
+    from wsp_api.testing.fakes import InMemoryDocumentStore
+    from wsp_core.ids import content_hash
+    from wsp_core.model import DocRecord
+
+    services = browse_services()
+    rfc = DocRecord(
+        doc_id=make_doc_id("rfc", "rfc:RFC-4242"),
+        source_id="rfc",
+        native_id="rfc:RFC-4242",
+        title="HTTP Semantics",
+        lang="en",
+        license="LicenseRef-IETF-Trust",
+        text="The Hypertext Transfer Protocol.",
+        content_hash=content_hash("The Hypertext Transfer Protocol."),
+    )
+    assert isinstance(services.documents, InMemoryDocumentStore)
+    services.documents.put(SAMPLE_GEN_2, rfc)
+    with local_client(create_app(services)) as c:
+        found = [c.get(document_href(make_doc_id("rfc", n))) for n in ("4242", "04242")]
+        missing = c.get(document_href(make_doc_id("rfc", "9999")))
+    assert [r.json()["doc_id"] for r in found] == ["wsp:rfc/rfc:RFC-4242"] * 2
+    assert (missing.status_code, missing.json()["error"]["code"]) == (404, "document_not_found")

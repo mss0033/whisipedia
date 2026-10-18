@@ -37,6 +37,9 @@ HELD = {s.source_id for s in SITES} | {
         ("https://en.wikipedia.org/w/index.php?title=Turing_test", (("wikipedia-en-zim", "Turing_test"), "")),
         ("https://www.appropedia.org/Solar_cooker", (("kiwix-appropedia-en-all", "Solar_cooker"), "")),
         ("https://appropedia.org/Solar_cooker", (("kiwix-appropedia-en-all", "Solar_cooker"), "")),
+        # interlanguage links keep the language in the title (Simple Wiktionary's front page)
+        ("https://simple.wikipedia.org/wiki/en:", (("wikipedia-en-zim", "Main_Page"), "")),
+        ("https://simple.wikipedia.org/wiki/en:Alan_Turing", (("wikipedia-en-zim", "Alan_Turing"), "")),
         ("https://en.wikibooks.org/wiki/Cookbook:Bread", (("kiwix-curated-t2", "wikibooks_en_all_maxi/Cookbook:Bread"), "")),
         (
             "https://askubuntu.com/questions/12/how-to-x?noredirect=1",
@@ -49,6 +52,8 @@ HELD = {s.source_id for s in SITES} | {
         ("https://imgs.xkcd.com/comics/p_values.png", (("kiwix-xkcd-com-en-all", "imgs.xkcd.com/comics/p_values.png"), "")),
         ("http://www.gutenberg.org/ebooks/1342", (("gutenberg", "1342"), "")),
         ("https://www.rfc-editor.org/rfc/rfc9110.html#section-9", (("rfc", "rfc:RFC-9110"), "section-9")),
+        ("https://doi.org/10.17487/RFC9293", (("rfc", "rfc:RFC-9293"), "")),
+        ("https://dx.doi.org/10.17487/rfc0791", (("rfc", "rfc:RFC-791"), "")),
         ("https://datatracker.ietf.org/doc/html/rfc791", (("rfc", "rfc:RFC-791"), "")),
         ("https://pubmed.ncbi.nlm.nih.gov/21792337/", (("pubmed", "21792337"), "")),
         ("https://openlibrary.org/works/OL45804W/Fantastic_Mr_Fox", (("open-library", "works/OL45804W"), "")),
