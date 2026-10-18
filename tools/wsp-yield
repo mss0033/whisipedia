@@ -10,6 +10,12 @@
 #   short: MemAvailable under WSP_YIELD_MIN_AVAIL_MB (default 1024), or "full avg10" (the share of the
 #          last 10 s in which every task waited for memory) at least WSP_YIELD_MAX_PSI percent (30)
 #   calm:  MemAvailable at least WSP_YIELD_CALM_AVAIL_MB (default 3072) and "full avg10" under 5
+# A stall that is all inside the background slice, while memory is still available, is a job pressing
+# on its own cgroup ceiling (memory.high), not the machine: freezing the slice frees nothing the owner
+# needs. 2026-10-18 00:30-07:40: the index job sat over its memory.high and the slice was frozen and
+# thawed 506 times in 7 hours (available ~3 GB throughout), the job and every download standing still.
+# So the pressure counts only when the slice's own "full avg10" (WSP_YIELD_SLICE_PRESSURE) is
+# CALM_PSI or more below the machine's: someone outside the background is waiting for memory.
 # Short: freeze whisipedia-background.slice. Its units stop running and allocating, and their pages
 # can be swapped out; the API is outside it and keeps serving. Calm again: thaw it.
 # Still short after WSP_YIELD_STOP_TICKS checks (default 6, 30 s): stop the background jobs that can
@@ -32,17 +38,24 @@ MEMINFO="${WSP_YIELD_MEMINFO:-/proc/meminfo}"
 PRESSURE="${WSP_YIELD_PRESSURE:-/proc/pressure/memory}"
 TICKS="${WSP_YIELD_TICKS:-0}"
 SLICE=whisipedia-background.slice
+SLICE_PRESSURE="${WSP_YIELD_SLICE_PRESSURE:-/sys/fs/cgroup$(systemctl --user show "$SLICE" -p ControlGroup --value 2>/dev/null)/memory.pressure}"
 STOPPABLE="whisipedia-job-* whisipedia-trawler.service whisipedia-index.service whisipedia-quality.service"
 
 state=calm  # calm | frozen | stopped
 since=0     # checks spent in this state (frozen) or calm in a row (stopped)
 tick=0
 
+full_avg10() {
+  awk '$1 == "full" { for (i = 2; i <= NF; i++) if ($i ~ /^avg10=/) { sub(/^avg10=/, "", $i); printf "%d", $i } }' \
+    "$1" 2>/dev/null
+}
+
 reading() {
   avail_mb=$(awk '$1 == "MemAvailable:" { printf "%d", $2 / 1024 }' "$MEMINFO" 2>/dev/null)
-  full=$(awk '$1 == "full" { for (i = 2; i <= NF; i++) if ($i ~ /^avg10=/) { sub(/^avg10=/, "", $i); printf "%d", $i } }' \
-    "$PRESSURE" 2>/dev/null)
+  full=$(full_avg10 "$PRESSURE")
+  own=$(full_avg10 "$SLICE_PRESSURE")
   avail_mb="${avail_mb:-999999}" full="${full:-0}"  # unreadable: assume calm, never act on a guess
+  own="${own:-0}"  # unreadable: all the pressure is the machine's, as before
 }
 
 thaw() {
@@ -67,7 +80,8 @@ thaw
 while :; do
   reading
   short="" calm=""
-  [ "$avail_mb" -lt "$MIN_AVAIL_MB" ] || [ "$full" -ge "$MAX_PSI" ] && short=1
+  outside=$((full - own))
+  [ "$avail_mb" -lt "$MIN_AVAIL_MB" ] || { [ "$full" -ge "$MAX_PSI" ] && [ "$outside" -ge "$CALM_PSI" ]; } && short=1
   [ "$avail_mb" -ge "$CALM_AVAIL_MB" ] && [ "$full" -lt "$CALM_PSI" ] && calm=1
   case "$state" in
     calm)

@@ -524,10 +524,12 @@ def test_api_health_waits_when_the_start_time_is_unknown(tmp_path: Path, started
     assert not any("restart" in c for c in calls)
 
 
-def _yield(tmp_path: Path, readings: list[tuple[int, int]], active: str = "") -> tuple[str, list[str]]:
-    """Run tools/wsp-yield for one check per reading of (MemAvailable MB, "full avg10" percent), with a
-    fake systemctl (``active``: its list of active units) and a fake sleep that moves to the next
-    reading."""
+def _yield(
+    tmp_path: Path, readings: list[tuple[int, int] | tuple[int, int, int]], active: str = ""
+) -> tuple[str, list[str]]:
+    """Run tools/wsp-yield for one check per reading of (MemAvailable MB, "full avg10" percent[, the
+    background slice's own "full avg10", 0 if left out]), with a fake systemctl (``active``: its list
+    of active units) and a fake sleep that moves to the next reading."""
     import subprocess
 
     from test_cli_autonomy import ROOT
@@ -536,11 +538,15 @@ def _yield(tmp_path: Path, readings: list[tuple[int, int]], active: str = "") ->
     fakebin.mkdir(parents=True)
     calls = tmp_path / "calls"
     meminfo, pressure, step = tmp_path / "meminfo", tmp_path / "memory", tmp_path / "step"
-    for i, (avail_mb, full) in enumerate(readings):
+    own_pressure = tmp_path / "slice"
+    for i, (avail_mb, full, *own) in enumerate(readings):
         (tmp_path / f"meminfo.{i}").write_text(f"MemTotal: 16000000 kB\nMemAvailable: {avail_mb * 1024} kB\n")
         (tmp_path / f"memory.{i}").write_text(
             f"some avg10={full}.00 avg60=0.00 avg300=0.00 total=1\n"
             f"full avg10={full}.50 avg60=0.00 avg300=0.00 total=1\n"
+        )
+        (tmp_path / f"slice.{i}").write_text(
+            f"full avg10={own[0] if own else 0}.25 avg60=0.00 avg300=0.00 total=1\n"
         )
     scripts = {
         "systemctl": (
@@ -549,6 +555,7 @@ def _yield(tmp_path: Path, readings: list[tuple[int, int]], active: str = "") ->
         "sleep": (
             f"#!/bin/sh\nn=$(( $(cat {step}) + 1 ))\necho $n > {step}\n"
             f"cp {tmp_path}/meminfo.$n {meminfo}; cp {tmp_path}/memory.$n {pressure}\n"
+            f"cp {tmp_path}/slice.$n {own_pressure}\n"
         ),
     }
     for name, text in scripts.items():
@@ -557,10 +564,12 @@ def _yield(tmp_path: Path, readings: list[tuple[int, int]], active: str = "") ->
     step.write_text("0\n")
     (meminfo).write_text((tmp_path / "meminfo.0").read_text())
     (pressure).write_text((tmp_path / "memory.0").read_text())
+    own_pressure.write_text((tmp_path / "slice.0").read_text())
     env = {
         "PATH": f"{fakebin}:/usr/bin:/bin",
         "WSP_YIELD_MEMINFO": str(meminfo),
         "WSP_YIELD_PRESSURE": str(pressure),
+        "WSP_YIELD_SLICE_PRESSURE": str(own_pressure),
         "WSP_YIELD_TICKS": str(len(readings)),
         "WSP_YIELD_STOP_TICKS": "2",
         "WSP_YIELD_RESUME_TICKS": "3",
@@ -591,6 +600,22 @@ def test_yield_freezes_the_background_while_memory_is_short_and_thaws_it_after(t
     assert "thawed" in out
     out, calls = _yield(tmp_path / "psi", [SQUEEZED, CALM])  # memory left, but every task waits for it
     assert calls == ["--user freeze whisipedia-background.slice", "--user thaw whisipedia-background.slice"]
+
+
+def test_yield_leaves_a_job_pressing_on_its_own_ceiling_alone(tmp_path: Path) -> None:
+    """2026-10-18 00:30-07:40: the index job sat over its memory.high; every task stalled waiting for
+    memory was in the background slice, with ~3 GB available. The slice was frozen and thawed 506 times
+    and nothing moved for 7 hours."""
+    own_ceiling = (3100, 44, 43)
+    out, calls = _yield(tmp_path, [own_ceiling, own_ceiling, CALM, own_ceiling])
+    assert out == ""
+    assert calls == []
+    # The same stall with tasks outside the slice waiting too is the machine's: freeze as before.
+    out, calls = _yield(tmp_path / "shared", [(3100, 44, 20), CALM])
+    assert calls == ["--user freeze whisipedia-background.slice", "--user thaw whisipedia-background.slice"]
+    # Short of memory is short whoever is waiting.
+    out, calls = _yield(tmp_path / "short", [(600, 44, 44), CALM])
+    assert calls[0] == "--user freeze whisipedia-background.slice"
 
 
 def test_yield_stops_the_resumable_jobs_when_freezing_is_not_enough_and_resumes_them(tmp_path: Path) -> None:
