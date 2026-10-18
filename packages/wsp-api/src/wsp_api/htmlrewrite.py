@@ -15,6 +15,8 @@
   that is not there is also tried under each of ``site_roots``: a crawled site (zimit) keeps its host
   in every path, and one published below a folder (the OPSEC Bible at ``privacydefence.org/opsec/
   bibleprivacy/``) writes ``/assets/logo.png`` for a file under that folder.
+* An ``<img>`` whose file the archive does not hold (given ``find``) is left out, its ``alt`` text kept:
+  a page of missing photos showed a grid of broken images.
 * ``<base>`` is dropped: links are already resolved here, and a base would re-target them.
 * Absolute URLs of sites the library holds (``outside``: Wikipedia, xkcd, an RFC) → the library's
   copy; a relative path into another site the crawl did not keep → the archive that copies it. Other
@@ -36,7 +38,7 @@ from urllib.parse import quote, unquote, urlsplit
 
 from wsp_api.addresses import address_of
 
-VERSION = 9  # bump when the output changes: rendered pages are cached by it
+VERSION = 10  # bump when the output changes: rendered pages are cached by it
 
 # Links to these are files (shown by the browser, or saved), not pages. By name, so rewriting needs no
 # lookup per link; a page with such a name (rare) is then offered as a file the asset route refuses.
@@ -124,6 +126,7 @@ class _Rewriter(HTMLParser):
         self._outside = outside
         self._seen: dict[tuple[str, bool], str | None] = {}  # (outside url, asset) -> library url
         self._found: dict[str, tuple[str, str] | None] = {}  # root-relative href -> where it is
+        self._held: dict[str, bool] = {}  # image path -> in the archive
         self.out: list[str] = []
         self._in_style = False
 
@@ -178,6 +181,18 @@ class _Rewriter(HTMLParser):
             return None
         return self._foreign(target[0], asset=True) or self._asset_url(target[0])
 
+    def _missing_image(self, value: str) -> bool:
+        """An ``<img src>`` the archive does not hold (given ``find``): the CIA World Factbook's Japan
+        page asked for 108 photos its archive never kept (2026-10-17 field exam), 108 broken images."""
+        if self._find is None or _ABSOLUTE.match(value) or value.strip().startswith("data:"):
+            return False
+        target = self._target(value)
+        if target is None or self._foreign(target[0], asset=True) is not None:
+            return False
+        if target[0] not in self._held:
+            self._held[target[0]] = self._find(target[0]) is not None
+        return not self._held[target[0]]
+
     def _srcset(self, value: str) -> str:
         out: list[str] = []
         for m in _CANDIDATE.finditer(value):
@@ -222,6 +237,10 @@ class _Rewriter(HTMLParser):
             self._in_style = not closing
             return
         if tag == "base":
+            return
+        if tag == "img" and self._missing_image(dict(attrs).get("src") or ""):
+            alt = (dict(attrs).get("alt") or "").strip()  # what the picture was, if the page says
+            self.out.append(f'<span class="missing-image">{html.escape(alt)}</span>' if alt else "")
             return
         new = self._attrs(tag, attrs) if tag in _TAGS else None
         if any(name == "style" for name, _ in new or attrs):

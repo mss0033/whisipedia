@@ -104,12 +104,37 @@ def test_root_relative_urls_try_the_site_roots_only_when_missing() -> None:
         rr('<img src="/x.png"><img src="/x.png">')
         == f'<img src="{A}h.org/sub/x.png"><img src="{A}h.org/sub/x.png">'
     )
-    assert seen == ["x.png", "h.org/x.png", "h.org/sub/x.png"]  # looked up once for the page
+    # looked up once for the page, then (once) whether the picture found is held
+    assert seen == ["x.png", "h.org/x.png", "h.org/sub/x.png", "h.org/sub/x.png"]
     assert rr('<a href="/y#s">y</a>') == '<a href="wsp://qa/h.org/y%2F#s">y</a>'  # the entry's own slash
     assert (
         rr('<a href="z.html">z</a>') == '<a href="wsp://qa/h.org/sub/p/z.html">z</a>'
     )  # relative: no lookup
     assert "z.html" not in " ".join(seen)
+
+
+def test_a_picture_the_archive_does_not_hold_is_left_out() -> None:
+    """The Factbook's Japan page showed 108 broken photos its archive never kept (2026-10-17)."""
+
+    def rr(html: str) -> str:
+        return rewrite_html(
+            html,
+            source_id="qa",
+            generation_id="g",
+            native_id="geos/ja.html",
+            find=lambda p: p if p == "images/flag.png" else None,
+        )
+
+    assert rr('<img src="../images/flag.png">') == f'<img src="{A}images/flag.png">'
+    assert (
+        rr('<img src="../thumb/JA_017.jpg?152" alt="Mount Fuji">x')
+        == '<span class="missing-image">Mount Fuji</span>x'
+    )
+    assert (
+        rr('<a href="../thumb/JA_017.jpg"><img src="../thumb/JA_017.jpg"></a>')
+        == f'<a href="{A}thumb/JA_017.jpg"></a>'
+    )
+    assert rr('<img src="data:image/png;base64,AAAA">') == '<img src="data:image/png;base64,AAAA">'
 
 
 def test_base_is_dropped_and_everything_else_is_kept() -> None:

@@ -444,7 +444,7 @@ def test_a_site_published_below_a_folder_finds_its_root_relative_files(tmp_path:
         f'<img src="/v1/assets/wiki/g/{site}assets/logo.png">'
         f'<a href="{address_of("wiki", f"{site}opsec/vpn/")}">VPN</a>'
         f'<a href="{address_of("wiki", "privacydefence.org/about/")}">About</a>'  # the host's own root first
-        '<img src="/v1/assets/wiki/g/nowhere.png">'  # nowhere: as before
+        # nowhere: the archive does not hold it, so it is left out (no broken image)
         f'<a href="{address_of("wiki", f"{site}opsec/standard/index.html")}">S</a>'
     )
 
