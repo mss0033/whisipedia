@@ -1150,6 +1150,28 @@ sources:
     size: {bytes: 14.83e9, measured: true, as_of: 2026-10-10}
     notes: Score 4.6. The repository README states the files are in the public domain. Size is the GitHub repository size (history included; the snapshot is the default branch's files only). Refined since 2026-10-17 (CA-12).
 
+  - id: linux-kernel-docs
+    name: Linux kernel documentation (Documentation/, the kernel's own reStructuredText)
+    publisher: The Linux kernel developers
+    domain: [computing]
+    tier: T1
+    status: candidate
+    license: GPL-2.0-only
+    legal_basis: open-license
+    access:
+      adapter: doc-collection
+      issuer: The Linux kernel developers
+      key_prefix: kernel-docs
+      endpoints: ["https://github.com/torvalds/linux"]  # the git allow-list (the mainline tree's mirror)
+      origins: [github.com, api.github.com]
+      reader: rst-kernel  # one document per Documentation/ page, translations left out
+      discovery:
+        - {kind: git, repos: ["https://github.com/torvalds/linux"], snapshot: true}
+      filter: {allow_all: true}
+    update: {cadence: P3M, strategy: snapshot-retention}
+    size: {bytes: 0.3e9, measured: false, as_of: 2026-10-17}
+    notes: The 2026-10-17 field exam asked what cgroup v2's memory.max does; the library held a Wikibooks outline only. A shallow snapshot of the tree (about 0.3 GB zipped; 6.4 GB with history) is fetched and its Documentation/ pages read; the rest of the tree is not indexed.
+
   - id: perseus-classics
     name: Perseus Digital Library classics in English translation (canonical-greekLit, canonical-latinLit)
     publisher: Perseus Digital Library, Tufts University

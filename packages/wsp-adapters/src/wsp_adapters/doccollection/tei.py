@@ -1,4 +1,4 @@
-"""TEI texts of collections published as git repositories (a ``reader`` in the registry ``access``).
+"""Texts of collections published as git repositories (a ``reader`` in the registry ``access``).
 
 A repository is fetched as a snapshot of its files (``git archive`` of the default branch, one zip:
 ``discovery: [{kind: git, snapshot: true}]``), and the refiner reads its TEI files with a reader:
@@ -13,6 +13,10 @@ A repository is fetched as a snapshot of its files (``git archive`` of the defau
   ``<file stem>/<book>``, titled "<author>, <title>, Book <n> (tr. <translator>)"; a work without
   books is one document. Chapter numbers stay at the start of their paragraphs ("9. In the year...")
   so a citation such as "Appian, Civil Wars 1.9" can be followed in the text.
+
+* ``rst-kernel`` (the Linux kernel's ``Documentation/``, reStructuredText): each page a document,
+  native id its path below ``Documentation/`` without ``.rst``, linked to docs.kernel.org;
+  translations (``Documentation/translations/``) left out.
 
 The 2026-10-17 field exam found Appian only as a noisy OCR scan and asked for FRUS, which the
 registry held as a git mirror no refiner read (2026-10-12 audit, CA-12).
@@ -179,9 +183,42 @@ def _cts_member(name: str) -> str | None:
     return m.group(1) if m else None
 
 
+# --- reStructuredText (the Linux kernel's Documentation/) ------------------------------------------
+
+_RST_RULE = re.compile(r"^([=\-~^*#+`':.\"_])\1{2,}\s*$")
+_RST_COMMENT = re.compile(r"^\.\. (?:SPDX-License-Identifier|_[\w-]+:|\|[^|]+\| )")
+
+
+def rst_page(data: bytes, stem: str) -> Iterator[TeiDoc]:
+    """One kernel documentation page (``Documentation/admin-guide/cgroup-v2.rst``): titled by its
+    first section title, its text as written, heading rules and label lines left out. The field
+    exam asked about cgroup v2's memory.max and found only a Wikibooks outline (2026-10-17)."""
+    lines = data.decode("utf-8", errors="replace").splitlines()
+    title = ""
+    out: list[str] = []
+    for i, line in enumerate(lines):
+        if _RST_RULE.match(line) or _RST_COMMENT.match(line):
+            continue
+        nxt = lines[i + 1] if i + 1 < len(lines) else ""
+        if not title and line.strip() and _RST_RULE.match(nxt) and len(nxt.strip()) >= len(line.strip()):
+            title = line.strip()
+        out.append(line.rstrip())
+    text = re.sub(r"\n{3,}", "\n\n", "\n".join(out)).strip()
+    if not text:
+        return
+    title = title or stem.rsplit("/", 1)[-1].replace("-", " ").replace("_", " ")
+    yield TeiDoc(key=stem, title=title, text=text, url=f"https://docs.kernel.org/{stem}.html")
+
+
+def _kernel_member(name: str) -> str | None:
+    m = re.fullmatch(r"(?:[^/]+/)?Documentation/([\w./+-]+)\.rst", name)
+    return m.group(1) if m and "/translations/" not in f"/{m.group(1)}" else None
+
+
 READERS: dict[str, tuple[Callable[[str], str | None], Callable[[bytes, str], Iterator[TeiDoc]]]] = {
     "tei-frus": (_frus_member, frus_volume),
     "tei-cts": (_cts_member, cts_work),
+    "rst-kernel": (_kernel_member, rst_page),
 }
 
 

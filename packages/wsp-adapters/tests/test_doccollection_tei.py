@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from wsp_adapters.doccollection.adapter import CollectionConfig
-from wsp_adapters.doccollection.tei import cts_work, frus_volume, read_snapshot
+from wsp_adapters.doccollection.tei import cts_work, frus_volume, read_snapshot, rst_page
 from wsp_core.model import SourceSpec, SourceStatus, Tier
 
 FRUS = """<?xml version="1.0" encoding="UTF-8"?>
@@ -97,3 +97,39 @@ def test_an_unknown_reader_is_refused() -> None:
     assert CollectionConfig.from_spec(spec("tei-frus")).reader == "tei-frus"
     with pytest.raises(ValueError, match=r"access\.reader"):
         CollectionConfig.from_spec(spec("tei-unknown"))
+
+
+RST = """.. SPDX-License-Identifier: GPL-2.0
+
+.. _cgroup-v2:
+
+================
+Control Group v2
+================
+
+:Date: October, 2015
+
+memory.max
+	A read-write single value file which exists on non-root
+	cgroups.  The default is "max".
+
+	Memory usage hard limit.
+"""
+
+
+def test_a_kernel_documentation_page_is_titled_by_its_title() -> None:
+    (doc,) = rst_page(RST.encode(), "admin-guide/cgroup-v2")
+    assert doc.title == "Control Group v2"
+    assert doc.url == "https://docs.kernel.org/admin-guide/cgroup-v2.html"
+    assert "SPDX" not in doc.text
+    assert "=====" not in doc.text
+    assert "memory.max\n\tA read-write single value file" in doc.text
+
+
+def test_kernel_translations_are_left_out(tmp_path: Path) -> None:
+    zpath = tmp_path / "linux.zip"
+    with zipfile.ZipFile(zpath, "w") as z:
+        z.writestr("Documentation/admin-guide/cgroup-v2.rst", RST)
+        z.writestr("Documentation/translations/zh_CN/admin-guide/cgroup-v2.rst", RST)
+        z.writestr("kernel/cgroup/cgroup.c", "int x;")
+    assert [d.key for d in read_snapshot(zpath, "rst-kernel")] == ["admin-guide/cgroup-v2"]

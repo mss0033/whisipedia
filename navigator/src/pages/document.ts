@@ -160,7 +160,8 @@ function asOfText(doc: DocumentResponse): string {
 }
 
 export function isPreformatted(doc: Pick<DocumentResponse, 'source_id' | 'kind'>): boolean {
-  return doc.source_id === 'rfc' || doc.kind === 'data';
+  // the kernel's reStructuredText keeps its layout (indented definitions, code)
+  return doc.source_id === 'rfc' || doc.source_id === 'linux-kernel-docs' || doc.kind === 'data';
 }
 
 /** The page heading already shows the title: drop a first line that only repeats it. */
