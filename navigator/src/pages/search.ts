@@ -258,8 +258,11 @@ function kindFilters(resp: SearchResults, route: SearchRoute): HTMLElement | nul
   if (resp.facets.length === 0 && !route.kind) return null;
   const counts = new Map(resp.facets.map((f) => [f.kind, f.count]));
   const kinds = KIND_ORDER.filter((k) => counts.has(k) || k === route.kind);
+  // The counts are of the mixed list; a filter searches its kind's own sources and can find more.
+  // They are totals only when that list holds every match (2026-10-17 field exam: "Books (2)").
+  const exact = !resp.total_is_estimate && !route.kind;
   const item = (label: string, kind: DocKind | undefined, count?: number) => {
-    const text = count === undefined ? label : `${label} (${formatNumber(count)})`;
+    const text = count === undefined || !exact ? label : `${label} (${formatNumber(count)})`;
     const current = route.kind === kind;
     return h(
       'li',

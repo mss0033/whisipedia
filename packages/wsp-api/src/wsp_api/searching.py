@@ -1,8 +1,9 @@
 """``GET /v1/search``: one retrieval per query, and every number on the page counted in it (audit #7).
 
 The page, ``total`` and the facets all come from one ranked list of at most :data:`WINDOW` hits for
-the query (the Oracle's result when the index is the Oracle). A ``kind`` filter keeps that kind's hits
-of the list, so "Medicine (4)" shows exactly 4 results and kinds with nothing are not offered.
+the query (the Oracle's result when the index is the Oracle). The facets count the kinds of that list
+(kinds with nothing are not offered); a ``kind`` filter searches that kind's sources, so its list
+reaches as deep as an unfiltered one.
 Offsets beyond the list are refused (422) rather than paged deeper and inconsistently.
 
 Identical searches in flight share one retrieval; the Oracle also caches recent results, so the next
@@ -241,6 +242,24 @@ class Searcher:
         content = [h for h in found.hits if not self.is_listing(h)]
         kinds = [self.kind_of(h) for h in content]
         shown = [h for h, k in zip(content, kinds, strict=True) if kind is None or k is kind]
+        if kind is not None:
+            # A kind is searched in its own sources, not picked out of the mixed list: "Books" for
+            # "bread" offered 2 Wikisource pages of the top 200 while Gutenberg holds hundreds
+            # (2026-10-17 field exam). The facets still count the mixed list.
+            scope = self.scope_of(kind, wanted)
+            if scope:
+                found = self.retrieval(q, scope)
+                t = lap("kind_retrieval", t)
+                shown = [h for h in found.hits if not self.is_listing(h) and self.kind_of(h) is kind]
+            else:
+                shown = []
+        nav = search.navigate_to(s, q, exists=lib.exists) if offset == 0 else None
+        pin = nav or search.cited(s, q, exists=lib.exists)
+        if pin is not None and (kind is None or self.kind_of(SearchHit(pin, 0.0, "")) is kind):
+            held = next((h for h in shown if h.doc_id == pin), None)
+            first = held or SearchHit(pin, 0.0, lib.title(pin) or pin, source_id=pin[4:].partition("/")[0])
+            shown = [first, *(h for h in shown if h.doc_id != pin)]
+        t = lap("navigate", t)
         page = shown[offset : offset + limit]
         fill = getattr(s.index, "with_snippets", None)
         if callable(fill) and any(not h.snippet for h in page):  # ranked without them: cut for this page
@@ -261,8 +280,6 @@ class Searcher:
             )
         t = lap("hit_fields", t)
         counts = Counter(kinds)
-        nav = search.navigate_to(s, q, exists=lib.exists) if offset == 0 else None
-        t = lap("navigate", t)
         did_you_mean = self.did_you_mean(q, self.scope_of(kind, wanted), len(shown)) if offset == 0 else None
         t = lap("did_you_mean", t)
         low = found.low_confidence or not shown

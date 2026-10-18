@@ -100,7 +100,9 @@ def test_every_facet_is_exactly_what_filtering_by_it_shows(oracle: bool) -> None
             assert only.total == facet.count == len(only.hits)
             assert {self_kind.kind for self_kind in only.hits} == {facet.kind}
             assert only.facets == res.facets  # facets ignore the filter
-        assert len(index.searches) == len(res.facets)  # one retrieval per request, no per-kind windows
+        # each filter is also searched in its own sources (2026-10-17 field exam: "Books" for "bread"
+        # showed 2 of the mixed top 200 while Gutenberg holds hundreds): the mixed list and the kind's
+        assert len(index.searches) <= 2 * len(res.facets)
 
 
 def test_one_retrieval_per_page_and_pages_tile_the_results() -> None:
@@ -195,3 +197,43 @@ def test_lists_use_projected_reads_not_article_text() -> None:
         assert c.get("/go/rfc/9110").status_code == 200
         assert c.get("/v1/random", params={"seed": 1}).status_code == 200
     assert store.full_reads == 0
+
+
+def test_a_kind_is_searched_in_its_own_sources() -> None:
+    """The mixed list is the top of everything; a kind filter reaches past it (2026-10-17 field exam:
+    "Books" for "bread" showed 2 Wikisource pages of the top 200, Gutenberg holds hundreds)."""
+    full = OracleLike(cast(InMemoryLexicalIndex, browse_services().index))
+    every = _search(_client(full), q="the", limit=100)
+    index = CollapsingOracle(cast(InMemoryLexicalIndex, browse_services().index))  # a mixed list of 2
+    with _client(index) as c:
+        mixed = _search(c, q="the", limit=100)
+        beyond = [f.kind for f in every.facets if f.kind not in {m.kind for m in mixed.facets}]
+        assert beyond  # kinds the short mixed list does not reach
+        for kind in beyond:
+            only = _search(c, q="the", kind=kind.value, limit=100)
+            assert only.hits
+            assert {h.kind for h in only.hits} == {kind}
+
+
+def test_a_document_the_query_cites_comes_first() -> None:
+    """RFCs citing RFC 791 ranked above it, and a question naming 5 U.S.C. 552 did not show the
+    section (2026-10-17 field exam): a cited document the library holds is the first result."""
+    services = browse_services()
+    rfc = DocRecord(
+        doc_id=DocId("wsp:rfc/rfc:RFC-4242"),
+        source_id="rfc",
+        native_id="rfc:RFC-4242",
+        title="Information Refresh Time Option",
+        lang="en",
+        license="LicenseRef-IETF-Trust",
+        text="Refresh.",
+        content_hash="x",
+    )
+    assert isinstance(services.documents, InMemoryDocumentStore)
+    services.documents.put(next(iter(services.vault.generations("rfc"))).generation_id, rfc)
+    with local_client(create_app(services)) as c:
+        res = _search(c, q="the refresh option of RFC 4242", limit=5)
+        plain = _search(c, q="the", limit=100)
+    assert res.hits[0].doc_id == "wsp:rfc/rfc:RFC-4242"
+    assert res.hits[0].title == "Information Refresh Time Option"
+    assert "wsp:rfc/rfc:RFC-4242" not in {h.doc_id for h in plain.hits}

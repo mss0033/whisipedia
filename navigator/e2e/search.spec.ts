@@ -86,20 +86,25 @@ test('a plain-language query in the location bar: results, filters, paging, back
 });
 
 test("a kind filter narrows the results to that kind's count", async ({ nav, data }) => {
-  // E2E-5 (docs/testing/e2e-findings.md, fixed): facet counts and filtered totals agree.
+  // E2E-5 (docs/testing/e2e-findings.md, fixed): facet counts and filtered totals agree. Counts are
+  // shown only when the list holds every match; a filter then finds exactly that many (2026-10-17).
   await nav.open(`wsp://search?q=${encodeURIComponent(data.question)}`);
   const before = await resultsBar(nav.main);
   const filters = nav.main.getByRole('navigation', { name: 'Filter by kind' });
   const links = filters.getByRole('link');
   const labels = await links.allInnerTexts();
-  const counts = labels.map((l) => Number(/\(([\d,]+)\)/.exec(l)?.[1]?.replace(/,/g, '') ?? 0));
+  const counts = labels.map((l) => Number(/\(([\d,]+)\)/.exec(l)?.[1]?.replace(/,/g, '') ?? -1));
+  const counted = counts.every((n) => n >= 0);
   // The smallest facet, so the narrowing is visible.
-  const pick = counts.indexOf(Math.min(...counts));
+  const pick = counted ? counts.indexOf(Math.min(...counts)) : labels.length - 1;
   await links.nth(pick).click();
   await nav.settled();
   const after = await resultsBar(nav.main);
-  expect(after.total).toBeLessThan(before.total);
-  expect(after.total).toBe(counts[pick]);
+  expect(after.total).toBeGreaterThan(0);
+  if (counted) {
+    expect(after.total).toBeLessThan(before.total);
+    expect(after.total).toBe(counts[pick]);
+  }
   // The last page the pager offers has results.
   const pager = nav.main.getByRole('navigation', { name: 'Result pages' });
   if (await pager.count()) {

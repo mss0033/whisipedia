@@ -66,6 +66,17 @@ _INTENTS: tuple[tuple[re.Pattern[str], QueryIntent], ...] = (
     (re.compile(r"^how (to|do|does|can|is)\b", re.I), QueryIntent.HOW_TO),
     (re.compile(r"\b(vs\.?|versus)\b|^compare\b", re.I), QueryIntent.COMPARE),
 )
+_CITED = (  # a citation anywhere in a longer query: "5 U.S.C. 552 trade secrets", "RFC 2026 process"
+    (
+        re.compile(r"\b(\d+a?)\s*U\.?\s?S\.?\s?C\.?(?:\s?A\.?)?\s*(?:§+\s*)?([0-9]+[0-9A-Za-z-]*)\b", re.I),
+        "us-code",
+    ),
+    (
+        re.compile(r"\b(\d+)\s*C\.?\s?F\.?\s?R\.?\s*(?:§+\s*)?([0-9]+\.[0-9A-Za-z-]+)\b", re.I),
+        "ecfr-federal-register",
+    ),
+)
+_CITED_RFC = re.compile(r"\bRFC[\s-]?0*(\d{1,5})\b", re.I)
 _SITE_NUMBER = re.compile(r"^([a-z][a-z.-]*?)[\s#:-]*(\d[\w./-]*)$", re.I)
 _QID = re.compile(r"^Q[1-9]\d*$")
 
@@ -150,6 +161,19 @@ def _key_prefix(services: Services, source_id: str) -> str:
     access = spec.raw.get("access") if spec is not None else None
     prefix = cast(dict[str, object], access).get("key_prefix") if isinstance(access, dict) else None
     return str(prefix) if isinstance(prefix, str) else ""
+
+
+def cited(services: Services, query: str, exists: Callable[[DocId], bool]) -> DocId | None:
+    """The document a query cites by its number ("RFC 791", "5 U.S.C. 552 trade secrets"), if the
+    library holds it: shown first. RFCs that cite RFC 791 ranked above it, and FOIA's section was
+    not among the first hits for a question naming it (2026-10-17 field exam)."""
+    found: list[DocId] = []
+    for rx, source_id in _CITED:
+        if services.source(source_id) is not None:
+            found += [make_doc_id(source_id, f"t{m.group(1)}/s{m.group(2)}") for m in rx.finditer(query)]
+    if services.source("rfc") is not None:
+        found += [make_doc_id("rfc", f"rfc:RFC-{int(m.group(1))}") for m in _CITED_RFC.finditer(query)]
+    return next((d for d in found[:3] if exists(d)), None)
 
 
 def navigate_to(
