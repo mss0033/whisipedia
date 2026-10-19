@@ -356,6 +356,16 @@ export interface LedgerEntry {
   hash: string;
 }
 
+export interface LinkCheck {
+  /** `wsp://` addresses a page links to (at most 500 at a time). */
+  addresses: Array<string>;
+}
+
+export interface LinkCheckResult {
+  /** Those of them the library holds no page for, in the order asked. An address it could not answer for just now (a busy archive) is not listed. */
+  missing: Array<string>;
+}
+
 export interface MapAnswer {
   type: 'map';
   place: string;
@@ -1072,6 +1082,13 @@ export interface Routes {
     };
     body: null;
     response: OutsideCopy;
+  };
+  /** Missing Links */
+  'POST /v1/links/missing': {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: LinkCheck;
+    response: LinkCheckResult;
   };
   /** Report Gap */
   'POST /v1/gaps': {

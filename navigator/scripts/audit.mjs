@@ -175,6 +175,11 @@ async function waitForPage(page) {
     null,
     { timeout: PAGE_TIMEOUT, polling: 500 },
   );
+  // A document's links that lead nowhere are marked once the library has said which (they are not
+  // counted as broken: the reader is told before following them).
+  await page
+    .waitForSelector('[data-links-checked], .page-error', { state: 'attached', timeout: 20_000 })
+    .catch(() => {});
 }
 
 /** Everything about the page as the reader sees it (run in the page). */

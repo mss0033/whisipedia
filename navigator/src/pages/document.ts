@@ -1047,6 +1047,47 @@ export function deadEndNotice(
   );
 }
 
+/** Most links on 32 archived sites that opened Not Found (2026-10-19 audit) went to pages the site's
+ * own archive never captured: its "contact" page, a wiki's Talk: pages, a search. Once the page is
+ * shown, the library is asked which of its links it holds no page for, and those are marked as the
+ * links to websites it does not hold are. `data-links-checked` says the answer is in. */
+export async function markUncaptured(
+  ctx: Pick<PageContext, 'app' | 'signal'>,
+  content: HTMLElement,
+  note: HTMLElement,
+): Promise<void> {
+  const byAddress = new Map<string, HTMLAnchorElement[]>();
+  for (const a of content.querySelectorAll<HTMLAnchorElement>('a[data-wsp]:not([data-missing])')) {
+    const at = a.dataset.wsp ?? '';
+    if (at.startsWith('wsp://')) byAddress.set(at, [...(byAddress.get(at) ?? []), a]);
+  }
+  const missing = await ctx.app.api.missingLinks([...byAddress.keys()], ctx.signal);
+  if (ctx.signal.aborted) return;
+  let marked = 0;
+  for (const at of missing) {
+    for (const a of byAddress.get(at) ?? []) {
+      a.dataset.missing = at;
+      a.classList.add('broken-link', 'uncaptured-link');
+      a.setAttribute('title', `Not in library: ${at}`);
+      marked += 1;
+    }
+  }
+  if (marked) {
+    note.textContent = `${marked} link(s) on this page go to pages the library does not hold: this site’s archive did not capture them. They are marked.`;
+    note.hidden = false;
+  }
+  content.dataset.linksChecked = '1';
+}
+
+/** The web address a page of an archived website had (`www.nhs.uk/contact/` → https://…), or null
+ * when its id is not a web path (a wiki title). */
+export function originalWebAddress(nativeId: string): string | null {
+  const host = nativeId.split('/')[0] ?? '';
+  return /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(host) && /[a-z]/i.test(host.split('.').pop() ?? '')
+    ? `https://${nativeId}`
+    : null;
+}
+
 export async function render(ctx: PageContext): Promise<PageResult> {
   const route = ctx.route as DocRoute;
   let doc: DocumentResponse;
@@ -1068,7 +1109,9 @@ export async function render(ctx: PageContext): Promise<PageResult> {
           heading: 'Not Found',
           message: route.at
             ? `The library holds no version of this page as of ${route.at}.`
-            : `The requested page was not found in the library. It may not have been mirrored yet, or it was removed upstream.`,
+            : originalWebAddress(route.nativeId)
+              ? `The library does not hold this page: its site’s archive did not capture ${originalWebAddress(route.nativeId)}.`
+              : `The requested page was not found in the library. It may not have been mirrored yet, or it was removed upstream.`,
           address: ctx.address,
           suggestions: [
             route.at
@@ -1122,6 +1165,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
     content = r.node;
     broken = r.broken;
   }
+  const uncapturedNote = h('p', { class: 'fineprint uncaptured-note', hidden: true });
 
   const body = h(
     'article',
@@ -1161,10 +1205,13 @@ export async function render(ctx: PageContext): Promise<PageResult> {
           `${broken} link(s) on this page go to websites the library does not hold offline. They are marked, and opening one explains what is missing.`,
         )
       : null,
+    uncapturedNote,
     route.diff ? null : linksList(doc),
     timeMachine(ctx, doc, route),
     footer(ctx.app, doc, here),
   );
+  if (route.at || route.diff) content.dataset.linksChecked = '1';
+  else void markUncaptured(ctx, content, uncapturedNote);
   const title = body.querySelector('h1');
   if (title) {
     // The page's own id for its heading stays a place to land: TruePrepper's "Skip to content"

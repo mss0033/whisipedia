@@ -280,6 +280,25 @@ export class WspClient {
    * Tell the gap miner about a "not in library" link (PLAN §5.3). Best effort:
    * never throws, and each link is reported once per session.
    */
+  /** Which of `addresses` the library holds no page for (at most 500 asked at a time). An error is
+   * "none known": marking links must never disturb browsing. */
+  async missingLinks(addresses: string[], signal?: AbortSignal): Promise<string[]> {
+    if (!addresses.length) return [];
+    const body: Routes['POST /v1/links/missing']['body'] = { addresses: addresses.slice(0, 500) };
+    try {
+      const res = await this.fetchImpl(this.base + routePath('POST /v1/links/missing', NO_PATH), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(body),
+        ...(signal ? { signal } : {}),
+      });
+      const out = (await this.parse(res)) as Routes['POST /v1/links/missing']['response'];
+      return out.missing;
+    } catch {
+      return [];
+    }
+  }
+
   async reportGap(report: GapReport): Promise<void> {
     const key = `${report.href}\n${report.from_doc_id ?? ''}`;
     if (this.reportedGaps.has(key)) return;

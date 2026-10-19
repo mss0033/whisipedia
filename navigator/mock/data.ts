@@ -369,6 +369,7 @@ const turingV3 = `
 <h2 id="Legacy">Legacy</h2>
 <p>The structured record for Turing is held in <a href="wsp:wikidata/Q7251">Wikidata (Q7251)</a>. The essay that introduced the imitation game remains widely read; see the <a href="https://www.turing.org.uk/">Turing Digital Archive</a> (not held locally).</p>
 <p>Modern networked computers speak protocols such as <a href="./Hypertext_Transfer_Protocol">HTTP</a>, the descendants of ideas Turing helped make possible.</p>
+<p>The field's highest honour, the <a href="./Turing_Award">Turing Award</a>, bears his name.</p>
 <script>alert('this must never run')</script>
 <p class="noprint" onclick="steal()">Fixture: this paragraph had an onclick handler, removed by the sanitizer (the API already drops inline styles; tests/links.test.ts covers the sanitizer dropping them too).</p>
 <img src="https://upload.example.org/turing.jpg" alt="Portrait of Alan Turing">

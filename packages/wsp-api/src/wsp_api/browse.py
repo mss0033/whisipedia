@@ -5,6 +5,7 @@ from __future__ import annotations
 import ipaddress
 import random
 import secrets
+import time
 from collections.abc import Callable, Sequence
 from typing import Annotated
 from urllib.parse import quote
@@ -12,7 +13,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, Query, Request, Response
 
 from wsp_api import sites
-from wsp_api.addresses import address_of
+from wsp_api.addresses import address_of, resolve
 from wsp_api.errors import ApiError, errors
 from wsp_api.schemas import (
     Change,
@@ -24,15 +25,20 @@ from wsp_api.schemas import (
     DocRef,
     FeaturedDoc,
     GapReport,
+    LinkCheck,
+    LinkCheckResult,
     OnThisDay,
     OutsideCopy,
     Portal,
     SourceInfo,
 )
 from wsp_api.views import Library
+from wsp_api.zimread import ZimUnavailable
 from wsp_core.ids import DocId, parse_doc_id
 from wsp_core.model import ChangeKind, ChangeRecord, Gap, SourceSpec
 from wsp_core.ports import PortalSource
+
+LINK_CHECK_SECONDS = 5.0  # a page's link check never holds a NAS worker longer
 
 # Only images are served from containers: never HTML or scripts at our origin.
 SERVED_MIMETYPES = frozenset(
@@ -308,6 +314,32 @@ def browse_router(lib: Library) -> APIRouter:
         if address is None or hit is None:
             raise ApiError(404, "not_held", "the library holds no copy of this address")
         return OutsideCopy(url=url, address=address, source_id=hit[0][0])
+
+    # --- Links that lead nowhere ------------------------------------------------------------------
+
+    @r.post("/links/missing", tags=["navigator"], responses=errors(422, 503))
+    async def missing_links(body: LinkCheck) -> LinkCheckResult:
+        """Which of a page's links the library holds no page for, so the Navigator can mark them before
+        they are followed. 2026-10-19 audit: 71 links on 32 sites opened Not Found, pages their own
+        archives never captured (a site's "contact" page, a wiki's Talk: pages). Each is resolved as
+        ``/go`` resolves it (a trailing slash, a stand-in from another source). Checking stops after
+        :data:`LINK_CHECK_SECONDS`; the rest are not listed."""
+        return LinkCheckResult(missing=await lib.nas.run(lambda: _missing(body.addresses)))
+
+    def _missing(addresses: Sequence[str]) -> list[str]:
+        out: list[str] = []
+        deadline = time.monotonic() + LINK_CHECK_SECONDS
+        for a in dict.fromkeys(addresses):
+            if time.monotonic() > deadline:
+                break
+            try:
+                resolve(s, a, {}, exists=lib.exists, stand_in=lib.stand_in)
+            except ApiError as exc:
+                if exc.status == 404:
+                    out.append(a)
+            except ZimUnavailable:
+                continue  # busy: unknown, not missing
+        return out
 
     # --- Gaps -----------------------------------------------------------------------------------
 

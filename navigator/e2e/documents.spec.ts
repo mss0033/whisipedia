@@ -42,7 +42,9 @@ test('open a search result, follow an internal link, then Back and Forward', asy
     await expect(article.getByRole('button', { name: 'View Source Data' })).toBeVisible();
   });
 
-  // The first visible link to another document in the library.
+  // The first visible link to another document in the library, once the library has said which of
+  // the page's links lead nowhere (they are marked broken).
+  await expect(nav.main.locator('[data-links-checked]')).toHaveCount(1);
   const link = body.locator('p a[data-wsp]:not(.broken-link):visible').first();
   let target = '';
 
@@ -121,6 +123,23 @@ test('the time machine lists versions and shows a diff', async ({ nav, target })
   await nav.expectAddress(/[?&]diff=1/);
   await expect(nav.main.getByRole('note')).toContainText('Time Machine:');
   await expect(nav.main.locator('.diff-stats')).toContainText(/line\(s\) added/);
+});
+
+test("a link to a page the site's archive never captured is marked before it is followed", async ({
+  nav,
+  target,
+}) => {
+  // 2026-10-19 audit: 71 links on 32 archived sites opened Not Found (a "contact" page, Talk: pages).
+  test.skip(target === 'live', 'mock fixture: the mock holds no Turing Award page');
+  await nav.open('wsp://wikipedia-en-zim/Alan_Turing');
+  const gone = nav.main.locator('p a.uncaptured-link', { hasText: 'Turing Award' });
+  await expect(gone).toBeVisible();
+  await expect(nav.main.locator('p a.uncaptured-link', { hasText: 'Enigma machine' })).toHaveCount(
+    0,
+  );
+  await gone.hover();
+  await expect(nav.status).toHaveText('Not in library: wsp://wikipedia-en-zim/Turing_Award');
+  await expect(nav.main.getByText(/this site’s archive did not capture them/)).toBeVisible();
 });
 
 test.describe('a missing page', () => {

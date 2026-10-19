@@ -691,6 +691,24 @@ export function handle(
     GAPS.push(gap);
     return { status: 204 };
   }
+  if (method === 'POST' && path === '/v1/links/missing') {
+    const ask = body as Routes['POST /v1/links/missing']['body'] | undefined;
+    if (!Array.isArray(ask?.addresses) || ask.addresses.length > 500)
+      return err(422, 'invalid_request', 'addresses: at most 500');
+    // A page of a mock source the mock holds no document for (other addresses are pages of the app).
+    const missing = [...new Set(ask.addresses)].filter((a) => {
+      const m = /^wsp:\/\/([^/?#]+)\/(.+)$/.exec(a);
+      if (!m || !SOURCES.some((x) => x.id === m[1])) return false;
+      let native: string;
+      try {
+        native = decodeURIComponent(m[2]!);
+      } catch {
+        return true;
+      }
+      return !document(`wsp:${m[1]}/${native}`, new URLSearchParams());
+    });
+    return { status: 200, json: { missing } };
+  }
   if (method !== 'GET') return err(405, 'method_not_allowed', method);
 
   const docMatch = /^\/v1\/documents\/([^/]+)(\/history)?$/.exec(path);

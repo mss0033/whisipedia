@@ -92,3 +92,23 @@ def test_an_rfc_cited_by_number_resolves_to_its_key() -> None:
     res = resolve(services, "wsp://rfc/3171", {}, exists=lambda d: d in held)
     assert (res.kind, res.address) == ("document", "wsp://rfc/rfc:RFC-3171")
     assert res.href == "/v1/documents/wsp%3Arfc%2Frfc%3ARFC-3171"
+
+
+def test_a_pages_links_that_lead_nowhere_are_named_at_once(client: httpx.Client) -> None:
+    """2026-10-19 audit: links to pages a site's own archive never captured opened Not Found; the
+    Navigator now asks first and marks them."""
+    asked = [
+        "wsp://rfc/9110",
+        "wsp://rfc/9110",  # asked twice, answered once
+        "wsp://rfc/999999",
+        "wsp://wikipedia-en-zim/A/Alan_Turing",
+        "wsp://no-such-site/page",
+        "wsp://home",
+        "wsp://wikipedia-en-zim/A/Nowhere_at_all",
+    ]
+    r = client.post("/v1/links/missing", json={"addresses": asked})
+    assert r.status_code == 200, r.text
+    assert r.json() == {
+        "missing": ["wsp://rfc/999999", "wsp://no-such-site/page", "wsp://wikipedia-en-zim/A/Nowhere_at_all"]
+    }
+    assert client.post("/v1/links/missing", json={"addresses": ["wsp://rfc/1"] * 501}).status_code == 422

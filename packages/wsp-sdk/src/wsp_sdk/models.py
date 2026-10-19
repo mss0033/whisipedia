@@ -748,6 +748,19 @@ class GapReport(_Wire):
     from_doc_id: str | None = Field(default=None, max_length=2048, description="Page the link was on.")
 
 
+class LinkCheck(_Wire):
+    addresses: list[str] = Field(
+        max_length=500, description="`wsp://` addresses a page links to (at most 500 at a time)."
+    )
+
+
+class LinkCheckResult(_Wire):
+    missing: list[str] = Field(
+        description="Those of them the library holds no page for, in the order asked. An address it "
+        "could not answer for just now (a busy archive) is not listed."
+    )
+
+
 class OutsideCopy(_Wire):
     url: str = Field(description="The outside URL asked about.")
     address: str = Field(description="The library's copy of it, e.g. `wsp://wikipedia-en-zim/Alan_Turing`.")

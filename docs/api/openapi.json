@@ -2229,6 +2229,68 @@
         }
       }
     },
+    "/v1/links/missing": {
+      "post": {
+        "tags": [
+          "navigator"
+        ],
+        "summary": "Missing Links",
+        "description": "Which of a page's links the library holds no page for, so the Navigator can mark them before\nthey are followed. 2026-10-19 audit: 71 links on 32 sites opened Not Found, pages their own\narchives never captured (a site's \"contact\" page, a wiki's Talk: pages). Each is resolved as\n``/go`` resolves it (a trailing slash, a stand-in from another source). Checking stops after\n:data:`LINK_CHECK_SECONDS`; the rest are not listed.",
+        "operationId": "missing_links_v1_links_missing_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LinkCheck"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinkCheckResult"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid_request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/gaps": {
       "post": {
         "tags": [
@@ -4104,6 +4166,41 @@
           "hash"
         ],
         "title": "LedgerEntry"
+      },
+      "LinkCheck": {
+        "properties": {
+          "addresses": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 500,
+            "title": "Addresses",
+            "description": "`wsp://` addresses a page links to (at most 500 at a time)."
+          }
+        },
+        "type": "object",
+        "required": [
+          "addresses"
+        ],
+        "title": "LinkCheck"
+      },
+      "LinkCheckResult": {
+        "properties": {
+          "missing": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Missing",
+            "description": "Those of them the library holds no page for, in the order asked. An address it could not answer for just now (a busy archive) is not listed."
+          }
+        },
+        "type": "object",
+        "required": [
+          "missing"
+        ],
+        "title": "LinkCheckResult"
       },
       "MapAnswer": {
         "properties": {
