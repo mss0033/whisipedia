@@ -79,6 +79,31 @@ def test_parallel_multi_mirror_correctness(servers: Servers, tmp_path: Path) -> 
     assert {r.user_agent for s in (a, b, c) for r in s.requests} == {"wsp-test/1.0"}
 
 
+def test_mirrors_are_probed_in_turn_when_no_thread_can_start(
+    servers: Servers, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-10-19: "can't start new thread" while probing ended a nine-hour collection fetch; the
+    mirrors left are probed one by one instead."""
+    import threading
+
+    class Starved(threading.Thread):
+        def start(self) -> None:
+            target = getattr(self, "_target", None)
+            if "_probe_all" in getattr(target, "__qualname__", ""):
+                raise RuntimeError("can't start new thread")
+            super().start()
+
+    monkeypatch.setattr("wsp_fetch.http.threading.Thread", Starved)
+    data = payload(300_000, seed=11)
+    a, b = servers(), servers()
+    for s in (a, b):
+        s.add("f.bin", data)
+    with HttpFetcher(CFG) as f:
+        result = f.fetch(remote_for(data, a.url("f.bin"), b.url("f.bin")), tmp_path / "f.bin")
+    assert (tmp_path / "f.bin").read_bytes() == data
+    assert result.verdict.ok
+
+
 def test_per_host_cap_respected(servers: Servers, tmp_path: Path) -> None:
     data = payload(640_000, seed=11)
     two, four = servers(), servers()

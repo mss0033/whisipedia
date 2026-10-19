@@ -558,9 +558,18 @@ class HttpFetcher:
                 log.info("mirror %s unusable: %s", url, exc)
 
         threads = [threading.Thread(target=run, args=(i, u), daemon=True) for i, u in enumerate(target.urls)]
-        for t in threads:
-            t.start()
-        for t in threads:
+        started: list[threading.Thread] = []
+        for i, t in enumerate(threads):
+            try:
+                t.start()
+            except RuntimeError:  # "can't start new thread": the machine is short for a moment
+                # Probe the rest here, one by one, rather than end the fetch: NPS Calhoun's nine-hour
+                # listing of 17,757 documents ended so on 2026-10-19.
+                for j in range(i, len(threads)):
+                    run(j, target.urls[j])
+                break
+            started.append(t)
+        for t in started:
             t.join()
         probes = [p for p in results if p is not None]
         expected = target.size
