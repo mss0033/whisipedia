@@ -8,6 +8,7 @@ import type { DirectoryPage, SourceInfo } from '../api/types.ts';
 import { makeAddress, searchAddress } from '../core/address.ts';
 import { h } from '../core/dom.ts';
 import { formatNumber } from '../core/format.ts';
+import { PLACES } from '../core/places.ts';
 import { badge, docLink, errorPage, KIND_LABELS, searchForm, wspLink } from '../ui/components.ts';
 import type { PageContext, PageResult } from './types.ts';
 
@@ -155,6 +156,17 @@ export async function render(ctx: PageContext): Promise<PageResult> {
           : wspLink(makeAddress('directory', t.path), t.name),
       ]),
     ),
+    dir.path
+      ? null
+      : h(
+          'p',
+          { class: 'dir-places' },
+          h('b', null, 'Places: '),
+          ...PLACES.flatMap((p, i) => [
+            i ? ' · ' : null,
+            h('span', { title: p.blurb }, wspLink(p.address, p.label)),
+          ]),
+        ),
     h('hr'),
     dir.children.length
       ? h(

@@ -9,6 +9,7 @@ import { makeAddress, searchAddress } from '../core/address.ts';
 import { unfinishedBooks } from '../core/book.ts';
 import { h } from '../core/dom.ts';
 import { formatDate, formatNumber, odometer } from '../core/format.ts';
+import { PLACES } from '../core/places.ts';
 import {
   docLink,
   ENGINE_NAME,
@@ -39,6 +40,12 @@ function sitesList(sources: SourceInfo[]): HTMLElement {
   return h(
     'div',
     { class: 'sites-list' },
+    h(
+      'div',
+      { class: 'sites-group sites-places' },
+      h('h3', null, 'Places'),
+      h('ul', null, ...PLACES.map((p) => h('li', null, wspLink(p.address, p.label)))),
+    ),
     // Alphabetical by kind, with the catch-all "Other" last.
     ...[...byKind.entries()]
       .sort(
@@ -213,10 +220,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
       ' | ',
       wspLink(makeAddress('hotlist'), 'Hotlist'),
       ' | ',
-      wspLink(makeAddress('practice'), 'Practice Hall'),
-      ' | ',
-      wspLink(makeAddress('screening-room'), 'Screening Room'),
-      ' | ',
+      ...PLACES.flatMap((p) => [wspLink(p.address, p.label), ' | ']),
       wspLink(makeAddress('system'), 'System Monitor'),
       ' | ',
       wspLink(makeAddress('help'), 'Help'),

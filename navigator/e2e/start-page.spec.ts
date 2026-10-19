@@ -59,3 +59,35 @@ test('the start page shows the portal: search box, sites, what is new, stats', a
     await expect(nav.status).toHaveText(/Document: Done/);
   });
 });
+
+test('the Atlas and the other places are found without typing an address', async ({
+  page,
+  nav,
+}) => {
+  // 2026-10-18: the owner found the Atlas only by typing "maps"; it was in no list of where to go.
+  await page.goto('/');
+  await nav.settled();
+  await nav.step('the start page lists the places among the sites', async () => {
+    const sites = nav.main.getByRole('region', { name: 'Sites in the Library' });
+    for (const name of ['Atlas', 'Screening Room', 'Exam Practice Hall', 'Dictionary'])
+      await expect(sites.getByRole('link', { name, exact: true })).toBeVisible();
+  });
+  await nav.step('the Go menu lists them too', async () => {
+    await page
+      .getByRole('menubar', { name: 'Main menu' })
+      .getByRole('menuitem', { name: 'Go' })
+      .click();
+    const menu = page.getByRole('menu', { name: 'Go' });
+    await expect(menu.getByRole('menuitem', { name: 'Screening Room' })).toBeVisible();
+    await menu.getByRole('menuitem', { name: 'Atlas' }).click();
+    await nav.settled();
+    await nav.expectAddress(/^wsp:\/\/atlas/);
+  });
+  await nav.step('and the directory names them at the top', async () => {
+    await page.goto('/#wsp://directory');
+    await nav.settled();
+    await expect(
+      nav.main.locator('.dir-places').getByRole('link', { name: 'Atlas' }),
+    ).toBeVisible();
+  });
+});

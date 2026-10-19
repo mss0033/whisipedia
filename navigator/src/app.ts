@@ -20,6 +20,7 @@ import {
 } from './core/address.ts';
 import { h } from './core/dom.ts';
 import { GlobalHistory, Hotlist, SessionStack } from './core/history.ts';
+import { PLACES } from './core/places.ts';
 import { type Route, resolveRoute } from './core/router.ts';
 import { SafeStorage } from './core/storage.ts';
 import { THEMES, ThemeManager } from './core/theme.ts';
@@ -683,6 +684,10 @@ export class App implements AppServices {
               action: go(makeAddress('history')),
             },
             { type: 'sep' },
+            ...PLACES.map(
+              (p): MenuItem => ({ type: 'item', label: p.label, action: go(p.address) }),
+            ),
+            { type: 'sep' },
             ...list.slice(from).map((e, k): MenuItem => {
               const i = from + k;
               return {
@@ -898,6 +903,7 @@ export class App implements AppServices {
       'nav',
       { class: 'dirbuttons', 'aria-label': 'Directory buttons' },
       dirButton("What's New!", makeAddress('whatsnew')),
+      dirButton('Atlas', makeAddress('atlas')),
       dirButton("What's Cool?", makeAddress('directory')),
       dirButton('Handbook', makeAddress('help')),
       dirButton('Net Search', makeAddress('search')),

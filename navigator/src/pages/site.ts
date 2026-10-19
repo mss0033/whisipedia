@@ -116,6 +116,10 @@ export async function render(ctx: PageContext): Promise<PageResult> {
             ' ',
           ]
         : null,
+      // A map source is tiles, not pages: the Atlas is the way in (2026-10-18: found only by typing "maps").
+      src.kind === 'maps' || src.id === 'osm-planet'
+        ? wspLink(makeAddress('atlas'), h('span', { class: 'btn-like' }, 'Open the Atlas'))
+        : null,
       // Its A–Z (or subject) shelves in the directory: the way in for a site with no landing page.
       src.readable && src.domain[0]
         ? wspLink(
