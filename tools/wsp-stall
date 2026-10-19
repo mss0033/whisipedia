@@ -17,8 +17,8 @@ log) or the owner sees it at once:
 * ``api-down``                /v1/health did not answer 200 twice in a row
 * ``disk-low:<mount>``        under WSP_STALL_MIN_FREE_GB free locally (50) or on the NAS (2000)
 * ``log``                     a new problem line in a lane log (HTTP 429, Traceback, FAILED, a fetch
-                              that failed (exit 7 and 8 are complete), partitions left for later, no space); one note
-                              per problem (429, FAILED...) and log a day, never the backlog
+                              that failed (exits 7 and 8 are complete), partitions left for later,
+                              no space); one note per problem and log a day, never the backlog
 
 Conditions are re-checked every run: ``RAISED`` when one starts, ``CLEARED`` when it is gone.
 ``--status`` prints what is open now. WSP_STALL_STATE, WSP_STALL_LOGS (colon-separated globs),
