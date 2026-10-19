@@ -179,6 +179,44 @@ def process(pid: str) -> tuple[str, float | None]:
     return cmd, uptime - start_ticks / os.sysconf("SC_CLK_TCK")
 
 
+def lock_waiters() -> dict[str, str]:
+    """``pid -> lock name`` of every process blocked waiting for a lock file in LOCKS (``->`` lines)."""
+    by_inode = _lock_inodes()
+    out: dict[str, str] = {}
+    try:
+        lines = (PROC / "locks").read_text().splitlines()
+    except OSError:
+        return out
+    for line in lines:
+        f = line.split()
+        if len(f) < 7 or f[1] != "->" or f[2] != "FLOCK":
+            continue
+        try:
+            name = by_inode.get(int(f[6].rsplit(":", 1)[1]))
+        except (IndexError, ValueError):
+            continue
+        if name is not None:
+            out[f[5]] = name
+    return out
+
+
+def _lock_inodes() -> dict[int, str]:
+    by_inode: dict[int, str] = {}
+    for p in LOCKS.glob("*.lock"):
+        try:
+            by_inode[p.stat().st_ino] = p.stem
+        except OSError:
+            continue
+    return by_inode
+
+
+def cgroup_pids(cgroup: str) -> set[str]:
+    try:
+        return set(Path(f"{CGROUP_ROOT}{cgroup}/cgroup.procs").read_text().split())
+    except OSError:
+        return set()
+
+
 def lock_holders() -> dict[str, tuple[str, str, float]]:
     """``lock name -> (pid, command, age seconds)`` of every lock file in LOCKS that is held."""
     by_inode: dict[int, str] = {}
@@ -247,6 +285,7 @@ def check(state: State, t: float) -> tuple[dict[str, str], list[str]]:
             del first[key]
 
     samples = state.cpu
+    waiters = lock_waiters()
     seen: set[str] = set()
     rows = units()
     for unit, active, sub in rows:
@@ -274,9 +313,20 @@ def check(state: State, t: float) -> tuple[dict[str, str], list[str]]:
             if frozen(cg):
                 why = "; its slice is frozen (tools/wsp-yield: the machine is short of memory)"
             elif held:
-                name = min(held, key=lambda n: (CAUSE_ORDER.index(n) if n in CAUSE_ORDER else 9, -held[n][2]))
+                # The lock the job is blocked on, when one of its processes waits in flock (2026-10-19:
+                # the job waited for the heavy lock, and the message named the ingest lock); else the
+                # likeliest one.
+                waits = [waiters[p] for p in cgroup_pids(cg) if p in waiters and waiters[p] in held]
+                name = (
+                    waits[0]
+                    if waits
+                    else min(
+                        held, key=lambda n: (CAUSE_ORDER.index(n) if n in CAUSE_ORDER else 9, -held[n][2])
+                    )
+                )
                 _, cmd, age = held[name]
-                why = f"; the {name} lock is held ({hours(age)}) by {short(cmd, 80)}"
+                verb = "waits for" if waits else "may be waiting on"
+                why = f"; it {verb} the {name} lock, held ({hours(age)}) by {short(cmd, 80)}"
             cond[f"job-idle:{unit}"] = (
                 f"{unit} used {(use - base) / 1e6:.0f} s of CPU in {hours(t - since)}{why}"
             )

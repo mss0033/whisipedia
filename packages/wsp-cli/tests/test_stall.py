@@ -29,18 +29,22 @@ def _world(tmp: Path, *, usage: int, failed: bool = False) -> dict[str, str]:
     cg = tmp / "cgroup" / CG.strip("/")
     cg.mkdir(parents=True, exist_ok=True)
     (cg / "cpu.stat").write_text(f"usage_usec {usage}\nuser_usec 1\n")
+    (cg / "cgroup.procs").write_text("76\n77\n")
     locks, proc = tmp / "locks", tmp / "proc"
     locks.mkdir(exist_ok=True)
     (locks / "ingest.lock").touch()
     (locks / "scrub.lock").touch()
+    (locks / "heavy.lock").touch()
     (proc / "42").mkdir(parents=True, exist_ok=True)
     (proc / "42" / "cmdline").write_bytes(b"/r/.venv/bin/python3\0.venv/bin/wsp\0ingest\0--source\0big\0")
     (proc / "42" / "stat").write_text("42 (wsp) S " + " ".join(["0"] * 18) + " 100 0 0\n")  # started 1 s in
     (proc / "uptime").write_text("90000.00 1.00\n")  # the holder is 25 h old
     ingest, scrub = (locks / "ingest.lock").stat().st_ino, (locks / "scrub.lock").stat().st_ino
+    heavy = (locks / "heavy.lock").stat().st_ino
     (proc / "locks").write_text(
         f"1: FLOCK  ADVISORY  WRITE 42 08:30:{ingest} 0 EOF\n"
-        f"1: -> FLOCK  ADVISORY  WRITE 77 08:30:{ingest} 0 EOF\n"
+        f"3: FLOCK  ADVISORY  WRITE 42 08:30:{heavy} 0 EOF\n"
+        f"3: -> FLOCK  ADVISORY  WRITE 77 08:30:{heavy} 0 EOF\n"  # the lane's process waits for it
         f"2: FLOCK  ADVISORY  WRITE 42 08:30:{scrub} 0 EOF\n"
     )
     return {
@@ -75,7 +79,8 @@ def test_an_idle_job_a_long_held_lock_and_a_silent_api_are_raised_once_then_clea
     env = _world(tmp_path, usage=6_000_000, failed=True)  # 1 s of CPU in 3.5 h: idle
     later = " ".join(_run(env, 3.5))
     assert "RAISED job-idle:whisipedia-job-lane.service" in later
-    assert "the ingest lock is held (3.5 h) by wsp ingest --source big" in later  # from first sight
+    # The lock its process waits for (heavy), not the likeliest held one (ingest); held from first sight.
+    assert "it waits for the heavy lock, held (3.5 h) by wsp ingest --source big" in later
     assert "RAISED unit-failed:whisipedia-job-maps.service" in later
     assert "lock-held" not in later
     held = " ".join(_run(env, 8.5))
@@ -86,7 +91,7 @@ def test_an_idle_job_a_long_held_lock_and_a_silent_api_are_raised_once_then_clea
     assert "CLEARED job-idle:whisipedia-job-lane.service" in cleared
     assert "CLEARED unit-failed:whisipedia-job-maps.service" in cleared
     status = _run(env, 9, "--status")
-    assert {line.split()[0] for line in status} == {"api-down", "lock-held:ingest"}
+    assert {line.split()[0] for line in status} == {"api-down", "lock-held:ingest", "lock-held:heavy"}
     events = (tmp_path / "state" / "watch" / "events.log").read_text()
     assert events.count("RAISED api-down") == 1
 
