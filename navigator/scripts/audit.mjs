@@ -471,6 +471,9 @@ async function audit(context, phoneContext, id) {
         if (!lastPart) add(issues, 'navigate', 'reader-no-next');
       } else {
         const was = await page.evaluate(() => location.hash);
+        // The reader scrolls inside its own pane; Playwright's scroll into view missed a link four
+        // screens down there, so the click landed on nothing (2026-10-19). A reader scrolls to it.
+        await next.scrollIntoViewIfNeeded({ timeout: 10_000 }).catch(() => undefined);
         await next.click({ timeout: 10_000 }).catch(() => undefined);
         // The next chapter can be the next part, a document of its own: wait for it, not 600 ms
         // (2026-10-19: ten "Next does nothing" findings were the next part still loading).
