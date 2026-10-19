@@ -14,6 +14,9 @@ describe('wiki leftovers an archived page shows (2026-10-19 audit)', () => {
     expect(withoutTemplateLeftovers('*** (***** | *****) {{PAGENAME}} {{PAGENAME}}')).toBe(
       '*** (***** | *****)  ',
     );
+    expect(withoutTemplateLeftovers('text "You&#039;re an Indian?"')).toBe(
+      `text "You're an Indian?"`,
+    );
     expect(withoutTemplateLeftovers('or &quot;Mountain of Mercy,&quot; lies')).toBe(
       'or "Mountain of Mercy," lies',
     );

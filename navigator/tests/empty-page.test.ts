@@ -24,4 +24,11 @@ describe('a page empty in its archive is said to be (2026-10-19 audit)', () => {
     expect(emptyPageNotice(words, 'Heat stroke', null)).toBeNull();
     expect(emptyPageNotice('<p><img src="map.png" alt=""></p>', 'A map', null)).toBeNull();
   });
+
+  it('names a page that is only a canvas program', () => {
+    const html = '<div class="mini"><canvas id="c"></canvas></div><script src="game.js"></script>';
+    expect(emptyPageNotice(html, 'mini_checkerboard', null)?.textContent).toContain(
+      'interactive program',
+    );
+  });
 });

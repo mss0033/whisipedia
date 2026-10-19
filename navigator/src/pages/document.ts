@@ -1072,14 +1072,20 @@ export function emptyPageNotice(
   for (const el of page.querySelectorAll('script, style, noscript, template, title, h1'))
     el.remove();
   const words = (page.body?.textContent ?? '').replace(/\s+/g, ' ').trim();
-  const media = page.querySelector('img, video, audio, svg, canvas, object, embed, iframe');
-  if (!challenge && (words.replace(title, '').trim().length >= 40 || media)) return null;
+  const media = page.querySelector('img, video, audio, svg, object, embed, iframe');
+  // A page that is only a canvas and its scripts is a program (ncase.me's polygon games): nothing of
+  // it shows here, where page scripts never run.
+  const program = !media && !!page.querySelector('canvas');
+  if (!challenge && !program && (words.replace(title, '').trim().length >= 40 || media))
+    return null;
   return h(
     'p',
     { class: 'notice empty-page-notice', role: 'note' },
     challenge
       ? 'The site’s archive holds a bot check in place of this page: the crawler was refused it. '
-      : 'This page is empty in the site’s archive: its content was loaded by a script when the site was crawled. ',
+      : program
+        ? 'This page is an interactive program that runs only with its own scripts, which the library does not run. '
+        : 'This page is empty in the site’s archive: its content was loaded by a script when the site was crawled. ',
     original ? ['The original address: ', h('code', null, original), '. '] : null,
     wspLink(searchAddress(title), `Search the library for “${title}”`),
   );

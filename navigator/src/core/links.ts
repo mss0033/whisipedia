@@ -419,11 +419,14 @@ const UNLINKED = /\[\[([A-Z][^[\]|,{}]{0,80})(?:\|([^[\]|{}]{1,80}))?\]\]/g;
 
 /** Entities escaped twice upstream, so the page shows `&quot;` (The World Factbook: "or
  * &quot;Mountain of Mercy,&quot; lies Persepolis", 2026-10-19 audit). Outside code only. */
-const ESCAPED_TWICE = /&(?:quot|apos|amp|#39|nbsp);/g;
+const ESCAPED_TWICE = /&(?:quot|apos|amp|nbsp|#0*39|#0*34);/g;
 const UNESCAPE: Record<string, string> = {
   '&quot;': '"',
   '&apos;': "'",
   '&#39;': "'",
+  '&#039;': "'",
+  '&#34;': '"',
+  '&#034;': '"',
   '&amp;': '&',
   '&nbsp;': '\u00a0',
 };
