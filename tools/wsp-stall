@@ -17,7 +17,7 @@ log) or the owner sees it at once:
 * ``api-down``                /v1/health did not answer 200 twice in a row
 * ``disk-low:<mount>``        under WSP_STALL_MIN_FREE_GB free locally (50) or on the NAS (2000)
 * ``log``                     a new problem line in a lane log (HTTP 429, Traceback, FAILED, a fetch
-                              that exited non-zero, partitions left for later, no space); one note
+                              that failed (exit 7 and 8 are complete), partitions left for later, no space); one note
                               per problem (429, FAILED...) and log a day, never the backlog
 
 Conditions are re-checked every run: ``RAISED`` when one starts, ``CLEARED`` when it is gone.
@@ -66,7 +66,7 @@ LOCK_H = float(os.environ.get("WSP_STALL_LOCK_H", "8"))
 MOUNTS = {"/": 50, "/mnt/z": 2000}  # free GB below which the disk is low
 CORE = ("whisipedia-api.service", "whisipedia-orchestrator.service")
 PROBLEM = re.compile(
-    r"HTTP 429|Too Many Requests|Traceback|FAILED|fetch exit [1-9]|left for a later run|No space left"
+    r"HTTP 429|Too Many Requests|Traceback|FAILED|fetch exit [1-69]|left for a later run|No space left"
     r"|Killed|OOM"
 )
 LIFETIME_LOCKS = {"scrub"}  # held by the orchestrator while it runs (wsp_cli.locks.SCRUB)

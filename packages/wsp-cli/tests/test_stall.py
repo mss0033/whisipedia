@@ -103,6 +103,7 @@ def test_new_problem_lines_in_lane_logs_are_noted_once_a_day_without_the_backlog
         fh.write("2026-10-19T05:14:01Z wv: GET ocr.json failed after 6 attempt(s): HTTP 429\n")
         fh.write("error: another 'ingest' is running (pid 695565); lock: ingest.lock\n")
         fh.write("2026-10-19T05:15:01Z fetched wv\n")
+        fh.write("2026-10-19T05:16:01Z fetch exit 7\n")  # complete, with alerts: not a problem
     notes = [line for line in _run(env, 0.2) if " NOTE " in line]
     assert len(notes) == 1  # one problem; the lock wait is not one
     assert "bulk-lane-chronicling.log: 2026-10-19T05:14:01Z wv: GET ocr.json" in notes[0]
