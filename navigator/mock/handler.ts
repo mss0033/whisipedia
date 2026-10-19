@@ -404,6 +404,7 @@ export function document(
     original: d.original ?? null,
     rendition: null,
     section: null,
+    parts: null,
   };
 }
 

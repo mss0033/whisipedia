@@ -170,6 +170,8 @@ export interface Document {
   currency: string | null;
   /** Reader warning to show above the document, e.g. 'Historical document — methods may be outdated or unsafe.' (PLAN D13). Absent when there is nothing to warn about. */
   banner: string | null;
+  /** A document read in parts (a long PDF's chapters): the whole, every part in order, and this one's place. On the whole document, its parts. */
+  parts: DocumentParts | null;
   /** Other copies of the same work (registry access.copies): an illustrated edition, a complete rendering of a page whose text here is partial. */
   copies: Array<OtherCopy>;
   /** Set when `html` is another source's page for this title; `vault` then describes that page's file. */
@@ -185,6 +187,14 @@ export interface DocumentLink {
   href: string;
   /** Local doc id it resolves to, or null if not in the library. */
   target: string | null;
+}
+
+/** Where a part sits in the whole: the whole document, its parts in order, and this one's place. */
+export interface DocumentParts {
+  whole: PartRef;
+  parts: Array<PartRef>;
+  /** This document's place in `parts`; null when it is the whole. */
+  index: number | null;
 }
 
 export interface DocumentVersion {
@@ -428,6 +438,15 @@ export interface ParityStatus {
   /** Generations per parity state (none, partial, sidecar, ...). */
   states: Record<string, number>;
   last_run: Record<string, JsonValue> | null;
+}
+
+/** One part of a document read in parts (a long PDF's chapter), or the whole of it. */
+export interface PartRef {
+  doc_id: string;
+  address: string;
+  title: string;
+  /** The page of the original it starts on. */
+  first_page: number | null;
 }
 
 export interface PlaceHit {

@@ -161,6 +161,25 @@ class OtherCopy(_Wire):
     )
 
 
+class PartRef(_Wire):
+    """One part of a document read in parts (a long PDF's chapter), or the whole of it."""
+
+    doc_id: str
+    address: str
+    title: str
+    first_page: int | None = Field(default=None, description="The page of the original it starts on.")
+
+
+class DocumentParts(_Wire):
+    """Where a part sits in the whole: the whole document, its parts in order, and this one's place."""
+
+    whole: PartRef
+    parts: list[PartRef] = Field(default_factory=list[PartRef])
+    index: int | None = Field(
+        default=None, description="This document's place in `parts`; null when it is the whole."
+    )
+
+
 class DocumentLink(_Wire):
     href: str = Field(description="The link as recorded by the Refinery (a doc id or a native URL).")
     target: str | None = Field(description="Local doc id it resolves to, or null if not in the library.")
@@ -242,6 +261,11 @@ class Document(_Wire):
         default=None,
         description="Reader warning to show above the document, e.g. 'Historical document — methods may be "
         "outdated or unsafe.' (PLAN D13). Absent when there is nothing to warn about.",
+    )
+    parts: DocumentParts | None = Field(
+        default=None,
+        description="A document read in parts (a long PDF's chapters): the whole, every part in order, "
+        "and this one's place. On the whole document, its parts.",
     )
     copies: list[OtherCopy] = Field(
         default_factory=list[OtherCopy],

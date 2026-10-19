@@ -21,6 +21,7 @@ from wsp_api.schemas import (
     DocKind,
     Document,
     DocumentLink,
+    DocumentParts,
     GenerationInfo,
     Hit,
     LedgerEntry,
@@ -139,6 +140,7 @@ def document(
     include_text: bool = True,
     copies: Sequence[OtherCopy] = (),
     section: str | None = None,
+    parts: DocumentParts | None = None,
 ) -> Document:
     """``include_text``: send ``text`` even when there is HTML (always sent when there is none)."""
     return Document(
@@ -170,6 +172,7 @@ def document(
         banner=dated_banner(banner_for(doc.meta), doc.timestamp or edition_time(doc.revision)),
         original=original_of(doc),
         section=section,
+        parts=parts,
     )
 
 

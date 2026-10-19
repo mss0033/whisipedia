@@ -54,6 +54,7 @@ from wsp_core.model import (
     searchable,
 )
 from wsp_core.ports import AssetStore, Catalog
+from wsp_core.titles import shown_title
 
 log = logging.getLogger(__name__)
 MANIFEST_NAME = "MANIFEST.json"  # same name as wsp_vault.manifest.MANIFEST_NAME
@@ -86,6 +87,9 @@ class DocumentView:
     section: str | None = None
 
 
+# The contents a long PDF's whole document lists (wsp_adapters.doccollection: "Title (page N)").
+_CONTENTS_HEAD = "\n\nContents\n"
+_CONTENTS_LINE = re.compile(r"^(.+) \(page (\d+)\)$")
 _GENERATION_LIKE = re.compile(r"^\d{4}(-\d{2}){0,2}")  # 2026-08, 2026-10-12r5.b0001 ...
 
 DEFAULT_ZIM_MAX_OPEN = 512
@@ -400,6 +404,48 @@ class Library:
                     )
                 )
         return out
+
+    def parts(self, doc: DocRecord) -> schemas.DocumentParts | None:
+        """A long PDF read as its chapters (meta ``part_of`` on each, the contents in the whole's text):
+        the whole, the chapters in order and this document's place, for the reader's way between them.
+        The whole's text lists ``Title (page N)``; chapter N's native id is ``<whole>/pN``."""
+        meta = doc.meta or {}
+        whole_native = str(meta.get("part_of") or "")
+        if whole_native:
+            whole = self.s.documents.get(DocId(f"wsp:{doc.source_id}/{whole_native}"))
+        elif "pages" in meta and _CONTENTS_HEAD in doc.text:
+            whole, whole_native = doc, doc.native_id
+        else:
+            return None
+        if whole is None:
+            return None
+        parts: list[schemas.PartRef] = []
+        for line in whole.text.split(_CONTENTS_HEAD, 1)[-1].splitlines():
+            m = _CONTENTS_LINE.match(line.strip())
+            if m is None:
+                continue
+            native = f"{whole_native}/p{m.group(2)}"
+            parts.append(
+                schemas.PartRef(
+                    doc_id=f"wsp:{doc.source_id}/{native}",
+                    address=address_of(doc.source_id, native),
+                    title=m.group(1),
+                    first_page=int(m.group(2)),
+                )
+            )
+        if not parts:
+            return None
+        index = next((i for i, p in enumerate(parts) if p.doc_id == doc.doc_id), None)
+        return schemas.DocumentParts(
+            whole=schemas.PartRef(
+                doc_id=whole.doc_id,
+                address=address_of(doc.source_id, whole_native),
+                title=shown_title(whole.title),
+                first_page=1,
+            ),
+            parts=parts,
+            index=index,
+        )
 
     def links(self, doc: DocRecord) -> list[DocumentLink]:
         """Outbound links, each resolved to a local document when the library holds it: in the store,

@@ -338,6 +338,7 @@ def _v1(lib: Library, settings: ApiSettings) -> APIRouter:
                 include_text=include_text,
                 copies=lib.copies(view.doc, s.source(view.doc.source_id)),
                 section=view.section,
+                parts=lib.parts(view.doc),
             )
             return model.model_dump_json().encode("utf-8")
 

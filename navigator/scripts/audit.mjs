@@ -1,0 +1,665 @@
+#!/usr/bin/env node
+/**
+ * The source audit: a sample of every source's documents, opened through the real Navigator the way a
+ * reader would, and checked on five counts (owner, 2026-10-18: "reachable, renderable, navigable,
+ * readable, and the UI offers all the functionality to manipulate the document for consumption").
+ *
+ *   reach     the document answers (API and page), within the page timeout, without an error page
+ *   render    no script error or failed API call, images there, nothing wider than the window
+ *             (desktop and phone), something to read or a viewer for the original
+ *   read      the text is whole (not cut short against the API's text), not mojibake, no markup
+ *             leaking through as text, legible (contrast) in the light and the dark theme
+ *   navigate  a title, a way to the source's home, links that lead somewhere, anchors that exist, a
+ *             book's next chapter and contents, a chapter's way to its whole book, Back that returns
+ *   use       larger and smaller text reach the document's text, the dark theme reaches it, printing
+ *             shows the document without the browser chrome, the original opens and downloads,
+ *             a film or recording plays, and the browser's own Find is not taken away
+ *
+ * Unlike the trawler (scripts/trawl.mjs: one fresh page a minute, forever) this is a sweep: every
+ * readable source, WSP_AUDIT_SAMPLES pages each (the source's home page first, then random ones), in
+ * one run. Every request carries `X-Whisipedia-Probe: check`, so it never counts as the owner's use.
+ *
+ * Results: <out>/results.jsonl (a line a page) and <out>/report.md (per source and per check).
+ * Environment:
+ *   WSP_AUDIT_URL      the library (default http://127.0.0.1:8737)
+ *   WSP_AUDIT_OUT      where results go (default ./audit-<date>)
+ *   WSP_AUDIT_SAMPLES  pages per source (default 5)
+ *   WSP_AUDIT_SOURCE   only these sources (comma-separated)
+ *   WSP_AUDIT_PAUSE    milliseconds between pages (default 500)
+ *   WSP_E2E_CHROMIUM   the Chromium to run (default: as the e2e tests pick it)
+ */
+import { existsSync, mkdirSync, readdirSync } from 'node:fs';
+import { appendFile, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { chromium } from '@playwright/test';
+
+const BASE = (process.env.WSP_AUDIT_URL ?? 'http://127.0.0.1:8737').replace(/\/+$/, '');
+const OUT = process.env.WSP_AUDIT_OUT ?? `audit-${new Date().toISOString().slice(0, 10)}`;
+const SAMPLES = Number(process.env.WSP_AUDIT_SAMPLES ?? 5);
+const ONLY = new Set(
+  (process.env.WSP_AUDIT_SOURCE ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean),
+);
+const PAUSE = Number(process.env.WSP_AUDIT_PAUSE ?? 500);
+const HEADERS = { 'X-Whisipedia-Probe': 'check' };
+const PAGE_TIMEOUT = 120_000;
+const DESKTOP = { width: 1280, height: 900 };
+const PHONE = { width: 390, height: 844 };
+const LINKS_CHECKED = 5;
+const IMAGES_CHECKED = 6;
+const RANDOM_TRIES = 8;
+const MIN_CONTRAST = 4.5;
+const BUILTIN = new Set([
+  'home',
+  'directory',
+  'search',
+  'whatsnew',
+  'system',
+  'history',
+  'hotlist',
+  'about',
+  'help',
+  'random',
+  'offline',
+  'practice',
+  'screening-room',
+  'define',
+  'atlas',
+]);
+// Text that is the encoding gone wrong (UTF-8 read as Latin-1 or cp1252), not the language.
+const MOJIBAKE = /Ã[\u0080-¿]|â€[\u0080-¿™œ"]|Â[ -¿]|�{2,}/;
+// Markup a reader should never see as text.
+const MARKUP = [
+  [/&lt;\/?(p|div|span|br|a|b|i|em|strong|table|tr|td|li|ul|ol|h[1-6])\b/i, 'escaped HTML tags'],
+  [/<\/?(p|div|span|table|tr|td|li|ul|ol|h[1-6])(\s[^>]*)?>/i, 'raw HTML tags'],
+  [/\{\{[A-Za-z][^}]{0,60}(\||\}\})/, 'wiki template'],
+  [/\[\[(?:[^\]|]{1,80})(?:\|[^\]]{0,80})?\]\]/, 'wiki link'],
+  [/&(?:amp;)?(?:nbsp|quot|#\d{2,5});/, 'escaped entities'],
+];
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const log = (...a) => console.log(new Date().toISOString(), ...a);
+
+function chromiumExecutable() {
+  if (process.env.WSP_E2E_CHROMIUM) return process.env.WSP_E2E_CHROMIUM;
+  try {
+    if (existsSync(chromium.executablePath())) return undefined;
+  } catch {
+    /* fall through to the cache */
+  }
+  const cache = process.env.PLAYWRIGHT_BROWSERS_PATH || join(homedir(), '.cache', 'ms-playwright');
+  if (!existsSync(cache)) return undefined;
+  return readdirSync(cache)
+    .map((d) => /^chromium-(\d+)$/.exec(d))
+    .filter((m) => m !== null)
+    .sort((a, b) => Number(b[1]) - Number(a[1]))
+    .map((m) => join(cache, m[0], 'chrome-linux', 'chrome'))
+    .find((p) => existsSync(p));
+}
+
+async function api(path) {
+  const r = await fetch(`${BASE}${path}`, {
+    headers: HEADERS,
+    signal: AbortSignal.timeout(90_000),
+  });
+  if (!r.ok) throw new Error(`${path}: HTTP ${r.status}`);
+  return r.json();
+}
+
+async function allSources() {
+  const out = [];
+  let cursor = '';
+  for (;;) {
+    const page = await api(
+      `/v1/sources?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
+    );
+    out.push(...page.items);
+    if (!page.next_cursor) return out;
+    cursor = page.next_cursor;
+  }
+}
+
+const docPath = (id) => `/v1/documents/${encodeURIComponent(id)}`;
+const addressOf = (id) => `wsp://${id.slice('wsp:'.length)}`;
+
+/** The pages to audit for a source: its home page, then random ones (distinct). */
+async function samplesOf(source) {
+  const ids = [];
+  if (source.home_doc_id) ids.push(source.home_doc_id);
+  for (let i = 0; ids.length < SAMPLES && i < SAMPLES * RANDOM_TRIES; i++) {
+    const r = await api(`/v1/random?source=${encodeURIComponent(source.id)}`).catch(() => null);
+    if (!r) break;
+    if (!ids.includes(r.doc_id)) ids.push(r.doc_id);
+  }
+  return ids;
+}
+
+async function waitForPage(page) {
+  await page.waitForFunction(
+    () => {
+      const root = document.getElementById('app');
+      const main = document.querySelector('main');
+      const retrying = /still loading/i.test(
+        main?.querySelector('.page-error h1, .page-error h2')?.textContent ?? '',
+      );
+      return (
+        root &&
+        !root.classList.contains('is-loading') &&
+        !retrying &&
+        main?.querySelector('h1, .page-error')
+      );
+    },
+    null,
+    { timeout: PAGE_TIMEOUT, polling: 500 },
+  );
+}
+
+/** Everything about the page as the reader sees it (run in the page). */
+function inspect() {
+  const main = document.querySelector('main');
+  const body = main?.querySelector('.doc-body');
+  const err = main?.querySelector('.page-error');
+  const parse = (c) => {
+    const m = /rgba?\(([\d.]+),\s*([\d.]+),\s*([\d.]+)(?:,\s*([\d.]+))?\)/.exec(c ?? '');
+    return m
+      ? [Number(m[1]), Number(m[2]), Number(m[3]), m[4] === undefined ? 1 : Number(m[4])]
+      : null;
+  };
+  const lum = ([r, g, b]) => {
+    const f = (v) => {
+      const s = v / 255;
+      return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+    };
+    return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+  };
+  const backgroundOf = (el) => {
+    for (let e = el; e; e = e.parentElement) {
+      const c = parse(getComputedStyle(e).backgroundColor);
+      if (c && c[3] > 0.5) return c;
+    }
+    return [255, 255, 255, 1];
+  };
+  // The first stretch of real reading text: a paragraph (or list item, cell) with words in it.
+  const textEl =
+    [...(body?.querySelectorAll('p, li, td, dd, pre, blockquote, div') ?? [])].find(
+      (e) =>
+        e.childElementCount < 6 &&
+        (e.textContent ?? '').trim().length > 40 &&
+        e.getClientRects().length > 0 &&
+        getComputedStyle(e).visibility !== 'hidden',
+    ) ?? null;
+  let contrast = null;
+  let fontPx = null;
+  if (textEl) {
+    const fg = parse(getComputedStyle(textEl).color);
+    const bg = backgroundOf(textEl);
+    if (fg) {
+      const a = lum(fg) + 0.05;
+      const b = lum(bg) + 0.05;
+      contrast = Math.round((Math.max(a, b) / Math.min(a, b)) * 100) / 100;
+    }
+    fontPx = Number.parseFloat(getComputedStyle(textEl).fontSize);
+  }
+  const ids = new Set(
+    [...document.querySelectorAll('[id], a[name]')].map((e) => e.id || e.getAttribute('name')),
+  );
+  const fragments = [...(body?.querySelectorAll('a[href^="#"]') ?? [])]
+    .map((a) => a.getAttribute('href') ?? '')
+    // The Navigator's own addresses are #wsp://...; a page anchor is #name.
+    .filter((h) => h.length > 1 && !h.startsWith('#wsp:') && !h.startsWith('#/'))
+    .map((h) => decodeURIComponent(h.slice(1)));
+  const banner = main?.querySelector('.site-banner a');
+  return {
+    error: err ? (err.querySelector('h1, h2')?.textContent ?? 'error page').trim() : null,
+    title: (main?.querySelector('h1')?.textContent ?? '').trim(),
+    text: (body?.innerText ?? '').trim(),
+    images: [...(body?.querySelectorAll('img') ?? [])].map((i) => ({
+      src: i.getAttribute('src'),
+      broken: i.complete && i.naturalWidth === 0 && !!i.getAttribute('src'),
+    })),
+    links: [...(main?.querySelectorAll('.doc-body a[data-wsp]:not([data-missing])') ?? [])]
+      .map((a) => a.getAttribute('data-wsp') ?? '')
+      .filter((x) => x.startsWith('wsp://')),
+    missingAnchors: [...new Set(fragments.filter((f) => !ids.has(f)))].slice(0, 5),
+    anchors: fragments.length,
+    home: banner ? (banner.getAttribute('data-wsp') ?? banner.getAttribute('href') ?? '') : null,
+    reader: !!main?.querySelector('.reader'),
+    toc: main?.querySelectorAll('.reader-toc li').length ?? 0,
+    readerNext: [...(main?.querySelectorAll('.reader-nav a, .reader-nav button') ?? [])]
+      .map((a) => (a.textContent ?? '').trim())
+      .filter((t) => /next|›|»|→/i.test(t)),
+    player: !!main?.querySelector('.original-media .player'),
+    fileLinks: [...(main?.querySelectorAll('.original-links a') ?? [])].map((a) => ({
+      text: (a.textContent ?? '').trim(),
+      href: a.getAttribute('href') ?? '',
+      download: a.hasAttribute('download'),
+    })),
+    frame: main?.querySelector('.original-frame')?.getAttribute('src') ?? null,
+    media:
+      main?.querySelectorAll('.doc-body video, .doc-body audio, .doc-body iframe, .doc-body pre')
+        .length ?? 0,
+    allLinks: [...(main?.querySelectorAll('a') ?? [])].map((a) => ({
+      text: (a.textContent ?? '').trim().slice(0, 80),
+      wsp: a.getAttribute('data-wsp') ?? '',
+      href: a.getAttribute('href') ?? '',
+    })),
+    overflow: document.documentElement.scrollWidth - window.innerWidth,
+    contrast,
+    fontPx,
+    hasText: !!textEl,
+  };
+}
+
+function add(list, dim, code, detail = '') {
+  list.push({ dim, code, detail: String(detail).slice(0, 200) });
+}
+
+async function audit(context, phoneContext, id) {
+  const issues = [];
+  const address = addressOf(id);
+  const started = Date.now();
+  // --- reach: the API ------------------------------------------------------------------------------
+  let doc = null;
+  try {
+    const r = await fetch(`${BASE}${docPath(id)}`, {
+      headers: HEADERS,
+      signal: AbortSignal.timeout(90_000),
+    });
+    if (!r.ok) add(issues, 'reach', 'api-status', `${r.status}`);
+    else doc = await r.json();
+  } catch (e) {
+    add(issues, 'reach', 'api-timeout', e);
+  }
+  const page = await context.newPage();
+  const scriptErrors = [];
+  const failedApi = [];
+  page.on('pageerror', (e) => scriptErrors.push(String(e.message ?? e)));
+  page.on('response', (resp) => {
+    const url = resp.url();
+    if (url.startsWith(`${BASE}/v1/`) && resp.status() >= 500 && resp.status() !== 503)
+      failedApi.push(`${resp.status()} ${url.slice(BASE.length, BASE.length + 140)}`);
+  });
+  let seen = null;
+  try {
+    await page.goto(`${BASE}/#${address}`, { timeout: PAGE_TIMEOUT });
+    await waitForPage(page);
+    await page.waitForTimeout(800); // images, the reader, a late script
+    seen = await page.evaluate(inspect);
+  } catch (e) {
+    add(issues, 'reach', 'page-timeout', e.message ?? e);
+  }
+  const result = {
+    id,
+    address,
+    source: id.slice(4).split('/')[0],
+    kind: doc?.kind ?? null,
+    format: doc?.format ?? null,
+  };
+  if (!seen) {
+    await page.close().catch(() => undefined);
+    return { ...result, issues, ms: Date.now() - started };
+  }
+  if (seen.error) add(issues, 'reach', 'error-page', seen.error);
+  const original = doc?.original ?? null;
+  const type = original?.media_type ?? '';
+  const isMedia = /^(video|audio)\//.test(type);
+  // --- render ---------------------------------------------------------------------------------------
+  for (const e of [...new Set(scriptErrors)].slice(0, 3)) add(issues, 'render', 'script-error', e);
+  for (const f of [...new Set(failedApi)].slice(0, 3)) add(issues, 'render', 'api-5xx', f);
+  if (
+    !seen.error &&
+    seen.text.length < 20 &&
+    seen.images.length === 0 &&
+    seen.media === 0 &&
+    !original
+  )
+    add(issues, 'render', 'empty');
+  if (seen.overflow > 2)
+    add(issues, 'render', 'overflow-desktop', `${seen.overflow}px wider than the window`);
+  const broken = seen.images.filter((i) => i.broken).map((i) => i.src);
+  if (broken.length) add(issues, 'render', 'image-broken', `${broken.length}: ${broken[0]}`);
+  for (const img of seen.images.slice(0, IMAGES_CHECKED)) {
+    if (!img.src?.startsWith('/v1/') || img.broken) continue;
+    const r = await context.request.get(`${BASE}${img.src}`, { timeout: 60_000 }).catch(() => null);
+    if (!r?.ok()) add(issues, 'render', 'image-missing', `${r?.status() ?? 'timeout'} ${img.src}`);
+  }
+  // --- read -----------------------------------------------------------------------------------------
+  const apiText = (doc?.text ?? '').trim();
+  if (
+    !seen.reader &&
+    apiText.length > 2000 &&
+    seen.text.length < apiText.length * 0.5 &&
+    doc?.format !== 'html'
+  )
+    add(issues, 'read', 'cut-short', `${seen.text.length} of ${apiText.length} characters shown`);
+  const sample = seen.text.slice(0, 60_000);
+  const moji = MOJIBAKE.exec(sample);
+  if (moji)
+    add(issues, 'read', 'mojibake', sample.slice(Math.max(0, moji.index - 30), moji.index + 30));
+  for (const [re, what] of MARKUP) {
+    const m = re.exec(sample);
+    if (m)
+      add(
+        issues,
+        'read',
+        'markup-shown',
+        `${what}: ${sample.slice(Math.max(0, m.index - 20), m.index + 50)}`,
+      );
+  }
+  if (seen.contrast !== null && seen.contrast < MIN_CONTRAST)
+    add(issues, 'read', 'low-contrast-light', `${seen.contrast}:1`);
+  // --- navigate -------------------------------------------------------------------------------------
+  if (!seen.error && !seen.title) add(issues, 'navigate', 'no-title');
+  if (!seen.error && !seen.home) add(issues, 'navigate', 'no-source-link');
+  if (seen.missingAnchors.length)
+    add(
+      issues,
+      'navigate',
+      'anchor-missing',
+      `${seen.missingAnchors.length}: #${seen.missingAnchors[0]}`,
+    );
+  const links = [...new Set(seen.links)].filter(
+    (a) => !BUILTIN.has(a.slice('wsp://'.length).split(/[/?#]/)[0] ?? ''),
+  );
+  let linksBroken = 0;
+  for (const a of links.sort(() => Math.random() - 0.5).slice(0, LINKS_CHECKED)) {
+    const go = () =>
+      context.request
+        .get(`${BASE}/go/${a.slice('wsp://'.length)}`, { timeout: 60_000, maxRedirects: 0 })
+        .catch(() => null);
+    const r = (await go()) ?? (await go()); // once more: a cold archive can miss the first minute
+    if (!r) add(issues, 'navigate', 'link-timeout', a);
+    else if (r.status() === 404) {
+      linksBroken += 1;
+      if (linksBroken === 1) add(issues, 'navigate', 'link-broken', a);
+    } else if (r.status() >= 500) add(issues, 'navigate', 'link-error', `${r.status()} ${a}`);
+  }
+  // A chapter of a longer document leads to the whole of it and to its neighbours (the API's parts).
+  const parts = doc?.parts ?? null;
+  if (parts && parts.index !== null) {
+    const shown = new Set(seen.allLinks.map((l) => l.wsp));
+    if (!shown.has(parts.whole.address))
+      add(issues, 'navigate', 'no-whole-document-link', `part of ${parts.whole.address}`);
+    const neighbours = [parts.parts[parts.index - 1], parts.parts[parts.index + 1]].filter(Boolean);
+    if (neighbours.some((n) => !shown.has(n.address)))
+      add(issues, 'navigate', 'no-chapter-neighbours', 'no previous/next part link');
+  } else if (parts && !parts.parts.every((p) => seen.allLinks.some((l) => l.wsp === p.address)))
+    add(issues, 'navigate', 'parts-not-listed', `${parts.parts.length} parts`);
+  // A book in the reader: contents and a next chapter that works.
+  if (seen.reader && doc?.kind === 'books' && apiText.length > 20000) {
+    if (seen.toc === 0) add(issues, 'navigate', 'reader-no-contents');
+    if (seen.toc > 1) {
+      const chapterText = () =>
+        page.evaluate(() =>
+          (document.querySelector('main .reader-chapter')?.textContent ?? '').trim().slice(0, 300),
+        );
+      const before = await chapterText();
+      const next = page
+        .locator('.reader-nav a, .reader-nav button')
+        .filter({ hasText: /next|›|»|→/i })
+        .first();
+      if ((await next.count()) === 0) add(issues, 'navigate', 'reader-no-next');
+      else {
+        await next.click({ timeout: 10_000 }).catch(() => undefined);
+        await page.waitForTimeout(600);
+        const after = await chapterText();
+        if (after === before) add(issues, 'navigate', 'reader-next-does-nothing');
+        await page.goBack({ timeout: 30_000 }).catch(() => undefined);
+      }
+    }
+  }
+  // Back returns: follow one in-library link, then Back.
+  if (links.length && !seen.error) {
+    const title = seen.title;
+    const link = page.locator('main .doc-body a[data-wsp]:not([data-missing])').first();
+    if ((await link.count()) > 0 && (await link.isVisible().catch(() => false))) {
+      await link.click({ timeout: 10_000 }).catch(() => undefined);
+      await waitForPage(page).catch(() => undefined);
+      await page.goBack({ timeout: 30_000 }).catch(() => undefined);
+      await waitForPage(page).catch(() => undefined);
+      const t = await page
+        .evaluate(() => (document.querySelector('main h1')?.textContent ?? '').trim())
+        .catch(() => '');
+      if (t !== title)
+        add(
+          issues,
+          'navigate',
+          'back-does-not-return',
+          `"${t.slice(0, 60)}" after Back, was "${title.slice(0, 60)}"`,
+        );
+    }
+  }
+  // --- use ------------------------------------------------------------------------------------------
+  if (seen.hasText && seen.fontPx) {
+    await page.keyboard.press('Control+]');
+    await page.keyboard.press('Control+]');
+    await page.waitForTimeout(300);
+    const bigger = await page.evaluate(inspect);
+    if (bigger.fontPx !== null && bigger.fontPx <= seen.fontPx)
+      add(issues, 'use', 'larger-text-ignored', `${seen.fontPx}px stays ${bigger.fontPx}px`);
+    await page.keyboard.press('Control+0');
+  }
+  const findBlocked = await page.evaluate(() => {
+    const e = new KeyboardEvent('keydown', {
+      key: 'f',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    document.activeElement?.dispatchEvent(e) ?? document.dispatchEvent(e);
+    return e.defaultPrevented;
+  });
+  if (findBlocked) add(issues, 'use', 'find-blocked', 'Ctrl+F is taken from the browser');
+  // Print: the document without the browser chrome.
+  await page.emulateMedia({ media: 'print' });
+  const printed = await page.evaluate(() => {
+    const vis = (sel) => {
+      const e = document.querySelector(sel);
+      if (!e) return null;
+      const s = getComputedStyle(e);
+      return s.display !== 'none' && s.visibility !== 'hidden' && e.getClientRects().length > 0;
+    };
+    return {
+      chrome: vis('.toolbar') || vis('.menubar') || vis('nav.menubar'),
+      page: vis('main article') ?? vis('main'),
+    };
+  });
+  await page.emulateMedia({ media: 'screen' });
+  if (printed.chrome) add(issues, 'use', 'print-shows-chrome');
+  if (printed.page === false) add(issues, 'use', 'print-hides-document');
+  // The original: opens and downloads.
+  if (original && !seen.error) {
+    if (isMedia && !seen.player) add(issues, 'use', 'no-player', type);
+    if (!isMedia && seen.fileLinks.length === 0) add(issues, 'use', 'no-file-panel');
+    const dl = seen.fileLinks.find((l) => l.download);
+    if (!isMedia && !dl) add(issues, 'use', 'no-download');
+    const href = dl?.href || (original.url ? `${BASE}${original.url}` : null);
+    if (href) {
+      // The first bytes only, as a browser's download or viewer starts it (a range GET, not HEAD).
+      const r = await context.request
+        .get(href.startsWith('http') ? href : `${BASE}${href}`, {
+          timeout: 60_000,
+          headers: { Range: 'bytes=0-1023' },
+        })
+        .catch(() => null);
+      if (!r?.ok())
+        add(issues, 'use', 'download-fails', `${r?.status() ?? 'timeout'} ${href.slice(0, 120)}`);
+      else if (type && !(r.headers()['content-type'] ?? '').startsWith(type.split(';')[0]))
+        add(issues, 'use', 'download-wrong-type', `${r.headers()['content-type']} for ${type}`);
+    }
+    if (
+      type === 'application/pdf' &&
+      doc?.url_native?.includes('#page=') &&
+      seen.frame &&
+      !seen.frame.includes('#page=')
+    )
+      add(issues, 'use', 'pdf-opens-at-page-1', doc.url_native);
+  }
+  // Dark theme: the document's own text follows it and stays legible.
+  if (seen.hasText) {
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await page.waitForTimeout(300);
+    const dark = await page.evaluate(inspect);
+    if (dark.contrast !== null && dark.contrast < MIN_CONTRAST)
+      add(issues, 'read', 'low-contrast-dark', `${dark.contrast}:1`);
+    await page.emulateMedia({ colorScheme: 'light' });
+  }
+  await page.close().catch(() => undefined);
+  // Phone width: nothing wider than the screen.
+  const phone = await phoneContext.newPage();
+  try {
+    await phone.goto(`${BASE}/#${address}`, { timeout: PAGE_TIMEOUT });
+    await waitForPage(phone);
+    await phone.waitForTimeout(600);
+    const over = await phone.evaluate(
+      () => document.documentElement.scrollWidth - window.innerWidth,
+    );
+    if (over > 2) add(issues, 'render', 'overflow-phone', `${over}px wider than a 390px screen`);
+  } catch {
+    add(issues, 'reach', 'phone-timeout');
+  }
+  await phone.close().catch(() => undefined);
+  return {
+    ...result,
+    issues,
+    ms: Date.now() - started,
+    text_chars: seen.text.length,
+    api_chars: apiText.length,
+    images: seen.images.length,
+    links: links.length,
+    reader: seen.reader,
+    original: type || null,
+  };
+}
+
+const DIMS = ['reach', 'render', 'read', 'navigate', 'use'];
+
+function report(sources, results, skipped) {
+  const by = new Map();
+  for (const r of results) {
+    if (!by.has(r.source)) by.set(r.source, []);
+    by.get(r.source).push(r);
+  }
+  const codes = new Map();
+  for (const r of results)
+    for (const i of r.issues) {
+      const k = `${i.dim}:${i.code}`;
+      if (!codes.has(k))
+        codes.set(k, { n: 0, sources: new Set(), example: `${r.address} — ${i.detail}` });
+      const c = codes.get(k);
+      c.n += 1;
+      c.sources.add(r.source);
+    }
+  const clean = results.filter((r) => r.issues.length === 0).length;
+  const lines = [
+    `# Source audit — ${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC`,
+    '',
+    `${results.length} pages from ${by.size} sources; ${clean} with no issue. Samples per source: ${SAMPLES}.`,
+    '',
+    '## Issues by check',
+    '',
+    '| Check | Pages | Sources | Example |',
+    '|---|--:|--:|---|',
+    ...[...codes.entries()]
+      .sort(
+        (a, b) =>
+          DIMS.indexOf(a[0].split(':')[0]) - DIMS.indexOf(b[0].split(':')[0]) || b[1].n - a[1].n,
+      )
+      .map(
+        ([k, c]) => `| ${k} | ${c.n} | ${c.sources.size} | ${c.example.replace(/\|/g, '\\|')} |`,
+      ),
+    '',
+    '## Per source',
+    '',
+    `| Source | Pages | ${DIMS.join(' | ')} |`,
+    `|---|--:|${DIMS.map(() => ':-:').join('|')}|`,
+  ];
+  for (const s of sources) {
+    const rs = by.get(s.id);
+    if (!rs) continue;
+    const cell = (d) => {
+      const n = rs.filter((r) => r.issues.some((i) => i.dim === d)).length;
+      return n === 0 ? 'ok' : `**${n}**`;
+    };
+    lines.push(`| ${s.id} | ${rs.length} | ${DIMS.map(cell).join(' | ')} |`);
+  }
+  if (skipped.length) {
+    lines.push('', '## Not audited as documents', '');
+    for (const s of skipped) lines.push(`- ${s.id}: ${s.why}`);
+  }
+  lines.push('', '## Every issue', '');
+  for (const r of results)
+    for (const i of r.issues) lines.push(`- ${r.address} — **${i.dim}:${i.code}** ${i.detail}`);
+  return `${lines.join('\n')}\n`;
+}
+
+async function main() {
+  mkdirSync(OUT, { recursive: true });
+  const executablePath = chromiumExecutable();
+  const browser = await chromium.launch({
+    headless: true,
+    ...(executablePath ? { executablePath } : {}),
+    args: ['--disable-gpu', '--disable-dev-shm-usage', '--renderer-process-limit=2'],
+  });
+  const make = (viewport) =>
+    browser.newContext({ extraHTTPHeaders: HEADERS, serviceWorkers: 'block', viewport });
+  let context = await make(DESKTOP);
+  let phoneContext = await make(PHONE);
+  const sources = (await allSources()).filter(
+    (s) => s.current_generation && (!ONLY.size || ONLY.has(s.id)),
+  );
+  const results = [];
+  const skipped = [];
+  let n = 0;
+  for (const s of sources) {
+    if (!s.readable) {
+      skipped.push({ id: s.id, why: 'not readable as documents (data, tiles or a history feed)' });
+      continue;
+    }
+    const ids = await samplesOf(s).catch(() => []);
+    if (ids.length === 0) {
+      skipped.push({ id: s.id, why: 'no page to draw (random and home both empty)' });
+      results.push({
+        id: `wsp:${s.id}`,
+        address: `wsp://${s.id}`,
+        source: s.id,
+        issues: [{ dim: 'reach', code: 'no-pages', detail: '/v1/random found nothing' }],
+      });
+      continue;
+    }
+    for (const id of ids) {
+      const r = await audit(context, phoneContext, id).catch((e) => ({
+        id,
+        address: addressOf(id),
+        source: s.id,
+        issues: [{ dim: 'reach', code: 'audit-error', detail: String(e).slice(0, 200) }],
+      }));
+      r.source = s.id;
+      results.push(r);
+      await appendFile(join(OUT, 'results.jsonl'), `${JSON.stringify(r)}\n`);
+      log(
+        `${r.issues.length ? 'ISSUES' : 'ok    '} ${r.address} ${r.issues.map((i) => `${i.dim}:${i.code}`).join(' ')}`,
+      );
+      n += 1;
+      if (n % 60 === 0) {
+        await context.close().catch(() => undefined);
+        await phoneContext.close().catch(() => undefined);
+        context = await make(DESKTOP);
+        phoneContext = await make(PHONE);
+        await writeFile(join(OUT, 'report.md'), report(sources, results, skipped));
+      }
+      await sleep(PAUSE);
+    }
+  }
+  await writeFile(join(OUT, 'report.md'), report(sources, results, skipped));
+  await browser.close();
+  log(`audit: ${results.length} pages; report ${join(OUT, 'report.md')}`);
+}
+
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

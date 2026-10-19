@@ -3153,6 +3153,17 @@
             "title": "Banner",
             "description": "Reader warning to show above the document, e.g. 'Historical document — methods may be outdated or unsafe.' (PLAN D13). Absent when there is nothing to warn about."
           },
+          "parts": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DocumentParts"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A document read in parts (a long PDF's chapters): the whole, every part in order, and this one's place. On the whole document, its parts."
+          },
           "copies": {
             "items": {
               "$ref": "#/components/schemas/OtherCopy"
@@ -3222,6 +3233,7 @@
           "has_history",
           "currency",
           "banner",
+          "parts",
           "copies",
           "rendition",
           "original",
@@ -3255,6 +3267,40 @@
           "target"
         ],
         "title": "DocumentLink"
+      },
+      "DocumentParts": {
+        "properties": {
+          "whole": {
+            "$ref": "#/components/schemas/PartRef"
+          },
+          "parts": {
+            "items": {
+              "$ref": "#/components/schemas/PartRef"
+            },
+            "type": "array",
+            "title": "Parts"
+          },
+          "index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Index",
+            "description": "This document's place in `parts`; null when it is the whole."
+          }
+        },
+        "type": "object",
+        "required": [
+          "whole",
+          "parts",
+          "index"
+        ],
+        "title": "DocumentParts",
+        "description": "Where a part sits in the whole: the whole document, its parts in order, and this one's place."
       },
       "DocumentVersion": {
         "properties": {
@@ -4407,6 +4453,43 @@
           "last_run"
         ],
         "title": "ParityStatus"
+      },
+      "PartRef": {
+        "properties": {
+          "doc_id": {
+            "type": "string",
+            "title": "Doc Id"
+          },
+          "address": {
+            "type": "string",
+            "title": "Address"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "first_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Page",
+            "description": "The page of the original it starts on."
+          }
+        },
+        "type": "object",
+        "required": [
+          "doc_id",
+          "address",
+          "title",
+          "first_page"
+        ],
+        "title": "PartRef",
+        "description": "One part of a document read in parts (a long PDF's chapter), or the whole of it."
       },
       "PlaceHit": {
         "properties": {

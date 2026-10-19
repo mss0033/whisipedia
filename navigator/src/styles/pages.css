@@ -954,6 +954,17 @@
 .reader-nav {
   margin: 1.5em 0 0;
 }
+/* a document read in parts (document.ts partsNav) */
+.parts-nav {
+  margin: 0 0 1em;
+}
+.parts-where,
+.parts-steps {
+  margin: 0.3em 0;
+}
+.parts-nav-bottom {
+  margin: 1.5em 0 0;
+}
 .continue-reading li {
   margin: 0.3em 0;
 }

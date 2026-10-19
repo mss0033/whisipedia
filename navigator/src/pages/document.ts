@@ -482,6 +482,64 @@ export function copiesNotice(
   );
 }
 
+/**
+ * A document read in parts (the API's `parts`: a long PDF's chapters). A chapter leads to its whole and
+ * to its neighbours; the whole lists its chapters (2026-10-18 audit: a chapter of a 3,311-page book had
+ * no way to the book or the next chapter). `where` is "top" or "bottom": the bottom bar has no contents.
+ */
+export function partsNav(
+  doc: Pick<DocumentResponse, 'parts'>,
+  where: 'top' | 'bottom' = 'top',
+): HTMLElement | null {
+  const p = doc.parts;
+  if (!p || p.parts.length === 0) return null;
+  const i = p.index;
+  const contents = h(
+    'details',
+    { class: 'reader-toc parts-toc', open: i === null ? true : undefined },
+    h('summary', null, `Contents (${p.parts.length} parts)`),
+    h(
+      'ol',
+      null,
+      ...p.parts.map((part, n) =>
+        h(
+          'li',
+          { class: n === i ? 'is-current' : undefined },
+          n === i ? part.title : wspLink(part.address, part.title),
+          part.first_page ? h('span', { class: 'fineprint' }, ` p. ${part.first_page}`) : null,
+        ),
+      ),
+    ),
+  );
+  if (i === null)
+    return where === 'top'
+      ? h('nav', { class: 'parts-nav', 'aria-label': 'Parts' }, contents)
+      : null;
+  const prev = i > 0 ? p.parts[i - 1] : undefined;
+  const next = i < p.parts.length - 1 ? p.parts[i + 1] : undefined;
+  return h(
+    'nav',
+    {
+      class: `parts-nav parts-nav-${where}`,
+      'aria-label': where === 'top' ? 'Parts' : 'Parts (end)',
+    },
+    h(
+      'p',
+      { class: 'parts-where' },
+      `Part ${i + 1} of ${p.parts.length} of `,
+      wspLink(p.whole.address, h('b', null, p.whole.title)),
+    ),
+    h(
+      'p',
+      { class: 'reader-nav parts-steps' },
+      prev ? wspLink(prev.address, `‹ Previous: ${prev.title}`) : null,
+      prev && next ? ' · ' : null,
+      next ? wspLink(next.address, `Next: ${next.title} ›`) : null,
+    ),
+    where === 'top' ? contents : null,
+  );
+}
+
 /** A web archive's placeholder for an embedded player it did not capture (`youtube.fuzzy.replayweb.page/embed/…`): the page reads "YouTube" and nothing else (field exam 2026-10-14). Same rule as wsp_core.listing.REPLAY_STUB. */
 export const REPLAY_STUB =
   /(?:^|\/)(?:[^/]*\.fuzzy\.replayweb\.page\/|(?:www\.)?google\.[a-z.]+\/maps(?:\/d)?\/embed|(?:www\.)?youtube(?:-nocookie)?\.com\/embed\/|player\.vimeo\.com\/video\/)/;
@@ -1086,6 +1144,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
       : null,
     // Original pages (ZIM HTML) carry their own <h1>; don't print the title twice.
     content instanceof Element && content.querySelector('h1') ? null : pageHeading(doc.title),
+    partsNav(doc),
     route.at
       ? null
       : originalPanel(doc, (path) => ctx.app.api.url(path), {
@@ -1094,6 +1153,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
           address: here,
         }),
     content,
+    partsNav(doc, 'bottom'),
     broken
       ? h(
           'p',
