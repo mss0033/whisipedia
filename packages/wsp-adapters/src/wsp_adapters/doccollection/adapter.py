@@ -54,7 +54,7 @@ from typing import Any, NamedTuple, cast
 from urllib.parse import urlsplit
 
 from wsp_adapters._common import access, upstream_dir, verify_file
-from wsp_adapters.doccollection import tei
+from wsp_adapters.doccollection import structured, tei
 from wsp_adapters.doccollection.catalog import FetchedDoc, build_catalog, excluded_by, write_catalog
 from wsp_adapters.doccollection.discovery import (
     DiscoverEnv,
@@ -151,8 +151,9 @@ class CollectionConfig:
         if not isinstance(formats, list):
             raise ValueError(f"{spec.id}: access.formats must be a list of file extensions, got {formats!r}")
         reader = str(acc.get("reader") or "")
-        if reader and reader not in tei.READERS:
-            raise ValueError(f"{spec.id}: access.reader must be one of {sorted(tei.READERS)}, got {reader!r}")
+        known = {**tei.READERS, **structured.READERS}
+        if reader and reader not in known:
+            raise ValueError(f"{spec.id}: access.reader must be one of {sorted(known)}, got {reader!r}")
         return CollectionConfig(
             reader=reader,
             formats=tuple(str(f).lower().lstrip(".") for f in cast(list[object], formats)),
@@ -550,7 +551,7 @@ class DocCollectionAdapter:
             if path is None:
                 log.warning("%s: %s not found in any generation", spec.id, meta.file)
                 continue
-            if cfg.reader and path.suffix == ".zip":
+            if cfg.reader and path.suffix.lower() in (".zip", ".xml", ".json"):
                 yield from self._snapshot_documents(spec, cfg, meta, path)
                 continue
             if path.suffix.lower() == ".pdf" and (sections := long_pdf_sections(path, cfg.pdf_max_pages)):

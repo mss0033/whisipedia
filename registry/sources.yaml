@@ -182,10 +182,18 @@ sources:
     status: candidate
     license: CC-BY-4.0
     legal_basis: open-license
-    access: {adapter: git-mirror}
-    index: false  # stored as a git bundle; no refine adapter reads bundles yet (2026-10-12 audit, CA-12)
-    update: {strategy: mirror}
+    access:
+      adapter: doc-collection
+      issuer: OpenStax (Rice University)
+      key_prefix: openstax
+      origins: [openstax.org, assets.openstax.org]
+      # The CMS API lists every book with its print PDF (129 books, 2026-10-18); a long PDF is read as
+      # its chapters. The CNXML sources on GitHub need a reader of their own; the PDFs are the book.
+      discovery: [{kind: api, flavor: openstax}]
+      filter: {allow_all: true}
+    update: {cadence: P6M, strategy: snapshot-retention}
     size: {bytes: 8e9, measured: false, as_of: 2026-10-09}
+    notes: Peer-reviewed open textbooks (CC BY 4.0; a few CC BY-NC-SA, read per book from the PDF).
 
   - id: arxiv
     name: arXiv
@@ -274,9 +282,21 @@ sources:
     status: candidate
     license: LicenseRef-US-Gov-PD
     legal_basis: public-domain
-    access: {adapter: http-files}
-    update: {strategy: snapshot-retention}
-    size: {bytes: 0.5e9, measured: false, as_of: 2026-10-09}
+    access:
+      adapter: doc-collection
+      issuer: US National Library of Medicine
+      key_prefix: medlineplus
+      origins: [medlineplus.gov]
+      # The daily health-topics XML (English and Spanish), each topic a document
+      # (doccollection.structured, "medlineplus-topics"). The page lists the newest file first; the
+      # constant pub number keeps one document, so the newest wins and an update supersedes it.
+      reader: medlineplus-topics
+      discovery:
+        - {kind: index-page, url: "https://medlineplus.gov/xml.html", documents: "/xml/mplus_topics_\\d{4}-\\d{2}-\\d{2}\\.xml$", pub_number: "(mplus_topics)_\\d"}
+      filter: {allow_all: true, builtin_review: false}
+    update: {cadence: P1M, strategy: snapshot-retention}
+    size: {bytes: 0.03e9, measured: true, as_of: 2026-10-18}
+    notes: The Kiwix MedlinePlus ZIM holds the whole site; this is the curated topic summaries, searchable on their own and in Spanish. 2026-10-18 sample read 2,033 topics.
 
   - id: osm-planet
     name: OpenStreetMap planet
@@ -1109,11 +1129,23 @@ sources:
     status: candidate
     license: LicenseRef-US-Gov-PD
     legal_basis: public-domain
-    access: {adapter: git-mirror, endpoints: ["https://github.com/usnistgov/oscal-content"]}
-    index: false  # stored as a git bundle; no refine adapter reads bundles yet (2026-10-12 audit, CA-12)
-    update: {cadence: P3M, strategy: mirror}
-    size: {bytes: 93.7e6, measured: true, as_of: 2026-10-10}
-    notes: Score 4.4. Size is the GitHub repository size.
+    access:
+      adapter: doc-collection
+      issuer: National Institute of Standards and Technology
+      key_prefix: oscal
+      origins: [raw.githubusercontent.com]
+      # Each SP 800-53 control and enhancement a document (doccollection.structured, "oscal-catalog"),
+      # Rev. 5 and the withdrawn-but-cited Rev. 4, from NIST's own oscal-content repository.
+      reader: oscal-catalog
+      discovery:
+        - kind: list
+          items:
+            - {url: "https://raw.githubusercontent.com/usnistgov/oscal-content/main/nist.gov/SP800-53/rev5/json/NIST_SP-800-53_rev5_catalog.json", title: "NIST SP 800-53 Rev. 5 catalog (OSCAL)"}
+            - {url: "https://raw.githubusercontent.com/usnistgov/oscal-content/main/nist.gov/SP800-53/rev4/json/NIST_SP-800-53_rev4_catalog.json", title: "NIST SP 800-53 Rev. 4 catalog (OSCAL)"}
+      filter: {allow_all: true, builtin_review: false}
+    update: {cadence: P3M, strategy: snapshot-retention}
+    size: {bytes: 20e6, measured: true, as_of: 2026-10-18}
+    notes: Score 4.4. 2026-10-18 sample read 1,196 Rev. 5 controls and enhancements.
 
   - id: mitre-attack-cwe-capec
     name: MITRE ATT&CK (STIX), CWE and CAPEC
@@ -1123,11 +1155,26 @@ sources:
     status: candidate
     license: LicenseRef-MITRE-terms-of-use
     legal_basis: open-license
-    access: {adapter: git-mirror, endpoints: ["https://github.com/mitre-attack/attack-stix-data", "https://cwe.mitre.org/data/downloads.html"]}
-    index: false  # stored as a git bundle; no refine adapter reads bundles yet (2026-10-12 audit, CA-12)
-    update: {cadence: P3M, strategy: mirror}
-    size: {attack_repo_bytes: 132.4e6, measured: true, as_of: 2026-10-10}
-    notes: Score 4.2. Royalty-free licence with attribution. Defender taxonomies only; no exploit code (boundary §3.2).
+    access:
+      adapter: doc-collection
+      issuer: The MITRE Corporation
+      key_prefix: mitre
+      origins: [raw.githubusercontent.com, cwe.mitre.org, capec.mitre.org]
+      # Each catalogue entry a document (doccollection.structured, reader "mitre"): the current ATT&CK
+      # bundles from MITRE's own attack-stix-data repository, the CWE and CAPEC XML from their sites.
+      reader: mitre
+      discovery:
+        - kind: list
+          items:
+            - {url: "https://raw.githubusercontent.com/mitre-attack/attack-stix-data/master/enterprise-attack/enterprise-attack.json", title: "ATT&CK Enterprise"}
+            - {url: "https://raw.githubusercontent.com/mitre-attack/attack-stix-data/master/mobile-attack/mobile-attack.json", title: "ATT&CK Mobile"}
+            - {url: "https://raw.githubusercontent.com/mitre-attack/attack-stix-data/master/ics-attack/ics-attack.json", title: "ATT&CK ICS"}
+            - {url: "https://cwe.mitre.org/data/xml/cwec_latest.xml.zip", title: "Common Weakness Enumeration (CWE)"}
+            - {url: "https://capec.mitre.org/data/xml/capec_latest.xml", title: "Common Attack Pattern Enumeration and Classification (CAPEC)"}
+      filter: {allow_all: true, builtin_review: false}  # defender taxonomies: attack vocabulary is the subject
+    update: {cadence: P3M, strategy: snapshot-retention}
+    size: {bytes: 0.1e9, measured: true, as_of: 2026-10-18}
+    notes: Score 4.2. Royalty-free licence with attribution. Defender taxonomies only; no exploit code (boundary §3.2). 2026-10-18 sample read 1,842 enterprise ATT&CK entries, 944 CWE weaknesses, 558 CAPEC patterns.
 
   - id: disa-stigs
     name: DISA Security Technical Implementation Guides and SRGs
@@ -1295,7 +1342,37 @@ sources:
     status: candidate
     license: LicenseRef-per-item
     legal_basis: public-domain
-    access: {adapter: oai-pmh, oai_endpoint: "https://calhoun.nps.edu/server/oai/request", metadata_prefix: dim, filter: {distribution: {require: [A], read_from: dc.rights}, default: allow}}
+    access:
+      adapter: doc-collection
+      issuer: Naval Postgraduate School
+      key_prefix: nps
+      origins: [calhoun.nps.edu]
+      oai_endpoint: "https://calhoun.nps.edu/server/oai/request"
+      # DSpace 7 search (the OAI feed has no subject query); the research doc §3.3 subjects. Only items
+      # whose rights say "Approved for public release; distribution is unlimited" pass the gate.
+      discovery:
+        - kind: api
+          flavor: dspace7
+          base: "https://calhoun.nps.edu"
+          queries:
+            - "\"mesh network\""
+            - "\"wireless sensor network\""
+            - "\"software defined radio\""
+            - "antenna design"
+            - "\"satellite communications\""
+            - "\"high frequency\" radio propagation"
+            - "microgrid"
+            - "\"renewable energy\""
+            - "\"water purification\""
+            - "\"humanitarian assistance\" disaster relief"
+            - "\"disaster response\""
+            - "\"supply chain\" logistics"
+            - "oceanography"
+            - "meteorology forecasting"
+            - "\"celestial navigation\" OR \"GPS navigation\""
+            - "\"network defense\""
+            - "\"power electronics\""
+      filter: {allow_all: true, distribution: {require: [public-release]}}
     update: {cadence: P3M, strategy: base-plus-incremental}
     size: {records: 74327, bytes: 100e9, measured: false, as_of: 2026-10-10}
     notes: Score 3.9. Record count measured (OAI completeListSize). Only items stating "Approved for public release; distribution is unlimited", then the subject filter of research doc §3.3.

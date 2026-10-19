@@ -606,6 +606,48 @@ def nga_msi(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
             )
 
 
+def openstax(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
+    """OpenStax's book catalogue (its CMS API): each live book's print-quality PDF. ``url`` overrides it."""
+    base = _s(cfg.get("url")) or "https://openstax.org/apps/cms/api/v2/pages/"
+    fields = "title,high_resolution_pdf_url,book_state"  # the API refuses unknown fields (HTTP 400)
+    offset = pages = seen = 0
+    while pages < env.pages():
+        params = {"type": "books.Book", "fields": fields, "limit": 50, "offset": offset}
+        data = cast(Json, env.get_json(f"{base}?{urlencode(params)}"))
+        pages += 1
+        env.totals["openstax"] = int(cast(Json, data.get("meta") or {}).get("total_count") or 0)
+        items = cast(list[Json], data.get("items") or [])
+        if not items:
+            break
+        for it in items:
+            seen += 1
+            meta = cast(Json, it.get("meta") or {})
+            url = _s(it.get("high_resolution_pdf_url"))
+            # Retired books stay on the site with their PDF; a book still being written has none.
+            if not url or _s(it.get("book_state")) not in ("live", "deprecated", "retired", ""):
+                continue
+            slug = _s(meta.get("slug")) or str(it.get("id"))
+            yield Candidate(
+                key=make_key(env.prefix, slug),
+                url=url,
+                title=_s(it.get("title")),
+                issuer=env.issuer,
+                edition_date=_s(meta.get("first_published_at"))[:10],
+                language=(_s(meta.get("locale")) or "en")[:2],
+                landing_url=_s(meta.get("html_url")),
+                discovered_by="api:openstax",
+            )
+        offset += len(items)
+        if offset >= env.totals["openstax"]:
+            break
+    env.listing_end(
+        "openstax",
+        stopped=offset < env.totals.get("openstax", 0),
+        seen=seen,
+        total=env.totals.get("openstax"),
+    )
+
+
 def govinfo(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
     """GovInfo collection listing (official GPO API). ``collection``, ``since``, ``package_prefix``."""
     collection = _s(cfg.get("collection")) or "GOVPUB"
@@ -1070,6 +1112,7 @@ _API: dict[str, Discoverer] = {
     "govuk-search": govuk_search,
     "dspace7": dspace7,
     "tnm": tnm,
+    "openstax": openstax,
 }
 
 

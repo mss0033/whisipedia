@@ -671,6 +671,41 @@ def test_dspace7_search_and_bitstreams() -> None:
     assert (doc.size, doc.md5, doc.url) == (1234, "ff", f"{base}/server/api/core/bitstreams/s1/content")
 
 
+def test_openstax_lists_each_live_book_with_its_pdf() -> None:
+    def book(slug: str, state: str, pdf: str) -> dict[str, object]:
+        return {
+            "meta": {
+                "slug": slug,
+                "locale": "en",
+                "html_url": f"https://openstax.org/details/books/{slug}",
+                "first_published_at": "2025-02-18T15:26:43-06:00",
+            },
+            "title": slug.replace("-", " ").title(),
+            "book_state": state,
+            "high_resolution_pdf_url": pdf,
+        }
+
+    page = {
+        "meta": {"total_count": 3},
+        "items": [
+            book("college-physics", "live", "https://assets.openstax.org/media/documents/Physics-WEB.pdf"),
+            book("new-book", "coming_soon", ""),
+            book("old-stats", "retired", "https://assets.openstax.org/media/documents/Stats-WEB.pdf"),
+        ],
+    }
+    env = env_for(
+        {"https://openstax.org/apps/cms/api/v2/pages/": json.dumps(page).encode()},
+        origins=("openstax.org", "assets.openstax.org"),
+    )
+    got = list(discover_all([{"kind": "api", "flavor": "openstax"}], env))
+    assert [(c.title, c.url.rsplit("/", 1)[-1], c.edition_date) for c in got] == [
+        ("College Physics", "Physics-WEB.pdf", "2025-02-18"),
+        ("Old Stats", "Stats-WEB.pdf", "2025-02-18"),
+    ]
+    assert got[0].landing_url == "https://openstax.org/details/books/college-physics"
+    assert not env.incomplete
+
+
 def test_unknown_kinds_and_flavors_fail_loudly() -> None:
     with pytest.raises(DiscoveryError):
         list(discover_all([{"kind": "carrier-pigeon"}], env_for({})))

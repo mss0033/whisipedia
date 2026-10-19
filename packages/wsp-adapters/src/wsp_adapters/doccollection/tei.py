@@ -223,8 +223,19 @@ READERS: dict[str, tuple[Callable[[str], str | None], Callable[[bytes, str], Ite
 
 
 def read_snapshot(path: Path, reader: str) -> Iterator[TeiDoc]:
-    """Every document a ``reader`` finds in a repository snapshot (a zip of its files)."""
-    member, parse = READERS[reader]
+    """Every document a ``reader`` finds in a repository snapshot (a zip of its files), or in a single
+    file the reader reads (a catalogue published as one XML or JSON file: CAPEC, MedlinePlus)."""
+    from wsp_adapters.doccollection import structured  # its readers build TeiDocs too
+
+    member, parse = {**READERS, **structured.READERS}[reader]
+    if not zipfile.is_zipfile(path):
+        stem = member(path.name)
+        if stem is not None:
+            try:
+                yield from parse(path.read_bytes(), stem)
+            except (ET.ParseError, ValueError):
+                return
+        return
     with zipfile.ZipFile(path) as archive:
         for info in archive.infolist():
             stem = member(info.filename)
@@ -232,5 +243,5 @@ def read_snapshot(path: Path, reader: str) -> Iterator[TeiDoc]:
                 continue
             try:
                 yield from parse(archive.read(info), stem)
-            except ET.ParseError:
+            except (ET.ParseError, ValueError):
                 continue  # one malformed file does not stop the collection
