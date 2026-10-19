@@ -9,7 +9,9 @@ partition by partition (ADR-0010, ``wsp bulk fetch --partition``), read into doc
 * ``chronicling-america`` (the Library of Congress's page OCR of Chronicling America, public domain):
   the 3,010 OCR batch archives (2.47 TB) listed by ``ocr.json`` with their SHA-256, one partition per
   state (the batch's first word: ``ak_albatross_ver01`` is Alaska's). American Stories already reads
-  the same scans as articles; the page OCR keeps every column it left out.
+  the same scans as articles; the page OCR keeps every column it left out. The 64 MB ``ocr.json`` is
+  read once a day into the work directory and reused by every state fetched that day: read once per
+  state, it drew HTTP 429 from the Library of Congress and the lane stopped (2026-10-19).
 
 Neither yields documents yet (``documents`` is empty, and the registry keeps them ``index: false``):
 465 million works or 23 million pages would outgrow the local index disk; a reader of them is next.
@@ -19,8 +21,10 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import xml.etree.ElementTree as ET
 from collections.abc import Iterable, Iterator, Mapping
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 from urllib.parse import urlencode
@@ -41,6 +45,7 @@ from wsp_core.ports import Ctx
 OPENALEX = "https://openalex.s3.amazonaws.com"
 OPENALEX_PREFIX = "data/parquet/"
 LOC_OCR = "https://chroniclingamerica.loc.gov/data/ocr/ocr.json"
+LISTING_MAX = 128 * 1024 * 1024
 _S3 = "{http://s3.amazonaws.com/doc/2006-03-01/}"
 _PARTITION = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -171,9 +176,23 @@ class ChroniclingAmericaOcrAdapter(_DataOnly):
     id = "loc-ocr-batches"
 
     def _batches(self, ctx: Ctx) -> list[tuple[str, RemoteFile, str]]:
+        """Every batch in ``ocr.json``, read at most once a day (``<workdir>/listing/<day>``)."""
         url = str(access(ctx.source).get("listing") or LOC_OCR)
-        listing = json.loads(ctx.fetcher.get_bytes(url, max_bytes=64 * 1024 * 1024))
-        return list(ocr_batches(cast(list[Mapping[str, Any]], listing)))
+        here = ctx.workdir / "listing"
+        today = here / datetime.now(UTC).strftime("%Y-%m-%d") / "ocr.json"
+        if today.is_file():
+            raw = today.read_bytes()
+        else:
+            raw = ctx.fetcher.get_bytes(url, max_bytes=LISTING_MAX)
+            json.loads(raw)  # only a listing that parses is kept
+            today.parent.mkdir(parents=True, exist_ok=True)
+            tmp = today.with_suffix(".tmp")
+            tmp.write_bytes(raw)
+            tmp.replace(today)
+            for old in here.iterdir():
+                if old != today.parent:
+                    shutil.rmtree(old, ignore_errors=True)
+        return list(ocr_batches(cast(list[Mapping[str, Any]], json.loads(raw))))
 
     def partitions(self, ctx: Ctx) -> list[str]:
         return sorted({state for state, _, _ in self._batches(ctx) if _PARTITION.match(state)})
