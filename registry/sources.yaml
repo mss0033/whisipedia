@@ -1527,7 +1527,7 @@ sources:
     publisher: Kiwix (various upstreams)
     domain: [encyclopedia, education]
     tier: T2
-    status: candidate
+    status: active
     license: LicenseRef-per-item
     legal_basis: open-license
     languages: [de]
@@ -1542,7 +1542,7 @@ sources:
     publisher: Kiwix (various upstreams)
     domain: [encyclopedia, education]
     tier: T2
-    status: candidate
+    status: active
     license: LicenseRef-per-item
     legal_basis: open-license
     languages: [fr]
@@ -1557,7 +1557,7 @@ sources:
     publisher: Kiwix (various upstreams)
     domain: [encyclopedia, education]
     tier: T2
-    status: candidate
+    status: active
     license: LicenseRef-per-item
     legal_basis: open-license
     languages: [es]
@@ -1572,7 +1572,7 @@ sources:
     publisher: Kiwix (various upstreams)
     domain: [encyclopedia, education]
     tier: T2
-    status: candidate
+    status: active
     license: LicenseRef-per-item
     legal_basis: open-license
     languages: [ru]
@@ -1587,7 +1587,7 @@ sources:
     publisher: Kiwix (various upstreams)
     domain: [encyclopedia, education]
     tier: T2
-    status: candidate
+    status: active
     license: LicenseRef-per-item
     legal_basis: open-license
     languages: [it]
@@ -1602,7 +1602,7 @@ sources:
     publisher: Kiwix (various upstreams)
     domain: [encyclopedia, education]
     tier: T2
-    status: candidate
+    status: active
     license: LicenseRef-per-item
     legal_basis: open-license
     languages: [pl]
@@ -1617,7 +1617,7 @@ sources:
     publisher: Kiwix (various upstreams)
     domain: [encyclopedia, education]
     tier: T2
-    status: candidate
+    status: active
     license: LicenseRef-per-item
     legal_basis: open-license
     languages: [ja]
@@ -1632,7 +1632,7 @@ sources:
     publisher: Kiwix (various upstreams)
     domain: [encyclopedia, education]
     tier: T2
-    status: candidate
+    status: active
     license: LicenseRef-per-item
     legal_basis: open-license
     languages: [zh]
@@ -1647,7 +1647,7 @@ sources:
     publisher: Kiwix (various upstreams)
     domain: [encyclopedia, education]
     tier: T2
-    status: candidate
+    status: active
     license: LicenseRef-per-item
     legal_basis: open-license
     languages: [pt]
@@ -1662,7 +1662,7 @@ sources:
     publisher: Kiwix (various upstreams)
     domain: [encyclopedia, education]
     tier: T2
-    status: candidate
+    status: active
     license: LicenseRef-per-item
     legal_basis: open-license
     languages: [ar]
@@ -1678,7 +1678,7 @@ sources:
     publisher: Wikimedia Foundation
     domain: [encyclopedia]
     tier: T2
-    status: candidate
+    status: active
     license: CC-BY-SA-4.0
     legal_basis: open-license
     languages: [ja, zh, pt, ar]
