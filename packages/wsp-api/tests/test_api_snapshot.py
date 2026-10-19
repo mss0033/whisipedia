@@ -189,6 +189,28 @@ def test_a_landing_page_that_cannot_be_read_yet_is_retried() -> None:
     assert lib.state.home_doc_id(zim, current) == f"wsp:{zim.id}/A/Main"
 
 
+def test_the_refresher_opens_a_landing_archive_before_reading_its_page() -> None:
+    services = sample_services()
+    lib = Library(services, ApiSettings(background=True))
+    calls: list[str] = []
+
+    class Finder:
+        def open_landing(self, source_id: str, generation_id: str) -> None:
+            calls.append(f"open {source_id}")
+
+        def home(self, source_id: str, generation_id: str) -> str | None:
+            calls.append(f"home {source_id}")
+            return "A/Main"
+
+    lib.state.home_finder = Finder()
+    snap = lib.state.core.refresh()
+    lib.state._find_homes(snap)  # pyright: ignore[reportPrivateUsage]
+    zims = [s.id for s in services.sources if s.adapter == "kiwix-opds"]
+    assert zims
+    assert calls[:2] == [f"open {calls[0].split()[1]}", f"home {calls[0].split()[1]}"]
+    assert len(calls) == 2 * len(zims)
+
+
 def test_warming_up_is_a_503_not_a_hang() -> None:
     services = sample_services()
     lib = Library(services, ApiSettings(background=True))

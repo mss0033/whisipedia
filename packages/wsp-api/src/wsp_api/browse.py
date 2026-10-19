@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import random
 import secrets
-import time
 from collections.abc import Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor, wait
 from typing import Annotated
 from urllib.parse import quote
 
@@ -38,7 +39,9 @@ from wsp_core.ids import DocId, parse_doc_id
 from wsp_core.model import ChangeKind, ChangeRecord, Gap, SourceSpec
 from wsp_core.ports import PortalSource
 
-LINK_CHECK_SECONDS = 5.0  # a page's link check never holds a NAS worker longer
+LINK_CHECK_SECONDS = 5.0  # a page's link check answers within this, with what it has checked
+# Four lookups at a time, shared by every page: one slow archive does not hold up a page's other links.
+_LINK_CHECKS = ThreadPoolExecutor(4, thread_name_prefix="link-check")
 
 # Only images are served from containers: never HTML or scripts at our origin.
 SERVED_MIMETYPES = frozenset(
@@ -324,22 +327,24 @@ def browse_router(lib: Library) -> APIRouter:
         archives never captured (a site's "contact" page, a wiki's Talk: pages). Each is resolved as
         ``/go`` resolves it (a trailing slash, a stand-in from another source). Checking stops after
         :data:`LINK_CHECK_SECONDS`; the rest are not listed."""
-        return LinkCheckResult(missing=await lib.nas.run(lambda: _missing(body.addresses)))
+        return LinkCheckResult(missing=await asyncio.to_thread(_missing, body.addresses))
 
     def _missing(addresses: Sequence[str]) -> list[str]:
-        out: list[str] = []
-        deadline = time.monotonic() + LINK_CHECK_SECONDS
-        for a in dict.fromkeys(addresses):
-            if time.monotonic() > deadline:
-                break
+        def gone(a: str) -> bool:
             try:
                 resolve(s, a, {}, exists=lib.exists, stand_in=lib.stand_in)
             except ApiError as exc:
-                if exc.status == 404:
-                    out.append(a)
+                return exc.status == 404
             except ZimUnavailable:
-                continue  # busy: unknown, not missing
-        return out
+                return False  # busy: unknown, not missing
+            return False
+
+        asked = list(dict.fromkeys(addresses))
+        futures = [_LINK_CHECKS.submit(gone, a) for a in asked]
+        done, late = wait(futures, timeout=LINK_CHECK_SECONDS)
+        for f in late:
+            f.cancel()  # not started yet: never started; a running one finishes unheard
+        return [a for a, f in zip(asked, futures, strict=True) if f in done and f.result()]
 
     # --- Gaps -----------------------------------------------------------------------------------
 

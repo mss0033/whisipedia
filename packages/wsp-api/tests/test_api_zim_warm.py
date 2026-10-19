@@ -79,3 +79,19 @@ def test_article_counts_are_summed_once_every_archive_is_open(tmp_path: Path) ->
     while ("se", "g1") not in store.article_counts and time.monotonic() < deadline:
         time.sleep(0.01)
     assert store.article_counts[("se", "g1")] == 20
+
+
+def test_a_landing_archive_is_opened_before_its_page_is_read(tmp_path: Path) -> None:
+    """2026-10-19: landing-page reads that timed out left worker threads opening archives, and page
+    views waited behind them; the refresher now opens one archive at a time, as long as it takes."""
+    up = tmp_path / "upstream"
+    up.mkdir()
+    (up / "only.zim").write_bytes(b"x")
+    reader = _Reader()
+    store = ZimAssetStore(_Vault(tmp_path, []), reader)  # pyright: ignore[reportArgumentType]
+    store.open_landing("se", "g1")
+    assert reader.warmed == ["only.zim"]
+    (up / "second.zim").write_bytes(b"x")
+    bundle = ZimAssetStore(_Vault(tmp_path, []), reader)  # pyright: ignore[reportArgumentType]
+    bundle.open_landing("se", "g1")  # a bundle's landing page is its book list: nothing opened
+    assert reader.warmed == ["only.zim"]

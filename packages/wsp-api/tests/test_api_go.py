@@ -112,3 +112,27 @@ def test_a_pages_links_that_lead_nowhere_are_named_at_once(client: httpx.Client)
         "missing": ["wsp://rfc/999999", "wsp://no-such-site/page", "wsp://wikipedia-en-zim/A/Nowhere_at_all"]
     }
     assert client.post("/v1/links/missing", json={"addresses": ["wsp://rfc/1"] * 501}).status_code == 422
+
+
+def test_the_link_check_answers_in_time_without_the_links_it_could_not_check(
+    client: httpx.Client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One archive slow to answer (a cold open on a busy NAS) must not hold up the page's other links."""
+    import time
+
+    from wsp_api import browse
+    from wsp_api.errors import ApiError
+
+    def fake_resolve(services: object, address: str, query: object, **_: object) -> None:
+        if address.endswith("/slow"):
+            time.sleep(2)
+        if "gone" in address:
+            raise ApiError(404, "not_in_library", address)
+
+    monkeypatch.setattr(browse, "resolve", fake_resolve)
+    monkeypatch.setattr(browse, "LINK_CHECK_SECONDS", 0.5)
+    asked = ["wsp://s/gone/slow", *(f"wsp://s/gone/{i}" for i in range(6)), "wsp://s/here"]
+    started = time.monotonic()
+    r = client.post("/v1/links/missing", json={"addresses": asked})
+    assert time.monotonic() - started < 1.5
+    assert r.json()["missing"] == [f"wsp://s/gone/{i}" for i in range(6)]

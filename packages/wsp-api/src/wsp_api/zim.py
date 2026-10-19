@@ -380,6 +380,20 @@ class ZimAssetStore:
             return None
         return self.reader.random(layout.single)
 
+    def open_landing(self, source_id: str, generation_id: str) -> None:
+        """Open the archive a single-book generation's landing page is read from, waiting as long as
+        that takes (the snapshot refresher, before :meth:`home`). A landing-page read that timed out
+        left its worker thread opening the archive while the refresher went on to the next one: on
+        2026-10-19, 15 minutes after a restart over a busy NAS, every worker thread was opening an
+        archive no one waited for and page views failed as busy. This way the refresher holds one."""
+        layout = self.layout(source_id, generation_id)
+        if layout is None or layout.single is None:
+            return  # a bundle's landing page is its book list: nothing is read
+        try:
+            self.reader.warm(layout.single)
+        except Exception as exc:  # the landing-page read reports it
+            log.debug("could not open %s ahead of its landing page: %s", layout.single, exc)
+
     def warm_soon(self, source_id: str, generation_id: str) -> None:
         """Open every archive of a generation in the background, largest first, one at a time (a single
         thread for all generations: the NAS serves one cold open well, many badly)."""

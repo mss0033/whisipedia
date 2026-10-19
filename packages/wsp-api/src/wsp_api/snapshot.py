@@ -411,6 +411,9 @@ class LibraryState:
             with self._homes_lock:
                 if key in self._homes:
                     continue
+            opener = getattr(self.home_finder, "open_landing", None)
+            if callable(opener):
+                opener(*key)  # one cold open at a time, however long (ZimAssetStore.open_landing)
             native = self._home(*key)
             warm = getattr(self.home_finder, "warm_soon", None)
             if callable(warm):
