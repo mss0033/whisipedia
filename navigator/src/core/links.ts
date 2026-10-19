@@ -347,7 +347,7 @@ const MATH_ATTRS = new Set([
 ]);
 
 /** A formula as MathML (allowlisted elements and attributes, no links), or null to drop it. */
-function sanitizeMath(el: Element): Element | null {
+export function sanitizeMath(el: Element): Element | null {
   // Wikipedia's hidden accessible copy: its fallback image is the formula on screen.
   if (el.closest('[class*="mwe-math-mathml"]')) return null;
   const copy = (src: Element): Element | null => {

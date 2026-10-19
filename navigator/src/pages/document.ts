@@ -19,6 +19,7 @@ import {
   writeSkin,
 } from '../core/media.ts';
 import type { Route } from '../core/router.ts';
+import { hasTex, typesetSoon } from '../core/tex.ts';
 import { renderPlainText } from '../core/text.ts';
 import {
   asOf,
@@ -1220,6 +1221,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
   );
   if (route.at || route.diff) content.dataset.linksChecked = '1';
   else void markUncaptured(ctx, content, uncapturedNote);
+  if (doc.format === 'html' && doc.html && hasTex(doc.html)) typesetSoon(content);
   const title = titleHeading(body);
   if (title) {
     // The page's own id for its heading stays a place to land: TruePrepper's "Skip to content"

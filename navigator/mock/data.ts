@@ -444,7 +444,8 @@ export const DOCS: FixtureDoc[] = [
         revision: '1248000001',
         timestamp: T('2026-09-12'),
         html: `<p>A <b>Turing machine</b> is a mathematical model of computation describing an abstract machine that manipulates symbols on a strip of tape according to a table of rules. It was introduced by <a href="./Alan_Turing">Alan Turing</a> in 1936.</p>
-<p>Despite its simplicity, the model can implement any computer algorithm, which makes it the standard yardstick for what is computable.</p>`,
+<p>Despite its simplicity, the model can implement any computer algorithm, which makes it the standard yardstick for what is computable.</p>
+<p>A machine with \\(n\\) states and two symbols halts within \\[\\Sigma(n) \\le \\frac{n^2}{2}\\] steps in this toy bound.</p>`,
       },
     ],
     links: [],

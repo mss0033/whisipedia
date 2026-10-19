@@ -142,6 +142,15 @@ test("a link to a page the site's archive never captured is marked before it is 
   await expect(nav.main.getByText(/this site’s archive did not capture them/)).toBeVisible();
 });
 
+test('formulas written as TeX are typeset as MathML', async ({ nav, target }) => {
+  // 2026-10-19 audit: LibreTexts pages showed about a hundred raw \\( … \\) formulas each.
+  test.skip(target === 'live', 'mock fixture: the Turing machine page carries TeX');
+  await nav.open('wsp://wikipedia-en-zim/Turing_machine');
+  await expect(nav.main.locator('math')).toHaveCount(2);
+  await expect(nav.main.locator('math[display="block"] mfrac')).toHaveCount(1);
+  await expect(nav.main.getByText(/\\\(|\\\[/)).toHaveCount(0);
+});
+
 test.describe('a missing page', () => {
   test.use({ allowConsole: [/status of 404/] });
 

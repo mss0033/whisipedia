@@ -12,6 +12,9 @@ const BUDGET = { js: 150 * 1024, css: 40 * 1024 };
 // The Atlas's map (MapLibre GL and its worker) loads only on wsp://atlas: its own budget.
 const MAP_CHUNK = /^assets\/(atlas-map|maplibre-gl-worker)-/;
 const MAP_BUDGET = { js: 500 * 1024, css: 16 * 1024 };
+// TeX typesetting (Temml) loads only for a page with formulas written as TeX: its own budget.
+const TEX_CHUNK = /^assets\/(texrender|temml)-/;
+const TEX_BUDGET = { js: 120 * 1024 };
 // XML namespace identifiers are not fetched.
 const ALLOWED_URLS = [/^http:\/\/www\.w3\.org\//];
 // MapLibre's inert strings: licence and issue references in comments, the `.invalid` base it parses
@@ -44,6 +47,7 @@ try {
 const errors = [];
 const totals = { js: 0, css: 0 };
 const mapTotals = { js: 0, css: 0 };
+const texTotals = { js: 0 };
 const rows = [];
 
 for (const f of files) {
@@ -52,8 +56,9 @@ for (const f of files) {
   const ext = f.split('.').pop();
   const gz = gzipSync(buf, { level: 9 }).length;
   const isMap = MAP_CHUNK.test(rel);
+  const isTex = TEX_CHUNK.test(rel);
   const sums = isMap ? mapTotals : totals;
-  if (ext === 'js') sums.js += gz;
+  if (ext === 'js') (isTex ? texTotals : sums).js += gz;
   if (ext === 'css') sums.css += gz;
   rows.push([rel, buf.length, gz]);
 
@@ -93,6 +98,8 @@ for (const [rel, raw, gz] of rows) {
 const kb = (n) => `${(n / 1024).toFixed(1)} KB`;
 console.log(`\nJS  total ${kb(totals.js)} gz (budget ${kb(BUDGET.js)})`);
 console.log(`CSS total ${kb(totals.css)} gz (budget ${kb(BUDGET.css)})`);
+console.log(`TeX JS ${kb(texTotals.js)} gz (budget ${kb(TEX_BUDGET.js)})`);
+if (texTotals.js > TEX_BUDGET.js) errors.push(`TeX JS over budget: ${kb(texTotals.js)}`);
 if (totals.js > BUDGET.js) errors.push(`JS over budget: ${kb(totals.js)} > ${kb(BUDGET.js)}`);
 if (totals.css > BUDGET.css) errors.push(`CSS over budget: ${kb(totals.css)} > ${kb(BUDGET.css)}`);
 console.log(

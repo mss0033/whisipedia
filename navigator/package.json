@@ -37,6 +37,7 @@
   },
   "dependencies": {
     "@protomaps/basemaps": "5.7.2",
-    "maplibre-gl": "6.11.2"
+    "maplibre-gl": "6.11.2",
+    "temml": "0.13.5"
   }
 }
