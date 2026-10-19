@@ -151,7 +151,7 @@ class CollectionConfig:
         if not isinstance(formats, list):
             raise ValueError(f"{spec.id}: access.formats must be a list of file extensions, got {formats!r}")
         reader = str(acc.get("reader") or "")
-        known = {**tei.READERS, **structured.READERS}
+        known = {**tei.READERS, **structured.READERS, **structured.ARCHIVE_READERS}
         if reader and reader not in known:
             raise ValueError(f"{spec.id}: access.reader must be one of {sorted(known)}, got {reader!r}")
         return CollectionConfig(

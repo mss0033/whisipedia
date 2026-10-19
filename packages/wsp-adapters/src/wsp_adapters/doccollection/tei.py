@@ -227,6 +227,14 @@ def read_snapshot(path: Path, reader: str) -> Iterator[TeiDoc]:
     file the reader reads (a catalogue published as one XML or JSON file: CAPEC, MedlinePlus)."""
     from wsp_adapters.doccollection import structured  # its readers build TeiDocs too
 
+    whole = structured.ARCHIVE_READERS.get(reader)
+    if whole is not None:  # a reader of the whole snapshot (a book's chapters in its own order)
+        try:
+            with zipfile.ZipFile(path) as archive:
+                yield from whole(archive)
+        except (zipfile.BadZipFile, ET.ParseError, KeyError):
+            return
+        return
     member, parse = {**READERS, **structured.READERS}[reader]
     if not zipfile.is_zipfile(path):
         stem = member(path.name)

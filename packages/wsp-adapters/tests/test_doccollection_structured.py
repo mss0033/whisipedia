@@ -198,3 +198,56 @@ def test_files_a_reader_does_not_know_are_skipped(tmp_path: Path) -> None:
     other = tmp_path / "README.json"
     other.write_text("{}")
     assert list(read_snapshot(other, "mitre")) == []
+
+
+SE_OPF = """<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0">
+<metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+ <dc:identifier id="uid">https://standardebooks.org/ebooks/jane-austen/pride-and-prejudice</dc:identifier>
+ <dc:date>2014-05-25T00:00:00Z</dc:date><dc:title id="title">Pride and Prejudice</dc:title>
+ <dc:language>en-GB</dc:language><dc:creator id="author">Jane Austen</dc:creator>
+</metadata>
+<manifest>
+ <item href="text/titlepage.xhtml" id="titlepage.xhtml" media-type="application/xhtml+xml"/>
+ <item href="text/chapter-1.xhtml" id="chapter-1.xhtml" media-type="application/xhtml+xml"/>
+ <item href="text/chapter-2.xhtml" id="chapter-2.xhtml" media-type="application/xhtml+xml"/>
+ <item href="text/colophon.xhtml" id="colophon.xhtml" media-type="application/xhtml+xml"/>
+</manifest>
+<spine><itemref idref="titlepage.xhtml"/><itemref idref="chapter-2.xhtml"/><itemref idref="chapter-1.xhtml"/>
+<itemref idref="colophon.xhtml"/></spine></package>"""
+
+
+def _se_page(title: str, paragraphs: list[str], kind: str = "chapter") -> str:
+    body = "".join(f"<p>{p}</p>" for p in paragraphs)
+    return (
+        '<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">'
+        f'<head><title>{title}</title></head><body epub:type="bodymatter">'
+        f'<section epub:type="{kind}"><h2>{title}</h2>{body}</section></body></html>'
+    )
+
+
+def test_a_standard_ebooks_repository_is_one_book_in_reading_order(tmp_path: Path) -> None:
+    snap = tmp_path / "se.zip"
+    root = "jane-austen_pride-and-prejudice-ed94a32/src/epub"
+    with zipfile.ZipFile(snap, "w") as z:
+        z.writestr(f"{root}/content.opf", SE_OPF)
+        z.writestr(
+            f"{root}/text/titlepage.xhtml", _se_page("Titlepage", ["Pride and Prejudice"], "titlepage")
+        )
+        z.writestr(
+            f"{root}/text/chapter-1.xhtml",
+            _se_page("I", ["It is a truth universally acknowledged.", "However little known."]),
+        )
+        z.writestr(f"{root}/text/chapter-2.xhtml", _se_page("II", ["Mr. Bennet was among the earliest."]))
+        z.writestr(
+            f"{root}/text/colophon.xhtml", _se_page("Colophon", ["Typeset by Standard Ebooks."], "colophon")
+        )
+    (book,) = read_snapshot(snap, "standard-ebooks")
+    assert (book.key, book.title, book.lang, book.date) == ("book", "Pride and Prejudice", "en", "2014-05-25")
+    assert book.url == "https://standardebooks.org/ebooks/jane-austen/pride-and-prejudice"
+    assert book.text.startswith(
+        "Pride and Prejudice\n\nby Jane Austen\n\nChapter II\n\nMr. Bennet"
+    )  # spine order
+    assert "Chapter I\n\nIt is a truth universally acknowledged.\n\nHowever little known." in book.text
+    assert "Titlepage" not in book.text
+    assert "Typeset by" not in book.text  # colophon left out

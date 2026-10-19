@@ -15,6 +15,9 @@ document a reader can find and read.
   "[Assignment: ...]" the publication prints), its discussion and its related controls.
 * ``medlineplus-topics`` (MedlinePlus health topics XML, ``mplus_topics_<date>.xml``): each topic
   (``topic/6308``), English or Spanish, with its other names, summary, groups and related topics.
+* ``standard-ebooks`` (a Standard Ebooks book repository, read whole): the book as one document
+  (``book``), its chapters in the reading order of ``src/epub/content.opf``, each under its heading
+  ("Chapter I"); the title page, imprint, colophon and licence page left out.
 
 The 2026-10-18 owner request listed them as sources to bring in; each was a registered candidate whose
 adapter (``git-mirror``, ``http-files``) was never written.
@@ -25,11 +28,12 @@ from __future__ import annotations
 import json
 import re
 import xml.etree.ElementTree as ET
+import zipfile
 from collections.abc import Iterator, Mapping, Sequence
 from typing import Any, cast
 
 from wsp_adapters.doccollection.tei import TeiDoc
-from wsp_adapters.html_text import html_to_text
+from wsp_adapters.html_text import html_to_text  # MedlinePlus summaries (HTML in the XML)
 
 _WS = re.compile(r"[ \t]+")
 _CITATION = re.compile(r"\(Citation: [^)]*\)")
@@ -427,6 +431,93 @@ def medlineplus_topics(data: bytes, stem: str) -> Iterator[TeiDoc]:
 def _medlineplus_member(name: str) -> str | None:
     return "topics" if re.search(r"mplus_topics_\d{4}-\d{2}-\d{2}\.xml$", name) else None
 
+
+# --- Standard Ebooks (a book repository, read whole) ---------------------------------------------------
+
+_OPF = "{http://www.idpf.org/2007/opf}"
+_DCNS = "{http://purl.org/dc/elements/1.1/}"
+_XHTML = "{http://www.w3.org/1999/xhtml}"
+_EPUB_TYPE = "{http://www.idpf.org/2007/ops}type"
+SE_SKIP = frozenset({"titlepage", "imprint", "colophon", "uncopyright", "halftitlepage", "toc", "loi"})
+_ROMAN_OR_NUMBER = re.compile(r"^(?:[IVXLCDM]+|\d+)\.?$")
+
+
+_BLOCK_TAGS = frozenset(
+    {"p", "h1", "h2", "h3", "h4", "h5", "h6", "li", "dt", "dd", "td", "th", "figcaption", "pre"}
+)
+
+
+def _xhtml_blocks(body: ET.Element) -> list[str]:
+    """The text of each block (paragraph, heading, list item) in order: a block within a block (a
+    paragraph in a list item) is read with the outer one. Independent of the whitespace between tags."""
+    out: list[str] = []
+
+    def walk(el: ET.Element) -> None:
+        for child in el:
+            if _local(child.tag) in _BLOCK_TAGS:
+                text = " ".join("".join(child.itertext()).split())
+                if text:
+                    out.append(text)
+            else:
+                walk(child)
+
+    walk(body)
+    return out
+
+
+def se_book(archive: zipfile.ZipFile) -> Iterator[TeiDoc]:
+    names = archive.namelist()
+    opf_name = next((n for n in names if n.endswith("src/epub/content.opf")), None)
+    if opf_name is None:
+        return
+    base = opf_name.rsplit("/", 1)[0]
+    opf = ET.fromstring(archive.read(opf_name))  # noqa: S314 - Standard Ebooks' own EPUB source
+    meta = opf.find(f"{_OPF}metadata")
+    if meta is None:
+        return
+
+    def dc(tag: str) -> list[str]:
+        return [
+            " ".join((e.text or "").split()) for e in meta.iter(f"{_DCNS}{tag}") if (e.text or "").strip()
+        ]
+
+    title = (dc("title") or [""])[0]
+    authors = dc("creator")
+    url = next((u for i in dc("identifier") if (u := i.removeprefix("url:")).startswith("https://")), "")
+    hrefs = {
+        i.get("id", ""): i.get("href", "")
+        for i in opf.iter(f"{_OPF}item")
+        if i.get("media-type") == "application/xhtml+xml"
+    }
+    parts: list[str] = []
+    for ref in opf.iter(f"{_OPF}itemref"):
+        idref = ref.get("idref", "")
+        href = hrefs.get(idref, "")
+        if not href or idref.removesuffix(".xhtml") in SE_SKIP or f"{base}/{href}" not in names:
+            continue
+        page = ET.fromstring(archive.read(f"{base}/{href}"))  # noqa: S314 - Standard Ebooks' own XHTML
+        head = " ".join((page.findtext(f"{_XHTML}head/{_XHTML}title") or "").split())
+        body = page.find(f"{_XHTML}body")
+        kinds = " ".join(e.get(_EPUB_TYPE, "") for e in (body.iter() if body is not None else ()))
+        blocks = _xhtml_blocks(body) if body is not None else []
+        if not blocks:
+            continue
+        if "chapter" in kinds and _ROMAN_OR_NUMBER.match(head):
+            head = f"Chapter {head.rstrip('.')}"
+        # The heading the page prints ("I") gives way to the one a reader can find ("Chapter I").
+        if head and blocks[0].rstrip(".") in head:
+            blocks = blocks[1:]
+        body_text = "\n\n".join(blocks)  # a paragraph a block, a blank line between (not verse)
+        parts.append(f"{head}\n\n{body_text}" if head else body_text)
+    if not title or not parts:
+        return
+    by = f"by {', '.join(authors)}" if authors else ""
+    text = "\n\n".join(x for x in (title, by, *parts) if x)
+    lang = (dc("language") or ["en"])[0][:2].lower()
+    yield TeiDoc(key="book", title=title, text=text, date=(dc("date") or [""])[0][:10], url=url, lang=lang)
+
+
+ARCHIVE_READERS = {"standard-ebooks": se_book}
 
 READERS = {
     "mitre": (_mitre_member, mitre),

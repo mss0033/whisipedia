@@ -1379,13 +1379,39 @@ def s3_listing(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
     env.listing_end(f"s3-listing:{prefix}", stopped=more, seen=0)
 
 
+def _org_repos(org: str, cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Json]:
+    """Every repository of a GitHub organisation (``org``) whose name matches ``match``: 100 a page, so
+    Standard Ebooks' ~1,400 books take 14 requests, not one each (the anonymous API allows 60 an hour)."""
+    match = re.compile(_s(cfg.get("match")) or r".")
+    page = seen = 0
+    while page < env.pages():
+        page += 1
+        repos = cast(
+            list[Json], env.get_json(f"https://api.github.com/orgs/{org}/repos?per_page=100&page={page}")
+        )
+        if not repos:
+            break
+        seen += len(repos)
+        for info in repos:
+            if not info.get("archived") and match.search(_s(info.get("name"))):
+                yield info
+        if len(repos) < 100:
+            break
+    env.listing_end(f"git:{org}", stopped=page >= env.pages(), seen=seen)
+
+
 def git_repo(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
+    listed: list[tuple[str, str, Json | None]] = []
     for repo in _strs(cfg.get("repos")) or _strs(cfg.get("url")):
         m = re.match(r"https://github\.com/([^/]+)/([^/.]+)", repo)
         if not m:
             raise DiscoveryError(f"git discovery supports GitHub repositories, got {repo!r}")
-        owner, name = m.groups()
-        info = cast(Json, env.get_json(f"https://api.github.com/repos/{owner}/{name}"))
+        listed.append((m.group(1), m.group(2), None))
+    if cfg.get("org"):
+        org = _s(cfg.get("org"))
+        listed += [(org, _s(info.get("name")), info) for info in _org_repos(org, cfg, env)]
+    for owner, name, known in listed:
+        info = known or cast(Json, env.get_json(f"https://api.github.com/repos/{owner}/{name}"))
         yield Candidate(
             key=make_key(env.prefix, f"{owner}-{name}"),
             url=f"https://github.com/{owner}/{name}.git",

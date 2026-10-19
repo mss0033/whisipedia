@@ -706,6 +706,33 @@ def test_openstax_lists_each_live_book_with_its_pdf() -> None:
     assert not env.incomplete
 
 
+def test_git_lists_an_organisations_repositories_a_hundred_a_page() -> None:
+    def repo(name: str, archived: bool = False) -> dict[str, object]:
+        return {
+            "name": name,
+            "description": name,
+            "default_branch": "master",
+            "pushed_at": "2026-09-01T00:00:00Z",
+            "size": 1500,
+            "archived": archived,
+            "license": {"spdx_id": "CC0-1.0"},
+        }
+
+    page1 = [repo(f"author-{i}_book-{i}") for i in range(99)] + [repo("tools")]
+    page2 = [repo("jane-austen_emma"), repo("old_gone", archived=True)]
+    routes = {
+        "https://api.github.com/orgs/standardebooks/repos?per_page=100&page=1": json.dumps(page1).encode(),
+        "https://api.github.com/orgs/standardebooks/repos?per_page=100&page=2": json.dumps(page2).encode(),
+    }
+    env = env_for(routes, origins=("github.com", "api.github.com", "codeload.github.com"))
+    cfg = {"kind": "git", "org": "standardebooks", "match": "^[a-z0-9-]+_[a-z0-9-]+", "snapshot": True}
+    got = list(discover_all([cfg], env))
+    assert len(got) == 100  # 99 + emma; "tools" does not match, an archived repository is left out
+    assert got[-1].url == "https://github.com/standardebooks/jane-austen_emma.git"
+    assert got[-1].extra["default_branch"] == "master"
+    assert got[-1].extra["snapshot"] == "1"
+
+
 def test_unknown_kinds_and_flavors_fail_loudly() -> None:
     with pytest.raises(DiscoveryError):
         list(discover_all([{"kind": "carrier-pigeon"}], env_for({})))

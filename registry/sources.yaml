@@ -156,11 +156,23 @@ sources:
     tier: T1
     status: candidate
     license: CC0-1.0
-    legal_basis: public-domain
-    access: {adapter: git-mirror}
-    index: false  # stored as a git bundle; no refine adapter reads bundles yet (2026-10-12 audit, CA-12)
-    update: {strategy: mirror}
-    size: {bytes: 15e9, measured: false, as_of: 2026-10-09}
+    legal_basis: open-license
+    access:
+      adapter: doc-collection
+      issuer: Standard Ebooks
+      key_prefix: se
+      origins: [github.com, api.github.com, codeload.github.com]
+      # Each book is a public GitHub repository of its EPUB source (CC0). The site's robots.txt keeps
+      # AI agents off its download pages and its bulk downloads are for patrons, so the books come from
+      # the repositories: the organisation listed 100 a page, each book's default branch as one zip,
+      # read whole (doccollection.structured, reader standard-ebooks: the chapters in reading order).
+      reader: standard-ebooks
+      discovery:
+        - {kind: git, org: standardebooks, match: "^[a-z0-9-]+_[a-z0-9-]+", snapshot: true}
+      filter: {allow_all: true}
+    update: {cadence: P3M, strategy: snapshot-retention}
+    size: {bytes: 3e9, measured: false, as_of: 2026-10-18}
+    notes: Carefully corrected and typeset public-domain books (mostly from Project Gutenberg transcriptions); ~1,400 titles.
 
   - id: open-library
     name: Open Library dumps
