@@ -22,6 +22,11 @@ the text, the article's own licence (``license_code``: CC BY, CC0, ... or TDM fo
 manuscript), linked to its PubMed record (``wsp:pubmed/<pmid>``) and to its page on PMC. A retracted
 article says so in its title.
 
+**Packed.** A partition's files are stored as one zip (``pmc-<version>.zip``, :meth:`PmcAdapter.pack_name`;
+``wsp bulk fetch`` packs them on the local disk): 45,000 small files a partition written one by one into
+the NAS starved every read of the library (2026-10-19), and 12 million of them would burden every
+scrub. The documents are read from the zip (loose files too, as an earlier run stored them).
+
 The inventory is read once a day into the adapter's work directory (``<workdir>/inventory/<date>``,
 about 250 MB) and reused by every partition fetched that day.
 """
@@ -35,6 +40,7 @@ import json
 import logging
 import re
 import xml.etree.ElementTree as ET
+import zipfile
 from collections.abc import Iterable, Iterator, Mapping
 from pathlib import Path
 from typing import Any, cast
@@ -237,8 +243,14 @@ class PmcAdapter:
     def verify(self, ctx: Ctx, remote: RemoteFile, local: Path) -> Verdict:
         return verify_file(remote, local)
 
+    def pack_name(self, version: str) -> str:
+        """The one file a partition is stored as (``wsp bulk fetch`` packs its articles into it)."""
+        return f"pmc-{version}.zip"
+
     def documents(self, ctx: Ctx, generation_dir: Path) -> Iterator[DocRecord]:
         up = upstream_dir(generation_dir)
+        for packed in sorted(up.glob("pmc-*.zip")):
+            yield from self._packed_documents(ctx, packed)
         for meta_path in sorted(up.glob("PMC*.json")):
             text_path = meta_path.with_suffix(".txt")
             if not text_path.is_file():
@@ -252,3 +264,25 @@ class PmcAdapter:
             doc = article_document(meta, body, ctx.source.id)
             if doc is not None:
                 yield doc
+
+    def _packed_documents(self, ctx: Ctx, packed: Path) -> Iterator[DocRecord]:
+        try:
+            archive = zipfile.ZipFile(packed)
+        except (OSError, zipfile.BadZipFile) as exc:
+            log.warning("%s: %s unreadable: %s", ctx.source.id, packed.name, exc)
+            return
+        with archive:
+            names = set(archive.namelist())
+            for meta_name in sorted(n for n in names if n.startswith("PMC") and n.endswith(".json")):
+                text_name = meta_name.removesuffix(".json") + ".txt"
+                if text_name not in names:
+                    continue
+                try:
+                    meta = cast(Mapping[str, Any], json.loads(archive.read(meta_name)))
+                    body = archive.read(text_name).decode("utf-8", errors="replace")
+                except (OSError, ValueError, zipfile.BadZipFile) as exc:
+                    log.warning("%s: %s in %s unreadable: %s", ctx.source.id, meta_name, packed.name, exc)
+                    continue
+                doc = article_document(meta, body, ctx.source.id)
+                if doc is not None:
+                    yield doc

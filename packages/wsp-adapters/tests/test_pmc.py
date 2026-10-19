@@ -113,3 +113,22 @@ def test_each_article_is_a_document_with_its_licence_and_pubmed_link(tmp_path: P
     assert retracted.title.startswith("Retracted: ")
     assert retracted.license == "LicenseRef-PMC-TDM"
     assert article_document({**meta, "pmcid": "nope"}, "text", "pmc-oa") is None
+
+
+def test_a_packed_partition_is_read_from_its_zip(tmp_path: Path) -> None:
+    """A partition is stored as one zip (2026-10-19): its articles are read from inside it."""
+    import zipfile
+
+    gen = tmp_path / "2026-10-19.p0193" / "upstream"
+    gen.mkdir(parents=True)
+    meta = {"pmcid": "PMC9650000", "title": "Heat stroke", "license_code": "CC0", "pmid": 1}
+    with zipfile.ZipFile(gen / "pmc-2026-10-19.p0193.zip", "w") as z:
+        z.writestr("PMC9650000.2.json", json.dumps(meta))
+        z.writestr("PMC9650000.2.txt", "Heat stroke is a medical emergency.")
+        z.writestr("PMC9699999.1.json", json.dumps({**meta, "pmcid": "PMC9699999"}))  # no text
+    adapter = PmcAdapter()
+    assert adapter.pack_name("2026-10-19.p0193") == "pmc-2026-10-19.p0193.zip"
+    spec = make_spec("pmc-oa", {"adapter": "pmc-oa"})
+    (doc,) = adapter.documents(make_ctx(spec, FakeFetcher({}), tmp_path / "w"), gen.parent)
+    assert (doc.native_id, doc.license) == ("PMC9650000", "CC0-1.0")
+    assert "medical emergency" in doc.text

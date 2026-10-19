@@ -13,22 +13,34 @@ so a rerun continues where a failure stopped. ``--only`` fetches the files whose
 (``discover_partition``: PubMed Central, 50,000 PMC ids a partition); its version is ``<day>.<P>``.
 ``--parallel N`` downloads N files at once (a release of many small files: PMC's 60,000 a partition).
 The adapter works in ``<state>/bulk/<source>``, kept between runs (PMC's inventory is read once a day).
+
+**Packed releases.** An adapter with ``pack_name(version)`` (PubMed Central) has its release's many
+small files downloaded to the local disk (``<state>/bulk/<source>/pack/<version>/``), stored in one
+zip of that name, and only the zip written into ``_incoming`` (paced like every write into the
+vault); the plan names the zip with its SHA-256. 45,000 files a partition written one by one into the
+NAS made a hundred file creations a second, and every page of the library waited behind them
+(2026-10-19: Wikipedia pages failed after 18 s until the lane stopped). Loose files an earlier run
+left in ``_incoming/<source>/*.<partition>`` are moved into the local staging first, not fetched again.
 """
 
 from __future__ import annotations
 
 import argparse
 import fnmatch
+import hashlib
 import json
+import shutil
 import sys
-from collections.abc import Mapping
+import zipfile
+from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, TextIO
 
 from wsp_cli import bootstrap
 from wsp_core.errors import FetchError
-from wsp_core.model import ReleaseRef, RemoteFile, SourceSpec
+from wsp_core.model import Checksum, ReleaseRef, RemoteFile, SourceSpec
 from wsp_core.ports import Ctx
 
 PLANS_SUBDIR = "targets.d"
@@ -119,6 +131,20 @@ def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
         return EXIT_NOTHING_NEW
     incoming = vault_root / "_incoming"
     dest_dir = incoming / spec.id / release.version
+    pack_name = getattr(adapter, "pack_name", None)
+    if callable(pack_name):
+        return _fetch_packed(
+            spec,
+            release,
+            str(pack_name(release.version)),
+            incoming,
+            work,
+            bootstrap.build_fetcher(cfg),  # into the local disk: the NAS write is paced below
+            bootstrap.ingest_pace(cfg),
+            max(1, int(getattr(args, "parallel", 1) or 1)),
+            partition,
+            out,
+        )
     dest_dir.mkdir(parents=True, exist_ok=True)
     write_plan(incoming, release)
     wanted: list[RemoteFile] = [
@@ -161,6 +187,133 @@ def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
         return EXIT_FAILED
     out.write(f"next: wsp ingest --source {spec.id} --version {release.version}\n")
     return EXIT_OK
+
+
+PACK_CHUNK = 4 * 1024 * 1024
+
+
+def _fetch_packed(
+    spec: SourceSpec,
+    release: ReleaseRef,
+    name: str,
+    incoming: Path,
+    work: Path,
+    fetcher: Any,
+    pace: Callable[[int], None] | None,
+    parallel: int,
+    partition: str | None,
+    out: TextIO,
+) -> int:
+    """Fetch a release's files into the local disk, pack them into one zip, write that into
+    ``_incoming`` (see the module docstring). Resumable: files already staged are not fetched again,
+    and a zip already in ``_incoming`` with its planned size is not written again."""
+    dest_dir = incoming / spec.id / release.version
+    final = dest_dir / name
+    plan = incoming / "_plans" / PLANS_SUBDIR / f"{release.source_id}-{release.version}.json"
+    if final.is_file() and plan.is_file():
+        planned = json.loads(plan.read_text(encoding="utf-8"))
+        if [t.get("name") for t in planned] == [name] and planned[0].get("size") == final.stat().st_size:
+            out.write(f"{spec.id}/{release.version}: {name} already written\n")
+            out.write(f"next: wsp ingest --source {spec.id} --version {release.version}\n")
+            return EXIT_OK
+    staging = work / "pack" / release.version
+    staging.mkdir(parents=True, exist_ok=True)
+    wanted = {f.name: f for f in release.files}
+    moved = _adopt_loose(incoming / spec.id, partition, release.version, wanted, staging)
+    if moved:
+        out.write(f"{spec.id}/{release.version}: {moved:,} file(s) an earlier run left in _incoming staged\n")
+    todo = [f for f in release.files if not _whole(staging / f.name, f)]
+    out.write(
+        f"{spec.id}/{release.version}: {len(release.files):,} files packed as {name}; "
+        f"fetching {len(todo):,}\n"
+    )
+
+    def one(remote: RemoteFile) -> str | None:
+        try:
+            fetcher.download(remote, staging / remote.name)
+        except (FetchError, OSError) as exc:
+            return f"  {remote.name}: FAILED {exc}"
+        return None
+
+    failed = done = 0
+    with ThreadPoolExecutor(max_workers=parallel) as pool:
+        for line in pool.map(one, todo):
+            done += 1
+            if line is not None:
+                failed += 1
+                out.write(line + "\n")
+            if done % 1000 == 0:
+                out.write(f"  {done:,}/{len(todo):,} fetched\n")
+            out.flush()
+    if failed:
+        out.write(f"{spec.id}/{release.version}: {failed} file(s) failed; run again to continue\n")
+        return EXIT_FAILED
+    local_zip = staging.parent / f"{release.version}.zip"
+    tmp = local_zip.with_suffix(".zip.partial")
+    with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as z:
+        for f in sorted(release.files, key=lambda f: f.name):
+            z.write(staging / f.name, f.name)
+    tmp.replace(local_zip)
+    digest, size = _sha256(local_zip), local_zip.stat().st_size
+    packed = replace(
+        release,
+        files=(RemoteFile(f"packed:{spec.id}/{release.version}", name, size, (Checksum("sha256", digest),)),),
+    )
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    if not (final.is_file() and final.stat().st_size == size):
+        _paced_copy(local_zip, final, pace)
+    write_plan(incoming, packed)
+    shutil.rmtree(staging, ignore_errors=True)
+    local_zip.unlink(missing_ok=True)
+    out.write(f"{spec.id}/{release.version}: {name} {_gb(size)} written\n")
+    out.write(f"next: wsp ingest --source {spec.id} --version {release.version}\n")
+    return EXIT_OK
+
+
+def _whole(path: Path, remote: RemoteFile) -> bool:
+    return path.is_file() and (remote.size is None or path.stat().st_size == remote.size)
+
+
+def _adopt_loose(
+    source_dir: Path, partition: str | None, version: str, wanted: Mapping[str, RemoteFile], staging: Path
+) -> int:
+    """Move into ``staging`` the release's files an earlier, unpacked run left loose in ``_incoming``
+    (any version of the same partition), and remove the folders that empties."""
+    if not source_dir.is_dir():
+        return 0
+    moved = 0
+    for folder in sorted(source_dir.iterdir()):
+        same = folder.name == version or (partition is not None and folder.name.endswith(f".{partition}"))
+        if not (folder.is_dir() and same):
+            continue
+        for path in folder.iterdir():
+            if path.name in wanted and path.is_file() and not (staging / path.name).is_file():
+                shutil.move(str(path), staging / path.name)
+                moved += 1
+        if folder.name != version and not any(folder.iterdir()):
+            folder.rmdir()  # and its plan: nothing of that version is left to ingest
+            plan = source_dir.parent / "_plans" / PLANS_SUBDIR / f"{source_dir.name}-{folder.name}.json"
+            plan.unlink(missing_ok=True)
+    return moved
+
+
+def _sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        while chunk := fh.read(PACK_CHUNK):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _paced_copy(src: Path, dest: Path, pace: Callable[[int], None] | None) -> None:
+    """Copy into the vault at the library's write budget, renamed into place when whole."""
+    tmp = dest.with_name(dest.name + ".partial")
+    with src.open("rb") as fin, tmp.open("wb") as fout:
+        while chunk := fin.read(PACK_CHUNK):
+            if pace is not None:
+                pace(len(chunk))
+            fout.write(chunk)
+    tmp.replace(dest)
 
 
 def register(sub: Any, add: Any) -> None:

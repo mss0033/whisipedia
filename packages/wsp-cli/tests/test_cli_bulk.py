@@ -174,3 +174,50 @@ def test_one_partition_in_parallel_with_a_kept_workdir(vault: tuple[Path, Downlo
     assert "next: wsp ingest --source big --version 2026-10-18.p0001" in text
     assert ADAPTER.workdir == tmp_path / "state" / "bulk" / "big"  # kept between runs (PMC's inventory)
     assert run(partition="p0099")[0] == bulk.EXIT_NOTHING_NEW  # an empty partition
+
+
+class Packed(Adapter):
+    """A partition of many small files stored as one zip (PubMed Central, 2026-10-19)."""
+
+    def pack_name(self, version: str) -> str:
+        return f"big-{version}.zip"
+
+
+def test_a_packed_partition_lands_in_incoming_as_one_zip(
+    vault: tuple[Path, Downloads], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """45,000 files a partition written one by one into the NAS starved every read of the library;
+    they are fetched into the local disk and written into _incoming as one zip."""
+    import zipfile
+
+    root, fetcher = vault
+
+    def adapters(*_: object, **__: object) -> dict[str, object]:
+        return {"big": Packed()}
+
+    monkeypatch.setattr(bootstrap, "load_adapters", adapters)
+    # An earlier, unpacked run left one file loose under the partition's older version.
+    loose = root / "_incoming" / "big" / "2026-10-17.p0001"
+    loose.mkdir(parents=True)
+    (loose / "a.tar.gz").write_bytes(A)
+    old_plan = root / "_incoming/_plans/targets.d/big-2026-10-17.p0001.json"
+    old_plan.parent.mkdir(parents=True)
+    old_plan.write_text("[]")
+    rc, text = run(partition="p0001", parallel=4)
+    assert rc == bulk.EXIT_OK, text
+    assert fetcher.downloaded == []  # the loose file was staged, not fetched again
+    assert not loose.exists()  # and its emptied folder removed, with its plan
+    assert not old_plan.exists()
+    version = root / "_incoming" / "big" / "2026-10-18.p0001"
+    assert [p.name for p in version.iterdir()] == ["big-2026-10-18.p0001.zip"]
+    with zipfile.ZipFile(version / "big-2026-10-18.p0001.zip") as z:
+        assert z.read("a.tar.gz") == A
+    (target,) = load_targets(root / "_incoming/_plans/targets.d/big-2026-10-18.p0001.json")
+    data = (version / target.name).read_bytes()
+    assert target.checksum == Checksum("sha256", hashlib.sha256(data).hexdigest())
+    assert target.size == len(data)
+    assert not (tmp_path / "state" / "bulk" / "big" / "pack" / "2026-10-18.p0001").exists()  # cleaned
+    rc, text = run(partition="p0001")  # a rerun before the ingest: nothing fetched or written again
+    assert rc == bulk.EXIT_OK
+    assert "already written" in text
+    assert fetcher.downloaded == []
