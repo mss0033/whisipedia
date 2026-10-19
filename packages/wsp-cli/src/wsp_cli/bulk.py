@@ -288,7 +288,11 @@ def _adopt_loose(
             continue
         for path in folder.iterdir():
             if path.name in wanted and path.is_file() and not (staging / path.name).is_file():
-                shutil.move(str(path), staging / path.name)
+                try:  # the bytes only: copying the NAS's extended attributes failed (EAGAIN, 2026-10-19)
+                    shutil.move(str(path), staging / path.name, copy_function=shutil.copyfile)
+                except OSError:
+                    (staging / path.name).unlink(missing_ok=True)  # fetched instead
+                    continue
                 moved += 1
         if folder.name != version and not any(folder.iterdir()):
             folder.rmdir()  # and its plan: nothing of that version is left to ingest

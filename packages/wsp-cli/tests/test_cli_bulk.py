@@ -221,3 +221,27 @@ def test_a_packed_partition_lands_in_incoming_as_one_zip(
     assert rc == bulk.EXIT_OK
     assert "already written" in text
     assert fetcher.downloaded == []
+
+
+def test_a_loose_file_that_cannot_be_moved_is_fetched_instead(
+    vault: tuple[Path, Downloads], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Moving a loose file off the NAS failed with EAGAIN (2026-10-19): the run fetches it instead."""
+    import shutil
+
+    root, fetcher = vault
+
+    def adapters(*_: object, **__: object) -> dict[str, object]:
+        return {"big": Packed()}
+
+    def refuse(*_: object, **__: object) -> None:
+        raise BlockingIOError(11, "Resource temporarily unavailable")
+
+    monkeypatch.setattr(bootstrap, "load_adapters", adapters)
+    monkeypatch.setattr(shutil, "move", refuse)
+    loose = root / "_incoming" / "big" / "2026-10-17.p0001"
+    loose.mkdir(parents=True)
+    (loose / "a.tar.gz").write_bytes(A)
+    rc, text = run(partition="p0001")
+    assert rc == bulk.EXIT_OK, text
+    assert fetcher.downloaded == ["a.tar.gz"]
