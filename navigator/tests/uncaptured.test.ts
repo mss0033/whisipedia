@@ -7,7 +7,9 @@ function page(): HTMLElement {
   body.innerHTML = `
     <p><a data-wsp="wsp://site/www.ex.org/a/">A</a> <a data-wsp="wsp://site/www.ex.org/contact">Contact</a>
     <a data-wsp="wsp://site/www.ex.org/contact">Contact again</a>
-    <a data-wsp="wsp://site/x" data-missing="https://far.example/">Remote</a></p>`;
+    <a data-wsp="wsp://site/x" data-missing="https://far.example/">Remote</a>
+    <a data-wsp="wsp://site/www.ex.org/a/#part">A, a section</a></p>
+    <p class="reader-nav"><a data-wsp="wsp://site/book?ch=1">Next chapter →</a></p>`;
   return body;
 }
 

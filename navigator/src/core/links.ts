@@ -377,16 +377,56 @@ export function sanitizeMath(el: Element): Element | null {
 const HIDDEN_CLASSES = ['cs1-maint', 'cs1-hidden-error'];
 
 /** Wiki template leftovers in a page's text: a parameter never filled in (`{{{name}}}`), and a category
- * or file link with no name (`[[Category:]]`, `[[File:|thumb|]]`). Never a page's words: Gardenology
+ * or file link with no name (`[[Category:]]`, `[[File:|thumb|]]`), a magic word (`{{PAGENAME}}`,
+ * Energypedia's file pages). Never a page's words: Gardenology
  * and Appropedia pages showed them in place of the values their templates lacked (2026-10-19 audit).
  * Text in code blocks is left alone. */
 const TEMPLATE_LEFTOVERS =
-  /\[\[\s*(?:\{\{\{[^{}]{1,40}\}\}\}|(?:Category|File|Image)\s*:\s*(?:\|[^[\]|]{0,40})*)\s*\]\]|\{\{\{[\w -]{1,40}(?:\|[^{}]{0,40})?\}\}\}/g;
+  /\[\[\s*(?:\{\{\{[^{}]{1,40}\}\}\}|(?:Category|File|Image)\s*:\s*(?:\|[^[\]|]{0,40})*)\s*\]\]|\{\{\{[\w -]{1,40}(?:\|[^{}]{0,40})?\}\}\}|\{\{(?:FULL|BASE|SUB)?PAGENAMEE?\}\}|\{\{(?:SITENAME|NAMESPACE)\}\}/g;
 const CODE_TAGS = new Set(['pre', 'code', 'kbd', 'samp', 'textarea']);
 
-export function withoutTemplateLeftovers(text: string): string {
-  return text.includes('[[') || text.includes('{{{') ? text.replace(TEMPLATE_LEFTOVERS, '') : text;
+/** The page a `<frame>` or `<iframe>` showed: its source rewritten to the archive's asset route
+ * (`/v1/assets/<source>/<generation>/<path>.html`), as the address of that page. */
+function framePage(el: Element): { address: string; name: string } | null {
+  const m = /^\/v1\/assets\/([^/]+)\/[^/]+\/([^?#]+\.html?)$/i.exec(el.getAttribute('src') ?? '');
+  if (!m) return null;
+  let path: string;
+  try {
+    path = decodeURIComponent(m[2]!);
+  } catch {
+    return null;
+  }
+  const name = (
+    el.getAttribute('title') ||
+    el.getAttribute('name') ||
+    path.split('/').pop() ||
+    path
+  ).trim();
+  return { address: makeAddress(m[1]!, path), name };
 }
+
+export function withoutTemplateLeftovers(text: string): string {
+  let t = text.includes('[[') || text.includes('{{') ? text.replace(TEMPLATE_LEFTOVERS, '') : text;
+  if (t.includes('[['))
+    t = t.replace(UNLINKED, (_m, title: string, label?: string) => label ?? title);
+  return t.includes('&') ? t.replace(ESCAPED_TWICE, (e) => UNESCAPE[e] ?? e) : t;
+}
+
+/** A wiki link the wiki never turned into one: `[[Colsterworth]]`, `[[Main Page|home]]` (OpenStreetMap
+ * wiki, 2026-10-19 audit), shown as its words. A title starts with a capital and has no comma: a
+ * chemical name (`[[2,2′-...]]`) or a list comprehension (`[[y for x in xs]]`) is not one. */
+const UNLINKED = /\[\[([A-Z][^[\]|,{}]{0,80})(?:\|([^[\]|{}]{1,80}))?\]\]/g;
+
+/** Entities escaped twice upstream, so the page shows `&quot;` (The World Factbook: "or
+ * &quot;Mountain of Mercy,&quot; lies Persepolis", 2026-10-19 audit). Outside code only. */
+const ESCAPED_TWICE = /&(?:quot|apos|amp|#39|nbsp);/g;
+const UNESCAPE: Record<string, string> = {
+  '&quot;': '"',
+  '&apos;': "'",
+  '&#39;': "'",
+  '&amp;': '&',
+  '&nbsp;': '\u00a0',
+};
 
 /** Classes of navigation-only blocks: a field's sidebar, the navboxes at the end of an article. */
 const NAVIGATION_CLASSES = ['sidebar', 'vertical-navbox', 'navbox'];
@@ -425,6 +465,25 @@ export function sanitizeDocumentHtml(
       if (child.nodeType !== Node.ELEMENT_NODE) continue; // comments, PIs
       const el = child as Element;
       const tag = el.tagName.toLowerCase();
+      if (tag === 'noframes') {
+        // A frameset page's text for browsers without frames, which the parser keeps as raw text
+        // (Javadoc's "Frame Alert … Non-frame version", shown as markup: 2026-10-19 audit).
+        walk(new DOMParser().parseFromString(el.textContent ?? '', 'text/html').body, dest);
+        continue;
+      }
+      if ((tag === 'frame' || tag === 'iframe') && framePage(el)) {
+        // A frame is never loaded here: a link to the page it showed, when the archive holds it.
+        const { address, name } = framePage(el)!;
+        const p = document.createElement('p');
+        const a = document.createElement('a');
+        a.setAttribute('href', `#${address}`);
+        a.dataset.wsp = address;
+        a.textContent = name;
+        p.append('Frame: ', a);
+        dest.appendChild(p);
+        stats.links += 1;
+        continue;
+      }
       if (DROP.has(tag) || HIDDEN_CLASSES.some((c) => el.classList.contains(c))) {
         stats.removed += 1;
         continue;
@@ -507,6 +566,10 @@ export function sanitizeDocumentHtml(
     }
   };
   walk(parsed.body, out);
+  // A frameset page's <noframes> follows its <frameset>, outside the body the parser gives it.
+  if (parsed.body?.localName === 'frameset')
+    for (const nf of Array.from(parsed.documentElement.children))
+      if (nf.localName === 'noframes') walk({ childNodes: [nf] } as unknown as Node, out);
   // A link to a place in the page that is not there (a dropped navigation bar) is plain text.
   const ids = new Set([...out.querySelectorAll('[id]')].map((e) => e.id));
   for (const a of out.querySelectorAll<HTMLAnchorElement>('a[data-anchor]')) {

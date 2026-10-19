@@ -1056,6 +1056,35 @@ export function titleHeading(root: ParentNode): HTMLHeadingElement | null {
   return null;
 }
 
+/** A page whose archived HTML holds no text of its own: the crawler saved a script that would have
+ * loaded it (LibreTexts' empty "Exercises"), or a bot check in place of the page (an AWS WAF
+ * challenge saved as the FAS medical handbook, a Cloudflare challenge). Said so, with the address it
+ * came from, rather than shown as a blank page (2026-10-19 audit). */
+export function emptyPageNotice(
+  html: string,
+  title: string,
+  original: string | null,
+): HTMLElement | null {
+  const page = new DOMParser().parseFromString(html, 'text/html');
+  const challenge = /awswaf\.com|challenge-platform|cf-challenge|id="challenge-container"/i.test(
+    html,
+  );
+  for (const el of page.querySelectorAll('script, style, noscript, template, title, h1'))
+    el.remove();
+  const words = (page.body?.textContent ?? '').replace(/\s+/g, ' ').trim();
+  const media = page.querySelector('img, video, audio, svg, canvas, object, embed, iframe');
+  if (!challenge && (words.replace(title, '').trim().length >= 40 || media)) return null;
+  return h(
+    'p',
+    { class: 'notice empty-page-notice', role: 'note' },
+    challenge
+      ? 'The site’s archive holds a bot check in place of this page: the crawler was refused it. '
+      : 'This page is empty in the site’s archive: its content was loaded by a script when the site was crawled. ',
+    original ? ['The original address: ', h('code', null, original), '. '] : null,
+    wspLink(searchAddress(title), `Search the library for “${title}”`),
+  );
+}
+
 /** Most links on 32 archived sites that opened Not Found (2026-10-19 audit) went to pages the site's
  * own archive never captured: its "contact" page, a wiki's Talk: pages, a search. Once the page is
  * shown, the library is asked which of its links it holds no page for, and those are marked as the
@@ -1067,7 +1096,10 @@ export async function markUncaptured(
 ): Promise<void> {
   const byAddress = new Map<string, HTMLAnchorElement[]>();
   for (const a of content.querySelectorAll<HTMLAnchorElement>('a[data-wsp]:not([data-missing])')) {
-    const at = a.dataset.wsp ?? '';
+    if (a.closest('.reader-nav, .reader-toc, .parts-nav')) continue; // the Navigator's own links
+    // The page, without the Navigator's own query (`?ch=1`) or a fragment: a native id's `?` and `#`
+    // are escaped (%3F, %23). The reader's "Next chapter" was marked missing (2026-10-19 audit).
+    const at = (a.dataset.wsp ?? '').split(/[?#]/)[0] ?? '';
     if (at.startsWith('wsp://')) byAddress.set(at, [...(byAddress.get(at) ?? []), a]);
   }
   const missing = await ctx.app.api.missingLinks([...byAddress.keys()], ctx.signal);
@@ -1188,6 +1220,9 @@ export async function render(ctx: PageContext): Promise<PageResult> {
       lookup: (q) => lookupBooks(ctx, q),
     }),
     practiceNotice(doc),
+    doc.format === 'html' && doc.html && !route.at
+      ? emptyPageNotice(doc.html, doc.title, doc.url_native ?? null)
+      : null,
     replayStubNotice(doc),
     route.at ? null : deadEndNotice(doc, source, content),
     copiesNotice(doc, new Map(sources.map((s) => [s.id, s.name]))),

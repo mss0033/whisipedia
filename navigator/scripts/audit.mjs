@@ -79,7 +79,8 @@ const MARKUP = [
   [/&lt;\/?(p|div|span|br|a|b|i|em|strong|table|tr|td|li|ul|ol|h[1-6])\b/i, 'escaped HTML tags'],
   [/<\/?(p|div|span|table|tr|td|li|ul|ol|h[1-6])(\s[^>]*)?>/i, 'raw HTML tags'],
   [/\{\{[A-Za-z][^}]{0,60}(\||\}\})/, 'wiki template'],
-  [/\[\[(?:[^\]|]{1,80})(?:\|[^\]]{0,80})?\]\]/, 'wiki link'],
+  // A wiki title: a capital first, no comma (a chemical name in brackets is not one, eCFR 2026-10-19).
+  [/\[\[(?:[A-Z][^\]|,]{0,80})(?:\|[^\]]{0,80})?\]\]/, 'wiki link'],
   [/&(?:amp;)?(?:nbsp|quot|#\d{2,5});/, 'escaped entities'],
 ];
 
@@ -257,8 +258,11 @@ function inspect() {
   return {
     error: err ? (err.querySelector('h1, h2')?.textContent ?? 'error page').trim() : null,
     // The page's title heading (an archived page can carry an empty logo <h1> above it).
-    title: (main?.querySelector('#doc-title, h1')?.textContent ?? '').trim(),
+    title: (
+      (main?.querySelector('#doc-title') ?? main?.querySelector('h1'))?.textContent ?? ''
+    ).trim(),
     text: (body?.innerText ?? '').trim(),
+    emptyNotice: !!main?.querySelector('.empty-page-notice'),
     // The text outside code: a code sample showing HTML or [[...]] is the page's content, not markup
     // left over (Bootstrap's examples, a Python list comprehension).
     prose: (() => {
@@ -362,6 +366,9 @@ async function audit(context, phoneContext, id) {
   for (const f of [...new Set(failedApi)].slice(0, 3)) add(issues, 'render', 'api-5xx', f);
   if (
     !seen.error &&
+    !seen.emptyNotice && // the reader says the archive holds no text for it (an upstream gap)
+    // A two-word dictionary entry is all there is (an HTML page's emptiness the reader says itself).
+    (doc?.format === 'html' || (doc?.text ?? '').trim().length >= 40) &&
     seen.text.length < 20 &&
     seen.images.length === 0 &&
     seen.media === 0 &&
@@ -457,8 +464,10 @@ async function audit(context, phoneContext, id) {
         .locator('.reader-nav a, .reader-nav button')
         .filter({ hasText: /next|›|»|→/i })
         .first();
-      if ((await next.count()) === 0) add(issues, 'navigate', 'reader-no-next');
-      else {
+      const lastPart = !!parts && parts.index === parts.parts.length - 1; // nothing follows it
+      if ((await next.count()) === 0) {
+        if (!lastPart) add(issues, 'navigate', 'reader-no-next');
+      } else {
         const was = await page.evaluate(() => location.hash);
         await next.click({ timeout: 10_000 }).catch(() => undefined);
         // The next chapter can be the next part, a document of its own: wait for it, not 600 ms
@@ -471,7 +480,13 @@ async function audit(context, phoneContext, id) {
         // A part of a long document is not shown in a .reader-chapter: Next leading to the next part
         // (a new address) has done something.
         const moved = (await page.evaluate(() => location.hash)) !== was;
-        if (after === before && !moved) add(issues, 'navigate', 'reader-next-does-nothing');
+        if (after === before && !moved)
+          add(
+            issues,
+            'navigate',
+            'reader-next-does-nothing',
+            `${was} ${(await next.textContent()) ?? ''}`,
+          );
         await page.goBack({ timeout: 30_000 }).catch(() => undefined);
       }
     }
@@ -516,7 +531,10 @@ async function audit(context, phoneContext, id) {
         await waitForPage(page).catch(() => undefined);
         const t = await page
           .evaluate(() =>
-            (document.querySelector('main #doc-title, main h1')?.textContent ?? '').trim(),
+            (
+              (document.querySelector('main #doc-title') ?? document.querySelector('main h1'))
+                ?.textContent ?? ''
+            ).trim(),
           )
           .catch(() => '');
         if (t !== title)
