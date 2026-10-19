@@ -84,7 +84,11 @@ def test_an_rfc_cited_by_number_resolves_to_its_key() -> None:
     from wsp_api.addresses import resolve
 
     held = {"wsp:rfc/rfc:RFC-3171"}
-    services = cast(Any, SimpleNamespace(source=lambda sid: object() if sid == "rfc" else None))
+
+    def source(sid: str) -> object | None:
+        return object() if sid == "rfc" else None
+
+    services = cast(Any, SimpleNamespace(source=source))
     res = resolve(services, "wsp://rfc/3171", {}, exists=lambda d: d in held)
     assert (res.kind, res.address) == ("document", "wsp://rfc/rfc:RFC-3171")
     assert res.href == "/v1/documents/wsp%3Arfc%2Frfc%3ARFC-3171"

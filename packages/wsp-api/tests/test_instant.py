@@ -119,5 +119,6 @@ def test_where_is_a_place_shows_its_map_named_by_its_article() -> None:
     assert (got.place, got.zoom, got.doc_id) == ("Lisbon", 11, "wsp:wikipedia-top10/en/Lisbon")
     assert (got.lat, got.lon) == (38.72, -9.14)
     assert got.description == "City, population 552,700"
-    assert map_answer("define lisbon", find, {}.get) is None
-    assert map_answer("where is lisbon", find, {}.get) is None  # no article in the library: no box
+    nothing: dict[DocId, DocRecord] = {}
+    assert map_answer("define lisbon", find, nothing.get) is None
+    assert map_answer("where is lisbon", find, nothing.get) is None  # no article in the library: no box
