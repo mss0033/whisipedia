@@ -43,6 +43,9 @@ const ONLY = new Set(
     .map((s) => s.trim())
     .filter(Boolean),
 );
+// A line that heads a chapter of a book: "CHAPTER IV", "Book 2", "ACT III.", "XII.", "Canto 5".
+const HEADING_LINE =
+  /^(?:(?:chapter|book|part|section|canto|act|scene|letter|stave|lecture)\b.{0,60}|[IVXLC]{1,7}\.?)$/i;
 const PAUSE = Number(process.env.WSP_AUDIT_PAUSE ?? 500);
 const HEADERS = { 'X-Whisipedia-Probe': 'check' };
 const PAGE_TIMEOUT = 120_000;
@@ -143,7 +146,18 @@ async function allSources() {
 }
 
 const docPath = (id) => `/v1/documents/${encodeURIComponent(id)}`;
-const addressOf = (id) => `wsp://${id.slice('wsp:'.length)}`;
+/** A document's address, encoded as the library encodes it (wsp_api.addresses.encode_native): `%`, `?`,
+ * `#` and spaces escaped, a trailing `/` as %2F. Unencoded, a native id with a query
+ * (`viewcontent.cgi?article=1018`) opened another address, Not Found (2026-10-19). */
+const addressOf = (id) => {
+  const [source, ...rest] = id.slice('wsp:'.length).split('/');
+  if (!rest.length) return `wsp://${source}`;
+  const body = [...rest.join('/')]
+    .map((c) => (/[%?#]|\s/.test(c) ? encodeURIComponent(c) : c))
+    .join('');
+  const stripped = body.replace(/\/+$/, '');
+  return `wsp://${source}/${stripped}${'%2F'.repeat(body.length - stripped.length)}`;
+};
 
 /** The pages to audit for a source: its home page, then random ones (distinct). */
 async function samplesOf(source) {
@@ -239,7 +253,8 @@ function inspect() {
   const banner = main?.querySelector('.site-banner a');
   return {
     error: err ? (err.querySelector('h1, h2')?.textContent ?? 'error page').trim() : null,
-    title: (main?.querySelector('h1')?.textContent ?? '').trim(),
+    // The page's title heading (an archived page can carry an empty logo <h1> above it).
+    title: (main?.querySelector('#doc-title, h1')?.textContent ?? '').trim(),
     text: (body?.innerText ?? '').trim(),
     images: [...(body?.querySelectorAll('img') ?? [])].map((i) => ({
       src: i.getAttribute('src'),
@@ -415,7 +430,11 @@ async function audit(context, phoneContext, id) {
     add(issues, 'navigate', 'parts-not-listed', `${parts.parts.length} parts`);
   // A book in the reader: contents and a next chapter that works.
   if (seen.reader && doc?.kind === 'books' && apiText.length > 20000) {
-    if (seen.toc === 0) add(issues, 'navigate', 'reader-no-contents');
+    // Contents are owed to a text with chapters: a single speech of 40,000 characters has none to
+    // list (2026-10-19: Perseus's Cicero speeches).
+    const headings = apiText.split('\n').filter((l) => HEADING_LINE.test(l.trim())).length;
+    if (seen.toc === 0 && headings >= 3)
+      add(issues, 'navigate', 'reader-no-contents', `${headings} heading lines`);
     if (seen.toc > 1) {
       const chapterText = () =>
         page.evaluate(() =>
@@ -437,7 +456,10 @@ async function audit(context, phoneContext, id) {
           .catch(() => undefined);
         await waitForPage(page).catch(() => undefined);
         const after = await chapterText();
-        if (after === before) add(issues, 'navigate', 'reader-next-does-nothing');
+        // A part of a long document is not shown in a .reader-chapter: Next leading to the next part
+        // (a new address) has done something.
+        const moved = (await page.evaluate(() => location.hash)) !== was;
+        if (after === before && !moved) add(issues, 'navigate', 'reader-next-does-nothing');
         await page.goBack({ timeout: 30_000 }).catch(() => undefined);
       }
     }
@@ -473,7 +495,9 @@ async function audit(context, phoneContext, id) {
       await page.goBack({ timeout: 30_000 }).catch(() => undefined);
       await waitForPage(page).catch(() => undefined);
       const t = await page
-        .evaluate(() => (document.querySelector('main h1')?.textContent ?? '').trim())
+        .evaluate(() =>
+          (document.querySelector('main #doc-title, main h1')?.textContent ?? '').trim(),
+        )
         .catch(() => '');
       if (t !== title)
         add(
