@@ -369,9 +369,20 @@ class Indexer:
         state = self._state()
         previous = state.get(spec.id)
         new_dir = generation_dir(self.refinery, spec.id, generation_id)
+        # The copy the index was built from: the replaced one when refine-again re-read the generation
+        # (its own directory now holds the new copy: MedlinePlus, indexed with no documents and refined
+        # again with 2,033, was refused, 2026-10-19).
+        indexed_from = (
+            since
+            if since is not None
+            else generation_dir(self.refinery, spec.id, previous)
+            if previous
+            else None
+        )
         if (
             previous is not None
-            and self._documents_in(spec.id, previous)
+            and indexed_from is not None
+            and _holds_documents(indexed_from)
             and not self.index.has_source(spec.id)
         ):
             # The state is trusted to diff from: with ``lexical/`` rebuilt alone, the run "indexed"
@@ -410,11 +421,7 @@ class Indexer:
 
     def _documents_in(self, source_id: str, generation_id: str) -> bool:
         """Whether a refined generation holds documents (unknown, e.g. deleted since: assumed so)."""
-        path = generation_dir(self.refinery, source_id, generation_id) / SUCCESS_FILE
-        try:
-            return int(json.loads(path.read_text(encoding="utf-8")).get("docs", 1)) > 0
-        except (OSError, ValueError):
-            return True
+        return _holds_documents(generation_dir(self.refinery, source_id, generation_id))
 
     def purge(self, spec: SourceSpec) -> int:
         """Remove from the search index a source the registry no longer indexes (``index: false``).
@@ -728,3 +735,11 @@ def indexed_title_sources(
         sources.append(IndexedSource(sid, RefineryReader(gen_dir, map_ids=False), tables))
     limiter = RateLimiter(read_mb_per_sec * 1e6, burst_seconds=5.0) if read_mb_per_sec > 0 else None
     return TitleSources(sources, limiter=limiter)
+
+
+def _holds_documents(refined: Path) -> bool:
+    """Whether a refined copy holds documents (unknown, e.g. deleted since: assumed so)."""
+    try:
+        return int(json.loads((refined / SUCCESS_FILE).read_text(encoding="utf-8")).get("docs", 1)) > 0
+    except (OSError, ValueError):
+        return True

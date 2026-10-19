@@ -110,6 +110,29 @@ def test_refine_again_indexes_what_the_adapter_now_reads(tmp_path: Path) -> None
         ix.close()
 
 
+class Unread(Adapter):
+    """Reads nothing until it learns to recognise the stored file (``full``): MedlinePlus, 2026-10-19."""
+
+    def documents(self, ctx: Any, generation_path: Path) -> Iterator[DocRecord]:
+        return super().documents(ctx, generation_path) if self.full else iter(())
+
+
+def test_a_source_indexed_with_no_documents_is_refined_again(tmp_path: Path) -> None:
+    """Indexed with none (its reader did not know the stored file), then refined again with two: the
+    index-state check took the new copy for the indexed one and refused (2026-10-19)."""
+    adapter = Unread()
+    ix = indexer(tmp_path, adapter)
+    try:
+        ix.build([SID])
+        assert not ix.index.has_source(SID)
+        adapter.full = True
+        report = ix.refine_again(SID)
+        assert (report.indexed, report.upserted) == ("2026-01", 2)
+        assert [h.doc_id for h in ix.index.search("rocks")] == [make_doc_id(SID, "rocks")]
+    finally:
+        ix.close()
+
+
 def test_a_deferred_suggest_rebuild_is_left_for_a_later_run(tmp_path: Path) -> None:
     adapter = Adapter()
     ix = indexer(tmp_path, adapter)
