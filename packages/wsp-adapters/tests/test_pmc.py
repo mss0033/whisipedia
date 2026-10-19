@@ -72,7 +72,7 @@ def test_a_partition_release_lists_each_articles_metadata_and_text(tmp_path: Pat
         "PMC9699999.1.txt",
     ]
     assert release.files[0].url == f"{B}/metadata/PMC9650000.2.json"
-    assert release.files[0].checksums[0].hexdigest == "b" * 32
+    assert release.files[0].checksums == ()  # the inventory's MD5 is a day old; metadata changes after it
     assert release.files[1].url == f"{B}/PMC9650000.2/PMC9650000.2.txt"
     assert adapter.discover_partition(ctx, "p0100") == []
     assert list(adapter.discover(ctx)) == []  # partitioned: never the whole set at once

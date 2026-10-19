@@ -12,6 +12,10 @@ partition is a range of :data:`PARTITION_SIZE` PMC ids (``p0000`` is PMC1-PMC499
 on its own (``wsp bulk fetch --source pmc-oa --partition p0193``). Its release is the newest version of
 each article in the range: the metadata JSON (checksummed by the inventory) and the text. The XML,
 PDFs and figures are not fetched (several terabytes; the text is what search and the reader need).
+Neither file is pinned to a checksum: the inventory's MD5 is a day old, and NLM rewrites metadata
+after it (2026-10-19: 2,536 of p0273's 22,889 metadata files had changed since the morning's
+inventory, and every one was refused). The download is over HTTPS, and a file that does not parse is
+left out of the documents.
 
 **Documents.** One per article, keyed by its PMC id (``PMC10000000``): the title and citation above
 the text, the article's own licence (``license_code``: CC BY, CC0, ... or TDM for an author
@@ -129,10 +133,9 @@ def newest_versions(rows: Iterable[tuple[int, int, str]], partition: str) -> dic
 def release_files(bucket: str, articles: Mapping[int, tuple[int, str]]) -> list[RemoteFile]:
     files: list[RemoteFile] = []
     for pmcid in sorted(articles):
-        version, etag = articles[pmcid]
+        version, _ = articles[pmcid]  # its inventory MD5 is a day old: not pinned
         stem = f"PMC{pmcid}.{version}"
-        md5 = (Checksum("md5", etag),) if re.fullmatch(r"[0-9a-f]{32}", etag) else ()
-        files.append(RemoteFile(f"{bucket}/metadata/{stem}.json", f"{stem}.json", None, md5))
+        files.append(RemoteFile(f"{bucket}/metadata/{stem}.json", f"{stem}.json", None, ()))
         files.append(RemoteFile(f"{bucket}/{stem}/{stem}.txt", f"{stem}.txt", None, ()))
     return files
 
