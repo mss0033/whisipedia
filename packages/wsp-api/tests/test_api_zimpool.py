@@ -290,3 +290,18 @@ def test_a_worker_opens_an_archive_after_a_helper_process_has(
     assert zimworker.open_prewarmed(zim).entry_count == archive.entry_count
     with pytest.raises(RuntimeError):
         zimworker.open_prewarmed(str(tmp_path / "missing.zim"))
+
+
+def test_a_random_page_is_never_a_captured_bot_challenge(tmp_path: Path) -> None:
+    """2026-10-19 audit: most random pages of the Cloudflare Learning Center were its crawler's captures
+    of Cloudflare challenges (challenges.cloudflare.com/cdn-cgi/...), which open as Not Found."""
+    from wsp_api.zimread import open_archive, random_article
+
+    items = [("www.ex.org/learning/", "text/html", "<p>a real page</p>")]
+    items += [
+        (f"challenges.ex.org/cdn-cgi/challenge-platform/h/b/{i}", "text/html", "<p>challenge</p>")
+        for i in range(30)
+    ]
+    archive = open_archive(str(write_zim(tmp_path / "c.zim", "c", items, [])))
+    picks = {random_article(archive) for _ in range(20)}
+    assert picks <= {("www.ex.org/learning/", "www.ex.org/learning/"), None}

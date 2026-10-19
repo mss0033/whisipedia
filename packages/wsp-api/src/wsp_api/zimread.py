@@ -163,14 +163,20 @@ def page_count(archive: Archive) -> int:
     return int(archive.article_count)
 
 
-RANDOM_TRIES = 20  # random entries drawn until one is an article (most are, after the front matter)
+RANDOM_TRIES = 60  # random entries drawn until one is an article (a crawl can be mostly machinery)
+
+
+# Pages a crawler captured that are no site's page: Cloudflare's bot challenges under /cdn-cgi/ were
+# most of what "Random page" opened on the Cloudflare Learning Center (2026-10-19 audit).
+NOT_A_PAGE = re.compile(r"(?:^|/)cdn-cgi/")
 
 
 def random_article(archive: Archive) -> tuple[str, str] | None:
-    """``(path, title)`` of a random HTML entry that is not a redirect, or ``None`` after a few tries."""
+    """``(path, title)`` of a random HTML entry that is not a redirect or a crawler's capture of site
+    machinery (:data:`NOT_A_PAGE`), or ``None`` after a few tries."""
     for _ in range(RANDOM_TRIES):
         entry = archive.get_random_entry()
-        if entry.is_redirect:
+        if entry.is_redirect or NOT_A_PAGE.search(entry.path):
             continue
         if str(entry.get_item().mimetype).startswith("text/html"):
             return entry.path, entry.title

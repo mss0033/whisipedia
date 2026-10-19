@@ -439,7 +439,28 @@ async function audit(context, phoneContext, id) {
   // Back returns: follow one in-library link, then Back.
   if (links.length && !seen.error) {
     const title = seen.title;
-    const link = page.locator('main .doc-body a[data-wsp]:not([data-missing])').first();
+    // A link that leads elsewhere: a site's logo links its own front page, and following that adds no
+    // history entry, so Back left the app (2026-10-19: 9 front pages reported an empty title).
+    const here = (await page.evaluate(() => decodeURIComponent(location.hash.slice(1)))).replace(
+      /(%2F|\/)+$/i,
+      '',
+    );
+    const others = page.locator('main .doc-body a[data-wsp]:not([data-missing])');
+    const n = await others.count();
+    let link = others.first();
+    for (let i = 0; i < Math.min(n, 50); i++) {
+      const at = decodeURIComponent((await others.nth(i).getAttribute('data-wsp')) ?? '');
+      if (
+        at.replace(/(%2F|\/)+$/i, '') !== here &&
+        (await others
+          .nth(i)
+          .isVisible()
+          .catch(() => false))
+      ) {
+        link = others.nth(i);
+        break;
+      }
+    }
     if ((await link.count()) > 0 && (await link.isVisible().catch(() => false))) {
       await link.click({ timeout: 10_000 }).catch(() => undefined);
       await waitForPage(page).catch(() => undefined);
