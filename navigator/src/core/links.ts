@@ -626,12 +626,26 @@ function sanitizeImage(el: Element, stats: SanitizeStats): Node {
     return img;
   }
   stats.removed += 1;
+  return imagePlaceholder(alt);
+}
+
+export function imagePlaceholder(alt: string): HTMLElement {
   const span = document.createElement('span');
   span.className = 'broken-image';
   span.setAttribute('role', 'img');
   span.setAttribute('aria-label', alt ? `Image not in library: ${alt}` : 'Image not in library');
   span.textContent = alt ? `[IMAGE: ${alt}]` : '[IMAGE]';
   return span;
+}
+
+/** An image the archive answers with no picture (an HTML error page the crawl saved under a .png
+ * name, a file it never got: LibreTexts, 2026-10-19 audit) becomes the placeholder of an image the
+ * library does not hold, with its caption, instead of a broken-image icon. */
+export function replaceBrokenImages(root: ParentNode): void {
+  for (const img of root.querySelectorAll('img')) {
+    const swap = () => img.replaceWith(imagePlaceholder(img.getAttribute('alt')?.trim() ?? ''));
+    img.addEventListener('error', swap, { once: true }); // listening before the page is shown
+  }
 }
 
 export function rewriteAnchor(

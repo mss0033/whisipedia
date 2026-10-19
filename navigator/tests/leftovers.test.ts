@@ -64,3 +64,15 @@ describe('wiki leftovers an archived page shows (2026-10-19 audit)', () => {
     );
   });
 });
+
+describe('an image the archive answers with no picture (2026-10-19 audit)', () => {
+  it('becomes the placeholder of an image the library does not hold, with its caption', async () => {
+    const { replaceBrokenImages } = await import('../src/core/links.ts');
+    const page = document.createElement('div');
+    page.innerHTML = '<p><img src="/v1/assets/s/g/fig.png" alt="Figure 4.18"></p>';
+    replaceBrokenImages(page);
+    page.querySelector('img')!.dispatchEvent(new Event('error'));
+    expect(page.querySelector('img')).toBeNull();
+    expect(page.querySelector('.broken-image')?.textContent).toBe('[IMAGE: Figure 4.18]');
+  });
+});

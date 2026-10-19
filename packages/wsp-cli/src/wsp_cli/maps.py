@@ -189,7 +189,11 @@ def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
             remote = RemoteFile(
                 url=part.url, name=part.name, size=part.size, checksums=(checksum,) if checksum else ()
             )
-            fetcher.download(remote, dest)
+            try:
+                fetcher.download(remote, dest)
+            except FetchError as exc:  # a host's 520, its mirrors exhausted: the lane's next pass retries
+                print(f"error: {spec.id}/{partition}: {exc}", file=sys.stderr)
+                return EXIT_FAILED
         out.write(f"{spec.id}/{version}: {part.name} {_gb(dest.stat().st_size)} downloaded\n")
     elif not dest.is_file():
         from wsp_adapters.mapcut import Window, cut_archive

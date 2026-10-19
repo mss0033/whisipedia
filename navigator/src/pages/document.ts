@@ -9,7 +9,7 @@ import { docIdToAddress, makeAddress, searchAddress } from '../core/address.ts';
 import { diffLines, diffStats } from '../core/diff.ts';
 import { type Child, h } from '../core/dom.ts';
 import { formatDate, formatNumber } from '../core/format.ts';
-import { sanitizeDocumentHtml } from '../core/links.ts';
+import { replaceBrokenImages, sanitizeDocumentHtml } from '../core/links.ts';
 import {
   formatLabel,
   mediaKindOf,
@@ -1089,6 +1089,9 @@ export function emptyPageNotice(
  * own archive never captured: its "contact" page, a wiki's Talk: pages, a search. Once the page is
  * shown, the library is asked which of its links it holds no page for, and those are marked as the
  * links to websites it does not hold are. `data-links-checked` says the answer is in. */
+const LINK_CHECK_BATCH = 100;
+const LINK_CHECK_MAX = 500;
+
 export async function markUncaptured(
   ctx: Pick<PageContext, 'app' | 'signal'>,
   content: HTMLElement,
@@ -1102,15 +1105,23 @@ export async function markUncaptured(
     const at = (a.dataset.wsp ?? '').split(/[?#]/)[0] ?? '';
     if (at.startsWith('wsp://')) byAddress.set(at, [...(byAddress.get(at) ?? []), a]);
   }
-  const missing = await ctx.app.api.missingLinks([...byAddress.keys()], ctx.signal);
-  if (ctx.signal.aborted) return;
+  // A hundred at a time, each answered within the library's five seconds: one request for a page's
+  // 200 links on a cold archive ran out of time before the one that leads nowhere (2026-10-19).
+  const addresses = [...byAddress.keys()].slice(0, LINK_CHECK_MAX);
   let marked = 0;
-  for (const at of missing) {
-    for (const a of byAddress.get(at) ?? []) {
-      a.dataset.missing = at;
-      a.classList.add('broken-link', 'uncaptured-link');
-      a.setAttribute('title', `Not in library: ${at}`);
-      marked += 1;
+  for (let i = 0; i < addresses.length; i += LINK_CHECK_BATCH) {
+    const missing = await ctx.app.api.missingLinks(
+      addresses.slice(i, i + LINK_CHECK_BATCH),
+      ctx.signal,
+    );
+    if (ctx.signal.aborted) return;
+    for (const at of missing) {
+      for (const a of byAddress.get(at) ?? []) {
+        a.dataset.missing = at;
+        a.classList.add('broken-link', 'uncaptured-link');
+        a.setAttribute('title', `Not in library: ${at}`);
+        marked += 1;
+      }
     }
   }
   if (marked) {
@@ -1257,6 +1268,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
   if (route.at || route.diff) content.dataset.linksChecked = '1';
   else void markUncaptured(ctx, content, uncapturedNote);
   if (doc.format === 'html' && doc.html && hasTex(doc.html)) typesetSoon(content);
+  replaceBrokenImages(content);
   const title = titleHeading(body);
   if (title) {
     // The page's own id for its heading stays a place to land: TruePrepper's "Skip to content"

@@ -395,7 +395,9 @@ async function audit(context, phoneContext, id) {
     add(issues, 'read', 'cut-short', `${seen.text.length} of ${apiText.length} characters shown`);
   const sample = seen.text.slice(0, 60_000);
   const moji = MOJIBAKE.exec(sample);
-  if (moji)
+  // Characters the archived page itself holds are its own (a pasted systeminfo listing with
+  // U+FFFD in it, the OPSEC Bible, 2026-10-19): only what the reader garbled counts.
+  if (moji && !(doc?.html ?? doc?.text ?? '').includes(moji[0]))
     add(issues, 'read', 'mojibake', sample.slice(Math.max(0, moji.index - 30), moji.index + 30));
   const prose = (seen.prose ?? seen.text).slice(0, 60_000);
   for (const [re, what] of MARKUP) {
