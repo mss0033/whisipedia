@@ -29,7 +29,11 @@ DocIdSegment = Annotated[
 ]
 
 
-MAX_TRANSFERS = 4  # concurrent originals: a stalled NAS read holds a thread of Starlette's shared pool
+MAX_TRANSFERS = 8  # concurrent originals: a stalled NAS read holds a thread of Starlette's shared pool
+# How long a transfer waits for a slot before the 503. Waiting holds no thread (an asyncio semaphore).
+# A browser's PDF viewer asks for several ranges of one file at once: refused at once, the reader's
+# own Download or the viewer's next range got "busy" (2026-10-18 audit, 7 of the first 46 pages).
+TRANSFER_WAIT = 30.0
 
 
 class _BoundedFile(FileResponse):
@@ -40,14 +44,18 @@ class _BoundedFile(FileResponse):
         self._slots = slots
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if self._slots.locked():
+        try:
+            await asyncio.wait_for(self._slots.acquire(), TRANSFER_WAIT)
+        except TimeoutError:
             busy = error_response(
                 503, "busy", "too many files are being sent; try again shortly", retry_after=RETRY_AFTER
             )
             await busy(scope, receive, send)
             return
-        async with self._slots:
+        try:
             await super().__call__(scope, receive, send)
+        finally:
+            self._slots.release()
 
 
 def files_router(lib: Library) -> APIRouter:

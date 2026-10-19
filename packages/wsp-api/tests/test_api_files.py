@@ -169,11 +169,13 @@ def test_display_names_drop_the_fetcher_prefix_and_hash() -> None:
     assert display_name("cp1.pdf") == "cp1.pdf"
 
 
-def test_transfers_beyond_the_cap_are_busy(tmp_path: Path) -> None:
+def test_transfers_beyond_the_cap_wait_then_are_busy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import asyncio
 
+    from wsp_api import files
     from wsp_api.files import _BoundedFile  # pyright: ignore[reportPrivateUsage]
 
+    monkeypatch.setattr(files, "TRANSFER_WAIT", 0.2)
     f = tmp_path / "a.pdf"
     f.write_bytes(PDF)
     sent: list[dict[str, object]] = []
@@ -187,11 +189,17 @@ def test_transfers_beyond_the_cap_are_busy(tmp_path: Path) -> None:
     async def run() -> None:
         slots = asyncio.Semaphore(1)
         scope: dict[str, object] = {"type": "http", "method": "GET", "headers": []}
-        async with slots:  # the only slot is streaming another file
+        async with slots:  # the only slot streams another file for longer than the wait
             await _BoundedFile(slots, f)(scope, receive, send)  # type: ignore[arg-type]
         assert sent[0]["status"] == 503
         sent.clear()
+
+        # A slot that frees within the wait: the transfer waits for it instead of failing (a PDF
+        # viewer's parallel range requests, 2026-10-18 audit).
+        await slots.acquire()
+        asyncio.get_running_loop().call_later(0.05, slots.release)
         await _BoundedFile(slots, f)(scope, receive, send)  # type: ignore[arg-type]
         assert sent[0]["status"] == 200
+        assert not slots.locked()  # released after the transfer
 
     asyncio.run(run())
