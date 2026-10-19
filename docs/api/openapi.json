@@ -1197,7 +1197,7 @@
           "documents"
         ],
         "summary": "Original",
-        "description": "The document's stored original file (PDF, map scan, archive). Supports ``Range``.",
+        "description": "The document's stored original file (PDF, map scan, archive). Supports ``Range``, and ``HEAD``\n(headers only: a download manager asks for the size first; it was a 404, 2026-10-19 audit).",
         "operationId": "original_v1_files__doc_id__get",
         "parameters": [
           {

@@ -93,11 +93,13 @@ def files_router(lib: Library) -> APIRouter:
             raise ApiError(404, "no_original", "the stored file is not in the vault")
         return doc, path
 
+    @r.head("/files/{doc_id}", include_in_schema=False)
     @r.get(
         "/files/{doc_id}", tags=["documents"], response_class=FileResponse, responses=errors(400, 404, 503)
     )
     async def original(doc_id: DocIdSegment) -> FileResponse:
-        """The document's stored original file (PDF, map scan, archive). Supports ``Range``."""
+        """The document's stored original file (PDF, map scan, archive). Supports ``Range``, and ``HEAD``
+        (headers only: a download manager asks for the size first; it was a 404, 2026-10-19 audit)."""
         _doc, path = await lib.nas.run(lambda: locate(doc_id))
         suffix = path.suffix.lower()
         return _BoundedFile(

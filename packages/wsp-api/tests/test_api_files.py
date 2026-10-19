@@ -203,3 +203,15 @@ def test_transfers_beyond_the_cap_wait_then_are_busy(tmp_path: Path, monkeypatch
         assert not slots.locked()  # released after the transfer
 
     asyncio.run(run())
+
+
+def test_head_answers_with_the_files_headers_and_no_body(setup: tuple[httpx.Client, Path]) -> None:
+    """A download manager asks for the size first: HEAD was a 404 (2026-10-19 audit)."""
+    c, _ = setup
+    r = c.head(url("cp1"))
+    assert r.status_code == 200
+    assert r.headers["content-length"] == str(len(PDF))
+    assert r.headers["content-type"] == "application/pdf"
+    assert r.content == b""
+    assert c.head(url("nope")).status_code == 404
+    assert c.head("/v1/health").status_code == 200

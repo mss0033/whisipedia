@@ -211,6 +211,7 @@ def _v1(lib: Library, settings: ApiSettings) -> APIRouter:
     searcher = Searcher(lib)
     started = time.monotonic()
 
+    @r.head("/health", include_in_schema=False)  # monitors probe with HEAD
     @r.get("/health", tags=["meta"])
     async def health() -> Health:
         return Health(sources=len(s.sources))
