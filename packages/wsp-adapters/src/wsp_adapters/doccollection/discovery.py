@@ -33,8 +33,10 @@ carry ``Candidate.resolve`` and are resolved only for documents the metadata fil
 from __future__ import annotations
 
 import contextlib
+import csv
 import gzip
 import hashlib
+import io
 import json
 import logging
 import os
@@ -1456,6 +1458,32 @@ def fixed_list(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
         )
 
 
+def csv_list(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
+    """A published CSV of documents (EveryCRSReport's reports.csv): ``url`` the CSV; ``base`` what its
+    paths are relative to; columns named by ``key``, ``file`` (tried in order: ``[latestHTML,
+    latestPDF]``), ``title``, ``date``."""
+    text = env.get_text(_s(cfg.get("url")))
+    base = _s(cfg.get("base"))
+    files = _strs(cfg.get("file"))
+    rows = list(csv.DictReader(io.StringIO(text)))
+    env.totals["csv"] = len(rows)
+    for row in rows:
+        path = next((row[c] for c in files if row.get(c)), "")
+        key = (row.get(_s(cfg.get("key"))) or "").strip()
+        if not path or not key:
+            continue
+        url = path if path.startswith("https://") else base.rstrip("/") + "/" + path.lstrip("/")
+        yield Candidate(
+            key=make_key(env.prefix, key),
+            url=url,
+            title=" ".join((row.get(_s(cfg.get("title"))) or key).split()),
+            issuer=env.issuer,
+            pub_number=key,
+            edition_date=iso_date(row.get(_s(cfg.get("date"))) or ""),
+            discovered_by="csv",
+        )
+
+
 _MONTHS = (
     "January", "February", "March", "April", "May", "June",
     "July", "August", "September", "October", "November", "December",
@@ -1505,6 +1533,7 @@ DISCOVERERS: dict[str, Discoverer] = {
     "git": git_repo,
     "list": fixed_list,
     "document": fixed_list,
+    "csv": csv_list,
     "latest-dated": latest_dated,
 }
 

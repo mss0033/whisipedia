@@ -65,7 +65,7 @@
           "items": {
             "type": "object",
             "required": ["kind"],
-            "properties": {"kind": {"enum": ["index-page", "api", "oai-pmh", "archive-org", "s3-listing", "git", "list", "document", "latest-dated"]}}
+            "properties": {"kind": {"enum": ["index-page", "api", "oai-pmh", "archive-org", "s3-listing", "git", "list", "document", "latest-dated", "csv"]}}
           }
         },
         "filter": {

@@ -733,6 +733,33 @@ def test_git_lists_an_organisations_repositories_a_hundred_a_page() -> None:
     assert got[-1].extra["snapshot"] == "1"
 
 
+def test_a_published_csv_lists_documents_newest_html_first() -> None:
+    csv_text = (
+        "number,url,sha1,latestPubDate,title,latestPDF,latestHTML\n"
+        "R48566,reports/R48566.json,d2,2026-10-16,The Motion to Recommit in the House,"
+        "files/a.pdf,files/a.html\n"
+        "IF1,reports/IF1.json,f2,2026-10-15,Only a PDF,files/b.pdf,\n"
+        ",reports/x.json,f3,2026-10-14,No number,files/c.pdf,\n"
+    )
+    url = "https://www.everycrsreport.com/reports.csv"
+    env = env_for({url: csv_text.encode()}, origins=("www.everycrsreport.com",))
+    cfg = {
+        "kind": "csv",
+        "url": url,
+        "base": "https://www.everycrsreport.com/",
+        "key": "number",
+        "file": ["latestHTML", "latestPDF"],
+        "title": "title",
+        "date": "latestPubDate",
+    }
+    got = list(discover_all([cfg], env))
+    assert [(c.pub_number, c.url.rsplit("/", 1)[-1], c.edition_date) for c in got] == [
+        ("R48566", "a.html", "2026-10-16"),
+        ("IF1", "b.pdf", "2026-10-15"),
+    ]
+    assert got[0].title == "The Motion to Recommit in the House"
+
+
 def test_unknown_kinds_and_flavors_fail_loudly() -> None:
     with pytest.raises(DiscoveryError):
         list(discover_all([{"kind": "carrier-pigeon"}], env_for({})))
