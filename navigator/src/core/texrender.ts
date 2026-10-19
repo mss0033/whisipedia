@@ -43,6 +43,75 @@ export function texToMathML(tex: string, display: boolean): Element | null {
   }
 }
 
+// Inline elements a formula may run through: LibreTexts wrapped part of one in a <span> (2026-10-19).
+const INLINE = new Set([
+  'span',
+  'em',
+  'i',
+  'b',
+  'strong',
+  'sub',
+  'sup',
+  'font',
+  'small',
+  'big',
+  'u',
+]);
+const MAX_RUN = 20; // siblings one formula may span
+
+function plainInline(n: ChildNode): boolean {
+  if (n.nodeType === Node.TEXT_NODE) return true;
+  if (n.nodeType !== Node.ELEMENT_NODE) return false;
+  const el = n as Element;
+  return INLINE.has(el.localName) && [...el.children].every((c) => plainInline(c));
+}
+
+/** A formula whose text runs through inline elements (`\[ … <span>…</span> … \]`): its opening text
+ * node, the siblings up to the one that closes it, joined and typeset as one. */
+function typesetAcross(root: Element): number {
+  let count = 0;
+  const opens: Text[] = [];
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const t = n as Text;
+    if (/\\[([]/.test(t.data) && !skipped(t, root)) opens.push(t);
+  }
+  for (const first of opens) {
+    if (!root.contains(first)) continue; // swallowed by an earlier formula
+    const at = Math.max(first.data.lastIndexOf('\\('), first.data.lastIndexOf('\\['));
+    if (at < 0) continue;
+    const display = first.data[at + 1] === '[';
+    const close = display ? '\\]' : '\\)';
+    if (first.data.indexOf(close, at) >= 0) continue; // closed in its own node: the first pass's
+    const run: ChildNode[] = [];
+    let tex = first.data.slice(at + 2);
+    let end: Text | null = null;
+    for (let n = first.nextSibling; n && run.length < MAX_RUN; n = n.nextSibling) {
+      if (!plainInline(n)) break;
+      const text = n.textContent ?? '';
+      const stop = n.nodeType === Node.TEXT_NODE ? text.indexOf(close) : -1;
+      if (stop >= 0) {
+        tex += text.slice(0, stop);
+        end = n as Text;
+        break;
+      }
+      tex += text;
+      run.push(n);
+    }
+    if (!end) continue;
+    const math = texToMathML(tex, display);
+    if (!math) continue;
+    if (display) math.setAttribute('display', 'block');
+    const stop = end.data.indexOf(close);
+    end.data = end.data.slice(stop + 2);
+    for (const n of run) n.remove();
+    first.data = first.data.slice(0, at);
+    first.after(math);
+    count += 1;
+  }
+  return count;
+}
+
 /** Typeset every delimited formula in `root`'s text (not in code); returns how many. */
 export function typeset(root: Element): number {
   const texts: Text[] = [];
@@ -70,5 +139,5 @@ export function typeset(root: Element): number {
     out.append(text.slice(at));
     t.replaceWith(out);
   }
-  return count;
+  return count + typesetAcross(root);
 }
