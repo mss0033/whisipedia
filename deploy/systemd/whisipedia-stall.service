@@ -1,0 +1,9 @@
+# Notices stalled background work (tools/wsp-stall). Started by whisipedia-stall.timer.
+
+[Unit]
+Description=Whisipedia stall check
+
+[Service]
+Type=oneshot
+ExecStart=@REPO@/tools/wsp-stall
+TimeoutStartSec=5min

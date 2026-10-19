@@ -1,0 +1,369 @@
+#!/usr/bin/env -S python3 -I
+"""Notice when the library's background work stalls (run by whisipedia-stall.timer every 10 minutes).
+
+2026-10-19: the American Stories ingest held the ingest lock for 10.5 hours and a dozen download lanes
+sat waiting behind it, and the Chronicling America lane stopped on HTTP 429 at 05:13; both were found
+by hand hours later. This looks for such things and writes each one once, when it starts and when it
+ends, to ``<state>/watch/events.log`` (and the journal), where a Claude session (a Monitor tailing the
+log) or the owner sees it at once:
+
+* ``unit-failed:<unit>``      a whisipedia unit failed; a core service (API, orchestrator) not running
+* ``job-idle:<unit>``         a background job (whisipedia-job-*) used under IDLE_CPU_S of CPU in the
+                              last WSP_STALL_IDLE_H hours (default 3): stuck, or waiting on something
+                              (the message names a long-held lock, or a frozen background slice)
+* ``lock-held:<lock>``        a lock (ingest, heavy, index...) held by one process over WSP_STALL_LOCK_H
+                              hours (8), counted from the first run that saw it held (the scrub lock
+                              is the orchestrator's for its whole life, and is not counted)
+* ``api-down``                /v1/health did not answer 200 twice in a row
+* ``disk-low:<mount>``        under WSP_STALL_MIN_FREE_GB free locally (50) or on the NAS (2000)
+* ``log``                     a new problem line in a lane log (HTTP 429, Traceback, FAILED, a fetch
+                              that exited non-zero, partitions left for later, no space); one note
+                              per problem (429, FAILED...) and log a day, never the backlog
+
+Conditions are re-checked every run: ``RAISED`` when one starts, ``CLEARED`` when it is gone.
+``--status`` prints what is open now. WSP_STALL_STATE, WSP_STALL_LOGS (colon-separated globs),
+WSP_STALL_LOCKS, WSP_STALL_PROC, WSP_STALL_CGROUP_ROOT, WSP_STALL_HEALTH_URL and WSP_STALL_NOW are
+for tests.
+"""
+
+from __future__ import annotations
+
+import glob
+import hashlib
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+import urllib.request
+from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any, cast
+
+HOME = Path.home()
+STATE = Path(os.environ.get("WSP_STALL_STATE", HOME / ".local/share/whisipedia/state"))
+WATCH = STATE / "watch"
+LOCKS = Path(os.environ.get("WSP_STALL_LOCKS", HOME / ".local/share/whisipedia/locks"))
+PROC = Path(os.environ.get("WSP_STALL_PROC", "/proc"))
+CGROUP_ROOT = os.environ.get("WSP_STALL_CGROUP_ROOT", "/sys/fs/cgroup")
+HEALTH_URL = os.environ.get("WSP_STALL_HEALTH_URL", "http://127.0.0.1:8737/v1/health")
+LOGS = os.environ.get(
+    "WSP_STALL_LOGS",
+    ":".join(
+        [
+            f"{STATE}/*.log",
+            f"{STATE}/maps/lane.log",
+            f"{HOME}/.local/state/whisipedia/collections/*.log",
+        ]
+    ),
+).split(":")
+IDLE_H = float(os.environ.get("WSP_STALL_IDLE_H", "3"))
+IDLE_CPU_S = 10.0
+LOCK_H = float(os.environ.get("WSP_STALL_LOCK_H", "8"))
+MOUNTS = {"/": 50, "/mnt/z": 2000}  # free GB below which the disk is low
+CORE = ("whisipedia-api.service", "whisipedia-orchestrator.service")
+PROBLEM = re.compile(
+    r"HTTP 429|Too Many Requests|Traceback|FAILED|fetch exit [1-9]|left for a later run|No space left"
+    r"|Killed|OOM"
+)
+LIFETIME_LOCKS = {"scrub"}  # held by the orchestrator while it runs (wsp_cli.locks.SCRUB)
+CAUSE_ORDER = ("ingest", "heavy", "index")  # the locks a waiting job most likely waits on
+NOISE = re.compile(r"another '\w+' is running")  # a lock wait: lock-held reports the holder once
+NOTE_EVERY_S = 24 * 3600
+KEEP_SAMPLES_S = 26 * 3600
+
+
+@dataclass
+class State:
+    """What one run leaves the next (``<state>/watch/state.json``)."""
+
+    open: dict[str, tuple[float, str]] = field(
+        default_factory=dict[str, tuple[float, str]]
+    )  # key -> since, msg
+    held: dict[str, float] = field(default_factory=dict[str, float])  # "lock:pid" -> first seen held
+    cpu: dict[str, list[tuple[float, int]]] = field(default_factory=dict[str, list[tuple[float, int]]])
+    offsets: dict[str, int] = field(default_factory=dict[str, int])  # log -> bytes read
+    noted: dict[str, float] = field(default_factory=dict[str, float])  # problem kind -> when noted
+
+    @classmethod
+    def load(cls, path: Path) -> State:
+        try:
+            raw = cast(dict[str, Any], json.loads(path.read_text()))
+            return cls(
+                open={k: (float(v[0]), str(v[1])) for k, v in raw.get("open", {}).items()},
+                held={k: float(v) for k, v in raw.get("held", {}).items()},
+                cpu={k: [(float(a), int(b)) for a, b in v] for k, v in raw.get("cpu", {}).items()},
+                offsets={k: int(v) for k, v in raw.get("offsets", {}).items()},
+                noted={k: float(v) for k, v in raw.get("noted", {}).items()},
+            )
+        except (OSError, ValueError, TypeError, AttributeError, IndexError):
+            return cls()
+
+    def save(self, path: Path) -> None:
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(asdict(self)))
+        tmp.replace(path)
+
+
+def now() -> float:
+    return float(os.environ.get("WSP_STALL_NOW") or time.time())
+
+
+def stamp(t: float) -> str:
+    return datetime.fromtimestamp(t, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def hours(seconds: float) -> str:
+    return f"{seconds / 3600:.1f} h"
+
+
+def systemctl(*args: str) -> str:
+    exe = shutil.which("systemctl")
+    if exe is None:
+        return ""
+    done = subprocess.run(  # noqa: S603 - fixed argv
+        [exe, "--user", *args], capture_output=True, text=True, check=False, timeout=60
+    )
+    return done.stdout
+
+
+def units() -> list[tuple[str, str, str]]:
+    """``(unit, active, sub)`` of every whisipedia unit systemd knows."""
+    out = systemctl("list-units", "--all", "--no-legend", "--plain", "whisipedia-*")
+    rows: list[tuple[str, str, str]] = []
+    for line in out.splitlines():
+        f = line.split()
+        if len(f) >= 4:
+            rows.append((f[0], f[2], f[3]))
+    return rows
+
+
+def unit_prop(unit: str, prop: str) -> str:
+    return systemctl("show", unit, "-p", prop, "--value").strip()
+
+
+def cpu_usec(cgroup: str) -> int | None:
+    try:
+        for line in Path(f"{CGROUP_ROOT}{cgroup}/cpu.stat").read_text().splitlines():
+            k, _, v = line.partition(" ")
+            if k == "usage_usec":
+                return int(v)
+    except (OSError, ValueError):
+        return None
+    return None
+
+
+def frozen(cgroup: str) -> bool:
+    """Whether the job's cgroup or a slice above it is frozen (tools/wsp-yield)."""
+    parts = cgroup.strip("/").split("/")
+    for i in range(len(parts), 0, -1):
+        try:
+            if Path(f"{CGROUP_ROOT}/{'/'.join(parts[:i])}/cgroup.freeze").read_text().strip() == "1":
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def process(pid: str) -> tuple[str, float | None]:
+    """A process's command line and its age in seconds (None if it is gone)."""
+    try:
+        cmd = (PROC / pid / "cmdline").read_bytes().replace(b"\0", b" ").decode(errors="replace").strip()
+        start_ticks = int((PROC / pid / "stat").read_text().rsplit(")", 1)[1].split()[19])
+        uptime = float((PROC / "uptime").read_text().split()[0])
+    except (OSError, ValueError, IndexError):
+        return "", None
+    return cmd, uptime - start_ticks / os.sysconf("SC_CLK_TCK")
+
+
+def lock_holders() -> dict[str, tuple[str, str, float]]:
+    """``lock name -> (pid, command, age seconds)`` of every lock file in LOCKS that is held."""
+    by_inode: dict[int, str] = {}
+    for p in LOCKS.glob("*.lock"):
+        try:
+            by_inode[p.stat().st_ino] = p.stem
+        except OSError:
+            continue
+    held: dict[str, tuple[str, str, float]] = {}
+    try:
+        lines = (PROC / "locks").read_text().splitlines()
+    except OSError:
+        return held
+    for line in lines:
+        f = line.split()
+        if len(f) < 6 or f[1] != "FLOCK" or f[3] == "->":
+            continue
+        try:
+            inode = int(f[5].rsplit(":", 1)[1])
+        except (IndexError, ValueError):
+            continue
+        name = by_inode.get(inode)
+        if name is None:
+            continue
+        cmd, age = process(f[4])
+        if age is not None and (name not in held or age > held[name][2]):
+            held[name] = (f[4], cmd, age)
+    return held
+
+
+def health_ok() -> bool:
+    for _ in range(2):
+        try:
+            with urllib.request.urlopen(HEALTH_URL, timeout=30) as r:  # noqa: S310 - local API
+                if r.status == 200:
+                    return True
+        except OSError:
+            pass
+    return False
+
+
+def short(cmd: str, width: int = 120) -> str:
+    cmd = re.sub(r"\S*/\.venv/bin/(python3? \S*/)?", "", cmd)
+    return cmd if len(cmd) <= width else cmd[: width - 1] + "…"
+
+
+def check(state: State, t: float) -> tuple[dict[str, str], list[str]]:
+    """Every open condition (``key -> message``) and the one-off notes of this run."""
+    cond: dict[str, str] = {}
+    notes: list[str] = []
+    first = state.held
+    held: dict[str, tuple[str, str, float]] = {}
+    for name, (pid, cmd, age) in lock_holders().items():
+        if name in LIFETIME_LOCKS:
+            continue
+        key = f"{name}:{pid}"
+        # Held since the first run that saw it, but never longer than its holder has lived.
+        since = max(first.get(key, t), t - age)
+        first[key] = since
+        held[name] = (pid, cmd, t - since)
+        if t - since >= LOCK_H * 3600:
+            cond[f"lock-held:{name}"] = f"{name} lock held {hours(t - since)} by pid {pid}: {short(cmd)}"
+    for key in list(first):
+        name, _, pid = key.partition(":")
+        if name not in held or held[name][0] != pid:
+            del first[key]
+
+    samples = state.cpu
+    seen: set[str] = set()
+    rows = units()
+    for unit, active, sub in rows:
+        if active == "failed":
+            cond[f"unit-failed:{unit}"] = f"{unit} failed ({sub}); journalctl --user -u {unit}"
+            continue
+        if unit in CORE and active != "active":
+            cond[f"unit-failed:{unit}"] = f"{unit} is {active} ({sub})"
+        if not (unit.startswith("whisipedia-job-") and active == "active"):
+            continue
+        cg = unit_prop(unit, "ControlGroup")
+        use = cpu_usec(cg) if cg else None
+        if use is None:
+            continue
+        seen.add(unit)
+        hist = [s for s in samples.get(unit, []) if t - s[0] <= KEEP_SAMPLES_S and s[1] <= use]
+        hist.append((t, use))
+        samples[unit] = hist
+        window = [s for s in hist if t - s[0] >= IDLE_H * 3600]
+        if not window:
+            continue  # not watched long enough yet
+        since, base = window[-1]  # the newest sample at least IDLE_H old
+        if (use - base) / 1e6 < IDLE_CPU_S:
+            why = ""
+            if frozen(cg):
+                why = "; its slice is frozen (tools/wsp-yield: the machine is short of memory)"
+            elif held:
+                name = min(held, key=lambda n: (CAUSE_ORDER.index(n) if n in CAUSE_ORDER else 9, -held[n][2]))
+                _, cmd, age = held[name]
+                why = f"; the {name} lock is held ({hours(age)}) by {short(cmd, 80)}"
+            cond[f"job-idle:{unit}"] = (
+                f"{unit} used {(use - base) / 1e6:.0f} s of CPU in {hours(t - since)}{why}"
+            )
+    for unit in [u for u in samples if u not in seen]:
+        del samples[unit]
+
+    if not health_ok():
+        cond["api-down"] = f"{HEALTH_URL} did not answer 200 twice"
+    for mount, min_gb in MOUNTS.items():
+        try:
+            free = shutil.disk_usage(mount).free / 1e9
+        except OSError:
+            continue
+        floor = float(os.environ.get("WSP_STALL_MIN_FREE_GB", min_gb)) if mount == "/" else min_gb
+        if free < floor:
+            cond[f"disk-low:{mount}"] = f"{mount} has {free:.0f} GB free (under {floor:.0f} GB)"
+
+    notes.extend(scan_logs(state, t))
+    return cond, notes
+
+
+def scan_logs(state: State, t: float) -> list[str]:
+    """New problem lines since the last run, one note per problem and log a day (the last line, and
+    how many)."""
+    offsets, noted = state.offsets, state.noted
+    for k in [k for k, v in noted.items() if t - v > NOTE_EVERY_S]:
+        del noted[k]
+    notes: list[str] = []
+    paths = sorted({p for pattern in LOGS if pattern for p in glob.glob(pattern)})
+    for path in paths:
+        try:
+            size = os.path.getsize(path)
+        except OSError:
+            continue
+        start = offsets.get(path)
+        offsets[path] = size
+        if start is None or size <= start:
+            continue  # first sight (no backlog), unchanged, or rotated
+        with open(path, "rb") as fh:
+            fh.seek(start)
+            chunk = fh.read(min(size - start, 8 * 1024 * 1024)).decode(errors="replace")
+        hits: dict[str, tuple[int, str]] = {}
+        for line in chunk.splitlines():
+            m = PROBLEM.search(line)
+            if m is None or NOISE.search(line):
+                continue
+            kind = hashlib.sha1(f"{path}\0{m.group(0)}".encode()).hexdigest()[:16]  # noqa: S324 - a key
+            n, _ = hits.get(kind, (0, ""))
+            hits[kind] = (n + 1, line.strip())
+        for kind, (n, line) in hits.items():
+            if kind in noted:
+                continue
+            noted[kind] = t
+            more = f" (x{n})" if n > 1 else ""
+            notes.append(f"{Path(path).name}: {line[:300]}{more}")
+    for gone in [p for p in offsets if p not in paths]:
+        del offsets[gone]
+    return notes
+
+
+def main() -> int:
+    WATCH.mkdir(parents=True, exist_ok=True)
+    state_path, events = WATCH / "state.json", WATCH / "events.log"
+    state = State.load(state_path)
+    open_ = state.open
+    if sys.argv[1:] == ["--status"]:
+        for key, (since, msg) in sorted(open_.items()):
+            print(f"{key} (since {stamp(since)}): {msg}")
+        return 0
+    t = now()
+    cond, notes = check(state, t)
+    lines: list[str] = []
+    for key, msg in cond.items():
+        if key not in open_:
+            lines.append(f"{stamp(t)} RAISED {key}: {msg}")
+        open_[key] = (open_.get(key, (t, ""))[0], msg)
+    for key in [k for k in open_ if k not in cond]:
+        since, _ = open_.pop(key)
+        lines.append(f"{stamp(t)} CLEARED {key} (open {hours(t - since)})")
+    lines += [f"{stamp(t)} NOTE log {n}" for n in notes]
+    if lines:
+        with events.open("a", encoding="utf-8") as fh:
+            fh.write("".join(f"{line}\n" for line in lines))
+        print("\n".join(lines))
+    state.save(state_path)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

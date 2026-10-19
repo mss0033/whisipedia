@@ -1,0 +1,12 @@
+# Look for stalled background work every 10 minutes; see tools/wsp-stall.
+
+[Unit]
+Description=Whisipedia stall check every 10 minutes
+
+[Timer]
+OnBootSec=10min
+OnUnitInactiveSec=10min
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

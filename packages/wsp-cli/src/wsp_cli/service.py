@@ -21,6 +21,8 @@ UNITS = (
     "whisipedia-api.service",
     "whisipedia-api-health.service",  # restarts an API that stops answering (tools/wsp-api-health)
     "whisipedia-api-health.timer",
+    "whisipedia-stall.service",  # notices stalled background work (tools/wsp-stall)
+    "whisipedia-stall.timer",
     "whisipedia-index.service",
     "whisipedia-index.timer",
     "whisipedia-trawler.service",  # checks unvisited pages as a reader sees them (tools/wsp-trawl)
@@ -36,6 +38,7 @@ ENABLE = (
     "whisipedia-orchestrator.service",
     "whisipedia-api.service",
     "whisipedia-api-health.timer",
+    "whisipedia-stall.timer",
     "whisipedia-index.timer",
     "whisipedia-trawler.service",
     "whisipedia-yield.service",
