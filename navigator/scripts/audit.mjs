@@ -502,22 +502,34 @@ async function audit(context, phoneContext, id) {
       }
     }
     if ((await link.count()) > 0 && (await link.isVisible().catch(() => false))) {
+      const from = await page.evaluate(() => location.hash);
       await link.click({ timeout: 10_000 }).catch(() => undefined);
-      await waitForPage(page).catch(() => undefined);
-      await page.goBack({ timeout: 30_000 }).catch(() => undefined);
-      await waitForPage(page).catch(() => undefined);
-      const t = await page
-        .evaluate(() =>
-          (document.querySelector('main #doc-title, main h1')?.textContent ?? '').trim(),
-        )
-        .catch(() => '');
-      if (t !== title)
-        add(
-          issues,
-          'navigate',
-          'back-does-not-return',
-          `"${t.slice(0, 60)}" after Back, was "${title.slice(0, 60)}"`,
-        );
+      // As in any browser, a page still loading has no history entry yet: Back then leaves the page
+      // before. Back is judged only once the link's page is in (2026-10-19: a slow Wikipedia page).
+      const arrived = await page
+        .waitForFunction((h) => location.hash !== h, from, { timeout: PAGE_TIMEOUT })
+        .then(() => true)
+        .catch(() => false);
+      if (arrived) {
+        await waitForPage(page).catch(() => undefined);
+        await page.goBack({ timeout: 30_000 }).catch(() => undefined);
+        await waitForPage(page).catch(() => undefined);
+        const t = await page
+          .evaluate(() =>
+            (document.querySelector('main #doc-title, main h1')?.textContent ?? '').trim(),
+          )
+          .catch(() => '');
+        if (t !== title)
+          add(
+            issues,
+            'navigate',
+            'back-does-not-return',
+            `"${t.slice(0, 60)}" after Back, was "${title.slice(0, 60)}"`,
+          );
+      } else {
+        await page.goto(`${BASE}/${from}`).catch(() => undefined); // back to the page under audit
+        await waitForPage(page).catch(() => undefined);
+      }
     }
   }
   // --- use ------------------------------------------------------------------------------------------

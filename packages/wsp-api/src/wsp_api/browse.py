@@ -267,7 +267,7 @@ def browse_router(lib: Library) -> APIRouter:
         ref = None
         for _ in range(RANDOM_DRAWS):  # a crawl's captures of site machinery are drawn again
             ref = doc_ref(lib.catalog.random_doc(sources=[source] if source else None, rng=rng))
-            if ref is None or not NOT_A_PAGE.search(ref.doc_id):
+            if ref is None or not NOT_A_PAGE.search(parse_doc_id(ref.doc_id)[1]):
                 break
         else:
             ref = None

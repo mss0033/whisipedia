@@ -9,14 +9,25 @@ import { interwikiAddress } from './interwiki.ts';
 const TOKEN_RE =
   /\b(RFC)[ -]?(\d{1,5})\b|\b(wsp:(?:\/\/)?[a-z0-9.-]+\/[^\s<>"')\]]+)|\b((?:https?|ftp):\/\/[^\s<>"')\]]+)/gi;
 
+/** A URL a PDF's line (or table cell) cut short: it ends at the line's end on a path part of one or two
+ * characters. FEMA's IS-288.a cites https://en.wikipedia.org/wiki/H|urricane_Harvey across a page
+ * break, and the cut link opened the article on the letter H (2026-10-19 audit). Left as text. */
+export function cutAtLineEnd(url: string, text: string, at: number): boolean {
+  const after = text.slice(at + url.length, at + url.length + 2);
+  if (!/^\r?\n/.test(after)) return false;
+  const last = url.replace(/\/+$/, '').split('/').pop() ?? '';
+  return url.split('/').length > 3 && last.length > 0 && last.length <= 2;
+}
+
 export function linkify(text: string): DocumentFragment {
   const f = document.createDocumentFragment();
   let pos = 0;
   for (const m of text.matchAll(TOKEN_RE)) {
     const i = m.index ?? 0;
     if (i > pos) f.appendChild(document.createTextNode(text.slice(pos, i)));
-    if (m[2] && !isReadableHost('rfc')) {
-      f.appendChild(document.createTextNode(m[0])); // the library holds no RFCs: plain text, not a 404
+    if ((m[2] && !isReadableHost('rfc')) || (m[4] && cutAtLineEnd(m[4], text, i))) {
+      // The library holds no RFCs: plain text, not a 404. A URL cut by the line: plain text too.
+      f.appendChild(document.createTextNode(m[0]));
       pos = i + m[0].length;
       continue;
     }

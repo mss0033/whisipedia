@@ -464,7 +464,9 @@ def test_random_skips_a_crawls_captures_of_site_machinery(monkeypatch: pytest.Mo
     app = create_app(sample_services())
     lib = library_of(app)
     draws = iter(
-        [DocId("wsp:rfc/challenges.example.com/cdn-cgi/challenge-platform/x")] * 3 + [DocId("wsp:rfc/9110")]
+        [DocId("wsp:rfc/challenges.example.com/cdn-cgi/challenge-platform/x")] * 3
+        + [DocId("wsp:rfc/youtube.fuzzy.replayweb.page/embed/x")]
+        + [DocId("wsp:rfc/9110")]
     )
 
     def random_doc(**_: object) -> DocId:
