@@ -76,7 +76,7 @@ def chunk_name(prefix: str) -> str:
     return f"{archive}-{yymm}"
 
 
-def run_chunk(prefix: str, dest: Path, manifests: Path, parallel: int, aria2: str) -> bool:
+def run_chunk(prefix: str, dest: Path, manifests: Path, parallel: int, aria2: str, rate: str = "0") -> bool:
     name = chunk_name(prefix)
     items = [it for page in _list(prefix) for it in page.get("items", []) if it["name"].endswith(".pdf")]
     lines: list[str] = []
@@ -108,6 +108,7 @@ def run_chunk(prefix: str, dest: Path, manifests: Path, parallel: int, aria2: st
         aria2,
         f"--input-file={input_file}",
         f"-j{parallel}",
+        f"--max-overall-download-limit={rate}",  # the NAS link is shared and paced (0: no cap)
         "-x1",
         "-s1",
         "--continue=true",
@@ -132,6 +133,9 @@ def main() -> None:
     ap.add_argument("--root", type=Path, required=True)
     ap.add_argument("--snapshot", default="2026-10")
     ap.add_argument("--parallel", type=int, default=32)
+    ap.add_argument(
+        "--rate", default="25M", help="cap on the whole pull, aria2 syntax (25M = 25 MiB/s; 0: none)"
+    )
     args = ap.parse_args()
     aria2 = shutil.which("aria2c")
     if not aria2:
@@ -150,7 +154,7 @@ def main() -> None:
         name = chunk_name(prefix)
         if name in done:
             continue
-        ok = run_chunk(prefix, dest, manifests, args.parallel, aria2)
+        ok = run_chunk(prefix, dest, manifests, args.parallel, aria2, args.rate)
         print(f"[{i}/{len(chunks)}] {name}: {'ok' if ok else 'INCOMPLETE (will retry next run)'}", flush=True)
         if ok:
             with done_file.open("a", encoding="utf-8") as fh:
