@@ -222,9 +222,13 @@ READERS: dict[str, tuple[Callable[[str], str | None], Callable[[bytes, str], Ite
 }
 
 
-def read_snapshot(path: Path, reader: str) -> Iterator[TeiDoc]:
+def read_snapshot(path: Path, reader: str, name: str | None = None) -> Iterator[TeiDoc]:
     """Every document a ``reader`` finds in a repository snapshot (a zip of its files), or in a single
-    file the reader reads (a catalogue published as one XML or JSON file: CAPEC, MedlinePlus)."""
+    file the reader reads (a catalogue published as one XML or JSON file: CAPEC, MedlinePlus).
+
+    ``name``: the single file's name as published (its URL's last part). The vault stores it under its
+    document key (``medlineplus__MPLUS_TOPICS-2353a4ac.xml``), which no reader recognises: MedlinePlus
+    was indexed with no documents (2026-10-19)."""
     from wsp_adapters.doccollection import structured  # its readers build TeiDocs too
 
     whole = structured.ARCHIVE_READERS.get(reader)
@@ -237,7 +241,8 @@ def read_snapshot(path: Path, reader: str) -> Iterator[TeiDoc]:
         return
     member, parse = {**READERS, **structured.READERS}[reader]
     if not zipfile.is_zipfile(path):
-        stem = member(path.name)
+        stem = member(name) if name else None
+        stem = stem if stem is not None else member(path.name)
         if stem is not None:
             try:
                 yield from parse(path.read_bytes(), stem)

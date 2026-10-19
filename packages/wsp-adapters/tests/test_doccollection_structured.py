@@ -194,6 +194,53 @@ def test_medlineplus_topics_in_both_languages(tmp_path: Path) -> None:
     assert (es.lang, es.title) == ("es", "Prueba A1C")
 
 
+def test_a_catalogue_stored_under_its_document_key_is_read_by_its_published_name(tmp_path: Path) -> None:
+    """The vault stores the file as medlineplus__MPLUS_TOPICS-2353a4ac.xml, a name no reader knows:
+    MedlinePlus was indexed with no documents (2026-10-19). Its catalog record's URL names it."""
+    from adapters_testkit import make_ctx, make_spec
+
+    from wsp_adapters.doccollection.adapter import CATALOG, DocCollectionAdapter
+    from wsp_adapters.doccollection.catalog import write_catalog
+    from wsp_adapters.doccollection.model import DocumentMeta
+    from wsp_core.testing.adapter_contract import FakeFetcher
+
+    gen = tmp_path / "2026-10-19"
+    (gen / "upstream").mkdir(parents=True)
+    (gen / "upstream" / "medlineplus__MPLUS_TOPICS-2353a4ac.xml").write_text(
+        '<health-topics date-generated="10/17/2026 02:30:35">'
+        '<health-topic title="A1C" url="https://medlineplus.gov/a1c.html" id="6308" language="English">'
+        "<full-summary>A blood test.</full-summary></health-topic></health-topics>",
+        encoding="utf-8",
+    )
+    meta = DocumentMeta(
+        doc_key="medlineplus:MPLUS_TOPICS",
+        file="upstream/medlineplus__MPLUS_TOPICS-2353a4ac.xml",
+        issuer="National Library of Medicine",
+        title="MedlinePlus health topics",
+        origin_url="https://medlineplus.gov/xml/mplus_topics_2026-10-17.xml",
+    )
+    write_catalog(gen / CATALOG, [meta])
+    spec = make_spec(
+        "medlineplus",
+        {
+            "adapter": "doc-collection",
+            "issuer": "National Library of Medicine",
+            "key_prefix": "medlineplus",
+            "origins": ["medlineplus.gov"],
+            "discovery": [
+                {"kind": "list", "urls": ["https://medlineplus.gov/xml/mplus_topics_2026-10-17.xml"]}
+            ],
+            "filter": {"allow_all": True},
+            "reader": "medlineplus-topics",
+        },
+        license_="LicenseRef-US-Gov-PD",
+    )
+    (doc,) = DocCollectionAdapter(throttle=False).documents(
+        make_ctx(spec, FakeFetcher(), tmp_path / "w"), gen
+    )
+    assert (doc.native_id, doc.title) == ("medlineplus:MPLUS_TOPICS/topic/6308", "A1C")
+
+
 def test_files_a_reader_does_not_know_are_skipped(tmp_path: Path) -> None:
     other = tmp_path / "README.json"
     other.write_text("{}")

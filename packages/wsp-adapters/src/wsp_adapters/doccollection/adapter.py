@@ -51,7 +51,7 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, NamedTuple, cast
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 from wsp_adapters._common import access, upstream_dir, verify_file
 from wsp_adapters.doccollection import structured, tei
@@ -640,7 +640,8 @@ class DocCollectionAdapter:
         self, spec: SourceSpec, cfg: CollectionConfig, meta: DocumentMeta, path: Path
     ) -> Iterator[DocRecord]:
         """The documents ``cfg.reader`` finds in a repository snapshot (FRUS volumes, Perseus texts)."""
-        for d in tei.read_snapshot(path, cfg.reader):
+        published = urlsplit(meta.origin_url).path.rsplit("/", 1)[-1] if meta.origin_url else None
+        for d in tei.read_snapshot(path, cfg.reader, unquote(published) if published else None):
             native = f"{meta.doc_key}/{d.key}"
             yield DocRecord(
                 doc_id=make_doc_id(spec.id, native),
