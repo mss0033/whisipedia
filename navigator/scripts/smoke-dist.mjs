@@ -9,7 +9,7 @@ import { handle } from '../mock/handler.ts';
 
 const DIST = new URL('../dist/', import.meta.url).pathname;
 const CSP =
-  "default-src 'self'; media-src 'self' blob:; base-uri 'none'; object-src 'none'; form-action 'self'";
+  "default-src 'self'; img-src 'self' data:; media-src 'self' blob:; base-uri 'none'; object-src 'none'; form-action 'self'";
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',

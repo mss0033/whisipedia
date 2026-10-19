@@ -116,3 +116,12 @@ def test_static_bundle_is_mounted_at_root(tmp_path: Path) -> None:
         missing = c.get("/nope.js")
         assert missing.status_code == 404
         assert missing.json()["error"]["code"] == "not_found"
+
+
+def test_inline_images_are_allowed_and_nothing_else_outside(client: httpx.Client) -> None:
+    """The Atlas's map controls draw their icons as data: SVGs; the header blocked them while the page's
+    own meta policy allowed them (browsers enforce both), so the buttons were blank (2026-10-18)."""
+    csp = client.get("/v1/health").headers["content-security-policy"]
+    directives = dict(d.strip().split(" ", 1) for d in csp.split(";") if d.strip())
+    assert directives["img-src"].split() == ["'self'", "data:"]
+    assert directives["default-src"] == "'self'"

@@ -20,7 +20,11 @@ SECURITY_HEADERS: tuple[tuple[bytes, bytes], ...] = (
     (
         b"content-security-policy",
         # media-src blob:: the Screening Room's projection test plays a reel made in the page.
-        b"default-src 'self'; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; "
+        # img-src data:: the Atlas's map controls draw their icons as inline SVG (MapLibre's stylesheet);
+        # blocked, the zoom, compass and fullscreen buttons were blank (2026-10-18). A data: image is in
+        # the page itself: it fetches nothing and, shown as an image, runs nothing. Scripts stay 'self'.
+        b"default-src 'self'; img-src 'self' data:; media-src 'self' blob:; frame-ancestors 'none'; "
+        b"base-uri 'self'; "
         b"form-action 'self'",
     ),
     (b"x-content-type-options", b"nosniff"),
