@@ -381,7 +381,16 @@ async function audit(context, phoneContext, id) {
   if (broken.length) add(issues, 'render', 'image-broken', `${broken.length}: ${broken[0]}`);
   for (const img of seen.images.slice(0, IMAGES_CHECKED)) {
     if (!img.src?.startsWith('/v1/') || img.broken) continue;
-    const r = await context.request.get(`${BASE}${img.src}`, { timeout: 60_000 }).catch(() => null);
+    // Once more after a reset: the server closes an idle keep-alive connection after 5 s, and reusing
+    // it as it closes reads ECONNRESET; a browser retries such a GET by itself (24 images, 2026-10-19).
+    const get = () =>
+      context.request.get(`${BASE}${img.src}`, { timeout: 60_000 }).catch((e) => {
+        if (/ECONNRESET|socket hang up|EPIPE/.test(String(e))) return 'reset';
+        return null;
+      });
+    let r = await get();
+    if (r === 'reset') r = await get();
+    if (r === 'reset') r = null;
     if (!r?.ok()) add(issues, 'render', 'image-missing', `${r?.status() ?? 'timeout'} ${img.src}`);
   }
   // --- read -----------------------------------------------------------------------------------------
@@ -402,7 +411,10 @@ async function audit(context, phoneContext, id) {
   const prose = (seen.prose ?? seen.text).slice(0, 60_000);
   for (const [re, what] of MARKUP) {
     const m = re.exec(prose);
-    if (m)
+    // Tags the archived page writes as text (&lt;h1&gt;: How to Design Programs shows an example
+    // page's code in a code table) are its words, not markup left over.
+    const tag = what === 'raw HTML tags' ? /<\/?([a-z0-9]+)/i.exec(m?.[0] ?? '')?.[1] : null;
+    if (m && !(tag && (doc?.html ?? '').includes(`&lt;${tag}`)))
       add(
         issues,
         'read',
@@ -559,8 +571,13 @@ async function audit(context, phoneContext, id) {
   if (seen.hasText && seen.fontPx) {
     await page.keyboard.press('Control+]');
     await page.keyboard.press('Control+]');
-    await page.waitForTimeout(300);
-    const bigger = await page.evaluate(inspect);
+    // A page of 1.8 million characters takes longer than 300 ms to lay out again (NGA's Sailing
+    // Directions, 2026-10-19): wait for the size to change, three seconds at most.
+    let bigger = await page.evaluate(inspect);
+    for (let t = 0; t < 10 && bigger.fontPx !== null && bigger.fontPx <= seen.fontPx; t++) {
+      await page.waitForTimeout(300);
+      bigger = await page.evaluate(inspect);
+    }
     if (bigger.fontPx !== null && bigger.fontPx <= seen.fontPx)
       add(issues, 'use', 'larger-text-ignored', `${seen.fontPx}px stays ${bigger.fontPx}px`);
     await page.keyboard.press('Control+0');

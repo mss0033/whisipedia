@@ -168,11 +168,12 @@ RANDOM_TRIES = 60  # random entries drawn until one is an article (a crawl can b
 
 # Pages a crawler captured that are no site's page: Cloudflare's bot challenges under /cdn-cgi/ were
 # most of what "Random page" opened on the Cloudflare Learning Center, and a reCAPTCHA widget and the
-# shells of embedded YouTube videos (replayweb.page's) and GitHub "follow" buttons (ghbtns.com) opened
-# empty elsewhere (2026-10-19 audits).
+# shells of embedded YouTube videos (replayweb.page's), GitHub "follow" buttons (ghbtns.com) and oEmbed
+# answers (womenshistory.si.edu/media/oembed?url=...) opened empty elsewhere (2026-10-19 audits).
 NOT_A_PAGE = re.compile(
     r"(?:^|/)cdn-cgi/|^www\.google\.com/recaptcha/|^youtube\.fuzzy\.replayweb\.page/"
     r"|^(?:www\.)?youtube(?:-nocookie)?\.com/embed/|^player\.vimeo\.com/|^ghbtns\.com/"
+    r"|/oembed(?:[?/]|$)"
 )
 
 

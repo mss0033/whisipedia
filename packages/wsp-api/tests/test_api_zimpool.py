@@ -304,6 +304,7 @@ def test_a_random_page_is_never_a_captured_bot_challenge(tmp_path: Path) -> None
     ]
     items += [("www.google.com/recaptcha/api2/anchor?ar=1", "text/html", "<p></p>")]
     items += [("ghbtns.com/github-btn.html?user=fat&type=follow", "text/html", "<p></p>")]
+    items += [("womenshistory.si.edu/media/oembed?url=https://x", "text/html", "<p></p>")]
     items += [(f"youtube.fuzzy.replayweb.page/embed/v{i}", "text/html", "<p></p>") for i in range(10)]
     archive = open_archive(str(write_zim(tmp_path / "c.zim", "c", items, [])))
     picks = {random_article(archive) for _ in range(20)}
