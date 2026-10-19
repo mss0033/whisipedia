@@ -28,7 +28,7 @@
  *   WSP_AUDIT_PAUSE    milliseconds between pages (default 500)
  *   WSP_E2E_CHROMIUM   the Chromium to run (default: as the e2e tests pick it)
  */
-import { existsSync, mkdirSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { appendFile, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -108,6 +108,26 @@ async function api(path) {
   if (!r.ok) throw new Error(`${path}: HTTP ${r.status}`);
   return r.json();
 }
+
+/** Wait (up to 15 minutes) for the library to answer again: a deploy restarts the API mid-audit, and
+ * every page in that minute would otherwise count as unreachable (the first run lost 135 sources so). */
+async function waitForLibrary() {
+  for (let i = 0; i < 180; i++) {
+    try {
+      const r = await fetch(`${BASE}/v1/health`, {
+        headers: HEADERS,
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (r.ok) return true;
+    } catch {
+      /* not up yet */
+    }
+    await sleep(5_000);
+  }
+  return false;
+}
+
+const RESTARTED = /ERR_CONNECTION_REFUSED|ECONNREFUSED|fetch failed|socket hang up/;
 
 async function allSources() {
   const out = [];
@@ -611,7 +631,19 @@ async function main() {
   const sources = (await allSources()).filter(
     (s) => s.current_generation && (!ONLY.size || ONLY.has(s.id)),
   );
+  // A rerun into the same directory continues: pages already in results.jsonl are kept, not redone.
   const results = [];
+  const seen = new Set();
+  try {
+    for (const line of readFileSync(join(OUT, 'results.jsonl'), 'utf8').split('\n')) {
+      if (!line.trim()) continue;
+      const r = JSON.parse(line);
+      results.push(r);
+      seen.add(r.id);
+    }
+  } catch {
+    /* a first run */
+  }
   const skipped = [];
   let n = 0;
   for (const s of sources) {
@@ -619,7 +651,11 @@ async function main() {
       skipped.push({ id: s.id, why: 'not readable as documents (data, tiles or a history feed)' });
       continue;
     }
-    const ids = await samplesOf(s).catch(() => []);
+    let ids = await samplesOf(s).catch(() => null);
+    if (ids === null || ids.length === 0) {
+      await waitForLibrary();
+      ids = (await samplesOf(s).catch(() => [])) ?? [];
+    }
     if (ids.length === 0) {
       skipped.push({ id: s.id, why: 'no page to draw (random and home both empty)' });
       results.push({
@@ -631,12 +667,21 @@ async function main() {
       continue;
     }
     for (const id of ids) {
-      const r = await audit(context, phoneContext, id).catch((e) => ({
-        id,
-        address: addressOf(id),
-        source: s.id,
-        issues: [{ dim: 'reach', code: 'audit-error', detail: String(e).slice(0, 200) }],
-      }));
+      if (seen.has(id)) continue;
+      const once = () =>
+        audit(context, phoneContext, id).catch((e) => ({
+          id,
+          address: addressOf(id),
+          source: s.id,
+          issues: [{ dim: 'reach', code: 'audit-error', detail: String(e).slice(0, 200) }],
+        }));
+      let r = await once();
+      // The library went away under the page (a restart): wait for it and look again.
+      if (r.issues.some((i) => RESTARTED.test(i.detail))) {
+        log(`library not answering; waiting, then ${addressOf(id)} again`);
+        await waitForLibrary();
+        r = await once();
+      }
       r.source = s.id;
       results.push(r);
       await appendFile(join(OUT, 'results.jsonl'), `${JSON.stringify(r)}\n`);
