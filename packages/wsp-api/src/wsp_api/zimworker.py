@@ -6,6 +6,12 @@ stay open between requests (an LRU per worker). If libzim touches a page of a me
 the NAS cannot deliver, the kernel sends ``SIGBUS`` and this process dies; the pool notices, fails the
 requests in flight and starts a new worker. The process is marked non-dumpable first, so such a death
 never writes a core dump (on this machine a crash dump is gigabytes on C:).
+
+libzim holds the GIL for the whole of an archive's open: a cold open over SMB froze every other thread
+of the worker, so every page of its other archives waited (2026-10-19: 18 s for an 8.6 GB archive, and
+page views failed as busy all day, the background warmer opening one archive after another). Each
+archive is first opened by a short-lived process (:func:`open_prewarmed`), which brings what libzim
+reads into the page cache; the open here then takes a fraction of a second (0.05-0.2 s measured).
 """
 
 from __future__ import annotations
@@ -14,6 +20,7 @@ import argparse
 import ctypes
 import os
 import signal
+import subprocess
 import sys
 import threading
 import time
@@ -36,6 +43,34 @@ from wsp_api.zimread import (
 )
 
 _PR_SET_DUMPABLE = 4
+PREOPEN_TIMEOUT = 900.0  # the largest archive (115 GB) took 99 s to open over SMB
+# Run as `python -I -c PREOPEN file`: no core dump if the NAS fails a page (SIGBUS), any error ignored.
+_PREOPEN = (
+    "import resource, sys\n"
+    "resource.setrlimit(resource.RLIMIT_CORE, (0, 0))\n"
+    "from libzim.reader import Archive\n"
+    "a = Archive(sys.argv[1])\n"
+    "try:\n"
+    "    a.main_entry.get_item()\n"
+    "except Exception:\n"
+    "    pass\n"
+)
+
+
+def open_prewarmed(file: str) -> Archive:
+    """Open ``file`` after a short-lived process has opened it (see the module docstring): this thread
+    waits for that process without the GIL, and the open here finds its pages cached. If the process
+    fails, the open here is only as slow as it was before."""
+    with suppress(OSError, subprocess.SubprocessError):
+        subprocess.run(  # noqa: S603 - this interpreter, a fixed program, the archive path as argv
+            [sys.executable, "-I", "-c", _PREOPEN, file],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=PREOPEN_TIMEOUT,
+            check=False,
+        )
+    return open_archive(file)
 
 
 def harden() -> None:
@@ -63,10 +98,15 @@ _ARCHIVE_OPS = frozenset({"read", "count", "random"})  # ops whose first argumen
 
 class _Server:
     def __init__(
-        self, out: Connection, max_open: int, test_ops: bool, submit: Callable[..., object] | None = None
+        self,
+        out: Connection,
+        max_open: int,
+        test_ops: bool,
+        submit: Callable[..., object] | None = None,
+        opener: Callable[[str], Archive] = open_archive,
     ) -> None:
         self.out = out
-        self.cache = ArchiveCache(max_open)
+        self.cache = ArchiveCache(max_open, opener)
         self.test_ops = test_ops
         self.send_lock = threading.Lock()
         # Runs a handler on the worker's thread pool; None runs it inline (tests).
@@ -143,7 +183,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     signal.signal(signal.SIGINT, signal.SIG_IGN)  # Ctrl-C goes to the API; the pool closes us
     inbox = Connection(args.fd_in, writable=False)
     pool = ThreadPoolExecutor(max(1, args.threads), thread_name_prefix="zim")
-    server = _Server(Connection(args.fd_out, readable=False), args.max_open, args.test_ops, pool.submit)
+    server = _Server(
+        Connection(args.fd_out, readable=False), args.max_open, args.test_ops, pool.submit, open_prewarmed
+    )
     while True:
         try:
             msg = inbox.recv()

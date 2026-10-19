@@ -257,3 +257,36 @@ def test_requests_waiting_for_an_archive_to_open_hold_no_thread() -> None:
     finally:
         release.set()
         pool.shutdown(wait=True)
+
+
+def test_a_worker_opens_an_archive_after_a_helper_process_has(
+    zim: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-10-19: libzim held the GIL for an 18 s cold open, freezing the worker's other reads. A
+    short-lived process opens the archive first; this one waits for it without the GIL."""
+    import subprocess
+
+    from wsp_api import zimworker
+
+    ran: list[list[str]] = []
+    real_run = subprocess.run
+
+    def run(cmd: list[str], **kw: object) -> subprocess.CompletedProcess[bytes]:
+        ran.append(cmd)
+        return real_run(cmd, **kw)  # type: ignore[call-overload,no-any-return]
+
+    monkeypatch.setattr(subprocess, "run", run)
+    archive = zimworker.open_prewarmed(zim)
+    assert archive.entry_count > 0
+    assert ran
+    assert ran[0][-1] == zim
+    assert real_run(ran[0], check=False).returncode == 0  # the helper itself opens it cleanly
+
+    # A helper that cannot run leaves the open as it was; a missing archive still fails here.
+    def cannot_run(*_: object, **__: object) -> None:
+        raise OSError("no helper")
+
+    monkeypatch.setattr(subprocess, "run", cannot_run)
+    assert zimworker.open_prewarmed(zim).entry_count == archive.entry_count
+    with pytest.raises(RuntimeError):
+        zimworker.open_prewarmed(str(tmp_path / "missing.zim"))
