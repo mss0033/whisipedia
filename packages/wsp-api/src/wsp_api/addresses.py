@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Mapping
 from typing import Literal
 from urllib.parse import quote, unquote, urlencode
@@ -64,6 +65,9 @@ def _strip(address: str) -> str:
     return a
 
 
+_RFC_NUMBER = re.compile(r"0*(\d{1,5})")
+
+
 def _near_misses(native: str) -> list[str]:
     """``native`` and what a mistyped or older address may have meant: a trailing slash some native ids
     end with, and the last part's first letter in the other case (`/Safety` for `/safety`)."""
@@ -120,8 +124,11 @@ def resolve(
         ok = exists(doc_id) if exists is not None else services.documents.get(doc_id) is not None
         return doc_id if ok else None
 
-    # A typed or older address lost a native id's trailing slash (xkcd.com/936/): try it with one.
-    for native in _near_misses(rest):
+    # A typed or older address lost a native id's trailing slash (xkcd.com/936/): try it with one. An
+    # RFC is keyed rfc:RFC-9110 but cited as wsp://rfc/9110, as the document route already accepts
+    # (2026-10-18 audit: NIFOG's link to RFC 3171 was dead through /go only).
+    rfc = _RFC_NUMBER.fullmatch(rest) if head == "rfc" else None
+    for native in [*_near_misses(rest), *([f"rfc:RFC-{int(rfc.group(1))}"] if rfc else [])]:
         doc_id = found(native)
         if doc_id is not None:
             return Resolution(address=address_of(head, native), kind="document", href=document_href(doc_id))

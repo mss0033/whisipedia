@@ -73,3 +73,18 @@ def test_unresolvable(client: httpx.Client, address: str, status: int, code: str
     r = client.get(f"/go/{address}")
     assert r.status_code == status
     assert r.json()["error"]["code"] == code
+
+
+def test_an_rfc_cited_by_number_resolves_to_its_key() -> None:
+    """RFCs are keyed rfc:RFC-3171; the document route took wsp://rfc/3171, /go did not (2026-10-18
+    audit: a field guide's link to RFC 3171 was dead for every check that resolves through /go)."""
+    from types import SimpleNamespace
+    from typing import Any, cast
+
+    from wsp_api.addresses import resolve
+
+    held = {"wsp:rfc/rfc:RFC-3171"}
+    services = cast(Any, SimpleNamespace(source=lambda sid: object() if sid == "rfc" else None))
+    res = resolve(services, "wsp://rfc/3171", {}, exists=lambda d: d in held)
+    assert (res.kind, res.address) == ("document", "wsp://rfc/rfc:RFC-3171")
+    assert res.href == "/v1/documents/wsp%3Arfc%2Frfc%3ARFC-3171"
