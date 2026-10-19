@@ -256,6 +256,14 @@ function inspect() {
     // The page's title heading (an archived page can carry an empty logo <h1> above it).
     title: (main?.querySelector('#doc-title, h1')?.textContent ?? '').trim(),
     text: (body?.innerText ?? '').trim(),
+    // The text outside code: a code sample showing HTML or [[...]] is the page's content, not markup
+    // left over (Bootstrap's examples, a Python list comprehension).
+    prose: (() => {
+      const copy = body?.cloneNode(true);
+      if (!copy) return '';
+      for (const c of copy.querySelectorAll('pre, code, kbd, samp, textarea')) c.remove();
+      return (copy.textContent ?? '').replace(/[ \t]+/g, ' ').trim();
+    })(),
     images: [...(body?.querySelectorAll('img') ?? [])].map((i) => ({
       src: i.getAttribute('src'),
       broken: i.complete && i.naturalWidth === 0 && !!i.getAttribute('src'),
@@ -379,14 +387,15 @@ async function audit(context, phoneContext, id) {
   const moji = MOJIBAKE.exec(sample);
   if (moji)
     add(issues, 'read', 'mojibake', sample.slice(Math.max(0, moji.index - 30), moji.index + 30));
+  const prose = (seen.prose ?? seen.text).slice(0, 60_000);
   for (const [re, what] of MARKUP) {
-    const m = re.exec(sample);
+    const m = re.exec(prose);
     if (m)
       add(
         issues,
         'read',
         'markup-shown',
-        `${what}: ${sample.slice(Math.max(0, m.index - 20), m.index + 50)}`,
+        `${what}: ${prose.slice(Math.max(0, m.index - 20), m.index + 50)}`,
       );
   }
   if (seen.contrast !== null && seen.contrast < MIN_CONTRAST)

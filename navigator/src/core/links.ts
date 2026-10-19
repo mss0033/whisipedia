@@ -372,6 +372,22 @@ function sanitizeMath(el: Element): Element | null {
   return copy(el);
 }
 
+/** Notes a wiki's own stylesheet hides, which show once it is gone: Wikipedia's citation maintenance
+ * messages ("{{cite journal}}: CS1 maint: unflagged free DOI", 2026-10-19 audit). */
+const HIDDEN_CLASSES = ['cs1-maint', 'cs1-hidden-error'];
+
+/** Wiki template leftovers in a page's text: a parameter never filled in (`{{{name}}}`), and a category
+ * or file link with no name (`[[Category:]]`, `[[File:|thumb|]]`). Never a page's words: Gardenology
+ * and Appropedia pages showed them in place of the values their templates lacked (2026-10-19 audit).
+ * Text in code blocks is left alone. */
+const TEMPLATE_LEFTOVERS =
+  /\[\[\s*(?:\{\{\{[^{}]{1,40}\}\}\}|(?:Category|File|Image)\s*:\s*(?:\|[^[\]|]{0,40})*)\s*\]\]|\{\{\{[\w -]{1,40}(?:\|[^{}]{0,40})?\}\}\}/g;
+const CODE_TAGS = new Set(['pre', 'code', 'kbd', 'samp', 'textarea']);
+
+export function withoutTemplateLeftovers(text: string): string {
+  return text.includes('[[') || text.includes('{{{') ? text.replace(TEMPLATE_LEFTOVERS, '') : text;
+}
+
 /** Classes of navigation-only blocks: a field's sidebar, the navboxes at the end of an article. */
 const NAVIGATION_CLASSES = ['sidebar', 'vertical-navbox', 'navbox'];
 
@@ -397,17 +413,19 @@ export function sanitizeDocumentHtml(
   // Navigation blocks, folded: expanded in place, a field's sidebar filled the first screen before
   // the lead (Gibbs free energy, Arrow's theorem: 2026-10-16 field exam). Inner ones stay as they are.
   let inNavigation = 0;
+  let inCode = 0;
 
   const walk = (src: Node, dest: Node): void => {
     for (const child of Array.from(src.childNodes)) {
       if (child.nodeType === Node.TEXT_NODE) {
-        dest.appendChild(document.createTextNode(child.textContent ?? ''));
+        const text = child.textContent ?? '';
+        dest.appendChild(document.createTextNode(inCode ? text : withoutTemplateLeftovers(text)));
         continue;
       }
       if (child.nodeType !== Node.ELEMENT_NODE) continue; // comments, PIs
       const el = child as Element;
       const tag = el.tagName.toLowerCase();
-      if (DROP.has(tag)) {
+      if (DROP.has(tag) || HIDDEN_CLASSES.some((c) => el.classList.contains(c))) {
         stats.removed += 1;
         continue;
       }
@@ -460,7 +478,10 @@ export function sanitizeDocumentHtml(
         const href = el.getAttribute('href');
         if (href !== null) rewriteAnchor(copy as HTMLAnchorElement, href, ctx, stats);
       }
+      const code = CODE_TAGS.has(tag);
+      if (code) inCode += 1;
       walk(el, copy);
+      if (code) inCode -= 1;
       if (
         tag === 'a' &&
         copy.hasAttribute('href') &&
