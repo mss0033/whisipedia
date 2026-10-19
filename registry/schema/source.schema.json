@@ -87,6 +87,7 @@
         "partitioned": {"type": "boolean"},
         "pdf_max_pages": {"type": "integer", "minimum": 1},
         "keep_superseded": {"type": "boolean"},
+        "index_text": {"type": "boolean"},
         "mirrors": {"type": "array"},
         "mirrors_required": {},
         "endpoints": {"type": "array"},

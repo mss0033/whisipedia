@@ -129,6 +129,10 @@ class CollectionConfig:
     interval: float = 1.0
     per_host: Mapping[str, float] = field(default_factory=dict[str, float])
     pdf_max_pages: int = DEFAULT_PDF_MAX_PAGES
+    # ``access.index_text``: false indexes each document by its catalog record alone, never reading the
+    # file. A scanned map's "text" is stray labels, and reading 60,000 map PDFs over the NAS held the
+    # heavy lock for days (USGS topo, 2026-10-19); the sheet is found by its name, state, year, scale.
+    index_text: bool = True
     keep_superseded: bool = True
     # Requests in flight at once (``rate.concurrency``, 1-8). Starts stay ``interval`` apart per host:
     # this only stops a 2-3 s round trip from cutting a 1 request/s budget to 0.3/s.
@@ -171,6 +175,7 @@ class CollectionConfig:
             },
             pdf_max_pages=int(str(acc.get("pdf_max_pages", DEFAULT_PDF_MAX_PAGES))),
             keep_superseded=bool(acc.get("keep_superseded", True)),
+            index_text=bool(acc.get("index_text", True)),
             concurrency=min(8, max(1, int(str(rate.get("concurrency", 1))))),
         )
 
@@ -554,10 +559,14 @@ class DocCollectionAdapter:
             if cfg.reader and path.suffix.lower() in (".zip", ".xml", ".json"):
                 yield from self._snapshot_documents(spec, cfg, meta, path)
                 continue
-            if path.suffix.lower() == ".pdf" and (sections := long_pdf_sections(path, cfg.pdf_max_pages)):
+            if (
+                cfg.index_text
+                and path.suffix.lower() == ".pdf"
+                and (sections := long_pdf_sections(path, cfg.pdf_max_pages))
+            ):
                 yield from self._section_documents(spec, meta, path, generation_dir, sections)
                 continue
-            body = document_text(path, max_pages=cfg.pdf_max_pages)
+            body = document_text(path, max_pages=cfg.pdf_max_pages) if cfg.index_text else ""
             title = reader_title(meta, path, body)
             text = catalog_header(meta, title=title) + ("\n\n" + body if body else "")
             license_ = meta.license or spec.license
@@ -570,7 +579,7 @@ class DocCollectionAdapter:
                 lang=meta.language or "en",
                 license=license_,
                 text=text,
-                revision=meta.edition_date or pdf_metadata_date(path) or None,
+                revision=meta.edition_date or (pdf_metadata_date(path) if cfg.index_text else None) or None,
                 url_native=meta.origin_url or None,
                 html_ref=f"file:{meta.generation or generation_dir.name}/{meta.file}",
                 content_hash=content_hash(text),

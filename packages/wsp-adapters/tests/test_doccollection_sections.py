@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from adapters_testkit import make_ctx, make_spec
 
 from wsp_adapters.doccollection.adapter import CATALOG, DocCollectionAdapter, long_pdf_sections, pdf_text
@@ -134,3 +135,49 @@ def test_a_long_pdf_is_the_book_and_its_chapters(tmp_path: Path) -> None:
     assert two.html_ref == book.html_ref  # the original is the whole PDF
     assert two.meta["pages"] == "10-12"
     assert two.meta["part_of"] == "test:BOOK"
+
+
+def test_a_source_indexed_by_its_catalog_never_reads_its_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """USGS topo (2026-10-19): reading 60,000 map PDFs over the NAS held the heavy lock for days; with
+    ``index_text: false`` a document is its catalog record, and the file is never opened."""
+    gen = tmp_path / "lib" / "2026-10-12.me"
+    (gen / "upstream").mkdir(parents=True)
+    (gen / "upstream" / "map.pdf").write_bytes(_book(tmp_path).read_bytes())
+    meta = DocumentMeta(
+        doc_key="usgs-htmc:ME_Farmington_1924",
+        file="upstream/map.pdf",
+        issuer="US Geological Survey",
+        title="Farmington, ME (1924), 1:62,500",
+        edition_date="1924",
+    )
+    write_catalog(gen / CATALOG, [meta])
+    spec = make_spec(
+        "usgs-topo",
+        {
+            "adapter": "doc-collection",
+            "issuer": "US Geological Survey",
+            "key_prefix": "usgs-htmc",
+            "origins": ["prd-tnm.s3.amazonaws.com"],
+            "discovery": [{"kind": "list", "urls": ["https://prd-tnm.s3.amazonaws.com/map.pdf"]}],
+            "filter": {"allow_all": True},
+            "pdf_max_pages": 5,
+            "index_text": False,
+        },
+        license_="LicenseRef-US-Gov-PD",
+    )
+    import wsp_adapters.doccollection.adapter as adapter_module
+
+    def never(*_: object, **__: object) -> object:
+        raise AssertionError("the map file was read")
+
+    for name in ("document_text", "long_pdf_sections", "pdf_metadata_date", "pdf_text"):
+        monkeypatch.setattr(adapter_module, name, never)
+    (doc,) = list(
+        DocCollectionAdapter(throttle=False).documents(make_ctx(spec, FakeFetcher(), tmp_path / "w"), gen)
+    )
+    assert doc.title == "Farmington, ME (1924), 1:62,500"
+    assert doc.text.startswith("Farmington, ME (1924), 1:62,500\nIssuer: US Geological Survey")
+    assert "carburetor" not in doc.text
+    assert doc.html_ref == "file:2026-10-12.me/upstream/map.pdf"  # the reader still shows the map

@@ -1599,6 +1599,9 @@ sources:
       # layer; it doubled every download and was held. Stored .tif/.zip files leave the index (catalog
       # "excluded: format=tif") at the next refine.
       formats: [pdf]
+      # Indexed by the catalog record (sheet name, state, year, scale), not the map PDF's stray labels:
+      # reading 60,000 map PDFs over the NAS held the heavy lock for days (2026-10-19).
+      index_text: false
       mirrors:
         - {channel: "USGS prd-tnm S3 bucket (agency-owned, public)", status: verified, verified: 2026-10-10, note: "ListObjects 200: StagedProducts/Maps/HistoricalTopo/{GeoTIFF,PDF}/; ETag = MD5 for single-part objects"}
         - {channel: "TNM Access API", status: verified, verified: 2026-10-10, note: "186,061 'Historical Topographic Maps' products with sizeInBytes"}
