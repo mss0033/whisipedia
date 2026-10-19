@@ -1047,6 +1047,14 @@ export function deadEndNotice(
   );
 }
 
+/** The page's title heading: its first `<h1>` with words in it. A site's logo heading (Milne Open
+ * Textbooks) or one its scripts filled in (Fretmap, the CDC Yellow Book) is empty here, and taking it
+ * for the title left those pages with none (2026-10-19 audit). */
+export function titleHeading(root: ParentNode): HTMLHeadingElement | null {
+  for (const h1 of root.querySelectorAll('h1')) if ((h1.textContent ?? '').trim()) return h1;
+  return null;
+}
+
 /** Most links on 32 archived sites that opened Not Found (2026-10-19 audit) went to pages the site's
  * own archive never captured: its "contact" page, a wiki's Talk: pages, a search. Once the page is
  * shown, the library is asked which of its links it holds no page for, and those are marked as the
@@ -1187,7 +1195,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
       ? comicBar(doc.source_id, doc.native_id, (a) => ctx.app.navigate(a))
       : null,
     // Original pages (ZIM HTML) carry their own <h1>; don't print the title twice.
-    content instanceof Element && content.querySelector('h1') ? null : pageHeading(doc.title),
+    content instanceof Element && titleHeading(content) ? null : pageHeading(doc.title),
     partsNav(doc),
     route.at
       ? null
@@ -1212,7 +1220,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
   );
   if (route.at || route.diff) content.dataset.linksChecked = '1';
   else void markUncaptured(ctx, content, uncapturedNote);
-  const title = body.querySelector('h1');
+  const title = titleHeading(body);
   if (title) {
     // The page's own id for its heading stays a place to land: TruePrepper's "Skip to content"
     // points at <h1 id="main"> (2026-10-16 crawl).

@@ -428,8 +428,14 @@ async function audit(context, phoneContext, id) {
         .first();
       if ((await next.count()) === 0) add(issues, 'navigate', 'reader-no-next');
       else {
+        const was = await page.evaluate(() => location.hash);
         await next.click({ timeout: 10_000 }).catch(() => undefined);
-        await page.waitForTimeout(600);
+        // The next chapter can be the next part, a document of its own: wait for it, not 600 ms
+        // (2026-10-19: ten "Next does nothing" findings were the next part still loading).
+        await page
+          .waitForFunction((h) => location.hash !== h, was, { timeout: 10_000 })
+          .catch(() => undefined);
+        await waitForPage(page).catch(() => undefined);
         const after = await chapterText();
         if (after === before) add(issues, 'navigate', 'reader-next-does-nothing');
         await page.goBack({ timeout: 30_000 }).catch(() => undefined);
