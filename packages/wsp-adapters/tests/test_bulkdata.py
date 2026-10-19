@@ -73,7 +73,8 @@ def test_chronicling_america_ocr_by_state_with_sha256(tmp_path: Path) -> None:
                batch("az_saguaro_ver02", "2020-01-01")]  # fmt: skip
     routes = {"https://chroniclingamerica.loc.gov/data/ocr/ocr.json": json.dumps(listing).encode()}
     spec = make_spec("chronicling-america", {"adapter": "loc-ocr-batches", "partitioned": True})
-    ctx = make_ctx(spec, FakeFetcher(routes), tmp_path)
+    fetcher = FakeFetcher(routes)
+    ctx = make_ctx(spec, fetcher, tmp_path)
     adapter = ChroniclingAmericaOcrAdapter()
     assert adapter.partitions(ctx) == ["ak", "az"]
     (r,) = adapter.discover_partition(ctx, "ak")
@@ -82,3 +83,5 @@ def test_chronicling_america_ocr_by_state_with_sha256(tmp_path: Path) -> None:
     assert r.files[0].checksums[0].algorithm == "sha256"
     assert r.files[0].checksums[0].hexdigest == "f" * 64
     assert adapter.discover_partition(ctx, "wy") == []
+    # Read once a day, reused by every state after the first (read once per state, it drew HTTP 429).
+    assert fetcher.requests.count("https://chroniclingamerica.loc.gov/data/ocr/ocr.json") == 1
