@@ -553,6 +553,7 @@ CHECKSUM_ONLY_ADAPTERS = frozenset(
         "ncbi-bookshelf",  # NLM's open-access book archives (chosen books, licence read per book)
         "map-tiles",  # PMTiles archives: MD5 (whole) or our SHA-256 after a read-back (cuts); no documents
         "american-stories",  # newspaper OCR of the Library of Congress's public scans, LFS SHA-256
+        "pmc-oa",  # NLM's own PMC Article Datasets (text and metadata), inventory MD5s
     }
 )
 SCREENED_ADAPTERS = frozenset({"doc-collection"})  # policy screened by document_screen()

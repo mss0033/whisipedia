@@ -35,6 +35,14 @@ class Adapter:
     def discover(self, ctx: Ctx) -> Iterable[ReleaseRef]:
         return [RELEASE]
 
+    def discover_partition(self, ctx: Ctx, partition: str) -> list[ReleaseRef]:
+        self.workdir = ctx.workdir
+        if partition != "p0001":
+            return []
+        return [ReleaseRef("big", "2026-10-18.p0001", None, FILES[:1], format="tar", license="CC-BY-4.0")]
+
+
+ADAPTER = Adapter()
 
 SPEC = SourceSpec(
     id="big",
@@ -72,7 +80,11 @@ def vault(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Downlo
     root = tmp_path / "vault"
     root.mkdir()
     fetcher = Downloads({f.url: d for f, d in zip(FILES, (A, B), strict=True)})
-    cfg = {"vault": {"root": str(root), "ingest_bytes_per_sec": 0}, "index": {"root": str(tmp_path / "i")}}
+    cfg = {
+        "vault": {"root": str(root), "ingest_bytes_per_sec": 0},
+        "index": {"root": str(tmp_path / "i")},
+        "orchestrator": {"state_db": str(tmp_path / "state" / "orchestrator.sqlite3")},
+    }
 
     def returning(value: object) -> Any:
         def stub(*args: object, **kwargs: object) -> object:
@@ -83,14 +95,17 @@ def vault(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Downlo
     monkeypatch.setattr(bootstrap, "layout", returning(None))
     monkeypatch.setattr(bootstrap, "load", returning(cfg))
     monkeypatch.setattr(bootstrap, "load_sources", returning([SPEC]))
-    monkeypatch.setattr(bootstrap, "load_adapters", returning({"big": Adapter()}))
+    monkeypatch.setattr(bootstrap, "load_adapters", returning({"big": ADAPTER}))
     monkeypatch.setattr(bootstrap, "build_fetcher", returning(fetcher))
     return root, fetcher
 
 
-def run(only: list[str] | None = None) -> tuple[int, str]:
+def run(only: list[str] | None = None, partition: str | None = None, parallel: int = 1) -> tuple[int, str]:
     out = io.StringIO()
-    rc = bulk.cmd_fetch(argparse.Namespace(config_dir=None, source="big", only=only or []), out)
+    args = argparse.Namespace(
+        config_dir=None, source="big", only=only or [], partition=partition, parallel=parallel
+    )
+    rc = bulk.cmd_fetch(args, out)
     return rc, out.getvalue()
 
 
@@ -148,3 +163,14 @@ def test_a_sealed_release_is_not_fetched_again(vault: tuple[Path, Downloads]) ->
     (sealed / "MANIFEST.json").write_text("{}")
     assert run()[0] == bulk.EXIT_NOTHING_NEW
     assert fetcher.downloaded == []
+
+
+def test_one_partition_in_parallel_with_a_kept_workdir(vault: tuple[Path, Downloads], tmp_path: Path) -> None:
+    root, fetcher = vault
+    rc, text = run(partition="p0001", parallel=4)
+    assert rc == bulk.EXIT_OK, text
+    assert (root / "_incoming/big/2026-10-18.p0001/a.tar.gz").read_bytes() == A
+    assert fetcher.downloaded == ["a.tar.gz"]
+    assert "next: wsp ingest --source big --version 2026-10-18.p0001" in text
+    assert ADAPTER.workdir == tmp_path / "state" / "bulk" / "big"  # kept between runs (PMC's inventory)
+    assert run(partition="p0099")[0] == bulk.EXIT_NOTHING_NEW  # an empty partition

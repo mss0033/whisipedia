@@ -231,9 +231,18 @@ sources:
     status: candidate
     license: LicenseRef-per-item
     legal_basis: open-license
-    access: {adapter: s3-bucket}
-    update: {strategy: base-plus-incremental}
-    size: {bytes: 5e12, measured: false, as_of: 2026-10-09}
+    access:
+      adapter: pmc-oa
+      # ADR-0010: 50,000 PMC ids a partition (p0000 ...), `wsp bulk fetch --source pmc-oa --partition
+      # p0193 --parallel 8`, then `wsp ingest`. The text and metadata of each article; not the XML,
+      # PDFs or figures (several TB). The FTP bulk packages were withdrawn in August 2026.
+      partitioned: true
+    # Indexed partition by partition once one partition's index size is measured: about 8 million
+    # full-text articles would otherwise outgrow the local index disk.
+    index: false
+    update: {cadence: P1M, strategy: snapshot-retention}
+    size: {records: 8e6, bytes: 350e9, measured: false, as_of: 2026-10-18}
+    notes: 2026-10-18 owner asked for it. Text-only estimate; the whole bucket with PDFs and figures is about 5 TB. Licence per article (license_code; TDM for author manuscripts).
 
   - id: openalex
     name: OpenAlex snapshot

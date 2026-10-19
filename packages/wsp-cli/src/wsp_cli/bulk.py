@@ -8,6 +8,11 @@ and downloads the files one by one into ``_incoming/<S>/<version>/`` with the li
 (resumable, checked against upstream, paced like every write into the vault). ``wsp ingest --source
 S --version V`` then adopts them by rename, never a copy. A file already there is not fetched again,
 so a rerun continues where a failure stopped. ``--only`` fetches the files whose names match a glob.
+
+``--partition P`` fetches one partition of a partitioned source (ADR-0010) whose adapter lists them
+(``discover_partition``: PubMed Central, 50,000 PMC ids a partition); its version is ``<day>.<P>``.
+``--parallel N`` downloads N files at once (a release of many small files: PMC's 60,000 a partition).
+The adapter works in ``<state>/bulk/<source>``, kept between runs (PMC's inventory is read once a day).
 """
 
 from __future__ import annotations
@@ -16,8 +21,8 @@ import argparse
 import fnmatch
 import json
 import sys
-import tempfile
 from collections.abc import Mapping
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, TextIO
 
@@ -29,6 +34,7 @@ from wsp_core.ports import Ctx
 PLANS_SUBDIR = "targets.d"
 LANE = "collections"  # renamed into place only when complete: ingest needs no settle wait
 EXIT_OK, EXIT_REFUSED, EXIT_FAILED, EXIT_NOTHING_NEW = 0, 2, 6, 7
+LOUD_FILES = 500  # beyond this many files to fetch, progress is reported per thousand
 _ALGO = {"sha256": "sha-256", "sha1": "sha-1", "md5": "md5"}
 
 
@@ -89,8 +95,20 @@ def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
         return EXIT_REFUSED
     vault_root = bootstrap.paths(cfg).require_vault()
     fetcher = bootstrap.build_fetcher(cfg, pace=bootstrap.ingest_pace(cfg))
-    with tempfile.TemporaryDirectory(prefix="wsp-bulk-") as work:
-        ctx = Ctx(source=spec, fetcher=fetcher, workdir=Path(work), user_agent=bootstrap.user_agent(cfg))
+    work = bootstrap.paths(cfg).require_state() / "bulk" / spec.id
+    work.mkdir(parents=True, exist_ok=True)
+    ctx = Ctx(source=spec, fetcher=fetcher, workdir=work, user_agent=bootstrap.user_agent(cfg))
+    partition = getattr(args, "partition", None)
+    if partition:
+        by_partition = getattr(adapter, "discover_partition", None)
+        if by_partition is None:
+            print(f"error: {spec.id}: its adapter has no partitions", file=sys.stderr)
+            return EXIT_REFUSED
+        releases = list(by_partition(ctx, partition))
+        if not releases:
+            out.write(f"{spec.id}: partition {partition} holds nothing; nothing new\n")
+            return EXIT_NOTHING_NEW
+    else:
         releases = list(adapter.discover(ctx))
     if not releases:
         print(f"error: {spec.id}: discovery found no release", file=sys.stderr)
@@ -110,19 +128,34 @@ def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
     out.write(
         f"{spec.id}/{release.version}: {len(release.files)} files, {_gb(total)}; fetching {len(wanted)}\n"
     )
-    failed = 0
-    for i, remote in enumerate(wanted, 1):
+    todo = [
+        (i, r)
+        for i, r in enumerate(wanted, 1)
+        if not ((d := dest_dir / r.name).is_file() and (r.size is None or d.stat().st_size == r.size))
+    ]
+    parallel = max(1, int(getattr(args, "parallel", 1) or 1))
+    quiet = len(todo) > LOUD_FILES  # 60,000 small files: a line a thousand, not a line a file
+
+    def one(item: tuple[int, RemoteFile]) -> tuple[bool, str | None]:
+        """Fetch one file: (it failed, the line to print)."""
+        i, remote = item
         dest = dest_dir / remote.name
-        if dest.is_file() and (remote.size is None or dest.stat().st_size == remote.size):
-            continue
         try:
             fetcher.download(remote, dest)
         except (FetchError, OSError) as exc:  # OSError: the NAS refused a write (EFAULT, 2026-10-18)
-            failed += 1
-            out.write(f"  {remote.name}: FAILED {exc}\n")
-            continue
-        out.write(f"  [{i}/{len(wanted)}] {remote.name} {_gb(dest.stat().st_size)}\n")
-        out.flush()
+            return True, f"  {remote.name}: FAILED {exc}"
+        return False, None if quiet else f"  [{i}/{len(wanted)}] {remote.name} {_gb(dest.stat().st_size)}"
+
+    failed = done = 0
+    with ThreadPoolExecutor(max_workers=parallel) as pool:
+        for bad, line in pool.map(one, todo):
+            done += 1
+            failed += bad
+            if line is not None:
+                out.write(line + "\n")
+            if quiet and done % 1000 == 0:
+                out.write(f"  {done:,}/{len(todo):,} fetched\n")
+            out.flush()
     if failed:
         out.write(f"{spec.id}/{release.version}: {failed} file(s) failed; run again to continue\n")
         return EXIT_FAILED
@@ -144,3 +177,5 @@ def register(sub: Any, add: Any) -> None:
     s.add_argument(
         "--only", action="append", default=[], help="fetch only files matching this glob (repeatable)"
     )
+    s.add_argument("--partition", help="one partition of a partitioned source (ADR-0010), e.g. p0193")
+    s.add_argument("--parallel", type=int, default=1, help="files downloaded at once (default 1)")

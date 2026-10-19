@@ -30,6 +30,7 @@ dailymed = "wsp_adapters.dailymed:DailyMedAdapter"
 ncbi-bookshelf = "wsp_adapters.bookshelf:BookshelfAdapter"
 map-tiles = "wsp_adapters.maptiles:MapTilesAdapter"
 american-stories = "wsp_adapters.americanstories:AmericanStoriesAdapter"
+pmc-oa = "wsp_adapters.pmc:PmcAdapter"
 
 [dependency-groups]
 dev = ["wsp-core[testing]"]
