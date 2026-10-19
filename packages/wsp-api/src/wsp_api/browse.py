@@ -34,11 +34,12 @@ from wsp_api.schemas import (
     SourceInfo,
 )
 from wsp_api.views import Library
-from wsp_api.zimread import ZimUnavailable
+from wsp_api.zimread import NOT_A_PAGE, ZimUnavailable
 from wsp_core.ids import DocId, parse_doc_id
 from wsp_core.model import ChangeKind, ChangeRecord, Gap, SourceSpec
 from wsp_core.ports import PortalSource
 
+RANDOM_DRAWS = 20  # catalog picks until one is not a capture of site machinery (zimread.NOT_A_PAGE)
 LINK_CHECK_SECONDS = 5.0  # a page's link check answers within this, with what it has checked
 # Four lookups at a time, shared by every page: one slow archive does not hold up a page's other links.
 _LINK_CHECKS = ThreadPoolExecutor(4, thread_name_prefix="link-check")
@@ -263,7 +264,13 @@ def browse_router(lib: Library) -> APIRouter:
         if source is not None:
             lib.source(source)
         rng = random.Random(secrets.randbits(64) if seed is None else seed)  # noqa: S311 - not security
-        ref = doc_ref(lib.catalog.random_doc(sources=[source] if source else None, rng=rng))
+        ref = None
+        for _ in range(RANDOM_DRAWS):  # a crawl's captures of site machinery are drawn again
+            ref = doc_ref(lib.catalog.random_doc(sources=[source] if source else None, rng=rng))
+            if ref is None or not NOT_A_PAGE.search(ref.doc_id):
+                break
+        else:
+            ref = None
         if ref is None and source is not None:
             ref = lib.random_zim_page(source)  # a site served straight from its ZIM archive
         if ref is None:

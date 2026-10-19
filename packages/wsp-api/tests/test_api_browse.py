@@ -454,3 +454,25 @@ def test_an_rfc_asked_by_its_number_is_answered() -> None:
         missing = c.get(document_href(make_doc_id("rfc", "9999")))
     assert [r.json()["doc_id"] for r in found] == ["wsp:rfc/rfc:RFC-4242"] * 2
     assert (missing.status_code, missing.json()["error"]["code"]) == (404, "document_not_found")
+
+
+def test_random_skips_a_crawls_captures_of_site_machinery(monkeypatch: pytest.MonkeyPatch) -> None:
+    """2026-10-19 audit: half the random pages of the Cloudflare Learning Center were its crawler's
+    captures of Cloudflare challenges (.../cdn-cgi/challenge-platform/...), which open as Not Found."""
+    from wsp_api.app import library_of
+
+    app = create_app(sample_services())
+    lib = library_of(app)
+    draws = iter(
+        [DocId("wsp:rfc/challenges.example.com/cdn-cgi/challenge-platform/x")] * 3 + [DocId("wsp:rfc/9110")]
+    )
+    def random_doc(**_: object) -> DocId:
+        return next(draws)
+
+    def title(did: str) -> str:
+        return "a title"
+
+    monkeypatch.setattr(lib.catalog, "random_doc", random_doc)
+    monkeypatch.setattr(lib, "title", title)
+    with local_client(app) as c:
+        assert c.get("/v1/random", params={"source": "rfc"}).json()["doc_id"] == "wsp:rfc/9110"
