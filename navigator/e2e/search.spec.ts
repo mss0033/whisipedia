@@ -129,11 +129,11 @@ test("I'm Feeling Lucky goes straight to a document", async ({ page, nav }) => {
   // Opening the search site puts the cursor in its box.
   await expect(box).toBeFocused();
   await box.pressSequentially('alan turing', { delay: 20 });
-  // Suggestions that arrive after the typing can open over the buttons, as a person would see them:
-  // Escape closes them first (the test clicked a suggestion half the time otherwise).
-  await expect(nav.main.locator('.suggest-item').first()).toBeVisible();
+  // Escape dismisses the suggestions, and those still on their way: one arriving after Escape opened
+  // the list again over the buttons (the test clicked a suggestion half the time).
   await box.press('Escape');
-  await expect(nav.main.locator('.suggest-item')).toHaveCount(0);
+  await page.waitForTimeout(600); // past the suggest debounce: nothing may open now
+  await expect(nav.main.locator('.suggest-item:visible')).toHaveCount(0);
   await nav.main.getByRole('button', { name: "I'm Feeling Lucky" }).click();
   await nav.settled();
   await nav.expectAddress(/^wsp:\/\/[a-z0-9.-]+\/[^?]+/);

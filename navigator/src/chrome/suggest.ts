@@ -41,6 +41,7 @@ export function attachSuggest(
   let items: PickedSuggestion[] = [];
   let active = -1;
   let controller: AbortController | null = null;
+  let waiting = false; // suggestions asked for (or about to be) and not shown yet
   const limit = opts.limit ?? 8;
 
   const close = () => {
@@ -114,6 +115,7 @@ export function attachSuggest(
       .suggest(q, limit, ac.signal)
       .then((r) => {
         if (ac.signal.aborted || input.value.trim() !== q) return;
+        waiting = false;
         const seen = new Set(local.map((l) => l.text.toLowerCase()));
         const remote: PickedSuggestion[] = r.suggestions
           .filter((text) => !seen.has(text.toLowerCase()))
@@ -121,7 +123,7 @@ export function attachSuggest(
         show(q, [...local, ...remote].slice(0, limit));
       })
       .catch(() => {
-        /* suggestions are best-effort */
+        waiting = false; // suggestions are best-effort
       });
   }, SUGGEST_DEBOUNCE_MS);
 
@@ -133,10 +135,26 @@ export function attachSuggest(
       close();
       return;
     }
+    waiting = true;
     fetchSuggestions(q);
   };
 
   const onKey = (ev: KeyboardEvent) => {
+    if (ev.key === 'Escape') {
+      // Suggestions still on their way are dismissed too: one arriving after Escape opened the list
+      // again, over the buttons a reader was about to press (2026-10-19, the Lucky e2e test). Only
+      // dismissing: with nothing to dismiss, Escape keeps its own meaning (a search box clears).
+      const dismissing = !list.hidden || waiting;
+      fetchSuggestions.cancel();
+      controller?.abort();
+      waiting = false;
+      if (dismissing) {
+        ev.preventDefault();
+        ev.stopPropagation();
+      }
+      close();
+      return;
+    }
     if (list.hidden) {
       if (ev.key === 'ArrowDown' && input.value.trim().length >= 2) onInput();
       return;
@@ -147,10 +165,6 @@ export function attachSuggest(
     } else if (ev.key === 'ArrowUp') {
       ev.preventDefault();
       setActive(active <= 0 ? items.length - 1 : active - 1);
-    } else if (ev.key === 'Escape') {
-      ev.preventDefault();
-      ev.stopPropagation();
-      close();
     } else if (ev.key === 'Enter' && active >= 0) {
       ev.preventDefault();
       const s = items[active]!;

@@ -449,9 +449,16 @@ class Library:
 
     def links(self, doc: DocRecord) -> list[DocumentLink]:
         """Outbound links, each resolved to a local document when the library holds it: in the store,
-        or (at most :data:`_MAX_ZIM_LINK_CHECKS` of them) a page of a Kiwix source's current ZIM."""
+        or (at most :data:`_MAX_ZIM_LINK_CHECKS` of them) a page of another Kiwix source's current ZIM.
+
+        A link inside the page's own archive is taken as held without a lookup: 32 lookups one after
+        another made a Wikipedia page nobody had opened take 1-5 s on a cold archive (2026-10-19),
+        and the Navigator asks afterwards which links lead nowhere (``POST /v1/links/missing``), all
+        at once, and marks them."""
         out: list[DocumentLink] = []
         zim_checks = 0
+        own = f"wsp:{doc.source_id}/"
+        own_zim = self._zim_backed(DocId(own + "x"))
         for i, href in enumerate(doc.links):
             target: str | None = None
             if i < _MAX_LINK_LOOKUPS and href.startswith("wsp:"):
@@ -459,7 +466,7 @@ class Library:
                     did = parse_doc(href)
                 except ApiError:
                     did = None
-                if did is not None and self.in_store(did):
+                if did is not None and ((own_zim and did.startswith(own)) or self.in_store(did)):
                     target = did
                 elif did is not None and zim_checks < _MAX_ZIM_LINK_CHECKS and self._may_stand_in(did):
                     zim_checks += 1

@@ -55,7 +55,9 @@ def test_html_document_is_rewritten_into_the_offline_web(browse: httpx.Client) -
     assert doc.kind == "encyclopedia"
     assert [(link.href, link.target) for link in doc.links] == [
         (TURING, TURING),
-        ("wsp:wikipedia-en-zim/A/Bombe", None),
+        # A link inside the page's own archive is taken as held (no lookup per link: 1-5 s on a cold
+        # archive); the Navigator's POST /v1/links/missing marks it when the archive lacks it.
+        ("wsp:wikipedia-en-zim/A/Bombe", "wsp:wikipedia-en-zim/A/Bombe"),
         ("https://example.org/enigma", None),
     ]
 
