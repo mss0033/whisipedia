@@ -31,6 +31,8 @@ ncbi-bookshelf = "wsp_adapters.bookshelf:BookshelfAdapter"
 map-tiles = "wsp_adapters.maptiles:MapTilesAdapter"
 american-stories = "wsp_adapters.americanstories:AmericanStoriesAdapter"
 pmc-oa = "wsp_adapters.pmc:PmcAdapter"
+openalex = "wsp_adapters.bulkdata:OpenAlexAdapter"
+loc-ocr-batches = "wsp_adapters.bulkdata:ChroniclingAmericaOcrAdapter"
 
 [dependency-groups]
 dev = ["wsp-core[testing]"]

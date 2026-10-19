@@ -248,14 +248,19 @@ sources:
     name: OpenAlex snapshot
     publisher: OurResearch
     domain: [science, catalog]
-    tier: T1
+    tier: T2
     status: candidate
     license: CC0-1.0
     legal_basis: open-license
-    access: {adapter: s3-bucket}
-    update: {strategy: snapshot-retention}
-    size: {bytes: 500e9, measured: false, as_of: 2026-10-09}
-    notes: Snapshot path on S3 changed; re-measure in Phase 1.
+    access:
+      adapter: openalex
+      # ADR-0010: one entity a partition (works, authors, sources, institutions, topics, ...) of the
+      # Parquet snapshot in the public bucket; `wsp bulk fetch --source openalex --partition works`.
+      partitioned: true
+    index: false  # 465 million works: kept whole for a reader of their own, not the full-text index
+    update: {cadence: P3M, strategy: snapshot-retention}
+    size: {records: 465e6, bytes: 800e9, measured: true, as_of: 2026-10-18}
+    notes: 2026-10-18 owner asked for it. The S3 path moved to data/parquet/<entity>/ (manifest.json each); works alone is 744 GB.
 
   - id: stackexchange
     name: Stack Exchange network
@@ -602,10 +607,15 @@ sources:
     status: candidate
     license: LicenseRef-PD
     legal_basis: public-domain
-    access: {adapter: http-files}
-    update: {strategy: base-plus-incremental}
-    size: {bytes: 2e12, measured: false, as_of: 2026-10-09}
-    notes: "Page OCR of 23.8 M pages in 3,010 batches (2.47 TB, loc.gov datasets portal). Its article-level text is held as american-stories; the page OCR waits until a reader needs the columns American Stories left out."
+    access:
+      adapter: loc-ocr-batches
+      # ADR-0010: one state a partition (the batch name's first word), from ocr.json (3,010 archives,
+      # 2.47 TB, SHA-256 each); `wsp bulk fetch --source chronicling-america --partition ak`.
+      partitioned: true
+    index: false  # page OCR of 23.8 M pages: kept whole; American Stories is its searchable article text
+    update: {cadence: P6M, strategy: snapshot-retention}
+    size: {bytes: 2.47e12, measured: true, as_of: 2026-10-18}
+    notes: 2026-10-18 owner asked for it. Page OCR of 23.8 M pages in 3,010 batches (loc.gov datasets); its article-level text is held as american-stories.
 
   - id: american-stories
     name: American Stories (Chronicling America, article by article)
