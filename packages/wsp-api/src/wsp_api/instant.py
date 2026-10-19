@@ -1,4 +1,5 @@
-"""Instant answers above the results (PLAN §11.3): a dictionary box for "define <word>".
+"""Instant answers above the results (PLAN §11.3): a dictionary box for "define <word>", and a map for
+"where is <place>" (the Atlas's place index, linked to the place's encyclopedia article).
 
 Read from the library itself, the Wiktionary entry for the word, never generated. The refined text of
 an entry keeps its section headings on their own lines ("English", "Adjective", "Noun", "Translations")
@@ -8,11 +9,13 @@ and each sense as a line below its part of speech; dated quotations follow the s
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
-from wsp_api.schemas import DefinitionAnswer, DefinitionSense
+from wsp_api.schemas import DefinitionAnswer, DefinitionSense, MapAnswer
+from wsp_core.gazetteer import Place
 from wsp_core.ids import DocId, make_doc_id
 from wsp_core.model import DocRecord
+from wsp_core.titles import shown_title
 
 DICTIONARY = "wiktionary-en"
 MAX_SENSES = 4
@@ -134,3 +137,63 @@ def _is_language_heading(line: str) -> bool:
 
 def _clip(text: str) -> str:
     return text if len(text) <= MAX_SENSE_CHARS else text[: MAX_SENSE_CHARS - 1].rstrip() + "…"
+
+
+# --- "where is <place>" ------------------------------------------------------------------------------
+
+_LOCATE = re.compile(
+    r"^\s*(?:where\s+is|where's|map\s+of|location\s+of|show\s+me)\s+(?P<a>.+?)\s*\??\s*$"
+    r"|^\s*(?P<b>.+?)\s+on\s+a\s+map\s*\??\s*$",
+    re.IGNORECASE,
+)
+ENCYCLOPEDIA = "wikipedia-top10"  # its native ids are <lang>/<Title>, the OSM wikipedia tag's form
+ZOOM_FOR_KIND = {
+    "place=country": 5, "place=state": 6, "place=region": 7, "place=province": 7, "place=county": 9,
+    "place=district": 10, "place=city": 11, "place=town": 12, "place=municipality": 12,
+    "place=village": 13, "place=island": 11, "place=archipelago": 8,
+}  # fmt: skip
+PLACE_CANDIDATES = 3
+
+
+def located_place(query: str) -> str | None:
+    """The place of a "where is …", "map of …" or "… on a map" query, or ``None``."""
+    m = _LOCATE.match(query)
+    if m is None:
+        return None
+    place = " ".join((m["a"] or m["b"] or "").split()).removeprefix("the ").strip()
+    return place or None
+
+
+def _describe(p: Place) -> str:
+    kind = p.kind.partition("=")[2].replace("_", " ").capitalize() or "Place"
+    return f"{kind}, population {p.population:,}" if p.population else kind
+
+
+def map_answer(
+    query: str,
+    find: Callable[[str], Sequence[Place]],
+    get: Callable[[DocId], DocRecord | None],
+) -> MapAnswer | None:
+    """The map box for a "where is …" query: the gazetteer's best match that has an article in the
+    library, which names it (Lisboa is shown as "Lisbon") and is where "The place »" leads. The server
+    never answered it before 2026-10-18; only the Navigator's mock did."""
+    place = located_place(query)
+    if place is None:
+        return None
+    for p in list(find(place))[:PLACE_CANDIDATES]:
+        lang, _, title = (p.wikipedia or "").partition(":")
+        if not title:
+            continue
+        doc = get(make_doc_id(ENCYCLOPEDIA, f"{lang}/{title.replace(' ', '_')}"))
+        if doc is None:
+            continue
+        return MapAnswer(
+            place=shown_title(doc.title) or p.name,
+            lat=p.lat,
+            lon=p.lon,
+            zoom=ZOOM_FOR_KIND.get(p.kind, 14),
+            description=_describe(p),
+            doc_id=doc.doc_id,
+            license=doc.license,
+        )
+    return None

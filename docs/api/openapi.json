@@ -1343,7 +1343,7 @@
           "maps"
         ],
         "summary": "Places",
-        "description": "Named places (OpenStreetMap) matching ``q``, the most important first.",
+        "description": "Named places (OpenStreetMap) matching ``q``, the most important first; with ``lat`` and\n``lon`` (the map's centre), the matches around that point first.",
         "operationId": "places_v1_maps_places_get",
         "parameters": [
           {
@@ -1370,6 +1370,46 @@
               "default": 10,
               "title": "Limit"
             }
+          },
+          {
+            "name": "lat",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "maximum": 90,
+                  "minimum": -90
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "With lon: the point looked at.",
+              "title": "Lat"
+            },
+            "description": "With lon: the point looked at."
+          },
+          {
+            "name": "lon",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "maximum": 180,
+                  "minimum": -180
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "With lat: matches near it first.",
+              "title": "Lon"
+            },
+            "description": "With lat: matches near it first."
           }
         ],
         "responses": {
@@ -1422,7 +1462,7 @@
           "maps"
         ],
         "summary": "Nearby",
-        "description": "Named places within ``radius`` metres of a point, nearest first.",
+        "description": "Named places within ``radius`` metres of a point: nearest first, weighed by importance (the\ntown before the café in it).",
         "operationId": "nearby_v1_maps_nearby_get",
         "parameters": [
           {

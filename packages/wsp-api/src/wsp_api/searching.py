@@ -24,7 +24,8 @@ from dataclasses import dataclass, field, replace
 from typing import Any, cast
 
 from wsp_api import convert, instant, search, sites
-from wsp_api.schemas import DocKind, Hit, KindFacet, SearchResults, SearchScope
+from wsp_api.errors import ApiError
+from wsp_api.schemas import DocKind, Hit, KindFacet, MapAnswer, SearchResults, SearchScope
 from wsp_api.snapshot import ZIM_ADAPTER
 from wsp_api.views import Library
 from wsp_core.listing import skip_paths, skip_regex
@@ -308,7 +309,9 @@ class Searcher:
                 KindFacet(kind=k, count=n) for k, n in sorted(counts.items(), key=lambda x: (-x[1], x[0]))
             ],
             navigate_to=nav,
-            instant=instant.definition(q, lib.s.documents.get) if offset == 0 else None,
+            instant=(instant.definition(q, lib.s.documents.get) or _map_answer(lib, q))
+            if offset == 0
+            else None,
             did_you_mean=did_you_mean,
             low_confidence=low,
             scope_note=note,
@@ -316,3 +319,17 @@ class Searcher:
             if routed is None
             else SearchScope(site=routed.site, sources=list(routed.sources), fallback=routed.fallback),
         )
+
+
+def _map_answer(lib: Library, q: str) -> MapAnswer | None:
+    """The "where is …" map, when the Atlas's place index is built (maps router: ``lib.gazetteer``)."""
+    gazetteer = getattr(lib, "gazetteer", None)
+    if gazetteer is None or instant.located_place(q) is None:
+        return None
+    try:
+        places = gazetteer()
+    except ApiError:  # the place index is not built yet: no map, the results as usual
+        return None
+    return instant.map_answer(
+        q, lambda name: places.search(name, limit=instant.PLACE_CANDIDATES), lib.s.documents.get
+    )

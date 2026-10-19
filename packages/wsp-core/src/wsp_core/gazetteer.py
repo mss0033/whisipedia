@@ -8,7 +8,7 @@ city of millions before a village (:func:`place_rank`).
 
 Searches are prefix searches on the last word ("interl" finds Interlaken), the most important
 matches first; a name spelled as asked gains a bonus, not precedence. Nearby places come from the
-R*Tree, nearest first.
+R*Tree, nearest and most important first.
 """
 
 from __future__ import annotations
@@ -54,6 +54,18 @@ CANDIDATES = 400  # FTS matches re-ranked per search, the most important first
 # match order, which put hamlets named New York before the city (2026-10-18).
 EXACT_BONUS = 30.0
 PREFIX_BONUS = 10.0
+# Another of its names (a translation, a former name) counts as its name for an important place, a
+# city of about 100,000 or more: the aliases name every Lisbon, but "Lisbon" means the capital.
+IMPORTANT_RANK = 90.0
+NOT_THE_WORD = 15.0
+# Searching from a map: a match near what the reader looks at counts like a few steps in KIND_RANK,
+# fading with distance (half at NEAR_SCALE_KM). "unter" seen from Interlaken is Unterseen next door, not
+# Unterwalden or Unterschleißheim (2026-10-18 live e2e). The nearby candidates are read as well as the
+# globally important ones: Unterseen is not among the first CANDIDATES "unter*" by rank.
+NEAR_BONUS = 45.0
+NEAR_SCALE_KM = 10.0
+NEAR_BOX_DEG = 0.5
+NEAR_CANDIDATES = 200
 
 
 def place_rank(kind: str, population: int | None, has_article: bool) -> float:
@@ -131,6 +143,12 @@ def _fold(text: str) -> str:
 _WORD = re.compile(r"\w+", re.UNICODE)
 
 
+def _article_title(wikipedia: str | None) -> str:
+    """``en:Lisbon`` -> ``lisbon``; ``en:Paris, Texas`` and ``en:Georgia (U.S. state)``: the first part."""
+    title = (wikipedia or "").partition(":")[2]
+    return _fold(re.split(r",| \(", title, maxsplit=1)[0].replace("_", " ").strip()) if title else ""
+
+
 def fts_query(text: str) -> str | None:
     """An FTS5 query for ``text``: every word, the last one as a prefix ("new yo" -> "new" "yo"*)."""
     words = _WORD.findall(_fold(text))
@@ -171,27 +189,70 @@ class Gazetteer:
                 qid=r[7], wikipedia=r[8],
             )  # fmt: skip
 
-    def search(self, text: str, *, limit: int = 10) -> list[Place]:
+    def search(self, text: str, *, limit: int = 10, near: tuple[float, float] | None = None) -> list[Place]:
+        """Places named ``text`` (its last word a prefix), the most important first; ``near`` (lat, lon),
+        the point the reader looks at, puts the matches around it first."""
         q = fts_query(text)
         if q is None:
             return []
         limit = max(1, min(limit, MAX_LIMIT))
-        found = list(
-            self._rows(
-                "SELECT p.osm, p.name, p.kind, p.lat, p.lon, p.rank, p.population, p.qid, p.wikipedia "
-                "FROM names JOIN places p ON p.id = names.rowid WHERE names MATCH ? "
+        cols = "SELECT p.id, p.osm, p.name, p.kind, p.lat, p.lon, p.rank, p.population, p.qid, p.wikipedia "
+        db = self._db()
+
+        def rows(sql: str, args: tuple[object, ...]) -> Iterator[tuple[int, Place]]:
+            for r in db.execute(sql, args):
+                yield int(r[0]), Place(r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9])
+
+        found = dict(
+            rows(
+                cols + "FROM names JOIN places p ON p.id = names.rowid WHERE names MATCH ? "
                 "ORDER BY p.rank DESC LIMIT ?",
                 (q, CANDIDATES),
             )
         )
+        if near is not None:
+            lat, lon = near
+            box = (lat - NEAR_BOX_DEG, lat + NEAR_BOX_DEG, lon - NEAR_BOX_DEG, lon + NEAR_BOX_DEG)
+            # The R*Tree first, then the names: 30 ms, where the text side first took 1-13 s.
+            local = (
+                "FROM spots s JOIN places p ON p.id = s.id WHERE s.min_lat >= ? AND s.max_lat <= ? "
+                "AND s.min_lon >= ? AND s.max_lon <= ? "
+                "AND p.id IN (SELECT rowid FROM names WHERE names MATCH ?) ORDER BY p.rank DESC LIMIT ?"
+            )
+            for i, p in rows(cols + local, (*box, q, NEAR_CANDIDATES)):
+                found.setdefault(i, p)
         want = _fold(text.strip())
+        # The words as a phrase in any of its names. The aliases live only in the full-text index (it
+        # keeps no text), so whether "Lisbon" is one of Lisboa's names is asked of the index.
+        ids = list(found)
+        named: set[int] = set()
+        if ids:
+            phrase = '"' + " ".join(_WORD.findall(want)) + '"'
+            marks = ",".join("?" * len(ids))
+            sql = f"SELECT rowid FROM names WHERE names MATCH ? AND rowid IN ({marks})"  # noqa: S608 - marks only
+            named = {int(r[0]) for r in db.execute(sql, (phrase, *ids))}
 
-        def score(p: Place) -> float:
+        # A place of this name that matters (a capital known as "Rome", "Vienna") is what the words mean;
+        # matches where they are only the start of another word ("rome" in România) step back.
+        the_word = any(i in named and found[i].rank >= IMPORTANT_RANK for i in ids)
+
+        def score(item: tuple[int, Place]) -> float:
+            i, p = item
             name = _fold(p.name)
-            return p.rank + (EXACT_BONUS if name == want else PREFIX_BONUS if name.startswith(want) else 0.0)
+            if name == want or _article_title(p.wikipedia) == want:
+                bonus = EXACT_BONUS  # its name, or its article's: Lisboa is "Lisbon" (en:Lisbon)
+            elif i in named and p.rank >= IMPORTANT_RANK:
+                bonus = EXACT_BONUS  # another name of an important place: Wien is Vienna
+            elif i in named or name.startswith(want):
+                bonus = PREFIX_BONUS
+            else:
+                bonus = -NOT_THE_WORD if the_word else 0.0
+            if near is not None:
+                km = distance_m(near[0], near[1], p.lat, p.lon) / 1000
+                bonus += NEAR_BONUS * NEAR_SCALE_KM / (NEAR_SCALE_KM + km)
+            return p.rank + bonus
 
-        found.sort(key=score, reverse=True)
-        return found[:limit]
+        return [p for _, p in sorted(found.items(), key=score, reverse=True)[:limit]]
 
     def nearby(self, lat: float, lon: float, *, radius_m: float = 5000, limit: int = 10) -> list[Place]:
         limit = max(1, min(limit, MAX_LIMIT))
@@ -212,5 +273,8 @@ class Gazetteer:
                         p.osm, p.name, p.kind, p.lat, p.lon, p.rank, p.population, p.qid, p.wikipedia, (), d
                     )
                 )
-        near.sort(key=lambda p: p.distance_m or 0.0)
+        # "What's here" names the town before the casino in it: distance divided by importance, so a
+        # place a few times further away but much more important comes first (2026-10-18 live e2e:
+        # Casino Interlaken, 176 m, was listed before Interlaken).
+        near.sort(key=lambda p: (p.distance_m or 0.0) / (1 + max(p.rank, 0.0) / 10))
         return near[:limit]

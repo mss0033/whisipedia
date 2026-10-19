@@ -452,6 +452,8 @@ def maps_router(lib: Library) -> APIRouter:
             gazetteers[:] = [Gazetteer(gazetteer_path)]
         return gazetteers[0]
 
+    lib.gazetteer = gazetteer  # type: ignore[attr-defined]  # search's "where is" answer reads it
+
     def hit(p: Place) -> PlaceHit:
         dist = None if p.distance_m is None else round(p.distance_m, 1)
         return PlaceHit(
@@ -465,9 +467,17 @@ def maps_router(lib: Library) -> APIRouter:
             str, Query(min_length=1, max_length=200, description="A place name; the last word is a prefix.")
         ],
         limit: Annotated[int, Query(ge=1, le=50)] = 10,
+        lat: Annotated[
+            float | None, Query(ge=-90, le=90, description="With lon: the point looked at.")
+        ] = None,
+        lon: Annotated[
+            float | None, Query(ge=-180, le=180, description="With lat: matches near it first.")
+        ] = None,
     ) -> Places:
-        """Named places (OpenStreetMap) matching ``q``, the most important first."""
-        found = await pool.run(lambda: gazetteer().search(q, limit=limit))
+        """Named places (OpenStreetMap) matching ``q``, the most important first; with ``lat`` and
+        ``lon`` (the map's centre), the matches around that point first."""
+        near = (lat, lon) if lat is not None and lon is not None else None
+        found = await pool.run(lambda: gazetteer().search(q, limit=limit, near=near))
         return Places(places=[hit(p) for p in found])
 
     @r.get("/nearby", tags=["maps"], response_model=Places, responses=errors(503))
@@ -477,7 +487,8 @@ def maps_router(lib: Library) -> APIRouter:
         radius: Annotated[float, Query(gt=0, le=200_000, description="Metres.")] = 5000,
         limit: Annotated[int, Query(ge=1, le=50)] = 10,
     ) -> Places:
-        """Named places within ``radius`` metres of a point, nearest first."""
+        """Named places within ``radius`` metres of a point: nearest first, weighed by importance (the
+        town before the café in it)."""
         found = await pool.run(lambda: gazetteer().nearby(lat, lon, radius_m=radius, limit=limit))
         return Places(places=[hit(p) for p in found])
 

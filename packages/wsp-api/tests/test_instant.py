@@ -85,3 +85,39 @@ def test_definition_reads_the_library_entry() -> None:
     assert definition("sesquipedalian", get) is None
     empty: dict[DocId, DocRecord] = {}
     assert definition("define sesquipedalian", empty.get) is None
+
+
+def test_where_is_a_place_shows_its_map_named_by_its_article() -> None:
+    from wsp_api.instant import located_place, map_answer
+    from wsp_core.gazetteer import Place
+
+    assert located_place("where is Lisbon?") == "Lisbon"
+    assert located_place("map of the Alps") == "Alps"
+    assert located_place("Interlaken on a map") == "Interlaken"
+    assert located_place("lisbon earthquake") is None
+    lisboa = Place("node/1", "Lisboa", "place=city", 38.72, -9.14, 98.0, 552_700, "Q597", "en:Lisbon")
+    no_article = Place("node/2", "Lisbon", "place=hamlet", 1.0, 2.0, 15.0)
+    article = DocRecord(
+        doc_id=make_doc_id("wikipedia-top10", "en/Lisbon"),
+        source_id="wikipedia-top10",
+        native_id="en/Lisbon",
+        title="Lisbon",
+        lang="en",
+        license="CC-BY-SA-4.0",
+        text="Lisbon is the capital of Portugal.",
+        content_hash=content_hash("x"),
+    )
+    asked: list[str] = []
+
+    def find(name: str) -> list[Place]:
+        asked.append(name)
+        return [no_article, lisboa]
+
+    got = map_answer("where is lisbon", find, {article.doc_id: article}.get)
+    assert asked == ["lisbon"]
+    assert got is not None
+    assert (got.place, got.zoom, got.doc_id) == ("Lisbon", 11, "wsp:wikipedia-top10/en/Lisbon")
+    assert (got.lat, got.lon) == (38.72, -9.14)
+    assert got.description == "City, population 552,700"
+    assert map_answer("define lisbon", find, {}.get) is None
+    assert map_answer("where is lisbon", find, {}.get) is None  # no article in the library: no box

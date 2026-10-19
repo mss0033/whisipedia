@@ -230,9 +230,16 @@ export class WspClient {
     return this.get('GET /v1/maps/tilesets', NO_PATH, {}, signal);
   }
 
-  /** Named places matching `q` (the gazetteer); 503 until it is built. */
-  places(q: string, limit = 10, signal?: AbortSignal): Promise<Places> {
-    return this.get('GET /v1/maps/places', NO_PATH, { q, limit }, signal);
+  /** Named places matching `q` (the gazetteer); `near`, the point looked at, puts the matches
+   * around it first. 503 until it is built. */
+  places(
+    q: string,
+    limit = 10,
+    signal?: AbortSignal,
+    near?: { lat: number; lon: number },
+  ): Promise<Places> {
+    const at = near ? { lat: near.lat, lon: near.lon } : {};
+    return this.get('GET /v1/maps/places', NO_PATH, { q, limit, ...at }, signal);
   }
 
   /** Named places within `radius` metres of a point, nearest first. */

@@ -963,6 +963,10 @@ export interface Routes {
       /** A place name; the last word is a prefix. */
       q: string;
       limit?: number | undefined;
+      /** With lon: the point looked at. */
+      lat?: number | null | undefined;
+      /** With lat: matches near it first. */
+      lon?: number | null | undefined;
     };
     body: null;
     response: Places;

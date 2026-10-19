@@ -56,6 +56,9 @@ import {
 } from './style.ts';
 import { type AtlasRoute, type AtlasView, atlasAddress, WORLD_VIEW } from './view-state.ts';
 
+/** From this zoom on, a place search favours the places around the map's centre. */
+const NEAR_SEARCH_ZOOM = 6;
+
 setWorkerUrl(workerUrl);
 
 export interface AtlasOptions {
@@ -799,7 +802,11 @@ export class Atlas {
     );
     this.openPanel('Places', results, library);
     try {
-      const found = await this.opts.api.places(q, 15, this.opts.signal);
+      // Seen from a region (not the whole world), the places around it first: "unter" from
+      // Interlaken is Unterseen next door (2026-10-18).
+      const c = this.map.getCenter();
+      const near = this.map.getZoom() >= NEAR_SEARCH_ZOOM ? { lat: c.lat, lon: c.lng } : undefined;
+      const found = await this.opts.api.places(q, 15, this.opts.signal, near);
       if (!found.places.length) {
         results.replaceChildren(h('p', null, `No place named “${q}” in the place index.`));
         return;
