@@ -77,7 +77,7 @@ const MOJIBAKE = /Ã[\u0080-¿]|â€[\u0080-¿™œ"]|Â[ -¿]|�{2,}/;
 // Markup a reader should never see as text.
 const MARKUP = [
   [/&lt;\/?(p|div|span|br|a|b|i|em|strong|table|tr|td|li|ul|ol|h[1-6])\b/i, 'escaped HTML tags'],
-  [/<\/?(p|div|span|table|tr|td|li|ul|ol|h[1-6])(\s[^>]*)?>/i, 'raw HTML tags'],
+  [/<\/?(p|div|span|table|tr|td|li|ul|ol|h[1-6])(\s[^>\n]*)?>/i, 'raw HTML tags'],
   // A template name starts with a capital: {{ca:a∈A}} is a set in a logic text (IEP, 2026-10-20).
   [/\{\{[A-Z][A-Za-z ]{0,60}(\||\}\})/, 'wiki template'],
   // A wiki title: a capital first, no comma (a chemical name in brackets is not one, eCFR 2026-10-19).
@@ -313,6 +313,24 @@ function add(list, dim, code, detail = '') {
   list.push({ dim, code, detail: String(detail).slice(0, 200) });
 }
 
+// A GET as a browser makes it: once more after a reset. The server closes an idle keep-alive
+// connection after 5 s, and reusing it as it closes reads ECONNRESET; a browser retries such a GET by
+// itself (24 images on 2026-10-19, 2 CIA downloads reported as "timeout" on 2026-10-20). `status` is
+// the HTTP status, or what went wrong when no answer came.
+async function getAsBrowser(context, url, headers = {}) {
+  let failure = '';
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const r = await context.request.get(url, { timeout: 60_000, headers });
+      return { ok: r.ok(), status: r.status(), headers: r.headers() };
+    } catch (e) {
+      failure = String(e).split('\n')[0].slice(0, 80);
+      if (!/ECONNRESET|socket hang up|EPIPE/.test(failure)) break;
+    }
+  }
+  return { ok: false, status: /timeout/i.test(failure) ? 'timeout' : failure, headers: {} };
+}
+
 async function audit(context, phoneContext, id) {
   const issues = [];
   const address = addressOf(id);
@@ -389,17 +407,8 @@ async function audit(context, phoneContext, id) {
   if (broken.length) add(issues, 'render', 'image-broken', `${broken.length}: ${broken[0]}`);
   for (const img of seen.images.slice(0, IMAGES_CHECKED)) {
     if (!img.src?.startsWith('/v1/') || img.broken) continue;
-    // Once more after a reset: the server closes an idle keep-alive connection after 5 s, and reusing
-    // it as it closes reads ECONNRESET; a browser retries such a GET by itself (24 images, 2026-10-19).
-    const get = () =>
-      context.request.get(`${BASE}${img.src}`, { timeout: 60_000 }).catch((e) => {
-        if (/ECONNRESET|socket hang up|EPIPE/.test(String(e))) return 'reset';
-        return null;
-      });
-    let r = await get();
-    if (r === 'reset') r = await get();
-    if (r === 'reset') r = null;
-    if (!r?.ok()) add(issues, 'render', 'image-missing', `${r?.status() ?? 'timeout'} ${img.src}`);
+    const r = await getAsBrowser(context, `${BASE}${img.src}`);
+    if (!r.ok) add(issues, 'render', 'image-missing', `${r.status} ${img.src}`);
   }
   // --- read -----------------------------------------------------------------------------------------
   const apiText = (doc?.text ?? '').trim();
@@ -429,7 +438,12 @@ async function audit(context, phoneContext, id) {
       what === 'wiki template' &&
       /^\{\{[^{}]+\}\}$/.test(m?.[0] ?? '') &&
       (doc?.html ?? '').includes(m?.[0] ?? '\u0000');
-    const escaped = tag && new RegExp(`&lt;/?${tag}\\b`, 'i').test(doc?.html ?? '');
+    // A plain-text document's text is all its own words (OCR of a CIA page reads "<li ee g a!").
+    const escaped =
+      tag &&
+      (doc?.html
+        ? new RegExp(`&lt;/?${tag}\\b`, 'i').test(doc.html)
+        : (doc?.text ?? '').includes(m?.[0] ?? '\u0000'));
     if (m && !written && !escaped)
       add(
         issues,
@@ -635,16 +649,12 @@ async function audit(context, phoneContext, id) {
     const href = dl?.href || (original.url ? `${BASE}${original.url}` : null);
     if (href) {
       // The first bytes only, as a browser's download or viewer starts it (a range GET, not HEAD).
-      const r = await context.request
-        .get(href.startsWith('http') ? href : `${BASE}${href}`, {
-          timeout: 60_000,
-          headers: { Range: 'bytes=0-1023' },
-        })
-        .catch(() => null);
-      if (!r?.ok())
-        add(issues, 'use', 'download-fails', `${r?.status() ?? 'timeout'} ${href.slice(0, 120)}`);
-      else if (type && !(r.headers()['content-type'] ?? '').startsWith(type.split(';')[0]))
-        add(issues, 'use', 'download-wrong-type', `${r.headers()['content-type']} for ${type}`);
+      const r = await getAsBrowser(context, href.startsWith('http') ? href : `${BASE}${href}`, {
+        Range: 'bytes=0-1023',
+      });
+      if (!r.ok) add(issues, 'use', 'download-fails', `${r.status} ${href.slice(0, 120)}`);
+      else if (type && !(r.headers['content-type'] ?? '').startsWith(type.split(';')[0]))
+        add(issues, 'use', 'download-wrong-type', `${r.headers['content-type']} for ${type}`);
     }
     if (
       type === 'application/pdf' &&

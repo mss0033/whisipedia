@@ -10,7 +10,14 @@ from typing import cast
 import pytest
 from adapters_testkit import make_ctx, make_spec
 
-from wsp_adapters.doccollection.adapter import CATALOG, DocCollectionAdapter, long_pdf_sections, pdf_text
+from wsp_adapters.doccollection.adapter import (
+    CATALOG,
+    INLINE_READS,
+    DocCollectionAdapter,
+    long_pdf_sections,
+    pdf_text,
+    read_in_order,
+)
 from wsp_adapters.doccollection.catalog import write_catalog
 from wsp_adapters.doccollection.model import DocumentMeta
 from wsp_adapters.doccollection.testing import make_pdf
@@ -205,3 +212,35 @@ def test_an_unreadable_page_is_left_out_and_the_rest_read(
     monkeypatch.setattr(pypdfium2.PdfDocument, "__getitem__", damaged)  # pdf[i], as pdf_text reads it
     pages = pdf_text(path, 3).split("\n\f\n")
     assert pages == ["Page 1 text", "[Page 2 of this PDF could not be read.]", "Page 3 text"]
+
+
+def test_files_are_read_by_worker_processes_in_catalog_order(tmp_path: Path) -> None:
+    """Past INLINE_READS files the reads go to worker processes; the records keep the catalog's order,
+    a file that needs no reading passes straight through, and a long PDF arrives in its chapters."""
+    items: list[tuple[DocumentMeta, Path]] = []
+    for i in range(INLINE_READS + 6):
+        path = tmp_path / f"d{i:02}.pdf"
+        path.write_bytes(make_pdf([[f"Document number {i} about anemometers"]]))
+        items.append((DocumentMeta(doc_key=f"t:{i}", file=path.name, issuer="T", title=f"D{i}"), path))
+    book = _book(tmp_path)
+    items.insert(
+        INLINE_READS + 2, (DocumentMeta(doc_key="t:book", file=book.name, issuer="T", title="B"), book)
+    )
+    skip = tmp_path / "skip.zip"
+    items.insert(3, (DocumentMeta(doc_key="t:skip", file=skip.name, issuer="T", title="S"), skip))
+
+    def needs(item: tuple[DocumentMeta, Path]) -> bool:
+        return item[1].suffix == ".pdf"
+
+    pooled = list(read_in_order(items, needs, 5, workers=2))
+    inline = list(read_in_order(items, needs, 5, workers=1))
+    assert [m.doc_key for m, _, _ in pooled] == [m.doc_key for m, _ in items]
+    assert pooled == inline
+    reads = {m.doc_key: r for m, _, r in pooled}
+    assert reads["t:skip"] is None
+    twenty, long = reads["t:20"], reads["t:book"]
+    assert twenty is not None
+    assert "Document number 20" in twenty.body
+    assert long is not None
+    assert [s.title for s in long.sections][-1] == "Chapter Two"
+    assert "Page 12 text" in long.parts[-1]

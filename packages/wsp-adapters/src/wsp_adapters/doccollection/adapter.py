@@ -40,20 +40,22 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import multiprocessing
+import os
 import re
 import sqlite3
 import time
 import zipfile
 from collections import deque
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, NamedTuple, cast
 from urllib.parse import unquote, urlsplit
 
-from wsp_adapters._common import access, upstream_dir, verify_file
+from wsp_adapters._common import access, available_cpus, upstream_dir, verify_file
 from wsp_adapters.doccollection import structured, tei
 from wsp_adapters.doccollection.catalog import FetchedDoc, build_catalog, excluded_by, write_catalog
 from wsp_adapters.doccollection.discovery import (
@@ -547,26 +549,33 @@ class DocCollectionAdapter:
         """
         spec = ctx.source
         cfg = self.config(spec)
-        for meta in read_catalog(generation_dir):
-            why = meta.excluded or excluded_by(meta, cfg.rules, cfg.formats)
-            if why:
-                log.info("%s: %s left out of the index (%s)", spec.id, meta.doc_key, why)
+
+        def admitted() -> Iterator[tuple[DocumentMeta, Path]]:
+            for meta in read_catalog(generation_dir):
+                why = meta.excluded or excluded_by(meta, cfg.rules, cfg.formats)
+                if why:
+                    log.info("%s: %s left out of the index (%s)", spec.id, meta.doc_key, why)
+                    continue
+                path = resolve_file(generation_dir, meta)
+                if path is None:
+                    log.warning("%s: %s not found in any generation", spec.id, meta.file)
+                    continue
+                yield meta, path
+
+        def needs_reading(item: tuple[DocumentMeta, Path]) -> bool:
+            snapshot = cfg.reader and item[1].suffix.lower() in (".zip", ".xml", ".json")
+            return cfg.index_text and not snapshot
+
+        for meta, path, read in read_in_order(admitted(), needs_reading, cfg.pdf_max_pages):
+            if read is None:
+                if cfg.reader and path.suffix.lower() in (".zip", ".xml", ".json"):
+                    yield from self._snapshot_documents(spec, cfg, meta, path)
+                    continue
+                read = FileText((), "", (), "")
+            if read.sections:
+                yield from self._section_documents(spec, meta, path, generation_dir, read)
                 continue
-            path = resolve_file(generation_dir, meta)
-            if path is None:
-                log.warning("%s: %s not found in any generation", spec.id, meta.file)
-                continue
-            if cfg.reader and path.suffix.lower() in (".zip", ".xml", ".json"):
-                yield from self._snapshot_documents(spec, cfg, meta, path)
-                continue
-            if (
-                cfg.index_text
-                and path.suffix.lower() == ".pdf"
-                and (sections := long_pdf_sections(path, cfg.pdf_max_pages))
-            ):
-                yield from self._section_documents(spec, meta, path, generation_dir, sections)
-                continue
-            body = document_text(path, max_pages=cfg.pdf_max_pages) if cfg.index_text else ""
+            body = read.body
             title = reader_title(meta, path, body)
             text = catalog_header(meta, title=title) + ("\n\n" + body if body else "")
             license_ = meta.license or spec.license
@@ -579,7 +588,7 @@ class DocCollectionAdapter:
                 lang=meta.language or "en",
                 license=license_,
                 text=text,
-                revision=meta.edition_date or (pdf_metadata_date(path) if cfg.index_text else None) or None,
+                revision=meta.edition_date or read.date or None,
                 url_native=meta.origin_url or None,
                 html_ref=f"file:{meta.generation or generation_dir.name}/{meta.file}",
                 content_hash=content_hash(text),
@@ -588,15 +597,15 @@ class DocCollectionAdapter:
             )
 
     def _section_documents(
-        self, spec: SourceSpec, meta: DocumentMeta, path: Path, generation_dir: Path, sections: list[Section]
+        self, spec: SourceSpec, meta: DocumentMeta, path: Path, generation_dir: Path, read: FileText
     ) -> Iterator[DocRecord]:
         """A PDF longer than ``pdf_max_pages`` as its chapters (:func:`wsp_adapters.pdftext.plan_sections`),
         each read whole, and the book itself: its catalog header and its contents, under the id the
         whole PDF always had."""
-        front = pdf_text(path, max_pages=min(FRONT_MATTER_PAGES, sections[0].stop))
-        title = reader_title(meta, path, front)
+        sections = read.sections
+        title = reader_title(meta, path, read.body)
         license_ = meta.license or spec.license
-        revision = meta.edition_date or pdf_metadata_date(path) or None
+        revision = meta.edition_date or read.date or None
         html_ref = f"file:{meta.generation or generation_dir.name}/{meta.file}"
         record_meta = meta.record_meta()
         contents = "\n".join(f"{s.title} (page {s.start + 1})" for s in sections)
@@ -617,8 +626,7 @@ class DocCollectionAdapter:
             aliases=tuple(dict.fromkeys(a for a in (meta.pub_number, listed_as) if a and a != title)),
             meta={**record_meta, "pages": f"1-{sections[-1].stop}"},
         )
-        for section in sections:
-            body = pdf_text(path, max_pages=section.stop - section.start, first=section.start)
+        for section, body in zip(sections, read.parts, strict=True):
             text = f"{title}\n{section.title} (pages {section.start + 1}-{section.stop})\n\n{body}"
             native = f"{meta.doc_key}/p{section.start + 1}"
             yield DocRecord(
@@ -1365,6 +1373,73 @@ def long_pdf_sections(path: Path, max_pages: int) -> list[Section]:
 
 def document_text(path: Path, *, max_pages: int) -> str:
     return extract_text(path, max_pages=max_pages).text
+
+
+class FileText(NamedTuple):
+    """What indexing a file reads from the file itself (:func:`read_for_index`)."""
+
+    sections: tuple[Section, ...]  # a PDF longer than ``pdf_max_pages``: its chapters; else ()
+    body: str  # the whole text; for a sectioned PDF its front matter
+    parts: tuple[str, ...]  # each section's text
+    date: str  # the PDF's own date (pdf_metadata_date), "" for other files
+
+
+def read_for_index(path: Path, max_pages: int) -> FileText:
+    """Read one file for the index. Runs in a worker process (:func:`read_in_order`): pdfium is not
+    thread-safe, and one core read the 85,000 USGS publications at a document a second (2026-10-20)."""
+    if path.suffix.lower() == ".pdf" and (sections := long_pdf_sections(path, max_pages)):
+        front = pdf_text(path, max_pages=min(FRONT_MATTER_PAGES, sections[0].stop))
+        parts = tuple(pdf_text(path, max_pages=s.stop - s.start, first=s.start) for s in sections)
+        return FileText(tuple(sections), front, parts, pdf_metadata_date(path))
+    return FileText((), document_text(path, max_pages=max_pages), (), pdf_metadata_date(path))
+
+
+INLINE_READS = 16  # files read in this process before worker processes start: a small source needs none
+READS_AHEAD_PER_WORKER = 2  # files in flight per worker; bounds the texts held in memory
+
+
+def refine_workers(env: Mapping[str, str] | None = None) -> int:
+    """Worker processes for reading files: ``$WSP_MAX_WORKERS`` (the systemd units set 4), at most the
+    CPUs this process may use less one, at least 1."""
+    raw = (os.environ if env is None else env).get("WSP_MAX_WORKERS", "").strip()
+    wanted = int(raw) if raw.isdigit() and int(raw) > 0 else 4
+    return max(1, min(wanted, available_cpus() - 1))
+
+
+def read_in_order[T: tuple[DocumentMeta, Path]](
+    items: Iterable[T], needs_reading: Callable[[T], bool], max_pages: int, *, workers: int | None = None
+) -> Iterator[tuple[DocumentMeta, Path, FileText | None]]:
+    """Each item with its :func:`read_for_index` (``None`` when ``needs_reading`` says no), in the
+    items' order. After :data:`INLINE_READS` files the reads go to worker processes, a few at a time."""
+    workers = refine_workers() if workers is None else workers
+    pending: deque[tuple[DocumentMeta, Path, Future[FileText] | None]] = deque()
+    pool: ProcessPoolExecutor | None = None
+    inline = 0
+    try:
+        for item in items:
+            meta, path = item
+            if not needs_reading(item):
+                pending.append((meta, path, None))
+            elif pool is None and (workers <= 1 or inline < INLINE_READS):
+                inline += 1
+                done: Future[FileText] = Future()
+                done.set_result(read_for_index(path, max_pages))
+                pending.append((meta, path, done))
+            else:
+                if pool is None:
+                    # spawn, not fork: the index process runs threads, and a forked child can inherit
+                    # a lock one of them held.
+                    pool = ProcessPoolExecutor(workers, mp_context=multiprocessing.get_context("spawn"))
+                pending.append((meta, path, pool.submit(read_for_index, path, max_pages)))
+            while pending and (len(pending) > workers * READS_AHEAD_PER_WORKER or pending[0][2] is None):
+                m, p, f = pending.popleft()
+                yield m, p, None if f is None else f.result()
+        while pending:
+            m, p, f = pending.popleft()
+            yield m, p, None if f is None else f.result()
+    finally:
+        if pool is not None:
+            pool.shutdown(wait=True, cancel_futures=True)
 
 
 def front_matter(path: Path, pages: int = FRONT_MATTER_PAGES) -> Extracted:
