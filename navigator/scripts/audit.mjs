@@ -414,7 +414,13 @@ async function audit(context, phoneContext, id) {
     // Tags the archived page writes as text (&lt;h1&gt;: How to Design Programs shows an example
     // page's code in a code table) are its words, not markup left over.
     const tag = what === 'raw HTML tags' ? /<\/?([a-z0-9]+)/i.exec(m?.[0] ?? '')?.[1] : null;
-    if (m && !(tag && (doc?.html ?? '').includes(`&lt;${tag}`)))
+    // A whole template a page writes in its own text is its words (Wikipedia's portal pages discuss
+    // "the {{Random portal component}}"); the Navigator removes the leftovers it knows.
+    const written =
+      what === 'wiki template' &&
+      /^\{\{[^{}]+\}\}$/.test(m?.[0] ?? '') &&
+      (doc?.html ?? '').includes(m?.[0] ?? '\u0000');
+    if (m && !written && !(tag && (doc?.html ?? '').includes(`&lt;${tag}`)))
       add(
         issues,
         'read',

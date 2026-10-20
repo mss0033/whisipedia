@@ -17,6 +17,10 @@ describe('wiki leftovers an archived page shows (2026-10-19 audit)', () => {
     expect(withoutTemplateLeftovers('text "You&#039;re an Indian?"')).toBe(
       `text "You're an Indian?"`,
     );
+    expect(withoutTemplateLeftovers('[[Image:{{{range_map}}}|{{{range_map_width}}}|]]x')).toBe('x');
+    expect(withoutTemplateLeftovers('和 {{Package|net-wireless/wpa_supplicant} }。')).toBe(
+      '和 net-wireless/wpa_supplicant。',
+    );
     expect(withoutTemplateLeftovers('or &quot;Mountain of Mercy,&quot; lies')).toBe(
       'or "Mountain of Mercy," lies',
     );

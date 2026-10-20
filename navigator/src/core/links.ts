@@ -374,7 +374,7 @@ export function sanitizeMath(el: Element): Element | null {
 
 /** Notes a wiki's own stylesheet hides, which show once it is gone: Wikipedia's citation maintenance
  * messages ("{{cite journal}}: CS1 maint: unflagged free DOI", 2026-10-19 audit). */
-const HIDDEN_CLASSES = ['cs1-maint', 'cs1-hidden-error'];
+const HIDDEN_CLASSES = ['cs1-maint', 'cs1-hidden-error', 'hiddenStructure'];
 
 /** Wiki template leftovers in a page's text: a parameter never filled in (`{{{name}}}`), and a category
  * or file link with no name (`[[Category:]]`, `[[File:|thumb|]]`), a magic word (`{{PAGENAME}}`,
@@ -406,11 +406,22 @@ function framePage(el: Element): { address: string; name: string } | null {
 }
 
 export function withoutTemplateLeftovers(text: string): string {
-  let t = text.includes('[[') || text.includes('{{') ? text.replace(TEMPLATE_LEFTOVERS, '') : text;
+  let t = text;
+  // Again until nothing changes: [[Image:{{{range_map}}}|{{{width}}}|]] is a nameless image link
+  // once its parameters are gone (Gardenology, 2026-10-20 audit).
+  for (let i = 0; i < 3 && (t.includes('[[') || t.includes('{{')); i++) {
+    const next = t.replace(TEMPLATE_LEFTOVERS, '').replace(BROKEN_TEMPLATE, '$1');
+    if (next === t) break;
+    t = next;
+  }
   if (t.includes('[['))
     t = t.replace(UNLINKED, (_m, title: string, label?: string) => label ?? title);
   return t.includes('&') ? t.replace(ESCAPED_TWICE, (e) => UNESCAPE[e] ?? e) : t;
 }
+
+/** A template a translation broke, so the wiki printed it (Gentoo's handbook in Chinese and Japanese:
+ * `{{Package|net-wireless/wpa_supplicant} }`): its argument, the words it would have shown. */
+const BROKEN_TEMPLATE = /\{\{[A-Z][A-Za-z]{1,20}\|([^{}|]{1,100})\}\s+\}/g;
 
 /** A wiki link the wiki never turned into one: `[[Colsterworth]]`, `[[Main Page|home]]` (OpenStreetMap
  * wiki, 2026-10-19 audit), shown as its words. A title starts with a capital and has no comma: a
