@@ -3,7 +3,9 @@ Industrial Instrumentation is 3,311 pages and only its first 400 reached the ind
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
+from typing import cast
 
 import pytest
 from adapters_testkit import make_ctx, make_spec
@@ -181,3 +183,25 @@ def test_a_source_indexed_by_its_catalog_never_reads_its_files(
     assert doc.text.startswith("Farmington, ME (1924), 1:62,500\nIssuer: US Geological Survey")
     assert "carburetor" not in doc.text
     assert doc.html_ref == "file:2026-10-12.me/upstream/map.pdf"  # the reader still shows the map
+
+
+def test_an_unreadable_page_is_left_out_and_the_rest_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One damaged page in a USGS publication ended the whole index run (2026-10-20)."""
+    import pypdfium2
+
+    path = _book(tmp_path)
+    real = cast(
+        Callable[[pypdfium2.PdfDocument, int], pypdfium2.PdfPage],
+        pypdfium2.PdfDocument.get_page,  # pyright: ignore[reportUnknownMemberType]
+    )
+
+    def damaged(self: pypdfium2.PdfDocument, i: int) -> pypdfium2.PdfPage:
+        if i == 1:
+            raise pypdfium2.PdfiumError("Failed to load page.")
+        return real(self, i)
+
+    monkeypatch.setattr(pypdfium2.PdfDocument, "__getitem__", damaged)  # pdf[i], as pdf_text reads it
+    pages = pdf_text(path, 3).split("\n\f\n")
+    assert pages == ["Page 1 text", "[Page 2 of this PDF could not be read.]", "Page 3 text"]

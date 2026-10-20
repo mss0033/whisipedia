@@ -1157,7 +1157,14 @@ def pdf_text(
             if i > first and (i - first) % PAGES_PER_OPEN == 0:
                 pdf.close()
                 pdf = pypdfium2.PdfDocument(str(path))
-            page = pdf[i]
+            try:
+                page = pdf[i]
+            except pypdfium2.PdfiumError as exc:
+                # One damaged page (a USGS publication, 2026-10-20) ended the whole index run; it is
+                # left out with a note, and the rest of the document is read.
+                log.warning("%s: page %d unreadable (%s); left out", path.name, i + 1, exc)
+                out.append(f"[Page {i + 1} of this PDF could not be read.]")
+                continue
             try:
                 textpage = page.get_textpage()
                 out.append(page_text(page, textpage))
