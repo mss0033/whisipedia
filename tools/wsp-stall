@@ -69,7 +69,10 @@ PROBLEM = re.compile(
     r"HTTP 429|Too Many Requests|Traceback|FAILED|fetch exit [1-69]|left for a later run|No space left"
     r"|Killed|OOM"
 )
-LIFETIME_LOCKS = {"scrub"}  # held by the orchestrator while it runs (wsp_cli.locks.SCRUB)
+LIFETIME_LOCKS = {"scrub"}
+# Locks held for hours by design: a generation's profile samples a 60 GB archive at a paced rate
+# (wsp_cli.integrity.profile_child; 8 h on the Spanish Wikipedia, 2026-10-20).
+LOCK_LIMIT_H = {"profile": 24.0}  # held by the orchestrator while it runs (wsp_cli.locks.SCRUB)
 CAUSE_ORDER = ("ingest", "heavy", "index")  # the locks a waiting job most likely waits on
 NOISE = re.compile(r"another '\w+' is running")  # a lock wait: lock-held reports the holder once
 NOTE_EVERY_S = 24 * 3600
@@ -277,7 +280,7 @@ def check(state: State, t: float) -> tuple[dict[str, str], list[str]]:
         since = max(first.get(key, t), t - age)
         first[key] = since
         held[name] = (pid, cmd, t - since)
-        if t - since >= LOCK_H * 3600:
+        if t - since >= LOCK_LIMIT_H.get(name, LOCK_H) * 3600:
             cond[f"lock-held:{name}"] = f"{name} lock held {hours(t - since)} by pid {pid}: {short(cmd)}"
     for key in list(first):
         name, _, pid = key.partition(":")

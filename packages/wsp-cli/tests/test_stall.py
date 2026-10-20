@@ -35,16 +35,19 @@ def _world(tmp: Path, *, usage: int, failed: bool = False) -> dict[str, str]:
     (locks / "ingest.lock").touch()
     (locks / "scrub.lock").touch()
     (locks / "heavy.lock").touch()
+    (locks / "profile.lock").touch()
     (proc / "42").mkdir(parents=True, exist_ok=True)
     (proc / "42" / "cmdline").write_bytes(b"/r/.venv/bin/python3\0.venv/bin/wsp\0ingest\0--source\0big\0")
     (proc / "42" / "stat").write_text("42 (wsp) S " + " ".join(["0"] * 18) + " 100 0 0\n")  # started 1 s in
     (proc / "uptime").write_text("90000.00 1.00\n")  # the holder is 25 h old
     ingest, scrub = (locks / "ingest.lock").stat().st_ino, (locks / "scrub.lock").stat().st_ino
     heavy = (locks / "heavy.lock").stat().st_ino
+    profile = (locks / "profile.lock").stat().st_ino
     (proc / "locks").write_text(
         f"1: FLOCK  ADVISORY  WRITE 42 08:30:{ingest} 0 EOF\n"
         f"3: FLOCK  ADVISORY  WRITE 42 08:30:{heavy} 0 EOF\n"
         f"3: -> FLOCK  ADVISORY  WRITE 77 08:30:{heavy} 0 EOF\n"  # the lane's process waits for it
+        f"4: FLOCK  ADVISORY  WRITE 42 08:30:{profile} 0 EOF\n"  # a paced profile: hours by design
         f"2: FLOCK  ADVISORY  WRITE 42 08:30:{scrub} 0 EOF\n"
     )
     return {
@@ -86,6 +89,7 @@ def test_an_idle_job_a_long_held_lock_and_a_silent_api_are_raised_once_then_clea
     held = " ".join(_run(env, 8.5))
     assert "RAISED lock-held:ingest: ingest lock held 8.5 h by pid 42" in held
     assert "scrub" not in held  # the orchestrator's for its whole life
+    assert "lock-held:profile" not in held  # its limit is 24 h
     env = _world(tmp_path, usage=900_000_000)  # working again; the failed unit is gone
     cleared = " ".join(_run(env, 9))
     assert "CLEARED job-idle:whisipedia-job-lane.service" in cleared
