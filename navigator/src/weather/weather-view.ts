@@ -1246,8 +1246,23 @@ export class WeatherView {
               }
             : range;
           try {
-            const ss = await this.o.api.station(st.id, want, signal);
-            chart.replaceChildren(this.stationCharts(ss));
+            let ss = await this.o.api.station(st.id, want, signal);
+            let note = '';
+            const measured = (x: StationSeries): boolean =>
+              Object.values(x.values).some((vals) => vals.some((v) => v !== null));
+            if (!measured(ss) && st.last_year) {
+              // Nothing measured in the period (the station closed, or reports late): its latest year.
+              ss = await this.o.api.station(
+                st.id,
+                { from: `${st.last_year}-01-01`, to: `${st.last_year}-12-31` },
+                signal,
+              );
+              note = `No measurements from ${want.from} to ${want.to}; its latest year, ${st.last_year}:`;
+            }
+            chart.replaceChildren(
+              ...(note ? [h('p', { class: 'wx-panel-note' }, note)] : []),
+              this.stationCharts(ss),
+            );
           } catch (err) {
             chart.replaceChildren(h('p', null, `The record could not be read: ${String(err)}`));
           }
