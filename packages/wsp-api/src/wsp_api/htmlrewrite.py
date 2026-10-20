@@ -21,7 +21,9 @@
 * Absolute URLs of sites the library holds (``outside``: Wikipedia, xkcd, an RFC) → the library's
   copy; a relative path into another site the crawl did not keep → the archive that copies it. Other
   absolute and scheme-relative URLs are left alone; clients show them as "not in library".
-* ``style`` attributes and ``<style>`` elements are dropped: the Navigator's CSP refuses them anyway,
+* ``style`` and event-handler (``on*``) attributes and ``<style>`` elements are dropped: the
+  Navigator's CSP refuses them anyway (a crawl's share buttons carry ``onclick``: four reports a
+  page view, 2026-10-20),
   and Chrome reports every one as a violation while merely parsing the page (E2E-1).
 
 This is not a sanitizer: the HTML stays untrusted and clients must sanitize it (the Navigator does).
@@ -38,7 +40,7 @@ from urllib.parse import quote, unquote, urlsplit
 
 from wsp_api.addresses import address_of
 
-VERSION = 10  # bump when the output changes: rendered pages are cached by it
+VERSION = 11  # bump when the output changes: rendered pages are cached by it
 
 # Links to these are files (shown by the browser, or saved), not pages. By name, so rewriting needs no
 # lookup per link; a page with such a name (rare) is then offered as a file the asset route refuses.
@@ -243,8 +245,10 @@ class _Rewriter(HTMLParser):
             self.out.append(f'<span class="missing-image">{html.escape(alt)}</span>' if alt else "")
             return
         new = self._attrs(tag, attrs) if tag in _TAGS else None
-        if any(name == "style" for name, _ in new or attrs):
-            new = [(name, value) for name, value in new or attrs if name != "style"]
+        if any(name == "style" or name.startswith("on") for name, _ in new or attrs):
+            new = [
+                (name, value) for name, value in new or attrs if name != "style" and not name.startswith("on")
+            ]
         if new is None:
             self.out.append(self.get_starttag_text() or "")
             return

@@ -175,3 +175,13 @@ def test_none_host_links_from_stack_exchange_zims_resolve_as_relative() -> None:
     page = '<a href="//:None/../../questions/134882/undoing-a-git-rebase">Undoing</a>'
     out = rw(page, native_id="stackoverflow.com_en_all/questions/tagged/git-rebase")
     assert 'href="wsp://qa/stackoverflow.com_en_all/questions/134882/undoing-a-git-rebase"' in out
+
+
+def test_event_handler_attributes_are_dropped() -> None:
+    """A crawl's share buttons carry onclick: never run, and Chrome reports each one as a CSP violation
+    while merely parsing the page (four a page view, citizensinformation.ie, 2026-10-20)."""
+    src = (
+        '<a class="share" href="#" onclick="window.print()" onmouseover="x()">Print</a><p onload="y()">t</p>'
+    )
+    assert rw(src, "A/P") == '<a class="share" href="#">Print</a><p>t</p>'
+    assert rw('<p data-online="yes" one="1">t</p>', "A/P") == '<p data-online="yes">t</p>'

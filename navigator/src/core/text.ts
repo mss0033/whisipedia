@@ -19,10 +19,33 @@ export function cutAtLineEnd(url: string, text: string, at: number): boolean {
   return url.split('/').length > 3 && last.length > 0 && last.length <= 2;
 }
 
+/** A token cut at a ``)`` that closes a ``(`` inside it (``wsp:wikipedia-top10/ceb/Pamilya_(biyolohiya)``,
+ * ``https://en.wikipedia.org/wiki/Mercury_(planet)``) gets its ``)`` back: the token pattern stops at
+ * every ``)`` so that a link in parentheses does not take the bracket (2026-10-20 random walk). */
+function withClosingParens(m: RegExpMatchArray, text: string): RegExpMatchArray {
+  let token = m[0];
+  const end = (m.index ?? 0) + token.length;
+  let extra = 0;
+  while (
+    (token.match(/\(/g)?.length ?? 0) > (token.match(/\)/g)?.length ?? 0) &&
+    text[end + extra] === ')'
+  ) {
+    token += ')';
+    extra += 1;
+  }
+  if (!extra) return m;
+  const out = [...m] as unknown as RegExpMatchArray;
+  out[0] = token;
+  for (let g = 3; g <= 4; g++) if (m[g]) out[g] = m[g] + ')'.repeat(extra);
+  out.index = m.index ?? 0;
+  return out;
+}
+
 export function linkify(text: string): DocumentFragment {
   const f = document.createDocumentFragment();
   let pos = 0;
-  for (const m of text.matchAll(TOKEN_RE)) {
+  for (const found of text.matchAll(TOKEN_RE)) {
+    const m = withClosingParens(found, text);
     const i = m.index ?? 0;
     if (i > pos) f.appendChild(document.createTextNode(text.slice(pos, i)));
     if ((m[2] && !isReadableHost('rfc')) || (m[4] && cutAtLineEnd(m[4], text, i))) {

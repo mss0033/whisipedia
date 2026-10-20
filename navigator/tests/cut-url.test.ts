@@ -20,4 +20,18 @@ describe('a URL a PDF line cut short (2026-10-19 audit, FEMA IS-288.a)', () => {
     expect(cutAtLineEnd('https://xkcd.com/', 'https://xkcd.com/\n', 0)).toBe(false);
     expect(cutAtLineEnd('https://ex.org/a/b2', 'see https://ex.org/a/b2 here', 4)).toBe(false);
   });
+
+  it('keeps a closing parenthesis that belongs to the address', () => {
+    const div = document.createElement('div');
+    div.append(
+      linkify('see wsp:wikipedia-top10/ceb/Pamilya_(biyolohiya) and (https://ex.org/a) too'),
+    );
+    expect([...div.querySelectorAll('a')].map((a) => a.textContent)).toEqual([
+      'wsp:wikipedia-top10/ceb/Pamilya_(biyolohiya)',
+      'https://ex.org/a',
+    ]);
+    expect(div.querySelector('a')?.dataset.wsp).toBe(
+      'wsp://wikipedia-top10/ceb/Pamilya_(biyolohiya)',
+    );
+  });
 });

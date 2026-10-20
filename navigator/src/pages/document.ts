@@ -602,7 +602,7 @@ export function linksList(
         'a',
         {
           href: `#${addr}`,
-          dataset: { wsp: addr },
+          dataset: { wsp: addr, missing: l.href }, // like every link that leads out of the library
           class: 'broken-link',
           title: `Not in library: ${l.href}`,
         },
