@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { resolveRoute } from '../src/core/router.ts';
 import { age, availabilityBadge } from '../src/ui/components.ts';
+import { timeChart } from '../src/weather/charts.ts';
 import { gridIndex, NI, valueAt } from '../src/weather/field.ts';
 import { parseWeather, weatherAddress } from '../src/weather/route.ts';
 import { display, formatValue, legendPosition } from '../src/weather/scales.ts';
@@ -106,5 +107,26 @@ describe('availability badges', () => {
     expect(availabilityBadge({ kind: 'live', label: 'Needs a connection' }).title).toContain(
       'needs a connection',
     );
+  });
+});
+
+describe('charts', () => {
+  it('break a low-to-high band where a day is missing', () => {
+    const fig = timeChart({
+      title: 'Measured temperature',
+      unit: '°C',
+      series: [
+        {
+          label: 'Low to high',
+          cls: 'wx-c-1',
+          kind: 'band',
+          times: [0, 1, 2, 3, 4, 5].map((d) => d * 86_400_000),
+          values: [10, 11, null, 13, 14, 15],
+          low: [1, 2, null, 3, 4, 5],
+        },
+      ],
+      timeLabel: String,
+    });
+    expect(fig.querySelectorAll('polygon.wx-band')).toHaveLength(2);
   });
 });

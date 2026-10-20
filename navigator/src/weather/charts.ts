@@ -164,19 +164,29 @@ export function timeChart(opts: ChartOptions): HTMLElement {
       });
       svg.append(g);
     } else if (se.kind === 'band' && se.low) {
-      const top: string[] = [];
-      const bottom: string[] = [];
+      // One polygon per run of days with both a low and a high: a gap breaks the band, as it breaks a
+      // line (a station that reports highs only now and then drew one wedge across months).
+      let top: string[] = [];
+      let bottom: string[] = [];
+      const flush = (): void => {
+        if (top.length > 1)
+          svg.append(
+            s('polygon', { points: [...top, ...bottom].join(' '), class: `wx-band ${se.cls}` }),
+          );
+        top = [];
+        bottom = [];
+      };
       se.values.forEach((v, i) => {
         const l = se.low?.[i];
         const t = se.times[i];
-        if (v === null || l === null || l === undefined || t === undefined) return;
+        if (v === null || l === null || l === undefined || t === undefined) {
+          flush();
+          return;
+        }
         top.push(`${x(t).toFixed(1)},${y(v).toFixed(1)}`);
         bottom.unshift(`${x(t).toFixed(1)},${y(l).toFixed(1)}`);
       });
-      if (top.length)
-        svg.append(
-          s('polygon', { points: [...top, ...bottom].join(' '), class: `wx-band ${se.cls}` }),
-        );
+      flush();
     } else {
       let d = '';
       let pen = false;
