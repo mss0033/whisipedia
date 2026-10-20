@@ -17,6 +17,11 @@ log) or the owner sees it at once:
 * ``api-down``                /v1/health did not answer 200 twice in a row
 * ``files-high:<unit>``       a core service holds over 80% of the files it may open (the API ran out at
                               1,024 on 2026-10-20 and answered pages with HTTP 500)
+* ``mem-stall:<unit>``         the background slice, the download lanes' slice or the API spent over
+                              WSP_STALL_PRESSURE_PCT (50) of the last 5 minutes wholly stalled on memory
+                              (memory.pressure "full avg300"): its ceiling is too low for what runs in
+                              it, and everything in it crawls (the lanes, 81% on 2026-10-20, unnoticed:
+                              each still used enough CPU not to look idle)
 * ``disk-low:<mount>``        under WSP_STALL_MIN_FREE_GB free locally (50) or on the NAS (2000)
 * ``log``                     a new problem line in a lane log (HTTP 429, Traceback, FAILED, a fetch
                               that failed (exits 7 and 8 are complete), partitions left for later,
@@ -67,6 +72,12 @@ IDLE_CPU_S = 10.0
 LOCK_H = float(os.environ.get("WSP_STALL_LOCK_H", "8"))
 MOUNTS = {"/": 50, "/mnt/z": 2000}  # free GB below which the disk is low
 CORE = ("whisipedia-api.service", "whisipedia-orchestrator.service")
+PRESSURE_UNITS = (
+    "whisipedia-background.slice",
+    "whisipedia-background-fetch.slice",
+    "whisipedia-api.service",
+)
+PRESSURE_PCT = float(os.environ.get("WSP_STALL_PRESSURE_PCT", "50"))
 PROBLEM = re.compile(
     r"HTTP 429|Too Many Requests|Traceback|FAILED|fetch exit [1-69]|left for a later run|No space left"
     r"|Killed|OOM"
@@ -159,6 +170,24 @@ def cpu_usec(cgroup: str) -> int | None:
     except (OSError, ValueError):
         return None
     return None
+
+
+def memory_stall(cgroup: str) -> tuple[float, str] | None:
+    """The share (%) of the last 5 minutes the cgroup's tasks were all stalled on memory, and its
+    memory use against its ceiling; ``None`` when unknown."""
+    base = Path(f"{CGROUP_ROOT}{cgroup}")
+    try:
+        full = next(ln for ln in (base / "memory.pressure").read_text().splitlines() if ln.startswith("full"))
+        pct = float(dict(f.split("=", 1) for f in full.split()[1:])["avg300"])
+    except (OSError, StopIteration, KeyError, ValueError):
+        return None
+    try:
+        use = f"{int((base / 'memory.current').read_text()) / 2**20:,.0f} MB"
+        high = (base / "memory.high").read_text().strip()
+        use += f" of memory.high {int(high) / 2**20:,.0f} MB" if high.isdigit() else ""
+    except (OSError, ValueError):
+        use = "use unknown"
+    return pct, use
 
 
 def frozen(cgroup: str) -> bool:
@@ -354,6 +383,15 @@ def check(state: State, t: float) -> tuple[dict[str, str], list[str]]:
             )
     for unit in [u for u in samples if u not in seen]:
         del samples[unit]
+
+    for unit in PRESSURE_UNITS:
+        cg = unit_prop(unit, "ControlGroup")
+        stall = memory_stall(cg) if cg else None
+        if stall is not None and stall[0] >= PRESSURE_PCT:
+            cond[f"mem-stall:{unit}"] = (
+                f"{unit} stalled on memory {stall[0]:.0f}% of the last 5 minutes ({stall[1]}): "
+                "everything in it crawls; raise its ceiling or run less in it"
+            )
 
     if not health_ok():
         cond["api-down"] = f"{HEALTH_URL} did not answer 200 twice"

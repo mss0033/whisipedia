@@ -140,3 +140,24 @@ def test_new_problem_lines_in_lane_logs_are_noted_once_a_day_without_the_backlog
     assert [line for line in _run(env, 25.5) if " NOTE " in line]  # a day later: still happening
     state = json.loads((tmp_path / "state" / "watch" / "state.json").read_text())
     assert state["offsets"][str(lane)] == lane.stat().st_size
+
+
+def test_a_slice_stalled_on_memory_is_raised_until_its_pressure_falls(tmp_path: Path) -> None:
+    """2026-10-20: eleven lanes over the download slice's 1G were stalled 81% of the time, unnoticed."""
+    env = _world(tmp_path, usage=10**9)
+    cg = tmp_path / "cgroup" / CG.strip("/")
+    (cg / "memory.current").write_text(f"{1176 * 2**20}\n")
+    (cg / "memory.high").write_text(f"{2**30}\n")
+    (cg / "memory.pressure").write_text(
+        "some avg10=85.66 avg60=87.70 avg300=81.33 total=1\n"
+        "full avg10=85.13 avg60=87.15 avg300=80.85 total=1\n"
+    )
+    raised = [e for e in _run(env, 0) if "mem-stall:" in e]
+    assert len(raised) == 3  # the fake systemctl gives every unit the same cgroup
+    assert "RAISED mem-stall:whisipedia-background-fetch.slice" in "\n".join(raised)
+    assert "stalled on memory 81% of the last 5 minutes (1,176 MB of memory.high 1,024 MB)" in raised[0]
+    assert not [e for e in _run(env, 0.2) if "mem-stall:" in e]  # still open: not written again
+    (cg / "memory.pressure").write_text(
+        "some avg10=1 avg60=1 avg300=2 total=1\nfull avg10=0 avg60=0 avg300=1.5 total=1\n"
+    )
+    assert sum("CLEARED mem-stall:" in e for e in _run(env, 0.4)) == 3
