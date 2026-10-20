@@ -132,6 +132,13 @@ _GENERATION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _PIN_SAMPLES = 5  # manifests tried when keys/ is empty
 
 
+def _same_bytes(a: Path, b: Path, pace: Callable[[int], None] | None) -> bool:
+    """Whether two files hold the same bytes (size, then SHA-256)."""
+    if os.stat(a).st_size != os.stat(b).st_size:
+        return False
+    return readback(a, on_chunk=pace).sha256 == readback(b, on_chunk=pace).sha256
+
+
 class VaultError(Exception):
     pass
 
@@ -537,7 +544,14 @@ class FileVault:
         if path.exists():
             _require_regular(path)
             if moving.exists():
-                raise VaultError(f"an interrupted adoption left {moving}; inspect it and {path} by hand")
+                # An adoption killed after moving the file aside, and a fetch that brought it again
+                # (OpenAlex, 2026-10-20): the same bytes twice, so the leftover goes. Two different
+                # files still need a person.
+                if _same_bytes(moving, path, self._pace):
+                    os.unlink(moving)
+                    fsync_dir(moving.parent)
+                else:
+                    raise VaultError(f"an interrupted adoption left {moving}; inspect it and {path} by hand")
             if os.stat(dest.parent).st_dev != os.stat(path).st_dev:
                 raise VaultError(f"{path} is on a different filesystem; use ingest() to copy it")
             # Always under the private name first, also when the same path is staged already: a

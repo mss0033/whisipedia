@@ -145,6 +145,37 @@ def test_adopt_resumes_after_a_crash_mid_adoption(vault: FileVault, tmp_path: Pa
     assert (staging / "upstream/r.bin").read_bytes() == data
 
 
+def test_a_leftover_adoption_with_the_same_bytes_as_a_new_fetch_is_dropped(
+    vault: FileVault, tmp_path: Path
+) -> None:
+    """2026-10-20, OpenAlex: an ingest killed after moving a file aside, then the lane fetched the file
+    again; the two copies were identical, and every later ingest stopped for a person."""
+    data = b"same bytes"
+    staging = vault.stage(SOURCE, GEN)
+    moving = staging / "upstream" / "d.bin.adopting"
+    moving.parent.mkdir(parents=True)
+    moving.write_bytes(data)
+    src = _incoming(tmp_path, data)
+    art = vault.adopt(SOURCE, GEN, src, "upstream/d.bin")
+    assert art.sha256 == hashlib.sha256(data).hexdigest()
+    assert not moving.exists()
+    assert (staging / "upstream/d.bin").read_bytes() == data
+
+
+def test_a_leftover_adoption_that_differs_from_a_new_fetch_still_needs_a_person(
+    vault: FileVault, tmp_path: Path
+) -> None:
+    staging = vault.stage(SOURCE, GEN)
+    moving = staging / "upstream" / "e.bin.adopting"
+    moving.parent.mkdir(parents=True)
+    moving.write_bytes(b"old copy!")
+    src = _incoming(tmp_path, b"new bytes")
+    with pytest.raises(VaultError, match="inspect it"):
+        vault.adopt(SOURCE, GEN, src, "upstream/e.bin")
+    assert moving.read_bytes() == b"old copy!"  # both left in place
+    assert src.read_bytes() == b"new bytes"
+
+
 # --- paths and manifests -------------------------------------------------------------------------
 
 
