@@ -319,10 +319,17 @@ async function audit(context, phoneContext, id) {
   // --- reach: the API ------------------------------------------------------------------------------
   let doc = null;
   try {
-    const r = await fetch(`${BASE}${docPath(id)}`, {
-      headers: HEADERS,
-      signal: AbortSignal.timeout(90_000),
-    });
+    // A 503 (an archive still opening, the storage slow for a moment) is retried as the reader
+    // retries it, after its Retry-After; only a page that stays busy is reported.
+    let r = null;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      r = await fetch(`${BASE}${docPath(id)}`, {
+        headers: HEADERS,
+        signal: AbortSignal.timeout(90_000),
+      });
+      if (r.status !== 503 || attempt === 3) break;
+      await sleep(1000 * Math.min(30, Number(r.headers.get('retry-after')) || 5));
+    }
     if (!r.ok) add(issues, 'reach', 'api-status', `${r.status}`);
     else doc = await r.json();
   } catch (e) {
@@ -412,7 +419,8 @@ async function audit(context, phoneContext, id) {
   for (const [re, what] of MARKUP) {
     const m = re.exec(prose);
     // Tags the archived page writes as text (&lt;h1&gt;: How to Design Programs shows an example
-    // page's code in a code table) are its words, not markup left over.
+    // page's code in a code table; Energypedia's &lt;/pre&gt; an editor left) are its words, not
+    // markup the reader failed to render.
     const tag = what === 'raw HTML tags' ? /<\/?([a-z0-9]+)/i.exec(m?.[0] ?? '')?.[1] : null;
     // A whole template a page writes in its own text is its words (Wikipedia's portal pages discuss
     // "the {{Random portal component}}"); the Navigator removes the leftovers it knows.
@@ -420,7 +428,8 @@ async function audit(context, phoneContext, id) {
       what === 'wiki template' &&
       /^\{\{[^{}]+\}\}$/.test(m?.[0] ?? '') &&
       (doc?.html ?? '').includes(m?.[0] ?? '\u0000');
-    if (m && !written && !(tag && (doc?.html ?? '').includes(`&lt;${tag}`)))
+    const escaped = tag && new RegExp(`&lt;/?${tag}\\b`, 'i').test(doc?.html ?? '');
+    if (m && !written && !escaped)
       add(
         issues,
         'read',
@@ -806,6 +815,22 @@ async function main() {
       if (r.issues.some((i) => RESTARTED.test(i.detail))) {
         log(`library not answering; waiting, then ${addressOf(id)} again`);
         await waitForLibrary();
+        r = await once();
+      }
+      // The browser's tab crashed (the audit's own browser short of memory, 2026-10-20): fresh
+      // contexts and the page once more; a page that crashes a tab twice is reported.
+      if (
+        r.issues.some((i) =>
+          /Target crashed|Page crashed|Target page, context or browser has been closed/.test(
+            i.detail,
+          ),
+        )
+      ) {
+        log(`browser tab crashed; ${addressOf(id)} again in fresh contexts`);
+        await context.close().catch(() => undefined);
+        await phoneContext.close().catch(() => undefined);
+        context = await make(DESKTOP);
+        phoneContext = await make(PHONE);
         r = await once();
       }
       r.source = s.id;
