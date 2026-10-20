@@ -25,12 +25,14 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import itertools
 import json
 import subprocess
 import sys
 import time
+from collections import deque
 from collections.abc import Callable, Mapping, Sequence
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from importlib import import_module
@@ -317,19 +319,35 @@ def decode_grib(var: str, message: bytes) -> Decoded:
 
 @dataclass(slots=True)
 class StepResult:
+    """One step, ready to write: 16-bit fields (2 MB a variable), precipitation accumulated from the
+    start as float32 (it is differenced once every step is in), and the GRIB bytes when archived."""
+
     index: int
     step: int
-    fields: dict[str, Decoded] = field(default_factory=dict[str, Decoded])
+    fields: dict[str, wd.U16] = field(default_factory=dict[str, wd.U16])
+    accumulated: np.ndarray[Any, np.dtype[np.float32]] | None = None
     grib: bytes = b""
+    nbytes: int = 0
 
 
-def fetch_step(model: Model, get: Getter, run: datetime, index: int, step: int) -> StepResult:
+STEPS_AHEAD_PER_WORKER = 2  # steps fetched ahead of the one being written: bounds the job's memory
+
+
+def fetch_step(
+    model: Model, get: Getter, run: datetime, index: int, step: int, keep_grib: bool
+) -> StepResult:
     res = StepResult(index, step)
     raw = bytearray()
     for m in model.messages(get, run, step):
         data = get.get_range(m.url, m.offset, m.length)
-        raw += data
-        res.fields[m.var] = decode_grib(m.var, data)
+        res.nbytes += len(data)
+        if keep_grib:
+            raw += data
+        dec = decode_grib(m.var, data)
+        if m.var == "tp" and dec.accumulated:
+            res.accumulated = dec.values.astype(np.float32)
+        else:
+            res.fields[m.var] = wd.encode(dec.values, wd.VARIABLES[m.var])
     res.grib = bytes(raw)
     return res
 
@@ -343,7 +361,9 @@ def pull_run(
     keep_grib: bool,
     say: Callable[[str], None],
 ) -> Path:
-    """Fetch, decode and write one run to the hot copy; its directory."""
+    """Fetch, decode and write one run to the hot copy; its directory. At most
+    :data:`STEPS_AHEAD_PER_WORKER` steps a worker are in memory at once (all 81 of a GFS run at once
+    held 850 MB and swapped, 2026-10-20)."""
     steps = model.steps(run)
     meta = wd.RunMeta(
         model=model.id,
@@ -362,21 +382,30 @@ def pull_run(
     if keep_grib:
         grib_dir.mkdir()
     started, nbytes, done = time.monotonic(), 0, 0
+    ahead = max(1, ws.workers * STEPS_AHEAD_PER_WORKER)
     try:
         with ThreadPoolExecutor(ws.workers, thread_name_prefix=f"wx-{model.id}") as pool:
-            futures = [pool.submit(fetch_step, model, get, run, i, s) for i, s in enumerate(steps)]
-            for fut in futures:
-                res = fut.result()
-                for var, dec in res.fields.items():
-                    if var == "tp" and dec.accumulated:
-                        accumulated = True
-                        acc[res.index] = dec.values
-                    else:
-                        writer.put(var, res.index, wd.encode(dec.values, wd.VARIABLES[var]))
+            pending: deque[Future[StepResult]] = deque()
+            todo = iter(enumerate(steps))
+            for i, st in itertools.islice(todo, ahead):
+                pending.append(pool.submit(fetch_step, model, get, run, i, st, keep_grib))
+            while pending:
+                res = pending.popleft().result()
+                nxt = next(todo, None)
+                if nxt is not None:
+                    pending.append(pool.submit(fetch_step, model, get, run, nxt[0], nxt[1], keep_grib))
+                for var, n in res.fields.items():
+                    writer.put(var, res.index, n)
+                if res.accumulated is not None:
+                    accumulated = True
+                    acc[res.index] = res.accumulated
                 if keep_grib and res.grib:
                     (grib_dir / f"{model.id}-{meta.run}-f{res.step:03d}.grib2").write_bytes(res.grib)
-                nbytes += len(res.grib)
+                nbytes += res.nbytes
                 done += 1
+                if done % 10 == 0:
+                    writer.flush()  # written pages become clean, so the job's memory ceiling can drop them
+                    acc.flush()
                 if done % 20 == 0:
                     say(f"  {model.id} {meta.run}: {done}/{len(steps)} steps, {nbytes / 1e6:,.0f} MB")
         if accumulated:

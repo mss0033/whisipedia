@@ -213,9 +213,13 @@ class HotRunWriter:
             raise ValueError(f"{var} step {step_index}: field {field.shape}, expected {(NJ, NI)}")
         self._arrays[var][step_index] = field
 
-    def finish(self) -> Path:
+    def flush(self) -> None:
+        """Write what is put so far: dirty mapped pages count against a job's memory until written."""
         for arr in self._arrays.values():
             arr.flush()
+
+    def finish(self) -> Path:
+        self.flush()
         self._arrays.clear()
         (self.dir / META).write_text(json.dumps(self.meta.as_json(), indent=1), encoding="utf-8")
         if self.final.exists():

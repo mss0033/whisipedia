@@ -325,3 +325,37 @@ def test_a_sealed_year_reaching_the_last_day_is_not_made_again(tmp_path: Path) -
     (gen / "MANIFEST.json").write_text("{}")
     assert wp.era5_sealed(tmp_path, "weather", 2025, date(2025, 12, 31))
     assert not wp.era5_sealed(tmp_path, "weather", 2026, date(2026, 1, 5))
+
+
+def test_only_a_few_steps_are_fetched_ahead_of_the_one_being_written(tmp_path: Path) -> None:
+    """2026-10-20: every step of a GFS run was in flight at once, 850 MB held and swapping."""
+    import threading
+    import time
+
+    class Long(FakeModel):
+        def steps(self, run: datetime) -> tuple[int, ...]:
+            return tuple(range(0, 60, 6))
+
+        def messages(self, get: w.Getter, run: datetime, step: int) -> list[w.Message]:
+            return [w.Message("t2m", f"{self.url(run, step)}/t2m", 0, 0)]
+
+    started: list[int] = []
+    first_done = threading.Event()
+    lock = threading.Lock()
+
+    class Slow(FakeGet):
+        def get_range(self, url: str, start: int, length: int) -> bytes:
+            step = int(url.split("/")[-2])
+            with lock:
+                if not first_done.is_set():
+                    started.append(step)
+            if step == 0:
+                time.sleep(0.5)
+            data = super().get_range(url, start, length)
+            if step == 0:
+                first_done.set()
+            return data
+
+    ws = w.WeatherSettings(root=tmp_path, workers=2)
+    w.pull_run(Long(), Slow(), datetime(2026, 10, 20, tzinfo=UTC), ws, keep_grib=False, say=lambda _: None)
+    assert len(started) <= ws.workers * w.STEPS_AHEAD_PER_WORKER
