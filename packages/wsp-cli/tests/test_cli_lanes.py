@@ -378,3 +378,41 @@ def test_downloads_that_keep_failing_raise_a_warning(tmp_path: Path) -> None:
     assert len(raised) == 1
     assert "--severity warning" in raised[0]
     assert "downloads still failing after 3 tries" in raised[0]
+
+
+def test_jobs_the_memory_guard_stopped_are_started_again_as_they_were(tmp_path: Path) -> None:
+    """2026-10-20: tools/wsp-yield stopped every lane twice; with no lanes.conf the resume restarted
+    none, and each stood still until started by hand."""
+    fakebin = tmp_path / "bin"
+    fakebin.mkdir()
+    started = tmp_path / "started"
+    (fakebin / "systemd-run").write_text(
+        f'#!/bin/sh\nfor a in "$@"; do printf "[%s]" "$a"; done >> {started}\necho >> {started}\n'
+    )
+    (fakebin / "systemctl").write_text('#!/bin/sh\ncase "$*" in *is-active*) exit 3 ;; *) echo 7G ;; esac\n')
+    for f in fakebin.iterdir():
+        f.chmod(0o755)
+    env = {
+        "PATH": f"{fakebin}:/usr/bin:/bin",
+        "HOME": str(tmp_path),
+        "WSP_STATE": str(tmp_path / "state"),
+        "WSP_NAS_MOUNT": "/",
+        "WSP_RESUME_SETTLE": "0",
+        "WSP_BG_SLICE_HIGH": "7G",
+    }
+    bg = ROOT / "tools" / "wsp-bg"
+    job = [str(bg), "--fetch", "lane-x", "--", "tools/lanes/lane-run.sh", "lane-x", "-", "it's", "a b"]
+    subprocess.run(job, env=env, check=True, timeout=60)
+    first = started.read_text()
+    cmd = tmp_path / "state" / "jobs" / "lane-x.cmd"
+    assert cmd.is_file()
+    jobs = tmp_path / "state" / "jobs"
+    (jobs / "yield-stopped").write_text("whisipedia-job-lane-x.service\nwhisipedia-index.service\n")
+    started.unlink()
+    script = ROOT / "tools" / "lanes" / "resume-after-reboot.sh"
+    done = subprocess.run([str(script)], env=env, capture_output=True, text=True, timeout=60)
+    assert done.returncode == 0, done.stderr
+    assert "restarted whisipedia-job-lane-x.service" in done.stdout
+    assert started.read_text() == first  # the same unit, slice, limits and words
+    assert first.rstrip().endswith("[tools/lanes/lane-run.sh][lane-x][-][it's][a b]")  # words kept
+    assert not (jobs / "yield-stopped").exists()

@@ -40,6 +40,7 @@ TICKS="${WSP_YIELD_TICKS:-0}"
 SLICE=whisipedia-background.slice
 SLICE_PRESSURE="${WSP_YIELD_SLICE_PRESSURE:-/sys/fs/cgroup$(systemctl --user show "$SLICE" -p ControlGroup --value 2>/dev/null)/memory.pressure}"
 STOPPABLE="whisipedia-job-* whisipedia-trawler.service whisipedia-index.service whisipedia-quality.service"
+JOBS="${WSP_STATE:-${XDG_STATE_HOME:-$HOME/.local/state}/whisipedia}/jobs"
 
 state=calm  # calm | frozen | stopped
 since=0     # checks spent in this state (frozen) or calm in a row (stopped)
@@ -70,6 +71,8 @@ stop_jobs() {
   [ -n "$units" ] || return 0
   # shellcheck disable=SC2086
   systemctl --user stop --no-block $units
+  # whisipedia-resume.service starts these again (tools/wsp-bg saved how each one was started).
+  mkdir -p "$JOBS" 2>/dev/null && printf '%s\n' $units >>"$JOBS/yield-stopped" || true
   echo "<4>still short of memory after $STOP_TICKS checks: stopped" $units
 }
 

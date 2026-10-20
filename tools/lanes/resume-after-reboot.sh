@@ -64,5 +64,24 @@ if [ -f "$S/lanes.conf" ]; then
       echo "<4>$unit not started (already running?)" >&2
   done
 fi
+# Jobs tools/wsp-yield stopped when the machine ran short of memory, started again as tools/wsp-bg
+# started them (jobs/NAME.cmd); one still running, or without its command, is left alone.
+if [ -f "$S/jobs/yield-stopped" ]; then
+  sort -u "$S/jobs/yield-stopped" | while read -r unit; do
+    name=${unit#whisipedia-job-}
+    name=${name%.service}
+    [ "$name" != "$unit" ] || continue  # not a tools/wsp-bg job (the index waits for its timer)
+    if systemctl --user is-active -q "$unit" 2>/dev/null; then
+      continue
+    fi
+    if [ -f "$S/jobs/$name.cmd" ]; then
+      sh "$S/jobs/$name.cmd" </dev/null && echo "restarted $unit" ||
+        echo "<4>$unit not restarted (sh $S/jobs/$name.cmd failed)" >&2
+    else
+      echo "<4>$unit was stopped but how it was started is not known; start it by hand" >&2
+    fi
+  done
+  rm -f "$S/jobs/yield-stopped"
+fi
 echo "resumed $(date -Is)"
 exit "$status"

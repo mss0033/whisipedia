@@ -27,6 +27,10 @@
 # execs it), and KillMode=control-group sends SIGTERM to every process of the job, so the real job
 # gets a graceful stop; whatever still runs after TimeoutStopSec (120 s) is killed (audit M5).
 set -eu
+# q WORD: WORD quoted for sh.
+q() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
+invocation=""
+for a in "$@"; do invocation="$invocation $(q "$a")"; done
 usage() { echo "usage: $0 [--no-heavy-lock] [--wait] [--fetch] NAME [MEMORY_MAX] -- COMMAND..." >&2; exit 2; }
 lock=1
 wait=0
@@ -93,6 +97,14 @@ print(lock_dir_for(bootstrap.paths(bootstrap.load(bootstrap.layout())).require_i
   inherited="-E WSP_INHERITED_LOCKS=heavy:9"
 else
   inherited=""
+fi
+# Remember how this job was started: tools/wsp-yield stops the jobs when the whole machine runs short
+# of memory, and whisipedia-resume.service starts the ones it stopped again with these words (on
+# 2026-10-20 nothing did, twice, and every lane stood still until restarted by hand).
+jobs="${WSP_STATE:-${XDG_STATE_HOME:-$HOME/.local/state}/whisipedia}/jobs"
+if mkdir -p "$jobs" 2>/dev/null; then
+  printf 'cd %s && exec %s%s\n' "$(q "$repo")" "$(q "$repo/tools/wsp-bg")" "$invocation" >"$jobs/$name.cmd.tmp" &&
+    mv "$jobs/$name.cmd.tmp" "$jobs/$name.cmd" || true
 fi
 # shellcheck disable=SC2086  # $inherited is one optional "-E NAME=VALUE" pair, split on purpose
 exec systemd-run --user --collect --quiet \
