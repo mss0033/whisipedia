@@ -3928,3 +3928,335 @@ sources:
     update: {cadence: P1M, strategy: snapshot-retention}
     size: {bytes: 7200000000, measured: false, as_of: '2026-10-17'}
     notes: "Research round 2026-10-17 (docs/research/ROUND-2026-10-17.md). Size: StatPearls 2.05 GB, GeneReviews 0.64 GB, 525 WHO and CDC books ≈ 4.5 GB (sampled)."
+
+  # --- Circuits, radio and mesh networks; weather models; geography data (owner request 2026-10-18,
+  # registered 2026-10-20 on the owner's go-ahead) ---------------------------------------------------
+  - id: kicad-docs
+    name: KiCad 9 manuals (schematic, PCB, getting started, calculators, CLI)
+    publisher: The KiCad project
+    domain: [electronics, engineering]
+    tier: T1
+    status: candidate
+    license: GPL-3.0-or-later OR CC-BY-3.0
+    legal_basis: open-license
+    access:
+      adapter: doc-collection
+      issuer: The KiCad project
+      key_prefix: kicad
+      origins: [docs.kicad.org]
+      discovery:
+        - kind: list
+          items:
+            - {pub_number: KiCad getting started, title: "Getting Started in KiCad (9.0)", url: "https://docs.kicad.org/9.0/en/getting_started_in_kicad/getting_started_in_kicad.pdf"}
+            - {pub_number: KiCad eeschema, title: "Schematic Editor (9.0)", url: "https://docs.kicad.org/9.0/en/eeschema/eeschema.pdf"}
+            - {pub_number: KiCad pcbnew, title: "PCB Editor (9.0)", url: "https://docs.kicad.org/9.0/en/pcbnew/pcbnew.pdf"}
+            - {pub_number: KiCad, title: "KiCad project manager (9.0)", url: "https://docs.kicad.org/9.0/en/kicad/kicad.pdf"}
+            - {pub_number: KiCad pcb_calculator, title: "Calculator Tools (9.0)", url: "https://docs.kicad.org/9.0/en/pcb_calculator/pcb_calculator.pdf"}
+            - {pub_number: KiCad gerbview, title: "Gerber Viewer (9.0)", url: "https://docs.kicad.org/9.0/en/gerbview/gerbview.pdf"}
+            - {pub_number: KiCad pl_editor, title: "Drawing Sheet Editor (9.0)", url: "https://docs.kicad.org/9.0/en/pl_editor/pl_editor.pdf"}
+            - {pub_number: KiCad cli, title: "Command-Line Interface (9.0)", url: "https://docs.kicad.org/9.0/en/cli/cli.pdf"}
+      filter: {allow_all: true, public_issuer: true}
+    update: {cadence: P1Y, strategy: snapshot-retention}
+    size: {bytes: 1.5e8, measured: false, as_of: '2026-10-20'}
+    notes: "Circuit and PCB design (owner request 2026-10-18): the free EDA suite's manuals, dual-licensed GPL-3.0+ or CC BY 3.0+."
+
+  - id: ngspice-manual
+    name: ngspice User's Manual (circuit simulation)
+    publisher: The ngspice project
+    domain: [electronics, engineering]
+    tier: T1
+    status: candidate
+    license: CC-BY-SA-4.0
+    legal_basis: open-license
+    access:
+      adapter: doc-collection
+      issuer: The ngspice project
+      key_prefix: ngspice
+      origins: [ngspice.sourceforge.io]
+      discovery:
+        - kind: list
+          items:
+            - {pub_number: ngspice manual, title: "Ngspice User's Manual", url: "https://ngspice.sourceforge.io/docs/ngspice-manual.pdf"}
+      filter: {allow_all: true, public_issuer: true}
+    update: {cadence: P1Y, strategy: snapshot-retention}
+    size: {bytes: 2.7e6, measured: true, as_of: '2026-10-20'}
+    notes: "Analog and mixed-signal circuit simulation (SPICE): devices, analyses, control language; 765 pages. CC BY-SA 4.0 (parts of chapters 12 and 25-29 public domain, chapter 30 New BSD)."
+
+  - id: wndw
+    name: Wireless Networking in the Developing World (3rd edition)
+    publisher: The WNDW Authors
+    domain: [communications, engineering]
+    tier: T1
+    status: candidate
+    license: CC-BY-SA-3.0
+    legal_basis: open-license
+    access:
+      adapter: doc-collection
+      issuer: The WNDW Authors
+      key_prefix: wndw
+      origins: [wndw.net]
+      discovery:
+        - kind: list
+          items:
+            - {pub_number: WNDW3, title: "Wireless Networking in the Developing World, 3rd edition", url: "https://wndw.net/pdf/wndw3-en/wndw3-print.pdf"}
+      filter: {allow_all: true, public_issuer: true}
+    update: {cadence: P2Y, strategy: snapshot-retention}
+    size: {bytes: 1.54e8, measured: true, as_of: '2026-10-20'}
+    notes: "Building wireless networks from scratch (owner request 2026-10-18, wireless bootstrapping): radio physics, antennas, link planning, mesh, power, case studies; 520 pages."
+
+  - id: reticulum-manual
+    name: Reticulum Network Stack manual
+    publisher: Mark Qvist
+    domain: [communications, computing]
+    tier: T1
+    status: candidate
+    license: LicenseRef-Reticulum
+    legal_basis: open-license
+    access:
+      adapter: doc-collection
+      issuer: Mark Qvist
+      key_prefix: reticulum
+      origins: [reticulum.network]
+      discovery:
+        - kind: list
+          items:
+            - {pub_number: Reticulum manual, title: "Reticulum Network Stack Manual", url: "https://reticulum.network/manual/Reticulum%20Manual.pdf"}
+      filter: {allow_all: true, public_issuer: true}
+    update: {cadence: P6M, strategy: snapshot-retention}
+    size: {bytes: 6.7e6, measured: true, as_of: '2026-10-20'}
+    notes: "Mesh networking over any medium (LoRa, packet radio, serial, IP); 317 pages. The Reticulum License is MIT-style with two restrictions: no use in systems built to harm people, and none in creating machine-learning training datasets. A personal reference library is neither; recorded so it stays so."
+
+  - id: meshtastic-docs
+    name: Meshtastic documentation (LoRa mesh radios)
+    publisher: Meshtastic LLC and contributors
+    domain: [communications, electronics]
+    tier: T1
+    status: candidate
+    license: GPL-3.0-only
+    legal_basis: open-license
+    access:
+      adapter: doc-collection
+      issuer: Meshtastic
+      key_prefix: meshtastic
+      endpoints: ["https://github.com/meshtastic/meshtastic"]
+      origins: [github.com, api.github.com]
+      reader: markdown-docs  # one document per page of the documentation site
+      discovery:
+        - {kind: git, repos: ["https://github.com/meshtastic/meshtastic"], snapshot: true}
+      filter: {allow_all: true, public_issuer: true}
+    update: {cadence: P3M, strategy: snapshot-retention}
+    size: {bytes: 3.4e8, measured: false, as_of: '2026-10-20'}
+    notes: "Off-grid LoRa mesh texting (owner request 2026-10-18, mesh networks): hardware, configuration, channels, the CLI and modules; the documentation site's Markdown, a page per document."
+
+  - id: geonames
+    name: GeoNames gazetteer dump (all countries, alternate names, admin codes)
+    publisher: GeoNames
+    domain: [geography]
+    tier: T1
+    status: candidate
+    license: CC-BY-4.0
+    legal_basis: open-license
+    index: false  # a data set: the Atlas reads places from OSM; GeoNames adds alternate names and codes
+    access:
+      adapter: doc-collection
+      issuer: GeoNames
+      key_prefix: geonames
+      origins: [download.geonames.org]
+      discovery:
+        - kind: list
+          items:
+            - {pub_number: allCountries, title: "All countries (gazetteer)", url: "https://download.geonames.org/export/dump/allCountries.zip"}
+            - {pub_number: alternateNamesV2, title: "Alternate names", url: "https://download.geonames.org/export/dump/alternateNamesV2.zip"}
+            - {pub_number: hierarchy, title: "Hierarchy", url: "https://download.geonames.org/export/dump/hierarchy.zip"}
+            - {pub_number: admin1Codes, title: "Admin 1 codes", url: "https://download.geonames.org/export/dump/admin1CodesASCII.txt"}
+            - {pub_number: admin2Codes, title: "Admin 2 codes", url: "https://download.geonames.org/export/dump/admin2Codes.txt"}
+            - {pub_number: countryInfo, title: "Country information", url: "https://download.geonames.org/export/dump/countryInfo.txt"}
+            - {pub_number: featureCodes, title: "Feature codes", url: "https://download.geonames.org/export/dump/featureCodes_en.txt"}
+            - {pub_number: timeZones, title: "Time zones", url: "https://download.geonames.org/export/dump/timeZones.txt"}
+            - {pub_number: readme, title: "Readme (file formats)", url: "https://download.geonames.org/export/dump/readme.txt"}
+      filter: {allow_all: true, public_issuer: true, data_files: true}
+    update: {cadence: P3M, strategy: snapshot-retention}
+    size: {bytes: 1.0e9, measured: false, as_of: '2026-10-20'}
+    notes: "12 million place names with coordinates, population, elevation and alternate names in many languages (owner request 2026-10-18, geography)."
+
+  - id: natural-earth
+    name: Natural Earth vector data (all scales)
+    publisher: Natural Earth (NACIS)
+    domain: [geography, maps]
+    tier: T1
+    status: candidate
+    license: LicenseRef-Public-Domain
+    legal_basis: public-domain
+    index: false
+    access:
+      adapter: doc-collection
+      issuer: Natural Earth
+      key_prefix: naturalearth
+      origins: [naciscdn.org]
+      discovery:
+        - kind: list
+          items:
+            - {pub_number: natural_earth_vector, title: "Natural Earth vector, 1:10m, 1:50m and 1:110m", url: "https://naciscdn.org/naturalearth/packages/natural_earth_vector.zip"}
+      filter: {allow_all: true, public_issuer: true, data_files: true}
+    update: {cadence: P1Y, strategy: snapshot-retention}
+    size: {bytes: 5.0e8, measured: false, as_of: '2026-10-20'}
+    notes: "Public-domain country, state, coastline, river, lake and populated-place layers at three scales (owner request 2026-10-18)."
+
+  - id: gebco-grid
+    name: GEBCO global bathymetry and topography grid (2024)
+    publisher: General Bathymetric Chart of the Oceans (GEBCO)
+    domain: [geography, maps, science]
+    tier: T1
+    status: candidate
+    license: LicenseRef-GEBCO-Public-Domain
+    legal_basis: public-domain
+    index: false
+    access:
+      adapter: doc-collection
+      issuer: GEBCO Compilation Group
+      key_prefix: gebco
+      origins: [www.bodc.ac.uk]
+      discovery:
+        - kind: list
+          items:
+            - {pub_number: GEBCO_2024, title: "GEBCO_2024 Grid (netCDF, 15 arc-second)", url: "https://www.bodc.ac.uk/data/open_download/gebco/gebco_2024/zip/"}
+      filter: {allow_all: true, public_issuer: true, data_files: true}
+    update: {cadence: P1Y, strategy: snapshot-retention}
+    size: {bytes: 7.47e9, measured: true, as_of: '2026-10-20'}
+    notes: "Elevation of land and sea floor for the whole Earth at 15 arc-seconds (owner request 2026-10-18, geography and geology). The GEBCO Grid is placed in the public domain (attribution requested)."
+
+  - id: openhistoricalmap-planet
+    name: OpenHistoricalMap planet (newest daily extract)
+    publisher: OpenHistoricalMap contributors
+    domain: [geography, history, maps]
+    tier: T1
+    status: candidate
+    license: CC0-1.0
+    legal_basis: open-license
+    index: false
+    access:
+      adapter: doc-collection
+      issuer: OpenHistoricalMap
+      key_prefix: ohm
+      origins: [s3.amazonaws.com]
+      discovery:
+        - {kind: s3-listing, bucket_url: "https://s3.amazonaws.com/planet.openhistoricalmap.org", prefix: "planet/", key_pattern: "\\.osm\\.pbf$", newest: 1}
+      filter: {allow_all: true, public_issuer: true, data_files: true}
+    update: {cadence: P1M, strategy: snapshot-retention}
+    size: {bytes: 8.0e8, measured: false, as_of: '2026-10-20'}
+    notes: "Historical boundaries, roads and places with start and end dates (owner request 2026-10-18, historical geography); the bucket keeps a planet a day, the newest is taken."
+
+  - id: wrf-model
+    name: Weather Research and Forecasting model (WRF), source and documentation
+    publisher: NCAR / UCAR
+    domain: [weather, science]
+    tier: T1
+    status: candidate
+    license: LicenseRef-Public-Domain
+    legal_basis: public-domain
+    access:
+      adapter: doc-collection
+      issuer: NCAR Mesoscale and Microscale Meteorology Laboratory
+      key_prefix: wrf
+      endpoints: ["https://github.com/wrf-model/WRF"]
+      origins: [github.com, api.github.com]
+      reader: markdown-docs
+      discovery:
+        - {kind: git, repos: ["https://github.com/wrf-model/WRF"], snapshot: true}
+      filter: {allow_all: true, public_issuer: true}
+    update: {cadence: P6M, strategy: snapshot-retention}
+    size: {bytes: 2.8e8, measured: false, as_of: '2026-10-20'}
+    notes: "The community numerical weather prediction model (owner request 2026-10-18, weather modeling and simulation): the source tree, kept whole, with its README documentation searchable. NCAR/UCAR consider WRF public domain."
+
+  - id: mpas-model
+    name: Model for Prediction Across Scales (MPAS), source and documentation
+    publisher: Los Alamos National Laboratory and NCAR
+    domain: [weather, science]
+    tier: T1
+    status: candidate
+    license: LicenseRef-MPAS-BSD-style
+    legal_basis: open-license
+    access:
+      adapter: doc-collection
+      issuer: MPAS developers (LANL, NCAR)
+      key_prefix: mpas
+      endpoints: ["https://github.com/MPAS-Dev/MPAS-Model"]
+      origins: [github.com, api.github.com]
+      reader: markdown-docs
+      discovery:
+        - {kind: git, repos: ["https://github.com/MPAS-Dev/MPAS-Model"], snapshot: true}
+      filter: {allow_all: true, public_issuer: true}
+    update: {cadence: P6M, strategy: snapshot-retention}
+    size: {bytes: 5.0e7, measured: false, as_of: '2026-10-20'}
+    notes: "Global atmosphere and ocean models on variable-resolution meshes (owner request 2026-10-18, weather modeling); BSD-style licence (LANS/UCAR)."
+
+  - id: graphcast
+    name: GraphCast (Google DeepMind), source and model weights
+    publisher: Google DeepMind
+    domain: [weather, science, computing]
+    tier: T1
+    status: candidate
+    license: Apache-2.0 AND CC-BY-4.0
+    legal_basis: open-license
+    access:
+      adapter: doc-collection
+      issuer: Google DeepMind
+      key_prefix: graphcast
+      endpoints: ["https://github.com/google-deepmind/graphcast"]
+      origins: [github.com, api.github.com, storage.googleapis.com]
+      reader: markdown-docs
+      discovery:
+        - {kind: git, repos: ["https://github.com/google-deepmind/graphcast"], snapshot: true}
+        - kind: list
+          items:
+            - {pub_number: GraphCast 0.25 37 levels, title: "GraphCast weights, ERA5 1979-2017, 0.25°, 37 pressure levels", url: "https://storage.googleapis.com/dm_graphcast/params/GraphCast%20-%20ERA5%201979-2017%20-%20resolution%200.25%20-%20pressure%20levels%2037%20-%20mesh%202to6%20-%20precipitation%20input%20and%20output.npz"}
+            - {pub_number: GraphCast operational, title: "GraphCast_operational weights, ERA5-HRES 1979-2021, 0.25°, 13 levels", url: "https://storage.googleapis.com/dm_graphcast/params/GraphCast_operational%20-%20ERA5-HRES%201979-2021%20-%20resolution%200.25%20-%20pressure%20levels%2013%20-%20mesh%202to6%20-%20precipitation%20output%20only.npz"}
+            - {pub_number: GraphCast small, title: "GraphCast_small weights, ERA5 1979-2015, 1.0°, 13 levels", url: "https://storage.googleapis.com/dm_graphcast/params/GraphCast_small%20-%20ERA5%201979-2015%20-%20resolution%201.0%20-%20pressure%20levels%2013%20-%20mesh%202to5%20-%20precipitation%20input%20and%20output.npz"}
+      filter: {allow_all: true, public_issuer: true, data_files: true}
+    update: {cadence: P1Y, strategy: snapshot-retention}
+    size: {bytes: 5.0e8, measured: false, as_of: '2026-10-20'}
+    notes: "State-of-the-art machine-learned medium-range forecasting (owner request 2026-10-18, SOTA weather models): the code (Apache-2.0) and three released weight sets (CC BY 4.0, about 145 MB each)."
+
+  - id: aurora-weather-model
+    name: Aurora (Microsoft), atmosphere foundation model source and documentation
+    publisher: Microsoft
+    domain: [weather, science, computing]
+    tier: T1
+    status: candidate
+    license: MIT
+    legal_basis: open-license
+    access:
+      adapter: doc-collection
+      issuer: Microsoft
+      key_prefix: aurora
+      endpoints: ["https://github.com/microsoft/aurora"]
+      origins: [github.com, api.github.com]
+      reader: markdown-docs
+      discovery:
+        - {kind: git, repos: ["https://github.com/microsoft/aurora"], snapshot: true}
+      filter: {allow_all: true, public_issuer: true}
+    update: {cadence: P6M, strategy: snapshot-retention}
+    size: {bytes: 2.3e7, measured: false, as_of: '2026-10-20'}
+    notes: "A foundation model for weather, air quality and ocean waves (owner request 2026-10-18, SOTA weather models); the weights (several GB each, MIT) are on Hugging Face and can follow."
+
+  - id: earth2studio
+    name: NVIDIA Earth2Studio (FourCastNet, SFNO and other AI weather models), source and documentation
+    publisher: NVIDIA
+    domain: [weather, science, computing]
+    tier: T1
+    status: candidate
+    license: Apache-2.0
+    legal_basis: open-license
+    access:
+      adapter: doc-collection
+      issuer: NVIDIA
+      key_prefix: earth2studio
+      endpoints: ["https://github.com/NVIDIA/earth2studio"]
+      origins: [github.com, api.github.com]
+      reader: markdown-docs
+      discovery:
+        - {kind: git, repos: ["https://github.com/NVIDIA/earth2studio"], snapshot: true}
+      filter: {allow_all: true, public_issuer: true}
+    update: {cadence: P6M, strategy: snapshot-retention}
+    size: {bytes: 4.8e8, measured: false, as_of: '2026-10-20'}
+    notes: "A framework that runs FourCastNet, SFNO, Pangu, GraphCast and other AI weather models on common data (owner request 2026-10-18, SOTA weather models)."

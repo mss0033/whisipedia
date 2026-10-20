@@ -77,7 +77,7 @@
             "deny_keywords": {}, "review_keywords": {}, "neutral_phrases": {},
             "allow_documents": {}, "deny_documents": {}, "allow_content_review": {}, "override_safety": {"type": "object"},
             "allow_all": {"type": "boolean"}, "default": {"enum": ["allow", "deny", "review"]},
-            "declassified_ok": {"type": "boolean"}, "public_issuer": {"type": "boolean"}, "builtin_review": {"type": "boolean"}, "allow_image_only": {"type": "boolean"},
+            "declassified_ok": {"type": "boolean"}, "public_issuer": {"type": "boolean"}, "builtin_review": {"type": "boolean"}, "allow_image_only": {"type": "boolean"}, "data_files": {"type": "boolean"},
             "distribution": {"type": "object", "additionalProperties": false, "properties": {"require": {"type": "array", "items": {"type": "string"}}}}
           }
         },
@@ -93,7 +93,7 @@
         "endpoints": {"type": "array"},
         "oai_endpoint": {"type": "string"},
         "decode_url_keys": {"type": "boolean", "description": "decode %XX escapes before a URL becomes a document key; changes keys, so only for sources with no stored documents"},
-        "reader": {"enum": ["tei-frus", "tei-cts", "rst-kernel", "mitre", "oscal-catalog", "medlineplus-topics", "standard-ebooks"], "description": "how a doc-collection's repository snapshot (git discovery with snapshot: true) becomes documents (wsp_adapters.doccollection.tei)"}
+        "reader": {"enum": ["tei-frus", "tei-cts", "rst-kernel", "mitre", "oscal-catalog", "medlineplus-topics", "standard-ebooks", "markdown-docs"], "description": "how a doc-collection's repository snapshot (git discovery with snapshot: true) becomes documents (wsp_adapters.doccollection.tei)"}
       }
     }
   }

@@ -27,7 +27,7 @@ RETRY_AFTER = "5"
 _Job = tuple[Callable[[], Any], Future[Any]] | None
 
 
-class _DaemonPool:
+class DaemonPool:
     """Up to ``workers`` daemon threads running submitted calls in order."""
 
     def __init__(self, workers: int, name: str) -> None:
@@ -83,7 +83,7 @@ class Offload:
         self.timeout = timeout
         self.capacity = workers + queue
         self._slots = threading.BoundedSemaphore(self.capacity)
-        self._pool = _DaemonPool(workers, name)
+        self._pool = DaemonPool(workers, name)
         self._lock = threading.Lock()
         self.admitted = 0  # calls in the pool now (running or queued)
         self.shed = 0

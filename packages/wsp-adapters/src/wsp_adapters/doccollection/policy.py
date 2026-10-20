@@ -462,8 +462,11 @@ class Rules:
     safety: bool = True  # built-in §13 lists; never disabled in the registry (tests only)
     # A fetched file with no text to screen (a scanned PDF without a text layer) is held for review
     # unless the source is known to publish image-only scans and says so here. Unsupported formats
-    # and extraction errors are held regardless.
+    # and extraction errors are held regardless...
     allow_image_only: bool = False
+    # ...except in a collection of data files (a gazetteer, a bathymetry grid, a planet extract) the
+    # registry says is one: no text to screen is what such a file is (owner request 2026-10-18).
+    data_files: bool = False
 
     @property
     def deny_phrases(self) -> PhraseList:
@@ -499,6 +502,7 @@ RULE_KEYS = frozenset(
         "public_issuer",
         "builtin_review",
         "allow_image_only",
+        "data_files",
     }
 )
 # What `wsp proposals decide` records, in the machine-owned file next to the rules file.
@@ -565,6 +569,8 @@ def _rules_kwargs(data: Mapping[str, Any], *, base: Rules) -> dict[str, Any]:
         out["builtin_review"] = bool(data["builtin_review"])
     if "allow_image_only" in data:
         out["allow_image_only"] = bool(data["allow_image_only"])
+    if "data_files" in data:
+        out["data_files"] = bool(data["data_files"])
     if "default" in data:
         out["default"] = Verdict(str(data["default"]))
     dist = data.get("distribution")

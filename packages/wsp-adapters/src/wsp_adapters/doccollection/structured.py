@@ -517,7 +517,63 @@ def se_book(archive: zipfile.ZipFile) -> Iterator[TeiDoc]:
     yield TeiDoc(key="book", title=title, text=text, date=(dc("date") or [""])[0][:10], url=url, lang=lang)
 
 
-ARCHIVE_READERS = {"standard-ebooks": se_book}
+# --- A repository's Markdown documentation (owner request 2026-10-18: mesh networks, weather models) ----
+
+_MD_SKIP = re.compile(r"(?:^|/)(?:node_modules|i18n|\.github|vendor|third_party|blog|changelog)(?:/|$)", re.I)
+_FRONT_MATTER = re.compile(r"\A---\n(.*?)\n---\n", re.S)
+_JSX_LINE = re.compile(r"^\s*(?:import |export |<\/?[A-Z][\w.]*[^>]*>\s*$)")
+_JSX_TAG = re.compile(r"<\/?[A-Z][\w.]*(?:\s[^<>]*)?\/?>")
+_ADMONITION = re.compile(r"^\s*:::\s*(\w*)(.*)$")
+_COMMENT = re.compile(r"<!--.*?-->|\{/\*.*?\*/\}", re.S)
+MD_MAX_PAGES = 5000
+
+
+def markdown_docs(archive: zipfile.ZipFile) -> Iterator[TeiDoc]:
+    """Every Markdown page of a repository's documentation, one document each: Meshtastic's site
+    (Docusaurus ``.mdx`` under ``docs/``), a weather model's ``README.md`` and ``docs/``. Pages under
+    a ``docs`` folder when the repository has one, else every page; translations, blogs and vendored
+    code are left out. The title is the front matter's ``title``, else the first heading; JSX
+    components, imports and comments are dropped, admonitions (``:::note``) become plain lines."""
+    names = [n for n in archive.namelist() if n.lower().endswith((".md", ".mdx")) and not n.endswith("/")]
+    names = [n for n in names if not _MD_SKIP.search(n)]
+    in_docs = [n for n in names if re.search(r"(?:^|/)docs?/", n, re.I)]
+    readmes = [n for n in names if n.count("/") <= 1 and n.rsplit("/", 1)[-1].lower() == "readme.md"]
+    chosen = list(dict.fromkeys([*readmes, *in_docs])) if in_docs else names
+    for name in sorted(chosen)[:MD_MAX_PAGES]:
+        raw = archive.read(name).decode("utf-8", errors="replace").replace("\r\n", "\n")
+        title = ""
+        if m := _FRONT_MATTER.match(raw):
+            fm, raw = m.group(1), raw[m.end() :]
+            if t := re.search(r"^title:\s*['\"]?(.+?)['\"]?\s*$", fm, re.M):
+                title = t.group(1).strip()
+        lines: list[str] = []
+        fenced = False
+        for line in _COMMENT.sub("", raw).split("\n"):
+            if line.lstrip().startswith("```"):
+                fenced = not fenced
+                lines.append(line)
+                continue
+            if fenced:
+                lines.append(line)
+                continue
+            if _JSX_LINE.match(line):
+                continue
+            if am := _ADMONITION.match(line):
+                label = (am.group(1) or "").capitalize()
+                lines.append(f"{label}:{am.group(2)}" if label else "")
+                continue
+            lines.append(_JSX_TAG.sub("", line))
+        text = "\n".join(lines).strip()
+        if not title:
+            head = re.search(r"^#{1,2}\s+(.+)$", text, re.M)
+            title = head.group(1).strip() if head else name.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+        if len(text) < 40:
+            continue
+        key = name.split("/", 1)[1] if "/" in name else name  # without the snapshot's top folder
+        yield TeiDoc(key=key.rsplit(".", 1)[0], title=title, text=text)
+
+
+ARCHIVE_READERS = {"standard-ebooks": se_book, "markdown-docs": markdown_docs}
 
 READERS = {
     "mitre": (_mitre_member, mitre),

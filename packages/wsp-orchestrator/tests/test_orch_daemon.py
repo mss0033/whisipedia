@@ -10,6 +10,7 @@ from typing import Any
 
 import pytest
 
+from wsp_orchestrator import daemon
 from wsp_orchestrator.daemon import load_wiring, main, run
 from wsp_orchestrator.durations import IsoDuration
 from wsp_orchestrator.jobs import JobKind
@@ -99,7 +100,10 @@ def test_run_until_stopped_promotes_and_writes_metrics(tmp_path: Path) -> None:
     assert (tmp_path / "vault" / "demo" / "2026-10-01" / "upstream" / "demo.txt").is_file()
 
 
-def test_main_stops_gracefully_on_sigterm(tmp_path: Path) -> None:
+def test_main_stops_gracefully_on_sigterm(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Threads other tests leave running would make main() hard-exit the test runner with os._exit.
+    lingering = [t.name for t in daemon.lingering_threads()]
+    monkeypatch.setattr(daemon, "lingering_threads", list)
     cfg_dir = tmp_path / "config"
     cfg_dir.mkdir()
     cfg = config_for(tmp_path)
@@ -114,6 +118,7 @@ def test_main_stops_gracefully_on_sigterm(tmp_path: Path) -> None:
     finally:
         killer.cancel()
     assert signal.getsignal(signal.SIGTERM) == before, "signal handlers restored"
+    assert not lingering, f"threads left running by earlier tests: {lingering}"
 
 
 def test_json_logging() -> None:

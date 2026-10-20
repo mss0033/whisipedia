@@ -7,7 +7,8 @@ import ipaddress
 import random
 import secrets
 from collections.abc import Callable, Sequence
-from concurrent.futures import ThreadPoolExecutor, wait
+from concurrent.futures import wait
+from functools import partial
 from typing import Annotated
 from urllib.parse import quote
 
@@ -41,8 +42,6 @@ from wsp_core.ports import PortalSource
 
 RANDOM_DRAWS = 20  # catalog picks until one is not a capture of site machinery (zimread.NOT_A_PAGE)
 LINK_CHECK_SECONDS = 5.0  # a page's link check answers within this, with what it has checked
-# Four lookups at a time, shared by every page: one slow archive does not hold up a page's other links.
-_LINK_CHECKS = ThreadPoolExecutor(4, thread_name_prefix="link-check")
 
 # Only images are served from containers: never HTML or scripts at our origin.
 SERVED_MIMETYPES = frozenset(
@@ -348,7 +347,7 @@ def browse_router(lib: Library) -> APIRouter:
             return False
 
         asked = list(dict.fromkeys(addresses))
-        futures = [_LINK_CHECKS.submit(gone, a) for a in asked]
+        futures = [lib.link_checks.submit(partial(gone, a)) for a in asked]
         done, late = wait(futures, timeout=LINK_CHECK_SECONDS)
         for f in late:
             f.cancel()  # not started yet: never started; a running one finishes unheard

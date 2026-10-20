@@ -18,7 +18,8 @@ longer interval where ``robots.txt`` asks for one). Kinds (``access.discovery[].
 ``archive-org``
     The archive.org scrape API (``query``); one item per document, provenance kept.
 ``s3-listing``
-    A public bucket listing (``bucket_url``, ``prefix``, ``key_pattern``); ETag = MD5 when single-part.
+    A public bucket listing (``bucket_url``, ``prefix``, ``key_pattern``; ``newest: N`` for the N keys
+    that sort last); ETag = MD5 when single-part.
 ``git``
     A GitHub repository (size from the GitHub API); fetched as a ``git bundle`` of a mirror clone.
 ``list`` / ``document``
@@ -1337,6 +1338,17 @@ _S3 = "{http://s3.amazonaws.com/doc/2006-03-01/}"
 
 
 def s3_listing(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
+    """A bucket listing; ``newest: N`` keeps only the N keys that sort last (a dated snapshot a day,
+    as OpenHistoricalMap's planet-YYMMDD_HHMM.osm.pbf: the newest one, not 1,700 of them)."""
+    newest = int(_s(cfg.get("newest")) or 0)
+    found = _s3_candidates(cfg, env)
+    if newest <= 0:
+        yield from found
+        return
+    yield from sorted(found, key=lambda c: c.url, reverse=True)[:newest]
+
+
+def _s3_candidates(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
     bucket = _s(cfg.get("bucket_url")).rstrip("/")
     prefix = _s(cfg.get("prefix"))
     if env.partition and cfg.get("partition_in_prefix"):

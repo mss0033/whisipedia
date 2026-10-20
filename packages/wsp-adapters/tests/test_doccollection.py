@@ -791,6 +791,25 @@ def test_s3_listing_partitions_and_md5() -> None:
     assert cands[1].edition_date == "1898"
 
 
+def test_s3_listing_keeps_the_newest_of_a_dated_series() -> None:
+    """OpenHistoricalMap keeps a planet a day (planet-YYMMDD_HHMM.osm.pbf): only the newest is fetched."""
+    days = [
+        ("planet-211204_0800.osm.pbf", b"a"),
+        ("planet-261019_0800.osm.pbf", b"bb"),
+        ("planet-251231_0800.osm.pbf", b"c"),
+    ]
+    env = env_for({f"{BUCKET}/": s3_listing("planet/", days)}, origins=("bucket.example.gov",))
+    cfg = {
+        "kind": "s3-listing",
+        "bucket_url": BUCKET,
+        "prefix": "planet/",
+        "key_pattern": r"\.osm\.pbf$",
+        "newest": 1,
+    }
+    (cand,) = list(discover_all([cfg], env))
+    assert cand.url.endswith("planet-261019_0800.osm.pbf")
+
+
 def test_one_partition_lists_one_state_prefix() -> None:
     listing = s3_listing("HistoricalTopo/PDF/CA/", [("CA_Yosemite_1898.pdf", b"bb")])
     env = env_for({f"{BUCKET}/": listing}, origins=("bucket.example.gov",), partition="ca")

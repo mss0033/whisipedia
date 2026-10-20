@@ -1418,7 +1418,9 @@ def screen_text(got: Extracted, rules: Rules, *, keys: Iterable[str] = ()) -> Sc
         return Screen(content, marking, text_found)
     if gate.verdict is Verdict.REVIEW and not owner_allowed:
         return Screen(gate, marking, text_found)
-    image_only_ok = got.problem == "no-text-layer" and rules.allow_image_only
+    image_only_ok = (got.problem == "no-text-layer" and rules.allow_image_only) or (
+        got.problem == "unsupported-format" and rules.data_files
+    )
     if not text_found and not owner_allowed and not image_only_ok:
         return Screen(Decision(Verdict.REVIEW, f"text={got.problem}", Stage.CONTENT), marking, text_found)
     if content.verdict is Verdict.REVIEW and not content_released:

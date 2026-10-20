@@ -27,7 +27,7 @@ from wsp_adapters.doccollection.policy import (
     normalize_pub_number,
     parse_markings,
 )
-from wsp_adapters.doccollection.testing import PUBLIC_A, make_pdf
+from wsp_adapters.doccollection.testing import PUBLIC_A, RESTRICTED_C, make_pdf
 from wsp_core.model import FetchResult, RemoteFile
 
 RULES = Rules()
@@ -338,3 +338,15 @@ def test_a_word_document_is_read_and_screened(tmp_path: Path) -> None:
     got = extract_text(path, max_pages=3)
     assert got.problem == ""
     assert got.text == "Community resilience guidance\nPlan for flooding and power cuts in your area."
+
+
+def test_a_data_file_passes_only_in_a_collection_of_data_files(tmp_path: Path) -> None:
+    """A planet extract or bathymetry grid has no text to screen (owner request 2026-10-18): held
+    unless the registry says the collection is data files; a readable restricted file stays denied."""
+    pbf = tmp_path / "planet-261019_0800.osm.pbf"
+    pbf.write_bytes(b"\x00\x00\x00\x0d\n\tOSMHeader" + bytes(range(200)))
+    assert screen_file(pbf, Rules()).decision.verdict is Verdict.REVIEW
+    assert screen_file(pbf, Rules(data_files=True)).decision.verdict is Verdict.ALLOW
+    restricted = tmp_path / "c.pdf"
+    restricted.write_bytes(make_pdf([RESTRICTED_C]))
+    assert screen_file(restricted, Rules(data_files=True)).decision.verdict is Verdict.DENY

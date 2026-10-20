@@ -298,3 +298,41 @@ def test_a_standard_ebooks_repository_is_one_book_in_reading_order(tmp_path: Pat
     assert "Chapter I\n\nIt is a truth universally acknowledged.\n\nHowever little known." in book.text
     assert "Titlepage" not in book.text
     assert "Typeset by" not in book.text  # colophon left out
+
+
+def test_a_repositorys_markdown_docs_are_its_pages() -> None:
+    """Meshtastic's site is Docusaurus Markdown (owner request 2026-10-18): a page each, its title from
+    the front matter or first heading, JSX and imports dropped, translations and the blog left out."""
+    import io
+    import zipfile
+
+    from wsp_adapters.doccollection.structured import markdown_docs
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr(
+            "meshtastic-master/README.md", "# Meshtastic docs\n\nThe documentation website of the project.\n"
+        )
+        z.writestr(
+            "meshtastic-master/docs/configuration/radio/lora.mdx",
+            "---\ntitle: LoRa Configuration\nsidebar_label: LoRa\n---\nimport Tabs from '@theme/Tabs';\n\n"
+            "<Tabs>\nThe LoRa config sets the region and modem preset.\n:::note\nSet the region first.\n:::\n"
+            "</Tabs>\n```bash\nmeshtastic --set lora.region US\n```\n",
+        )
+        z.writestr(
+            "meshtastic-master/i18n/de/docs/lora.mdx",
+            "# LoRa\n\nDeutsch: die LoRa-Konfiguration ist wichtig.",
+        )
+        z.writestr(
+            "meshtastic-master/blog/2024-news.md", "# News\n\nA blog post about a release, long enough."
+        )
+    with zipfile.ZipFile(buf) as z:
+        docs = {d.key: d for d in markdown_docs(z)}
+    assert sorted(docs) == ["README", "docs/configuration/radio/lora"]
+    lora = docs["docs/configuration/radio/lora"]
+    assert lora.title == "LoRa Configuration"
+    assert "import Tabs" not in lora.text
+    assert "<Tabs>" not in lora.text
+    assert "Note:" in lora.text
+    assert "meshtastic --set lora.region US" in lora.text
+    assert docs["README"].title == "Meshtastic docs"
