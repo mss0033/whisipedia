@@ -22,6 +22,14 @@ describe('wiki leftovers an archived page shows (2026-10-19 audit)', () => {
       '和 net-wireless/wpa_supplicant。',
     );
     expect(withoutTemplateLeftovers('{{Ref HospAuto|')).toBe('');
+    expect(
+      withoutTemplateLeftovers(
+        '{{CodeBox|title=Eksempel på åpen diskusjon|lang=text|1=\n{{Talk|open|date=28 mars, 2017}}\nHei',
+      ),
+    ).toBe('\n\nHei');
+    expect(withoutTemplateLeftovers('the {{Citation needed}} tag')).toBe(
+      'the {{Citation needed}} tag',
+    );
     expect(withoutTemplateLeftovers('use {{Ref HospAuto|x}} here')).toBe(
       'use {{Ref HospAuto|x}} here',
     );

@@ -413,7 +413,9 @@ export function withoutTemplateLeftovers(text: string): string {
     const next = t
       .replace(TEMPLATE_LEFTOVERS, '')
       .replace(BROKEN_TEMPLATE, '$1')
-      .replace(UNCLOSED_TEMPLATE, '');
+      .replace(UNCLOSED_TEMPLATE, '')
+      .replace(PARAM_TEMPLATE, '')
+      .replace(TEMPLATE_OPENER, '');
     if (next === t) break;
     t = next;
   }
@@ -429,6 +431,14 @@ const BROKEN_TEMPLATE = /\{\{[A-Z][A-Za-z]{1,20}\|([^{}|]{1,100})\}\s+\}/g;
 /** A template the wiki left open and printed, nothing after it: LibrePathology's reference
  * `{{Ref HospAuto|` (2026-10-20 audit). */
 const UNCLOSED_TEMPLATE = /\{\{[A-Z][\w ]{0,30}\|\s*$/;
+
+/** A template with named parameters the wiki printed instead of expanding: Gentoo's outdated
+ * translations show `{{Talk|open|date=28 mars, 2017}}`, and the opening of a code box whose end
+ * comes lines later, `{{CodeBox|title=Eksempel|lang=text|1=` (2026-10-20 audit). A named parameter
+ * (`key=`) marks them: a template a page writes about has none. */
+const PARAM_TEMPLATE =
+  /\{\{[A-Z][A-Za-z]{1,20}(?:\|[^{}|\n]*)*\|[a-z0-9_]+=[^{}|\n]*(?:\|[^{}|\n]*)*\}\}/g;
+const TEMPLATE_OPENER = /\{\{[A-Z][A-Za-z]{1,20}\|(?:[a-z0-9_]+=[^|\n{}]*\|)+(?:1=)?/g;
 
 /** A wiki link the wiki never turned into one: `[[Colsterworth]]`, `[[Main Page|home]]` (OpenStreetMap
  * wiki, 2026-10-19 audit), shown as its words. A title starts with a capital and has no comma: a

@@ -78,7 +78,8 @@ const MOJIBAKE = /Ã[\u0080-¿]|â€[\u0080-¿™œ"]|Â[ -¿]|�{2,}/;
 const MARKUP = [
   [/&lt;\/?(p|div|span|br|a|b|i|em|strong|table|tr|td|li|ul|ol|h[1-6])\b/i, 'escaped HTML tags'],
   [/<\/?(p|div|span|table|tr|td|li|ul|ol|h[1-6])(\s[^>]*)?>/i, 'raw HTML tags'],
-  [/\{\{[A-Za-z][^}]{0,60}(\||\}\})/, 'wiki template'],
+  // A template name starts with a capital: {{ca:a∈A}} is a set in a logic text (IEP, 2026-10-20).
+  [/\{\{[A-Z][A-Za-z ]{0,60}(\||\}\})/, 'wiki template'],
   // A wiki title: a capital first, no comma (a chemical name in brackets is not one, eCFR 2026-10-19).
   [/\[\[(?:[A-Z][^\]|,]{0,80})(?:\|[^\]]{0,80})?\]\]/, 'wiki link'],
   [/&(?:amp;)?(?:nbsp|quot|#\d{2,5});/, 'escaped entities'],

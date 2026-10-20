@@ -23,7 +23,8 @@ def _world(tmp: Path, *, usage: int, failed: bool = False) -> dict[str, str]:
         rows += "whisipedia-job-maps.service loaded failed failed maps\n"
     (tmp / "units").write_text(rows)
     (fakebin / "systemctl").write_text(
-        f'#!/bin/sh\ncase "$*" in *list-units*) cat {tmp}/units ;; *ControlGroup*) echo {CG} ;; esac\n'
+        f'#!/bin/sh\ncase "$*" in *list-units*) cat {tmp}/units ;; *ControlGroup*) echo {CG} ;;'
+        " *MainPID*) echo 99 ;; esac\n"
     )
     (fakebin / "systemctl").chmod(0o755)
     cg = tmp / "cgroup" / CG.strip("/")
@@ -40,6 +41,12 @@ def _world(tmp: Path, *, usage: int, failed: bool = False) -> dict[str, str]:
     (proc / "42" / "cmdline").write_bytes(b"/r/.venv/bin/python3\0.venv/bin/wsp\0ingest\0--source\0big\0")
     (proc / "42" / "stat").write_text("42 (wsp) S " + " ".join(["0"] * 18) + " 100 0 0\n")  # started 1 s in
     (proc / "uptime").write_text("90000.00 1.00\n")  # the holder is 25 h old
+    (proc / "99" / "fd").mkdir(parents=True, exist_ok=True)  # the API: 9 of 10 files it may open
+    for n in range(9):
+        (proc / "99" / "fd" / str(n)).touch()
+    (proc / "99" / "limits").write_text(
+        "Max open files            10                   65536                files\n"
+    )
     ingest, scrub = (locks / "ingest.lock").stat().st_ino, (locks / "scrub.lock").stat().st_ino
     heavy = (locks / "heavy.lock").stat().st_ino
     profile = (locks / "profile.lock").stat().st_ino
@@ -77,7 +84,10 @@ def _run(env: dict[str, str], hours: float, *args: str) -> list[str]:
 def test_an_idle_job_a_long_held_lock_and_a_silent_api_are_raised_once_then_cleared(tmp_path: Path) -> None:
     env = _world(tmp_path, usage=5_000_000)
     first = _run(env, 0)
-    assert [line.split()[2].rstrip(":") for line in first] == ["api-down"]  # nothing else is known yet
+    assert sorted(line.split()[2].rstrip(":") for line in first) == [
+        "api-down",
+        "files-high:whisipedia-api.service",  # nothing else is known yet
+    ]
     assert _run(env, 1) == []  # raised once, not every run
     env = _world(tmp_path, usage=6_000_000, failed=True)  # 1 s of CPU in 3.5 h: idle
     later = " ".join(_run(env, 3.5))
@@ -95,7 +105,12 @@ def test_an_idle_job_a_long_held_lock_and_a_silent_api_are_raised_once_then_clea
     assert "CLEARED job-idle:whisipedia-job-lane.service" in cleared
     assert "CLEARED unit-failed:whisipedia-job-maps.service" in cleared
     status = _run(env, 9, "--status")
-    assert {line.split()[0] for line in status} == {"api-down", "lock-held:ingest", "lock-held:heavy"}
+    assert {line.split()[0] for line in status} == {
+        "api-down",
+        "lock-held:ingest",
+        "lock-held:heavy",
+        "files-high:whisipedia-api.service",
+    }
     events = (tmp_path / "state" / "watch" / "events.log").read_text()
     assert events.count("RAISED api-down") == 1
 
