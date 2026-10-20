@@ -7,7 +7,7 @@ import io
 import json
 import subprocess
 import zipfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, cast
 
@@ -316,6 +316,34 @@ def test_git_allow_list_is_the_registry_endpoints() -> None:
     assert github_repo("https://github.com/a/b/../../evil/x") is None
     assert github_repo("http://github.com/a/b") is None
     assert github_repo("https://github.com.evil.example/a/b") is None
+
+
+def test_an_organisation_discovery_allows_that_organisations_repositories(tmp_path: Path) -> None:
+    """Standard Ebooks names no repository one by one: discovering its organisation allows them, and
+    only them (all 1,533 books were refused, 2026-10-19)."""
+    spec_ = replace(
+        _git_spec([]),
+        raw={
+            "id": "se",
+            "access": {"adapter": "doc-collection", "discovery": [{"kind": "git", "org": "StandardEbooks"}]},
+        },
+    )
+    repos = registry_repos(spec_)
+    assert repos == frozenset({"standardebooks/*"})
+    fetcher = CollectionFetcher(
+        tmp_path / "vault", FakeFetcher(), keys={}, user_agent="t", workdir=tmp_path / "w", git="/bin/false"
+    )
+    elsewhere = Candidate(
+        key="x:y", url="https://github.com/evil/repo.git", title="t", issuer="i", resolve="git"
+    )
+    with pytest.raises(ValueError, match="not a repository the registry lists"):
+        fetcher._git_bundle(elsewhere, tmp_path / "out", Rules(), repos)  # pyright: ignore[reportPrivateUsage]
+    book = Candidate(
+        key="se:x", url="https://github.com/standardebooks/joseph-conrad_heart-of-darkness.git", title="t",
+        issuer="i", resolve="git",
+    )  # fmt: skip
+    with pytest.raises(subprocess.CalledProcessError):  # allowed: it reaches git (here /bin/false)
+        fetcher._git_bundle(book, tmp_path / "out", Rules(), repos)  # pyright: ignore[reportPrivateUsage]
 
 
 def test_unlisted_repository_is_never_cloned(tmp_path: Path) -> None:

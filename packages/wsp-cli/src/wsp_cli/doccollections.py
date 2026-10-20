@@ -601,7 +601,7 @@ class CollectionFetcher:
         if self.git is None:
             raise OSError("git is not installed")
         repo = github_repo(cand.url)
-        if repo is None or repo not in repos:
+        if repo is None or not (repo in repos or f"{repo.split('/')[0]}/*" in repos):
             raise ValueError(f"{cand.url} is not a repository the registry lists ({sorted(repos)})")
         dest_dir.mkdir(parents=True, exist_ok=True)
         if cand.extra.get("snapshot"):
@@ -856,10 +856,18 @@ def github_repo(url: str) -> str | None:
 
 
 def registry_repos(spec: SourceSpec) -> frozenset[str]:
-    """The repositories a git-mirror source's registry ``endpoints`` name: its git allow-list."""
+    """The repositories a git-mirror source's registry ``endpoints`` name: its git allow-list. A git
+    discovery of an organisation (``{kind: git, org: standardebooks}``) allows that organisation's
+    repositories (``owner/*``): Standard Ebooks lists 1,533 books there, none named one by one, and
+    every one was refused (2026-10-19)."""
     acc = cast(Mapping[str, Any], spec.raw.get("access") or {})
     named = (github_repo(str(u)) for u in cast(list[object], acc.get("endpoints") or []))
-    return frozenset(r for r in named if r)
+    orgs = (
+        f"{str(d.get('org')).lower()}/*"
+        for d in cast(list[Mapping[str, Any]], acc.get("discovery") or [])
+        if d.get("kind") == "git" and d.get("org")
+    )
+    return frozenset([*(r for r in named if r), *orgs])
 
 
 def _pointer(path: Path) -> str | None:
