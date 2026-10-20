@@ -1457,6 +1457,9 @@ def fixed_list(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
         pub = _s(it.get("pub_number"))
         title = _s(it.get("title")) or pub or title_from_url(urls[0])
         edition = _s(it.get("edition_date"))
+        # The stored file's extension when the URL has none (GEBCO's ".../gebco_2024/zip/").
+        suffix = _s(it.get("suffix"))
+        extra = {"suffix": suffix} if re.fullmatch(r"\.[a-z0-9]{1,8}", suffix) else {}
         yield Candidate(
             key=pub_key(env.prefix, pub, edition, key_stem_from_url(urls[0], decode=env.decode_url_keys)),
             url=urls[0],
@@ -1467,6 +1470,7 @@ def fixed_list(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
             mirrors=urls[1:],
             size=int(it["size"]) if isinstance(it.get("size"), int) else None,
             discovered_by="list",
+            extra=extra,
         )
 
 

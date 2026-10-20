@@ -1128,3 +1128,30 @@ def test_a_pdf_is_reopened_every_few_pages_and_read_within_a_time_budget(
     pages = late.split("\n\f\n")
     assert pages[:-1] == [f"Page {i}" for i in range(1, 5)]  # the clock passes 4.5 s before page 5
     assert pages[-1] == "[Pages 5-25 of this PDF were not read: its drawings take too long to read.]"
+
+
+def test_data_files_keep_their_extension_and_a_list_item_can_name_one(tmp_path: Path) -> None:
+    """2026-10-20: GHCN-Daily's .tar.gz was stored as .pdf and failed the PDF check; GEBCO's URL ends
+    in "/zip/" and needs its extension named."""
+    env = DiscoverEnv(fetcher=FakeFetcher({}), issuer="NOAA", prefix="ghcn", origins=("www.ncei.noaa.gov",))
+    cfg = {
+        "kind": "list",
+        "items": [
+            {
+                "pub_number": "ghcnd_all",
+                "url": "https://www.ncei.noaa.gov/pub/data/ghcn/daily/ghcnd_all.tar.gz",
+            },
+            {
+                "pub_number": "grid",
+                "url": "https://www.ncei.noaa.gov/open_download/grid/zip/",
+                "suffix": ".zip",
+            },
+            {"pub_number": "odd", "url": "https://www.ncei.noaa.gov/x/y/", "suffix": "../../etc"},
+            {"pub_number": "planet", "url": "https://www.ncei.noaa.gov/planet-260101.osm.pbf"},
+        ],
+    }
+    names = [c.file_name for c in discover_all([cfg], env)]
+    assert names[0].endswith(".gz")
+    assert names[1].endswith(".zip")
+    assert names[2].endswith(".pdf")  # a suffix that is not an extension is ignored
+    assert names[3].endswith(".pbf")
