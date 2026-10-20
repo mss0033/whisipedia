@@ -414,3 +414,18 @@ def test_a_year_is_packed_to_the_last_day_whose_hours_are_published(
     (gen / "upstream" / wd.era5_meta_name(2026)).write_text(json.dumps(meta))
     (gen / "MANIFEST.json").write_text("{}")
     assert wp._era5_year(*args) == 7  # type: ignore[arg-type]
+
+
+def test_ghcn_files_come_from_the_newest_generation_holding_each() -> None:
+    """2026-10-20: the retry's generation held the tarball alone; the lists were in the first one."""
+    retry = (Path("/v/2026-10-20r2"), ["upstream/ghcn__GHCND-ALL-1a2b3c4d.gz"])
+    first = (
+        Path("/v/2026-10-20"),
+        ["upstream/ghcn__GHCND-STATIONS-4821ed9b.txt", "upstream/ghcn__GHCND-COUNTRIES-5f9537b0.txt"],
+    )
+    assert wp.ghcn_files([retry, first]) == (
+        Path("/v/2026-10-20r2/upstream/ghcn__GHCND-ALL-1a2b3c4d.gz"),
+        Path("/v/2026-10-20/upstream/ghcn__GHCND-STATIONS-4821ed9b.txt"),
+        Path("/v/2026-10-20/upstream/ghcn__GHCND-COUNTRIES-5f9537b0.txt"),
+    )
+    assert wp.ghcn_files([first]) is None

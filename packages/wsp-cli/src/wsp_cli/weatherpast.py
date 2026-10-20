@@ -25,7 +25,7 @@ import sys
 import tarfile
 import time
 import zlib
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime, timedelta
 from importlib import import_module
@@ -440,21 +440,36 @@ def build_stations(
     return count
 
 
-def _ghcn_files(cfg: Mapping[str, Any], lay: Any) -> tuple[Path, Path, Path] | None:
-    specs = bootstrap.load_sources(cfg, lay)
-    vault = bootstrap.build_vault(cfg, specs, bootstrap.load_signer(cfg, lay, create=False), ledger=False)
-    gen = vault.current(GHCN_SOURCE)
-    if gen is None:
-        return None
-    root = Path(vault.generation_path(GHCN_SOURCE, gen.generation_id))
-    names = [root / Path(str(a.relpath)) for a in gen.artifacts]
+def ghcn_files(gens: Sequence[tuple[Path, Sequence[str]]]) -> tuple[Path, Path, Path] | None:
+    """The tarball and the station and country lists, each from the newest sealed generation that holds
+    it (``gens``: each generation's directory and file paths, newest first). A collection generation
+    holds only what that run fetched: on 2026-10-20 a retry's generation held the tarball alone, the
+    lists being in the one before."""
 
     def one(*needles: str) -> Path | None:
-        found = [p for p in names if all(n in p.name.lower() for n in needles)]
-        return found[0] if found else None
+        for root, rels in gens:
+            for rel in rels:
+                if all(n in Path(rel).name.lower() for n in needles):
+                    return root / rel
+        return None
 
     tar, st, co = one("all", ".gz"), one("stations"), one("countries")
     return (tar, st, co) if tar and st and co else None
+
+
+def _ghcn_files(cfg: Mapping[str, Any], lay: Any) -> tuple[Path, Path, Path] | None:
+    specs = bootstrap.load_sources(cfg, lay)
+    vault = bootstrap.build_vault(cfg, specs, bootstrap.load_signer(cfg, lay, create=False), ledger=False)
+    oldest = datetime.min.replace(tzinfo=UTC)
+    sealed = sorted(
+        vault.generations(GHCN_SOURCE), key=lambda g: (g.sealed_at or oldest, g.generation_id), reverse=True
+    )
+    return ghcn_files(
+        [
+            (Path(vault.generation_path(GHCN_SOURCE, g.generation_id)), [str(a.relpath) for a in g.artifacts])
+            for g in sealed
+        ]
+    )
 
 
 def cmd_stations(args: argparse.Namespace, out: TextIO) -> int:
