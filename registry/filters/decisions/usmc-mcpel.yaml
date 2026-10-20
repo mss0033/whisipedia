@@ -1,0 +1,610 @@
+# Owner review decisions for usmc-mcpel (machine-owned; written by `wsp proposals accept|reject`).
+# One entry per document the owner decided, keyed by document key (one edition). The hand-written
+# rules, with their comments, are in registry/filters/usmc-mcpel.yaml; this file is loaded next to it (policy.load_rules).
+# Remove an entry to undo a decision; anything else is rewritten by the next decision.
+allow_documents:
+- usmc:Explosive_Ordnance_Disposal_US_Marine_Corps_MCWP_3-17.2_formely_FMFM_13-8
+- usmc:MCDP_1-3_Tactics
+- usmc:MCDP_1_Warfighting
+- usmc:MCRP3-403B
+- usmc:MCRP3-403C
+- usmc:MCRP_3-02A_Marine_Physical_Readiness_Training_for_Combat
+- usmc:MCRP_3-02B_Close_Combat
+- usmc:MCRP_3-02F_FM_21-76_Survival
+- usmc:MCRP_3-0A_Unit_Training_Management_Guide
+- usmc:MCRP_3-11.1A_Commanders_Tactical_Handbook
+- usmc:MCRP_3-11.2A_Marine_Troop_Leaders_Guide
+- usmc:MCWP_3-11.2_Marine_Rifle_Squad
+- usmc:MCWP_3-11.3_Scouting_and_Patrolling
+- usmc:MCWP_3-15.3_Sniping
+- usmc:MCWP_3-15.5_MAGTF_Antiarmor_Operations
+- usmc:MCWP_3-16.6_Supporting_Arms_Observer_Spotter_and_Controller
+- usmc:MCWP_3-17.3_MAGTF_Breaching_Operations
+- usmc:MCWP_3-1_Ground_Combat_Operations
+- usmc:MCWP_3-3.1.2_Mine_Warfare
+- usmc:MCWP_3-33.2_Civil_Disturbances
+- usmc:MCWP_3-33.5_Counterinsurgency_Operations
+- usmc:MCWP_3-35.3_Military_Operations_on_Urbanized_Terrain_MOUT
+- usmc:MCWP_3-35.4_Doctrine_for_Navy-Marine_Corps_Joint_Riverine_Operations
+- usmc:MCWP_3-35.6_Desert_Operations
+- usmc:MCWP_3-37_MAGTF_Nuclear_Chemical_Biological_Defense_Operations
+- usmc:UnitedStatesMarineCorpsMcdp1-3tactics
+- usmc:UnitedStatesMarineCorpsMcdp1warfighting
+- usmc:information-mcdp-8
+- usmc:intelligence-mcdp-2
+- usmc:jungle-operations-mctp-12-10-c
+- usmc:logistics-mcdp-4
+- usmc:manualzilla-id-5662789
+- usmc:manualzilla-id-5819444
+- usmc:mcdp-6
+- usmc:mcrp-2-25-a-reconaissance-reports-guide
+- usmc:mcrp-3-02-b-close-combat
+- usmc:mcrp-3-11.1-a-commanders-tactical-handbook
+- usmc:mcrp-3-15.2-a-mortars
+- usmc:mcrp-3-15.2-b-mortar-gunnery
+- usmc:mcrp-333-a
+- usmc:mctp-3-32-f-secured
+- usmc:mcwp-2-6-counterintelligence
+- usmc:mcwp-3-11.3-scouting-and-patrolling-2000
+- usmc:mcwp-3-14-1-lav-25-gunnery
+- usmc:mcwp-3-15.1-machine-guns-and-machine-gun-gunnery-1996
+- usmc:mcwp-3-15.3-sniping-2004
+- usmc:mcwp-3-15.5-antiarmor-operations-2000
+- usmc:mcwp-3-15.5-magtf-antiarmor-operations
+- usmc:mcwp-3-15.5-magtf-antiarmor-operations-1992
+- usmc:mcwp-3-25.10-low-altitude-air-defense-handbook-1998
+- usmc:mcwp-3-35.4-doctrine-for-navy-marine-corps-joint-riverine-operations
+- usmc:milmanual-mcdp-1-3-tactics
+- usmc:milmanual-mcdp-1-warfighting
+- usmc:milmanual-mcrp-2-24b-remote-sensor-operations
+- usmc:milmanual-mcrp-2-25a-reconaissance-reports-guide
+- usmc:milmanual-mcrp-3-01a-rifle-marksmanship
+- usmc:milmanual-mcrp-3-02a-marine-physical-readiness-training-for-combat
+- usmc:milmanual-mcrp-3-02b-close-combat
+- usmc:milmanual-mcrp-3-02c-marine-combat-water-survival
+- usmc:milmanual-mcrp-3-02e-understanding-and-surviving-terrorism
+- usmc:milmanual-mcrp-3-02f-fm-21-76-survival
+- usmc:milmanual-mcrp-3-0a-unit-training-management-guide
+- usmc:milmanual-mcrp-3-11.1a-commanders-tactical-handbook
+- usmc:milmanual-mcrp-3-11.2a-marine-troop-leaders-guide
+- usmc:milmanual-mcrp-3-15.2a-mortars
+- usmc:milmanual-mcrp-3-15.2b-mortar-gunnery
+- usmc:milmanual-mcrp-3-17.2c-multiservice-procedures-for-explosive-ordnance
+- usmc:milmanual-mcrp-3-33a-counterguerilla-operations
+- usmc:milmanual-mcrp-3-37c-flame-riot-contol-agents-and-herbicide-ops.
+- usmc:milmanual-mcrp-4-11.8b-war-crimes-investigation
+- usmc:milmanual-mcwp-2-26-geographic-intelligence
+- usmc:milmanual-mcwp-2-6-counterintelligence
+- usmc:milmanual-mcwp-3-1-ground-combat-operations
+- usmc:milmanual-mcwp-3-11.2-marine-rifle-squad
+- usmc:milmanual-mcwp-3-11.3-scouting-and-patrolling
+- usmc:milmanual-mcwp-3-15.1-machine-guns-and-machine-gunnery
+- usmc:milmanual-mcwp-3-15.3-sniping
+- usmc:milmanual-mcwp-3-15.5-magtf-antiarmor-operations
+- usmc:milmanual-mcwp-3-16-fire-support-coordination-in-the-ground-combat-ele
+- usmc:milmanual-mcwp-3-16.6-supporting-arms-observer-spotter-and-controller
+- usmc:milmanual-mcwp-3-17.2-explosive-ordnance-disposal
+- usmc:milmanual-mcwp-3-17.3-magtf-breaching-operations
+- usmc:milmanual-mcwp-3-3.1.2-mine-warfare
+- usmc:milmanual-mcwp-3-33.2-civil-disturbances
+- usmc:milmanual-mcwp-3-33.5-counterinsurgency-operations
+- usmc:milmanual-mcwp-3-35.3-military-operations-on-urbanized-terrain-mout
+- usmc:milmanual-mcwp-3-35.4-doctrine-for-navy-marine-corps-joint-riverine-op
+- usmc:milmanual-mcwp-3-35.6-desert-operations
+- usmc:milmanual-mcwp-3-37-magtf-nuclear-chemical-biological-defense-operatio
+- usmc:milmanual-mcwp-3-40.5-electronic-warfare
+- usmc:milmanual-mcwp-3-41.1-rear-area-operations
+- usmc:milmanual-mcwp-4-1-logistics-operations
+- usmc:milmanual-mcwp-4-11-tactical-level-logistics
+- usmc:milmanual-mcwp-4-11.1-health-service-support-operations
+- usmc:milmanual-mcwp-4-11.3-transportation-operations
+- usmc:milmanual-mcwp-5-4-small-wars
+- usmc:planning-mcdp-5
+- usmc:radio-operators-handbook-mcrp-3-40.3-b_202604
+- usmc:strategy-mcdp-1-1
+- usmc:tactics-mcdp-1-3
+allow_content_review:
+- usmc:mcrp-3-15.2-b-mortar-gunnery
+- usmc:milmanual-mcrp-3-15.2b-mortar-gunnery
+deny_documents: []
+log:
+- key: usmc:Explosive_Ordnance_Disposal_US_Marine_Corps_MCWP_3-17.2_formely_FMFM_13-8
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:MCDP_1-3_Tactics
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:MCDP_1_Warfighting
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:MCRP3-403B
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:MCRP3-403C
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:MCRP_3-02A_Marine_Physical_Readiness_Training_for_Combat
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:MCRP_3-02B_Close_Combat
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:MCRP_3-02F_FM_21-76_Survival
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:MCRP_3-0A_Unit_Training_Management_Guide
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:MCRP_3-11.1A_Commanders_Tactical_Handbook
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:MCRP_3-11.2A_Marine_Troop_Leaders_Guide
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:MCWP_3-11.2_Marine_Rifle_Squad
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:MCWP_3-11.3_Scouting_and_Patrolling
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:MCWP_3-15.3_Sniping
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:MCWP_3-15.5_MAGTF_Antiarmor_Operations
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:MCWP_3-16.6_Supporting_Arms_Observer_Spotter_and_Controller
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:MCWP_3-17.3_MAGTF_Breaching_Operations
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:MCWP_3-1_Ground_Combat_Operations
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:MCWP_3-3.1.2_Mine_Warfare
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:MCWP_3-33.2_Civil_Disturbances
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:MCWP_3-33.5_Counterinsurgency_Operations
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:MCWP_3-35.3_Military_Operations_on_Urbanized_Terrain_MOUT
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:MCWP_3-35.4_Doctrine_for_Navy-Marine_Corps_Joint_Riverine_Operations
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:MCWP_3-35.6_Desert_Operations
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:UnitedStatesMarineCorpsMcdp1-3tactics
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:UnitedStatesMarineCorpsMcdp1warfighting
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:information-mcdp-8
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:intelligence-mcdp-2
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:jungle-operations-mctp-12-10-c
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:logistics-mcdp-4
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:manualzilla-id-5662789
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:manualzilla-id-5819444
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:mcdp-6
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:mcrp-2-25-a-reconaissance-reports-guide
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:mcrp-3-02-b-close-combat
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:mcrp-3-11.1-a-commanders-tactical-handbook
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:mcrp-3-15.2-a-mortars
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:mcrp-3-15.2-b-mortar-gunnery
+  decision: allow
+  rule: review:safety=firing tables
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:mcrp-333-a
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:mctp-3-32-f-secured
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:mcwp-2-6-counterintelligence
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:mcwp-3-11.3-scouting-and-patrolling-2000
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:mcwp-3-14-1-lav-25-gunnery
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:mcwp-3-15.1-machine-guns-and-machine-gun-gunnery-1996
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:mcwp-3-15.3-sniping-2004
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:mcwp-3-15.5-antiarmor-operations-2000
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:mcwp-3-15.5-magtf-antiarmor-operations
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:mcwp-3-15.5-magtf-antiarmor-operations-1992
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:mcwp-3-25.10-low-altitude-air-defense-handbook-1998
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:mcwp-3-35.4-doctrine-for-navy-marine-corps-joint-riverine-operations
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:milmanual-mcdp-1-3-tactics
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:milmanual-mcdp-1-warfighting
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:milmanual-mcrp-2-24b-remote-sensor-operations
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:milmanual-mcrp-2-25a-reconaissance-reports-guide
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:milmanual-mcrp-3-01a-rifle-marksmanship
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:milmanual-mcrp-3-02a-marine-physical-readiness-training-for-combat
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:milmanual-mcrp-3-02b-close-combat
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:milmanual-mcrp-3-02c-marine-combat-water-survival
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:milmanual-mcrp-3-02e-understanding-and-surviving-terrorism
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:milmanual-mcrp-3-02f-fm-21-76-survival
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:milmanual-mcrp-3-0a-unit-training-management-guide
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:milmanual-mcrp-3-11.1a-commanders-tactical-handbook
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:milmanual-mcrp-3-11.2a-marine-troop-leaders-guide
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:milmanual-mcrp-3-15.2a-mortars
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:milmanual-mcrp-3-15.2b-mortar-gunnery
+  decision: allow
+  rule: review:safety=firing tables
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:milmanual-mcrp-3-17.2c-multiservice-procedures-for-explosive-ordnance
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:milmanual-mcrp-3-33a-counterguerilla-operations
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:milmanual-mcrp-3-37c-flame-riot-contol-agents-and-herbicide-ops.
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:milmanual-mcrp-4-11.8b-war-crimes-investigation
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:milmanual-mcwp-2-26-geographic-intelligence
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:milmanual-mcwp-2-6-counterintelligence
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:milmanual-mcwp-3-1-ground-combat-operations
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:milmanual-mcwp-3-11.2-marine-rifle-squad
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:milmanual-mcwp-3-11.3-scouting-and-patrolling
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:milmanual-mcwp-3-15.1-machine-guns-and-machine-gunnery
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:milmanual-mcwp-3-15.3-sniping
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:milmanual-mcwp-3-15.5-magtf-antiarmor-operations
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:milmanual-mcwp-3-16-fire-support-coordination-in-the-ground-combat-ele
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:milmanual-mcwp-3-16.6-supporting-arms-observer-spotter-and-controller
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:milmanual-mcwp-3-17.2-explosive-ordnance-disposal
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:milmanual-mcwp-3-17.3-magtf-breaching-operations
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:milmanual-mcwp-3-3.1.2-mine-warfare
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:milmanual-mcwp-3-33.2-civil-disturbances
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:milmanual-mcwp-3-33.5-counterinsurgency-operations
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:milmanual-mcwp-3-35.3-military-operations-on-urbanized-terrain-mout
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:milmanual-mcwp-3-35.4-doctrine-for-navy-marine-corps-joint-riverine-op
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:milmanual-mcwp-3-35.6-desert-operations
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:milmanual-mcwp-3-37-magtf-nuclear-chemical-biological-defense-operatio
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:milmanual-mcwp-3-40.5-electronic-warfare
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:milmanual-mcwp-3-41.1-rear-area-operations
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:milmanual-mcwp-4-1-logistics-operations
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:milmanual-mcwp-4-11-tactical-level-logistics
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:milmanual-mcwp-4-11.1-health-service-support-operations
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:milmanual-mcwp-4-11.3-transportation-operations
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:milmanual-mcwp-5-4-small-wars
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:planning-mcdp-5
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:radio-operators-handbook-mcrp-3-40.3-b_202604
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:strategy-mcdp-1-1
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:tactics-mcdp-1-3
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:10+00:00'
+  proposal: 113
+- key: usmc:MCWP_3-37_MAGTF_Nuclear_Chemical_Biological_Defense_Operations
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:46:11+00:00'
+  proposal: 114

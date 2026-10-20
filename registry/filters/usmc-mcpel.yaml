@@ -1,0 +1,5 @@
+# Document-level rules for usmc-mcpel. Created 2026-10-20 so the owner's per-document decisions
+# (registry/filters/decisions/usmc-mcpel.yaml, written by `wsp proposals accept`) are loaded; the source's
+# filter in registry/sources.yaml is unchanged otherwise.
+allow_documents: []
+deny_documents: []

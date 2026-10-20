@@ -1,0 +1,20 @@
+# Owner review decisions for joint-publications (machine-owned; written by `wsp proposals accept|reject`).
+# One entry per document the owner decided, keyed by document key (one edition). The hand-written
+# rules, with their comments, are in registry/filters/joint-publications.yaml; this file is loaded next to it (policy.load_rules).
+# Remove an entry to undo a decision; anything else is rewritten by the next decision.
+allow_documents:
+- jcs:DTIC_ADA400771
+- jcs:JCSJointPublication372NuclearOperations20190611
+allow_content_review: []
+deny_documents: []
+log:
+- key: jcs:DTIC_ADA400771
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:45:25+00:00'
+  proposal: 115
+- key: jcs:JCSJointPublication372NuclearOperations20190611
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-20T00:45:25+00:00'
+  proposal: 115

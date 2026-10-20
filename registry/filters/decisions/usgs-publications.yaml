@@ -1,0 +1,519 @@
+# Owner review decisions for usgs-publications (machine-owned; written by `wsp proposals accept|reject`).
+# One entry per document the owner decided, keyed by document key (one edition). The hand-written
+# rules, with their comments, are in registry/filters/usgs-publications.yaml; this file is loaded next to it (policy.load_rules).
+# Remove an entry to undo a decision; anything else is rewritten by the next decision.
+allow_documents:
+- usgs:70038899
+- usgs:70043848
+- usgs:70046404
+- usgs:70046407
+- usgs:70160862
+- usgs:70160866
+- usgs:70160867
+- usgs:70160871
+- usgs:70161774
+- usgs:70161784
+- usgs:70161790
+- usgs:70174084
+- usgs:70267396
+- usgs:70268165
+- usgs:70268167
+- usgs:70268168
+- usgs:bsr19990001
+- usgs:fs02894
+- usgs:fs23696
+- usgs:gip119-1
+- usgs:ofr01169
+- usgs:ofr0145
+- usgs:ofr2003408
+- usgs:ofr20181006
+- usgs:ofr6453
+- usgs:ofr71303
+- usgs:ofr72269
+- usgs:ofr7323
+- usgs:ofr75144
+- usgs:ofr7532
+- usgs:ofr75353
+- usgs:ofr75434
+- usgs:ofr75529
+- usgs:ofr76213
+- usgs:ofr76595
+- usgs:ofr77328
+- usgs:ofr77704
+- usgs:ofr77781
+- usgs:ofr7783
+- usgs:ofr78457
+- usgs:ofr78613
+- usgs:ofr78882
+- usgs:ofr78941
+- usgs:ofr79685
+- usgs:ofr79923
+- usgs:ofr801016
+- usgs:ofr801119
+- usgs:ofr80162
+- usgs:ofr8051
+- usgs:ofr80992
+- usgs:ofr81286
+- usgs:ofr821087
+- usgs:ofr82702
+- usgs:ofr82703
+- usgs:ofr84461
+- usgs:ofr85288
+- usgs:ofr86316
+- usgs:ofr89471
+- usgs:ofr91535
+- usgs:ofr93111
+- usgs:ofr93445
+- usgs:ofr94313
+- usgs:pp1350
+- usgs:pp1350-1
+- usgs:pp1573
+- usgs:pp1802N
+- usgs:sim2848
+- usgs:sim2848-2
+- usgs:sir20175022K1-1
+- usgs:sir20175022K1-2
+- usgs:wri7415
+- usgs:wri77117
+- usgs:wri8213
+- usgs:wri8222
+- usgs:wri824093
+- usgs:wri854161
+- usgs:wri864200
+- usgs:wri874078
+- usgs:wri874201
+- usgs:wri884069
+- usgs:wri884103
+- usgs:wri894092
+- usgs:wri894212
+- usgs:wri914021
+- usgs:wri914175
+allow_content_review:
+- usgs:70267396
+deny_documents: []
+log:
+- key: usgs:ofr20181006
+  decision: allow
+  rule: review:safety-abstract=production of explosives
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:pp1802N
+  decision: allow
+  rule: review:safety-abstract=manufacture explosives
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:ofr86316
+  decision: allow
+  rule: review:safety-abstract=explosives manufacturing
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:gip119-1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:sim2848
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:sim2848-2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:ofr89471
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:ofr85288
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:ofr82702
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:ofr821087
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:ofr82703
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:ofr81286
+  decision: allow
+  rule: review:text=extraction-error
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:ofr80992
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:ofr78941
+  decision: allow
+  rule: review:text=extraction-error
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:ofr75529
+  decision: allow
+  rule: review:text=extraction-error
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:ofr75353
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:ofr75144
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:70268168
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:70268167
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:70268165
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:sir20175022K1-1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:sir20175022K1-2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:ofr0145
+  decision: allow
+  rule: review:text=extraction-error
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:fs23696
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:pp1573
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:70043848
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:fs02894
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:ofr94313
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:ofr93111
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:ofr93445
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:pp1350
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:pp1350-1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:ofr7323
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:70160871
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:70161790
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:70160867
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:70160866
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:70161784
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:70161774
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:70160862
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:70267396
+  decision: allow
+  rule: review:safety=making explosive
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:ofr2003408
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:ofr01169
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:bsr19990001
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:wri914175
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:wri874201
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:wri8222
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:wri8213
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:ofr80162
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:ofr801016
+  decision: allow
+  rule: review:text=extraction-error
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:ofr78882
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:ofr78457
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:wri77117
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:ofr77704
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:ofr77328
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:ofr7783
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:ofr76213
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:ofr76595
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:wri7415
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:70046404
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:ofr72269
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:70046407
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:ofr71303
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:ofr6453
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:ofr91535
+  decision: allow
+  rule: review:text=extraction-error
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:wri914021
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:wri894092
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:wri884103
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:wri884069
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:wri874078
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:wri854161
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:wri864200
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:ofr84461
+  decision: allow
+  rule: review:text=extraction-error
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:wri824093
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:ofr801119
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:ofr8051
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:ofr79923
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:ofr79685
+  decision: allow
+  rule: review:text=extraction-error
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:ofr77781
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:ofr7532
+  decision: allow
+  rule: review:text=extraction-error
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:wri894212
+  decision: allow
+  rule: review:text=extraction-error
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:ofr78613
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:ofr75434
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:70038899
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106
+- key: usgs:70174084
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 106

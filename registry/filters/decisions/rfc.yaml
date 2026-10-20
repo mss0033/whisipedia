@@ -1,0 +1,20 @@
+# Owner review decisions for rfc (machine-owned; written by `wsp proposals accept|reject`).
+# One entry per document the owner decided, keyed by document key (one edition). The hand-written
+# rules, with their comments, are in registry/filters/rfc.yaml; this file is loaded next to it (policy.load_rules).
+# Remove an entry to undo a decision; anything else is rewritten by the next decision.
+allow_documents:
+- rfc:RFC-500
+- rfc:RFC-570
+allow_content_review: []
+deny_documents: []
+log:
+- key: rfc:RFC-570
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:07+00:00'
+  proposal: 104
+- key: rfc:RFC-500
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:08+00:00'
+  proposal: 108

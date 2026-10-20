@@ -553,7 +553,7 @@ sources:
       # Every RFC is published openly: words that look like handling markings ("(TS)") are not
       # markings (71 RFCs, TCP's RFC 9293 among them, were rejected as classified, 2026-10-17). A
       # scan without a text layer (RFC 500) is kept for its title and pages.
-      filter: {allow_all: true, public_issuer: true, allow_image_only: true}
+      filter: {rules: registry/filters/rfc.yaml, allow_all: true, public_issuer: true, allow_image_only: true}
     update: {cadence: P1M, strategy: snapshot-retention}
     size: {bytes: 0.6e9, measured: false, as_of: 2026-10-14}
 
@@ -1076,7 +1076,7 @@ sources:
         - {kind: api, flavor: usgs-pubs, query: tsunami}
         - {kind: api, flavor: usgs-pubs, query: groundwater}
         - {kind: api, flavor: usgs-pubs, query: drought}
-      filter: {allow_all: true}
+      filter: {rules: registry/filters/usgs-publications.yaml, allow_all: true}
     update: {cadence: P3M, strategy: base-plus-incremental}
     size: {records: 186593, bytes: 200e9, measured: false, as_of: 2026-10-10}
     notes: Score 4.2. Record count measured via the API; bytes are an estimate for a hazards and water selection.
@@ -1207,7 +1207,7 @@ sources:
             - {url: "https://raw.githubusercontent.com/mitre-attack/attack-stix-data/master/ics-attack/ics-attack.json", title: "ATT&CK ICS"}
             - {url: "https://cwe.mitre.org/data/xml/cwec_latest.xml.zip", title: "Common Weakness Enumeration (CWE)"}
             - {url: "https://capec.mitre.org/data/xml/capec_latest.xml", title: "Common Attack Pattern Enumeration and Classification (CAPEC)"}
-      filter: {allow_all: true, builtin_review: false}  # defender taxonomies: attack vocabulary is the subject
+      filter: {rules: registry/filters/mitre-attack-cwe-capec.yaml, allow_all: true, builtin_review: false}  # defender taxonomies: attack vocabulary is the subject
     update: {cadence: P3M, strategy: snapshot-retention}
     size: {bytes: 0.1e9, measured: true, as_of: 2026-10-18}
     notes: Score 4.2. Royalty-free licence with attribution. Defender taxonomies only; no exploit code (boundary §3.2). 2026-10-18 sample read 1,842 enterprise ATT&CK entries, 944 CWE weaknesses, 558 CAPEC patterns.
@@ -1350,7 +1350,7 @@ sources:
           # "United States Marine Corps" or a dash, or the full name ("Marine Corps Doctrinal Publication 4").
           pub_number: "(?:^|:\\s*|-\\s|Corps\\s+)((?:MCDP|MCWP|MCRP|MCTP)[\\s_-]*\\d[\\d.-]*|Marine Corps Doctrinal Publication\\s+\\d[\\d.-]*)"
           provenance: "2026-10-18 owner decision (D11 exception): the issuer's site refuses this connection, so the Internet Archive's copy of USMC doctrinal publications (Distribution Statement A)"
-      filter: {distribution: {require: [A]}, allow_series_prefix: ["MCDP", "MCWP", "MCRP", "MCTP", "Marine Corps Doctrinal"], default: deny}
+      filter: {rules: registry/filters/usmc-mcpel.yaml, distribution: {require: [A]}, allow_series_prefix: ["MCDP", "MCWP", "MCRP", "MCTP", "Marine Corps Doctrinal"], default: deny}
       mirrors:
         - {channel: "archive.org MCDP/MCWP/MCRP copies", status: verified, verified: 2026-10-18, note: "owner approved third-party copies (2026-10-18)"}
         - {channel: "www.marines.mil MCPEL", status: blocked, verified: 2026-10-10, note: "403 (WAF)"}
@@ -1375,7 +1375,7 @@ sources:
       origins: [history.army.mil, www.govinfo.gov]
       discovery:
         - {kind: api, flavor: govinfo, collection: GOVPUB, package_prefix: [GOVPUB-D114], api_key: govinfo}
-      filter: {allow_all: true, distribution: {require: [public-release, published]}}
+      filter: {rules: registry/filters/army-cmh-histories.yaml, allow_all: true, distribution: {require: [public-release, published]}}
       currency: {historical_before: "1990-01-01"}
       mirrors:
         - {channel: "history.army.mil", status: blocked, verified: 2026-10-10, note: "403 (WAF)"}
@@ -1648,7 +1648,7 @@ sources:
       # reports.csv: every report's newest HTML (clean text) or PDF, its date and number.
       discovery:
         - {kind: csv, url: "https://www.everycrsreport.com/reports.csv", base: "https://www.everycrsreport.com/", key: number, file: [latestHTML, latestPDF], title: title, date: latestPubDate}
-      filter: {allow_all: true}
+      filter: {rules: registry/filters/crs-reports.yaml, allow_all: true}
       mirrors:
         - {channel: "api.congress.gov /v3/crsreport (official, api.data.gov key)", status: verified, verified: 2026-10-10, note: "metadata 200 with DEMO_KEY; format URLs point at www.congress.gov"}
         - {channel: "www.congress.gov crs_external_products PDFs", status: blocked, verified: 2026-10-10, note: "403 to a plain client (WAF)"}

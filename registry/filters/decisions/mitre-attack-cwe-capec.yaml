@@ -1,0 +1,14 @@
+# Owner review decisions for mitre-attack-cwe-capec (machine-owned; written by `wsp proposals accept|reject`).
+# One entry per document the owner decided, keyed by document key (one edition). The hand-written
+# rules, with their comments, are in registry/filters/mitre-attack-cwe-capec.yaml; this file is loaded next to it (policy.load_rules).
+# Remove an entry to undo a decision; anything else is rewritten by the next decision.
+allow_documents:
+- mitre:cwec-latest.xml
+allow_content_review: []
+deny_documents: []
+log:
+- key: mitre:cwec-latest.xml
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:09+00:00'
+  proposal: 112

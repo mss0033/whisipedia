@@ -1,0 +1,2008 @@
+# Owner review decisions for cia-reading-room (machine-owned; written by `wsp proposals accept|reject`).
+# One entry per document the owner decided, keyed by document key (one edition). The hand-written
+# rules, with their comments, are in registry/filters/cia-reading-room.yaml; this file is loaded next to it (policy.load_rules).
+# Remove an entry to undo a decision; anything else is rewritten by the next decision.
+allow_documents:
+- cia-rr:cia-readingroom-document-0000132244
+- cia-rr:cia-readingroom-document-0000235172
+- cia-rr:cia-readingroom-document-0000235187
+- cia-rr:cia-readingroom-document-0000242424
+- cia-rr:cia-readingroom-document-0000312353
+- cia-rr:cia-readingroom-document-0000312376
+- cia-rr:cia-readingroom-document-0000312384
+- cia-rr:cia-readingroom-document-0000365914
+- cia-rr:cia-readingroom-document-0000371990
+- cia-rr:cia-readingroom-document-0000916298
+- cia-rr:cia-readingroom-document-0000916337
+- cia-rr:cia-readingroom-document-0000916338
+- cia-rr:cia-readingroom-document-0000916481
+- cia-rr:cia-readingroom-document-0000916575
+- cia-rr:cia-readingroom-document-0000916710
+- cia-rr:cia-readingroom-document-0000917319
+- cia-rr:cia-readingroom-document-0000922634
+- cia-rr:cia-readingroom-document-0000922650
+- cia-rr:cia-readingroom-document-0001118683
+- cia-rr:cia-readingroom-document-0001118695
+- cia-rr:cia-readingroom-document-0001119344
+- cia-rr:cia-readingroom-document-0001218419
+- cia-rr:cia-readingroom-document-0001230253
+- cia-rr:cia-readingroom-document-0001282564
+- cia-rr:cia-readingroom-document-0001297563
+- cia-rr:cia-readingroom-document-0001354879
+- cia-rr:cia-readingroom-document-0001512861
+- cia-rr:cia-readingroom-document-0005339049
+- cia-rr:cia-readingroom-document-00149646
+- cia-rr:cia-readingroom-document-01013715
+- cia-rr:cia-readingroom-document-06479741
+- cia-rr:cia-readingroom-document-06479745
+- cia-rr:cia-readingroom-document-06505834
+- cia-rr:cia-readingroom-document-06627241
+- cia-rr:cia-readingroom-document-06627247
+- cia-rr:cia-readingroom-document-06729902
+- cia-rr:cia-readingroom-document-06828266
+- cia-rr:cia-readingroom-document-06828320
+- cia-rr:cia-readingroom-document-06828379
+- cia-rr:cia-readingroom-document-06828462
+- cia-rr:cia-readingroom-document-5076de58993247d4d82b58dc
+- cia-rr:cia-readingroom-document-5076de59993247d4d82b5968
+- cia-rr:cia-readingroom-document-5076de59993247d4d82b5992
+- cia-rr:cia-readingroom-document-5076de59993247d4d82b59c2
+- cia-rr:cia-readingroom-document-5076de59993247d4d82b59f2
+- cia-rr:cia-readingroom-document-5076de59993247d4d82b59f3
+- cia-rr:cia-readingroom-document-5076de59993247d4d82b5a17
+- cia-rr:cia-readingroom-document-5076de59993247d4d82b5a69
+- cia-rr:cia-readingroom-document-5076de59993247d4d82b5a6e
+- cia-rr:cia-readingroom-document-5076de59993247d4d82b5b3b
+- cia-rr:cia-readingroom-document-5076de59993247d4d82b5b96
+- cia-rr:cia-readingroom-document-5076de5a993247d4d82b5bb5
+- cia-rr:cia-readingroom-document-5076de5a993247d4d82b5bba
+- cia-rr:cia-readingroom-document-5076de5a993247d4d82b5bd8
+- cia-rr:cia-readingroom-document-cia-rdp05-01559r000400410063-1
+- cia-rr:cia-readingroom-document-cia-rdp33-02415a000400010033-9
+- cia-rr:cia-readingroom-document-cia-rdp33-02415a000400350095-4
+- cia-rr:cia-readingroom-document-cia-rdp56-00071a000100030002-3
+- cia-rr:cia-readingroom-document-cia-rdp57-00384r000500080057-9
+- cia-rr:cia-readingroom-document-cia-rdp57-00384r000500100200-6
+- cia-rr:cia-readingroom-document-cia-rdp57-00384r001300080006-6
+- cia-rr:cia-readingroom-document-cia-rdp57-00384r001300230037-5
+- cia-rr:cia-readingroom-document-cia-rdp58-00453r000200020003-9
+- cia-rr:cia-readingroom-document-cia-rdp58-00453r000200100004-9
+- cia-rr:cia-readingroom-document-cia-rdp60-00346r000100420004-1
+- cia-rr:cia-readingroom-document-cia-rdp61s00137a000100020082-8
+- cia-rr:cia-readingroom-document-cia-rdp61s00527a000100170038-8
+- cia-rr:cia-readingroom-document-cia-rdp61s00527a000100170060-3
+- cia-rr:cia-readingroom-document-cia-rdp61s00750a000400090077-3
+- cia-rr:cia-readingroom-document-cia-rdp61s00750a000500090200-4
+- cia-rr:cia-readingroom-document-cia-rdp61s00750a000700070208-6
+- cia-rr:cia-readingroom-document-cia-rdp62-00328a000100510036-1
+- cia-rr:cia-readingroom-document-cia-rdp62-00631r000400060004-9
+- cia-rr:cia-readingroom-document-cia-rdp62-01094r000100090040-5
+- cia-rr:cia-readingroom-document-cia-rdp62s00231a000100100039-1
+- cia-rr:cia-readingroom-document-cia-rdp62s00231a000100220001-9
+- cia-rr:cia-readingroom-document-cia-rdp63-00314r000200270023-8
+- cia-rr:cia-readingroom-document-cia-rdp64-00360r000600030006-7
+- cia-rr:cia-readingroom-document-cia-rdp64-00360r000700020076-9
+- cia-rr:cia-readingroom-document-cia-rdp66b00664r000600020004-9
+- cia-rr:cia-readingroom-document-cia-rdp66b00664r000600080077-3
+- cia-rr:cia-readingroom-document-cia-rdp67-00896r000100130048-7
+- cia-rr:cia-readingroom-document-cia-rdp67b00657r000100010001-8
+- cia-rr:cia-readingroom-document-cia-rdp69-00642r000100190008-5
+- cia-rr:cia-readingroom-document-cia-rdp69b00041r001800050052-8
+- cia-rr:cia-readingroom-document-cia-rdp69b00369r000200240051-2
+- cia-rr:cia-readingroom-document-cia-rdp70-00211r000100130026-7
+- cia-rr:cia-readingroom-document-cia-rdp70-00241r000300040015-4
+- cia-rr:cia-readingroom-document-cia-rdp70b00338r000200010112-1
+- cia-rr:cia-readingroom-document-cia-rdp71b00364r000300140006-4
+- cia-rr:cia-readingroom-document-cia-rdp75-00001r000200520012-6
+- cia-rr:cia-readingroom-document-cia-rdp75-00001r000200600090-1
+- cia-rr:cia-readingroom-document-cia-rdp75-00001r000300090012-3
+- cia-rr:cia-readingroom-document-cia-rdp75-00001r000300370022-1
+- cia-rr:cia-readingroom-document-cia-rdp75-00149r000100360037-5
+- cia-rr:cia-readingroom-document-cia-rdp75-00399r000100110131-0
+- cia-rr:cia-readingroom-document-cia-rdp75-00662r000300050010-6
+- cia-rr:cia-readingroom-document-cia-rdp76-00183r000200030072-2
+- cia-rr:cia-readingroom-document-cia-rdp76-00183r000200030163-1
+- cia-rr:cia-readingroom-document-cia-rdp76-00183r000200030213-5
+- cia-rr:cia-readingroom-document-cia-rdp76-00183r000200050065-8
+- cia-rr:cia-readingroom-document-cia-rdp76-00183r000200110006-6
+- cia-rr:cia-readingroom-document-cia-rdp76-00183r000300020270-2
+- cia-rr:cia-readingroom-document-cia-rdp76-00183r000300030024-4
+- cia-rr:cia-readingroom-document-cia-rdp76-00183r000300050148-5
+- cia-rr:cia-readingroom-document-cia-rdp78-03568a000800010018-3
+- cia-rr:cia-readingroom-document-cia-rdp78-03642a000600010012-1
+- cia-rr:cia-readingroom-document-cia-rdp78-04007a000700090005-1
+- cia-rr:cia-readingroom-document-cia-rdp78-04135a000100020065-6
+- cia-rr:cia-readingroom-document-cia-rdp78-04718a002300310033-8
+- cia-rr:cia-readingroom-document-cia-rdp78-05256a000100050003-6
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000200510032-7
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000200570010-5
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000200570028-6
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000200580009-6
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000200580026-7
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000200620023-5
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000200700004-7
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000200720033-3
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000301030031-9
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000301050034-4
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000301090017-9
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000301220023-7
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000301220027-3
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000401300011-0
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000401320010-9
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000401320012-7
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000401340009-9
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000401360030-9
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000401410041-5
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000414220016-0
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000414230012-3
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000414340016-7
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000414640001-0
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000414640006-5
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000414650008-2
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000414710013-9
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000415130006-0
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000415920016-2
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000415930006-2
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000415940005-2
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000416120012-3
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000416130004-1
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000416130007-8
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000416210001-5
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000416220012-2
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000416220013-1
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000416310005-0
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000416310009-6
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000416340003-9
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000416340019-2
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000416350001-0
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000416410008-6
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000416420017-5
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000416530005-6
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000416530006-5
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000416630010-9
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000416650019-8
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000416710002-9
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000416720008-2
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000416730005-4
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000416850019-6
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000501700001-3
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000501700028-4
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000501800027-7
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000502010036-3
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000517010018-7
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000517020010-4
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000517040004-9
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000517040016-6
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000517140018-3
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000517250001-9
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000518530015-2
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000518540004-3
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000518720012-4
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000518750018-5
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000518920018-6
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000518940004-9
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000518950010-1
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000518950018-3
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000519110001-2
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000519310003-8
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000519310009-2
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000519320010-9
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000519320014-5
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000519320020-8
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000519330016-2
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000519530007-0
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000519630018-7
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000519710002-5
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000519720001-5
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000519730002-3
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000519730006-9
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000520220020-7
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000520230007-1
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000520420010-6
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000520430001-5
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000520510006-1
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000520530020-3
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000520610015-0
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000520630019-4
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000520820003-0
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000520910005-8
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000520920020-0
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000520930003-8
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000520930010-0
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000521010002-9
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000521010009-2
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000621310009-8
+- cia-rr:cia-readingroom-document-cia-rdp78-05867a000623540008-2
+- cia-rr:cia-readingroom-document-cia-rdp78-06369a000100030002-3
+- cia-rr:cia-readingroom-document-cia-rdp78b03826a000200030087-5
+- cia-rr:cia-readingroom-document-cia-rdp78b04560a002400010025-5
+- cia-rr:cia-readingroom-document-cia-rdp78b04560a002700010037-9
+- cia-rr:cia-readingroom-document-cia-rdp78b04560a002900010103-3
+- cia-rr:cia-readingroom-document-cia-rdp78b04560a006300010037-9
+- cia-rr:cia-readingroom-document-cia-rdp78b04770a002100010038-8
+- cia-rr:cia-readingroom-document-cia-rdp78b04770a002900050015-1
+- cia-rr:cia-readingroom-document-cia-rdp78m02660r000800020026-1
+- cia-rr:cia-readingroom-document-cia-rdp78t04759a010200010086-0
+- cia-rr:cia-readingroom-document-cia-rdp78t05929a001100030002-4
+- cia-rr:cia-readingroom-document-cia-rdp78z02997a000100200027-8
+- cia-rr:cia-readingroom-document-cia-rdp79-00957a000100100025-2
+- cia-rr:cia-readingroom-document-cia-rdp79-01093a000300070003-6
+- cia-rr:cia-readingroom-document-cia-rdp79m00467a000300010010-7
+- cia-rr:cia-readingroom-document-cia-rdp79r01012a001000010031-4
+- cia-rr:cia-readingroom-document-cia-rdp79r01012a010600020001-3
+- cia-rr:cia-readingroom-document-cia-rdp79t01762a000500020003-9
+- cia-rr:cia-readingroom-document-cia-rdp80-00765a000100010040-9
+- cia-rr:cia-readingroom-document-cia-rdp80-00809a000600010172-6
+- cia-rr:cia-readingroom-document-cia-rdp80-00810a000300590004-0
+- cia-rr:cia-readingroom-document-cia-rdp80-01240a000400040041-0
+- cia-rr:cia-readingroom-document-cia-rdp80-01503r000100130015-3
+- cia-rr:cia-readingroom-document-cia-rdp80b01676r001000130025-2
+- cia-rr:cia-readingroom-document-cia-rdp80r01362a000200230007-6
+- cia-rr:cia-readingroom-document-cia-rdp80r01441r000100090022-1
+- cia-rr:cia-readingroom-document-cia-rdp80r01443r000200030003-5
+- cia-rr:cia-readingroom-document-cia-rdp80r01443r000200250009-5
+- cia-rr:cia-readingroom-document-cia-rdp80r01443r000200370003-8
+- cia-rr:cia-readingroom-document-cia-rdp80r01443r000400060004-9
+- cia-rr:cia-readingroom-document-cia-rdp80r01731r000100020087-4
+- cia-rr:cia-readingroom-document-cia-rdp80r01731r000300050047-7
+- cia-rr:cia-readingroom-document-cia-rdp80r01731r001900050002-9
+- cia-rr:cia-readingroom-document-cia-rdp80r01731r002000070005-2
+- cia-rr:cia-readingroom-document-cia-rdp80r01731r002400090015-5
+- cia-rr:cia-readingroom-document-cia-rdp80s01540r004900010003-0
+- cia-rr:cia-readingroom-document-cia-rdp80t00556a000100360001-6
+- cia-rr:cia-readingroom-document-cia-rdp80t00702a000800030003-7
+- cia-rr:cia-readingroom-document-cia-rdp80t01471r000800100004-0
+- cia-rr:cia-readingroom-document-cia-rdp81-00755r000100080010-5
+- cia-rr:cia-readingroom-document-cia-rdp81b00878r001200030062-3
+- cia-rr:cia-readingroom-document-cia-rdp81b00879r001000050070-3
+- cia-rr:cia-readingroom-document-cia-rdp81b00879r001100110028-2
+- cia-rr:cia-readingroom-document-cia-rdp81m00980r001700030091-1
+- cia-rr:cia-readingroom-document-cia-rdp82-00457r000600160013-8
+- cia-rr:cia-readingroom-document-cia-rdp82-00457r002100800005-9
+- cia-rr:cia-readingroom-document-cia-rdp82-00457r002700390003-1
+- cia-rr:cia-readingroom-document-cia-rdp82-00457r002700550001-5
+- cia-rr:cia-readingroom-document-cia-rdp82-00457r002900100005-8
+- cia-rr:cia-readingroom-document-cia-rdp82-00457r003800360007-8
+- cia-rr:cia-readingroom-document-cia-rdp82-00457r004000420004-1
+- cia-rr:cia-readingroom-document-cia-rdp82-00457r004200700010-1
+- cia-rr:cia-readingroom-document-cia-rdp82-00457r006400800010-6
+- cia-rr:cia-readingroom-document-cia-rdp82-00457r006700440004-0
+- cia-rr:cia-readingroom-document-cia-rdp82r00025r000800140003-0
+- cia-rr:cia-readingroom-document-cia-rdp83-00423r001700880005-2
+- cia-rr:cia-readingroom-document-cia-rdp83-01022r000100010010-2
+- cia-rr:cia-readingroom-document-cia-rdp83m00914r000600030066-5
+- cia-rr:cia-readingroom-document-cia-rdp83m00914r002200130063-9
+- cia-rr:cia-readingroom-document-cia-rdp84-00933r000400200019-8
+- cia-rr:cia-readingroom-document-cia-rdp84b00049r000501330009-6
+- cia-rr:cia-readingroom-document-cia-rdp85b01152r000700910069-8
+- cia-rr:cia-readingroom-document-cia-rdp85b01152r001001360024-3
+- cia-rr:cia-readingroom-document-cia-rdp85m01133r000100140008-6
+- cia-rr:cia-readingroom-document-cia-rdp85t00339r000200260001-5
+- cia-rr:cia-readingroom-document-cia-rdp85t00339r000500110002-7
+- cia-rr:cia-readingroom-document-cia-rdp86-00513r000410320011-9
+- cia-rr:cia-readingroom-document-cia-rdp86-00513r000410520005-4
+- cia-rr:cia-readingroom-document-cia-rdp86-00513r000411110018-4
+- cia-rr:cia-readingroom-document-cia-rdp86-00800r000100130020-2
+- cia-rr:cia-readingroom-document-cia-rdp86m00886r000600100085-5
+- cia-rr:cia-readingroom-document-cia-rdp87-00868r000100060086-6
+- cia-rr:cia-readingroom-document-cia-rdp88-01314r000100230017-2
+- cia-rr:cia-readingroom-document-cia-rdp88-01315r000400390056-8
+- cia-rr:cia-readingroom-document-cia-rdp89b00551r000100180015-5
+- cia-rr:cia-readingroom-document-cia-rdp89b00551r000300090010-8
+- cia-rr:cia-readingroom-document-cia-rdp89b00551r000300210009-6
+- cia-rr:cia-readingroom-document-cia-rdp89b00551r000300250004-7
+- cia-rr:cia-readingroom-document-cia-rdp89b00551r000300330010-1
+- cia-rr:cia-readingroom-document-cia-rdp89b00551r000400110009-6
+- cia-rr:cia-readingroom-document-cia-rdp89b00551r000500130012-9
+- cia-rr:cia-readingroom-document-cia-rdp89b00551r000500220001-1
+- cia-rr:cia-readingroom-document-cia-rdp89b00551r000500370005-1
+- cia-rr:cia-readingroom-document-cia-rdp89b00551r001000180010-9
+- cia-rr:cia-readingroom-document-cia-rdp90-00065r000100140014-3
+- cia-rr:cia-readingroom-document-cia-rdp90-00552r000100260067-1
+- cia-rr:cia-readingroom-document-cia-rdp90-00552r000201650058-6
+- cia-rr:cia-readingroom-document-cia-rdp90-00552r000404440009-8
+- cia-rr:cia-readingroom-document-cia-rdp90-00552r000505110027-2
+- cia-rr:cia-readingroom-document-cia-rdp90-00552r000707100002-6
+- cia-rr:cia-readingroom-document-cia-rdp90-00806r000100320007-8
+- cia-rr:cia-readingroom-document-cia-rdp90-00806r000200770002-3
+- cia-rr:cia-readingroom-document-cia-rdp90-00965r000100260022-2
+- cia-rr:cia-readingroom-document-cia-rdp90-00965r000100450015-9
+- cia-rr:cia-readingroom-document-cia-rdp90-00965r000302130007-9
+- cia-rr:cia-readingroom-document-cia-rdp90-00965r000302640085-7
+- cia-rr:cia-readingroom-document-cia-rdp91-00403r000201280006-8
+- cia-rr:cia-readingroom-document-cia-rdp91-00929r000201010015-4
+- cia-rr:cia-readingroom-document-cia-rdp91-00929r000201010034-3
+- cia-rr:cia-readingroom-document-cia-rdp91-00929r000201010057-8
+- cia-rr:cia-readingroom-document-cia-rdp91-00929r000201380001-7
+- cia-rr:cia-readingroom-document-cia-rdp91-00929r000201420004-9
+- cia-rr:cia-readingroom-document-cia-rdp91m00696r000700020008-0
+- cia-rr:cia-readingroom-document-cia-rdp92b01090r002600270026-3
+- cia-rr:cia-readingroom-document-cia-rdp95b00895r000200030012-8
+- cia-rr:cia-readingroom-document-cia-rdp96-00787r000200020004-6
+- cia-rr:cia-readingroom-document-cia-rdp96-00788r000300050004-1
+- cia-rr:cia-readingroom-document-cia-rdp96-00788r001500090004-4
+- cia-rr:cia-readingroom-document-cia-rdp96-00789r001400150003-8
+- cia-rr:cia-readingroom-document-cia-rdp96-00789r003300390002-2
+- cia-rr:cia-readingroom-document-cia-rdp96-00789r003400940009-3
+- cia-rr:cia-readingroom-document-cia-rdp96-00789r003400940011-0
+- cia-rr:cia-readingroom-document-cia-rdp96-00789r003700650004-7
+- cia-rr:cia-readingroom-document-cia-rdp96r01136r002605120030-1
+- cia-rr:cia-readingroom-document-cia-rdp99-00498r000100130098-3
+- cia-rr:cia-readingroom-document-cia-rdp99-00498r000100170048-4
+- cia-rr:cia-readingroom-document-cia-rdp99-00498r000200020006-5
+- cia-rr:cia-readingroom-document-cia-rdp99-00498r000200020042-5
+- cia-rr:cia-readingroom-document-loc-hak-178-1-25-6
+- cia-rr:cia-readingroom-document-loc-hak-541-2-1-7
+allow_content_review:
+- cia-rr:cia-readingroom-document-0000242424
+- cia-rr:cia-readingroom-document-cia-rdp05-01559r000400410063-1
+- cia-rr:cia-readingroom-document-cia-rdp62-00631r000400060004-9
+- cia-rr:cia-readingroom-document-cia-rdp71b00364r000300140006-4
+- cia-rr:cia-readingroom-document-cia-rdp78b04560a002400010025-5
+- cia-rr:cia-readingroom-document-cia-rdp79-01093a000300070003-6
+- cia-rr:cia-readingroom-document-cia-rdp79r01012a001000010031-4
+- cia-rr:cia-readingroom-document-cia-rdp79r01012a010600020001-3
+- cia-rr:cia-readingroom-document-cia-rdp80-00809a000600010172-6
+- cia-rr:cia-readingroom-document-cia-rdp80r01362a000200230007-6
+- cia-rr:cia-readingroom-document-cia-rdp80r01441r000100090022-1
+- cia-rr:cia-readingroom-document-cia-rdp82-00457r006700440004-0
+- cia-rr:cia-readingroom-document-cia-rdp85m01133r000100140008-6
+- cia-rr:cia-readingroom-document-cia-rdp88-01315r000400390056-8
+- cia-rr:cia-readingroom-document-cia-rdp90-00065r000100140014-3
+- cia-rr:cia-readingroom-document-cia-rdp90-00552r000505110027-2
+- cia-rr:cia-readingroom-document-cia-rdp90-00552r000707100002-6
+- cia-rr:cia-readingroom-document-cia-rdp90-00965r000100260022-2
+- cia-rr:cia-readingroom-document-cia-rdp91m00696r000700020008-0
+- cia-rr:cia-readingroom-document-loc-hak-541-2-1-7
+deny_documents: []
+log:
+- key: cia-rr:cia-readingroom-document-cia-rdp78b03826a000200030087-5
+  decision: allow
+  rule: review:safety-abstract=fire control radars
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 90
+- key: cia-rr:cia-readingroom-document-cia-rdp80r01443r000200370003-8
+  decision: allow
+  rule: review:safety-abstract=fire control equipment
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 90
+- key: cia-rr:cia-readingroom-document-cia-rdp80t01471r000800100004-0
+  decision: allow
+  rule: review:safety-abstract=fire control radar
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 90
+- key: cia-rr:cia-readingroom-document-cia-rdp96-00789r003300390002-2
+  decision: allow
+  rule: review:safety-abstract=target designator
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 90
+- key: cia-rr:cia-readingroom-document-0000132244
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 90
+- key: cia-rr:cia-readingroom-document-0001118683
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 90
+- key: cia-rr:cia-readingroom-document-0001118695
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 90
+- key: cia-rr:cia-readingroom-document-06505834
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 90
+- key: cia-rr:cia-readingroom-document-5076de59993247d4d82b59f3
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 90
+- key: cia-rr:cia-readingroom-document-5076de59993247d4d82b5a6e
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 90
+- key: cia-rr:cia-readingroom-document-cia-rdp58-00453r000200100004-9
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 90
+- key: cia-rr:cia-readingroom-document-cia-rdp61s00750a000400090077-3
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 90
+- key: cia-rr:cia-readingroom-document-cia-rdp62-00328a000100510036-1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 90
+- key: cia-rr:cia-readingroom-document-cia-rdp69-00642r000100190008-5
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 90
+- key: cia-rr:cia-readingroom-document-cia-rdp69b00041r001800050052-8
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 90
+- key: cia-rr:cia-readingroom-document-cia-rdp78-04007a000700090005-1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 90
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000200700004-7
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 90
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000301090017-9
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 90
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000416220012-2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 90
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000416220013-1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 90
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000416530005-6
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 90
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000416730005-4
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 90
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000518750018-5
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 90
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000519320020-8
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 90
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000519530007-0
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 90
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000520610015-0
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 90
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000520630019-4
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 90
+- key: cia-rr:cia-readingroom-document-cia-rdp78b04560a002400010025-5
+  decision: allow
+  rule: review:safety=field artillery battery
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 90
+- key: cia-rr:cia-readingroom-document-cia-rdp78b04770a002900050015-1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 90
+- key: cia-rr:cia-readingroom-document-cia-rdp78t05929a001100030002-4
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 90
+- key: cia-rr:cia-readingroom-document-cia-rdp79-00957a000100100025-2
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 90
+- key: cia-rr:cia-readingroom-document-cia-rdp79m00467a000300010010-7
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 90
+- key: cia-rr:cia-readingroom-document-cia-rdp80-00810a000300590004-0
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 90
+- key: cia-rr:cia-readingroom-document-cia-rdp80r01731r000100020087-4
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 90
+- key: cia-rr:cia-readingroom-document-cia-rdp81-00755r000100080010-5
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 90
+- key: cia-rr:cia-readingroom-document-cia-rdp82-00457r006700440004-0
+  decision: allow
+  rule: review:safety=sniping
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 90
+- key: cia-rr:cia-readingroom-document-cia-rdp83m00914r002200130063-9
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 90
+- key: cia-rr:cia-readingroom-document-cia-rdp85t00339r000200260001-5
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 90
+- key: cia-rr:cia-readingroom-document-cia-rdp86-00800r000100130020-2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 90
+- key: cia-rr:cia-readingroom-document-cia-rdp87-00868r000100060086-6
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 90
+- key: cia-rr:cia-readingroom-document-cia-rdp88-01314r000100230017-2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 90
+- key: cia-rr:cia-readingroom-document-cia-rdp88-01315r000400390056-8
+  decision: allow
+  rule: review:safety=sniping
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 90
+- key: cia-rr:cia-readingroom-document-cia-rdp89b00551r000300330010-1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 90
+- key: cia-rr:cia-readingroom-document-cia-rdp89b00551r001000180010-9
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 90
+- key: cia-rr:cia-readingroom-document-cia-rdp90-00065r000100140014-3
+  decision: allow
+  rule: review:safety=missile guidance
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 90
+- key: cia-rr:cia-readingroom-document-cia-rdp90-00552r000707100002-6
+  decision: allow
+  rule: review:safety=nuclear weapons production
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 90
+- key: cia-rr:cia-readingroom-document-cia-rdp91-00929r000201010015-4
+  decision: allow
+  rule: review:text=extraction-error
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 90
+- key: cia-rr:cia-readingroom-document-loc-hak-541-2-1-7
+  decision: allow
+  rule: review:safety=sniping
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 90
+- key: cia-rr:cia-readingroom-document-0000916481
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:14+00:00'
+  proposal: 91
+- key: cia-rr:cia-readingroom-document-cia-rdp82-00457r000600160013-8
+  decision: allow
+  rule: review:safety-abstract=manufactures explosives
+  at: '2026-10-20T00:45:15+00:00'
+  proposal: 92
+- key: cia-rr:cia-readingroom-document-0000242424
+  decision: allow
+  rule: review:safety=missile guidance
+  at: '2026-10-20T00:45:15+00:00'
+  proposal: 92
+- key: cia-rr:cia-readingroom-document-0000312376
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:15+00:00'
+  proposal: 92
+- key: cia-rr:cia-readingroom-document-0000365914
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:15+00:00'
+  proposal: 92
+- key: cia-rr:cia-readingroom-document-0000916710
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:15+00:00'
+  proposal: 92
+- key: cia-rr:cia-readingroom-document-0000922634
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:15+00:00'
+  proposal: 92
+- key: cia-rr:cia-readingroom-document-0001119344
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:15+00:00'
+  proposal: 92
+- key: cia-rr:cia-readingroom-document-01013715
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:15+00:00'
+  proposal: 92
+- key: cia-rr:cia-readingroom-document-06479745
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:15+00:00'
+  proposal: 92
+- key: cia-rr:cia-readingroom-document-06828320
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:15+00:00'
+  proposal: 92
+- key: cia-rr:cia-readingroom-document-5076de5a993247d4d82b5bba
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:15+00:00'
+  proposal: 92
+- key: cia-rr:cia-readingroom-document-cia-rdp58-00453r000200020003-9
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:15+00:00'
+  proposal: 92
+- key: cia-rr:cia-readingroom-document-cia-rdp61s00137a000100020082-8
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:15+00:00'
+  proposal: 92
+- key: cia-rr:cia-readingroom-document-cia-rdp61s00527a000100170038-8
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:15+00:00'
+  proposal: 92
+- key: cia-rr:cia-readingroom-document-cia-rdp62-01094r000100090040-5
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:15+00:00'
+  proposal: 92
+- key: cia-rr:cia-readingroom-document-cia-rdp67b00657r000100010001-8
+  decision: allow
+  rule: review:text=extraction-error
+  at: '2026-10-20T00:45:15+00:00'
+  proposal: 92
+- key: cia-rr:cia-readingroom-document-cia-rdp75-00001r000200600090-1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:15+00:00'
+  proposal: 92
+- key: cia-rr:cia-readingroom-document-cia-rdp75-00662r000300050010-6
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:15+00:00'
+  proposal: 92
+- key: cia-rr:cia-readingroom-document-cia-rdp76-00183r000200030072-2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:15+00:00'
+  proposal: 92
+- key: cia-rr:cia-readingroom-document-cia-rdp76-00183r000200050065-8
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:15+00:00'
+  proposal: 92
+- key: cia-rr:cia-readingroom-document-cia-rdp78-03568a000800010018-3
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:15+00:00'
+  proposal: 92
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000301220027-3
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:15+00:00'
+  proposal: 92
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000401300011-0
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:15+00:00'
+  proposal: 92
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000401320012-7
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:15+00:00'
+  proposal: 92
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000414640001-0
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:15+00:00'
+  proposal: 92
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000416120012-3
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:15+00:00'
+  proposal: 92
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000416130007-8
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:15+00:00'
+  proposal: 92
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000416210001-5
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:15+00:00'
+  proposal: 92
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000416650019-8
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:15+00:00'
+  proposal: 92
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000517140018-3
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:15+00:00'
+  proposal: 92
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000518950010-1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:15+00:00'
+  proposal: 92
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000519320010-9
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:15+00:00'
+  proposal: 92
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000519630018-7
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:15+00:00'
+  proposal: 92
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000521010002-9
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:15+00:00'
+  proposal: 92
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000521010009-2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:15+00:00'
+  proposal: 92
+- key: cia-rr:cia-readingroom-document-cia-rdp78b04560a002700010037-9
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:15+00:00'
+  proposal: 92
+- key: cia-rr:cia-readingroom-document-cia-rdp78b04560a002900010103-3
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:15+00:00'
+  proposal: 92
+- key: cia-rr:cia-readingroom-document-cia-rdp78b04770a002100010038-8
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-20T00:45:15+00:00'
+  proposal: 92
+- key: cia-rr:cia-readingroom-document-cia-rdp78m02660r000800020026-1
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-20T00:45:15+00:00'
+  proposal: 92
+- key: cia-rr:cia-readingroom-document-cia-rdp80-00809a000600010172-6
+  decision: allow
+  rule: review:safety=demolition charge
+  at: '2026-10-20T00:45:15+00:00'
+  proposal: 92
+- key: cia-rr:cia-readingroom-document-cia-rdp80r01731r000300050047-7
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:15+00:00'
+  proposal: 92
+- key: cia-rr:cia-readingroom-document-cia-rdp80r01731r001900050002-9
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:15+00:00'
+  proposal: 92
+- key: cia-rr:cia-readingroom-document-cia-rdp81b00879r001000050070-3
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:15+00:00'
+  proposal: 92
+- key: cia-rr:cia-readingroom-document-cia-rdp82-00457r003800360007-8
+  decision: allow
+  rule: review:text=extraction-error
+  at: '2026-10-20T00:45:15+00:00'
+  proposal: 92
+- key: cia-rr:cia-readingroom-document-cia-rdp82-00457r004200700010-1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:15+00:00'
+  proposal: 92
+- key: cia-rr:cia-readingroom-document-cia-rdp83-00423r001700880005-2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:15+00:00'
+  proposal: 92
+- key: cia-rr:cia-readingroom-document-cia-rdp85m01133r000100140008-6
+  decision: allow
+  rule: review:safety=manufacture of weapons
+  at: '2026-10-20T00:45:15+00:00'
+  proposal: 92
+- key: cia-rr:cia-readingroom-document-cia-rdp86-00513r000410320011-9
+  decision: allow
+  rule: review:text=extraction-error
+  at: '2026-10-20T00:45:15+00:00'
+  proposal: 92
+- key: cia-rr:cia-readingroom-document-cia-rdp86m00886r000600100085-5
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-20T00:45:15+00:00'
+  proposal: 92
+- key: cia-rr:cia-readingroom-document-cia-rdp89b00551r000300210009-6
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:15+00:00'
+  proposal: 92
+- key: cia-rr:cia-readingroom-document-cia-rdp96-00788r000300050004-1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:15+00:00'
+  proposal: 92
+- key: cia-rr:cia-readingroom-document-cia-rdp96-00789r001400150003-8
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:15+00:00'
+  proposal: 92
+- key: cia-rr:cia-readingroom-document-cia-rdp99-00498r000200020042-5
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-20T00:45:15+00:00'
+  proposal: 92
+- key: cia-rr:cia-readingroom-document-0000235187
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 103
+- key: cia-rr:cia-readingroom-document-0000312384
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 103
+- key: cia-rr:cia-readingroom-document-0001297563
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 103
+- key: cia-rr:cia-readingroom-document-0001354879
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 103
+- key: cia-rr:cia-readingroom-document-06828266
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 103
+- key: cia-rr:cia-readingroom-document-06828462
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 103
+- key: cia-rr:cia-readingroom-document-5076de59993247d4d82b59f2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 103
+- key: cia-rr:cia-readingroom-document-5076de5a993247d4d82b5bd8
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 103
+- key: cia-rr:cia-readingroom-document-cia-rdp05-01559r000400410063-1
+  decision: allow
+  rule: review:safety=manufacturing explosives
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 103
+- key: cia-rr:cia-readingroom-document-cia-rdp33-02415a000400350095-4
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 103
+- key: cia-rr:cia-readingroom-document-cia-rdp61s00750a000700070208-6
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 103
+- key: cia-rr:cia-readingroom-document-cia-rdp64-00360r000600030006-7
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 103
+- key: cia-rr:cia-readingroom-document-cia-rdp70-00211r000100130026-7
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 103
+- key: cia-rr:cia-readingroom-document-cia-rdp71b00364r000300140006-4
+  decision: allow
+  rule: review:safety=missile guidance
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 103
+- key: cia-rr:cia-readingroom-document-cia-rdp75-00001r000300090012-3
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 103
+- key: cia-rr:cia-readingroom-document-cia-rdp75-00001r000300370022-1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 103
+- key: cia-rr:cia-readingroom-document-cia-rdp76-00183r000200030163-1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 103
+- key: cia-rr:cia-readingroom-document-cia-rdp76-00183r000200030213-5
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 103
+- key: cia-rr:cia-readingroom-document-cia-rdp76-00183r000200110006-6
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 103
+- key: cia-rr:cia-readingroom-document-cia-rdp76-00183r000300030024-4
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 103
+- key: cia-rr:cia-readingroom-document-cia-rdp78-04135a000100020065-6
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 103
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000200570010-5
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 103
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000200570028-6
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 103
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000301220023-7
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 103
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000401320010-9
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 103
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000414230012-3
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 103
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000414640006-5
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 103
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000414650008-2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 103
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000415940005-2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 103
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000416130004-1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 103
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000416310005-0
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 103
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000416710002-9
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 103
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000519730006-9
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 103
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000520220020-7
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 103
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000520430001-5
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 103
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000520820003-0
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 103
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000621310009-8
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 103
+- key: cia-rr:cia-readingroom-document-cia-rdp78b04560a006300010037-9
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 103
+- key: cia-rr:cia-readingroom-document-cia-rdp78z02997a000100200027-8
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 103
+- key: cia-rr:cia-readingroom-document-cia-rdp80r01362a000200230007-6
+  decision: allow
+  rule: review:safety=nuclear weapons design
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 103
+- key: cia-rr:cia-readingroom-document-cia-rdp80t00702a000800030003-7
+  decision: allow
+  rule: review:text=extraction-error
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 103
+- key: cia-rr:cia-readingroom-document-cia-rdp85b01152r001001360024-3
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 103
+- key: cia-rr:cia-readingroom-document-cia-rdp89b00551r000500370005-1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 103
+- key: cia-rr:cia-readingroom-document-cia-rdp91-00403r000201280006-8
+  decision: allow
+  rule: review:text=extraction-error
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 103
+- key: cia-rr:cia-readingroom-document-cia-rdp91-00929r000201420004-9
+  decision: allow
+  rule: review:text=extraction-error
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 103
+- key: cia-rr:cia-readingroom-document-cia-rdp96-00789r003400940011-0
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 103
+- key: cia-rr:cia-readingroom-document-loc-hak-178-1-25-6
+  decision: allow
+  rule: review:marking=export-mention:ear
+  at: '2026-10-20T00:45:16+00:00'
+  proposal: 103
+- key: cia-rr:cia-readingroom-document-cia-rdp82-00457r002700550001-5
+  decision: allow
+  rule: review:safety-abstract=gunsmith
+  at: '2026-10-20T00:45:18+00:00'
+  proposal: 105
+- key: cia-rr:cia-readingroom-document-0000235172
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:18+00:00'
+  proposal: 105
+- key: cia-rr:cia-readingroom-document-0000312353
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:18+00:00'
+  proposal: 105
+- key: cia-rr:cia-readingroom-document-0000371990
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:18+00:00'
+  proposal: 105
+- key: cia-rr:cia-readingroom-document-0000922650
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:18+00:00'
+  proposal: 105
+- key: cia-rr:cia-readingroom-document-0001218419
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:18+00:00'
+  proposal: 105
+- key: cia-rr:cia-readingroom-document-0001512861
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:18+00:00'
+  proposal: 105
+- key: cia-rr:cia-readingroom-document-06479741
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:18+00:00'
+  proposal: 105
+- key: cia-rr:cia-readingroom-document-06627247
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:18+00:00'
+  proposal: 105
+- key: cia-rr:cia-readingroom-document-06828379
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:18+00:00'
+  proposal: 105
+- key: cia-rr:cia-readingroom-document-5076de59993247d4d82b5968
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:18+00:00'
+  proposal: 105
+- key: cia-rr:cia-readingroom-document-5076de59993247d4d82b5b96
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:18+00:00'
+  proposal: 105
+- key: cia-rr:cia-readingroom-document-cia-rdp57-00384r000500100200-6
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:18+00:00'
+  proposal: 105
+- key: cia-rr:cia-readingroom-document-cia-rdp57-00384r001300230037-5
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:18+00:00'
+  proposal: 105
+- key: cia-rr:cia-readingroom-document-cia-rdp60-00346r000100420004-1
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-20T00:45:18+00:00'
+  proposal: 105
+- key: cia-rr:cia-readingroom-document-cia-rdp63-00314r000200270023-8
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:18+00:00'
+  proposal: 105
+- key: cia-rr:cia-readingroom-document-cia-rdp69b00369r000200240051-2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:18+00:00'
+  proposal: 105
+- key: cia-rr:cia-readingroom-document-cia-rdp70-00241r000300040015-4
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:18+00:00'
+  proposal: 105
+- key: cia-rr:cia-readingroom-document-cia-rdp70b00338r000200010112-1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:18+00:00'
+  proposal: 105
+- key: cia-rr:cia-readingroom-document-cia-rdp75-00149r000100360037-5
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:18+00:00'
+  proposal: 105
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000200510032-7
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:18+00:00'
+  proposal: 105
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000200620023-5
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:18+00:00'
+  proposal: 105
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000401360030-9
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:18+00:00'
+  proposal: 105
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000414220016-0
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:18+00:00'
+  proposal: 105
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000416630010-9
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:18+00:00'
+  proposal: 105
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000517040004-9
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:18+00:00'
+  proposal: 105
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000517250001-9
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:18+00:00'
+  proposal: 105
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000518720012-4
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:18+00:00'
+  proposal: 105
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000518940004-9
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:18+00:00'
+  proposal: 105
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000519330016-2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:18+00:00'
+  proposal: 105
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000519710002-5
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:18+00:00'
+  proposal: 105
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000519720001-5
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:18+00:00'
+  proposal: 105
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000520530020-3
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:18+00:00'
+  proposal: 105
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000623540008-2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:18+00:00'
+  proposal: 105
+- key: cia-rr:cia-readingroom-document-cia-rdp78t04759a010200010086-0
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:18+00:00'
+  proposal: 105
+- key: cia-rr:cia-readingroom-document-cia-rdp80-01240a000400040041-0
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:18+00:00'
+  proposal: 105
+- key: cia-rr:cia-readingroom-document-cia-rdp80-01503r000100130015-3
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:18+00:00'
+  proposal: 105
+- key: cia-rr:cia-readingroom-document-cia-rdp80b01676r001000130025-2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:18+00:00'
+  proposal: 105
+- key: cia-rr:cia-readingroom-document-cia-rdp80r01441r000100090022-1
+  decision: allow
+  rule: review:safety=nuclear weapons production
+  at: '2026-10-20T00:45:18+00:00'
+  proposal: 105
+- key: cia-rr:cia-readingroom-document-cia-rdp80r01443r000200030003-5
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:18+00:00'
+  proposal: 105
+- key: cia-rr:cia-readingroom-document-cia-rdp80r01443r000400060004-9
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:18+00:00'
+  proposal: 105
+- key: cia-rr:cia-readingroom-document-cia-rdp80r01731r002400090015-5
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:18+00:00'
+  proposal: 105
+- key: cia-rr:cia-readingroom-document-cia-rdp82-00457r002100800005-9
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:18+00:00'
+  proposal: 105
+- key: cia-rr:cia-readingroom-document-cia-rdp82-00457r004000420004-1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:18+00:00'
+  proposal: 105
+- key: cia-rr:cia-readingroom-document-cia-rdp82-00457r006400800010-6
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:18+00:00'
+  proposal: 105
+- key: cia-rr:cia-readingroom-document-cia-rdp82r00025r000800140003-0
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:18+00:00'
+  proposal: 105
+- key: cia-rr:cia-readingroom-document-cia-rdp86-00513r000411110018-4
+  decision: allow
+  rule: review:text=extraction-error
+  at: '2026-10-20T00:45:18+00:00'
+  proposal: 105
+- key: cia-rr:cia-readingroom-document-cia-rdp89b00551r000100180015-5
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:18+00:00'
+  proposal: 105
+- key: cia-rr:cia-readingroom-document-cia-rdp89b00551r000300090010-8
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:18+00:00'
+  proposal: 105
+- key: cia-rr:cia-readingroom-document-cia-rdp89b00551r000300250004-7
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:18+00:00'
+  proposal: 105
+- key: cia-rr:cia-readingroom-document-cia-rdp90-00806r000100320007-8
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-20T00:45:18+00:00'
+  proposal: 105
+- key: cia-rr:cia-readingroom-document-cia-rdp90-00965r000302640085-7
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-20T00:45:18+00:00'
+  proposal: 105
+- key: cia-rr:cia-readingroom-document-cia-rdp99-00498r000100130098-3
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:18+00:00'
+  proposal: 105
+- key: cia-rr:cia-readingroom-document-cia-rdp61s00750a000500090200-4
+  decision: allow
+  rule: review:safety-abstract=missile guidance
+  at: '2026-10-20T00:45:20+00:00'
+  proposal: 107
+- key: cia-rr:cia-readingroom-document-cia-rdp92b01090r002600270026-3
+  decision: allow
+  rule: review:safety-abstract=nuclear weapons production
+  at: '2026-10-20T00:45:20+00:00'
+  proposal: 107
+- key: cia-rr:cia-readingroom-document-0001230253
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:20+00:00'
+  proposal: 107
+- key: cia-rr:cia-readingroom-document-0001282564
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:20+00:00'
+  proposal: 107
+- key: cia-rr:cia-readingroom-document-5076de58993247d4d82b58dc
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:20+00:00'
+  proposal: 107
+- key: cia-rr:cia-readingroom-document-5076de59993247d4d82b5a69
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:20+00:00'
+  proposal: 107
+- key: cia-rr:cia-readingroom-document-5076de59993247d4d82b5b3b
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:20+00:00'
+  proposal: 107
+- key: cia-rr:cia-readingroom-document-5076de5a993247d4d82b5bb5
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:20+00:00'
+  proposal: 107
+- key: cia-rr:cia-readingroom-document-cia-rdp57-00384r000500080057-9
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:20+00:00'
+  proposal: 107
+- key: cia-rr:cia-readingroom-document-cia-rdp62-00631r000400060004-9
+  decision: allow
+  rule: review:safety=nuclear weapons design
+  at: '2026-10-20T00:45:20+00:00'
+  proposal: 107
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05256a000100050003-6
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:20+00:00'
+  proposal: 107
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000415930006-2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:20+00:00'
+  proposal: 107
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000416310009-6
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:20+00:00'
+  proposal: 107
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000416340003-9
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:20+00:00'
+  proposal: 107
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000416420017-5
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:20+00:00'
+  proposal: 107
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000501700001-3
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:20+00:00'
+  proposal: 107
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000517010018-7
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:20+00:00'
+  proposal: 107
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000517020010-4
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:20+00:00'
+  proposal: 107
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000518530015-2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:20+00:00'
+  proposal: 107
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000518920018-6
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:20+00:00'
+  proposal: 107
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000519320014-5
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:20+00:00'
+  proposal: 107
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000520930010-0
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:20+00:00'
+  proposal: 107
+- key: cia-rr:cia-readingroom-document-cia-rdp78-06369a000100030002-3
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:20+00:00'
+  proposal: 107
+- key: cia-rr:cia-readingroom-document-cia-rdp79-01093a000300070003-6
+  decision: allow
+  rule: review:safety=manufacture of explosives
+  at: '2026-10-20T00:45:20+00:00'
+  proposal: 107
+- key: cia-rr:cia-readingroom-document-cia-rdp80r01731r002000070005-2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:20+00:00'
+  proposal: 107
+- key: cia-rr:cia-readingroom-document-cia-rdp80s01540r004900010003-0
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-20T00:45:20+00:00'
+  proposal: 107
+- key: cia-rr:cia-readingroom-document-cia-rdp81b00878r001200030062-3
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:20+00:00'
+  proposal: 107
+- key: cia-rr:cia-readingroom-document-cia-rdp81m00980r001700030091-1
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-20T00:45:20+00:00'
+  proposal: 107
+- key: cia-rr:cia-readingroom-document-cia-rdp84b00049r000501330009-6
+  decision: allow
+  rule: review:marking=export-mention:ear
+  at: '2026-10-20T00:45:20+00:00'
+  proposal: 107
+- key: cia-rr:cia-readingroom-document-cia-rdp89b00551r000500220001-1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:20+00:00'
+  proposal: 107
+- key: cia-rr:cia-readingroom-document-cia-rdp91-00929r000201010057-8
+  decision: allow
+  rule: review:text=extraction-error
+  at: '2026-10-20T00:45:20+00:00'
+  proposal: 107
+- key: cia-rr:cia-readingroom-document-cia-rdp91-00929r000201380001-7
+  decision: allow
+  rule: review:text=extraction-error
+  at: '2026-10-20T00:45:20+00:00'
+  proposal: 107
+- key: cia-rr:cia-readingroom-document-cia-rdp96-00787r000200020004-6
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:20+00:00'
+  proposal: 107
+- key: cia-rr:cia-readingroom-document-cia-rdp78-03642a000600010012-1
+  decision: allow
+  rule: review:safety-abstract=shaped charges
+  at: '2026-10-20T00:45:21+00:00'
+  proposal: 111
+- key: cia-rr:cia-readingroom-document-cia-rdp96r01136r002605120030-1
+  decision: allow
+  rule: review:safety-abstract=laying mines
+  at: '2026-10-20T00:45:21+00:00'
+  proposal: 111
+- key: cia-rr:cia-readingroom-document-0000916337
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:21+00:00'
+  proposal: 111
+- key: cia-rr:cia-readingroom-document-0000916338
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:21+00:00'
+  proposal: 111
+- key: cia-rr:cia-readingroom-document-06627241
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:21+00:00'
+  proposal: 111
+- key: cia-rr:cia-readingroom-document-5076de59993247d4d82b5a17
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:21+00:00'
+  proposal: 111
+- key: cia-rr:cia-readingroom-document-cia-rdp33-02415a000400010033-9
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:21+00:00'
+  proposal: 111
+- key: cia-rr:cia-readingroom-document-cia-rdp56-00071a000100030002-3
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:21+00:00'
+  proposal: 111
+- key: cia-rr:cia-readingroom-document-cia-rdp61s00527a000100170060-3
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:21+00:00'
+  proposal: 111
+- key: cia-rr:cia-readingroom-document-cia-rdp62s00231a000100100039-1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:21+00:00'
+  proposal: 111
+- key: cia-rr:cia-readingroom-document-cia-rdp66b00664r000600020004-9
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:21+00:00'
+  proposal: 111
+- key: cia-rr:cia-readingroom-document-cia-rdp67-00896r000100130048-7
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:21+00:00'
+  proposal: 111
+- key: cia-rr:cia-readingroom-document-cia-rdp75-00001r000200520012-6
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:21+00:00'
+  proposal: 111
+- key: cia-rr:cia-readingroom-document-cia-rdp78-04718a002300310033-8
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:21+00:00'
+  proposal: 111
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000200720033-3
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:21+00:00'
+  proposal: 111
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000301030031-9
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:21+00:00'
+  proposal: 111
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000414340016-7
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:21+00:00'
+  proposal: 111
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000415130006-0
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:21+00:00'
+  proposal: 111
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000416530006-5
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:21+00:00'
+  proposal: 111
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000502010036-3
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:21+00:00'
+  proposal: 111
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000517040016-6
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:21+00:00'
+  proposal: 111
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000518950018-3
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:21+00:00'
+  proposal: 111
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000520230007-1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:21+00:00'
+  proposal: 111
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000520510006-1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:21+00:00'
+  proposal: 111
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000520920020-0
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:21+00:00'
+  proposal: 111
+- key: cia-rr:cia-readingroom-document-cia-rdp79r01012a001000010031-4
+  decision: allow
+  rule: review:safety=production of explosives
+  at: '2026-10-20T00:45:21+00:00'
+  proposal: 111
+- key: cia-rr:cia-readingroom-document-cia-rdp79t01762a000500020003-9
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:21+00:00'
+  proposal: 111
+- key: cia-rr:cia-readingroom-document-cia-rdp80r01443r000200250009-5
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:21+00:00'
+  proposal: 111
+- key: cia-rr:cia-readingroom-document-cia-rdp80t00556a000100360001-6
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-20T00:45:21+00:00'
+  proposal: 111
+- key: cia-rr:cia-readingroom-document-cia-rdp81b00879r001100110028-2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:21+00:00'
+  proposal: 111
+- key: cia-rr:cia-readingroom-document-cia-rdp83-01022r000100010010-2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:21+00:00'
+  proposal: 111
+- key: cia-rr:cia-readingroom-document-cia-rdp86-00513r000410520005-4
+  decision: allow
+  rule: review:text=extraction-error
+  at: '2026-10-20T00:45:21+00:00'
+  proposal: 111
+- key: cia-rr:cia-readingroom-document-cia-rdp90-00552r000100260067-1
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-20T00:45:21+00:00'
+  proposal: 111
+- key: cia-rr:cia-readingroom-document-cia-rdp90-00552r000201650058-6
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-20T00:45:21+00:00'
+  proposal: 111
+- key: cia-rr:cia-readingroom-document-cia-rdp90-00965r000100450015-9
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-20T00:45:21+00:00'
+  proposal: 111
+- key: cia-rr:cia-readingroom-document-cia-rdp90-00965r000302130007-9
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-20T00:45:21+00:00'
+  proposal: 111
+- key: cia-rr:cia-readingroom-document-cia-rdp91-00929r000201010034-3
+  decision: allow
+  rule: review:text=extraction-error
+  at: '2026-10-20T00:45:21+00:00'
+  proposal: 111
+- key: cia-rr:cia-readingroom-document-cia-rdp91m00696r000700020008-0
+  decision: allow
+  rule: review:safety=missile guidance
+  at: '2026-10-20T00:45:21+00:00'
+  proposal: 111
+- key: cia-rr:cia-readingroom-document-cia-rdp95b00895r000200030012-8
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-20T00:45:21+00:00'
+  proposal: 111
+- key: cia-rr:cia-readingroom-document-cia-rdp96-00788r001500090004-4
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:21+00:00'
+  proposal: 111
+- key: cia-rr:cia-readingroom-document-cia-rdp99-00498r000100170048-4
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:21+00:00'
+  proposal: 111
+- key: cia-rr:cia-readingroom-document-cia-rdp99-00498r000200020006-5
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:21+00:00'
+  proposal: 111
+- key: cia-rr:cia-readingroom-document-0000916298
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:26+00:00'
+  proposal: 117
+- key: cia-rr:cia-readingroom-document-0000916575
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:26+00:00'
+  proposal: 117
+- key: cia-rr:cia-readingroom-document-0000917319
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:26+00:00'
+  proposal: 117
+- key: cia-rr:cia-readingroom-document-0005339049
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:26+00:00'
+  proposal: 117
+- key: cia-rr:cia-readingroom-document-00149646
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:26+00:00'
+  proposal: 117
+- key: cia-rr:cia-readingroom-document-06729902
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:26+00:00'
+  proposal: 117
+- key: cia-rr:cia-readingroom-document-5076de59993247d4d82b5992
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:26+00:00'
+  proposal: 117
+- key: cia-rr:cia-readingroom-document-5076de59993247d4d82b59c2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:26+00:00'
+  proposal: 117
+- key: cia-rr:cia-readingroom-document-cia-rdp57-00384r001300080006-6
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:26+00:00'
+  proposal: 117
+- key: cia-rr:cia-readingroom-document-cia-rdp62s00231a000100220001-9
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:26+00:00'
+  proposal: 117
+- key: cia-rr:cia-readingroom-document-cia-rdp64-00360r000700020076-9
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:26+00:00'
+  proposal: 117
+- key: cia-rr:cia-readingroom-document-cia-rdp66b00664r000600080077-3
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:26+00:00'
+  proposal: 117
+- key: cia-rr:cia-readingroom-document-cia-rdp75-00399r000100110131-0
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:26+00:00'
+  proposal: 117
+- key: cia-rr:cia-readingroom-document-cia-rdp76-00183r000300020270-2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:26+00:00'
+  proposal: 117
+- key: cia-rr:cia-readingroom-document-cia-rdp76-00183r000300050148-5
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:26+00:00'
+  proposal: 117
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000200580009-6
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:26+00:00'
+  proposal: 117
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000200580026-7
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:26+00:00'
+  proposal: 117
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000301050034-4
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:26+00:00'
+  proposal: 117
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000401340009-9
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:26+00:00'
+  proposal: 117
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000401410041-5
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:26+00:00'
+  proposal: 117
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000414710013-9
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:26+00:00'
+  proposal: 117
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000415920016-2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:26+00:00'
+  proposal: 117
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000416340019-2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:26+00:00'
+  proposal: 117
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000416350001-0
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:26+00:00'
+  proposal: 117
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000416410008-6
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:26+00:00'
+  proposal: 117
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000416720008-2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:26+00:00'
+  proposal: 117
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000416850019-6
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:26+00:00'
+  proposal: 117
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000501700028-4
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:26+00:00'
+  proposal: 117
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000501800027-7
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:26+00:00'
+  proposal: 117
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000518540004-3
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:26+00:00'
+  proposal: 117
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000519110001-2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:26+00:00'
+  proposal: 117
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000519310003-8
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:26+00:00'
+  proposal: 117
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000519310009-2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:26+00:00'
+  proposal: 117
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000519730002-3
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:26+00:00'
+  proposal: 117
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000520420010-6
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:26+00:00'
+  proposal: 117
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000520910005-8
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:26+00:00'
+  proposal: 117
+- key: cia-rr:cia-readingroom-document-cia-rdp78-05867a000520930003-8
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:26+00:00'
+  proposal: 117
+- key: cia-rr:cia-readingroom-document-cia-rdp79r01012a010600020001-3
+  decision: allow
+  rule: review:safety=nuclear weapons production
+  at: '2026-10-20T00:45:26+00:00'
+  proposal: 117
+- key: cia-rr:cia-readingroom-document-cia-rdp80-00765a000100010040-9
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:26+00:00'
+  proposal: 117
+- key: cia-rr:cia-readingroom-document-cia-rdp82-00457r002700390003-1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:26+00:00'
+  proposal: 117
+- key: cia-rr:cia-readingroom-document-cia-rdp82-00457r002900100005-8
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:26+00:00'
+  proposal: 117
+- key: cia-rr:cia-readingroom-document-cia-rdp83m00914r000600030066-5
+  decision: allow
+  rule: review:marking=export-mention:ear
+  at: '2026-10-20T00:45:26+00:00'
+  proposal: 117
+- key: cia-rr:cia-readingroom-document-cia-rdp84-00933r000400200019-8
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:26+00:00'
+  proposal: 117
+- key: cia-rr:cia-readingroom-document-cia-rdp85b01152r000700910069-8
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:26+00:00'
+  proposal: 117
+- key: cia-rr:cia-readingroom-document-cia-rdp85t00339r000500110002-7
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:26+00:00'
+  proposal: 117
+- key: cia-rr:cia-readingroom-document-cia-rdp89b00551r000400110009-6
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:26+00:00'
+  proposal: 117
+- key: cia-rr:cia-readingroom-document-cia-rdp89b00551r000500130012-9
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:26+00:00'
+  proposal: 117
+- key: cia-rr:cia-readingroom-document-cia-rdp90-00552r000404440009-8
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-20T00:45:26+00:00'
+  proposal: 117
+- key: cia-rr:cia-readingroom-document-cia-rdp90-00552r000505110027-2
+  decision: allow
+  rule: review:safety=production of biological weapons
+  at: '2026-10-20T00:45:26+00:00'
+  proposal: 117
+- key: cia-rr:cia-readingroom-document-cia-rdp90-00806r000200770002-3
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:26+00:00'
+  proposal: 117
+- key: cia-rr:cia-readingroom-document-cia-rdp90-00965r000100260022-2
+  decision: allow
+  rule: review:safety=missile guidance
+  at: '2026-10-20T00:45:26+00:00'
+  proposal: 117
+- key: cia-rr:cia-readingroom-document-cia-rdp96-00789r003400940009-3
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:26+00:00'
+  proposal: 117
+- key: cia-rr:cia-readingroom-document-cia-rdp96-00789r003700650004-7
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:45:26+00:00'
+  proposal: 117

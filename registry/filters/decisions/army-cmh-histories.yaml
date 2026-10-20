@@ -1,0 +1,153 @@
+# Owner review decisions for army-cmh-histories (machine-owned; written by `wsp proposals accept|reject`).
+# One entry per document the owner decided, keyed by document key (one edition). The hand-written
+# rules, with their comments, are in registry/filters/army-cmh-histories.yaml; this file is loaded next to it (policy.load_rules).
+# Remove an entry to undo a decision; anything else is rewritten by the next decision.
+allow_documents:
+- cmh:GOVPUB-D114-PURL-gpo107510
+- cmh:GOVPUB-D114-PURL-gpo107590
+- cmh:GOVPUB-D114-PURL-gpo107635
+- cmh:GOVPUB-D114-PURL-gpo107829
+- cmh:GOVPUB-D114-PURL-gpo107903
+- cmh:GOVPUB-D114-PURL-gpo107967
+- cmh:GOVPUB-D114-PURL-gpo107976
+- cmh:GOVPUB-D114-PURL-gpo110032
+- cmh:GOVPUB-D114-PURL-gpo27248
+- cmh:GOVPUB-D114-PURL-gpo34867
+- cmh:GOVPUB-D114-PURL-gpo35840
+- cmh:GOVPUB-D114-PURL-gpo39933
+- cmh:GOVPUB-D114-PURL-gpo41991
+- cmh:GOVPUB-D114-PURL-gpo50831
+- cmh:GOVPUB-D114-PURL-gpo53462
+- cmh:GOVPUB-D114-PURL-gpo53472
+- cmh:GOVPUB-D114-PURL-gpo53478
+- cmh:GOVPUB-D114-PURL-gpo82053
+- cmh:GOVPUB-D114-PURL-gpo88213
+- cmh:GOVPUB-D114-PURL-gpo90095
+- cmh:GOVPUB-D114-PURL-gpo92669
+- cmh:GOVPUB-D114-PURL-gpo93269
+- cmh:GOVPUB-D114-PURL-gpo93272
+- cmh:GOVPUB-D114-PURL-gpo94182
+allow_content_review:
+- cmh:GOVPUB-D114-PURL-gpo39933
+deny_documents: []
+log:
+- key: cmh:GOVPUB-D114-PURL-gpo107510
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:09+00:00'
+  proposal: 116
+- key: cmh:GOVPUB-D114-PURL-gpo107590
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:09+00:00'
+  proposal: 116
+- key: cmh:GOVPUB-D114-PURL-gpo107635
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:09+00:00'
+  proposal: 116
+- key: cmh:GOVPUB-D114-PURL-gpo107829
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:09+00:00'
+  proposal: 116
+- key: cmh:GOVPUB-D114-PURL-gpo107903
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:09+00:00'
+  proposal: 116
+- key: cmh:GOVPUB-D114-PURL-gpo107967
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:09+00:00'
+  proposal: 116
+- key: cmh:GOVPUB-D114-PURL-gpo107976
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:09+00:00'
+  proposal: 116
+- key: cmh:GOVPUB-D114-PURL-gpo110032
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:09+00:00'
+  proposal: 116
+- key: cmh:GOVPUB-D114-PURL-gpo27248
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:09+00:00'
+  proposal: 116
+- key: cmh:GOVPUB-D114-PURL-gpo34867
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:09+00:00'
+  proposal: 116
+- key: cmh:GOVPUB-D114-PURL-gpo35840
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:09+00:00'
+  proposal: 116
+- key: cmh:GOVPUB-D114-PURL-gpo39933
+  decision: allow
+  rule: review:safety=laying mines
+  at: '2026-10-20T00:46:09+00:00'
+  proposal: 116
+- key: cmh:GOVPUB-D114-PURL-gpo41991
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:09+00:00'
+  proposal: 116
+- key: cmh:GOVPUB-D114-PURL-gpo50831
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:09+00:00'
+  proposal: 116
+- key: cmh:GOVPUB-D114-PURL-gpo53462
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:09+00:00'
+  proposal: 116
+- key: cmh:GOVPUB-D114-PURL-gpo53472
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:09+00:00'
+  proposal: 116
+- key: cmh:GOVPUB-D114-PURL-gpo53478
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:09+00:00'
+  proposal: 116
+- key: cmh:GOVPUB-D114-PURL-gpo82053
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:09+00:00'
+  proposal: 116
+- key: cmh:GOVPUB-D114-PURL-gpo88213
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:09+00:00'
+  proposal: 116
+- key: cmh:GOVPUB-D114-PURL-gpo90095
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:09+00:00'
+  proposal: 116
+- key: cmh:GOVPUB-D114-PURL-gpo92669
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:09+00:00'
+  proposal: 116
+- key: cmh:GOVPUB-D114-PURL-gpo93269
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:09+00:00'
+  proposal: 116
+- key: cmh:GOVPUB-D114-PURL-gpo93272
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:09+00:00'
+  proposal: 116
+- key: cmh:GOVPUB-D114-PURL-gpo94182
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-20T00:46:09+00:00'
+  proposal: 116

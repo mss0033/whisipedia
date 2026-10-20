@@ -1,0 +1,9 @@
+# Document-level rules for crs-reports. Created 2026-10-20 for the owner's decisions.
+allow_documents: []
+deny_documents: []
+# Owner decision 2026-10-20 ("release the hold on all the docs"): two Congressional Research Service
+# policy briefs whose titles name the deny core are in scope. Both are public analysis for Congress,
+# not technical data.
+override_safety:
+  "crs:IF12106": "Iran and Nuclear Weapons Production: a CRS policy brief for Congress (owner 2026-10-20)"
+  "crs:97-945": "Nuclear Weapons Production Capability Issues: a CRS summary of findings for Congress (owner 2026-10-20)"
