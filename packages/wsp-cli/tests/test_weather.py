@@ -359,3 +359,58 @@ def test_only_a_few_steps_are_fetched_ahead_of_the_one_being_written(tmp_path: P
     ws = w.WeatherSettings(root=tmp_path, workers=2)
     w.pull_run(Long(), Slow(), datetime(2026, 10, 20, tzinfo=UTC), ws, keep_grib=False, say=lambda _: None)
     assert len(started) <= ws.workers * w.STEPS_AHEAD_PER_WORKER
+
+
+def test_a_year_is_packed_to_the_last_day_whose_hours_are_published(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-10-20: the store said "to 13 October" but its precipitation stopped at 10 October 00 UTC;
+    the year was retried three times and left. It is now packed to the last whole day: 3 January's
+    total needs 00 UTC on the 4th, so here the 2nd."""
+    from types import SimpleNamespace
+
+    from wsp_core.errors import NotFoundError
+
+    class Partial(FakeArco):
+        def field(self, var: str, t: datetime) -> np.ndarray[Any, np.dtype[np.float32]]:
+            if var == "tp" and t >= datetime(2026, 1, 4, tzinfo=UTC):
+                raise NotFoundError(f"https://example.invalid/tp/{t:%Y%m%d%H}")
+            return super().field(var, t)
+
+    vault = tmp_path / "vault"
+    from wsp_cli import bootstrap
+
+    def paths(cfg: object) -> SimpleNamespace:
+        return SimpleNamespace(require_vault=lambda: vault)
+
+    monkeypatch.setattr(bootstrap, "paths", paths)
+
+    def no_pace(cfg: object) -> None:
+        return None
+
+    monkeypatch.setattr(bootstrap, "ingest_pace", no_pace)
+    ws = w.WeatherSettings(root=tmp_path / "w")
+    out = io.StringIO()
+    args: tuple[Any, ...] = (
+        Partial(),
+        {},
+        ws,
+        2026,
+        date(2026, 1, 1),
+        date(2026, 1, 5),
+        tmp_path / "w" / "work",
+        2,
+        out,
+        "weather",
+    )
+    assert wp._era5_year(*args) == 0  # type: ignore[arg-type]
+    assert "published to 2026-01-02" in out.getvalue()
+    staged = next((vault / "_incoming" / "era5-daily").iterdir())
+    meta = json.loads((staged / wd.era5_meta_name(2026)).read_text())
+    assert (meta["first"], meta["days"]) == ("2026-01-01", 2)
+    # Once that is sealed, the same store gives nothing new (no identical generation every run).
+    gen = vault / "library" / "weather" / "era5-daily" / staged.name
+    (gen / "upstream").mkdir(parents=True)
+    (gen / "upstream" / wd.era5_meta_name(2026)).write_text(json.dumps(meta))
+    (gen / "MANIFEST.json").write_text("{}")
+    assert wp._era5_year(*args) == 7  # type: ignore[arg-type]

@@ -37,7 +37,7 @@ import numpy as np
 from wsp_api import weatherdata as wd
 from wsp_cli import bootstrap, locks
 from wsp_cli.weather import EXIT_FAILED, EXIT_OK, EXIT_REFUSED, Getter, WeatherSettings, stage_files
-from wsp_core.errors import FetchError
+from wsp_core.errors import FetchError, NotFoundError
 
 ERA5_SOURCE = "era5-daily"
 ARCO = "https://storage.googleapis.com/gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3"
@@ -53,6 +53,7 @@ ARCO_NAMES = {
 ARCO_EPOCH = datetime(1900, 1, 1, tzinfo=UTC)  # the store's time axis: hours since then, from index 0
 ERA5_FIRST = date(1940, 1, 1)
 SYNOPTIC = tuple(range(0, 24, 3))
+END_LAG_DAYS = 14  # a missing hour this close to the store's stated end is "not yet published"
 
 
 def hour_index(t: datetime) -> int:
@@ -175,7 +176,7 @@ def cmd_era5(args: argparse.Namespace, out: TextIO) -> int:
     work = ws.root / "era5-work" / str(year)
     try:
         with locks.exclusive(ws.root, f"era5-{year}"):
-            return _era5_year(arco, cfg, ws, year, first, last, work, workers, out)
+            return _era5_year(arco, cfg, ws, year, first, last, work, workers, out, spec.vault_domain)
     except locks.LockHeldError:
         out.write(f"era5 {year}: another run is building it\n")
         return locks.EXIT_BUSY
@@ -191,6 +192,7 @@ def _era5_year(
     work: Path,
     workers: int,
     out: TextIO,
+    domain: str,
 ) -> int:
     days = (last - first).days + 1
     stacks: dict[str, np.memmap[Any, np.dtype[np.uint16]]] = {}
@@ -216,6 +218,16 @@ def _era5_year(
             continue
         try:
             fields = daily_fields(arco, day, workers)
+        except NotFoundError as exc:
+            if (last - day).days > END_LAG_DAYS:
+                out.write(f"era5 {year}: {day} missing ({exc}); a rerun continues from here\n")
+                _save_days(done_file, made)
+                return EXIT_FAILED
+            # The store's stated end runs ahead of some variables (2026-10-20: precipitation to
+            # 10 October 00 UTC with the store "to 13 October"): the year is packed to the day before.
+            out.write(f"era5 {year}: published to {day - timedelta(days=1)} ({exc})\n")
+            days, last = i, day - timedelta(days=1)
+            break
         except FetchError as exc:
             out.write(f"era5 {year}: {day} failed ({exc}); a rerun continues from here\n")
             _save_days(done_file, made)
@@ -234,6 +246,10 @@ def _era5_year(
     for arr in stacks.values():
         arr.flush()
     _save_days(done_file, made)
+    vault = bootstrap.paths(cfg).require_vault()
+    if days <= 0 or era5_sealed(vault, domain, year, last):
+        out.write(f"era5 {year}: sealed to {last}; nothing new\n")
+        return 7
     pack = work / "pack"
     if pack.exists():
         shutil.rmtree(pack)
@@ -246,7 +262,6 @@ def _era5_year(
         )
     )
     stacks.clear()
-    vault = bootstrap.paths(cfg).require_vault()
     version = f"{datetime.now(UTC):%Y-%m-%d}.y{year}"
     size = sum(f.stat().st_size for f in files)
     stage_files(
