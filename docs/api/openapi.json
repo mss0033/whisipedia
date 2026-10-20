@@ -1843,6 +1843,655 @@
         }
       }
     },
+    "/v1/weather": {
+      "get": {
+        "tags": [
+          "weather"
+        ],
+        "summary": "Weather Status",
+        "description": "What is held for weather, how each part is available, and the feeds' connection.",
+        "operationId": "weather_status_v1_weather_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WeatherStatus"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/weather/forecast/point": {
+      "get": {
+        "tags": [
+          "weather"
+        ],
+        "summary": "Forecast Point",
+        "description": "Every model's newest run at the grid point nearest a place.",
+        "operationId": "forecast_point_v1_weather_forecast_point_get",
+        "parameters": [
+          {
+            "name": "lat",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "maximum": 90,
+              "minimum": -90,
+              "title": "Lat"
+            }
+          },
+          {
+            "name": "lon",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "maximum": 360,
+              "minimum": -180,
+              "title": "Lon"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PointForecast"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "bad_request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid_request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/weather/forecast/{model}/{run}/{var}/{step}": {
+      "get": {
+        "tags": [
+          "weather"
+        ],
+        "summary": "Forecast Field",
+        "description": "One variable of a run at one step, as an RG-encoded PNG (``docs/components/weather.md`` §3).",
+        "operationId": "forecast_field_v1_weather_forecast__model___run___var___step__get",
+        "parameters": [
+          {
+            "name": "model",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z]{2,8}$",
+              "title": "Model"
+            }
+          },
+          {
+            "name": "run",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{10}$",
+              "title": "Run"
+            }
+          },
+          {
+            "name": "var",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9_]{2,12}$",
+              "title": "Var"
+            }
+          },
+          {
+            "name": "step",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{1,3}\\.png$",
+              "title": "Step"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid_request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/weather/past/point": {
+      "get": {
+        "tags": [
+          "weather"
+        ],
+        "summary": "Past Point",
+        "description": "ERA5's daily values at the grid point nearest a place, from ``from`` to ``to`` (default: the\nlast year held), with each day's 1991-2020 normal.",
+        "operationId": "past_point_v1_weather_past_point_get",
+        "parameters": [
+          {
+            "name": "lat",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "maximum": 90,
+              "minimum": -90,
+              "title": "Lat"
+            }
+          },
+          {
+            "name": "lon",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "maximum": 360,
+              "minimum": -180,
+              "title": "Lon"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "From"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "To"
+            }
+          },
+          {
+            "name": "var",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Var"
+            }
+          },
+          {
+            "name": "normals",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": true,
+              "title": "Normals"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PastSeries"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "bad_request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid_request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/weather/past/{var}/{day}": {
+      "get": {
+        "tags": [
+          "weather"
+        ],
+        "summary": "Past Field",
+        "description": "One ERA5 daily field as an RG-encoded PNG, served as sealed.",
+        "operationId": "past_field_v1_weather_past__var___day__get",
+        "parameters": [
+          {
+            "name": "var",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9_]{2,12}$",
+              "title": "Var"
+            }
+          },
+          {
+            "name": "day",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}\\.png$",
+              "title": "Day"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid_request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/weather/stations": {
+      "get": {
+        "tags": [
+          "weather"
+        ],
+        "summary": "Stations Near",
+        "description": "The GHCN-Daily stations nearest a place, nearest first.",
+        "operationId": "stations_near_v1_weather_stations_get",
+        "parameters": [
+          {
+            "name": "lat",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "maximum": 90,
+              "minimum": -90,
+              "title": "Lat"
+            }
+          },
+          {
+            "name": "lon",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "maximum": 360,
+              "minimum": -180,
+              "title": "Lon"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 1,
+              "default": 8,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Stations"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid_request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/weather/stations/{station_id}": {
+      "get": {
+        "tags": [
+          "weather"
+        ],
+        "summary": "Station Series",
+        "description": "A station's daily records from ``from`` to ``to`` (default: its last year).",
+        "operationId": "station_series_v1_weather_stations__station_id__get",
+        "parameters": [
+          {
+            "name": "station_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Z0-9]{11}$",
+              "title": "Station Id"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "From"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "To"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StationSeries"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "bad_request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid_request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/weather/refresh": {
+      "post": {
+        "tags": [
+          "weather"
+        ],
+        "summary": "Refresh",
+        "description": "Start a pull now (loopback only): the one weather action that needs a connection.",
+        "operationId": "refresh_v1_weather_refresh_post",
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refresh"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/portal": {
       "get": {
         "tags": [
@@ -2540,6 +3189,65 @@
         "title": "AutonomyStatus",
         "description": "The plan's phase-5 exit (PLAN §14): 30 days unattended, every SLO met, no manual repairs."
       },
+      "Availability": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "offline",
+              "kept",
+              "live"
+            ],
+            "title": "Kind"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "as_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of",
+            "description": "What the data describes up to (a run time, a last day)."
+          },
+          "fetched_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fetched At",
+            "description": "When the library last copied it (kept data)."
+          },
+          "stale": {
+            "type": "boolean",
+            "title": "Stale",
+            "description": "Newer data should exist than this kept copy.",
+            "default": false
+          },
+          "note": {
+            "type": "string",
+            "title": "Note",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "label"
+        ],
+        "title": "Availability",
+        "description": "How a piece of data is available: the same three kinds everywhere (``docs/components/weather.md``)."
+      },
       "BotRun": {
         "properties": {
           "name": {
@@ -2721,6 +3429,57 @@
           "cursor"
         ],
         "title": "ChangePage"
+      },
+      "Connection": {
+        "properties": {
+          "online": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Online",
+            "description": "None: never tried."
+          },
+          "last_ok": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Ok"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "last_error_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error At"
+          }
+        },
+        "type": "object",
+        "title": "Connection"
       },
       "DefinitionAnswer": {
         "properties": {
@@ -3697,6 +4456,126 @@
         ],
         "title": "FeaturedDoc"
       },
+      "FeedState": {
+        "properties": {
+          "last_attempt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Attempt"
+          },
+          "last_ok": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Ok"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "last_error_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error At"
+          }
+        },
+        "type": "object",
+        "title": "FeedState"
+      },
+      "ForecastModel": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "attribution": {
+            "type": "string",
+            "title": "Attribution"
+          },
+          "run": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run",
+            "description": "The newest run held, YYYYMMDDHH (UTC)."
+          },
+          "run_time": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Time"
+          },
+          "steps": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Steps",
+            "default": []
+          },
+          "variables": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Variables",
+            "default": []
+          },
+          "availability": {
+            "$ref": "#/components/schemas/Availability"
+          },
+          "feed": {
+            "$ref": "#/components/schemas/FeedState"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "attribution",
+          "availability",
+          "feed"
+        ],
+        "title": "ForecastModel"
+      },
       "GapReport": {
         "properties": {
           "href": {
@@ -4637,6 +5516,147 @@
         "title": "PartRef",
         "description": "One part of a document read in parts (a long PDF's chapter), or the whole of it."
       },
+      "PastInfo": {
+        "properties": {
+          "years": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Years"
+          },
+          "first_day": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Day"
+          },
+          "last_day": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Day"
+          },
+          "variables": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Variables"
+          },
+          "attribution": {
+            "type": "string",
+            "title": "Attribution"
+          },
+          "availability": {
+            "$ref": "#/components/schemas/Availability"
+          }
+        },
+        "type": "object",
+        "required": [
+          "years",
+          "first_day",
+          "last_day",
+          "variables",
+          "attribution",
+          "availability"
+        ],
+        "title": "PastInfo"
+      },
+      "PastSeries": {
+        "properties": {
+          "lat": {
+            "type": "number",
+            "title": "Lat"
+          },
+          "lon": {
+            "type": "number",
+            "title": "Lon"
+          },
+          "grid_lat": {
+            "type": "number",
+            "title": "Grid Lat"
+          },
+          "grid_lon": {
+            "type": "number",
+            "title": "Grid Lon"
+          },
+          "days": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Days"
+          },
+          "values": {
+            "additionalProperties": {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Values"
+          },
+          "normals": {
+            "additionalProperties": {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Normals",
+            "description": "The 1991-2020 mean of each day of the year, when those years are held."
+          },
+          "normal_years": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Normal Years",
+            "default": []
+          },
+          "availability": {
+            "$ref": "#/components/schemas/Availability"
+          }
+        },
+        "type": "object",
+        "required": [
+          "lat",
+          "lon",
+          "grid_lat",
+          "grid_lon",
+          "days",
+          "values",
+          "availability"
+        ],
+        "title": "PastSeries"
+      },
       "PlaceHit": {
         "properties": {
           "name": {
@@ -4737,6 +5757,90 @@
           "places"
         ],
         "title": "Places"
+      },
+      "PointForecast": {
+        "properties": {
+          "lat": {
+            "type": "number",
+            "title": "Lat"
+          },
+          "lon": {
+            "type": "number",
+            "title": "Lon"
+          },
+          "grid_lat": {
+            "type": "number",
+            "title": "Grid Lat"
+          },
+          "grid_lon": {
+            "type": "number",
+            "title": "Grid Lon"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/PointModel"
+            },
+            "type": "array",
+            "title": "Models"
+          },
+          "availability": {
+            "$ref": "#/components/schemas/Availability"
+          }
+        },
+        "type": "object",
+        "required": [
+          "lat",
+          "lon",
+          "grid_lat",
+          "grid_lon",
+          "models",
+          "availability"
+        ],
+        "title": "PointForecast"
+      },
+      "PointModel": {
+        "properties": {
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "run": {
+            "type": "string",
+            "title": "Run"
+          },
+          "times": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Times"
+          },
+          "values": {
+            "additionalProperties": {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Values"
+          }
+        },
+        "type": "object",
+        "required": [
+          "model",
+          "run",
+          "times",
+          "values"
+        ],
+        "title": "PointModel"
       },
       "Portal": {
         "properties": {
@@ -5046,6 +6150,28 @@
           "cursor"
         ],
         "title": "RecentChanges"
+      },
+      "Refresh": {
+        "properties": {
+          "started": {
+            "type": "boolean",
+            "title": "Started"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "availability": {
+            "$ref": "#/components/schemas/Availability"
+          }
+        },
+        "type": "object",
+        "required": [
+          "started",
+          "message",
+          "availability"
+        ],
+        "title": "Refresh"
       },
       "Rendition": {
         "properties": {
@@ -5870,6 +6996,198 @@
         "title": "SourceSlo",
         "description": "Freshness against the source's SLO (PLAN §6.6)."
       },
+      "Station": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "country": {
+            "type": "string",
+            "title": "Country"
+          },
+          "lat": {
+            "type": "number",
+            "title": "Lat"
+          },
+          "lon": {
+            "type": "number",
+            "title": "Lon"
+          },
+          "elevation": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Elevation"
+          },
+          "first_year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Year"
+          },
+          "last_year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Year"
+          },
+          "elements": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Elements"
+          },
+          "distance_km": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Distance Km"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "country",
+          "lat",
+          "lon",
+          "elevation",
+          "first_year",
+          "last_year",
+          "elements"
+        ],
+        "title": "Station"
+      },
+      "StationSeries": {
+        "properties": {
+          "station": {
+            "$ref": "#/components/schemas/Station"
+          },
+          "days": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Days"
+          },
+          "values": {
+            "additionalProperties": {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Values"
+          },
+          "units": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Units"
+          },
+          "availability": {
+            "$ref": "#/components/schemas/Availability"
+          }
+        },
+        "type": "object",
+        "required": [
+          "station",
+          "days",
+          "values",
+          "units",
+          "availability"
+        ],
+        "title": "StationSeries"
+      },
+      "Stations": {
+        "properties": {
+          "stations": {
+            "items": {
+              "$ref": "#/components/schemas/Station"
+            },
+            "type": "array",
+            "title": "Stations"
+          },
+          "availability": {
+            "$ref": "#/components/schemas/Availability"
+          }
+        },
+        "type": "object",
+        "required": [
+          "stations",
+          "availability"
+        ],
+        "title": "Stations"
+      },
+      "StationsInfo": {
+        "properties": {
+          "stations": {
+            "type": "integer",
+            "title": "Stations"
+          },
+          "built_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Built At"
+          },
+          "attribution": {
+            "type": "string",
+            "title": "Attribution"
+          },
+          "availability": {
+            "$ref": "#/components/schemas/Availability"
+          }
+        },
+        "type": "object",
+        "required": [
+          "stations",
+          "built_at",
+          "attribution",
+          "availability"
+        ],
+        "title": "StationsInfo"
+      },
       "Suggestions": {
         "properties": {
           "query": {
@@ -6197,6 +7515,44 @@
         "title": "TrawlerStatus",
         "description": "What the trawler (navigator/scripts/trawl.mjs) found opening pages nobody had opened yet."
       },
+      "VariableInfo": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "unit": {
+            "type": "string",
+            "title": "Unit"
+          },
+          "offset": {
+            "type": "number",
+            "title": "Offset"
+          },
+          "scale": {
+            "type": "number",
+            "title": "Scale"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "unit",
+          "offset",
+          "scale",
+          "kind"
+        ],
+        "title": "VariableInfo"
+      },
       "VaultLocation": {
         "properties": {
           "generation_id": {
@@ -6273,6 +7629,52 @@
         ],
         "title": "VaultLocation",
         "description": "Where the bytes live, for \"View Source Data\" and the direct route (PLAN §7, §10.2)."
+      },
+      "WeatherStatus": {
+        "properties": {
+          "forecast": {
+            "items": {
+              "$ref": "#/components/schemas/ForecastModel"
+            },
+            "type": "array",
+            "title": "Forecast"
+          },
+          "past": {
+            "$ref": "#/components/schemas/PastInfo"
+          },
+          "stations": {
+            "$ref": "#/components/schemas/StationsInfo"
+          },
+          "connection": {
+            "$ref": "#/components/schemas/Connection"
+          },
+          "variables": {
+            "items": {
+              "$ref": "#/components/schemas/VariableInfo"
+            },
+            "type": "array",
+            "title": "Variables"
+          },
+          "field_png": {
+            "type": "string",
+            "title": "Field Png",
+            "description": "URL templates of map fields; see docs/components/weather.md §3."
+          },
+          "refresh": {
+            "$ref": "#/components/schemas/Availability"
+          }
+        },
+        "type": "object",
+        "required": [
+          "forecast",
+          "past",
+          "stations",
+          "connection",
+          "variables",
+          "field_png",
+          "refresh"
+        ],
+        "title": "WeatherStatus"
       }
     }
   }

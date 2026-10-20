@@ -63,6 +63,50 @@ export function asOf(ts: string | null): HTMLElement {
   return h('span', { class: 'as-of' }, 'as of ', h('time', { datetime: ts }, formatDate(ts)));
 }
 
+/** How old a time is, in words: "12 min", "3 h", "2 days". */
+export function age(iso: string | null | undefined, now = Date.now()): string {
+  if (!iso) return '';
+  const ms = now - Date.parse(iso);
+  if (!Number.isFinite(ms)) return '';
+  const min = Math.max(0, Math.round(ms / 60_000));
+  if (min < 60) return `${min} min`;
+  const hours = Math.round(min / 60);
+  if (hours < 48) return `${hours} h`;
+  return `${Math.round(hours / 24)} days`;
+}
+
+const AVAILABILITY_HELP: Record<string, string> = {
+  offline: 'Held in the library: sealed on the NAS, works with no connection.',
+  kept: 'A kept copy of something that changes: fetched while connected, works offline at the age shown.',
+  live: 'Asks the outside world now: needs a connection.',
+};
+
+/**
+ * The library's three kinds of availability (docs/components/weather.md §1): "In the library",
+ * "Kept copy · 2 h old" (stale: "out of date"), "Needs a connection".
+ */
+export function availabilityBadge(av: {
+  kind: string;
+  label: string;
+  as_of?: string | null;
+  fetched_at?: string | null;
+  stale?: boolean;
+  note?: string;
+}): HTMLElement {
+  const old = av.kind === 'kept' ? age(av.fetched_at ?? av.as_of) : '';
+  const text = av.kind === 'kept' && old ? `${av.label} · ${old} old` : av.label;
+  const title = [AVAILABILITY_HELP[av.kind] ?? '', av.note ?? ''].filter(Boolean).join(' ');
+  return h(
+    'span',
+    {
+      class: `badge badge-avail badge-avail-${av.kind}${av.stale ? ' badge-avail-stale' : ''}`,
+      title,
+    },
+    text,
+    av.stale ? ' · out of date' : '',
+  );
+}
+
 /** License badge, or nothing when the license is unknown. */
 export function maybeLicenseBadge(license: string | null): HTMLElement | null {
   return license ? licenseBadge(license) : null;

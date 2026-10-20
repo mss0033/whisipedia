@@ -59,6 +59,21 @@ export default defineConfig({
     modulePreload: { polyfill: false },
     sourcemap: false,
     reportCompressedSize: false,
+    rolldownOptions: {
+      output: {
+        // The map code shared by the Atlas and the weather page (MapLibre, the Protomaps styles,
+        // the Atlas's style builder) in one chunk with a stable name: it loads only with a map, and
+        // scripts/check-bundle.mjs counts it against the map budget.
+        codeSplitting: {
+          groups: [
+            {
+              name: 'maplibre',
+              test: /node_modules[\\/](maplibre-gl|@protomaps)[\\/]|src[\\/]atlas[\\/]style\.ts/,
+            },
+          ],
+        },
+      },
+    },
   },
   test: {
     environment: 'jsdom',

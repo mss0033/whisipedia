@@ -31,6 +31,8 @@ UNITS = (
     "whisipedia-digest.timer",
     "whisipedia-quality.service",  # the weekly search-quality check (wsp quality run)
     "whisipedia-quality.timer",
+    "whisipedia-weather.service",  # forecasts into the weather hot copy (wsp weather pull)
+    "whisipedia-weather.timer",
     "whisipedia-background.slice",  # shared memory/CPU/IO budget of the background units
     "whisipedia-background-fetch.slice",  # the download lanes' share of it (tools/wsp-bg --fetch)
 )
@@ -44,6 +46,7 @@ ENABLE = (
     "whisipedia-yield.service",
     "whisipedia-digest.timer",
     "whisipedia-quality.timer",
+    "whisipedia-weather.timer",
 )
 MARKER = "# Rendered by `wsp service install` from deploy/systemd/"
 

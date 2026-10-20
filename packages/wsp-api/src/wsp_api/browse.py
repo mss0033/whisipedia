@@ -84,7 +84,7 @@ def _blurb(text: str) -> str:
     return cut + "…"
 
 
-def _is_loopback(request: Request) -> bool:
+def is_loopback(request: Request) -> bool:
     host = request.client.host if request.client else ""
     try:
         return ipaddress.ip_address(host).is_loopback
@@ -359,7 +359,7 @@ def browse_router(lib: Library) -> APIRouter:
     @r.post("/gaps", tags=["navigator"], status_code=204, responses=errors(403, 422, 501))
     def report_gap(body: GapReport, request: Request) -> Response:
         """Record a "not in library" link for the gap miner. Accepted from loopback clients only."""
-        if not _is_loopback(request):
+        if not is_loopback(request):
             raise ApiError(403, "local_only", "gap reports are accepted from this computer only")
         if s.gaps is None:
             raise ApiError(501, "not_configured", "no gap log is configured")

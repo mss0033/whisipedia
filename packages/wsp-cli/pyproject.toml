@@ -14,6 +14,9 @@ dependencies = [
   "wsp-orchestrator",
   "wsp-oracle",
   "uvicorn>=0.30",
+  "eccodes>=2.48,<2.49",  # GRIB forecasts (wsp weather pull)
+  "eccodeslib>=2.48.3,<2.49",  # the ecCodes C library as a wheel (eccodes finds it)
+  "numcodecs>=0.13",  # ERA5 Zarr chunks (wsp weather era5)
 ]
 
 [project.scripts]

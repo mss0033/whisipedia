@@ -1,0 +1,21 @@
+# Fetches each forecast model's newest run into the weather hot copy and archives the 00 UTC runs
+# (`wsp weather pull`; docs/components/weather.md). Started by whisipedia-weather.timer, and by the
+# weather page's "Check for newer runs" (POST /v1/weather/refresh).
+#
+# Template: `wsp service install` renders @REPO@ and @CONFIG_DIR@ (docs/runbooks/install-services.md).
+
+[Unit]
+Description=Whisipedia weather pull (GFS, ECMWF IFS and AIFS forecasts)
+
+[Service]
+Type=oneshot
+WorkingDirectory=@REPO@
+EnvironmentFile=-%h/.config/whisipedia/whisipedia.env
+ExecStart=@REPO@/.venv/bin/wsp --config-dir @CONFIG_DIR@ weather pull
+# A pull is about 1 GB of downloads; an archived run's seal waits for the ingest lock (retried later).
+TimeoutStartSec=90min
+Nice=10
+CPUWeight=20
+Slice=whisipedia-background-fetch.slice
+MemoryHigh=768M
+MemoryMax=1G

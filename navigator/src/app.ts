@@ -50,6 +50,7 @@ import type {
   PageRenderer,
   PageResult,
 } from './pages/types.ts';
+import * as weatherPage from './pages/weather.ts';
 import * as whatsnewPage from './pages/whatsnew.ts';
 import { errorPage, wspLink } from './ui/components.ts';
 
@@ -61,6 +62,7 @@ const RENDERERS: Record<Route['page'], PageRenderer> = {
   screening: screeningPage.render,
   define: definePage.render,
   atlas: atlasPage.render,
+  weather: weatherPage.render,
   directory: directoryPage.render,
   search: searchPage.render,
   whatsnew: whatsnewPage.render,
@@ -904,6 +906,7 @@ export class App implements AppServices {
       { class: 'dirbuttons', 'aria-label': 'Directory buttons' },
       dirButton("What's New!", makeAddress('whatsnew')),
       dirButton('Atlas', makeAddress('atlas')),
+      dirButton('Weather', makeAddress('weather')),
       dirButton("What's Cool?", makeAddress('directory')),
       dirButton('Handbook', makeAddress('help')),
       dirButton('Net Search', makeAddress('search')),

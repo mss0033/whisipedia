@@ -9,8 +9,9 @@ import { gzipSync } from 'node:zlib';
 
 const DIST = new URL('../dist/', import.meta.url).pathname;
 const BUDGET = { js: 150 * 1024, css: 40 * 1024 };
-// The Atlas's map (MapLibre GL and its worker) loads only on wsp://atlas: its own budget.
-const MAP_CHUNK = /^assets\/(atlas-map|maplibre-gl-worker)-/;
+// The maps (MapLibre GL and its worker, the Atlas, the weather page) load only on wsp://atlas and
+// wsp://weather: their own budget.
+const MAP_CHUNK = /^assets\/(atlas-map|weather-view|maplibre|maplibre-gl-worker)-/;
 const MAP_BUDGET = { js: 500 * 1024, css: 16 * 1024 };
 // TeX typesetting (Temml) loads only for a page with formulas written as TeX: its own budget.
 const TEX_CHUNK = /^assets\/(texrender|temml)-/;

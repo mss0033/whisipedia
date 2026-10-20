@@ -552,6 +552,7 @@ CHECKSUM_ONLY_ADAPTERS = frozenset(
         "dailymed",  # NLM's own release of FDA drug labels, MD5-checked
         "ncbi-bookshelf",  # NLM's open-access book archives (chosen books, licence read per book)
         "map-tiles",  # PMTiles archives: MD5 (whole) or our SHA-256 after a read-back (cuts); no documents
+        "weather-data",  # forecast GRIB, ERA5 years we packed: our SHA-256 and a format check; no documents
         "american-stories",  # newspaper OCR of the Library of Congress's public scans, LFS SHA-256
         "pmc-oa",  # NLM's own PMC Article Datasets (text and metadata), inventory MD5s
         "openalex",  # OpenAlex's Parquet snapshot (CC0 metadata), S3 MD5s

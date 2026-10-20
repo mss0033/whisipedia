@@ -14,7 +14,9 @@ import type {
   GapReport,
   HistoryPage,
   OutsideCopy,
+  PastSeries,
   Places,
+  PointForecast,
   Portal,
   RecentChanges,
   Routes,
@@ -22,9 +24,12 @@ import type {
   SearchResults,
   SourceInfo,
   SourcePage,
+  StationSeries,
+  Stations,
   Suggestions,
   SystemStatus,
   Tilesets,
+  WeatherStatus,
 } from './types.ts';
 
 export class ApiRequestError extends Error {
@@ -251,6 +256,70 @@ export class WspClient {
     signal?: AbortSignal,
   ): Promise<Places> {
     return this.get('GET /v1/maps/nearby', NO_PATH, { lat, lon, radius, limit }, signal);
+  }
+
+  /** What the library holds for weather and how each part is available (wsp://weather). */
+  weather(signal?: AbortSignal): Promise<WeatherStatus> {
+    return this.get('GET /v1/weather', NO_PATH, {}, signal);
+  }
+
+  /** Every forecast model's newest run at the grid point nearest a place. */
+  forecastPoint(lat: number, lon: number, signal?: AbortSignal): Promise<PointForecast> {
+    return this.get('GET /v1/weather/forecast/point', NO_PATH, { lat, lon }, signal);
+  }
+
+  /** ERA5's daily values at a place from `from` to `to` (dates), with the 1991-2020 normals. */
+  pastPoint(
+    lat: number,
+    lon: number,
+    range: { from?: string; to?: string; vars?: string[]; normals?: boolean } = {},
+    signal?: AbortSignal,
+  ): Promise<PastSeries> {
+    return this.get(
+      'GET /v1/weather/past/point',
+      NO_PATH,
+      { lat, lon, from: range.from, to: range.to, var: range.vars, normals: range.normals },
+      signal,
+    );
+  }
+
+  /** The weather stations nearest a place. */
+  stationsNear(lat: number, lon: number, limit = 8, signal?: AbortSignal): Promise<Stations> {
+    return this.get('GET /v1/weather/stations', NO_PATH, { lat, lon, limit }, signal);
+  }
+
+  /** A station's daily records from `from` to `to` (dates). */
+  station(
+    id: string,
+    range: { from?: string; to?: string } = {},
+    signal?: AbortSignal,
+  ): Promise<StationSeries> {
+    return this.get(
+      'GET /v1/weather/stations/{station_id}',
+      { station_id: id },
+      { from: range.from, to: range.to },
+      signal,
+    );
+  }
+
+  /** URL of a forecast field's PNG (docs/components/weather.md §3). */
+  forecastFieldUrl(model: string, run: string, variable: string, step: number): string {
+    return this.url(`/v1/weather/forecast/${model}/${run}/${variable}/${step}.png`);
+  }
+
+  /** URL of an ERA5 daily field's PNG. */
+  pastFieldUrl(variable: string, day: string): string {
+    return this.url(`/v1/weather/past/${variable}/${day}.png`);
+  }
+
+  /** Ask the library to fetch newer forecast runs now (the one weather action needing a connection). */
+  async refreshWeather(): Promise<{ started: boolean; message: string }> {
+    const res = await this.fetchImpl(this.base + routePath('POST /v1/weather/refresh', NO_PATH), {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+    });
+    const out = (await this.parse(res)) as { started?: boolean; message?: string } | null;
+    return { started: !!out?.started, message: out?.message ?? '' };
   }
 
   portal(signal?: AbortSignal): Promise<Portal> {

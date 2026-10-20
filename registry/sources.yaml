@@ -4260,3 +4260,101 @@ sources:
     update: {cadence: P6M, strategy: snapshot-retention}
     size: {bytes: 4.8e8, measured: false, as_of: '2026-10-20'}
     notes: "A framework that runs FourCastNet, SFNO, Pangu, GraphCast and other AI weather models on common data (owner request 2026-10-18, SOTA weather models)."
+
+  # --- Weather: forecasts kept from live feeds, ERA5 and station records (owner request 2026-10-20;
+  # docs/components/weather.md) -------------------------------------------------------------------
+  - id: weather-gfs
+    name: GFS global forecast, 0.25°, 0-240 h (archived 00 UTC runs)
+    publisher: NOAA National Centers for Environmental Prediction
+    domain: [weather]
+    tier: T1
+    status: candidate
+    license: LicenseRef-US-Gov-PD
+    legal_basis: public-domain
+    index: false
+    access:
+      adapter: weather-data
+      partitioned: true
+      origins: [noaa-gfs-bdp-pds.s3.amazonaws.com]
+    update: {cadence: PT6H, strategy: snapshot-retention}
+    size: {bytes: 2.0e11, measured: false, as_of: '2026-10-20'}
+    notes: "Surface temperature, dew point, wind, gusts, pressure, precipitation and cloud from NOAA's Global Forecast System (AWS Open Data copy). wsp weather pull keeps every run hot for wsp://weather and archives the 00 UTC run here, a partition per run (about 550 MB)."
+
+  - id: weather-ecmwf-ifs
+    name: ECMWF IFS open-data forecast, 0.25°, 0-240 h (archived 00 UTC runs)
+    publisher: European Centre for Medium-Range Weather Forecasts
+    domain: [weather]
+    tier: T1
+    status: candidate
+    license: CC-BY-4.0
+    legal_basis: open-license
+    index: false
+    access:
+      adapter: weather-data
+      partitioned: true
+      origins: [data.ecmwf.int]
+    update: {cadence: PT6H, strategy: snapshot-retention}
+    size: {bytes: 1.2e11, measured: false, as_of: '2026-10-20'}
+    notes: "ECMWF's physics model (IFS), the open-data subset; attribution: ECMWF, CC BY 4.0. The 00 UTC run archived per day (about 330 MB)."
+
+  - id: weather-ecmwf-aifs
+    name: ECMWF AIFS (machine-learned) open-data forecast, 0.25°, 0-240 h (archived 00 UTC runs)
+    publisher: European Centre for Medium-Range Weather Forecasts
+    domain: [weather]
+    tier: T1
+    status: candidate
+    license: CC-BY-4.0
+    legal_basis: open-license
+    index: false
+    access:
+      adapter: weather-data
+      partitioned: true
+      origins: [data.ecmwf.int]
+    update: {cadence: PT6H, strategy: snapshot-retention}
+    size: {bytes: 6.0e10, measured: false, as_of: '2026-10-20'}
+    notes: "ECMWF's operational machine-learned model (AIFS Single), every 6 hours to 240 h; CC BY 4.0. The 00 UTC run archived per day (about 160 MB)."
+
+  - id: era5-daily
+    name: ERA5 reanalysis, daily fields, 0.25°, 1940 to about a week ago
+    publisher: ECMWF / Copernicus Climate Change Service (ARCO-ERA5 copy, Google Research)
+    domain: [weather, science]
+    tier: T1
+    status: candidate
+    license: LicenseRef-Copernicus-Licence
+    legal_basis: open-license
+    index: false
+    irreplaceable: false
+    access:
+      adapter: weather-data
+      partitioned: true
+      origins: [storage.googleapis.com]
+    update: {cadence: P1M, strategy: snapshot-retention}
+    size: {bytes: 5.0e11, measured: false, as_of: '2026-10-20'}
+    notes: "Daily mean, low and high temperature, dew point, precipitation, pressure, wind and cloud for the whole Earth since 1940, made by wsp weather era5 from ERA5's hourly fields in the public ARCO-ERA5 Zarr store (no account needed); a partition per year. Copernicus licence: free use with attribution ('Contains modified Copernicus Climate Change Service information')."
+
+  - id: ghcn-daily
+    name: GHCN-Daily station records (NOAA NCEI), every station
+    publisher: NOAA National Centers for Environmental Information
+    domain: [weather, science]
+    tier: T1
+    status: candidate
+    license: LicenseRef-US-Gov-PD
+    legal_basis: public-domain
+    index: false
+    access:
+      adapter: doc-collection
+      issuer: NOAA NCEI
+      key_prefix: ghcn
+      origins: [www.ncei.noaa.gov]
+      discovery:
+        - kind: list
+          items:
+            - {pub_number: ghcnd_all, title: "GHCN-Daily, all stations (tar.gz of .dly files)", url: "https://www.ncei.noaa.gov/pub/data/ghcn/daily/ghcnd_all.tar.gz"}
+            - {pub_number: ghcnd-stations, title: "GHCN-Daily station list", url: "https://www.ncei.noaa.gov/pub/data/ghcn/daily/ghcnd-stations.txt"}
+            - {pub_number: ghcnd-countries, title: "GHCN-Daily country codes", url: "https://www.ncei.noaa.gov/pub/data/ghcn/daily/ghcnd-countries.txt"}
+            - {pub_number: ghcnd-inventory, title: "GHCN-Daily inventory", url: "https://www.ncei.noaa.gov/pub/data/ghcn/daily/ghcnd-inventory.txt"}
+            - {pub_number: readme, title: "GHCN-Daily readme (formats and flags)", url: "https://www.ncei.noaa.gov/pub/data/ghcn/daily/readme.txt"}
+      filter: {allow_all: true, public_issuer: true, data_files: true}
+    update: {cadence: P1M, strategy: snapshot-retention}
+    size: {bytes: 3.9e9, measured: true, as_of: '2026-10-20'}
+    notes: "Daily highs, lows, precipitation and snow measured at about 129,000 stations, the oldest from 1763; wsp weather stations builds the station database wsp://weather reads."

@@ -146,6 +146,7 @@ def api_settings(cfg: Mapping[str, Any], lay: Layout, *, static_dir: Path | None
         ops_seconds=every,
         cache_dir=api_cache_dir(cfg),
         gazetteer=gazetteer_file(cfg),
+        weather=weather_dir(cfg),
     )
 
 
@@ -153,6 +154,15 @@ def gazetteer_file(cfg: Mapping[str, Any]) -> Path | None:
     """``<index.root>/gazetteer/places.sqlite`` (written by ``wsp maps gazetteer``), or None."""
     root = paths(cfg).index_root
     return None if root is None else root / "gazetteer" / "places.sqlite"
+
+
+def weather_dir(cfg: Mapping[str, Any]) -> Path | None:
+    """``[weather] root``, else ``<index.root>/weather`` (written by ``wsp weather``), or None."""
+    configured = section(cfg, "weather").get("root")
+    if configured:
+        return Path(str(configured))
+    root = paths(cfg).index_root
+    return None if root is None else root / "weather"
 
 
 def serve_settings(cfg: Mapping[str, Any], lay: Layout, *, static_dir: Path | None = None) -> ApiSettings:

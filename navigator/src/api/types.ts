@@ -15,6 +15,7 @@
 import type * as G from './generated.ts';
 
 export type {
+  Availability,
   Change,
   ChangePage,
   DefinitionAnswer,
@@ -27,6 +28,7 @@ export type {
   DocumentVersion,
   ErrorResponse,
   FactAnswer,
+  ForecastModel,
   GapReport,
   HistoryPage,
   Hit,
@@ -34,8 +36,11 @@ export type {
   MapAnswer,
   OriginalFile,
   OutsideCopy,
+  PastSeries,
   PlaceHit,
   Places,
+  PointForecast,
+  PointModel,
   Portal,
   QueryIntent,
   RecentChanges,
@@ -44,11 +49,16 @@ export type {
   SourceHealth,
   SourceInfo,
   SourcePage,
+  Station,
+  StationSeries,
+  Stations,
   Suggestions,
   SystemStatus,
   Tileset,
   Tilesets,
+  VariableInfo,
   VaultLocation,
+  WeatherStatus,
 } from './generated.ts';
 export { API_VERSION } from './generated.ts';
 

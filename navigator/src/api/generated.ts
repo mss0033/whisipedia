@@ -30,6 +30,19 @@ export interface AutonomyStatus {
   slo_failing: number;
 }
 
+/** How a piece of data is available: the same three kinds everywhere (``docs/components/weather.md``). */
+export interface Availability {
+  kind: 'offline' | 'kept' | 'live';
+  label: string;
+  /** What the data describes up to (a run time, a last day). */
+  as_of?: string | null;
+  /** When the library last copied it (kept data). */
+  fetched_at?: string | null;
+  /** Newer data should exist than this kept copy. */
+  stale?: boolean;
+  note?: string;
+}
+
 export interface BotRun {
   name: string;
   at: string | null;
@@ -57,6 +70,14 @@ export interface ChangePage {
   items: Array<Change>;
   /** Opaque. Pass as `since` to continue after these items. */
   cursor: string;
+}
+
+export interface Connection {
+  /** None: never tried. */
+  online?: boolean | null;
+  last_ok?: string | null;
+  last_error?: string | null;
+  last_error_at?: string | null;
 }
 
 export interface DefinitionAnswer {
@@ -257,6 +278,26 @@ export interface FeaturedDoc {
   title: string;
   address: string;
   blurb: string;
+}
+
+export interface FeedState {
+  last_attempt?: string | null;
+  last_ok?: string | null;
+  last_error?: string | null;
+  last_error_at?: string | null;
+}
+
+export interface ForecastModel {
+  id: string;
+  name: string;
+  attribution: string;
+  /** The newest run held, YYYYMMDDHH (UTC). */
+  run?: string | null;
+  run_time?: string | null;
+  steps?: Array<number>;
+  variables?: Array<string>;
+  availability: Availability;
+  feed: FeedState;
 }
 
 export interface GapReport {
@@ -461,6 +502,28 @@ export interface PartRef {
   first_page: number | null;
 }
 
+export interface PastInfo {
+  years: Array<number>;
+  first_day: string | null;
+  last_day: string | null;
+  variables: Array<string>;
+  attribution: string;
+  availability: Availability;
+}
+
+export interface PastSeries {
+  lat: number;
+  lon: number;
+  grid_lat: number;
+  grid_lon: number;
+  days: Array<string>;
+  values: Record<string, Array<number | null>>;
+  /** The 1991-2020 mean of each day of the year, when those years are held. */
+  normals?: Record<string, Array<number | null>>;
+  normal_years?: Array<number>;
+  availability: Availability;
+}
+
 export interface PlaceHit {
   name: string;
   /** `place=city`, `natural=peak`, ... */
@@ -479,6 +542,22 @@ export interface PlaceHit {
 
 export interface Places {
   places: Array<PlaceHit>;
+}
+
+export interface PointForecast {
+  lat: number;
+  lon: number;
+  grid_lat: number;
+  grid_lon: number;
+  models: Array<PointModel>;
+  availability: Availability;
+}
+
+export interface PointModel {
+  model: string;
+  run: string;
+  times: Array<string>;
+  values: Record<string, Array<number | null>>;
 }
 
 /** Start page content (`wsp://home`, PLAN §10.2). */
@@ -540,6 +619,12 @@ export interface RecentChanges {
   items: Array<Change>;
   /** Change-feed cursor these items are current to: follow `/v1/changes/stream?since=` from here for live updates. Null if the feed is empty. */
   cursor: string | null;
+}
+
+export interface Refresh {
+  started: boolean;
+  message: string;
+  availability: Availability;
 }
 
 /**
@@ -697,6 +782,39 @@ export interface SourceSlo {
   pause_reasons: Array<string>;
 }
 
+export interface Station {
+  id: string;
+  name: string;
+  country: string;
+  lat: number;
+  lon: number;
+  elevation: number | null;
+  first_year: number | null;
+  last_year: number | null;
+  elements: Array<string>;
+  distance_km?: number | null;
+}
+
+export interface StationSeries {
+  station: Station;
+  days: Array<string>;
+  values: Record<string, Array<number | null>>;
+  units: Record<string, string>;
+  availability: Availability;
+}
+
+export interface Stations {
+  stations: Array<Station>;
+  availability: Availability;
+}
+
+export interface StationsInfo {
+  stations: number;
+  built_at: string | null;
+  attribution: string;
+  availability: Availability;
+}
+
 export interface Suggestions {
   query: string;
   suggestions: Array<string>;
@@ -775,6 +893,15 @@ export interface TrawlerStatus {
   recent: Array<TrawlProblem>;
 }
 
+export interface VariableInfo {
+  id: string;
+  name: string;
+  unit: string;
+  offset: number;
+  scale: number;
+  kind: string;
+}
+
 /** Where the bytes live, for "View Source Data" and the direct route (PLAN §7, §10.2). */
 export interface VaultLocation {
   generation_id: string;
@@ -789,6 +916,17 @@ export interface VaultLocation {
   sha256: string | null;
   /** Manifest entry hash of the file. */
   blake3: string | null;
+}
+
+export interface WeatherStatus {
+  forecast: Array<ForecastModel>;
+  past: PastInfo;
+  stations: StationsInfo;
+  connection: Connection;
+  variables: Array<VariableInfo>;
+  /** URL templates of map fields; see docs/components/weather.md §3. */
+  field_png: string;
+  refresh: Availability;
 }
 
 /** Every operation: `"METHOD /path"` → path params, query params, body and 200 response. */
@@ -1034,6 +1172,89 @@ export interface Routes {
     query: Record<string, never>;
     body: null;
     response: unknown;
+  };
+  /** Weather Status */
+  'GET /v1/weather': {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: null;
+    response: WeatherStatus;
+  };
+  /** Forecast Point */
+  'GET /v1/weather/forecast/point': {
+    path: Record<string, never>;
+    query: {
+      lat: number;
+      lon: number;
+    };
+    body: null;
+    response: PointForecast;
+  };
+  /** Forecast Field */
+  'GET /v1/weather/forecast/{model}/{run}/{var}/{step}': {
+    path: {
+      model: string;
+      run: string;
+      var: string;
+      step: string;
+    };
+    query: Record<string, never>;
+    body: null;
+    response: null;
+  };
+  /** Past Point */
+  'GET /v1/weather/past/point': {
+    path: Record<string, never>;
+    query: {
+      lat: number;
+      lon: number;
+      from?: string | null | undefined;
+      to?: string | null | undefined;
+      var?: Array<string> | null | undefined;
+      normals?: boolean | undefined;
+    };
+    body: null;
+    response: PastSeries;
+  };
+  /** Past Field */
+  'GET /v1/weather/past/{var}/{day}': {
+    path: {
+      var: string;
+      day: string;
+    };
+    query: Record<string, never>;
+    body: null;
+    response: null;
+  };
+  /** Stations Near */
+  'GET /v1/weather/stations': {
+    path: Record<string, never>;
+    query: {
+      lat: number;
+      lon: number;
+      limit?: number | undefined;
+    };
+    body: null;
+    response: Stations;
+  };
+  /** Station Series */
+  'GET /v1/weather/stations/{station_id}': {
+    path: {
+      station_id: string;
+    };
+    query: {
+      from?: string | null | undefined;
+      to?: string | null | undefined;
+    };
+    body: null;
+    response: StationSeries;
+  };
+  /** Refresh */
+  'POST /v1/weather/refresh': {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: null;
+    response: null;
   };
   /** Portal */
   'GET /v1/portal': {

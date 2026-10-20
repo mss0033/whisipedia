@@ -1,0 +1,13 @@
+# Look for newer forecast runs every 30 minutes (models run every 6 hours and appear over a few
+# hours); see whisipedia-weather.service.
+
+[Unit]
+Description=Whisipedia weather pull every 30 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitInactiveSec=30min
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

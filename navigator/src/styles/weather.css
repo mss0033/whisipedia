@@ -1,0 +1,378 @@
+/* wsp://weather: the weather map, its controls and panels. Loaded with the map only. */
+
+.wx-page {
+  padding: 0 0 2rem;
+}
+.wx-holder {
+  min-height: 420px;
+}
+
+/* what the page holds and how (the availability strip) */
+.wx-strip {
+  font: 0.8125rem / 1.5 var(--ui-font);
+  border: 1px solid var(--rule);
+  padding: 4px 8px;
+  margin: 0 0 8px;
+}
+.wx-strip ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 18px;
+}
+.wx-explain summary {
+  cursor: pointer;
+  color: var(--link);
+}
+.wx-explain p {
+  margin: 4px 0;
+}
+
+/* the three kinds of availability (docs/components/weather.md §1) */
+.badge-avail-offline {
+  background: #1f6f3f;
+  color: #fff;
+  border-color: #134a29;
+}
+.badge-avail-kept {
+  background: #1d4f91;
+  color: #fff;
+  border-color: #12345f;
+}
+.badge-avail-live {
+  background: #8a5a00;
+  color: #fff;
+  border-color: #5c3c00;
+}
+.badge-avail-online {
+  background: #1f6f3f;
+  color: #fff;
+}
+.badge-avail-stale {
+  background: #9b2c1f;
+  color: #fff;
+  border-color: #6b1d14;
+}
+
+/* controls */
+.wx-view {
+  font: 0.8125rem / 1.4 var(--ui-font);
+}
+.wx-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 4px 6px;
+  background: var(--chrome-bg);
+  color: var(--chrome-fg);
+  box-shadow: var(--bevel-out);
+}
+.wx-tabs {
+  display: flex;
+  gap: 2px;
+}
+.wx-tabs button[aria-selected="true"],
+.wx-units button[aria-pressed="true"],
+.wx-play[aria-pressed="true"] {
+  box-shadow: var(--bevel-in);
+  font-weight: bold;
+}
+.wx-units {
+  display: flex;
+  gap: 2px;
+}
+.wx-find {
+  position: relative;
+  display: flex;
+  gap: 4px;
+  flex: 1 1 14rem;
+}
+.wx-find input {
+  flex: 1;
+  min-width: 8rem;
+}
+.wx-find-results {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 5;
+  margin: 2px 0 0;
+  padding: 2px;
+  list-style: none;
+  background: var(--field-bg);
+  color: var(--field-fg);
+  box-shadow: var(--menu-drop, 2px 2px 0 #000);
+  min-width: 18rem;
+}
+.wx-find-results button {
+  display: block;
+  width: 100%;
+  text-align: left;
+}
+
+/* the map */
+.wx-mapbox {
+  position: relative;
+  height: 56vh;
+  min-height: 340px;
+}
+.wx-map {
+  position: absolute;
+  inset: 0;
+}
+.wx-legend {
+  position: absolute;
+  left: 8px;
+  bottom: 22px;
+  z-index: 2;
+  padding: 4px 6px 0;
+  background: rgba(255, 255, 255, 0.86);
+  color: #111;
+  border: 1px solid rgba(0, 0, 0, 0.3);
+  pointer-events: none;
+}
+.wx-legend-title {
+  display: block;
+  font-weight: bold;
+}
+.wx-legend-tick {
+  font-size: 10px;
+  text-anchor: middle;
+  fill: #111;
+}
+.wx-legend-bar {
+  stroke: rgba(0, 0, 0, 0.35);
+}
+.wx-under {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  z-index: 2;
+  padding: 2px 6px;
+  background: rgba(255, 255, 255, 0.86);
+  color: #111;
+  border: 1px solid rgba(0, 0, 0, 0.3);
+  pointer-events: none;
+  max-width: 60%;
+}
+
+/* time */
+.wx-time {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  padding: 4px 6px;
+  background: var(--chrome-bg);
+  color: var(--chrome-fg);
+  box-shadow: var(--bevel-out);
+}
+.wx-time input[type="range"] {
+  flex: 1 1 14rem;
+}
+.wx-when {
+  min-width: 13rem;
+  font-weight: bold;
+}
+.wx-run {
+  color: var(--chrome-fg);
+}
+
+/* the panel at a place */
+.wx-panel {
+  margin-top: 8px;
+  border: 1px solid var(--rule);
+  padding: 6px 10px 10px;
+  position: relative;
+}
+.wx-panel header h2 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+.wx-close {
+  position: absolute;
+  right: 6px;
+  top: 6px;
+}
+.wx-link {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--link);
+  text-decoration: underline;
+  cursor: pointer;
+  font: inherit;
+}
+.wx-link:disabled {
+  color: var(--page-muted);
+  text-decoration: none;
+  cursor: default;
+}
+.wx-panel-tools,
+.wx-panel-note {
+  margin: 2px 0 6px;
+  color: var(--page-muted);
+}
+.wx-summary {
+  margin: 4px 0 8px;
+  font-weight: bold;
+}
+.wx-panel-body > div {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 30rem), 1fr));
+  gap: 6px 16px;
+}
+.wx-panel-body > div > p,
+.wx-panel-body > div > section,
+.wx-panel-body > div > div {
+  grid-column: 1 / -1;
+}
+
+/* charts */
+.wx-chart {
+  margin: 0;
+}
+.wx-chart figcaption {
+  font-weight: bold;
+}
+.wx-chart-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+  overflow: visible;
+}
+.wx-chart-empty {
+  color: var(--page-muted);
+}
+.wx-grid {
+  stroke: var(--rule);
+  stroke-width: 0.5;
+  opacity: 0.6;
+}
+.wx-tick {
+  font: 10px var(--ui-font);
+  fill: var(--page-fg);
+}
+.wx-tick-y {
+  text-anchor: end;
+}
+.wx-tick-x {
+  text-anchor: middle;
+}
+.wx-now {
+  stroke: #c0392b;
+  stroke-width: 1;
+  stroke-dasharray: 3 2;
+}
+.wx-cursor {
+  stroke: var(--page-fg);
+  stroke-width: 0.75;
+}
+.wx-line {
+  fill: none;
+  stroke-width: 1.6;
+  stroke-linejoin: round;
+}
+.wx-dashed {
+  stroke-dasharray: 5 3;
+}
+.wx-band {
+  stroke: none;
+  opacity: 0.35;
+}
+.wx-light {
+  opacity: 0.45;
+}
+.wx-readout {
+  margin: 0;
+  min-height: 1.4em;
+}
+.wx-legend-keys {
+  margin: 0;
+}
+.wx-key {
+  white-space: nowrap;
+}
+.wx-key::before {
+  content: "";
+  display: inline-block;
+  width: 14px;
+  height: 3px;
+  margin: 0 4px 3px 0;
+  background: currentColor;
+}
+.wx-key-dashed::before {
+  background: repeating-linear-gradient(90deg, currentColor 0 4px, transparent 4px 7px);
+}
+
+/* model and series colours: lines and bars take them; keys show them as text */
+.wx-c-0 {
+  color: #c0392b;
+  stroke: #c0392b;
+  fill: #c0392b;
+}
+.wx-c-1 {
+  color: #1f5fae;
+  stroke: #1f5fae;
+  fill: #1f5fae;
+}
+.wx-c-2 {
+  color: #2e8b57;
+  stroke: #2e8b57;
+  fill: #2e8b57;
+}
+.wx-c-3 {
+  color: #7d3c98;
+  stroke: #7d3c98;
+  fill: #7d3c98;
+}
+.wx-normal {
+  color: #666;
+  stroke: #666;
+  fill: #666;
+}
+.wx-line.wx-c-0,
+.wx-line.wx-c-1,
+.wx-line.wx-c-2,
+.wx-line.wx-c-3,
+.wx-line.wx-normal {
+  fill: none;
+}
+
+/* stations */
+.wx-stations h3 {
+  margin: 12px 0 2px;
+}
+.wx-station-list {
+  list-style: none;
+  padding: 0;
+  margin: 4px 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.wx-station-chart > div {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 30rem), 1fr));
+  gap: 6px 16px;
+}
+.wx-station-chart h4 {
+  grid-column: 1 / -1;
+  margin: 6px 0 0;
+}
+
+@media (prefers-color-scheme: dark) {
+  .wx-c-1 {
+    color: #6fa8ff;
+    stroke: #6fa8ff;
+    fill: #6fa8ff;
+  }
+  .wx-normal {
+    color: #aaa;
+    stroke: #aaa;
+    fill: #aaa;
+  }
+}

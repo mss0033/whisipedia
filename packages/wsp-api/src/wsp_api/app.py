@@ -69,6 +69,7 @@ from wsp_api.serving import NavigatorFiles, SlowRequestLog
 from wsp_api.snapshot import MAX_LEDGER_TAIL, proposals_with
 from wsp_api.sse import change_events
 from wsp_api.views import Library, parse_doc
+from wsp_api.weather import weather_router
 from wsp_api.zimread import ZimUnavailable
 from wsp_core.activity import ActivityMiddleware
 from wsp_core.ids import DocId
@@ -179,6 +180,7 @@ def create_app(services: Services, settings: ApiSettings | None = None) -> FastA
     app.include_router(_v1(lib, settings))
     app.include_router(files_router(lib))
     app.include_router(maps_router(lib))
+    app.include_router(weather_router(lib))
     app.include_router(browse_router(lib))
     app.include_router(_go(lib))
     _mount_navigator(app, settings)

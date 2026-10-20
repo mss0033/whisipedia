@@ -5,6 +5,7 @@
 import type { DocKind } from '../api/types.ts';
 import { DOC_KINDS } from '../api/types.ts';
 import { type AtlasRoute, parseAtlas } from '../atlas/view-state.ts';
+import { parseWeather, type WeatherRoute } from '../weather/route.ts';
 import { addressToDocId, parseAddress } from './address.ts';
 
 export type Route =
@@ -51,6 +52,7 @@ export type Route =
   | { page: 'screening' }
   | { page: 'define'; word: string }
   | { page: 'atlas'; atlas: AtlasRoute }
+  | { page: 'weather'; weather: WeatherRoute }
   | { page: 'invalid'; input: string };
 
 function toKind(v: string | undefined): DocKind | undefined {
@@ -104,6 +106,8 @@ export function resolveRoute(address: string): Route {
         return resolveRoute(`wsp://osm-planet/${a.path}`);
       return { page: 'atlas', atlas: parseAtlas(a.path, p) };
     }
+    case 'weather':
+      return { page: 'weather', weather: parseWeather(a.path, p) };
     case 'practice': {
       const seed = Number.parseInt(p.seed ?? '', 10);
       const index = Number.parseInt(p.n ?? '0', 10);

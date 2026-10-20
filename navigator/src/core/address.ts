@@ -36,6 +36,7 @@ export const BUILTIN_HOSTS = [
   'screening-room',
   'define',
   'atlas',
+  'weather',
 ] as const;
 export type BuiltinHost = (typeof BUILTIN_HOSTS)[number];
 
@@ -53,6 +54,8 @@ export const HOST_ALIASES: Readonly<Record<string, string>> = {
   wiktionary: 'wiktionary-en',
   maps: 'atlas',
   map: 'atlas',
+  forecast: 'weather',
+  climate: 'weather',
   osm: 'osm-planet',
   stack: 'stackexchange',
   'search.wsp': 'search',
