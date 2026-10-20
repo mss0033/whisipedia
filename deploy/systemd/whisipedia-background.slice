@@ -39,4 +39,7 @@ MemoryMax=8G
 MemorySwapMax=2G
 CPUWeight=20
 IOWeight=20
-TasksMax=512
+# Threads and processes of every background job together. 512 was reached 1,260 times on 2026-10-20
+# (25 jobs at once: downloads, two indexers, the audit browser, the trawler): "can't start new thread"
+# ended the CRS, OpenAlex and mirror fetches. A guard against a runaway job, not a working limit.
+TasksMax=2048

@@ -15,4 +15,5 @@ MemoryMax=1536M
 MemorySwapMax=512M
 CPUWeight=20
 IOWeight=10
-TasksMax=256
+# The download lanes' share of the background tasks (see whisipedia-background.slice, 2026-10-20).
+TasksMax=1024
