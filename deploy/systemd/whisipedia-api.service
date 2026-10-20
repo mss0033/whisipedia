@@ -11,6 +11,10 @@ Documentation=file://@REPO@/docs/components/api.md
 
 [Service]
 Type=simple
+# The API keeps every source's index shards open: 936 files on 2026-10-20 (American Stories, the topo
+# map partitions), and the default soft limit of 1,024 answered Wiktionary pages with "Too many open
+# files" (HTTP 500). The hard limit is far higher.
+LimitNOFILE=65536
 WorkingDirectory=@REPO@
 EnvironmentFile=-%h/.config/whisipedia/whisipedia.env
 Environment=PYTHONUNBUFFERED=1
