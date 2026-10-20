@@ -429,3 +429,22 @@ def test_ghcn_files_come_from_the_newest_generation_holding_each() -> None:
         Path("/v/2026-10-20/upstream/ghcn__GHCND-COUNTRIES-5f9537b0.txt"),
     )
     assert wp.ghcn_files([first]) is None
+
+
+def test_an_archive_ingest_queues_for_the_lock_then_runs_under_it(tmp_path: Path) -> None:
+    import fcntl
+    import subprocess
+
+    lock = tmp_path / "ingest.lock"
+    probe = ["/bin/sh", "-c", 'echo "$WSP_INHERITED_LOCKS"']
+    got = subprocess.run(
+        ["/bin/sh", "-c", w.QUEUED_INGEST, str(lock), "5", *probe], capture_output=True, text=True
+    )
+    assert got.returncode == 0
+    assert got.stdout.strip() == "ingest:9"  # wsp_cli.locks takes the lock it was handed
+    with lock.open("a") as held:
+        fcntl.flock(held, fcntl.LOCK_EX)  # another ingest holds it
+        busy = subprocess.run(
+            ["/bin/sh", "-c", w.QUEUED_INGEST, str(lock), "1", *probe], capture_output=True, text=True
+        )
+    assert busy.returncode == 3  # as a busy lock reads: retried by the next pull

@@ -502,13 +502,28 @@ def stage_files(
     return dest_dir
 
 
-def run_ingest(config_dir: Path | None, source: str, version: str) -> tuple[int, str]:
-    """``wsp ingest --source S --version V`` in a child process: its exit code and last line."""
+# Queue for the ingest lock with flock(1) on descriptor 9, then run the ingest under it
+# (WSP_INHERITED_LOCKS: wsp_cli.locks takes a lock its parent holds for it). Retrying every so often
+# instead lost to the download lanes' ingests every time (the ERA5 year waited 3 h, 2026-10-20).
+QUEUED_INGEST = (
+    'exec 9>>"$0" && { flock -w "$1" 9 || exit 3; } && shift && WSP_INHERITED_LOCKS=ingest:9 exec "$@"'
+)
+INGEST_WAIT_S = 1200  # a pull waits this long for the lock, then leaves the seal to the next pull
+
+
+def run_ingest(
+    config_dir: Path | None, source: str, version: str, *, lock: Path | None = None, wait: float = 0
+) -> tuple[int, str]:
+    """``wsp ingest --source S --version V`` in a child process: its exit code and last line. With
+    ``lock`` (the ingest lock file), it first waits up to ``wait`` seconds in the lock's queue (exit 3
+    when the wait runs out, as when the lock is busy)."""
     argv = [sys.executable, "-m", "wsp_cli"]
     if config_dir is not None:
         argv += ["--config-dir", str(config_dir)]
     argv += ["ingest", "--source", source, "--version", version]
-    done = subprocess.run(argv, capture_output=True, text=True, check=False, timeout=6 * 3600)  # noqa: S603
+    if lock is not None and wait > 0:
+        argv = ["/bin/sh", "-c", QUEUED_INGEST, str(lock), str(int(wait)), *argv]
+    done = subprocess.run(argv, capture_output=True, text=True, check=False, timeout=6 * 3600 + wait)  # noqa: S603
     lines = (done.stdout + done.stderr).strip().splitlines()
     return done.returncode, lines[-1] if lines else ""
 
@@ -625,7 +640,8 @@ def _archive(
             stage_files(incoming, model.source, version, [(f, urls.get(f.name, "")) for f in files], pace)
             item["staged"] = now_iso()
             say(f"{model.source}/{version}: {len(files)} GRIB files staged")
-        code, last = run_ingest(args.config_dir, model.source, version)
+        lock = locks.lock_dir_for(bootstrap.paths(cfg).require_index()) / f"{locks.INGEST}.lock"
+        code, last = run_ingest(args.config_dir, model.source, version, lock=lock, wait=INGEST_WAIT_S)
         if code == 0:
             say(f"{model.source}/{version}: sealed")
             continue
