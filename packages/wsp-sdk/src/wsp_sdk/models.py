@@ -759,6 +759,10 @@ class LinkCheckResult(_Wire):
         description="Those of them the library holds no page for, in the order asked. An address it "
         "could not answer for just now (a busy archive) is not listed."
     )
+    unchecked: list[str] = Field(
+        default_factory=list[str],
+        description="Those it had no time for (the answer comes within five seconds): ask again.",
+    )
 
 
 class OutsideCopy(_Wire):

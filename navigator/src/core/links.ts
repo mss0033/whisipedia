@@ -410,7 +410,10 @@ export function withoutTemplateLeftovers(text: string): string {
   // Again until nothing changes: [[Image:{{{range_map}}}|{{{width}}}|]] is a nameless image link
   // once its parameters are gone (Gardenology, 2026-10-20 audit).
   for (let i = 0; i < 3 && (t.includes('[[') || t.includes('{{')); i++) {
-    const next = t.replace(TEMPLATE_LEFTOVERS, '').replace(BROKEN_TEMPLATE, '$1');
+    const next = t
+      .replace(TEMPLATE_LEFTOVERS, '')
+      .replace(BROKEN_TEMPLATE, '$1')
+      .replace(UNCLOSED_TEMPLATE, '');
     if (next === t) break;
     t = next;
   }
@@ -422,6 +425,10 @@ export function withoutTemplateLeftovers(text: string): string {
 /** A template a translation broke, so the wiki printed it (Gentoo's handbook in Chinese and Japanese:
  * `{{Package|net-wireless/wpa_supplicant} }`): its argument, the words it would have shown. */
 const BROKEN_TEMPLATE = /\{\{[A-Z][A-Za-z]{1,20}\|([^{}|]{1,100})\}\s+\}/g;
+
+/** A template the wiki left open and printed, nothing after it: LibrePathology's reference
+ * `{{Ref HospAuto|` (2026-10-20 audit). */
+const UNCLOSED_TEMPLATE = /\{\{[A-Z][\w ]{0,30}\|\s*$/;
 
 /** A wiki link the wiki never turned into one: `[[Colsterworth]]`, `[[Main Page|home]]` (OpenStreetMap
  * wiki, 2026-10-19 audit), shown as its words. A title starts with a capital and has no comma: a

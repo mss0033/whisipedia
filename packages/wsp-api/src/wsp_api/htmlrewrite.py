@@ -40,7 +40,7 @@ from urllib.parse import quote, unquote, urlsplit
 
 from wsp_api.addresses import address_of
 
-VERSION = 11  # bump when the output changes: rendered pages are cached by it
+VERSION = 12  # bump when the output changes: rendered pages are cached by it
 
 # Links to these are files (shown by the browser, or saved), not pages. By name, so rewriting needs no
 # lookup per link; a page with such a name (rare) is then offered as a file the asset route refuses.
@@ -120,11 +120,13 @@ class _Rewriter(HTMLParser):
         site_roots: Sequence[str],
         find: Callable[[str], str | None] | None,
         outside: Outside | None = None,
+        is_image: Callable[[str], bool] | None = None,
     ) -> None:
         super().__init__(convert_charrefs=False)
         self._source, self._gen, self._base, self._root = source_id, generation_id, native_id, root
         self._site_roots = [r for r in dict.fromkeys(site_roots) if r != root]
         self._find = find
+        self._is_image = is_image
         self._outside = outside
         self._seen: dict[tuple[str, bool], str | None] = {}  # (outside url, asset) -> library url
         self._found: dict[str, tuple[str, str] | None] = {}  # root-relative href -> where it is
@@ -192,7 +194,10 @@ class _Rewriter(HTMLParser):
         if target is None or self._foreign(target[0], asset=True) is not None:
             return False
         if target[0] not in self._held:
-            self._held[target[0]] = self._find(target[0]) is not None
+            found = self._find(target[0])
+            # Held only as a picture: LibreTexts' archive keeps the site's HTML error page under a
+            # figure's name (…/CNX_Stats_C03_M01_021.jpg?revision=1), which the asset route refuses.
+            self._held[target[0]] = found is not None and (self._is_image is None or self._is_image(found))
         return not self._held[target[0]]
 
     def _srcset(self, value: str) -> str:
@@ -302,13 +307,15 @@ def rewrite_html(
     site_roots: Sequence[str] = (),
     find: Callable[[str], str | None] | None = None,
     outside: Outside | None = None,
+    is_image: Callable[[str], bool] | None = None,
 ) -> str:
     """``native_id``: the entry the page was served from (relative URLs resolve against it); ``root``:
     its container root inside the source (``"<book>/"`` in a bundle, else ``""``). ``site_roots`` (each
     ending in ``/``) and ``find`` (the native id of the entry at a path, slash forms tried, or None):
     where else a root-relative URL may be. ``outside(url, asset=...)``: the library's copy of an outside
-    URL (``wsp_api.outside``): a link to a site the library holds opens there, a picture from it loads."""
-    parser = _Rewriter(source_id, generation_id, native_id, root, site_roots, find, outside)
+    URL (``wsp_api.outside``): a link to a site the library holds opens there, a picture from it loads.
+    ``is_image(native id)``: whether that entry is a picture, so an ``<img>`` of anything else is left out."""
+    parser = _Rewriter(source_id, generation_id, native_id, root, site_roots, find, outside, is_image)
     parser.feed(text)
     parser.close()
     return "".join(parser.out)

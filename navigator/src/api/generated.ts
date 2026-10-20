@@ -364,6 +364,8 @@ export interface LinkCheck {
 export interface LinkCheckResult {
   /** Those of them the library holds no page for, in the order asked. An address it could not answer for just now (a busy archive) is not listed. */
   missing: Array<string>;
+  /** Those it had no time for (the answer comes within five seconds): ask again. */
+  unchecked: Array<string>;
 }
 
 export interface MapAnswer {

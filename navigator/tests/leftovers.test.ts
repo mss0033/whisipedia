@@ -21,6 +21,10 @@ describe('wiki leftovers an archived page shows (2026-10-19 audit)', () => {
     expect(withoutTemplateLeftovers('和 {{Package|net-wireless/wpa_supplicant} }。')).toBe(
       '和 net-wireless/wpa_supplicant。',
     );
+    expect(withoutTemplateLeftovers('{{Ref HospAuto|')).toBe('');
+    expect(withoutTemplateLeftovers('use {{Ref HospAuto|x}} here')).toBe(
+      'use {{Ref HospAuto|x}} here',
+    );
     expect(withoutTemplateLeftovers('or &quot;Mountain of Mercy,&quot; lies')).toBe(
       'or "Mountain of Mercy," lies',
     );

@@ -109,7 +109,8 @@ def test_a_pages_links_that_lead_nowhere_are_named_at_once(client: httpx.Client)
     r = client.post("/v1/links/missing", json={"addresses": asked})
     assert r.status_code == 200, r.text
     assert r.json() == {
-        "missing": ["wsp://rfc/999999", "wsp://no-such-site/page", "wsp://wikipedia-en-zim/A/Nowhere_at_all"]
+        "missing": ["wsp://rfc/999999", "wsp://no-such-site/page", "wsp://wikipedia-en-zim/A/Nowhere_at_all"],
+        "unchecked": [],
     }
     assert client.post("/v1/links/missing", json={"addresses": ["wsp://rfc/1"] * 501}).status_code == 422
 
@@ -136,3 +137,4 @@ def test_the_link_check_answers_in_time_without_the_links_it_could_not_check(
     r = client.post("/v1/links/missing", json={"addresses": asked})
     assert time.monotonic() - started < 1.5
     assert r.json()["missing"] == [f"wsp://s/gone/{i}" for i in range(6)]
+    assert r.json()["unchecked"] == ["wsp://s/gone/slow"]  # asked again by the Navigator

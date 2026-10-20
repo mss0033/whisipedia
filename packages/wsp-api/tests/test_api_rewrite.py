@@ -185,3 +185,25 @@ def test_event_handler_attributes_are_dropped() -> None:
     )
     assert rw(src, "A/P") == '<a class="share" href="#">Print</a><p>t</p>'
     assert rw('<p data-online="yes" one="1">t</p>', "A/P") == '<p data-online="yes">t</p>'
+
+
+def test_an_image_the_archive_holds_as_a_page_is_left_out() -> None:
+    """LibreTexts' archive keeps the site's HTML error page under a figure's name; the asset route
+    refuses a page, so the figure showed broken (2026-10-20 audit). Only a picture is kept."""
+    kinds = {"A/fig.jpg": "text/html", "A/ok.png": "image/png"}
+
+    def find(path: str) -> str | None:
+        return path if path in kinds else None
+
+    def is_image(path: str) -> bool:
+        return kinds[path].startswith("image/")
+
+    out = rewrite_html(
+        '<img alt="Figure 3" src="fig.jpg"><img src="ok.png">',
+        source_id="qa",
+        generation_id="g",
+        native_id="A/P",
+        find=find,
+        is_image=is_image,
+    )
+    assert out == f'<span class="missing-image">Figure 3</span><img src="{A}A/ok.png">'

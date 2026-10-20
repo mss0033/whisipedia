@@ -334,9 +334,10 @@ def browse_router(lib: Library) -> APIRouter:
         archives never captured (a site's "contact" page, a wiki's Talk: pages). Each is resolved as
         ``/go`` resolves it (a trailing slash, a stand-in from another source). Checking stops after
         :data:`LINK_CHECK_SECONDS`; the rest are not listed."""
-        return LinkCheckResult(missing=await asyncio.to_thread(_missing, body.addresses))
+        missing, unchecked = await asyncio.to_thread(_missing, body.addresses)
+        return LinkCheckResult(missing=missing, unchecked=unchecked)
 
-    def _missing(addresses: Sequence[str]) -> list[str]:
+    def _missing(addresses: Sequence[str]) -> tuple[list[str], list[str]]:
         def gone(a: str) -> bool:
             try:
                 resolve(s, a, {}, exists=lib.exists, stand_in=lib.stand_in)
@@ -351,7 +352,8 @@ def browse_router(lib: Library) -> APIRouter:
         done, late = wait(futures, timeout=LINK_CHECK_SECONDS)
         for f in late:
             f.cancel()  # not started yet: never started; a running one finishes unheard
-        return [a for a, f in zip(asked, futures, strict=True) if f in done and f.result()]
+        pairs = list(zip(asked, futures, strict=True))
+        return [a for a, f in pairs if f in done and f.result()], [a for a, f in pairs if f not in done]
 
     # --- Gaps -----------------------------------------------------------------------------------
 

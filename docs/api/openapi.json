@@ -4194,11 +4194,20 @@
             "type": "array",
             "title": "Missing",
             "description": "Those of them the library holds no page for, in the order asked. An address it could not answer for just now (a busy archive) is not listed."
+          },
+          "unchecked": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Unchecked",
+            "description": "Those it had no time for (the answer comes within five seconds): ask again."
           }
         },
         "type": "object",
         "required": [
-          "missing"
+          "missing",
+          "unchecked"
         ],
         "title": "LinkCheckResult"
       },

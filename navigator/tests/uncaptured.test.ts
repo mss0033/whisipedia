@@ -22,7 +22,10 @@ describe('links to pages the site archive never captured (2026-10-19 audit)', ()
         api: {
           missingLinks: async (a: string[]) => {
             asked.push(a);
-            return ['wsp://site/www.ex.org/contact'];
+            // The first time, the library has no time for the contact page: it is asked again.
+            return asked.length === 1
+              ? { missing: [], unchecked: ['wsp://site/www.ex.org/contact'] }
+              : { missing: ['wsp://site/www.ex.org/contact'], unchecked: [] };
           },
         },
       },
@@ -32,7 +35,10 @@ describe('links to pages the site archive never captured (2026-10-19 audit)', ()
     note.hidden = true;
     await markUncaptured(ctx, body, note);
     // Each address once; links already known to lead outside are not asked about.
-    expect(asked).toEqual([['wsp://site/www.ex.org/a/', 'wsp://site/www.ex.org/contact']]);
+    expect(asked).toEqual([
+      ['wsp://site/www.ex.org/a/', 'wsp://site/www.ex.org/contact'],
+      ['wsp://site/www.ex.org/contact'],
+    ]);
     const marked = [...body.querySelectorAll('a.uncaptured-link')].map((a) => a.textContent);
     expect(marked).toEqual(['Contact', 'Contact again']);
     expect(body.querySelector('a.uncaptured-link')!.getAttribute('title')).toBe(

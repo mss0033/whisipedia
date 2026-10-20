@@ -1096,7 +1096,7 @@ export function emptyPageNotice(
  * shown, the library is asked which of its links it holds no page for, and those are marked as the
  * links to websites it does not hold are. `data-links-checked` says the answer is in. */
 const LINK_CHECK_BATCH = 100;
-const LINK_CHECK_MAX = 500;
+const LINK_CHECK_MAX = 2000; // after the page is shown: explainxkcd's front page has more than 500
 
 export async function markUncaptured(
   ctx: Pick<PageContext, 'app' | 'signal'>,
@@ -1115,12 +1115,15 @@ export async function markUncaptured(
   // 200 links on a cold archive ran out of time before the one that leads nowhere (2026-10-19).
   const addresses = [...byAddress.keys()].slice(0, LINK_CHECK_MAX);
   let marked = 0;
-  for (let i = 0; i < addresses.length; i += LINK_CHECK_BATCH) {
-    const missing = await ctx.app.api.missingLinks(
-      addresses.slice(i, i + LINK_CHECK_BATCH),
-      ctx.signal,
-    );
+  const later: string[] = []; // links the library had no time for: asked once more at the end
+  for (let i = 0; i < addresses.length || later.length; i += LINK_CHECK_BATCH) {
+    const again = i >= addresses.length;
+    const batch = again
+      ? later.splice(0, LINK_CHECK_BATCH)
+      : addresses.slice(i, i + LINK_CHECK_BATCH);
+    const { missing, unchecked } = await ctx.app.api.missingLinks(batch, ctx.signal);
     if (ctx.signal.aborted) return;
+    if (!again) later.push(...unchecked);
     for (const at of missing) {
       for (const a of byAddress.get(at) ?? []) {
         a.dataset.missing = at;

@@ -572,6 +572,15 @@ class ZimAssetStore:
                 return root + candidate
         return None
 
+    def is_image(self, source_id: str, generation_id: str, native_id: str) -> bool:
+        """Whether the entry at ``native_id`` is a picture (no content is read)."""
+        try:
+            where = self._locate(source_id, generation_id, native_id)
+            data = self._read(where[0], where[1], Want.NONE) if where is not None else None
+        except ZimUnavailable:
+            return True  # busy: keep the picture rather than drop it
+        return data is not None and data.mimetype.startswith("image/")
+
     def _nautilus(self, file: str) -> list[nautilus.Item] | None:
         """The catalogue of a nautilus archive (``wsp_core.nautilus``), ``None`` for any other."""
         with self._lock:

@@ -282,8 +282,11 @@ export class WspClient {
    */
   /** Which of `addresses` the library holds no page for (at most 500 asked at a time). An error is
    * "none known": marking links must never disturb browsing. */
-  async missingLinks(addresses: string[], signal?: AbortSignal): Promise<string[]> {
-    if (!addresses.length) return [];
+  async missingLinks(
+    addresses: string[],
+    signal?: AbortSignal,
+  ): Promise<{ missing: string[]; unchecked: string[] }> {
+    if (!addresses.length) return { missing: [], unchecked: [] };
     const body: Routes['POST /v1/links/missing']['body'] = { addresses: addresses.slice(0, 500) };
     try {
       const res = await this.fetchImpl(this.base + routePath('POST /v1/links/missing', NO_PATH), {
@@ -293,9 +296,9 @@ export class WspClient {
         ...(signal ? { signal } : {}),
       });
       const out = (await this.parse(res)) as Routes['POST /v1/links/missing']['response'];
-      return out.missing;
+      return { missing: out.missing, unchecked: out.unchecked ?? [] };
     } catch {
-      return [];
+      return { missing: [], unchecked: [] };
     }
   }
 

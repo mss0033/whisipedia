@@ -557,6 +557,7 @@ class Library:
         def build() -> Rendered | None:
             sites: tuple[str, ...] = ()
             find: Callable[[str], str | None] | None = None
+            is_image: Callable[[str], bool] | None = None
             if (zim := self.zim) is not None and html_ref.startswith("zim:"):
                 page = zim.page(source_id, gid, html_ref.removeprefix("zim:"))
                 if page is None:
@@ -564,6 +565,7 @@ class Library:
                 base, root, original, section = page.native_id, page.book_root, page.html, page.fragment
                 sites = page.site_roots
                 find = partial(zim.find, source_id, gid)
+                is_image = partial(zim.is_image, source_id, gid)
             else:
                 found = self.assets.html(source_id, gid, html_ref)
                 if found is None:
@@ -580,6 +582,7 @@ class Library:
                     site_roots=sites,
                     find=find,
                     outside=self.outside_url,
+                    is_image=is_image,
                 ),
             )
             return replace(out, section=section) if section else out

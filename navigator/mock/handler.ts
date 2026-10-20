@@ -707,7 +707,7 @@ export function handle(
       }
       return !document(`wsp:${m[1]}/${native}`, new URLSearchParams());
     });
-    return { status: 200, json: { missing } };
+    return { status: 200, json: { missing, unchecked: [] } };
   }
   if (method !== 'GET') return err(405, 'method_not_allowed', method);
 
