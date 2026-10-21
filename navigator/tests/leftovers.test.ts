@@ -100,6 +100,30 @@ describe('a list item that held only a template leftover (2026-10-21 audit)', ()
   });
 });
 
+describe("a wiki's blank lines (2026-10-21 audit)", () => {
+  it('are one empty paragraph however many there were', () => {
+    const { fragment } = sanitizeDocumentHtml(
+      '<p>a</p><p><br> </p><p><br></p>\n<p><br></p><p>b</p><p><br></p><p><img src="/v1/assets/s/g/x.png"></p>',
+      { sourceId: 'energypedia', nativeId: 'Pub' },
+    );
+    expect([...fragment.querySelectorAll('p')].map((p) => p.innerHTML.trim())).toEqual([
+      'a',
+      '<br>',
+      'b',
+      '<br>',
+      expect.stringContaining('<img'),
+    ]);
+  });
+
+  it('keep the line around words between them', () => {
+    const { fragment } = sanitizeDocumentHtml('<div><p><br></p>words<p><br></p></div>', {
+      sourceId: 'energypedia',
+      nativeId: 'Pub',
+    });
+    expect(fragment.querySelectorAll('p')).toHaveLength(2);
+  });
+});
+
 describe('an image the archive answers with no picture (2026-10-19 audit)', () => {
   it('becomes the placeholder of an image the library does not hold, with its caption', async () => {
     const { replaceBrokenImages } = await import('../src/core/links.ts');

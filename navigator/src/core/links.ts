@@ -617,6 +617,19 @@ export function sanitizeDocumentHtml(
   if (parsed.body?.localName === 'frameset')
     for (const nf of Array.from(parsed.documentElement.children))
       if (nf.localName === 'noframes') walk({ childNodes: [nf] } as unknown as Node, out);
+  // A wiki's blank lines are empty paragraphs (`<p><br></p>`): a run of them is one blank line, not a
+  // screen of white (Energypedia: twelve in a row closing an article, 2026-10-21 audit).
+  const blank = (n: Node | null): boolean =>
+    n instanceof Element &&
+    n.localName === 'p' &&
+    !n.textContent?.trim() &&
+    [...n.children].every((c) => c.localName === 'br');
+  for (const p of Array.from(out.querySelectorAll('p'))) {
+    let before = p.previousSibling;
+    while (before?.nodeType === Node.TEXT_NODE && !before.textContent?.trim())
+      before = before.previousSibling;
+    if (blank(p) && blank(before)) p.remove();
+  }
   // A link to a place in the page that is not there (a dropped navigation bar) is plain text.
   const ids = new Set([...out.querySelectorAll('[id]')].map((e) => e.id));
   for (const a of out.querySelectorAll<HTMLAnchorElement>('a[data-anchor]')) {
