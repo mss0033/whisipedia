@@ -87,6 +87,19 @@ describe('wiki leftovers an archived page shows (2026-10-19 audit)', () => {
   });
 });
 
+describe('a list item that held only a template leftover (2026-10-21 audit)', () => {
+  it('is left out, not shown as an empty bullet', () => {
+    const { fragment } = sanitizeDocumentHtml(
+      '<ul><li>Financing and Funding</li><li>[[Template:Pub Tag Improved Cookstoves}]]</li><li></li></ul>',
+      { sourceId: 'energypedia', nativeId: 'Pub' },
+    );
+    expect([...fragment.querySelectorAll('li')].map((li) => li.textContent)).toEqual([
+      'Financing and Funding',
+      '',
+    ]);
+  });
+});
+
 describe('an image the archive answers with no picture (2026-10-19 audit)', () => {
   it('becomes the placeholder of an image the library does not hold, with its caption', async () => {
     const { replaceBrokenImages } = await import('../src/core/links.ts');

@@ -486,12 +486,15 @@ export function sanitizeDocumentHtml(
   // the lead (Gibbs free energy, Arrow's theorem: 2026-10-16 field exam). Inner ones stay as they are.
   let inNavigation = 0;
   let inCode = 0;
+  let emptied = 0; // text nodes that were only template leftovers
 
   const walk = (src: Node, dest: Node): void => {
     for (const child of Array.from(src.childNodes)) {
       if (child.nodeType === Node.TEXT_NODE) {
         const text = child.textContent ?? '';
-        dest.appendChild(document.createTextNode(inCode ? text : withoutTemplateLeftovers(text)));
+        const clean = inCode ? text : withoutTemplateLeftovers(text);
+        if (clean !== text && !clean.trim()) emptied += 1;
+        dest.appendChild(document.createTextNode(clean));
         continue;
       }
       if (child.nodeType !== Node.ELEMENT_NODE) continue; // comments, PIs
@@ -571,8 +574,20 @@ export function sanitizeDocumentHtml(
       }
       const code = CODE_TAGS.has(tag);
       if (code) inCode += 1;
+      const emptiedBefore = emptied;
       walk(el, copy);
       if (code) inCode -= 1;
+      if (
+        tag === 'li' &&
+        emptied > emptiedBefore &&
+        !copy.textContent?.trim() &&
+        !copy.querySelector('img, svg, math')
+      ) {
+        // A list item that held only a template leftover is not an empty bullet (Energypedia's
+        // `[[Template:Pub Tag …}]]`, 2026-10-21 audit).
+        stats.removed += 1;
+        continue;
+      }
       if (
         tag === 'a' &&
         copy.hasAttribute('href') &&
