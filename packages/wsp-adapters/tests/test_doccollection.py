@@ -901,6 +901,39 @@ def test_itu_recommendations_in_force_in_english() -> None:
     assert cand.edition_date == "2024-11"
 
 
+def test_an_itu_page_that_fails_once_is_asked_again_at_the_end() -> None:
+    from wsp_core.errors import FetchError
+
+    series = b'<a href="./recommendation.asp?lang=en&amp;parent=T-REC-K.12"><strong>K.12</strong></a>'
+    rec = (
+        b'<tr><td><a href="./recommendation.asp?lang=en&amp;parent=T-REC-K.12-202408-I"><strong>K.12 (08/24)'
+        b"</strong></a></td><td>Gas discharge tubes</td><td>In force</td></tr>"
+    )
+
+    class Busy(FakeFetcher):
+        failed = False
+
+        def get_bytes(self, url: str, *, max_bytes: int = 64 * 1024 * 1024) -> bytes:
+            if url.endswith("T-REC-K.12/en") and not Busy.failed:
+                Busy.failed = True
+                raise FetchError(f"GET {url} failed after 6 attempt(s): HTTP 503")
+            return super().get_bytes(url, max_bytes=max_bytes)
+
+    env = DiscoverEnv(
+        fetcher=Busy(
+            {"https://www.itu.int/rec/T-REC-K/en": series, "https://www.itu.int/rec/T-REC-K.12/en": rec}
+        ),
+        issuer="ITU",
+        prefix="itu",
+        origins=("www.itu.int",),
+    )
+    (cand,) = list(
+        discover_all([{"kind": "api", "flavor": "itu-recommendations", "sector": "T", "series": ["K"]}], env)
+    )
+    assert cand.pub_number == "ITU-T K.12 (08/24)"
+    assert not env.incomplete
+
+
 def test_openstax_lists_each_live_book_with_its_pdf() -> None:
     def book(slug: str, state: str, pdf: str) -> dict[str, object]:
         return {

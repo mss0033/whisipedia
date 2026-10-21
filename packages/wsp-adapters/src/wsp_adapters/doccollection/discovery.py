@@ -1298,32 +1298,44 @@ def itu_recommendations(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Ca
     def text(url: str) -> str:  # ITU's pages are Windows-1252
         return html_unescape(env.fetcher.get_bytes(url).decode("cp1252", "replace"))
 
-    for letter in _strs(cfg.get("series")):
-        series = text(f"https://www.itu.int/rec/{sector}-REC-{letter}/en")
-        for rec in dict.fromkeys(m.group("id") for m in _ITU_REC.finditer(series)):
-            page = text(f"https://www.itu.int/rec/{rec}/en")
-            for row in _ITU_ROW.finditer(page):
-                if not row.group("status").strip().lower().startswith("in force"):
-                    continue
-                vid = row.group("id")
-                if sector == "R":
-                    url = f"https://www.itu.int/dms_pubrec/itu-r/rec/{letter.lower()}/{vid}!!PDF-E.pdf"
-                else:
-                    url = f"https://www.itu.int/rec/dologin_pub.asp?lang=e&id={vid}!!PDF-E&type=items"
-                label = " ".join(row.group("label").split())
-                title = " ".join(re.sub(r"<[^>]+>", " ", row.group("title")).split()).split(" Note - ")[0]
-                seen += 1
-                yield Candidate(
-                    key=make_key(env.prefix, vid.replace("!", "-")),
-                    url=url,
-                    title=f"ITU-{sector} {label}: {title}" if title else f"ITU-{sector} {label}",
-                    issuer=env.issuer,
-                    pub_number=f"ITU-{sector} {label}",
-                    edition_date=_itu_date(vid),
-                    landing_url=f"https://www.itu.int/rec/{rec}/en",
-                    discovered_by=f"itu:{sector}-{letter}",
-                    extra={"suffix": ".pdf"},
-                )
+    # A Recommendation page that fails (a 503 among some 5,000, 2026-10-21) is asked again at the end
+    # of the run; failing then too, the listing is incomplete as usual.
+    later: list[tuple[str, str]] = []
+
+    def pages() -> Iterator[tuple[str, str, str]]:
+        for letter in _strs(cfg.get("series")):
+            series = text(f"https://www.itu.int/rec/{sector}-REC-{letter}/en")
+            for rec in dict.fromkeys(m.group("id") for m in _ITU_REC.finditer(series)):
+                try:
+                    yield letter, rec, text(f"https://www.itu.int/rec/{rec}/en")
+                except FetchError:
+                    later.append((letter, rec))
+        for letter, rec in later:
+            yield letter, rec, text(f"https://www.itu.int/rec/{rec}/en")
+
+    for letter, rec, page in pages():
+        for row in _ITU_ROW.finditer(page):
+            if not row.group("status").strip().lower().startswith("in force"):
+                continue
+            vid = row.group("id")
+            if sector == "R":
+                url = f"https://www.itu.int/dms_pubrec/itu-r/rec/{letter.lower()}/{vid}!!PDF-E.pdf"
+            else:
+                url = f"https://www.itu.int/rec/dologin_pub.asp?lang=e&id={vid}!!PDF-E&type=items"
+            label = " ".join(row.group("label").split())
+            title = " ".join(re.sub(r"<[^>]+>", " ", row.group("title")).split()).split(" Note - ")[0]
+            seen += 1
+            yield Candidate(
+                key=make_key(env.prefix, vid.replace("!", "-")),
+                url=url,
+                title=f"ITU-{sector} {label}: {title}" if title else f"ITU-{sector} {label}",
+                issuer=env.issuer,
+                pub_number=f"ITU-{sector} {label}",
+                edition_date=_itu_date(vid),
+                landing_url=f"https://www.itu.int/rec/{rec}/en",
+                discovered_by=f"itu:{sector}-{letter}",
+                extra={"suffix": ".pdf"},
+            )
     env.listing_end(f"itu-{sector}", stopped=False, seen=seen)
 
 
