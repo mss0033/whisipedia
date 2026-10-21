@@ -417,6 +417,7 @@ export function withoutTemplateLeftovers(text: string): string {
       .replace(BROKEN_TEMPLATE, '$1')
       .replace(UNCLOSED_TEMPLATE, '')
       .replace(PARAM_TEMPLATE, '')
+      .replace(CUT_LINK, '')
       .replace(TEMPLATE_OPENER, '');
     if (next === t) break;
     t = next;
@@ -435,11 +436,15 @@ const BROKEN_TEMPLATE = /\{\{[A-Z][A-Za-z]{1,20}\|([^{}|]{1,100})\}\s+\}/g;
 const UNCLOSED_TEMPLATE = /\{\{[A-Z][\w ]{0,30}\|\s*$/;
 
 /** A template with named parameters the wiki printed instead of expanding: Gentoo's outdated
- * translations show `{{Talk|open|date=28 mars, 2017}}`, and the opening of a code box whose end
+ * translations show `{{Talk|open|date=28 mars, 2017}}`, Energypedia's upload summaries
+ * `{{Information |Description =  |Source =  }}` (2026-10-21), and the opening of a code box whose end
  * comes lines later, `{{CodeBox|title=Eksempel|lang=text|1=` (2026-10-20 audit). A named parameter
  * (`key=`) marks them: a template a page writes about has none. */
 const PARAM_TEMPLATE =
-  /\{\{[A-Z][A-Za-z]{1,20}(?:\|[^{}|\n]*)*\|[a-z0-9_]+=[^{}|\n]*(?:\|[^{}|\n]*)*\}\}/g;
+  /\{\{[A-Z][A-Za-z]{1,20} ?(?:\|[^{}|\n]*)*\|\s*[A-Za-z][A-Za-z0-9_ ]{0,30}=[^{}|\n]*(?:\|[^{}|\n]*)*\}\}/g;
+/** A category or file link the wiki cut short in a summary ("[[Category:MENA_(Middle_East_and_N..."):
+ * Energypedia's file history, 2026-10-21 audit. */
+const CUT_LINK = /\[\[(?:Category|File|Image):[^\]\n]{0,200}\.\.\.(?!\])/g;
 const TEMPLATE_OPENER = /\{\{[A-Z][A-Za-z]{1,20}\|(?:[a-z0-9_]+=[^|\n{}]*\|)+(?:1=)?/g;
 
 /** A wiki link the wiki never turned into one: `[[Colsterworth]]`, `[[Main Page|home]]` (OpenStreetMap

@@ -21,6 +21,17 @@ describe('wiki leftovers an archived page shows (2026-10-19 audit)', () => {
     expect(withoutTemplateLeftovers('story)? -- [[User:|]] (talk)')).toBe('story)? --  (talk)');
     expect(withoutTemplateLeftovers('[[User talk:|]]x [[Paris]]')).toBe('x Paris');
     expect(
+      withoutTemplateLeftovers(
+        '{{Information |Description =  |Source =  |Date = ~~~~~ <!-- do not change -->  |Permission =  }}  Solar',
+      ),
+    ).toBe('  Solar');
+    expect(withoutTemplateLeftovers('Jordan [[Category:MENA_(Middle_East_and_N...')).toBe(
+      'Jordan ',
+    );
+    expect(withoutTemplateLeftovers('See {{cite}} and [[Category:Solar]] then...')).toBe(
+      'See {{cite}} and Category:Solar then...', // a whole link is not a cut one
+    );
+    expect(
       withoutTemplateLeftovers('Funding\n[[Template:Pub Tag Improved Cookstoves}]]\nmore'),
     ).toBe('Funding\n\nmore');
     expect(withoutTemplateLeftovers('和 {{Package|net-wireless/wpa_supplicant} }。')).toBe(

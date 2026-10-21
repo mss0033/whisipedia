@@ -64,9 +64,30 @@ def _gzip(data: bytes) -> bytes | None:
     return out if d.eof and not d.unconsumed_tail and len(out) <= MAX_OUTPUT else None
 
 
+# How a picture of each type starts: a gzip-encoded one is decoded only when it decodes to one.
+_SIGNATURES: dict[str, tuple[bytes, ...]] = {
+    "image/jpeg": (b"\xff\xd8\xff",),
+    "image/png": (b"\x89PNG\r\n\x1a\n",),
+    "image/gif": (b"GIF87a", b"GIF89a"),
+    "image/webp": (b"RIFF",),
+    "image/bmp": (b"BM",),
+    "image/x-icon": (b"\x00\x00\x01\x00",),
+    "image/vnd.microsoft.icon": (b"\x00\x00\x01\x00",),
+}
+
+
 def decoded(content: bytes, mimetype: str) -> bytes:
-    """``content``, or its decoding when a text file was stored brotli- or gzip-encoded."""
-    if not content or len(content) > MAX_INPUT or not _textual(mimetype) or _looks_like_text(content):
+    """``content``, or its decoding when a text file was stored brotli- or gzip-encoded, or a picture
+    gzip-encoded (footballdatabase.com's club badges, JPEGs in gzip, 2026-10-21 audit)."""
+    if not content or len(content) > MAX_INPUT:
+        return content
+    kind = mimetype.split(";", 1)[0].strip().lower()
+    if kind in _SIGNATURES:
+        if content[:2] != b"\x1f\x8b":
+            return content
+        out = _gzip(content)
+        return out if out is not None and out.startswith(_SIGNATURES[kind]) else content
+    if not _textual(mimetype) or _looks_like_text(content):
         return content
     out = _gzip(content) if content[:2] == b"\x1f\x8b" else _brotli(content)
     return out if out is not None and _looks_like_text(out) else content

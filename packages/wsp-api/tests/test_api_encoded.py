@@ -44,3 +44,13 @@ def test_a_web_page_saved_under_a_pictures_name_is_no_picture() -> None:
     assert not html_as_image(b"\x89PNG\r\n\x1a\n", "image/png")
     assert not html_as_image(SVG, "image/svg+xml")
     assert not html_as_image(page, "text/html")
+
+
+def test_a_picture_stored_gzip_encoded_is_served_decoded() -> None:
+    jpeg = b"\xff\xd8\xff\xe0\x00\x10JFIF" + bytes(range(256))
+    assert decoded(gzip.compress(jpeg), "image/jpeg") == jpeg
+    assert decoded(jpeg, "image/jpeg") == jpeg
+    # Decoding to something else than the picture it is labelled: left alone.
+    assert decoded(gzip.compress(b"not a jpeg"), "image/jpeg") == gzip.compress(b"not a jpeg")
+    # A gzip download is a gzip download.
+    assert decoded(gzip.compress(jpeg), "application/gzip") == gzip.compress(jpeg)
