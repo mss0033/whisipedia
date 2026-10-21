@@ -446,7 +446,10 @@ async function audit(context, phoneContext, id) {
       (doc?.html
         ? new RegExp(`&lt;/?${tag}\\b`, 'i').test(doc.html)
         : (doc?.text ?? '').includes(m?.[0] ?? '\u0000'));
-    if (m && !written && !escaped)
+    // Any markup a plain-text document holds verbatim is its words: the KiCad manual prints a sample
+    // info.html, `0.1&quot;` and all (2026-10-21).
+    const own = !doc?.html && m && (doc?.text ?? '').includes(m[0]);
+    if (m && !written && !escaped && !own)
       add(
         issues,
         'read',
