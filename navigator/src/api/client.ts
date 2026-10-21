@@ -367,7 +367,8 @@ export class WspClient {
       const out = (await this.parse(res)) as Routes['POST /v1/links/missing']['response'];
       return { missing: out.missing, unchecked: out.unchecked ?? [] };
     } catch {
-      return { missing: [], unchecked: [] };
+      // Busy, or no answer: none of them was checked (not "none is missing").
+      return { missing: [], unchecked: body.addresses };
     }
   }
 

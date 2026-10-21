@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { markUncaptured, originalWebAddress } from '../src/pages/document.ts';
 import type { PageContext } from '../src/pages/types.ts';
 
@@ -47,6 +47,39 @@ describe('links to pages the site archive never captured (2026-10-19 audit)', ()
     expect(note.hidden).toBe(false);
     expect(note.textContent).toContain('2 link(s)');
     expect(body.dataset.linksChecked).toBe('1');
+  });
+
+  it('are asked about again while the library is busy, a few times, then left', async () => {
+    vi.useFakeTimers();
+    try {
+      let calls = 0;
+      const ctx = {
+        signal: new AbortController().signal,
+        app: {
+          api: {
+            missingLinks: async (a: string[]) => {
+              calls += 1;
+              // Busy three times (a failed request counts as all unchecked), then the answer.
+              return calls < 4
+                ? { missing: [], unchecked: a }
+                : { missing: ['wsp://site/www.ex.org/contact'], unchecked: [] };
+            },
+          },
+        },
+      } as unknown as Pick<PageContext, 'app' | 'signal'>;
+      const body = page();
+      const note = document.createElement('p');
+      const done = markUncaptured(ctx, body, note);
+      await vi.runAllTimersAsync();
+      await done;
+      expect(calls).toBe(4);
+      expect([...body.querySelectorAll('a.uncaptured-link')].map((a) => a.textContent)).toEqual([
+        'Contact',
+        'Contact again',
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('name the web address a page of an archived website had', () => {

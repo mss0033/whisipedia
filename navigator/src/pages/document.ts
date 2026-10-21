@@ -1097,6 +1097,21 @@ export function emptyPageNotice(
  * links to websites it does not hold are. `data-links-checked` says the answer is in. */
 const LINK_CHECK_BATCH = 100;
 const LINK_CHECK_MAX = 2000; // after the page is shown: explainxkcd's front page has more than 500
+const LINK_CHECK_ROUNDS = 4;
+const LINK_CHECK_PAUSE_MS = 3000;
+
+/** Waits `ms`; false when the page was left meanwhile. */
+function pause(ms: number, signal: AbortSignal): Promise<boolean> {
+  return new Promise((done) => {
+    if (signal.aborted) return done(false);
+    const t = setTimeout(() => done(!signal.aborted), ms);
+    const stop = () => {
+      clearTimeout(t);
+      done(false);
+    };
+    signal.addEventListener('abort', stop, { once: true });
+  });
+}
 
 export async function markUncaptured(
   ctx: Pick<PageContext, 'app' | 'signal'>,
@@ -1113,25 +1128,28 @@ export async function markUncaptured(
   }
   // A hundred at a time, each answered within the library's five seconds: one request for a page's
   // 200 links on a cold archive ran out of time before the one that leads nowhere (2026-10-19).
-  const addresses = [...byAddress.keys()].slice(0, LINK_CHECK_MAX);
+  // Links the library had no time for, or could not answer while busy, are asked about again: at
+  // once, then after a pause, a few times (a busy library left a Talk: link unmarked, 2026-10-21).
+  let pending = [...byAddress.keys()].slice(0, LINK_CHECK_MAX);
   let marked = 0;
-  const later: string[] = []; // links the library had no time for: asked once more at the end
-  for (let i = 0; i < addresses.length || later.length; i += LINK_CHECK_BATCH) {
-    const again = i >= addresses.length;
-    const batch = again
-      ? later.splice(0, LINK_CHECK_BATCH)
-      : addresses.slice(i, i + LINK_CHECK_BATCH);
-    const { missing, unchecked } = await ctx.app.api.missingLinks(batch, ctx.signal);
-    if (ctx.signal.aborted) return;
-    if (!again) later.push(...unchecked);
-    for (const at of missing) {
-      for (const a of byAddress.get(at) ?? []) {
-        a.dataset.missing = at;
-        a.classList.add('broken-link', 'uncaptured-link');
-        a.setAttribute('title', `Not in library: ${at}`);
-        marked += 1;
+  for (let round = 0; pending.length && round < LINK_CHECK_ROUNDS; round++) {
+    if (round > 1 && !(await pause(LINK_CHECK_PAUSE_MS * (round - 1), ctx.signal))) return;
+    const later: string[] = [];
+    for (let i = 0; i < pending.length; i += LINK_CHECK_BATCH) {
+      const batch = pending.slice(i, i + LINK_CHECK_BATCH);
+      const { missing, unchecked } = await ctx.app.api.missingLinks(batch, ctx.signal);
+      if (ctx.signal.aborted) return;
+      later.push(...unchecked);
+      for (const at of missing) {
+        for (const a of byAddress.get(at) ?? []) {
+          a.dataset.missing = at;
+          a.classList.add('broken-link', 'uncaptured-link');
+          a.setAttribute('title', `Not in library: ${at}`);
+          marked += 1;
+        }
       }
     }
+    pending = later;
   }
   if (marked) {
     note.textContent = `${marked} link(s) on this page go to pages the library does not hold: this site’s archive did not capture them. They are marked.`;
