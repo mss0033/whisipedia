@@ -327,6 +327,23 @@ def test_a_sealed_year_reaching_the_last_day_is_not_made_again(tmp_path: Path) -
     assert not wp.era5_sealed(tmp_path, "weather", 2026, date(2026, 1, 5))
 
 
+def test_a_staged_year_waiting_for_its_seal_is_ingested_not_made_again(tmp_path: Path) -> None:
+    staged = tmp_path / "_incoming" / "era5-daily" / "2026-10-20.y2025"
+    staged.mkdir(parents=True)
+    wd.write_era5_meta(staged, 2025, date(2025, 1, 1), 365, ("t2m_mean",), "x")
+    end = date(2025, 12, 31)
+    assert wp.era5_staged(tmp_path, "weather", 2025, end) is None  # no plan: the copy did not finish
+    plans = tmp_path / "_incoming" / "_plans" / w.PLANS_SUBDIR
+    plans.mkdir(parents=True)
+    (plans / "era5-daily-2026-10-20.y2025.json").write_text("[]")
+    assert wp.era5_staged(tmp_path, "weather", 2025, end) == "2026-10-20.y2025"
+    assert wp.era5_staged(tmp_path, "weather", 2026, date(2026, 1, 5)) is None
+    gen = tmp_path / "library" / "weather" / "era5-daily" / "2026-10-20.y2025"
+    gen.mkdir(parents=True)
+    (gen / "MANIFEST.json").write_text("{}")
+    assert wp.era5_staged(tmp_path, "weather", 2025, end) is None  # sealed already
+
+
 def test_only_a_few_steps_are_fetched_ahead_of_the_one_being_written(tmp_path: Path) -> None:
     """2026-10-20: every step of a GFS run was in flight at once, 850 MB held and swapping."""
     import threading

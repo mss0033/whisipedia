@@ -36,7 +36,15 @@ import numpy as np
 
 from wsp_api import weatherdata as wd
 from wsp_cli import bootstrap, locks
-from wsp_cli.weather import EXIT_FAILED, EXIT_OK, EXIT_REFUSED, Getter, WeatherSettings, stage_files
+from wsp_cli.weather import (
+    EXIT_FAILED,
+    EXIT_OK,
+    EXIT_REFUSED,
+    PLANS_SUBDIR,
+    Getter,
+    WeatherSettings,
+    stage_files,
+)
 from wsp_core.errors import FetchError, NotFoundError
 
 ERA5_SOURCE = "era5-daily"
@@ -144,6 +152,27 @@ def era5_sealed(vault: Path, domain: str, year: int, last: date) -> bool:
     return False
 
 
+def era5_staged(vault: Path, domain: str, year: int, last: date) -> str | None:
+    """A staged, not yet sealed version of the year that reaches ``last`` (its plan written, so the
+    copy finished): ingesting it is all that is left. A lane stopped during that ingest otherwise made
+    the whole year again (2025, 2026-10-21)."""
+    plans = vault / "_incoming" / "_plans" / PLANS_SUBDIR
+    for staged in sorted((vault / "_incoming" / ERA5_SOURCE).glob(f"*.y{year}"), reverse=True):
+        version = staged.name
+        if not (plans / f"{ERA5_SOURCE}-{version}.json").is_file():
+            continue
+        if (vault / "library" / domain / ERA5_SOURCE / version / "MANIFEST.json").is_file():
+            continue
+        try:
+            raw = json.loads((staged / wd.era5_meta_name(year)).read_text(encoding="utf-8"))
+            reaches = date.fromisoformat(str(raw["first"])) + timedelta(days=int(raw["days"]) - 1)
+        except (OSError, ValueError, KeyError):
+            continue
+        if reaches >= last:
+            return version
+    return None
+
+
 def cmd_era5(args: argparse.Namespace, out: TextIO) -> int:
     lay = bootstrap.layout(args.config_dir)
     cfg = bootstrap.load(lay)
@@ -174,6 +203,13 @@ def cmd_era5(args: argparse.Namespace, out: TextIO) -> int:
         out.write(f"era5 {year}: sealed to {last}; nothing new\n")
         return 7
     work = ws.root / "era5-work" / str(year)
+    staged = era5_staged(vault, spec.vault_domain, year, last)
+    if staged is not None:
+        if last == date(year, 12, 31):
+            shutil.rmtree(work, ignore_errors=True)
+        out.write(f"era5 {year}: {ERA5_SOURCE}/{staged} is staged to {last}, waiting to be sealed\n")
+        out.write(f"next: wsp ingest --source {ERA5_SOURCE} --version {staged}\n")
+        return EXIT_OK
     try:
         with locks.exclusive(ws.root, f"era5-{year}"):
             return _era5_year(arco, cfg, ws, year, first, last, work, workers, out, spec.vault_domain)
