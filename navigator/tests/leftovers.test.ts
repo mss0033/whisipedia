@@ -137,6 +137,19 @@ describe("a wiki's blank lines (2026-10-21 audit)", () => {
   });
 });
 
+describe('a page that is a form (2026-10-21 audit)', () => {
+  it('keeps its heading and labels, not its controls', () => {
+    const { fragment } = sanitizeDocumentHtml(
+      '<form class="form-signin"><h1>Please sign in</h1><label for="e">Email address</label>' +
+        '<input type="email" id="e"><button type="submit">Sign in</button><p>&copy; 2017-2018</p></form>',
+      { sourceId: 'bootstrap', nativeId: 'sign-in/' },
+    );
+    expect(fragment.querySelector('h1')?.textContent).toBe('Please sign in');
+    expect(fragment.textContent).toContain('Email address');
+    expect(fragment.querySelector('form, input, button')).toBeNull();
+  });
+});
+
 describe('an image the archive answers with no picture (2026-10-19 audit)', () => {
   it('becomes the placeholder of an image the library does not hold, with its caption', async () => {
     const { replaceBrokenImages } = await import('../src/core/links.ts');

@@ -145,7 +145,8 @@ const DROP = new Set([
   'object',
   'embed',
   'applet',
-  'form',
+  // A <form> is unwrapped, not dropped: its headings and labels are the page (Bootstrap's sign-in
+  // example was empty, 2026-10-21; ASP.NET sites wrap whole pages in one). Its controls still go.
   'input',
   'button',
   'select',
