@@ -1072,7 +1072,9 @@ export function emptyPageNotice(
   for (const el of page.querySelectorAll('script, style, noscript, template, title, h1'))
     el.remove();
   const words = (page.body?.textContent ?? '').replace(/\s+/g, ' ').trim();
-  const media = page.querySelector('img, video, audio, svg, object, embed, iframe');
+  // Only what the reader shows counts: it drops video, audio, svg, object and embed (Ghost's admin
+  // shell, whose only element was its loading animation, read as a page with media, 2026-10-21).
+  const media = page.querySelector('img, iframe');
   // A page that is only a canvas and its scripts is a program (ncase.me's polygon games): nothing of
   // it shows here, where page scripts never run.
   const program = !media && !!page.querySelector('canvas');

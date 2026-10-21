@@ -25,6 +25,13 @@ describe('a page empty in its archive is said to be (2026-10-19 audit)', () => {
     expect(emptyPageNotice('<p><img src="map.png" alt=""></p>', 'A map', null)).toBeNull();
   });
 
+  it('names an app shell whose only element is its loading animation (2026-10-21 audit)', () => {
+    const html =
+      '<div id="ember-app"><div class="gh-loading-content"><video autoplay muted>' +
+      '<source src="logo-loader.mp4" type="video/mp4"></video></div></div><script src="ghost.js"></script>';
+    expect(emptyPageNotice(html, 'Ghost', null)?.textContent).toContain('loaded by a script');
+  });
+
   it('names a page that is only a canvas program', () => {
     const html = '<div class="mini"><canvas id="c"></canvas></div><script src="game.js"></script>';
     expect(emptyPageNotice(html, 'mini_checkerboard', null)?.textContent).toContain(
