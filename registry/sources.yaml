@@ -1291,14 +1291,14 @@ sources:
       key_prefix: army
       origins: [armypubs.army.mil]
       discovery:
-        - &apd {kind: index-page, label: apd-adp, url: "https://armypubs.army.mil/ProductMaps/PubForm/ADP.aspx", rows: "tr", columns: {pub_number: 0, status: 1, date: 2, title: 3}, detail_documents: "armypubs\\.army\\.mil/epubs/DR_pubs/.+\\.pdf$"}
+        - &apd {kind: index-page, label: apd-adp, url: "https://armypubs.army.mil/ProductMaps/PubForm/ADP.aspx", rows: "tr", columns: {pub_number: 0, status: 1, date: 2, title: 3}, detail_documents: "armypubs\\.army\\.mil/epubs/DR_pubs/DR_a/.+\\.pdf$"}
         - {<<: *apd, label: apd-fm, url: "https://armypubs.army.mil/ProductMaps/PubForm/FM.aspx"}
         - {<<: *apd, label: apd-atp, url: "https://armypubs.army.mil/ProductMaps/PubForm/ATP.aspx"}
         - {<<: *apd, label: apd-tc, url: "https://armypubs.army.mil/ProductMaps/PubForm/TC.aspx"}
       filter: {distribution: {require: [A]}, rules: registry/filters/army-pubs-public.yaml, default: allow}
     update: {cadence: P3M, strategy: snapshot-retention}
     size: {bytes: 30e9, measured: false, as_of: 2026-10-10}
-    notes: Score 4.3. The index has no distribution column, so the gate reads the PDF front matter (ADP 1 PDF measured at 8.2 MB). Series allow-list (planning, leadership, sustainment, engineering, medical, physical security, land navigation) and deny-list (munitions technical manuals, demolitions; fires, gunnery and targeting are in scope since the owner decision of 2026-10-12) per research doc §3.3 and §5.2; everything else goes to owner review. The rules file is created with the adapter. PDF downloads from armypubs.army.mil/epubs failed TLS verification on 2026-10-12 (CERTIFICATE_VERIFY_FAILED) while the listing pages loaded (2026-10-12 audit, CA-20), so document fetches fail until the certificate chain verifies.
+    notes: Score 4.3. The index has no distribution column, so the gate reads the PDF front matter (ADP 1 PDF measured at 8.2 MB). Series allow-list (planning, leadership, sustainment, engineering, medical, physical security, land navigation) and deny-list (munitions technical manuals, demolitions; fires, gunnery and targeting are in scope since the owner decision of 2026-10-12) per research doc §3.3 and §5.2; everything else goes to owner review. The rules file is created with the adapter. Only DR_pubs/DR_a (distribution A) is listed, since DR_b, DR_c and DR_d hold restricted distributions and redirect to the Army's CAC sign-in (federation.eams.army.mil, a DoD PKI certificate), which read as CERTIFICATE_VERIFY_FAILED on 2026-10-12 and again on 2026-10-21 (240 documents a run). All 366 held documents are DR_a.
 
   - id: joint-publications
     name: Joint Publications (Joint Electronic Library, public set)
