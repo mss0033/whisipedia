@@ -16,6 +16,7 @@ import numpy as np
 import pytest
 
 from wsp_api import weatherdata as wd
+from wsp_cli import bootstrap
 from wsp_cli import weather as w
 from wsp_cli import weatherpast as wp
 from wsp_core.errors import FetchError
@@ -156,6 +157,38 @@ def test_a_run_is_written_whole_with_per_interval_precipitation(tmp_path: Path) 
         "fake-2026102000-f012.grib2",
     ]
     assert not (path / "tp-acc.f32").exists()
+
+
+def test_a_run_still_being_published_is_left_for_the_next_pull(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import argparse
+
+    from wsp_core.errors import NotFoundError
+
+    tried: list[str] = []
+
+    def pull_run(model: Any, get: Any, run: datetime, *a: Any, **kw: Any) -> Path:
+        tried.append(w.run_id(run))
+        if len(tried) == 1:  # the newest run: one step not up yet (GFS f219, 2026-10-21)
+            raise NotFoundError("https://example.invalid/f219.idx")
+        return tmp_path
+
+    def build_fetcher(cfg: object) -> FakeGet:
+        return FakeGet()
+
+    monkeypatch.setattr(bootstrap, "build_fetcher", build_fetcher)
+    monkeypatch.setattr(w, "pull_run", pull_run)
+    said: list[str] = []
+    ws = w.WeatherSettings(root=tmp_path, archive_runs=())
+    code = w._pull({}, ws, [FakeModel()], argparse.Namespace(no_archive=True), said.append)  # pyright: ignore[reportPrivateUsage]
+    assert code == w.EXIT_OK
+    assert len(tried) == 2
+    assert tried[0] > tried[1]  # the newest, then the one before it
+    assert any("is not all published yet" in line for line in said)
+    state = w.load_state(tmp_path)
+    assert state["feeds"]["fake"]["newest_run"] == tried[1]
+    assert "last_error" not in state["feeds"]["fake"]
 
 
 def test_a_failed_run_leaves_nothing_behind(tmp_path: Path) -> None:

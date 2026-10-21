@@ -587,7 +587,13 @@ def _pull(
                 if not model.ready(get, run):
                     continue
                 keep = run.strftime("%H") in ws.archive_runs
-                pull_run(model, get, run, ws, keep_grib=keep, say=say)
+                try:
+                    pull_run(model, get, run, ws, keep_grib=keep, say=say)
+                except NotFoundError as exc:
+                    # Steps are published out of order: GFS had f240 up and not f219 (2026-10-21). An
+                    # unfinished run is not a failure; the next pull takes it.
+                    say(f"{model.id}: {rid} is not all published yet ({exc}); an older run instead")
+                    continue
                 feed["newest_run"] = rid
                 if keep:
                     pending.append({"model": model.id, "source": model.source, "run": rid, "staged": ""})
