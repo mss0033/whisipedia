@@ -709,7 +709,7 @@ export class WeatherView {
     const per =
       this.layer.kind === 'precipitation'
         ? this.tab === 'past'
-          ? ' a day'
+          ? '/day' // "in a day" read as words with inches (2026-10-21)
           : ' since the step before'
         : '';
     this.legend.replaceChildren(
