@@ -669,6 +669,13 @@ def test_dspace7_search_and_bitstreams() -> None:
     assert cand.edition_date == "2022"
     (doc,) = resolve(cand, env)
     assert (doc.size, doc.md5, doc.url) == (1234, "ff", f"{base}/server/api/core/bitstreams/s1/content")
+    # A repository that adds a cover page to what it serves (NPS Calhoun, 2026-10-21): the stored
+    # file's size and MD5 are not the download's.
+    env = env_for(routes, origins=("iris.example.int",), max_pages=1)
+    cfg = {"kind": "api", "flavor": "dspace7", "base": base, "queries": ["water"], "cover_page": True}
+    (cand,) = list(discover_all([cfg], env))
+    (doc,) = resolve(cand, env)
+    assert (doc.size, doc.md5, doc.url) == (None, None, f"{base}/server/api/core/bitstreams/s1/content")
 
 
 def test_openstax_lists_each_live_book_with_its_pdf() -> None:

@@ -1404,6 +1404,7 @@ sources:
         - kind: api
           flavor: dspace7
           base: "https://calhoun.nps.edu"
+          cover_page: true  # Calhoun serves each PDF with its citation cover page added
           queries:
             - "\"mesh network\""
             - "\"wireless sensor network\""

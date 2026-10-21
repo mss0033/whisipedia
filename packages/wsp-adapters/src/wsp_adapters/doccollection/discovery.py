@@ -979,8 +979,12 @@ def resolve_govuk_content(cand: Candidate, env: DiscoverEnv) -> list[Candidate]:
 
 
 def dspace7(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
-    """DSpace 7 discovery search (WHO IRIS, FAO): ``base``, ``queries``; bitstreams resolved later."""
+    """DSpace 7 discovery search (WHO IRIS, FAO): ``base``, ``queries``; bitstreams resolved later.
+    ``cover_page: true``: the repository adds a cover page to each PDF it serves, so the bitstream's
+    size and MD5 (of the stored file) are not the served file's and are not used (NPS Calhoun: 17,702
+    of 17,721 downloads failed "size 1183075 != 1014813", 2026-10-21)."""
     base = _s(cfg.get("base")).rstrip("/")
+    cover = {"cover_page": "1"} if cfg.get("cover_page") else {}
     for query in _strs(cfg.get("queries")) or ("*",):
         page, pages, seen, more = 0, 0, 0, True
         while pages < env.pages():
@@ -1020,6 +1024,7 @@ def dspace7(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
                     landing_url=f"{base}/handle/{handle}" if handle else "",
                     discovered_by=f"api:dspace7:{query}",
                     resolve="dspace7",
+                    extra=cover,
                 )
             page += 1
             if seen >= env.totals[f"dspace7:{query}"]:
@@ -1054,13 +1059,14 @@ def resolve_dspace7(cand: Candidate, env: DiscoverEnv) -> list[Candidate]:
             if not content:
                 continue
             md5 = cast(Json, bs.get("checkSum") or {})
+            stored = not cand.extra.get("cover_page")  # the stored file is the served one
             out.append(
                 replace(
                     cand.with_url(content),
                     key=f"{cand.key}-{i}" if i else cand.key,
-                    size=int(bs["sizeBytes"]) if isinstance(bs.get("sizeBytes"), int) else None,
+                    size=int(bs["sizeBytes"]) if stored and isinstance(bs.get("sizeBytes"), int) else None,
                     md5=_s(md5.get("value")).lower()
-                    if _s(md5.get("checkSumAlgorithm")).upper() == "MD5"
+                    if stored and _s(md5.get("checkSumAlgorithm")).upper() == "MD5"
                     else None,
                     language=cand.language,
                 )
