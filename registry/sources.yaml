@@ -1030,24 +1030,15 @@ sources:
     access:
       adapter: doc-collection
       issuer: Borden Institute
-      origins: [medcoe.army.mil, hrcoe.amedd.army.mil]
-      # medcoe.army.mil is a Gatsby site (pages are empty shells; the content is in page-data.json). Each
-      # book page links its PDF and EPUB through hrcoe.amedd.army.mil/apt/FileDownloadpublic.aspx?docid=,
-      # so documents are the chapter PDFs (not the whole-book EPUB/MOBI), keyed by book and chapter title.
+      origins: [archive.org]
+      # 2026-10-21 owner decision (D11 exception extended): hrcoe.amedd.army.mil, where medcoe.army.mil's
+      # book pages link every PDF, refuses this connection, so the Internet Archive's copies of the
+      # Office of The Surgeon General / Borden Institute publications are taken (issuer and mirror kept).
       discovery:
-        - kind: index-page
-          gatsby: true
-          urls:
-            - "https://medcoe.army.mil/borden-2-latest-releases"
-            - "https://medcoe.army.mil/borden-3-textbooks-of-military-medicine"
-            - "https://medcoe.army.mil/borden-4-specialty-titles"
-            - "https://medcoe.army.mil/borden-5-military-medical-history"
-          follow: "medcoe\\.army\\.mil/borden-[a-z]"
-          depth: 1
-          documents: "hrcoe\\.amedd\\.army\\.mil/apt/FileDownloadpublic\\.aspx\\?docid="
-          documents_skip_text: "\\b(EPUB|MOBI)\\b"  # whole-book ebooks; the chapters are PDFs
-          title_strip: "\\s*PDF\\s+file\\s+download\\s*$"
-          key_from: text
+        - kind: archive-org
+          query: 'creator:("U.S. Army. Office of The Surgeon General" OR "US Army Medical Department Center and School" OR "U.S. Army Medical Department Center and School" OR "U.S. ARMY MEDICAL CENTER OF EXCELLENCE" OR "Borden Institute") AND mediatype:texts AND NOT identifier:(bwb_* OR isbn_*)'
+          provenance: "2026-10-21 owner decision (D11 exception): the issuer's download host refuses this connection, so the Internet Archive's copies of the Borden Institute / Office of The Surgeon General publications"
+          title_volume: true
       # Official Army textbooks of military medicine (public site). The safety screens still apply.
       filter: {allow_all: true, allow_image_only: true, distribution: {require: [public-release, published]}}
     update: {cadence: P3M, strategy: snapshot-retention}
