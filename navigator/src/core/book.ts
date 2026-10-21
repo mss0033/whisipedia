@@ -195,9 +195,40 @@ function fold(into: Chapter, c: Chapter): void {
     into.subheads.push(into.paragraphs.length - c.paragraphs.length + s);
 }
 
+const CONTENTS = /^(?:table of )?contents\.?$/i;
+const entryKey = (l: string) => l.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+
+/**
+ * Headings a book's own contents list names: the short lines of the paragraphs after "CONTENTS", found
+ * again later as lines of their own. A poetry collection titles its poems in plain case, which reads
+ * as no heading at all (Frost's A Boy's Will had no contents in the reader, 2026-10-21 audit).
+ */
+export function listedHeadings(ps: readonly string[]): boolean[] | null {
+  const start = ps.findIndex((p) => CONTENTS.test(flat(p).trim()));
+  if (start < 0) return null;
+  const entries = new Set<string>();
+  let end = start + 1;
+  for (; end < ps.length; end++) {
+    const lines = ps[end]!.split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean);
+    if (!lines.length || lines.some((l) => l.length > MAX_HEADING_CHARS)) break;
+    if (lines.length === 1 && entries.has(entryKey(lines[0]!))) break; // the body's first heading
+    for (const l of lines) entries.add(entryKey(l));
+  }
+  const flags = ps.map(
+    (p, i) =>
+      i >= end && !p.includes('\n') && p.length <= MAX_HEADING_CHARS && entries.has(entryKey(p)),
+  );
+  return flags.filter(Boolean).length >= MIN_HEADINGS ? flags : null;
+}
+
 export function splitChapters(text: string, bookTitle = ''): Chapter[] {
   const ps = paragraphs(text);
-  const heads = headingFlags(ps);
+  const found = headingFlags(ps);
+  const listed = listedHeadings(ps);
+  const count = (f: readonly boolean[]) => f.filter(Boolean).length;
+  const heads = listed && count(listed) > count(found) ? listed : found;
   const runs = runLengths(heads);
   const chapters: Chapter[] = [];
   let current: Chapter = { title: bookTitle || 'Front matter', paragraphs: [] };

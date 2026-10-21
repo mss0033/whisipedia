@@ -449,3 +449,66 @@ describe('a book in volumes (Pride and Prejudice, 2026-10-17)', () => {
     ]);
   });
 });
+
+describe("a book's own contents list (2026-10-21 audit)", () => {
+  const poem = (first: string) =>
+    [
+      `    ${first}`,
+      '    So old and firm they scarcely show the breeze,',
+      "    Were not, as 'twere, the merest mask of gloom,",
+      '    But stretched away unto the edge of doom.',
+      '    I should not be withheld but that some day',
+      '    Into their vastness I should steal away,',
+    ].join('\r\n');
+  const frost = [
+    "A BOY'S WILL\r\n\r\nBy Robert Frost\r\n\r\n\r\nCONTENTS\r\n",
+    [
+      '    Part I',
+      '        Into My Own',
+      '            The youth is persuaded that he will be rather more than less himself',
+      '            for having forsworn the world.',
+      '        Ghost House',
+      '            He is happy in society of his choosing.',
+      '        My November Guest',
+      '            He is in love with being misunderstood.',
+    ].join('\r\n'),
+    ['    Part II', '        Revelation', '            He resolves to become intelligible.'].join(
+      '\r\n',
+    ),
+    'Into My Own',
+    poem('ONE of my wishes is that those dark trees,'),
+    'Ghost House',
+    poem('I DWELL in a lonely house I know'),
+    'My November Guest',
+    poem('MY Sorrow, when she’s here with me,'),
+    'Revelation',
+    poem('WE make ourselves a place apart'),
+  ].join('\r\n\r\n');
+
+  it('names the poems of a collection whose titles are in plain case', () => {
+    const titles = splitChapters(frost, "A Boy's Will").map((c) => c.title);
+    expect(titles).toEqual([
+      "A Boy's Will",
+      'Into My Own',
+      'Ghost House',
+      'My November Guest',
+      'Revelation',
+    ]);
+  });
+
+  it('leaves a book its usual headings split better alone', () => {
+    const novel = [
+      'CONTENTS',
+      'CHAPTER I',
+      'CHAPTER II',
+      'CHAPTER III',
+      ...['I', 'II', 'III'].flatMap((n) => [`CHAPTER ${n}`, 'It was a dark night. '.repeat(80)]),
+    ].join('\n\n');
+    expect(splitChapters(novel, 'N').map((c) => c.title)).toEqual([
+      'N',
+      'CHAPTER I',
+      'CHAPTER II',
+      'CHAPTER III',
+    ]);
+  });
+});
