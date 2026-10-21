@@ -713,6 +713,65 @@ def test_dspace7_search_and_bitstreams() -> None:
     assert (doc.size, doc.md5, doc.url) == (None, None, f"{base}/server/api/core/bitstreams/s1/content")
 
 
+def test_wbdg_lists_federal_criteria_in_force_and_their_current_files() -> None:
+    base = "https://www.wbdg.org"
+
+    def doc(i: str, status: str = "ACTIVE", agencies: int = 1, can_open: bool = True) -> dict[str, object]:
+        return {
+            "id": i,
+            "title": f"UFC {i}",
+            "documentNumber": f"UFC {i}",
+            "status": status,
+            "canOpen": can_open,
+            "publishDate": "2026-03-03T00:00:00.000Z",
+            "urlAlias": f"/dod/ufc/{i}",
+            "summary": "<p>Electrical engineering</p>",
+            "federalAgencies": [{"federalAgencyId": "dod"}] * agencies,
+        }
+
+    listing = {
+        "data": [
+            doc("3-501-01"),
+            doc("3-520-01", "SUPERSEDED"),
+            doc("green", agencies=0),
+            doc("x", can_open=False),
+        ],
+        "meta": {"pagination": {"page": 1, "total": 4, "totalPages": 1}},
+    }
+    s3 = "https://nibs-s3-wbdg3-production.s3.us-east-1.amazonaws.com/FFC/DOD/UFC"
+    detail = {
+        "data": {
+            "mediaFiles": [
+                {
+                    "fileUrl": f"{s3}/ufc_3_501_01_2026.pdf",
+                    "fileSize": 900,
+                    "isCurrent": True,
+                    "isArchived": False,
+                },
+                {
+                    "fileUrl": f"{s3}/ufc_3_501_01_2015.pdf",
+                    "fileSize": 800,
+                    "isCurrent": False,
+                    "isArchived": True,
+                },
+            ]
+        }
+    }
+    routes = {
+        f"{base}/api/documents": json.dumps(listing).encode(),
+        f"{base}/api/documents/3-501-01": json.dumps(detail).encode(),
+    }
+    env = env_for(routes, origins=("www.wbdg.org", "nibs-s3-wbdg3-production.s3.us-east-1.amazonaws.com"))
+    (cand,) = list(discover_all([{"kind": "api", "flavor": "wbdg"}], env))
+    assert (cand.pub_number, cand.edition_date, cand.abstract) == (
+        "UFC 3-501-01",
+        "2026-03-03",
+        "Electrical engineering",
+    )
+    (pdf,) = resolve(cand, env)
+    assert (pdf.url, pdf.size) == (f"{s3}/ufc_3_501_01_2026.pdf", 900)
+
+
 def test_openstax_lists_each_live_book_with_its_pdf() -> None:
     def book(slug: str, state: str, pdf: str) -> dict[str, object]:
         return {

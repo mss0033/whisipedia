@@ -4545,3 +4545,23 @@ sources:
     update: {cadence: P3M, strategy: snapshot-retention}
     size: {bytes: 3.0e9, measured: false, as_of: '2026-10-21'}
     notes: "How chemical releases, fires and explosions at plants happened and how to prevent them: 134 completed investigations with final reports, case studies and recommendations. robots.txt asks only that print views and /friend/ be left alone."
+
+  - id: wbdg-criteria
+    name: Whole Building Design Guide federal facility criteria (UFC, UFGS, USACE ECB, NAVFAC, AF and others), in force
+    publisher: National Institute of Building Sciences for DoD and other federal agencies
+    domain: [engineering, standards, defense, preparedness]
+    tier: T1
+    status: candidate
+    license: LicenseRef-US-Gov-PD
+    legal_basis: public-domain
+    access:
+      adapter: doc-collection
+      issuer: US Department of Defense and federal agencies (via WBDG)
+      key_prefix: wbdg
+      origins: [www.wbdg.org, nibs-s3-wbdg3-production.s3.us-east-1.amazonaws.com]
+      discovery:
+        - {kind: api, flavor: wbdg, statuses: [ACTIVE]}
+      filter: {allow_all: true, public_issuer: true}
+    update: {cadence: P3M, strategy: snapshot-retention}
+    size: {bytes: 6.0e8, measured: false, as_of: '2026-10-21'}
+    notes: "The US government's building code for its own facilities: Unified Facilities Criteria (structural, fire protection, electrical 3-5xx incl. lightning, grounding, generators; mechanical, plumbing, telecom), the matching guide specifications (UFGS, Division 26 electrical), USACE engineering bulletins and NAVFAC criteria. robots.txt allows all but /auth/; the old wbdg.org/FFC PDF paths answer 403, the API names each file on the criteria bucket."

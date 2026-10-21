@@ -1074,6 +1074,70 @@ def dspace7(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
         env.listing_end(f"dspace7:{query}", stopped=more, seen=seen, total=env.totals.get(f"dspace7:{query}"))
 
 
+def wbdg(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
+    """The Whole Building Design Guide's federal facility criteria (UFC, UFGS, ECB, NAVFAC, AF and
+    others): ``/api/documents`` a page at a time; ``statuses`` (default ``[ACTIVE]``) keeps the
+    criteria in force. Each document's files are resolved later (``/api/documents/<id>`` names them on
+    the criteria's S3 bucket, which does not list)."""
+    base = (_s(cfg.get("base")) or "https://www.wbdg.org").rstrip("/")
+    statuses = {s.upper() for s in _strs(cfg.get("statuses"))} or {"ACTIVE"}
+    page, pages, seen, more = 1, 0, 0, True
+    while pages < env.pages():
+        data = cast(Json, env.get_json(f"{base}/api/documents?" + urlencode({"limit": 100, "page": page})))
+        pages += 1
+        meta = cast(Json, cast(Json, data.get("meta") or {}).get("pagination") or {})
+        env.totals["wbdg"] = int(meta.get("total") or 0)
+        docs = cast(list[Json], data.get("data") or [])
+        if not docs:
+            more = False
+            break
+        seen += len(docs)
+        for d in docs:
+            if _s(d.get("status")).upper() not in statuses or d.get("canOpen") is False:
+                continue
+            if not cast(list[Json], d.get("federalAgencies") or []):
+                continue  # a private body's guide the site also lists (Green Seal, NIBS)
+            number = _s(d.get("documentNumber"))
+            did = _s(d.get("id"))
+            yield Candidate(
+                key=make_key(env.prefix, number or did),
+                url=f"{base}/api/documents/{did}",
+                title=_s(d.get("title")) or number,
+                issuer=env.issuer,
+                pub_number=number,
+                edition_date=_s(d.get("publishDate"))[:10],
+                abstract=re.sub(r"<[^>]+>", " ", _s(d.get("summary")))[:2000].strip(),
+                landing_url=f"{base}{_s(d.get('urlAlias'))}" if d.get("urlAlias") else "",
+                discovered_by="api:wbdg",
+                resolve="wbdg",
+            )
+        if int(meta.get("totalPages") or 0) <= page:
+            more = False
+            break
+        page += 1
+    env.listing_end("wbdg", stopped=more, seen=seen, total=env.totals.get("wbdg"))
+
+
+def resolve_wbdg(cand: Candidate, env: DiscoverEnv) -> list[Candidate]:
+    """A WBDG document's current files (its PDFs on the criteria bucket)."""
+    data = cast(Json, cast(Json, env.get_json(cand.url)).get("data") or {})
+    files = [
+        m
+        for m in cast(list[Json], data.get("mediaFiles") or [])
+        if m.get("isCurrent") and not m.get("isArchived") and _s(m.get("fileUrl"))
+    ]
+    if not files:
+        raise NoDocuments(f"{cand.landing_url or cand.url}: no current file")
+    return [
+        replace(
+            cand.with_url(_s(m.get("fileUrl"))),
+            key=f"{cand.key}-{i}" if i else cand.key,
+            size=int(m["fileSize"]) if isinstance(m.get("fileSize"), int) else None,
+        )
+        for i, m in enumerate(files)
+    ]
+
+
 def resolve_dspace7(cand: Candidate, env: DiscoverEnv) -> list[Candidate]:
     """The item's PDFs in its ORIGINAL bundle. An answer without a bundle list is a failure (``[]``);
     an item whose bundles hold no PDF is :class:`NoDocuments`."""
@@ -1172,6 +1236,7 @@ _API: dict[str, Discoverer] = {
     "usgs-pubs": usgs_pubs,
     "govuk-search": govuk_search,
     "dspace7": dspace7,
+    "wbdg": wbdg,
     "tnm": tnm,
     "openstax": openstax,
 }
@@ -1619,6 +1684,7 @@ RESOLVERS: dict[str, Resolver] = {
     "detail-page": resolve_detail_page,
     "govuk-content": resolve_govuk_content,
     "dspace7": resolve_dspace7,
+    "wbdg": resolve_wbdg,
     "archive-org": resolve_archive_org,
 }
 
