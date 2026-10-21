@@ -25,6 +25,7 @@ adapter (``git-mirror``, ``http-files``) was never written.
 
 from __future__ import annotations
 
+import io
 import json
 import re
 import xml.etree.ElementTree as ET
@@ -649,7 +650,57 @@ def ocw_course(archive: zipfile.ZipFile) -> Iterator[TeiDoc]:
         yield TeiDoc(key=folder, title=f"{label}: {page_title}", text=text, url=f"{url}/{folder}/")
 
 
-ARCHIVE_READERS = {"standard-ebooks": se_book, "markdown-docs": markdown_docs, "ocw-course": ocw_course}
+DOCX_MAX_BYTES = 128 * 1024 * 1024  # a Word file larger than this inside the zip is left out
+_W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+
+
+def zipped_docx(archive: zipfile.ZipFile) -> Iterator[TeiDoc]:
+    """Each Word (.docx) document in a zip, as its paragraphs: 3GPP publishes every specification as a
+    zip holding its .docx. The title is the cover's line naming the specification ("3GPP TS 38.300
+    V18.11.0 (2026-09)") and its title lines, up to the release."""
+    for info in archive.infolist():
+        if not info.filename.lower().endswith(".docx") or info.file_size > DOCX_MAX_BYTES:
+            continue
+        try:
+            with zipfile.ZipFile(io.BytesIO(archive.read(info))) as docx:
+                body = docx.getinfo("word/document.xml")
+                if body.compress_size and body.file_size / body.compress_size > 200:
+                    continue  # a zip bomb, not a document
+                root = ET.fromstring(docx.read(body))  # noqa: S314 - expat rejects external entities
+        except (zipfile.BadZipFile, KeyError, ET.ParseError):
+            continue
+        paragraphs = ["".join(t.text or "" for t in p.iter(f"{_W}t")).strip() for p in root.iter(f"{_W}p")]
+        paragraphs = [p for p in paragraphs if p]
+        text = "\n\n".join(paragraphs)
+        if len(text) < 40:
+            continue
+        name = info.filename.rsplit("/", 1)[-1].removesuffix(".docx")
+        spec = next((i for i, p in enumerate(paragraphs[:40]) if re.match(r"3GPP T[SR] \d", p)), None)
+        title = name
+        if spec is not None:
+            # The cover: "3GPP TS 38.300 V18.11.0 (2026-09)", "Technical Specification", "3rd Generation
+            # Partnership Project;", "Technical Specification Group …;", then the title lines up to
+            # "(Release 18)".
+            words: list[str] = []
+            for p in paragraphs[spec + 1 : spec + 15]:
+                if len(p) > 200:
+                    break
+                if not re.match(
+                    r"(?:Technical (?:Specification|Report)$|3rd Generation|Technical Specification Group)", p
+                ):
+                    words.append(p)
+                if p.startswith("(Release"):
+                    break
+            title = f"{paragraphs[spec]}: {' '.join(words)}" if words else paragraphs[spec]
+        yield TeiDoc(key=name, title=title, text=text)
+
+
+ARCHIVE_READERS = {
+    "standard-ebooks": se_book,
+    "markdown-docs": markdown_docs,
+    "ocw-course": ocw_course,
+    "zipped-docx": zipped_docx,
+}
 
 READERS = {
     "mitre": (_mitre_member, mitre),

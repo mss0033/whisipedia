@@ -418,3 +418,36 @@ def test_an_ocw_course_is_its_description_pages_and_pdfs(tmp_path: Path) -> None
     assert "lattice energy" in docs["resources/mit3_091f18_rec11"].text
     assert "electron shells" in docs["resources/hal1q8f7m_o_transcript"].text
     assert docs["pages/syllabus"].url == f"https://ocw.mit.edu/{site}/pages/syllabus/"
+
+
+def test_a_3gpp_zip_is_its_specification_titled_from_the_cover(tmp_path: Path) -> None:
+    import io
+
+    from wsp_adapters.doccollection.structured import zipped_docx
+
+    w = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    lines = [
+        "3GPP TS 38.300 V18.11.0 (2026-09)",
+        "Technical Specification",
+        "3rd Generation Partnership Project;",
+        "Technical Specification Group Radio Access Network;",
+        "NR; NR and NG-RAN Overall Description;",
+        "Stage 2",
+        "(Release 18)",
+        "The present document describes the overall architecture of the radio access network.",
+    ]
+    body = "".join(f"<w:p><w:r><w:t>{t}</w:t></w:r></w:p>" for t in lines)
+    docx = io.BytesIO()
+    with zipfile.ZipFile(docx, "w") as d:
+        d.writestr("word/document.xml", f'<w:document xmlns:w="{w}"><w:body>{body}</w:body></w:document>')
+    path = tmp_path / "38300-ib0.zip"
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("38300-ib0.docx", docx.getvalue())
+    with zipfile.ZipFile(path) as zf:
+        (doc,) = list(zipped_docx(zf))
+    assert doc.key == "38300-ib0"
+    assert (
+        doc.title
+        == "3GPP TS 38.300 V18.11.0 (2026-09): NR; NR and NG-RAN Overall Description; Stage 2 (Release 18)"
+    )
+    assert "overall architecture" in doc.text

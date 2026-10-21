@@ -4707,3 +4707,33 @@ sources:
     update: {cadence: P6M, strategy: snapshot-retention}
     size: {bytes: 1.0e10, measured: false, as_of: '2026-10-21'}
     notes: "Radio propagation, spectrum and satellite (ITU-R P, M, S, F, SM, BS, BT), and telecom networks, transmission, codecs, protection and security (ITU-T G, H, K, Q, X, Y …): the in-force version of each, with its amendments and appendices. ITU offers them as free downloads; owner approved free-download standards for the private library (2026-10-21). robots.txt allows /rec/ and /dms_pubrec/."
+
+  - id: 3gpp-specs-latest
+    name: 3GPP specifications, latest version of each in Release 18 and Release 19
+    publisher: 3GPP Organizational Partners
+    domain: [standards, communications, electronics]
+    tier: T1
+    status: candidate
+    license: LicenseRef-3GPP-Free-Download-Personal-Use
+    legal_basis: bulk-access-terms
+    index: false
+    access:
+      adapter: doc-collection
+      issuer: 3GPP
+      key_prefix: 3gpp
+      origins: [www.3gpp.org]
+      # Each specification is a zip of its Word file, read by zipped-docx (one document per spec).
+      reader: zipped-docx
+      discovery:
+        - kind: index-page
+          urls:
+            - "https://www.3gpp.org/ftp/Specs/latest/Rel-18/"
+            - "https://www.3gpp.org/ftp/Specs/latest/Rel-19/"
+          follow: "/ftp/Specs/latest/Rel-1[89]/\\d\\d_series/?$"
+          depth: 1
+          max_pages: 100
+          documents: "/ftp/Specs/latest/Rel-1[89]/\\d\\d_series/[0-9a-z-]+\\.zip$"
+      filter: {allow_all: true, public_issuer: true}
+    update: {cadence: P6M, strategy: snapshot-retention}
+    size: {bytes: 1.5e10, measured: false, as_of: '2026-10-21'}
+    notes: "The mobile network standards (LTE, 5G NR, core network, security, codecs) as 3GPP publishes them; the same specifications also arrive as ETSI TS PDFs (etsi-deliverables), often a release behind. robots.txt allows all but some AI crawlers by name. Owner approved free-download standards (2026-10-21). index: false at first (some 3,000 large specs)."
