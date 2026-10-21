@@ -4666,3 +4666,23 @@ sources:
     update: {cadence: P1Y, strategy: snapshot-retention}
     size: {bytes: 8.0e9, measured: false, as_of: '2026-10-21'}
     notes: "About 225 courses: Course 2 (mechanical: design and manufacturing, machine elements, thermofluids, controls), Course 3 (materials: solid-state chemistry, metallurgy, processing, failure, electronic materials), Course 16 (aero/astro structures and propulsion), and microfabrication and semiconductor manufacturing (6.152J, 6.774, 6.780, 6.012), the library's lithography and cleanroom process material. CC BY-NC-SA 4.0 (owner: non-commercial licences are fine)."
+
+  - id: doe-technical-standards
+    name: DOE technical standards and handbooks in force (safety, chemical management, electrical, fire protection, natural phenomena)
+    publisher: US Department of Energy, Office of Environment, Health, Safety and Security
+    domain: [engineering, standards, preparedness, hazmat]
+    tier: T1
+    status: candidate
+    license: LicenseRef-US-Gov-PD
+    legal_basis: public-domain
+    access:
+      adapter: doc-collection
+      issuer: US Department of Energy
+      key_prefix: doe-std
+      origins: [www.energy.gov]
+      discovery:
+        - {kind: api, flavor: doe-technical-standards, url: "https://www.energy.gov/ehss/technical-standards-current"}
+      filter: {allow_all: true, public_issuer: true}
+    update: {cadence: P1Y, strategy: snapshot-retention}
+    size: {bytes: 1.0e9, measured: false, as_of: '2026-10-21'}
+    notes: "The 160 DOE standards and handbooks in force: chemical management (DOE-HDBK-1139), emergency exposure limits for chemicals, electrical safety, fire protection, natural phenomena hazards design, human performance, hoisting and rigging, explosives safety in storage and handling (facility safety, not manufacture). Each article page on energy.gov links its PDF."

@@ -1247,6 +1247,39 @@ def etsi(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
     env.listing_end("etsi", stopped=False, seen=seen)
 
 
+_DOE_RECORD = re.compile(
+    r'\{"ID":"(?P<id>[^"]+)","Title":"(?P<title>(?:[^"\\]|\\.)*)","Type":"(?P<type>[^"]*)"'
+)
+
+
+def doe_technical_standards(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
+    """DOE's technical standards (``url``: energy.gov's current-standards page, whose table is a JSON
+    list in the page): each standard's article page, resolved to its PDF (``detail_documents``)."""
+    page = env.get_text(_s(cfg.get("url")) or "https://www.energy.gov/ehss/technical-standards-current")
+    detail_docs = _s(cfg.get("detail_documents")) or r"/sites/default/files/.+\.pdf$"
+    seen = 0
+    for m in _DOE_RECORD.finditer(page):
+        title_html = json.loads(f'"{m.group("title")}"')
+        node = re.search(r'href="(/node/\d+|/ehss/articles/[^"]+)"', title_html)
+        if node is None:
+            continue
+        seen += 1
+        number = m.group("id").split(" (")[0].strip()
+        yield Candidate(
+            key=make_key(env.prefix, number),
+            url=urljoin("https://www.energy.gov/", node.group(1)),
+            title=f"{number}: {html_unescape(re.sub(r'<[^>]+>', '', title_html)).strip()}",
+            issuer=env.issuer,
+            pub_number=number,
+            subjects=(m.group("type"),) if m.group("type") else (),
+            landing_url=urljoin("https://www.energy.gov/", node.group(1)),
+            discovered_by="doe-technical-standards",
+            resolve="detail-page",
+            extra={"detail_documents": detail_docs},
+        )
+    env.listing_end("doe-technical-standards", stopped=False, seen=seen)
+
+
 def resolve_dspace7(cand: Candidate, env: DiscoverEnv) -> list[Candidate]:
     """The item's PDFs in its ORIGINAL bundle. An answer without a bundle list is a failure (``[]``);
     an item whose bundles hold no PDF is :class:`NoDocuments`."""
@@ -1347,6 +1380,7 @@ _API: dict[str, Discoverer] = {
     "dspace7": dspace7,
     "wbdg": wbdg,
     "etsi": etsi,
+    "doe-technical-standards": doe_technical_standards,
     "tnm": tnm,
     "openstax": openstax,
 }

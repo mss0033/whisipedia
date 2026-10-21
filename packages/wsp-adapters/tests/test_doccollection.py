@@ -851,6 +851,30 @@ def test_a_sitemap_lists_landing_pages_whose_document_is_resolved() -> None:
     assert doc.url == f"{course}/3.091-fall-2018.zip"
 
 
+def test_doe_technical_standards_come_from_the_table_in_the_page() -> None:
+    page = (
+        b'<script>var t=[{"ID":"DOE-HDBK-1046-2016 (Reaffirmed 2022)",'
+        b'"Title":"\\u003Ca href=\\u0022\\/node\\/4857480\\u0022\\u003E'
+        b'Temporary Emergency Exposure Limits for Chemicals\\u003C\\/a\\u003E","Type":"Handbook"},'
+        b'{"ID":"DOE-STD-0000","Title":"No link","Type":"Standard"}];</script>'
+    )
+    article = b'<a href="/sites/default/files/2026-04/DOE-HDBK-1046-2016.pdf">PDF</a>'
+    env = env_for(
+        {
+            "https://www.energy.gov/ehss/technical-standards-current": page,
+            "https://www.energy.gov/node/4857480": article,
+        },
+        origins=("www.energy.gov",),
+    )
+    (cand,) = list(discover_all([{"kind": "api", "flavor": "doe-technical-standards"}], env))
+    assert (cand.pub_number, cand.title) == (
+        "DOE-HDBK-1046-2016",
+        "DOE-HDBK-1046-2016: Temporary Emergency Exposure Limits for Chemicals",
+    )
+    (pdf,) = resolve(cand, env)
+    assert pdf.url == "https://www.energy.gov/sites/default/files/2026-04/DOE-HDBK-1046-2016.pdf"
+
+
 def test_openstax_lists_each_live_book_with_its_pdf() -> None:
     def book(slug: str, state: str, pdf: str) -> dict[str, object]:
         return {
