@@ -460,7 +460,10 @@ async function audit(context, phoneContext, id) {
         : (doc?.text ?? '').includes(m?.[0] ?? '\u0000'));
     // Any markup a plain-text document holds verbatim is its words: the KiCad manual prints a sample
     // info.html, `0.1&quot;` and all (2026-10-21).
-    const own = !doc?.html && m && (doc?.text ?? '').includes(m[0]);
+    // Compared with runs of white space as one: the shown text joins the document's \r\n (CIA OCR,
+    // "<p aneetmeeren…", 2026-10-21).
+    const flat = (t) => t.replace(/\s+/g, ' ');
+    const own = !doc?.html && m && flat(doc?.text ?? '').includes(flat(m[0]).trim());
     if (m && !written && !escaped && !own)
       add(
         issues,
