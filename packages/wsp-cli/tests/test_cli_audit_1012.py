@@ -273,6 +273,19 @@ def test_a_refetch_after_an_interrupted_ingest_is_ingested(
     assert ingest(vault, "2026-10-12") == [("2026-10-12", VersionStatus.INGESTED, True)]
 
 
+def test_an_ingest_stopped_while_hashing_a_file_finishes_it(vault: FileVault, tmp_path: Path) -> None:
+    fetch(vault, tmp_path, OBJECTS, "2026-10-12")
+    plan = Ingestor(vault, [spec(OBJECTS)], out=io.StringIO()).plan(SID, "2026-10-12")
+    first = plan.versions[0].files[0]
+    # Killed after the vault moved the file aside into staging, before it was hashed and published.
+    moving = vault.stage(SID, "2026-10-12") / f"{first.target.relpath}.adopting"
+    moving.parent.mkdir(parents=True, exist_ok=True)
+    first.path.rename(moving)
+    # Before: "1 of N file(s) not complete" on every run (ERA5 2025, 2026-10-21).
+    assert ingest(vault, "2026-10-12") == [("2026-10-12", VersionStatus.INGESTED, True)]
+    assert not moving.exists()
+
+
 # --- M3: natural order in `wsp ingest` --------------------------------------------------------------------
 
 

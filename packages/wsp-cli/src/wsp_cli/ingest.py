@@ -70,7 +70,7 @@ from wsp_core.model import Checksum, Generation, SourceSpec, SourceStatus
 from wsp_core.ports import Ctx, Fetcher
 from wsp_vault.atomic import IntegrityError
 from wsp_vault.docs import write_library_docs
-from wsp_vault.vault import FileVault, VaultError
+from wsp_vault.vault import ADOPTING_SUFFIX, FileVault, VaultError
 
 ARXIV_SOURCE = "arxiv"
 PLANS_DIR = "_plans"
@@ -407,8 +407,13 @@ class Ingestor:
         for t in group:
             path = self._path(t)
             state, note = self._state(t, path)
-            if state is FileState.MISSING and staged_dir is not None and (staged_dir / t.relpath).is_file():
-                state = FileState.STAGED
+            # Moved into staging by an earlier run: adopted already, or still under its private
+            # ``.adopting`` name because that run was stopped while hashing it (the vault finishes it,
+            # checked against the plan's checksum; ERA5 2025's precipitation, 2026-10-21).
+            if state is FileState.MISSING and staged_dir is not None:
+                staged = staged_dir / t.relpath
+                if staged.is_file() or staged.with_name(staged.name + ADOPTING_SUFFIX).is_file():
+                    state = FileState.STAGED
             checksums = (t.checksum,) if t.checksum is not None else ()
             files.append(FilePlan(t, path, state, checksums, note))
         vp.files = files
