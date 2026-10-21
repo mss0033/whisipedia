@@ -48,7 +48,9 @@ LISTING_TRIES=${LANE_LISTING_TRIES:-8}     # fetch attempts while the listing is
 LISTING_WAIT=${LANE_LISTING_WAIT:-900}
 PARTIAL_TRIES=${LANE_PARTIAL_TRIES:-3}     # fetch attempts while downloads fail (exit 6)
 PARTIAL_WAIT=${LANE_PARTIAL_WAIT:-900}
-BUSY_TRIES=${LANE_BUSY_TRIES:-240}         # ingest attempts while another ingest runs (exit 3)
+# Ingest attempts while another ingest runs (exit 3), a minute apart: a day. Four hours gave up behind
+# a USGS topo ingest, leaving a one-shot lane's fetched cycle unsealed (lane-doe, 2026-10-21).
+BUSY_TRIES=${LANE_BUSY_TRIES:-1440}
 BUSY_WAIT=${LANE_BUSY_WAIT:-60}
 mkdir -p "$STATE/locks"
 DONE=$STATE/$NAME.done CYCLES=$STATE/$NAME.cycles FETCHED=$STATE/$NAME.fetched LOG=$STATE/$NAME.log
