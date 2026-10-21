@@ -827,6 +827,30 @@ def test_ntrs_keeps_public_records_with_a_pdf() -> None:
     assert [c.url for c in got] == ["https://ntrs.nasa.gov/api/citations/1/downloads/1.pdf"]
 
 
+def test_a_sitemap_lists_landing_pages_whose_document_is_resolved() -> None:
+    ocw = "https://ocw.mit.edu"
+    index = f"""<sitemapindex>
+      <sitemap><loc>{ocw}/sitemap-www.xml</loc></sitemap>
+      <sitemap><loc>{ocw}/courses/3-091-introduction-to-solid-state-chemistry-fall-2018/sitemap.xml</loc></sitemap>
+      <sitemap><loc>{ocw}/courses/10-01-ethics-for-engineers-spring-2020/sitemap.xml</loc></sitemap>
+    </sitemapindex>""".encode()
+    course = f"{ocw}/courses/3-091-introduction-to-solid-state-chemistry-fall-2018"
+    download = f'<a href="{course}/3.091-fall-2018.zip">Download course</a>'.encode()
+    env = env_for({f"{ocw}/sitemap.xml": index, f"{course}/download/": download}, origins=("ocw.mit.edu",))
+    cfg = {
+        "kind": "sitemap",
+        "url": f"{ocw}/sitemap.xml",
+        "match": r"/courses/(?:2|3|16)-",
+        "rewrite": [r"/sitemap\.xml$", "/download/"],
+        "detail_documents": r"\.zip$",
+    }
+    (cand,) = list(discover_all([cfg], env))
+    assert cand.url == f"{course}/download/"
+    assert cand.pub_number == "3-091-introduction-to-solid-state-chemistry-fall-2018"
+    (doc,) = resolve(cand, env)
+    assert doc.url == f"{course}/3.091-fall-2018.zip"
+
+
 def test_openstax_lists_each_live_book_with_its_pdf() -> None:
     def book(slug: str, state: str, pdf: str) -> dict[str, object]:
         return {

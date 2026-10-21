@@ -595,6 +595,47 @@ def _rows(
     del queue, level
 
 
+_LOC = re.compile(r"<loc>\s*([^<\s]+)\s*</loc>", re.IGNORECASE)
+
+
+def sitemap(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
+    """A site's sitemap (``url``; with ``expand``, a sitemap index whose sitemaps are read): each
+    ``<loc>`` matching ``match`` is a landing page (``rewrite``: ``[pattern, replacement]`` applied
+    first), whose document link (``detail_documents``) is found when it is resolved. MIT OpenCourseWare
+    lists one sitemap per course; ``…/sitemap.xml`` becomes ``…/download/``, whose zip is the course
+    (2026-10-21)."""
+    match = re.compile(_s(cfg.get("match")) or r".", re.IGNORECASE)
+    rewrite = cast(list[str], cfg.get("rewrite") or [])
+    detail_docs = _s(cfg.get("detail_documents"))
+    title_from = re.compile(_s(cfg["title_from"]), re.IGNORECASE) if cfg.get("title_from") else None
+    locs = _LOC.findall(env.get_text(_s(cfg.get("url"))))
+    if cfg.get("expand"):  # a sitemap index: the pages are in the sitemaps it names
+        locs = [loc for u in locs for loc in _LOC.findall(env.get_text(u))]
+    seen = 0
+    for loc in dict.fromkeys(locs):
+        if not match.search(loc):
+            continue
+        url = re.sub(rewrite[0], rewrite[1], loc) if len(rewrite) == 2 else loc
+        if not origin_ok(url, env.origins):
+            continue
+        seen += 1
+        slug = url.rstrip("/").split("/")[-2 if url.endswith("/download/") else -1]
+        m = title_from.search(url) if title_from else None
+        name = (m.group(1) if m else slug).replace("-", " ")
+        yield Candidate(
+            key=make_key(env.prefix, slug),
+            url=url,
+            title=display_title(name),
+            issuer=env.issuer,
+            pub_number=slug,
+            landing_url=url,
+            discovered_by="sitemap",
+            resolve="detail-page" if detail_docs else "",
+            extra={"detail_documents": detail_docs} if detail_docs else {},
+        )
+    env.listing_end("sitemap", stopped=False, seen=seen)
+
+
 def resolve_detail_page(cand: Candidate, env: DiscoverEnv) -> list[Candidate]:
     """Second hop: the document link on a detail page (first match of ``detail_documents``)."""
     pattern = re.compile(cand.extra.get("detail_documents") or r"\.pdf(?:$|[?#])", re.IGNORECASE)
@@ -1743,6 +1784,7 @@ DISCOVERERS: dict[str, Discoverer] = {
     "s3-listing": s3_listing,
     "git": git_repo,
     "list": fixed_list,
+    "sitemap": sitemap,
     "document": fixed_list,
     "csv": csv_list,
     "latest-dated": latest_dated,
