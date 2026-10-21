@@ -378,11 +378,12 @@ const HIDDEN_CLASSES = ['cs1-maint', 'cs1-hidden-error', 'hiddenStructure'];
 
 /** Wiki template leftovers in a page's text: a parameter never filled in (`{{{name}}}`), and a category
  * or file link with no name (`[[Category:]]`, `[[File:|thumb|]]`), a magic word (`{{PAGENAME}}`,
- * Energypedia's file pages). Never a page's words: Gardenology
+ * Energypedia's file pages), a link to a template (`[[Template:Pub Tag Improved Cookstoves}]]`,
+ * Energypedia, 2026-10-21 audit). Never a page's words: Gardenology
  * and Appropedia pages showed them in place of the values their templates lacked (2026-10-19 audit).
  * Text in code blocks is left alone. */
 const TEMPLATE_LEFTOVERS =
-  /\[\[\s*(?:\{\{\{[^{}]{1,40}\}\}\}|(?:Category|File|Image)\s*:\s*(?:\|[^[\]|]{0,40})*)\s*\]\]|\{\{\{[\w -]{1,40}(?:\|[^{}]{0,40})?\}\}\}|\{\{(?:FULL|BASE|SUB)?PAGENAMEE?\}\}|\{\{(?:SITENAME|NAMESPACE)\}\}/g;
+  /\[\[\s*(?:\{\{\{[^{}]{1,40}\}\}\}|(?:Category|File|Image)\s*:\s*(?:\|[^[\]|]{0,40})*|Template\s*:[^[\]]{1,80})\s*\]\]|\{\{\{[\w -]{1,40}(?:\|[^{}]{0,40})?\}\}\}|\{\{(?:FULL|BASE|SUB)?PAGENAMEE?\}\}|\{\{(?:SITENAME|NAMESPACE)\}\}/g;
 const CODE_TAGS = new Set(['pre', 'code', 'kbd', 'samp', 'textarea']);
 
 /** The page a `<frame>` or `<iframe>` showed: its source rewritten to the archive's asset route
@@ -669,13 +670,44 @@ export function imagePlaceholder(alt: string): HTMLElement {
   return span;
 }
 
+const IMAGE_BUSY_TRIES = 4;
+
 /** An image the archive answers with no picture (an HTML error page the crawl saved under a .png
  * name, a file it never got: LibreTexts, 2026-10-19 audit) becomes the placeholder of an image the
- * library does not hold, with its caption, instead of a broken-image icon. */
+ * library does not hold, with its caption, instead of a broken-image icon. A busy library (503) is
+ * not an answer: the image is asked for again after the Retry-After the library gave, a few times
+ * (explain xkcd's maps were "not in library" while the lanes restarted, 2026-10-21 audit). */
 export function replaceBrokenImages(root: ParentNode): void {
   for (const img of root.querySelectorAll('img')) {
+    let tries = 0;
     const swap = () => img.replaceWith(imagePlaceholder(img.getAttribute('alt')?.trim() ?? ''));
-    img.addEventListener('error', swap, { once: true }); // listening before the page is shown
+    const failed = async () => {
+      const url = img.currentSrc || img.src;
+      let wait = 0;
+      if (tries < IMAGE_BUSY_TRIES && url) {
+        try {
+          const res = await fetch(url, { cache: 'no-store' });
+          if (res.status === 503) wait = Number(res.headers.get('Retry-After')) || 5;
+          else if (res.ok) wait = 1; // it came this time: the error was the moment, not the file
+        } catch {
+          wait = 0; // the library itself is gone: nothing to wait for
+        }
+      }
+      if (!img.isConnected) return; // the reader moved on
+      if (!wait) {
+        img.removeEventListener('error', failed);
+        swap();
+        return;
+      }
+      tries += 1;
+      setTimeout(() => {
+        if (!img.isConnected) return;
+        const srcset = img.getAttribute('srcset');
+        if (srcset !== null) img.setAttribute('srcset', srcset);
+        img.setAttribute('src', img.getAttribute('src') ?? ''); // setting src loads it again
+      }, Math.min(wait, 30) * 1000);
+    };
+    img.addEventListener('error', failed); // listening before the page is shown
   }
 }
 

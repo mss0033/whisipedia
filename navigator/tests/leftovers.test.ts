@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { sanitizeDocumentHtml, withoutTemplateLeftovers } from '../src/core/links.ts';
 
 describe('wiki leftovers an archived page shows (2026-10-19 audit)', () => {
@@ -18,6 +18,9 @@ describe('wiki leftovers an archived page shows (2026-10-19 audit)', () => {
       `text "You're an Indian?"`,
     );
     expect(withoutTemplateLeftovers('[[Image:{{{range_map}}}|{{{range_map_width}}}|]]x')).toBe('x');
+    expect(
+      withoutTemplateLeftovers('Funding\n[[Template:Pub Tag Improved Cookstoves}]]\nmore'),
+    ).toBe('Funding\n\nmore');
     expect(withoutTemplateLeftovers('和 {{Package|net-wireless/wpa_supplicant} }。')).toBe(
       '和 net-wireless/wpa_supplicant。',
     );
@@ -89,9 +92,45 @@ describe('an image the archive answers with no picture (2026-10-19 audit)', () =
     const { replaceBrokenImages } = await import('../src/core/links.ts');
     const page = document.createElement('div');
     page.innerHTML = '<p><img src="/v1/assets/s/g/fig.png" alt="Figure 4.18"></p>';
-    replaceBrokenImages(page);
-    page.querySelector('img')!.dispatchEvent(new Event('error'));
-    expect(page.querySelector('img')).toBeNull();
-    expect(page.querySelector('.broken-image')?.textContent).toBe('[IMAGE: Figure 4.18]');
+    document.body.append(page);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('', { status: 404 })),
+    );
+    try {
+      replaceBrokenImages(page);
+      page.querySelector('img')!.dispatchEvent(new Event('error'));
+      await vi.waitFor(() => expect(page.querySelector('img')).toBeNull());
+      expect(page.querySelector('.broken-image')?.textContent).toBe('[IMAGE: Figure 4.18]');
+    } finally {
+      vi.unstubAllGlobals();
+      page.remove();
+    }
+  });
+
+  it('is asked for again while the library is busy, not called missing (2026-10-21 audit)', async () => {
+    const { replaceBrokenImages } = await import('../src/core/links.ts');
+    const page = document.createElement('div');
+    page.innerHTML = '<p><img src="/v1/assets/s/g/map.png" alt="Map"></p>';
+    document.body.append(page);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('', { status: 503, headers: { 'Retry-After': '2' } })),
+    );
+    vi.useFakeTimers();
+    try {
+      replaceBrokenImages(page);
+      const img = page.querySelector('img')!;
+      const set = vi.spyOn(img, 'setAttribute');
+      img.dispatchEvent(new Event('error'));
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(set).toHaveBeenCalledWith('src', '/v1/assets/s/g/map.png');
+      expect(page.querySelector('img')).toBe(img);
+      expect(page.querySelector('.broken-image')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+      page.remove();
+    }
   });
 });

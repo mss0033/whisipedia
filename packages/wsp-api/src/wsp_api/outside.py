@@ -121,10 +121,18 @@ def _host(netloc: str) -> str:
     return host.removeprefix("www.")
 
 
+_INDEX_PHP = re.compile(r"^(?:/[^/]+)*/index\.php(?:/(.*))?$")
+
+
 def _wiki_title(path: str, query: str) -> str | None:
-    if path.startswith("/wiki/") and len(path) > len("/wiki/"):
+    # explain xkcd's wiki lives at /wiki/index.php/<Title>, and its footer cites
+    # /wiki/index.php/?title=X&oldid=N: index.php is never a title (2026-10-21 audit).
+    php = _INDEX_PHP.match(path)
+    if php is not None:
+        title = php.group(1) or " ".join(parse_qs(query).get("title", []))
+    elif path.startswith("/wiki/") and len(path) > len("/wiki/"):
         title = path[len("/wiki/") :]
-    elif path in ("/w/index.php", "/index.php", "/wiki/"):  # "/wiki/?title=X&oldid=N" (citations)
+    elif path == "/wiki/":  # "/wiki/?title=X&oldid=N" (citations)
         title = " ".join(parse_qs(query).get("title", []))
     elif path.count("/") == 1 and len(path) > 1:  # Appropedia, energypedia: /<Title>
         title = path[1:]

@@ -18,6 +18,7 @@ SITES = [
     Site("qa", "askubuntu.com", "stackexchange", "askubuntu.com_en_all/"),
     Site("web", "docs.python.org", "kiwix-docs-python-org-en-all"),
     Site("web", "xkcd.com", "kiwix-xkcd-com-en-all"),
+    Site("wiki", "www.explainxkcd.com", "kiwix-explainxkcd-en-all"),
 ]
 HELD = {s.source_id for s in SITES} | {
     "gutenberg",
@@ -38,6 +39,12 @@ HELD = {s.source_id for s in SITES} | {
         ("https://en.wikipedia.org/wiki/?title=Turing_test&oldid=1234", (("wikipedia-en-zim", "Turing_test"), "")),
         ("https://www.appropedia.org/Solar_cooker", (("kiwix-appropedia-en-all", "Solar_cooker"), "")),
         ("https://appropedia.org/Solar_cooker", (("kiwix-appropedia-en-all", "Solar_cooker"), "")),
+        # explain xkcd's wiki is at /wiki/index.php/<Title>; its footer cites ?title=X&oldid=N
+        ("https://www.explainxkcd.com/wiki/index.php/257:_Code_Talkers", (("kiwix-explainxkcd-en-all", "257:_Code_Talkers"), "")),
+        (
+            "https://www.explainxkcd.com/wiki/index.php/?title=257%3A_Code_Talkers&oldid=144007",
+            (("kiwix-explainxkcd-en-all", "257:_Code_Talkers"), ""),
+        ),
         # interlanguage links keep the language in the title (Simple Wiktionary's front page)
         ("https://simple.wikipedia.org/wiki/en:", (("wikipedia-en-zim", "Main_Page"), "")),
         ("https://simple.wikipedia.org/wiki/en:Alan_Turing", (("wikipedia-en-zim", "Alan_Turing"), "")),
@@ -80,6 +87,7 @@ def test_an_outside_url_the_library_holds(url: str, target: object) -> None:
         "mailto:someone@example.org",
         "https://askubuntu.com/users/5/someone",  # a Q&A site's pages other than questions
         "https://en.wikipedia.org/",
+        "https://www.explainxkcd.com/wiki/index.php/",  # no title: not a page
         "https://arxiv.org/abs/1706.03762",  # no rule (and no such source)
     ],
 )
