@@ -321,7 +321,9 @@ async function getAsBrowser(context, url, headers = {}) {
   let failure = '';
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const r = await context.request.get(url, { timeout: 60_000, headers });
+      // As long as a browser waits for a file to start: the library holds a request up to 120 s for
+      // a transfer slot before it answers busy (wsp_api.files.TRANSFER_WAIT).
+      const r = await context.request.get(url, { timeout: 150_000, headers });
       return { ok: r.ok(), status: r.status(), headers: r.headers() };
     } catch (e) {
       failure = String(e).split('\n')[0].slice(0, 80);

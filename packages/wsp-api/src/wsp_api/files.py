@@ -32,8 +32,10 @@ DocIdSegment = Annotated[
 MAX_TRANSFERS = 8  # concurrent originals: a stalled NAS read holds a thread of Starlette's shared pool
 # How long a transfer waits for a slot before the 503. Waiting holds no thread (an asyncio semaphore).
 # A browser's PDF viewer asks for several ranges of one file at once: refused at once, the reader's
-# own Download or the viewer's next range got "busy" (2026-10-18 audit, 7 of the first 46 pages).
-TRANSFER_WAIT = 30.0
+# own Download or the viewer's next range got "busy" (2026-10-18 audit, 7 of the first 46 pages). A
+# browser waits minutes for a download to start; 30 s was too short while big ingests held the NAS
+# (an OpenStax page's Download, 2026-10-21 audit).
+TRANSFER_WAIT = 120.0
 
 
 class _BoundedFile(FileResponse):
