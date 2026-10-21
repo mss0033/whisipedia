@@ -22,7 +22,17 @@ describe('a page empty in its archive is said to be (2026-10-19 audit)', () => {
     const words =
       '<p>Heat stroke is a medical emergency in which the body overheats past forty degrees.</p>';
     expect(emptyPageNotice(words, 'Heat stroke', null)).toBeNull();
-    expect(emptyPageNotice('<p><img src="map.png" alt=""></p>', 'A map', null)).toBeNull();
+    expect(
+      emptyPageNotice('<p><img src="/v1/assets/s/g/map.png" alt=""></p>', 'A map', null),
+    ).toBeNull();
+    // A picture the reader does not show (a data: splash logo, Instagram's app shell) is not content.
+    expect(
+      emptyPageNotice(
+        '<div id="splash"><img src="data:image/png;base64,iVBOR"></div>',
+        'Instagram',
+        null,
+      )?.textContent,
+    ).toContain('loaded by a script');
   });
 
   it('names an app shell whose only element is its loading animation (2026-10-21 audit)', () => {

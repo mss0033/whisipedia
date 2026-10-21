@@ -9,7 +9,7 @@ import { docIdToAddress, makeAddress, searchAddress } from '../core/address.ts';
 import { diffLines, diffStats } from '../core/diff.ts';
 import { type Child, h } from '../core/dom.ts';
 import { formatDate, formatNumber } from '../core/format.ts';
-import { replaceBrokenImages, sanitizeDocumentHtml } from '../core/links.ts';
+import { allowedImagePath, replaceBrokenImages, sanitizeDocumentHtml } from '../core/links.ts';
 import {
   formatLabel,
   mediaKindOf,
@@ -1072,9 +1072,12 @@ export function emptyPageNotice(
   for (const el of page.querySelectorAll('script, style, noscript, template, title, h1'))
     el.remove();
   const words = (page.body?.textContent ?? '').replace(/\s+/g, ' ').trim();
-  // Only what the reader shows counts: it drops video, audio, svg, object and embed (Ghost's admin
-  // shell, whose only element was its loading animation, read as a page with media, 2026-10-21).
-  const media = page.querySelector('img, iframe');
+  // Only what the reader shows counts: it drops video, audio, svg, object and embed, and pictures not
+  // in the library (Ghost's admin shell, only its loading animation; Instagram's, only a data: splash
+  // logo, 2026-10-21).
+  const media =
+    !!page.querySelector('iframe') ||
+    [...page.querySelectorAll('img')].some((i) => allowedImagePath(i.getAttribute('src') ?? ''));
   // A page that is only a canvas and its scripts is a program (ncase.me's polygon games): nothing of
   // it shows here, where page scripts never run.
   const program = !media && !!page.querySelector('canvas');
