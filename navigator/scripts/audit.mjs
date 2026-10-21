@@ -604,18 +604,30 @@ async function audit(context, phoneContext, id) {
   }
   // --- use ------------------------------------------------------------------------------------------
   if (seen.hasText && seen.fontPx) {
-    await page.keyboard.press('Control+]');
-    await page.keyboard.press('Control+]');
-    // A page of 1.8 million characters takes longer than 300 ms to lay out again (NGA's Sailing
-    // Directions, 2026-10-19): wait for the size to change, three seconds at most.
-    let bigger = await page.evaluate(inspect);
-    for (let t = 0; t < 10 && bigger.fontPx !== null && bigger.fontPx <= seen.fontPx; t++) {
-      await page.waitForTimeout(300);
-      bigger = await page.evaluate(inspect);
-    }
-    if (bigger.fontPx !== null && bigger.fontPx <= seen.fontPx)
-      add(issues, 'use', 'larger-text-ignored', `${seen.fontPx}px stays ${bigger.fontPx}px`);
-    await page.keyboard.press('Control+0');
+    // Measured again here, after the Back above, from the page with nothing focused: twice in 2,000
+    // pages the size "stayed" while the shortcut worked in every try by hand (NGA, 2026-10-21). A
+    // second try before it counts.
+    const larger = async () => {
+      await page.evaluate(() =>
+        document.activeElement instanceof HTMLElement ? document.activeElement.blur() : undefined,
+      );
+      const before = (await page.evaluate(inspect)).fontPx ?? seen.fontPx;
+      await page.keyboard.press('Control+]');
+      await page.keyboard.press('Control+]');
+      // A page of 1.8 million characters takes longer than 300 ms to lay out again (NGA's Sailing
+      // Directions, 2026-10-19): wait for the size to change, three seconds at most.
+      let after = await page.evaluate(inspect);
+      for (let t = 0; t < 10 && after.fontPx !== null && after.fontPx <= before; t++) {
+        await page.waitForTimeout(300);
+        after = await page.evaluate(inspect);
+      }
+      await page.keyboard.press('Control+0');
+      return { before, after: after.fontPx };
+    };
+    let size = await larger();
+    if (size.after !== null && size.after <= size.before) size = await larger();
+    if (size.after !== null && size.after <= size.before)
+      add(issues, 'use', 'larger-text-ignored', `${size.before}px stays ${size.after}px`);
   }
   const findBlocked = await page.evaluate(() => {
     const e = new KeyboardEvent('keydown', {
