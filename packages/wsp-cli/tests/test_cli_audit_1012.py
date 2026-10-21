@@ -286,6 +286,49 @@ def test_an_ingest_stopped_while_hashing_a_file_finishes_it(vault: FileVault, tm
     assert not moving.exists()
 
 
+def test_a_host_that_takes_no_connection_is_left_for_the_next_run(vault: FileVault, tmp_path: Path) -> None:
+    from wsp_cli.doccollections import HostBreaker
+    from wsp_core.errors import FetchError
+
+    objects = [(f"FM-{i}_2022.pdf", GOOD) for i in range(8)]
+
+    class Refused(FakeFetcher):
+        tries = 0
+
+        def download(self, remote: Any, dest: Path) -> Any:
+            Refused.tries += 1
+            raise FetchError(f"probe {remote.url} failed after 6 attempt(s): ConnectTimeout: timed out")
+
+    runner = CollectionFetcher(
+        vault.root,
+        Refused(routes(objects)),
+        keys={},
+        user_agent="t",
+        workdir=tmp_path / "w",
+        out=io.StringIO(),
+        throttle=False,
+    )
+    report = runner.run(spec(objects), version="2026-10-21")
+    # Before: every document waited out its own connect timeouts (Borden Institute: hours a run).
+    assert Refused.tries == HostBreaker.AFTER
+    assert len(report.failed) == len(objects)
+    assert sum("HostUnreachable" in why for _, why in report.failed) == len(objects) - HostBreaker.AFTER
+    assert fetch_exit_code(report) == EXIT_PARTIAL
+
+
+def test_a_host_that_answered_is_never_skipped() -> None:
+    from wsp_cli.doccollections import HostBreaker
+
+    hosts = HostBreaker()
+    for _ in range(HostBreaker.AFTER):
+        hosts.failed("https://a.example/x", "FetchError: not found (HTTP 404)")  # it answers
+        hosts.failed("https://b.example/x", "probe failed: ConnectError: refused")
+    assert hosts.down("https://a.example/y") is None
+    assert hosts.down("https://b.example/y") is not None
+    hosts.answered("https://b.example/z")
+    assert hosts.down("https://b.example/y") is None
+
+
 # --- M3: natural order in `wsp ingest` --------------------------------------------------------------------
 
 

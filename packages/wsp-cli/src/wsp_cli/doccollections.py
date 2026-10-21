@@ -38,6 +38,7 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, TextIO, cast
+from urllib.parse import urlsplit
 
 import yaml
 
@@ -413,6 +414,46 @@ def fetch_exit_code(report: FetchReport) -> int:
     return EXIT_COMPLETE if report.fetched or report.planned else EXIT_NOTHING_NEW
 
 
+_NO_CONNECTION = re.compile(r"\bConnect(?:Timeout|Error)\b")
+
+
+class HostBreaker:
+    """Hosts that never answer this run. A host whose connections failed :attr:`AFTER` times in a row,
+    with no answer from it this run, is not tried again until the next run: its documents fail at once.
+    Borden Institute's 315 documents on an army.mil host that refuses this connection held the retry
+    lane for hours, each through six connect timeouts (2026-10-21). Any answer, a 404 too, resets it."""
+
+    AFTER = 5
+
+    def __init__(self) -> None:
+        self._failures: dict[str, int] = {}
+        self._answered: set[str] = set()
+
+    @staticmethod
+    def _host(url: str) -> str:
+        return (urlsplit(url).hostname or "").lower()
+
+    def answered(self, url: str) -> None:
+        host = self._host(url)
+        self._answered.add(host)
+        self._failures.pop(host, None)
+
+    def failed(self, url: str, why: str) -> None:
+        if _NO_CONNECTION.search(why) is None:
+            self.answered(url)  # it answered, with an error
+            return
+        host = self._host(url)
+        self._failures[host] = self._failures.get(host, 0) + 1
+
+    def down(self, url: str) -> str | None:
+        """Why ``url`` is not tried this run, or ``None``."""
+        host = self._host(url)
+        n = self._failures.get(host, 0)
+        if host in self._answered or n < self.AFTER:
+            return None
+        return f"HostUnreachable: {host} took no connection {n} times in a row; left for the next run"
+
+
 class CollectionFetcher:
     """Downloads one collection's allowed documents into ``_incoming`` and screens them."""
 
@@ -519,6 +560,12 @@ class CollectionFetcher:
         )
         inflight: deque[tuple[Candidate, Future[Path]]] = deque()
         fetch_errors = (FetchError, OSError, ValueError, subprocess.CalledProcessError)
+        hosts = HostBreaker()
+
+        def failed(cand: Candidate, exc: BaseException) -> None:
+            why = f"{type(exc).__name__}: {exc}"
+            hosts.failed(cand.url, why)
+            report.failed.append((cand.key, why))
 
         def drain(keep: int) -> None:
             while len(inflight) > keep:
@@ -526,14 +573,18 @@ class CollectionFetcher:
                 try:
                     path = fut.result()
                 except fetch_errors as exc:
-                    report.failed.append((cand.key, f"{type(exc).__name__}: {exc}"))
+                    failed(cand, exc)
                     continue
+                hosts.answered(cand.url)
                 self._screen(cand, path, cfg.rules, report, held_sha, screen=None)
 
         try:
             for cand in docs:
                 if cand.key not in refetch and unchanged(cand, held_meta.get(cand.key)):
                     report.skipped += 1  # held, and the listing says the same bytes: not downloaded again
+                    continue
+                if (down := hosts.down(cand.url)) is not None:
+                    report.failed.append((cand.key, down))
                     continue
                 if pool is not None and cand.resolve != "git":
                     inflight.append(
@@ -548,8 +599,9 @@ class CollectionFetcher:
                         path = self._download(throttle, cand, dest_dir, cfg.origins)
                         screen = None
                 except fetch_errors as exc:
-                    report.failed.append((cand.key, f"{type(exc).__name__}: {exc}"))
+                    failed(cand, exc)
                     continue
+                hosts.answered(cand.url)
                 self._screen(cand, path, cfg.rules, report, held_sha, screen=screen)
             drain(0)
         finally:
