@@ -410,7 +410,19 @@ async function audit(context, phoneContext, id) {
   for (const img of seen.images.slice(0, IMAGES_CHECKED)) {
     if (!img.src?.startsWith('/v1/') || img.broken) continue;
     const r = await getAsBrowser(context, `${BASE}${img.src}`);
-    if (!r.ok) add(issues, 'render', 'image-missing', `${r.status} ${img.src}`);
+    // A picture the archive does not hold is the reader's placeholder ("[IMAGE: caption]") once it
+    // has asked: only one still shown as a broken picture counts (2026-10-21: LibreTexts' figures
+    // saved as error pages, now a 404 by design).
+    const shown = async () =>
+      page
+        .evaluate((src) => !!document.querySelector(`main img[src="${CSS.escape(src)}"]`), img.src)
+        .catch(() => false);
+    let still = r.status === 404 ? await shown() : true;
+    for (let t = 0; t < 10 && still && r.status === 404; t++) {
+      await page.waitForTimeout(500);
+      still = await shown();
+    }
+    if (!r.ok && still) add(issues, 'render', 'image-missing', `${r.status} ${img.src}`);
   }
   // --- read -----------------------------------------------------------------------------------------
   const apiText = (doc?.text ?? '').trim();
