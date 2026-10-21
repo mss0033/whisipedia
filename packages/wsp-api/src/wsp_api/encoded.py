@@ -1,0 +1,72 @@
+"""Archived files still in their transfer encoding.
+
+A crawler that saved a response body without undoing its ``Content-Encoding`` leaves a text file
+(an SVG, a stylesheet) as brotli or gzip bytes under a text mimetype: the browser shows a broken
+image (anonymousplanet.org's Creative Commons icons, 2026-10-21 audit). Such a file is decoded once
+here, when it does not start as text and decodes to text; anything else is served as it is.
+"""
+
+from __future__ import annotations
+
+import zlib
+from collections.abc import Callable
+from typing import Any, cast
+
+import brotli
+
+_br = cast(Any, brotli)  # the package has no type information
+compress_brotli = cast(Callable[[bytes], bytes], _br.compress)
+
+MAX_INPUT = 4 << 20  # files larger than this are not guessed at
+MAX_OUTPUT = 32 << 20  # a decoded file stops here (a bad archive is not a reason to fill memory)
+_TEXTUAL = frozenset(
+    {
+        "image/svg+xml",
+        "application/javascript",
+        "application/json",
+        "application/xml",
+        "application/xhtml+xml",
+    }
+)
+
+
+def _textual(mimetype: str) -> bool:
+    kind = mimetype.split(";", 1)[0].strip().lower()
+    return kind.startswith("text/") or kind in _TEXTUAL
+
+
+def _looks_like_text(data: bytes) -> bool:
+    head = data[:512]
+    try:
+        head.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        if exc.start < len(head) - 3:  # a character cut at the end of the sample is still text
+            return False
+    return not any(b < 9 or 13 < b < 32 for b in head)
+
+
+def _brotli(data: bytes) -> bytes | None:
+    d = _br.Decompressor()
+    try:
+        out = cast(bytes, d.process(data, output_buffer_limit=MAX_OUTPUT))
+    except _br.error:
+        return None
+    # the limit only stops the buffer growing: a short input can still come out whole
+    return out if d.is_finished() and len(out) <= MAX_OUTPUT else None
+
+
+def _gzip(data: bytes) -> bytes | None:
+    d = zlib.decompressobj(wbits=31)
+    try:
+        out = d.decompress(data, MAX_OUTPUT)
+    except zlib.error:
+        return None
+    return out if d.eof and not d.unconsumed_tail and len(out) <= MAX_OUTPUT else None
+
+
+def decoded(content: bytes, mimetype: str) -> bytes:
+    """``content``, or its decoding when a text file was stored brotli- or gzip-encoded."""
+    if not content or len(content) > MAX_INPUT or not _textual(mimetype) or _looks_like_text(content):
+        return content
+    out = _gzip(content) if content[:2] == b"\x1f\x8b" else _brotli(content)
+    return out if out is not None and _looks_like_text(out) else content
