@@ -377,13 +377,14 @@ export function sanitizeMath(el: Element): Element | null {
 const HIDDEN_CLASSES = ['cs1-maint', 'cs1-hidden-error', 'hiddenStructure'];
 
 /** Wiki template leftovers in a page's text: a parameter never filled in (`{{{name}}}`), and a category
- * or file link with no name (`[[Category:]]`, `[[File:|thumb|]]`), a magic word (`{{PAGENAME}}`,
+ * or file link with no name (`[[Category:]]`, `[[File:|thumb|]]`, an unsigned comment's `[[User:|]]`
+ * on explain xkcd), a magic word (`{{PAGENAME}}`,
  * Energypedia's file pages), a link to a template (`[[Template:Pub Tag Improved Cookstoves}]]`,
  * Energypedia, 2026-10-21 audit). Never a page's words: Gardenology
  * and Appropedia pages showed them in place of the values their templates lacked (2026-10-19 audit).
  * Text in code blocks is left alone. */
 const TEMPLATE_LEFTOVERS =
-  /\[\[\s*(?:\{\{\{[^{}]{1,40}\}\}\}|(?:Category|File|Image)\s*:\s*(?:\|[^[\]|]{0,40})*|Template\s*:[^[\]]{1,80})\s*\]\]|\{\{\{[\w -]{1,40}(?:\|[^{}]{0,40})?\}\}\}|\{\{(?:FULL|BASE|SUB)?PAGENAMEE?\}\}|\{\{(?:SITENAME|NAMESPACE)\}\}/g;
+  /\[\[\s*(?:\{\{\{[^{}]{1,40}\}\}\}|[A-Z][A-Za-z]{1,20}(?:[ _][A-Za-z]{1,20})?\s*:\s*(?:\|[^[\]|]{0,40})*|Template\s*:[^[\]]{1,80})\s*\]\]|\{\{\{[\w -]{1,40}(?:\|[^{}]{0,40})?\}\}\}|\{\{(?:FULL|BASE|SUB)?PAGENAMEE?\}\}|\{\{(?:SITENAME|NAMESPACE)\}\}/g;
 const CODE_TAGS = new Set(['pre', 'code', 'kbd', 'samp', 'textarea']);
 
 /** The page a `<frame>` or `<iframe>` showed: its source rewritten to the archive's asset route

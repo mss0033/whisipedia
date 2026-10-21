@@ -18,6 +18,8 @@ describe('wiki leftovers an archived page shows (2026-10-19 audit)', () => {
       `text "You're an Indian?"`,
     );
     expect(withoutTemplateLeftovers('[[Image:{{{range_map}}}|{{{range_map_width}}}|]]x')).toBe('x');
+    expect(withoutTemplateLeftovers('story)? -- [[User:|]] (talk)')).toBe('story)? --  (talk)');
+    expect(withoutTemplateLeftovers('[[User talk:|]]x [[Paris]]')).toBe('x Paris');
     expect(
       withoutTemplateLeftovers('Funding\n[[Template:Pub Tag Improved Cookstoves}]]\nmore'),
     ).toBe('Funding\n\nmore');
