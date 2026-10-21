@@ -4406,8 +4406,8 @@ sources:
     notes: "First responders' guide to hazardous materials in transport: UN number and name lookups, the orange guides (fire, spill, evacuation and first aid per hazard class), isolation and protective-action distances. PHMSA's own host answers 403 to a plain client (not evaded); the same tri-national guide from Transport Canada, whose terms allow non-commercial reproduction."
 
   - id: engineering-references
-    name: "Engineering references (NIST/SEMATECH e-Handbook of Statistical Methods, Wood Handbook, NASA Fastener Design Manual, DOE Electrical Safety Handbook)"
-    publisher: NIST, USDA Forest Products Laboratory, NASA, US Department of Energy
+    name: "Engineering references (NIST/SEMATECH e-Handbook of Statistical Methods, NASA Fastener Design Manual, DOE Electrical Safety Handbook)"
+    publisher: NIST, NASA, US Department of Energy
     domain: [engineering, science, standards]
     tier: T1
     status: candidate
@@ -4415,9 +4415,9 @@ sources:
     legal_basis: public-domain
     access:
       adapter: doc-collection
-      issuer: US federal government (NIST, USDA FPL, NASA, DOE)
+      issuer: US federal government (NIST, NASA, DOE)
       key_prefix: engref
-      origins: [www.itl.nist.gov, research.fs.usda.gov, ntrs.nasa.gov, www.energy.gov]
+      origins: [www.itl.nist.gov, ntrs.nasa.gov, www.energy.gov]
       discovery:
         - kind: list
           items:
@@ -4429,13 +4429,14 @@ sources:
             - {pub_number: "NIST/SEMATECH e-Handbook 6", title: "Engineering Statistics Handbook: 6. Process or Product Monitoring and Control", url: "https://www.itl.nist.gov/div898/handbook/toolaids/pff/pmc.pdf"}
             - {pub_number: "NIST/SEMATECH e-Handbook 7", title: "Engineering Statistics Handbook: 7. Product and Process Comparisons", url: "https://www.itl.nist.gov/div898/handbook/toolaids/pff/prc.pdf"}
             - {pub_number: "NIST/SEMATECH e-Handbook 8", title: "Engineering Statistics Handbook: 8. Assessing Product Reliability", url: "https://www.itl.nist.gov/div898/handbook/toolaids/pff/apr.pdf"}
-            - {pub_number: "FPL-GTR-282", title: "Wood Handbook: Wood as an Engineering Material", url: "https://research.fs.usda.gov/download/treesearch/62200.pdf", edition_date: "2021"}
+            # The Wood Handbook (FPL-GTR-282) is on research.fs.usda.gov only, whose robots.txt disallows every
+            # crawler but Googlebot (2026-10-21); the old fpl.fs.fed.us host no longer resolves.
             - {pub_number: "NASA RP-1228", title: "Fastener Design Manual", url: "https://ntrs.nasa.gov/api/citations/19900009424/downloads/19900009424.pdf", edition_date: "1990"}
             - {pub_number: "DOE-HDBK-1092-2013", title: "DOE Handbook: Electrical Safety", url: "https://www.energy.gov/sites/default/files/2026-04/DOE-HDBK-1092-2013.pdf", edition_date: "2013"}
       filter: {allow_all: true, public_issuer: true}
     update: {cadence: P1Y, strategy: snapshot-retention}
     size: {bytes: 1.6e8, measured: false, as_of: '2026-10-21'}
-    notes: "Single reference works the larger collections lack: statistics for engineers (measurement, process control, reliability), wood as a structural material, bolted-joint design, and electrical safety practice (NFPA 70E-style work practices, grounding, batteries, research equipment)."
+    notes: "Single reference works the larger collections lack: statistics for engineers (measurement, process control, reliability), bolted-joint design, and electrical safety practice (NFPA 70E-style work practices, grounding, batteries, research equipment)."
 
   - id: nz-electrical-codes-of-practice
     name: New Zealand Electrical Codes of Practice (WorkSafe NZ)
@@ -4565,3 +4566,30 @@ sources:
     update: {cadence: P3M, strategy: snapshot-retention}
     size: {bytes: 6.0e8, measured: false, as_of: '2026-10-21'}
     notes: "The US government's building code for its own facilities: Unified Facilities Criteria (structural, fire protection, electrical 3-5xx incl. lightning, grounding, generators; mechanical, plumbing, telecom), the matching guide specifications (UFGS, Division 26 electrical), USACE engineering bulletins and NAVFAC criteria. robots.txt allows all but /auth/; the old wbdg.org/FFC PDF paths answer 403, the API names each file on the criteria bucket."
+
+  - id: codes-canada
+    name: Codes Canada (National Building, Fire, Plumbing, Energy and Farm codes, 1941-2025, with user's guides)
+    publisher: National Research Council Canada
+    domain: [engineering, standards, preparedness]
+    tier: T1
+    status: candidate
+    license: LicenseRef-NRC-Free-Electronic-Personal-Use
+    legal_basis: bulk-access-terms
+    access:
+      adapter: doc-collection
+      issuer: National Research Council Canada (Codes Canada)
+      key_prefix: nrc-code
+      origins: [nrc.canada.ca, doi.org, nrc-publications.canada.ca]
+      rate: {requests_per_second: 1, per_host: {nrc-publications.canada.ca: 2}}  # its robots.txt Crawl-delay: 2
+      discovery:
+        - kind: index-page
+          urls:
+            - "https://nrc.canada.ca/en/certifications-evaluations-standards/codes-canada/codes-canada-publications"
+          follow: "(?:codes-canada/codes-canada-publications/[a-z0-9-]+$|doi\\.org/10\\.4224/|nrc-publications\\.canada\\.ca/eng/view/object/\\?id=)"
+          depth: 3
+          max_pages: 600
+          documents: "nrc-publications\\.canada\\.ca/eng/view/ft/\\?id=[0-9a-f-]+(?:&(?:amp;)?dp=\\d+)?&(?:amp;)?dsl=en$"
+      filter: {allow_all: true, public_issuer: true}
+    update: {cadence: P1Y, strategy: snapshot-retention}
+    size: {bytes: 2.5e9, measured: false, as_of: '2026-10-21'}
+    notes: "Canada's model national codes in every edition NRC offers (2005-2025 plus the 1941-1998 historical editions), the Alberta and Quebec adoptions, and the illustrated Part 9 housing guide and structural commentaries. NRC provides them free in electronic form; owner approved taking free-download standards for the private library (2026-10-21)."
