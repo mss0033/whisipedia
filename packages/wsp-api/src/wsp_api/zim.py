@@ -35,7 +35,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
-from wsp_api.encoded import decoded
+from wsp_api.encoded import decoded, html_as_image
 from wsp_api.outside import Site
 from wsp_api.pdftext import pdf_text
 from wsp_api.seams import VaultView
@@ -736,7 +736,7 @@ class ZimAssetStore:
         if where is None:
             return None
         data = self._read(where[0], where[1], Want.ANY)
-        if data is None or data.content is None:
+        if data is None or data.content is None or html_as_image(data.content, data.mimetype):
             return None
         return Asset(content=decoded(data.content, data.mimetype), mimetype=data.mimetype)
 

@@ -8,7 +8,7 @@ import pytest
 
 from wsp_api import encoded
 from wsp_api.encoded import compress_brotli as br
-from wsp_api.encoded import decoded
+from wsp_api.encoded import decoded, html_as_image
 
 SVG = b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 30 30"><circle r="15"/></svg>'
 
@@ -35,3 +35,12 @@ def test_a_decoding_too_large_is_not_made(monkeypatch: pytest.MonkeyPatch) -> No
     big = b"<p>" + b"a" * 5000 + b"</p>"
     assert decoded(br(big), "text/html") == br(big)
     assert decoded(gzip.compress(big), "text/html") == gzip.compress(big)
+
+
+def test_a_web_page_saved_under_a_pictures_name_is_no_picture() -> None:
+    page = b'<!doctype html><html lang="en-US"><head><title>OpenStax</title>'
+    assert html_as_image(page, "image/png")
+    assert html_as_image(b"\n  <HTML><body>", "image/jpeg")
+    assert not html_as_image(b"\x89PNG\r\n\x1a\n", "image/png")
+    assert not html_as_image(SVG, "image/svg+xml")
+    assert not html_as_image(page, "text/html")

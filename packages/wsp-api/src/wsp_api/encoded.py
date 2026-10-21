@@ -70,3 +70,14 @@ def decoded(content: bytes, mimetype: str) -> bytes:
         return content
     out = _gzip(content) if content[:2] == b"\x1f\x8b" else _brotli(content)
     return out if out is not None and _looks_like_text(out) else content
+
+
+def html_as_image(content: bytes, mimetype: str) -> bool:
+    """A web page saved under a picture's name: a raster image type whose bytes are HTML (LibreTexts
+    kept OpenStax's error page as fig-ch04_18_01.png, 2026-10-19 and 2026-10-21 audits). Served as a
+    picture it is a broken image; it is no picture at all."""
+    kind = mimetype.split(";", 1)[0].strip().lower()
+    if not kind.startswith("image/") or kind == "image/svg+xml":
+        return False
+    head = content[:64].lstrip(b"\xef\xbb\xbf \t\r\n").lower()
+    return head.startswith((b"<!doctype html", b"<html", b"<head", b"<body"))
