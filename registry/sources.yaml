@@ -4593,3 +4593,49 @@ sources:
     update: {cadence: P1Y, strategy: snapshot-retention}
     size: {bytes: 2.5e9, measured: false, as_of: '2026-10-21'}
     notes: "Canada's model national codes in every edition NRC offers (2005-2025 plus the 1941-1998 historical editions), the Alberta and Quebec adoptions, and the illustrated Part 9 housing guide and structural commentaries. NRC provides them free in electronic form; owner approved taking free-download standards for the private library (2026-10-21)."
+
+  - id: etsi-deliverables
+    name: ETSI standards and reports (EN, ES, EG, TS, TR, GS, GR, SR), newest published version of each
+    publisher: European Telecommunications Standards Institute
+    domain: [standards, communications, electronics, engineering]
+    tier: T1
+    status: candidate
+    license: LicenseRef-ETSI-Free-Download-Personal-Use
+    legal_basis: bulk-access-terms
+    index: false
+    access:
+      adapter: doc-collection
+      issuer: European Telecommunications Standards Institute
+      key_prefix: etsi
+      origins: [www.etsi.org]
+      discovery:
+        - {kind: api, flavor: etsi}
+      filter: {allow_all: true, public_issuer: true}
+    update: {cadence: P6M, strategy: snapshot-retention}
+    size: {bytes: 1.0e11, measured: false, as_of: '2026-10-21'}
+    notes: "Radio, mobile (3GPP specs republished as ETSI TS 1xx), broadcasting, EMC, power supply, smart cards, security and many more, as free PDFs from ETSI's open delivery tree; the newest published version of each deliverable. robots.txt asks only that search be left alone. Owner approved free-download standards for the private library (2026-10-21). index: false at first (some 50,000 documents): searchable once the index can take it."
+
+  - id: nasa-ntrs-materials-mechanical
+    name: NASA Technical Reports Server, materials, mechanical engineering and thermofluids (public reports with a PDF)
+    publisher: NASA Scientific and Technical Information Program
+    domain: [engineering, science]
+    tier: T1
+    status: candidate
+    license: LicenseRef-US-Gov-PD
+    legal_basis: public-domain
+    index: false
+    access:
+      adapter: doc-collection
+      issuer: NASA
+      key_prefix: ntrs
+      origins: [ntrs.nasa.gov]
+      discovery:
+        - &ntrs {kind: api, flavor: ntrs, query: "", filters: {subjectCategory: "Mechanical Engineering"}}
+        - {<<: *ntrs, filters: {subjectCategory: "Metals and Metallic Materials"}}
+        - {<<: *ntrs, filters: {subjectCategory: "Composite Materials"}}
+        - {<<: *ntrs, filters: {subjectCategory: "Nonmetallic Materials"}}
+        - {<<: *ntrs, filters: {subjectCategory: "Fluid Mechanics and Thermodynamics"}}
+      filter: {allow_all: true, public_issuer: true}
+    update: {cadence: P6M, strategy: snapshot-retention}
+    size: {bytes: 6.0e10, measured: false, as_of: '2026-10-21'}
+    notes: "NASA's reports on machine elements, bearings and lubrication, fasteners, gears, metals and alloys, composites, ceramics and polymers, heat transfer and fluid flow (about 21,600 records in these categories; public ones with a PDF are kept). index: false at first given the size."

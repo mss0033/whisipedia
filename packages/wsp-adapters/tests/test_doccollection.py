@@ -772,6 +772,61 @@ def test_wbdg_lists_federal_criteria_in_force_and_their_current_files() -> None:
     assert (pdf.url, pdf.size) == (f"{s3}/ufc_3_501_01_2026.pdf", 900)
 
 
+def test_etsi_takes_the_newest_published_version_of_each_deliverable() -> None:
+    base = "https://www.etsi.org/deliver"
+
+    def listing(path: str, rows: list[tuple[str, int | None]]) -> bytes:
+        parent = path.rstrip("/").rsplit("/", 1)[0] + "/"
+        out = [f'<pre><A HREF="{parent}">[To Parent Directory]</A><br><br>']
+        for name, size in rows:
+            mark = str(size) if size is not None else "&lt;dir&gt;"
+            out.append(f' 7/24/2019  9:08 AM      {mark} <A HREF="{path}{name}">{name.rstrip("/")}</A><br>')
+        return "".join(out).encode()
+
+    en = "/deliver/etsi_en/"
+    rng = f"{en}300300_300399/"
+    doc = f"{rng}300328/"
+    draft_only = f"{rng}300330/"
+    routes = {
+        f"{base}/etsi_en/": listing(en, [("300300_300399/", None)]),
+        f"https://www.etsi.org{rng}": listing(rng, [("300328/", None), ("300330/", None)]),
+        f"https://www.etsi.org{doc}": listing(
+            doc, [("01.07.01_60/", None), ("02.02.02_60/", None), ("02.03.01_40/", None)]
+        ),
+        f"https://www.etsi.org{doc}02.02.02_60/": listing(
+            f"{doc}02.02.02_60/", [("en_300328v020202p.pdf", 1571870), ("en_300328v020202p0.zip", 99)]
+        ),
+        f"https://www.etsi.org{draft_only}": listing(draft_only, [("01.01.01_30/", None)]),
+        f"https://www.etsi.org{draft_only}01.01.01_30/": listing(
+            f"{draft_only}01.01.01_30/", [("en_300330v010101v.pdf", 10)]
+        ),
+    }
+    env = env_for(routes, origins=("www.etsi.org",))
+    got = list(discover_all([{"kind": "api", "flavor": "etsi", "types": ["etsi_en"]}], env))
+    assert [(c.pub_number, c.title, c.size, c.url.rsplit("/", 1)[-1]) for c in got] == [
+        ("ETSI EN 300328", "ETSI EN 300328 V2.2.2", 1571870, "en_300328v020202p.pdf"),
+        ("ETSI EN 300330", "ETSI EN 300330 V1.1.1", 10, "en_300330v010101v.pdf"),
+    ]
+
+
+def test_ntrs_keeps_public_records_with_a_pdf() -> None:
+    def rec(rid: str, dist: str, pdf: bool = True) -> dict[str, object]:
+        links = {"pdf": f"/api/citations/{rid}/downloads/{rid}.pdf"} if pdf else {}
+        return {"id": rid, "title": f"Report {rid}", "distribution": dist, "downloads": [{"links": links}]}
+
+    page = {
+        "stats": {"total": 3},
+        "results": [rec("1", "PUBLIC"), rec("2", "LIMITED"), rec("3", "PUBLIC", False)],
+    }
+    env = env_for({"https://ntrs.nasa.gov/api/citations/search": json.dumps(page).encode()}, max_pages=1)
+    got = list(
+        discover_all(
+            [{"kind": "api", "flavor": "ntrs", "filters": {"subjectCategory": "Composite Materials"}}], env
+        )
+    )
+    assert [c.url for c in got] == ["https://ntrs.nasa.gov/api/citations/1/downloads/1.pdf"]
+
+
 def test_openstax_lists_each_live_book_with_its_pdf() -> None:
     def book(slug: str, state: str, pdf: str) -> dict[str, object]:
         return {

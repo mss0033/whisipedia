@@ -47,6 +47,7 @@ import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime
+from html import unescape as html_unescape
 from pathlib import Path
 from typing import Any, cast
 from urllib.parse import quote, urlencode, urljoin, urlsplit
@@ -778,7 +779,9 @@ def ntrs(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
     """NASA Technical Reports Server search API (``query``; public records with a PDF only)."""
     size, start, pages, more = 100, 0, 0, True
     while pages < env.pages():
-        params = {"q": _s(cfg.get("query")), "page.size": size, "page.from": start}
+        params: dict[str, Any] = {"page.size": size, "page.from": start}
+        if _s(cfg.get("query")):  # an empty q= matches nothing (2026-10-21)
+            params["q"] = _s(cfg.get("query"))
         if cfg.get("filters"):
             params.update(cast(Mapping[str, Any], cfg["filters"]))
         data = cast(Json, env.get_json("https://ntrs.nasa.gov/api/citations/search?" + urlencode(params)))
@@ -798,13 +801,9 @@ def ntrs(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
                 "",
             )
             rid = _s(r.get("id"))
-            if not pdf:
+            # Only public records: the API's distribution parameter does not filter (2026-10-21).
+            if not pdf or _s(r.get("distribution")).upper() != "PUBLIC":
                 continue
-            rights = (
-                "public-release"
-                if _s(r.get("distribution")).upper() == "PUBLIC"
-                else _s(r.get("distribution"))
-            )
             yield Candidate(
                 key=make_key(env.prefix, rid),
                 url=urljoin("https://ntrs.nasa.gov/", pdf),
@@ -814,7 +813,6 @@ def ntrs(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
                 edition_date=_first_publication_date(r.get("publications")),
                 subjects=_strs(r.get("subjectCategories")) + _strs(r.get("keywords")),
                 abstract=_s(r.get("abstract"))[:2000],
-                rights="" if rights == "public-release" else f"distribution: {rights}",
                 landing_url=f"https://ntrs.nasa.gov/citations/{rid}",
                 discovered_by="api:ntrs",
             )
@@ -1138,6 +1136,76 @@ def resolve_wbdg(cand: Candidate, env: DiscoverEnv) -> list[Candidate]:
     ]
 
 
+_IIS_ROW = re.compile(r"(?:(?P<size>\d+)|&lt;dir&gt;)\s*<A HREF=\"(?P<href>[^\"]+)\">", re.IGNORECASE)
+_ETSI_VERSION = re.compile(r"/(\d{2})\.(\d{2})\.(\d{2})_(\d{2})/$")
+
+
+def _iis_listing(env: DiscoverEnv, url: str) -> list[tuple[str, int | None]]:
+    """``(absolute href, size or None for a folder)`` of an IIS directory listing, parent excluded."""
+    text = env.get_text(url)
+    out: list[tuple[str, int | None]] = []
+    for m in _IIS_ROW.finditer(text):
+        href = urljoin(url, html_unescape(m.group("href")))
+        if len(href) <= len(url):  # [To Parent Directory]
+            continue
+        out.append((href, int(m.group("size")) if m.group("size") else None))
+    return out
+
+
+def etsi(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
+    """ETSI deliverables (``www.etsi.org/deliver``, an open IIS tree: type, number range, number,
+    version): for each deliverable the newest published version (``_60``; the newest of any stage when
+    none is published yet), its PDFs. ``types``: the deliverable folders (default the current kinds)."""
+    base = (_s(cfg.get("base")) or "https://www.etsi.org/deliver").rstrip("/")
+    types = _strs(cfg.get("types")) or (
+        "etsi_en",
+        "etsi_es",
+        "etsi_eg",
+        "etsi_ts",
+        "etsi_tr",
+        "etsi_gs",
+        "etsi_gr",
+        "etsi_sr",
+    )
+    pages, seen = 0, 0
+    budget = env.pages() * 1000  # listing requests a run may make
+    for kind in types:
+        for rng, _ in _iis_listing(env, f"{base}/{kind}/"):
+            for number, _ in _iis_listing(env, rng):
+                pages += 2
+                if pages > budget:
+                    env.listing_end("etsi", stopped=True, seen=seen)
+                    return
+                versions = [
+                    (tuple(int(g) for g in m.groups()), href)
+                    for href, _ in _iis_listing(env, number)
+                    if (m := _ETSI_VERSION.search(href))
+                ]
+                if not versions:
+                    continue
+                published = [v for v in versions if v[0][3] == 60]
+                (ver, folder) = max(published or versions)
+                for href, size in _iis_listing(env, folder):
+                    if size is None or not href.lower().endswith(".pdf"):
+                        continue
+                    seen += 1
+                    name = href.rsplit("/", 1)[-1]
+                    num = number.rstrip("/").rsplit("/", 1)[-1]
+                    label = kind.removeprefix("etsi_").upper()
+                    yield Candidate(
+                        key=make_key(env.prefix, name.removesuffix(".pdf")),
+                        url=href,
+                        title=f"ETSI {label} {num} V{ver[0]}.{ver[1]}.{ver[2]}",
+                        issuer=env.issuer,
+                        pub_number=f"ETSI {label} {num}",
+                        edition_date="",
+                        size=size,
+                        landing_url=folder,
+                        discovered_by=f"etsi:{kind}",
+                    )
+    env.listing_end("etsi", stopped=False, seen=seen)
+
+
 def resolve_dspace7(cand: Candidate, env: DiscoverEnv) -> list[Candidate]:
     """The item's PDFs in its ORIGINAL bundle. An answer without a bundle list is a failure (``[]``);
     an item whose bundles hold no PDF is :class:`NoDocuments`."""
@@ -1237,6 +1305,7 @@ _API: dict[str, Discoverer] = {
     "govuk-search": govuk_search,
     "dspace7": dspace7,
     "wbdg": wbdg,
+    "etsi": etsi,
     "tnm": tnm,
     "openstax": openstax,
 }
