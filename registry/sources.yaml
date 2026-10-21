@@ -4639,3 +4639,30 @@ sources:
     update: {cadence: P6M, strategy: snapshot-retention}
     size: {bytes: 6.0e10, measured: false, as_of: '2026-10-21'}
     notes: "NASA's reports on machine elements, bearings and lubrication, fasteners, gears, metals and alloys, composites, ceramics and polymers, heat transfer and fluid flow (about 21,600 records in these categories; public ones with a PDF are kept). index: false at first given the size."
+
+  - id: mit-ocw-engineering
+    name: MIT OpenCourseWare, mechanical, materials and aeronautical engineering, microfabrication and semiconductor processing
+    publisher: Massachusetts Institute of Technology
+    domain: [education, engineering, textbooks, science]
+    tier: T1
+    status: candidate
+    license: CC-BY-NC-SA-4.0
+    legal_basis: open-license
+    access:
+      adapter: doc-collection
+      issuer: MIT OpenCourseWare
+      key_prefix: ocw
+      origins: [ocw.mit.edu]
+      # Each course as MIT offers it for download (its whole site, offline); read by the ocw-course reader:
+      # the course description, every page and every PDF (lecture notes, problem sets, transcripts).
+      reader: ocw-course
+      discovery:
+        - kind: sitemap
+          url: "https://ocw.mit.edu/sitemap.xml"
+          match: "/courses/(?:2-|3-|16-|6-152j-|6-774-|6-780-|6-012-|10-490-)[^/]+/sitemap\\.xml$"
+          rewrite: ["/sitemap\\.xml$", "/download/"]
+          detail_documents: "/courses/[^/]+/[^/]+\\.zip$"
+      filter: {allow_all: true}
+    update: {cadence: P1Y, strategy: snapshot-retention}
+    size: {bytes: 8.0e9, measured: false, as_of: '2026-10-21'}
+    notes: "About 225 courses: Course 2 (mechanical: design and manufacturing, machine elements, thermofluids, controls), Course 3 (materials: solid-state chemistry, metallurgy, processing, failure, electronic materials), Course 16 (aero/astro structures and propulsion), and microfabrication and semiconductor manufacturing (6.152J, 6.774, 6.780, 6.012), the library's lithography and cleanroom process material. CC BY-NC-SA 4.0 (owner: non-commercial licences are fine)."

@@ -336,3 +336,85 @@ def test_a_repositorys_markdown_docs_are_its_pages() -> None:
     assert "Note:" in lora.text
     assert "meshtastic --set lora.region US" in lora.text
     assert docs["README"].title == "Meshtastic docs"
+
+
+def test_an_ocw_course_is_its_description_pages_and_pdfs(tmp_path: Path) -> None:
+    from adapters_testkit import pages_pdf
+
+    from wsp_adapters.doccollection.structured import ocw_course
+
+    path = tmp_path / "3.091-fall-2018.zip"
+    site = "courses/3-091-introduction-to-solid-state-chemistry-fall-2018"
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr(
+            "data.json",
+            json.dumps(
+                {
+                    "course_title": "Introduction to Solid-State Chemistry",
+                    "primary_course_number": "3.091",
+                    "term": "Fall",
+                    "year": "2018",
+                    "site_url_path": site,
+                    "course_description_html": "<p>What makes things in the world the way they are.</p>",
+                }
+            ),
+        )
+        zf.writestr(
+            "pages/syllabus/data.json",
+            json.dumps(
+                {"title": "Syllabus", "content": "<p>Weekly problem sets and three exams make the grade.</p>"}
+            ),
+        )
+        # A resource whose file name carries the hash prefix, and one whose file does not.
+        zf.writestr(
+            "resources/mit3_091f18_rec11/data.json",
+            json.dumps(
+                {
+                    "title": "Recitation 11",
+                    "file": f"/{site}/0b96d759a9e98ced8c3611f19dc742d0_MIT3_091F18_rec11.pdf",
+                }
+            ),
+        )
+        zf.writestr(
+            "static_resources/0b96d759a9e98ced8c3611f19dc742d0_MIT3_091F18_rec11.pdf",
+            pages_pdf(["Ionic bonding and lattice energy in detail"]),
+        )
+        zf.writestr(
+            "resources/hal1q8f7m_o_transcript/data.json",
+            json.dumps(
+                {
+                    "title": "Lecture 2: The Periodic Table transcript",
+                    "file": f"/{site}/HaL1Q8f7M_o_transcript.pdf",
+                }
+            ),
+        )
+        zf.writestr(
+            "static_resources/HaL1Q8f7M_o_transcript.pdf",
+            pages_pdf(["The periodic table is organised by electron shells"]),
+        )
+        zf.writestr(
+            "resources/lecture-9/data.json",
+            json.dumps(
+                {
+                    "title": "Lecture 9",
+                    "resourcetype": "Video",
+                    "content": "<p>A video not in the zip at all, only described.</p>",
+                }
+            ),
+        )
+        zf.writestr(
+            "resources/draft/data.json", json.dumps({"title": "Draft", "draft": "True", "content": "x" * 50})
+        )
+    with zipfile.ZipFile(path) as zf:
+        docs = {d.key: d for d in ocw_course(zf)}
+    assert sorted(docs) == [
+        "course",
+        "pages/syllabus",
+        "resources/hal1q8f7m_o_transcript",
+        "resources/mit3_091f18_rec11",
+    ]
+    assert docs["course"].title == "3.091 Introduction to Solid-State Chemistry (Fall 2018)"
+    assert docs["pages/syllabus"].title.endswith(": Syllabus")
+    assert "lattice energy" in docs["resources/mit3_091f18_rec11"].text
+    assert "electron shells" in docs["resources/hal1q8f7m_o_transcript"].text
+    assert docs["pages/syllabus"].url == f"https://ocw.mit.edu/{site}/pages/syllabus/"

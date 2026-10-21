@@ -573,7 +573,83 @@ def markdown_docs(archive: zipfile.ZipFile) -> Iterator[TeiDoc]:
         yield TeiDoc(key=key.rsplit(".", 1)[0], title=title, text=text)
 
 
-ARCHIVE_READERS = {"standard-ebooks": se_book, "markdown-docs": markdown_docs}
+OCW_PDF_PAGES = 400  # a long reader is still read whole; a scanned book of 1,000 pages is cut
+OCW_TEXT_CHARS = 2_000_000
+
+
+def _ocw_json(archive: zipfile.ZipFile, name: str) -> dict[str, Any]:
+    try:
+        data: object = json.loads(archive.read(name))
+    except (KeyError, ValueError):
+        return {}
+    return cast(dict[str, Any], data) if isinstance(data, dict) else {}
+
+
+def _pdf_bytes_text(data: bytes, max_pages: int) -> str:
+    import pypdfium2  # imported on use: only courses with PDFs need it
+
+    try:
+        pdf = pypdfium2.PdfDocument(data)
+    except pypdfium2.PdfiumError:
+        return ""
+    try:
+        out: list[str] = []
+        for i in range(min(len(pdf), max_pages)):
+            try:
+                page = pdf[i]
+                out.append(page.get_textpage().get_text_range())
+            except pypdfium2.PdfiumError:
+                out.append(f"[Page {i + 1} of this PDF could not be read.]")
+        return "\n\n".join(out)
+    finally:
+        pdf.close()
+
+
+def ocw_course(archive: zipfile.ZipFile) -> Iterator[TeiDoc]:
+    """An MIT OpenCourseWare course as it is offered for download (the course site, offline): the
+    course's description, each page (syllabus, readings, lecture notes …) and each PDF it publishes
+    (lecture notes, problem sets, transcripts), one document each, titled from the course's own
+    ``data.json`` files. Videos and captions are left out (the videos are not in the zip)."""
+    names = set(archive.namelist())
+    course = _ocw_json(archive, "data.json")
+    title = " ".join(str(course.get("course_title") or "").split())
+    number = str(course.get("primary_course_number") or "")
+    term = " ".join(p for p in (str(course.get("term") or ""), str(course.get("year") or "")) if p)
+    label = " ".join(p for p in (number, title) if p) + (f" ({term})" if term else "")
+    if not label:
+        return
+    url = f"https://ocw.mit.edu/{course.get('site_url_path', '')}".rstrip("/")
+    about = html_to_text(str(course.get("course_description_html") or course.get("course_description") or ""))
+    if about:
+        yield TeiDoc(key="course", title=label, text=about, url=url)
+    # static_resources/<32 hex>_<name> or static_resources/<name>
+    by_base = {
+        re.sub(r"^[0-9a-f]{32}_", "", n.rsplit("/", 1)[-1]).lower(): n
+        for n in names
+        if n.startswith("static_resources/")
+    }
+    for name in sorted(n for n in names if n.endswith("/data.json") and n.count("/") >= 2):
+        folder = name.rsplit("/", 1)[0]
+        data = _ocw_json(archive, name)
+        page_title = " ".join(str(data.get("title") or "").split())
+        if not page_title or str(data.get("draft")) == "True":
+            continue
+        text = html_to_text(str(data.get("content") or ""))
+        file = str(data.get("file") or "")
+        if file.lower().endswith(".pdf"):
+            member = by_base.get(re.sub(r"^[0-9a-f]{32}_", "", file.rsplit("/", 1)[-1]).lower())
+            if member is not None:
+                body = _pdf_bytes_text(archive.read(member), OCW_PDF_PAGES)
+                text = f"{text}\n\n{body}".strip() if text else body
+        elif str(data.get("resourcetype")) == "Video" or "captions" in folder or file:
+            continue  # a video's page, its caption file, an image: nothing to read here
+        text = text[:OCW_TEXT_CHARS].strip()
+        if len(text) < 40:
+            continue
+        yield TeiDoc(key=folder, title=f"{label}: {page_title}", text=text, url=f"{url}/{folder}/")
+
+
+ARCHIVE_READERS = {"standard-ebooks": se_book, "markdown-docs": markdown_docs, "ocw-course": ocw_course}
 
 READERS = {
     "mitre": (_mitre_member, mitre),

@@ -65,7 +65,7 @@
           "items": {
             "type": "object",
             "required": ["kind"],
-            "properties": {"kind": {"enum": ["index-page", "api", "oai-pmh", "archive-org", "s3-listing", "git", "list", "document", "latest-dated", "csv"]}}
+            "properties": {"kind": {"enum": ["index-page", "api", "oai-pmh", "archive-org", "s3-listing", "git", "list", "document", "latest-dated", "csv", "sitemap"]}}
           }
         },
         "filter": {
@@ -93,7 +93,7 @@
         "endpoints": {"type": "array"},
         "oai_endpoint": {"type": "string"},
         "decode_url_keys": {"type": "boolean", "description": "decode %XX escapes before a URL becomes a document key; changes keys, so only for sources with no stored documents"},
-        "reader": {"enum": ["tei-frus", "tei-cts", "rst-kernel", "mitre", "oscal-catalog", "medlineplus-topics", "standard-ebooks", "markdown-docs"], "description": "how a doc-collection's repository snapshot (git discovery with snapshot: true) becomes documents (wsp_adapters.doccollection.tei)"}
+        "reader": {"enum": ["tei-frus", "tei-cts", "rst-kernel", "mitre", "oscal-catalog", "medlineplus-topics", "standard-ebooks", "markdown-docs", "ocw-course"], "description": "how a doc-collection's repository snapshot (git discovery with snapshot: true) becomes documents (wsp_adapters.doccollection.tei)"}
       }
     }
   }
