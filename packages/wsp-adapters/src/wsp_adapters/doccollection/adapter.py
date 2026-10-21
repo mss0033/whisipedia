@@ -249,7 +249,7 @@ class DocCollectionAdapter:
     def env(self, ctx: Ctx, *, max_pages: int | None = None, partition: str | None = None) -> DiscoverEnv:
         cfg = self.config(ctx.source)
         fetcher = (
-            Throttle(ctx.fetcher, interval=cfg.interval, per_host=cfg.per_host)
+            Throttle(ctx.fetcher, interval=cfg.interval, per_host=cfg.per_host, robots=ctx.user_agent)
             if self.throttle
             else ctx.fetcher
         )
@@ -441,7 +441,7 @@ class DocCollectionAdapter:
     def fetch(self, ctx: Ctx, plan: FetchPlan) -> Iterable[FetchResult]:
         cfg = self.config(ctx.source)
         fetcher = (
-            Throttle(ctx.fetcher, interval=cfg.interval, per_host=cfg.per_host)
+            Throttle(ctx.fetcher, interval=cfg.interval, per_host=cfg.per_host, robots=ctx.user_agent)
             if self.throttle
             else ctx.fetcher
         )

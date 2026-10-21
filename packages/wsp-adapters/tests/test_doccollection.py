@@ -366,6 +366,41 @@ def test_throttle_spaces_requests_per_host() -> None:
     assert t.requests == {"a.gov": 2, "b.gov": 1}
 
 
+def test_throttle_keeps_each_hosts_robots_txt() -> None:
+    """Crawl-delay and Disallow, read once per host (2026-10-21: four crawl delays had been missed,
+    and armypubs.army.mil, behind a byte-order mark, and download.geonames.org disallow everything)."""
+    from wsp_adapters.doccollection.discovery import RobotsDisallowedError
+
+    now = [0.0]
+    slept: list[float] = []
+
+    def sleep(s: float) -> None:
+        slept.append(s)
+        now[0] += s
+
+    routes = {
+        "https://slow.gov/robots.txt": b"User-agent: *\nCrawl-delay: 10\nDisallow: /private/\n",
+        "https://shut.mil/robots.txt": b"\xef\xbb\xbfUser-agent: *\nDisallow: /\n",
+        "https://slow.gov/a": b"a",
+        "https://slow.gov/b": b"b",
+        "https://slow.gov/private/c": b"c",
+        "https://open.gov/x": b"x",  # no robots.txt: no rules
+        "https://shut.mil/doc.pdf": b"%PDF",
+    }
+    inner = FakeFetcher(routes)
+    t = Throttle(inner, interval=1.0, clock=lambda: now[0], sleep=sleep, robots="Whisipedia/0.1")
+    assert t.get_bytes("https://slow.gov/a") == b"a"
+    assert t.get_bytes("https://slow.gov/b") == b"b"
+    assert slept == [10.0]
+    with pytest.raises(RobotsDisallowedError):
+        t.get_bytes("https://slow.gov/private/c")
+    with pytest.raises(RobotsDisallowedError):
+        t.get_bytes("https://shut.mil/doc.pdf")
+    assert t.get_bytes("https://open.gov/x") == b"x"
+    assert inner.requests.count("https://slow.gov/robots.txt") == 1
+    assert "https://shut.mil/doc.pdf" not in inner.requests
+
+
 def test_index_page_follow_never_opens_denied_series() -> None:
     index = b"""<html><body>
       <a href="/pubs/fm5-0.html">FM 5-0</a>

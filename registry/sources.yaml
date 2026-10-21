@@ -4071,7 +4071,7 @@ sources:
     publisher: GeoNames
     domain: [geography]
     tier: T1
-    status: candidate
+    status: paused  # download.geonames.org robots.txt "User-agent: * / Disallow: /" (found 2026-10-21); owner to decide
     license: CC-BY-4.0
     legal_basis: open-license
     index: false  # a data set: the Atlas reads places from OSM; GeoNames adds alternate names and codes

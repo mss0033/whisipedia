@@ -50,6 +50,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, cast
 from urllib.parse import quote, urlencode, urljoin, urlsplit
+from urllib.robotparser import RobotFileParser
 from xml.etree import ElementTree as ET
 
 from selectolax.lexbor import LexborHTMLParser, LexborNode
@@ -88,11 +89,20 @@ class NoDocuments(Exception):  # noqa: N818 - an answer, not a failure
 # --- politeness ----------------------------------------------------------------------------------
 
 
+class RobotsDisallowedError(FetchError):
+    """The host's robots.txt does not allow this URL for us."""
+
+
 class Throttle:
     """A ``Fetcher`` wrapper: at most one request per host every ``interval`` seconds.
 
     ``per_host`` overrides the interval (e.g. ``www.cia.gov: 10`` from its ``Crawl-delay``). Also
     counts requests per host, so a dry run can report what it cost upstream.
+
+    With ``robots`` (our user agent), each host's robots.txt is read once: a URL it disallows is a
+    :class:`RobotsDisallowedError`, and its ``Crawl-delay`` is the least interval for that host. Set by
+    hand per source, four crawl delays had been missed and two hosts disallowing every crawler were
+    being fetched (2026-10-21). A robots.txt that cannot be read sets no rules.
     """
 
     def __init__(
@@ -103,21 +113,49 @@ class Throttle:
         per_host: Mapping[str, float] | None = None,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
+        robots: str | None = None,
     ) -> None:
         self.inner = inner
         self.interval = interval
         self.per_host = {k.lower(): v for k, v in (per_host or {}).items()}
         self.clock = clock
         self.sleep = sleep
+        self.robots = robots
+        self._rules: dict[str, RobotFileParser | None] = {}  # "scheme://host" -> its robots.txt
         self._last: dict[str, float] = {}  # host -> start time of its latest (reserved) request
         self.requests: dict[str, int] = {}
         self._lock = threading.Lock()
+
+    def _robots(self, url: str) -> RobotFileParser | None:
+        parts = urlsplit(url)
+        site = f"{parts.scheme}://{parts.netloc.lower()}"
+        with self._lock:
+            if site in self._rules:
+                return self._rules[site]
+        rules: RobotFileParser | None = None
+        try:
+            body = self.inner.get_bytes(f"{site}/robots.txt", max_bytes=512 * 1024)
+        except (FetchError, OSError, ValueError):
+            body = None
+        if body is not None:
+            rules = RobotFileParser()
+            # A byte-order mark hides the first rule from the parser (armypubs.army.mil).
+            rules.parse(body.decode("utf-8", "replace").lstrip("\ufeff").splitlines())
+        with self._lock:
+            self._rules[site] = rules
+            self.requests[parts.netloc.lower()] = self.requests.get(parts.netloc.lower(), 0) + 1
+        return rules
 
     def _wait(self, url: str) -> None:
         """Reserve this host's next start slot, then sleep until it. Thread-safe: concurrent callers
         get consecutive slots, so requests may overlap but never *start* closer than the interval."""
         host = urlsplit(url).netloc.lower()
         gap = max(self.interval, self.per_host.get(host, 0.0))
+        if self.robots is not None and (rules := self._robots(url)) is not None:
+            if not rules.can_fetch(self.robots, url):
+                raise RobotsDisallowedError(f"{url}: disallowed by {host}/robots.txt")
+            delay = rules.crawl_delay(self.robots)
+            gap = max(gap, float(delay) if delay else 0.0)
         with self._lock:
             now = self.clock()
             last = self._last.get(host)
@@ -135,6 +173,9 @@ class Throttle:
             return
         host = urlsplit(url).netloc.lower()
         gap = max(self.interval, self.per_host.get(host, 0.0))
+        rules = self._rules.get(f"{urlsplit(url).scheme}://{host}")
+        if rules is not None and self.robots is not None and (delay := rules.crawl_delay(self.robots)):
+            gap = max(gap, float(delay))
         with self._lock:
             self._last[host] = max(self._last.get(host, self.clock()), self.clock()) + extra * gap
             self.requests[host] = self.requests.get(host, 0) + extra
