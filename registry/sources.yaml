@@ -4686,3 +4686,24 @@ sources:
     update: {cadence: P1Y, strategy: snapshot-retention}
     size: {bytes: 1.0e9, measured: false, as_of: '2026-10-21'}
     notes: "The 160 DOE standards and handbooks in force: chemical management (DOE-HDBK-1139), emergency exposure limits for chemicals, electrical safety, fire protection, natural phenomena hazards design, human performance, hoisting and rigging, explosives safety in storage and handling (facility safety, not manufacture). Each article page on energy.gov links its PDF."
+
+  - id: itu-recommendations
+    name: ITU-T and ITU-R Recommendations in force (English)
+    publisher: International Telecommunication Union
+    domain: [standards, communications, electronics, engineering]
+    tier: T1
+    status: candidate
+    license: LicenseRef-ITU-Free-Download-Personal-Use
+    legal_basis: bulk-access-terms
+    access:
+      adapter: doc-collection
+      issuer: International Telecommunication Union
+      key_prefix: itu
+      origins: [www.itu.int]
+      discovery:
+        - {kind: api, flavor: itu-recommendations, sector: R, series: [BO, BR, BS, BT, F, M, P, RA, RS, S, SA, SF, SM, SNG, TF, V]}
+        - {kind: api, flavor: itu-recommendations, sector: T, series: [A, B, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, X, Y, Z]}
+      filter: {allow_all: true, public_issuer: true}
+    update: {cadence: P6M, strategy: snapshot-retention}
+    size: {bytes: 1.0e10, measured: false, as_of: '2026-10-21'}
+    notes: "Radio propagation, spectrum and satellite (ITU-R P, M, S, F, SM, BS, BT), and telecom networks, transmission, codecs, protection and security (ITU-T G, H, K, Q, X, Y …): the in-force version of each, with its amendments and appendices. ITU offers them as free downloads; owner approved free-download standards for the private library (2026-10-21). robots.txt allows /rec/ and /dms_pubrec/."

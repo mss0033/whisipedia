@@ -875,6 +875,32 @@ def test_doe_technical_standards_come_from_the_table_in_the_page() -> None:
     assert pdf.url == "https://www.energy.gov/sites/default/files/2026-04/DOE-HDBK-1046-2016.pdf"
 
 
+def test_itu_recommendations_in_force_in_english() -> None:
+    series = b'<a href="./recommendation.asp?lang=en&amp;parent=R-REC-P.525"><strong>P.525</strong></a>'
+
+    def row(vid: str, label: str, status: str) -> str:
+        return (
+            f'<tr><td nowrap=""><a href="./recommendation.asp?lang=en&amp;parent={vid}">'
+            f"<strong>{label}</strong></a><br></td><td>Free-space attenuation \u2013 a note</td>"
+            f'<td nowrap="">{status}<br></td><td>N/A</td></tr>'
+        )
+
+    rec = (
+        row("R-REC-P.525-5-202411-I", "P.525-5 (11/2024)", "In force")
+        + row("R-REC-P.525-4-201908-S", "P.525-4 (08/2019)", "Superseded")
+    ).encode("cp1252")
+    env = env_for(
+        {"https://www.itu.int/rec/R-REC-P/en": series, "https://www.itu.int/rec/R-REC-P.525/en": rec},
+        origins=("www.itu.int",),
+    )
+    (cand,) = list(
+        discover_all([{"kind": "api", "flavor": "itu-recommendations", "sector": "R", "series": ["P"]}], env)
+    )
+    assert cand.url == "https://www.itu.int/dms_pubrec/itu-r/rec/p/R-REC-P.525-5-202411-I!!PDF-E.pdf"
+    assert cand.title == "ITU-R P.525-5 (11/2024): Free-space attenuation \u2013 a note"  # cp1252 0x96
+    assert cand.edition_date == "2024-11"
+
+
 def test_openstax_lists_each_live_book_with_its_pdf() -> None:
     def book(slug: str, state: str, pdf: str) -> dict[str, object]:
         return {

@@ -1280,6 +1280,59 @@ def doe_technical_standards(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterato
     env.listing_end("doe-technical-standards", stopped=False, seen=seen)
 
 
+_ITU_REC = re.compile(r'parent=(?P<id>[TR]-REC-[A-Z]+\.[0-9A-Za-z.]+)"')
+_ITU_ROW = re.compile(
+    r'parent=(?P<id>[TR]-REC-[^"&]+)"[^<]*<strong>(?P<label>[^<]+)</strong>.*?</td>\s*<td[^>]*>(?P<title>.*?)</td>'
+    r"\s*<td[^>]*>\s*(?P<status>[A-Za-z ]+)",
+    re.S,
+)
+
+
+def itu_recommendations(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
+    """ITU-T or ITU-R Recommendations in force (``sector``: ``T`` or ``R``; ``series``: the letters):
+    each series page lists its Recommendations, each Recommendation's page its versions with their
+    status; every version (and amendment, appendix) "In force" is a document, in English."""
+    sector = _s(cfg.get("sector")).upper() or "T"
+    seen = 0
+
+    def text(url: str) -> str:  # ITU's pages are Windows-1252
+        return html_unescape(env.fetcher.get_bytes(url).decode("cp1252", "replace"))
+
+    for letter in _strs(cfg.get("series")):
+        series = text(f"https://www.itu.int/rec/{sector}-REC-{letter}/en")
+        for rec in dict.fromkeys(m.group("id") for m in _ITU_REC.finditer(series)):
+            page = text(f"https://www.itu.int/rec/{rec}/en")
+            for row in _ITU_ROW.finditer(page):
+                if not row.group("status").strip().lower().startswith("in force"):
+                    continue
+                vid = row.group("id")
+                if sector == "R":
+                    url = f"https://www.itu.int/dms_pubrec/itu-r/rec/{letter.lower()}/{vid}!!PDF-E.pdf"
+                else:
+                    url = f"https://www.itu.int/rec/dologin_pub.asp?lang=e&id={vid}!!PDF-E&type=items"
+                label = " ".join(row.group("label").split())
+                title = " ".join(re.sub(r"<[^>]+>", " ", row.group("title")).split()).split(" Note - ")[0]
+                seen += 1
+                yield Candidate(
+                    key=make_key(env.prefix, vid.replace("!", "-")),
+                    url=url,
+                    title=f"ITU-{sector} {label}: {title}" if title else f"ITU-{sector} {label}",
+                    issuer=env.issuer,
+                    pub_number=f"ITU-{sector} {label}",
+                    edition_date=_itu_date(vid),
+                    landing_url=f"https://www.itu.int/rec/{rec}/en",
+                    discovered_by=f"itu:{sector}-{letter}",
+                    extra={"suffix": ".pdf"},
+                )
+    env.listing_end(f"itu-{sector}", stopped=False, seen=seen)
+
+
+def _itu_date(vid: str) -> str:
+    """``T-REC-G.711-198811-I``: November 1988."""
+    m = re.search(r"-(\d{4})(\d{2})-[A-Z]", vid)
+    return f"{m.group(1)}-{m.group(2)}" if m else ""
+
+
 def resolve_dspace7(cand: Candidate, env: DiscoverEnv) -> list[Candidate]:
     """The item's PDFs in its ORIGINAL bundle. An answer without a bundle list is a failure (``[]``);
     an item whose bundles hold no PDF is :class:`NoDocuments`."""
@@ -1381,6 +1434,7 @@ _API: dict[str, Discoverer] = {
     "wbdg": wbdg,
     "etsi": etsi,
     "doe-technical-standards": doe_technical_standards,
+    "itu-recommendations": itu_recommendations,
     "tnm": tnm,
     "openstax": openstax,
 }
