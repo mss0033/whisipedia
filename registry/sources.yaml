@@ -4552,7 +4552,7 @@ sources:
     publisher: National Institute of Building Sciences for DoD and other federal agencies
     domain: [engineering, standards, defense, preparedness]
     tier: T1
-    status: candidate
+    status: paused  # the files bucket (nibs-s3-wbdg3-production) has robots.txt "Disallow: /" though wbdg.org allows all (found 2026-10-21); owner to decide
     license: LicenseRef-US-Gov-PD
     legal_basis: public-domain
     access:
