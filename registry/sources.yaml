@@ -1622,11 +1622,28 @@ sources:
       adapter: doc-collection
       issuer: US Department of Energy
       key_prefix: doe-hdbk
-      origins: [www.osti.gov]
-      discovery: [{kind: api, flavor: osti, query: "", params: {title: "\"DOE fundamentals handbook\""}}]
+      origins: [www.osti.gov, www.energy.gov]
+      discovery:
+        # The volumes OSTI has no full text for (its records carry no "fulltext" link and the purl is a
+        # 404, 2026-10-20); DOE republished every handbook on energy.gov in April 2026.
+        - kind: list
+          items:
+            - {pub_number: "DOE-HDBK-1010-92", title: "DOE Fundamentals Handbook: Classical Physics", url: "https://www.energy.gov/sites/default/files/2026-04/DOE-HDBK-1010-92.pdf"}
+            - {pub_number: "DOE-HDBK-1012/1-92", title: "DOE Fundamentals Handbook: Thermodynamics, Heat Transfer, and Fluid Flow, Volume 1", url: "https://www.energy.gov/sites/default/files/2026-04/DOE-HDBK-1012-92_VOL1.pdf"}
+            - {pub_number: "DOE-HDBK-1012/2-92", title: "DOE Fundamentals Handbook: Thermodynamics, Heat Transfer, and Fluid Flow, Volume 2", url: "https://www.energy.gov/sites/default/files/2026-04/DOE-HDBK-1012-92_VOL2.pdf"}
+            - {pub_number: "DOE-HDBK-1012/3-92", title: "DOE Fundamentals Handbook: Thermodynamics, Heat Transfer, and Fluid Flow, Volume 3", url: "https://www.energy.gov/sites/default/files/2026-04/DOE-HDBK-1012-92_VOL3.pdf"}
+            - {pub_number: "DOE-HDBK-1013/2-92", title: "DOE Fundamentals Handbook: Instrumentation and Control, Volume 2", url: "https://www.energy.gov/sites/default/files/2026-04/DOE-HDBK-1013-92-VOL2.pdf"}
+            - {pub_number: "DOE-HDBK-1014/1-92", title: "DOE Fundamentals Handbook: Mathematics, Volume 1", url: "https://www.energy.gov/sites/default/files/2026-04/DOE-HDBK-1014-92_VOL1.pdf"}
+            - {pub_number: "DOE-HDBK-1015/1-93", title: "DOE Fundamentals Handbook: Chemistry, Volume 1", url: "https://www.energy.gov/sites/default/files/2026-04/DOE-HDBK-1015-93_VOL1.pdf"}
+            - {pub_number: "DOE-HDBK-1015/2-93", title: "DOE Fundamentals Handbook: Chemistry, Volume 2", url: "https://www.energy.gov/sites/default/files/2026-04/DOE-HDBK-1015-93_VOL2.pdf"}
+            - {pub_number: "DOE-HDBK-1016/1-93", title: "DOE Fundamentals Handbook: Engineering Symbology, Prints, and Drawings, Volume 1", url: "https://www.energy.gov/sites/default/files/2026-04/DOE-HDBK-1016-93_VOL1.pdf"}
+            - {pub_number: "DOE-HDBK-1016/2-93", title: "DOE Fundamentals Handbook: Engineering Symbology, Prints, and Drawings, Volume 2", url: "https://www.energy.gov/sites/default/files/2026-04/DOE-HDBK-1016-93_VOL2.pdf"}
+            - {pub_number: "DOE-HDBK-1017/2-93", title: "DOE Fundamentals Handbook: Material Science, Volume 2", url: "https://www.energy.gov/sites/default/files/2026-04/DOE-HDBK-1017-93_VOL2.pdf"}
+        - {kind: api, flavor: osti, query: "", params: {title: "\"DOE fundamentals handbook\""}}
       filter: {allow_series_prefix: ["DOE-HDBK-101"], builtin_review: false, default: allow, distribution: {require: [public-release, published]}}
       mirrors:
         - {channel: "OSTI.GOV records API + purl full text (official DOE)", status: verified, verified: 2026-10-10, note: "the old standards.doe.gov URLs redirect to energy.gov pages that now 404; OSTI holds the handbooks"}
+        - {channel: "energy.gov /ehss/articles/doe-hdbk-* pages (official DOE)", status: verified, verified: 2026-10-20, note: "each article links its PDF under /sites/default/files/2026-04/; used for the eleven volumes OSTI has no full text for"}
     update: {cadence: P1Y, strategy: snapshot-retention}
     size: {bytes: 0.3e9, measured: false, as_of: 2026-10-10}
     scores: {authority: 5, density: 4, uniqueness: 4, license: 5, bulk: 3, health: 3, longevity: 5, cost: 5}

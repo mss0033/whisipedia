@@ -760,6 +760,34 @@ def test_a_published_csv_lists_documents_newest_html_first() -> None:
     assert got[0].title == "The Motion to Recommit in the House"
 
 
+def test_osti_records_without_full_text_are_skipped_in_json_and_xml() -> None:
+    def link(oid: str, *rels: str) -> list[dict[str, str]]:
+        return [{"rel": r, "href": f"https://www.osti.gov/{r}/{oid}"} for r in rels]
+
+    api = "https://www.osti.gov/api/v1/records?"
+    page1 = json.dumps(
+        [
+            {"osti_id": "1", "title": "Has text", "links": link("1", "citation", "fulltext")},
+            {"osti_id": "2", "title": "Citation only", "links": link("2", "citation")},
+            {"osti_id": "3", "title": "No links listed"},
+        ]
+    ).encode()
+    xml = (
+        b'<?xml version="1.0"?><records>'
+        b'<record><osti_id>4</osti_id><title>X text</title><links><link rel="citation" href="c"/>'
+        b'<link rel="fulltext" href="f"/></links></record>'
+        b'<record><osti_id>5</osti_id><title>X citation only</title><links><link rel="citation" href="c"/>'
+        b"</links></record></records>"
+    )
+    for body, want in ((page1, ["t:OSTI-1", "t:OSTI-3"]), (xml, ["t:OSTI-4"])):
+        env = env_for(
+            {api + "rows=100&page=1&q=x": body, api + "rows=100&page=2&q=x": b"[]"}, origins=("www.osti.gov",)
+        )
+        got = list(discover_all([{"kind": "api", "flavor": "osti", "query": "x"}], env))
+        assert [c.key for c in got] == want
+        assert "osti: 1 record(s) without full text at OSTI were skipped" in env.notes
+
+
 def test_unknown_kinds_and_flavors_fail_loudly() -> None:
     with pytest.raises(DiscoveryError):
         list(discover_all([{"kind": "carrier-pigeon"}], env_for({})))

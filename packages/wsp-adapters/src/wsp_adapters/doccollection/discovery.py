@@ -811,6 +811,7 @@ def _osti_records(body: bytes) -> list[Json]:
         for rec in root.iter("record"):
             row: Json = {child.tag: (child.text or "").strip() for child in rec}
             row["subjects"] = [(s.text or "").strip() for s in rec.iter("subject") if (s.text or "").strip()]
+            row["links"] = [dict(link.attrib) for link in rec.iter("link")]
             out.append(row)
         return out
     data: object = json.loads(text or b"[]")
@@ -819,7 +820,7 @@ def _osti_records(body: bytes) -> list[Json]:
 
 def osti(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
     """OSTI.GOV records API (``query`` and optional ``params``); full text through the OSTI purl."""
-    page, pages, more = 1, 0, True
+    page, pages, more, no_text = 1, 0, True, 0
     while pages < env.pages():
         params: dict[str, Any] = {"rows": 100, "page": page}
         if _s(cfg.get("query")):
@@ -835,6 +836,14 @@ def osti(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
             oid = _s(r.get("osti_id"))
             if not oid:
                 continue
+            # Without a "fulltext" link the purl is a 404 every time (eleven DOE fundamentals handbook
+            # volumes, 2026-10-20).
+            links = cast(list[object], r.get("links")) if isinstance(r.get("links"), list) else []
+            if links and not any(
+                isinstance(x, dict) and cast(Json, x).get("rel") == "fulltext" for x in links
+            ):
+                no_text += 1
+                continue
             yield Candidate(
                 key=make_key(env.prefix, f"OSTI-{oid}"),
                 url=f"https://www.osti.gov/servlets/purl/{oid}",
@@ -848,6 +857,8 @@ def osti(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
                 discovered_by="api:osti",
             )
         page += 1
+    if no_text:
+        env.notes.append(f"osti: {no_text} record(s) without full text at OSTI were skipped")
     env.listing_end("osti", stopped=more, seen=0)
 
 
