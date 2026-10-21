@@ -1282,7 +1282,7 @@ sources:
     publisher: Department of the Army
     domain: [defense, doctrine]
     tier: T1
-    status: candidate
+    status: paused  # robots.txt "User-agent: * / Disallow: /" (found 2026-10-21); owner to decide
     license: LicenseRef-US-Gov-PD
     legal_basis: public-domain
     access:

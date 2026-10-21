@@ -143,6 +143,16 @@ def test_cmd_fetch_returns_the_outcome_code(
     assert "outcome: complete, with alerts (exit 7)" in out.getvalue()
     assert f"next: wsp ingest --source {SID} --version 2026-10-12" in out.getvalue()
     assert doccollections.cmd_fetch(_fetch_args(partition="ak"), io.StringIO()) == doccollections.EXIT_REFUSED
+    # A paused source is not fetched (army-pubs-public's robots.txt disallows every crawler, 2026-10-21).
+    import dataclasses
+
+    from wsp_core.model import SourceStatus
+
+    def paused(*a: object) -> list[SourceSpec]:
+        return [dataclasses.replace(spec(OBJECTS), status=SourceStatus.PAUSED)]
+
+    monkeypatch.setattr(bootstrap, "load_sources", paused)
+    assert doccollections.cmd_fetch(_fetch_args(), io.StringIO()) == doccollections.EXIT_REFUSED
 
 
 class _Paths:

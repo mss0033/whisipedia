@@ -1197,6 +1197,11 @@ def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
     if spec.status is SourceStatus.EXCLUDED or spec.raw.get("legal_basis") == "none":
         print(f"error: {spec.id} is excluded or has no legal basis", file=sys.stderr)
         return EXIT_REFUSED
+    if spec.status is SourceStatus.PAUSED:
+        # What is held stays served; nothing new is fetched until the owner says (army-pubs-public:
+        # its robots.txt disallows every crawler, 2026-10-21).
+        print(f"error: {spec.id} is paused (see its registry entry)", file=sys.stderr)
+        return EXIT_REFUSED
     if spec.partitioned and not args.partition and not args.dry_run:
         print(f"error: {spec.id} is fetched one partition per run: add --partition", file=sys.stderr)
         return EXIT_REFUSED
