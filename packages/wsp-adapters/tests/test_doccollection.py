@@ -843,6 +843,10 @@ def test_s3_listing_keeps_the_newest_of_a_dated_series() -> None:
     }
     (cand,) = list(discover_all([cfg], env))
     assert cand.url.endswith("planet-261019_0800.osm.pbf")
+    # The bucket lists but refuses reads; the same keys come from its CDN host (2026-10-21).
+    env = env_for({f"{BUCKET}/": s3_listing("planet/", days)}, origins=("bucket.example.gov",))
+    (cand,) = list(discover_all([{**cfg, "download_url": "https://planet.example.org/"}], env))
+    assert cand.url == "https://planet.example.org/planet/planet-261019_0800.osm.pbf"
 
 
 def test_one_partition_lists_one_state_prefix() -> None:

@@ -1367,6 +1367,9 @@ def s3_listing(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
 
 def _s3_candidates(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
     bucket = _s(cfg.get("bucket_url")).rstrip("/")
+    # Where the objects are read when that is not the bucket: OpenHistoricalMap's bucket still lists
+    # but answers 403 to reads; planet.openhistoricalmap.org serves the same keys (2026-10-21).
+    files = _s(cfg.get("download_url")).rstrip("/") or bucket
     prefix = _s(cfg.get("prefix"))
     if env.partition and cfg.get("partition_in_prefix"):
         prefix += env.partition.upper() + "/"  # list one state, not the whole bucket
@@ -1390,7 +1393,7 @@ def _s3_candidates(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candida
             part = m.group(1).lower() if part_rx and (m := part_rx.search(key)) else ""
             yield Candidate(
                 key=make_key(env.prefix, key.removeprefix(prefix)),
-                url=f"{bucket}/{quote(key)}",
+                url=f"{files}/{quote(key)}",
                 title=display_title(title_from_url(key)),
                 issuer=env.issuer,
                 edition_date=iso_date(key_stem_from_url(key)),

@@ -4156,9 +4156,10 @@ sources:
       adapter: doc-collection
       issuer: OpenHistoricalMap
       key_prefix: ohm
-      origins: [s3.amazonaws.com]
+      origins: [s3.amazonaws.com, planet.openhistoricalmap.org]
       discovery:
-        - {kind: s3-listing, bucket_url: "https://s3.amazonaws.com/planet.openhistoricalmap.org", prefix: "planet/", key_pattern: "\\.osm\\.pbf$", newest: 1}
+        # The bucket lists but answers 403 to reads since 2026-10-21: files come from the CDN host.
+        - {kind: s3-listing, bucket_url: "https://s3.amazonaws.com/planet.openhistoricalmap.org", download_url: "https://planet.openhistoricalmap.org", prefix: "planet/", key_pattern: "\\.osm\\.pbf$", newest: 1}
       filter: {allow_all: true, public_issuer: true, data_files: true}
     update: {cadence: P1M, strategy: snapshot-retention}
     size: {bytes: 8.0e8, measured: false, as_of: '2026-10-20'}
