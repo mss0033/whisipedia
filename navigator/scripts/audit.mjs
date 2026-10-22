@@ -671,13 +671,24 @@ async function audit(context, phoneContext, id) {
         await page.waitForTimeout(300);
         after = await page.evaluate(inspect);
       }
+      // What a failure needs to be told apart: the keys not arriving (focus, scale unchanged) or the
+      // scale changing and the measured text not following it.
+      const state = await page.evaluate(
+        () =>
+          `focus ${document.activeElement?.tagName ?? 'none'}, scale ${document.documentElement.style.getPropertyValue('--font-scale') || '1'}`,
+      );
       await page.keyboard.press('Control+0');
-      return { before, after: after.fontPx };
+      return { before, after: after.fontPx, state };
     };
     let size = await larger();
     if (size.after !== null && size.after <= size.before) size = await larger();
     if (size.after !== null && size.after <= size.before)
-      add(issues, 'use', 'larger-text-ignored', `${size.before}px stays ${size.after}px`);
+      add(
+        issues,
+        'use',
+        'larger-text-ignored',
+        `${size.before}px stays ${size.after}px (${size.state})`,
+      );
   }
   const findBlocked = await page.evaluate(() => {
     const e = new KeyboardEvent('keydown', {
