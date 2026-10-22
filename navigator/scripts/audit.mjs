@@ -167,7 +167,15 @@ const addressOf = (id) => {
 };
 
 /** The pages to audit for a source: its home page, then random ones (distinct). */
+// Given pages instead of samples (doc ids, comma-separated), for going over a finding again with
+// everything the audit does before its check: WSP_AUDIT_IDS=wsp:nga-nautical-pubs/... (with
+// WSP_AUDIT_SOURCE naming their sources).
+const IDS = (process.env.WSP_AUDIT_IDS ?? '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
 async function samplesOf(source) {
+  if (IDS.length) return IDS.filter((id) => id.startsWith(`wsp:${source.id}/`));
   const ids = [];
   if (source.home_doc_id) ids.push(source.home_doc_id);
   for (let i = 0; ids.length < SAMPLES && i < SAMPLES * RANDOM_TRIES; i++) {
@@ -308,7 +316,13 @@ function inspect() {
       href: a.getAttribute('href') ?? '',
       download: a.hasAttribute('download'),
     })),
-    frame: main?.querySelector('.original-frame')?.getAttribute('src') ?? null,
+    // Where the PDF opens: the frame once shown, else the link that opens it in a new window (the
+    // frame waits for the reader's click, 2026-10-22).
+    frame:
+      main?.querySelector('.original-frame')?.getAttribute('src') ??
+      main?.querySelector('.original-links a[target="_blank"]')?.getAttribute('href') ??
+      null,
+    showOriginal: !!main?.querySelector('button.original-show'),
     media:
       main?.querySelectorAll('.doc-body video, .doc-body audio, .doc-body iframe, .doc-body pre')
         .length ?? 0,
@@ -764,6 +778,22 @@ async function audit(context, phoneContext, id) {
       !seen.frame.includes('#page=')
     )
       add(issues, 'use', 'pdf-opens-at-page-1', doc.url_native);
+    // The viewer the reader asks for comes up, at the same page (after every keyboard check above:
+    // Chrome's PDF viewer may take the keyboard).
+    if (seen.showOriginal) {
+      await page
+        .locator('main button.original-show')
+        .click({ timeout: 10_000 })
+        .catch(() => undefined);
+      const shown = await page
+        .locator('main .original-frame')
+        .first()
+        .getAttribute('src', { timeout: 10_000 })
+        .catch(() => null);
+      if (!shown) add(issues, 'use', 'original-not-shown');
+      else if (seen.frame && shown !== seen.frame)
+        add(issues, 'use', 'original-shown-elsewhere', `${shown} (link: ${seen.frame})`);
+    }
   }
   // Dark theme: the document's own text follows it and stays legible.
   if (seen.hasText) {

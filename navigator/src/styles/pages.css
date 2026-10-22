@@ -747,6 +747,9 @@
   border: 2px inset var(--rule);
   background: #fff;
 }
+.original-frame-slot {
+  margin: 4px 0 2px;
+}
 .original-preview img {
   display: block;
   max-width: 100%;

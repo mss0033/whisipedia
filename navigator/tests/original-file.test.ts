@@ -19,8 +19,12 @@ describe('original file panel', () => {
       },
       base,
     )!;
+    // Not loaded with the page: Chrome's PDF viewer takes the keyboard from it (2026-10-22).
+    expect(el.querySelector('iframe')).toBeNull();
+    el.querySelector<HTMLButtonElement>('button.original-show')!.click();
     const frame = el.querySelector('iframe')!;
     expect(frame.getAttribute('src')).toBe('http://lib.test/v1/files/wsp%3Anoaa%2Fcp1');
+    expect(el.querySelector('button.original-show')).toBeNull();
     expect(frame.getAttribute('title')).toContain('Coast Pilot 1');
     expect(el.textContent).toContain('PDF document');
     expect(el.querySelector('a[download="CP1.pdf"]')).not.toBeNull();
@@ -43,6 +47,7 @@ describe('original file panel', () => {
       },
       base,
     )!;
+    el.querySelector<HTMLButtonElement>('button.original-show')!.click();
     expect(el.querySelector('iframe')!.getAttribute('src')).toBe(
       'http://lib.test/v1/files/liii#page=2370',
     );
@@ -135,6 +140,7 @@ describe('original file panel', () => {
         preview_url: '/v1/files/cp8/preview',
       },
     })!;
+    el.querySelector<HTMLButtonElement>('button.original-show')!.click();
     expect(el.querySelector('iframe')?.getAttribute('src')).toBe('/v1/files/cp8');
     expect(el.querySelector('img')).toBeNull();
   });

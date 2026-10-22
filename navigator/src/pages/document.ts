@@ -746,12 +746,20 @@ export function originalPanel(
       h('img', { src: urlOf(o.preview_url), alt: `Preview of ${doc.title}`, loading: 'lazy' }),
     );
   } else if (o.media_type === 'application/pdf') {
-    view = h('iframe', {
-      class: 'original-frame',
-      src: at,
-      title: `${doc.title} (${kind})`,
-      loading: 'lazy',
-    });
+    // Loaded when asked for, not with the page: Chrome's PDF viewer takes the keyboard when it opens
+    // some PDFs (NGA's Sailing Directions, 2026-10-22), and the page cannot take it back, so every
+    // shortcut (Back, larger text, the location bar) went dead until a click. A frame shown on the
+    // reader's word may have the keyboard. It also spares reading the whole file (13 MB for one
+    // chapter's page) from the library on every visit.
+    const frame = () =>
+      h('iframe', { class: 'original-frame', src: at, title: `${doc.title} (${kind})` });
+    const show = h(
+      'button',
+      { type: 'button', class: 'btn original-show' },
+      `Show the original ${kind} here`,
+    );
+    view = h('div', { class: 'original-frame-slot' }, show);
+    show.addEventListener('click', () => view?.replaceChildren(frame()));
   }
   // A text file is shown below as it is: no "cannot show" (every RFC said so, 2026-10-17 field exam).
   const text = o.media_type.startsWith('text/plain');
