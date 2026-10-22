@@ -330,6 +330,12 @@ function add(list, dim, code, detail = '') {
   list.push({ dim, code, detail: String(detail).replace(/\s+/g, ' ').trim().slice(0, 200) });
 }
 
+// What a failed fetch() met: Node's "fetch failed" keeps the socket's error in `cause`.
+const causeOf = (e) => {
+  const c = e?.cause;
+  return c ? `${c.code ?? c.name ?? ''} ${c.message ?? ''}`.trim() : String(e?.name ?? '');
+};
+
 // A GET as a browser makes it: once more after a reset. The server closes an idle keep-alive
 // connection after 5 s, and reusing it as it closes reads ECONNRESET; a browser retries such a GET by
 // itself (24 images on 2026-10-19, 2 CIA downloads reported as "timeout" on 2026-10-20). `status` is
@@ -360,18 +366,28 @@ async function audit(context, phoneContext, id) {
     // A 503 (an archive still opening, the storage slow for a moment) is retried as the reader
     // retries it, after its Retry-After; only a page that stays busy is reported.
     let r = null;
+    let resets = 0;
     for (let attempt = 0; attempt < 4; attempt++) {
-      r = await fetch(`${BASE}${docPath(id)}`, {
-        headers: HEADERS,
-        signal: AbortSignal.timeout(90_000),
-      });
+      try {
+        r = await fetch(`${BASE}${docPath(id)}`, {
+          headers: HEADERS,
+          signal: AbortSignal.timeout(90_000),
+        });
+      } catch (e) {
+        // A kept-alive connection the server closed as this reused it (it closes an idle one after
+        // 5 s): a browser sends such a GET again by itself, and so does this, once (2026-10-22:
+        // three "fetch failed" in 500 pages, the library up throughout).
+        if (resets++ === 0 && /ECONNRESET|UND_ERR_SOCKET|EPIPE|other side closed/.test(causeOf(e)))
+          continue;
+        throw e;
+      }
       if (r.status !== 503 || attempt === 3) break;
       await sleep(1000 * Math.min(30, Number(r.headers.get('retry-after')) || 5));
     }
     if (!r.ok) add(issues, 'reach', 'api-status', `${r.status}`);
     else doc = await r.json();
   } catch (e) {
-    add(issues, 'reach', 'api-timeout', e);
+    add(issues, 'reach', 'api-timeout', `${e} (${causeOf(e)})`);
   }
   const page = await context.newPage();
   const scriptErrors = [];
