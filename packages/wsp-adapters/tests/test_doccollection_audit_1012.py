@@ -388,6 +388,38 @@ def test_a_zip_bomb_member_holds_the_archive(tmp_path: Path) -> None:
     assert "ArchiveError" in got.decision.rule
 
 
+def _docx(text: str) -> bytes:
+    import io
+
+    w = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    body = "".join(f"<w:p><w:r><w:t>{t}</w:t></w:r></w:p>" for t in text.split("\n"))
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as d:
+        d.writestr("word/document.xml", f'<w:document xmlns:w="{w}"><w:body>{body}</w:body></w:document>')
+    return buf.getvalue()
+
+
+def test_a_zip_without_a_readme_is_screened_on_its_member_documents(tmp_path: Path) -> None:
+    # 3GPP publishes each specification as a zip holding one .docx: the names alone held all 3,498.
+    spec = tmp_path / "38300-ib0.zip"
+    with zipfile.ZipFile(spec, "w") as zf:
+        zf.writestr(
+            "38300-ib0.docx",
+            _docx(
+                "3GPP TS 38.300 V18.11.0\nNR and NG-RAN Overall Description\n"
+                + "The radio access network. " * 20
+            ),
+        )
+    assert screen_file(spec, Rules(allow_all=True)).decision.verdict is Verdict.ALLOW
+    # Nothing readable inside: the hold stands.
+    scans = tmp_path / "scans.zip"
+    with zipfile.ZipFile(scans, "w") as zf:
+        zf.writestr("page1.png", b"\x89PNG")
+    got = screen_file(scans, Rules(allow_all=True))
+    assert got.decision.verdict is Verdict.REVIEW
+    assert got.decision.rule == "text=no-text-layer"
+
+
 # --- CA-7 / CA-8 / CA-11 / CA-13: catalogs ---------------------------------------------------------------
 
 

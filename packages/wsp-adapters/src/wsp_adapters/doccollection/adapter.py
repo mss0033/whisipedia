@@ -1519,14 +1519,27 @@ def screen_zip(path: Path, rules: Rules, *, keys: Iterable[str] = ()) -> Screen:
     missing-evidence holds (no text, no printed release statement) are the archive's business, not
     each member's. A zip bomb holds the archive.
     """
-    archive = screen_text(front_matter(path), rules, keys=keys)
-    if archive.decision.verdict is Verdict.DENY or not archive.text_found:  # unreadable: the hold stands
+    own = front_matter(path)
+    archive = screen_text(own, rules, keys=keys)
+    if archive.decision.verdict is Verdict.DENY:
+        return archive
+    if not archive.text_found and own.problem != "no-text-layer":  # unreadable: the hold stands
         return archive
     try:
         members = zip_member_texts(path)
     except (ArchiveError, zipfile.BadZipFile, OSError) as exc:
         held = Decision(Verdict.REVIEW, f"text=extraction-error:{type(exc).__name__}", Stage.CONTENT)
         return Screen(held, archive.marking, archive.text_found)
+    if not archive.text_found:
+        # An archive with no README is only its member names: too few words to screen. Its member
+        # documents are its front matter then (3GPP's one-.docx zips were all held, 2026-10-21); with
+        # none readable, the hold stands.
+        readable = [got.text for _, got in members if not got.problem]
+        if not readable:
+            return archive
+        archive = screen_text(checked_front_matter("\n\n".join([own.text, *readable])), rules, keys=keys)
+        if archive.decision.verdict is Verdict.DENY:
+            return archive
     review: Screen | None = None
     for name, got in members:
         member = screen_text(got, rules, keys=keys)
