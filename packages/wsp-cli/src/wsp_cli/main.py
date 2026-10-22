@@ -356,6 +356,12 @@ def build_parser(argv: Sequence[str] | None = None) -> argparse.ArgumentParser:
         "--allow-mirror", action="store_true", help="with --source gutenberg: ingest the rsync tree"
     )
     s.add_argument("--settle-seconds", type=float, default=120.0, help="ignore files modified more recently")
+    s.add_argument(
+        "--max-seconds",
+        type=float,
+        default=None,
+        help="stop after the current file once this long has passed, so other ingests can run (exit 3)",
+    )
     s.add_argument("--json", action="store_true")
 
     qu = add("quality", _usage, "Search quality: the gold queries through the running library.")

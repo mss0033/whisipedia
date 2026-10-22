@@ -339,6 +339,17 @@ def test_a_host_that_answered_is_never_skipped() -> None:
     assert hosts.down("https://b.example/y") is None
 
 
+def test_an_ingest_out_of_time_yields_and_the_next_run_goes_on(vault: FileVault, tmp_path: Path) -> None:
+    fetch(vault, tmp_path, OBJECTS, "2026-10-12")
+    out = io.StringIO()
+    report = Ingestor(vault, [spec(OBJECTS)], out=out, max_seconds=0).run(source_id=SID, version="2026-10-12")
+    # 22,000 CRS reports held the ingest lock for hours (2026-10-21): an ingest gives it up in time.
+    assert [v.status for v in report.versions] == [VersionStatus.YIELDED]
+    assert "yielded after 0 s" in out.getvalue()
+    assert vault.current_set_ids(SID) == []
+    assert ingest(vault, "2026-10-12") == [("2026-10-12", VersionStatus.INGESTED, True)]
+
+
 # --- M3: natural order in `wsp ingest` --------------------------------------------------------------------
 
 

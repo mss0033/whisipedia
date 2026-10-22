@@ -107,6 +107,7 @@ class VersionStatus(StrEnum):
     INCOMPLETE = "incomplete"
     FAILED = "failed"
     SKIPPED = "skipped"
+    YIELDED = "yielded"  # stopped after max_seconds to let other ingests run; the next run goes on
 
 
 @dataclass(frozen=True, slots=True)
@@ -272,6 +273,7 @@ class Ingestor:
         user_agent: str = "Whisipedia ingest",
         arxiv_state_dir: Path | None = None,
         hash_workers: int = 4,
+        max_seconds: float | None = None,
     ) -> None:
         self.vault = vault
         self.specs = {s.id: s for s in specs}
@@ -284,6 +286,11 @@ class Ingestor:
         self.incoming = vault.root / "_incoming"
         self.arxiv_state_dir = arxiv_state_dir if arxiv_state_dir is not None else default_arxiv_state_dir()
         self.hash_workers = hash_workers
+        # One ingest holds the machine's ingest lock: a version of 22,000 files held it for hours while
+        # every lane's ingest waited (2026-10-21). With max_seconds an ingest stops after the file in
+        # hand once that long has passed (adoption resumes; the seal comes when all are in).
+        self.max_seconds = max_seconds
+        self._started = time.monotonic()
 
     def _say(self, text: str) -> None:
         if self.out is not None:
@@ -463,6 +470,8 @@ class Ingestor:
         report.dry_run = dry_run
         changed = False
         for vp in report.versions:
+            if any(v.status is VersionStatus.YIELDED for v in report.versions):
+                break  # out of time: the rest waits for the next run
             if vp.status is VersionStatus.READY:
                 if isinstance(vp, ArxivSnapshotPlan):
                     if not dry_run:
@@ -482,6 +491,10 @@ class Ingestor:
         try:
             self.vault.stage(sid, gid)
             for f in vp.files:
+                if self.max_seconds is not None and time.monotonic() - self._started > self.max_seconds:
+                    vp.status, vp.reason = VersionStatus.YIELDED, f"stopped after {self.max_seconds:.0f} s"
+                    self._say(f"  yielded after {self.max_seconds:.0f} s; run again to continue")
+                    return False
                 started = time.monotonic()
                 # A verified file replaces a different one staged by an interrupted ingest of the same
                 # version (re-fetched since: the plan is the newer truth, H2); unverifiable ones never.

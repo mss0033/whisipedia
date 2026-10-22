@@ -100,7 +100,8 @@ def test_complete_fetch_and_ingest_of_this_cycle_is_done(lane: Lane) -> None:
     cyc = lane.cycle("neets")
     assert lane.calls() == [
         f"collections fetch --source neets --version {cyc}",
-        f"ingest --source neets --version {cyc}",  # this cycle only, never the whole source
+        # this cycle only, never the whole source
+        f"ingest --max-seconds 3600 --source neets --version {cyc}",
     ]
     lane.script(fetch=[], ingest=[])
     assert lane.run("neets") == 0  # done items are skipped
@@ -133,9 +134,9 @@ def test_a_partial_fetch_is_ingested_then_fetched_again_in_a_new_cycle(lane: Lan
     first = lane.calls()[0].split("--version ")[1]
     assert lane.calls() == [
         f"collections fetch --source cia-reading-room --partition b0001 --version {first}",
-        f"ingest --source cia-reading-room --partition b0001 --version {first}",
+        f"ingest --max-seconds 3600 --source cia-reading-room --partition b0001 --version {first}",
         f"collections fetch --source cia-reading-room --partition b0001 --version {first}r2",
-        f"ingest --source cia-reading-room --partition b0001 --version {first}r2",
+        f"ingest --max-seconds 3600 --source cia-reading-room --partition b0001 --version {first}r2",
     ]
     assert lane.done() == ["b0001"]
     assert lane.cycle("b0001") == f"{first}r2"
@@ -161,7 +162,10 @@ def test_an_earlier_fetch_awaiting_ingest_is_ingested_by_name_first(lane: Lane) 
     lane.script(fetch=[f"5:{waiting}", 0], ingest=[0, 0])
     assert lane.run("b0001", source="cia-reading-room") == 0
     calls = lane.calls()
-    assert calls[1] == "ingest --source cia-reading-room --partition b0001 --version 2026-10-01"
+    assert (
+        calls[1]
+        == "ingest --max-seconds 3600 --source cia-reading-room --partition b0001 --version 2026-10-01"
+    )
     assert calls[2].startswith("collections fetch --source cia-reading-room --partition b0001")
     assert lane.done() == ["b0001"]
 

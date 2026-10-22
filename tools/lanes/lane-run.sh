@@ -52,6 +52,9 @@ PARTIAL_WAIT=${LANE_PARTIAL_WAIT:-900}
 # a USGS topo ingest, leaving a one-shot lane's fetched cycle unsealed (lane-doe, 2026-10-21).
 BUSY_TRIES=${LANE_BUSY_TRIES:-1440}
 BUSY_WAIT=${LANE_BUSY_WAIT:-60}
+# An ingest gives the lock up after this long (exit 3, like a held lock) and is asked again after
+# BUSY_WAIT, so one large version does not keep every other lane's ingest waiting for hours.
+INGEST_SLICE=${LANE_INGEST_SLICE:-3600}
 mkdir -p "$STATE/locks"
 DONE=$STATE/$NAME.done CYCLES=$STATE/$NAME.cycles FETCHED=$STATE/$NAME.fetched LOG=$STATE/$NAME.log
 touch "$DONE" "$CYCLES" "$FETCHED"
@@ -130,7 +133,7 @@ ingest_cycle() {
   ingest_from=$(wc -c < "$out" 2>/dev/null || echo 0)
   while :; do
     # shellcheck disable=SC2086  # $part is "--partition X" or empty, split on purpose
-    run "$out" "$WSP" ingest --source "$src" $part --version "$cyc"
+    run "$out" "$WSP" ingest --max-seconds "$INGEST_SLICE" --source "$src" $part --version "$cyc"
     irc=$?
     [ "$irc" -ne 3 ] && break
     tries=$((tries + 1))
@@ -208,7 +211,7 @@ for item in "$@"; do
         for v in $waiting; do
           [ -n "$part" ] && v=${v%".$item"}
           # shellcheck disable=SC2086
-          run "$out" "$WSP" ingest --source "$src" $part --version "$v"
+          run "$out" "$WSP" ingest --max-seconds "$INGEST_SLICE" --source "$src" $part --version "$v"
           say "ingest of the pending $src $part --version $v: exit $?"
         done
         ;;

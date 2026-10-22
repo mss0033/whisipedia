@@ -69,7 +69,7 @@ version only):
 | 0 | ingested, or already sealed |
 | 1 | a version failed (verification, or the vault refused it) |
 | 2 | usage (`--version` without `--source`, `--partition` on an unpartitioned source, ...) |
-| 3 | another ingest runs (the `ingest` lock); retry |
+| 3 | another ingest runs (the `ingest` lock), or this one stopped after `--max-seconds` (lanes pass an hour, `LANE_INGEST_SLICE`) so others could run; retry, it goes on where it stopped |
 | 4 | files still missing or downloading |
 | 8 | `--version` only: no download plan names that version (nothing was fetched for it) |
 

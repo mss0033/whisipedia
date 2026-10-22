@@ -50,8 +50,9 @@ from wsp_vault.vault import FileVault
 
 # `wsp ingest` exit codes (docs/runbooks/document-collections.md, "Exit codes"): 0 every version
 # (with --version: that version) is ingested or already sealed; 1 a version failed; 2 usage;
-# 3 another ingest runs (EXIT_BUSY); 4 files still missing or downloading; 8 with --version only:
-# no download plan names that version (nothing was fetched for it, so there is nothing to ingest).
+# 3 another ingest runs, or this one yielded after --max-seconds (EXIT_BUSY); 4 files still missing
+# or downloading; 8 with --version only: no download plan names that version (nothing was fetched
+# for it, so there is nothing to ingest).
 EXIT_INCOMPLETE = 4  # `wsp ingest`: some version still has files missing or downloading
 EXIT_NOT_PLANNED = 8  # `wsp ingest --version V`: no download plan names V
 EXIT_UNAVAILABLE = 5  # the vault share is unreachable (scrub stopped without recording anything)
@@ -128,6 +129,7 @@ def _ingest(
         out=None if args.json else out,
         user_agent=bootstrap.user_agent(cfg),
         settle_seconds=float(args.settle_seconds),
+        max_seconds=getattr(args, "max_seconds", None),
     )
     try:
         if args.allow_mirror:
@@ -152,6 +154,12 @@ def _ingest(
         return EXIT_NOT_PLANNED  # a lane must not take "nothing to do" for "this cycle landed"
     if any(v.status is VersionStatus.FAILED for v in report.versions):
         return 1
+    if any(v.status is VersionStatus.YIELDED for v in report.versions):
+        print(
+            "ingest yielded (--max-seconds) so other ingests can run; run it again to continue",
+            file=sys.stderr,
+        )
+        return EXIT_BUSY  # as a lock held: try again shortly
     # Not an error, but not done either: scripts must not mistake it for success (exit 0).
     return EXIT_INCOMPLETE if any(v.status is VersionStatus.INCOMPLETE for v in report.versions) else 0
 
