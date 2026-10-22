@@ -256,7 +256,15 @@ function inspect() {
     .map((a) => a.getAttribute('href') ?? '')
     // The Navigator's own addresses are #wsp://...; a page anchor is #name.
     .filter((h) => h.length > 1 && !h.startsWith('#wsp:') && !h.startsWith('#/'))
-    .map((h) => decodeURIComponent(h.slice(1)));
+    .map((h) => {
+      // A page's anchor may carry a malformed escape (Wikipedia's Nintendo Australia, 2026-10-22):
+      // compared as written then, as a browser would.
+      try {
+        return decodeURIComponent(h.slice(1));
+      } catch {
+        return h.slice(1);
+      }
+    });
   const banner = main?.querySelector('.site-banner a');
   return {
     error: err ? (err.querySelector('h1, h2')?.textContent ?? 'error page').trim() : null,
@@ -574,15 +582,26 @@ async function audit(context, phoneContext, id) {
     const title = seen.title;
     // A link that leads elsewhere: a site's logo links its own front page, and following that adds no
     // history entry, so Back left the app (2026-10-19: 9 front pages reported an empty title).
-    const here = (await page.evaluate(() => decodeURIComponent(location.hash.slice(1)))).replace(
-      /(%2F|\/)+$/i,
-      '',
-    );
+    const here = (
+      await page.evaluate(() => {
+        try {
+          return decodeURIComponent(location.hash.slice(1));
+        } catch {
+          return location.hash.slice(1);
+        }
+      })
+    ).replace(/(%2F|\/)+$/i, '');
     const others = page.locator('main .doc-body a[data-wsp]:not([data-missing])');
     const n = await others.count();
     let link = others.first();
     for (let i = 0; i < Math.min(n, 50); i++) {
-      const at = decodeURIComponent((await others.nth(i).getAttribute('data-wsp')) ?? '');
+      const raw = (await others.nth(i).getAttribute('data-wsp')) ?? '';
+      let at = raw;
+      try {
+        at = decodeURIComponent(raw);
+      } catch {
+        // a malformed escape: compared as written
+      }
       if (
         at.replace(/(%2F|\/)+$/i, '') !== here &&
         (await others
