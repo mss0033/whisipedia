@@ -432,10 +432,18 @@ async function main() {
       exhausted.set(source, Date.now());
       continue;
     }
-    const result = await check(context, pick.address).catch((e) => ({
-      problems: [`trawler-error: ${String(e).slice(0, 200)}`],
-      ms: 0,
-    }));
+    const look = () =>
+      check(context, pick.address).catch((e) => ({
+        problems: [`trawler-error: ${String(e).slice(0, 200)}`],
+        ms: 0,
+      }));
+    let result = await look();
+    // tools/wsp-yield freezes this while the owner reads, and the browser's clock runs on through a
+    // freeze: a timeout is looked at once more, after the owner has gone (2026-10-22).
+    if (result.problems.some((p) => /timeout/.test(p))) {
+      while (!stopRequested && ownerIdleMs() < YIELD) await sleep(30_000);
+      result = await look();
+    }
     const line = {
       ts: new Date().toISOString(),
       doc_id: pick.doc_id,
