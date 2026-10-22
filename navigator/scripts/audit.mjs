@@ -885,8 +885,12 @@ async function main() {
         }));
       let r = await once();
       // The library went away under the page (a restart): wait for it and look again.
-      if (r.issues.some((i) => RESTARTED.test(i.detail))) {
-        log(`library not answering; waiting, then ${addressOf(id)} again`);
+      const gone = r.issues.find((i) => RESTARTED.test(i.detail));
+      if (gone) {
+        // The detail says which request failed and how (a restart, a reset, a refused connection).
+        log(
+          `library not answering (${gone.dim}:${gone.code} ${gone.detail}); waiting, then ${addressOf(id)} again`,
+        );
         await waitForLibrary();
         r = await once();
       }
