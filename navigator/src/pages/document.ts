@@ -1102,7 +1102,7 @@ export function emptyPageNotice(
  * links to websites it does not hold are. `data-links-checked` says the answer is in. */
 const LINK_CHECK_BATCH = 100;
 const LINK_CHECK_MAX = 2000; // after the page is shown: explainxkcd's front page has more than 500
-const LINK_CHECK_ROUNDS = 4;
+const LINK_CHECK_ROUNDS = 6; // under a long ingest, a page of Wikipedia links took four rounds (2026-10-22)
 const LINK_CHECK_PAUSE_MS = 3000;
 
 /** Waits `ms`; false when the page was left meanwhile. */

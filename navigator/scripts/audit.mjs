@@ -196,9 +196,9 @@ async function waitForPage(page) {
   await page
     .waitForSelector('[data-links-checked]:not([data-typesetting]), .page-error', {
       state: 'attached',
-      // The reader asks again about links a busy library left unchecked, after pauses of 3 and 6 s
-      // (2026-10-21): 20 s was shorter than that under load.
-      timeout: 45_000,
+      // The reader asks again about links a busy library left unchecked, up to six rounds with
+      // pauses of 3 to 15 s (2026-10-22): 20 s was shorter than that under load.
+      timeout: 90_000,
     })
     .catch(() => {});
 }
