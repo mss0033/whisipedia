@@ -54,6 +54,7 @@ in ``targets.json``; :func:`plan_arxiv` reads it directly. The incremental model
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import tempfile
@@ -66,6 +67,7 @@ from pathlib import Path
 from typing import Any, TextIO, cast
 
 from wsp_adapters.kiwix import KiwixOpdsAdapter, Selector
+from wsp_core import diag
 from wsp_core.model import Checksum, Generation, SourceSpec, SourceStatus
 from wsp_core.ports import Ctx, Fetcher
 from wsp_vault.atomic import IntegrityError
@@ -83,6 +85,7 @@ ALGORITHMS = {"sha-1": "sha1", "sha1": "sha1", "sha-256": "sha256", "sha256": "s
 _YYYYMMDD = re.compile(r"^(\d{4})(\d{2})(\d{2})$")
 _YYMMDD = re.compile(r"^(\d{2})(\d{2})(\d{2})$")  # OSM planet files (planet-YYMMDD.osm.pbf)
 _DATED = re.compile(r"^\d{4}-\d{2}(-\d{2})?$")
+PROGRESS = logging.getLogger("wsp.ingest.progress")
 
 
 class FileState(StrEnum):
@@ -293,6 +296,7 @@ class Ingestor:
         self._started = time.monotonic()
 
     def _say(self, text: str) -> None:
+        PROGRESS.info(text)  # the run log has every progress line, timestamped
         if self.out is not None:
             self.out.write(text + "\n")
             self.out.flush()
@@ -479,7 +483,11 @@ class Ingestor:
                     continue
                 self.resolve_checksums(vp)
                 if not dry_run:
-                    changed |= self._ingest(vp)
+                    with diag.phase(
+                        "ingest-version", source=vp.source_id, generation=vp.generation_id
+                    ) as info:
+                        changed |= self._ingest(vp)
+                        info.update(status=vp.status.value, files=len(vp.files), bytes=vp.bytes)
         if not dry_run and changed:
             write_library_docs(self.vault, list(self.specs.values()))
         return report
@@ -504,7 +512,8 @@ class Ingestor:
                 f.state = FileState.STAGED
                 how = "verified" if f.verifiable else "unverifiable"
                 self._say(f"  {f.target.name}: {how} ({time.monotonic() - started:.1f}s)")
-            gen = self.vault.seal(sid, gid, parity_percent=10 if spec.irreplaceable else None)
+            with diag.phase("seal", source=sid, generation=gid):
+                gen = self.vault.seal(sid, gid, parity_percent=10 if spec.irreplaceable else None)
         except (IntegrityError, VaultError, OSError) as exc:
             vp.status, vp.reason = VersionStatus.FAILED, f"{type(exc).__name__}: {exc}"
             self._say(f"  FAILED: {vp.reason} (files left in place)")

@@ -5,14 +5,16 @@ from __future__ import annotations
 import argparse
 import hashlib
 import io
+import json
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from wsp_cli import bootstrap, bulk
+from wsp_cli import bootstrap, bulk, ops
 from wsp_cli.ingest import load_targets
+from wsp_core import diag
 from wsp_core.model import Checksum, ReleaseRef, RemoteFile, SourceSpec, SourceStatus, Tier
 from wsp_core.ports import Ctx
 from wsp_core.testing.adapter_contract import FakeFetcher
@@ -245,3 +247,34 @@ def test_a_loose_file_that_cannot_be_moved_is_fetched_instead(
     rc, text = run(partition="p0001")
     assert rc == bulk.EXIT_OK, text
     assert fetcher.downloaded == ["a.tar.gz"]
+
+
+def test_an_ingest_run_log_times_each_version_and_its_seal(
+    vault: tuple[Path, Downloads], tmp_path: Path
+) -> None:
+    assert run()[0] == bulk.EXIT_OK
+    args = argparse.Namespace(
+        config_dir=None,
+        source="big",
+        version=None,
+        partition=None,
+        dry_run=False,
+        offline=True,
+        json=False,
+        settle_seconds=0,
+        allow_mirror=False,
+        max_seconds=None,
+    )
+    log = diag.start_run(tmp_path / "state", "ingest", ["ingest"])
+    rc = ops.cmd_ingest(args, io.StringIO())
+    diag.end_run(log, rc)
+    assert rc == 0
+    rows = [json.loads(line) for line in log.path.read_text(encoding="utf-8").splitlines()]
+    ends = {r["phase"]: r for r in rows if r.get("event") == "phase-end"}
+    assert set(ends) == {"ingest-version", "seal"}
+    assert (ends["ingest-version"]["source"], ends["ingest-version"]["status"]) == ("big", "ingested")
+    assert ends["ingest-version"]["files"] == 2
+    assert ends["ingest-version"]["bytes"] == len(A) + len(B)
+    assert ends["seal"]["seconds"] <= ends["ingest-version"]["seconds"]
+    # The progress lines are in the log too.
+    assert any(r.get("logger") == "wsp.ingest.progress" and "adopting 2 file(s)" in r["msg"] for r in rows)

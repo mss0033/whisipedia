@@ -38,6 +38,9 @@ the one that grew.
 The index build's phases: `index-finish`, `refine`, `index-generation`, `index-partitioned`, `rank`,
 `spell`, `reindex`, `refine-again`.
 
+The ingest's phases: `ingest-version` (per source and generation, with its status, file count and
+bytes) and, inside it, `seal`.
+
 ## Reading one
 
 ```sh
