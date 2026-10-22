@@ -57,6 +57,10 @@ MemorySwapMax=512M
 TasksMax=256
 OOMScoreAdjust=500
 Environment=WSP_MAX_WORKERS=4
+# glibc gives each thread its own malloc arena: 2026-10-22, with a 26 GB download (many piece threads)
+# and a scrub running, 40 arenas held 878 MB of the daemon's 1.6 GB and it sat stalled at its
+# MemoryHigh. Two arenas, as the jobs (tools/wsp-bg) and the API have.
+Environment=MALLOC_ARENA_MAX=2
 Environment=WSP_HEAVY_LAUNCHER=systemd
 # best-effort/7, not idle: an idle-class writer holding a lock or a long SQLite transaction starved
 # everything waiting for it (priority inversion).
