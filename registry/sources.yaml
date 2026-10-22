@@ -1560,13 +1560,16 @@ sources:
           # text layer (about twice the size). Owner-approved collection; the OCR copy is a derivative.
           prefer: text-pdf
           provenance: "Internet Archive's one-to-one mirror of foia.cia.gov (creator 'CIA Reading Room'; identifiers are the CIA document numbers, e.g. CIA-RDP84-00499R000900030045-6); spot-check bytes against www.cia.gov when deep links answer"
-      filter: {rules: registry/filters/cia-reading-room.yaml, declassified_ok: true, distribution: {require: [declassified, public-release, published]}, default: allow}
+      # Owner decision 2026-10-22: every document here is an official CIA release, so its old banners
+      # (SECRET, NOFORN, FOUO) are not markings; a page whose release stamp the scan lost withheld the
+      # whole document (78 of 9,929 in b0001). The content screen and its deny core still apply.
+      filter: {rules: registry/filters/cia-reading-room.yaml, public_issuer: true, default: allow}
       mirrors:
         - {channel: "www.cia.gov/readingroom", status: degraded, verified: 2026-10-10, note: "home page 200, but document and collection deep links redirect to the home page for a plain client; robots.txt Crawl-delay 10, /readingroom/search/ disallowed"}
         - {channel: "archive.org collection ciareadingroom (mirror of the official release)", status: verified, verified: 2026-10-10, note: "984,230 items with item_size via the scrape API; one item per CIA document"}
     update: {cadence: P3M, strategy: mirror}
     size: {bytes: 7.5e12, measured: false, as_of: 2026-10-10}
-    notes: Officially released, declassified documents (≈5-10 TB). Document-level filtering applies (PLAN §13 boundaries); declassified banners with a release stamp are expected and allowed, export-control warnings are not. Included by owner decision D14 (2026-10-10). Acquisition plan in docs/research/PREPAREDNESS_AND_DEFENSE.md §8 (partitioned part generations, ≤1 request/s).
+    notes: Officially released, declassified documents (≈5-10 TB). Document-level filtering applies (PLAN §13 boundaries), the content screen and its deny core; old classification banners are not markings here (an official release, owner decision 2026-10-22). Included by owner decision D14 (2026-10-10). Acquisition plan in docs/research/PREPAREDNESS_AND_DEFENSE.md §8 (partitioned part generations, ≤1 request/s).
 
   - id: usgs-historical-topo
     name: USGS Historical Topographic Map Collection

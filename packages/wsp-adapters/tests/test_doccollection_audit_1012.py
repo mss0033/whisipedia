@@ -725,3 +725,22 @@ def test_early_rfcs_padded_with_nuls_or_titled_with_an_error_are_documents(tmp_p
     latin1 = tmp_path / "rfc64.txt"
     latin1.write_bytes(b"The line takes approximately 12 \xb5sec to settle.\n" * 20)
     assert "12 \u00b5sec" in extract_text(latin1, max_pages=1).text
+
+
+def test_a_cia_release_keeps_its_old_banners_but_not_the_deny_core() -> None:
+    """Owner decision 2026-10-22: the CIA reading room is an official release, so a page whose
+    "Approved For Release" stamp the scan lost no longer withholds the whole document (78 of 9,929
+    in batch b0001 were). The registry's own filter block is what is tested."""
+    import yaml
+
+    from wsp_adapters.doccollection.policy import load_rules
+
+    repo = Path(__file__).resolve().parents[3]
+    sources = yaml.safe_load((repo / "registry" / "sources.yaml").read_text(encoding="utf-8"))
+    rows = sources["sources"] if isinstance(sources, dict) else sources
+    spec = next(s for s in rows if s["id"] == "cia-reading-room")
+    rules = load_rules(spec["access"]["filter"], repo_root=repo)
+    cover = Extracted("SECRET NOFORN\nROUTING AND RECORD SHEET\nSoviet grain harvest estimates" + FILLER)
+    assert screen_text(cover, rules).decision.verdict is Verdict.ALLOW
+    harmful = Extracted("Demolition Charges and Calculations\nshaped charges, demolition charges" + FILLER)
+    assert screen_text(harmful, rules).decision.verdict is Verdict.DENY
