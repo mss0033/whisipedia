@@ -14,6 +14,12 @@ log) or the owner sees it at once:
 * ``lock-held:<lock>``        a lock (ingest, heavy, index...) held by one process over WSP_STALL_LOCK_H
                               hours (8), counted from the first run that saw it held (the scrub lock
                               is the orchestrator's for its whole life, and is not counted)
+* ``jobs-owed``               jobs tools/wsp-yield stopped for memory (``jobs/yield-stopped``) not started
+                              again after WSP_STALL_OWED_MIN minutes (30): 2026-10-22, every lane stood
+                              still for 10 hours and nothing here said so
+* ``job-down:<name>``         a job named in ``jobs.conf`` (the jobs resumed after a reboot) not running
+                              for WSP_STALL_DOWN_H hours (1): stopped, crashed, or finished (then take it
+                              out of jobs.conf)
 * ``api-down``                /v1/health did not answer 200 twice in a row
 * ``files-high:<unit>``       a core service holds over 80% of the files it may open (the API ran out at
                               1,024 on 2026-10-20 and answered pages with HTTP 500)
@@ -54,6 +60,7 @@ HOME = Path.home()
 STATE = Path(os.environ.get("WSP_STALL_STATE", HOME / ".local/share/whisipedia/state"))
 WATCH = STATE / "watch"
 LOCKS = Path(os.environ.get("WSP_STALL_LOCKS", HOME / ".local/share/whisipedia/locks"))
+JOBS = Path(os.environ.get("WSP_STALL_JOBS", HOME / ".local/state/whisipedia"))  # tools/wsp-bg's state
 PROC = Path(os.environ.get("WSP_STALL_PROC", "/proc"))
 CGROUP_ROOT = os.environ.get("WSP_STALL_CGROUP_ROOT", "/sys/fs/cgroup")
 HEALTH_URL = os.environ.get("WSP_STALL_HEALTH_URL", "http://127.0.0.1:8737/v1/health")
@@ -70,6 +77,8 @@ LOGS = os.environ.get(
 IDLE_H = float(os.environ.get("WSP_STALL_IDLE_H", "3"))
 IDLE_CPU_S = 10.0
 LOCK_H = float(os.environ.get("WSP_STALL_LOCK_H", "8"))
+OWED_MIN = float(os.environ.get("WSP_STALL_OWED_MIN", "30"))
+DOWN_H = float(os.environ.get("WSP_STALL_DOWN_H", "1"))
 MOUNTS = {"/": 50, "/mnt/z": 2000}  # free GB below which the disk is low
 CORE = ("whisipedia-api.service", "whisipedia-orchestrator.service")
 PRESSURE_UNITS = (
@@ -103,6 +112,7 @@ class State:
     cpu: dict[str, list[tuple[float, int]]] = field(default_factory=dict[str, list[tuple[float, int]]])
     offsets: dict[str, int] = field(default_factory=dict[str, int])  # log -> bytes read
     noted: dict[str, float] = field(default_factory=dict[str, float])  # problem kind -> when noted
+    down: dict[str, float] = field(default_factory=dict[str, float])  # jobs.conf name -> first seen down
 
     @classmethod
     def load(cls, path: Path) -> State:
@@ -114,6 +124,7 @@ class State:
                 cpu={k: [(float(a), int(b)) for a, b in v] for k, v in raw.get("cpu", {}).items()},
                 offsets={k: int(v) for k, v in raw.get("offsets", {}).items()},
                 noted={k: float(v) for k, v in raw.get("noted", {}).items()},
+                down={k: float(v) for k, v in raw.get("down", {}).items()},
             )
         except (OSError, ValueError, TypeError, AttributeError, IndexError):
             return cls()
@@ -383,6 +394,40 @@ def check(state: State, t: float) -> tuple[dict[str, str], list[str]]:
             )
     for unit in [u for u in samples if u not in seen]:
         del samples[unit]
+
+    owed = JOBS / "jobs" / "yield-stopped"
+    try:
+        age = t - owed.stat().st_mtime
+        names = sorted({line.strip() for line in owed.read_text().splitlines() if line.strip()})
+    except OSError:
+        age, names = 0.0, []
+    if names and age >= OWED_MIN * 60:
+        cond["jobs-owed"] = (
+            f"{len(names)} jobs stopped for memory {hours(age)} ago are not started again "
+            f"({', '.join(n.removeprefix('whisipedia-job-').removesuffix('.service') for n in names)[:300]}): "
+            "systemctl --user start whisipedia-resume"
+        )
+    active = {u for u, a, _ in rows if a == "active"}
+    try:
+        wanted = [
+            line.split("#", 1)[0].split()[0]
+            for line in (JOBS / "jobs.conf").read_text().splitlines()
+            if line.split("#", 1)[0].strip()
+        ]
+    except OSError:
+        wanted = []
+    for name in wanted:
+        if f"whisipedia-job-{name}.service" in active:
+            state.down.pop(name, None)
+            continue
+        since = state.down.setdefault(name, t)
+        if t - since >= DOWN_H * 3600:
+            cond[f"job-down:{name}"] = (
+                f"whisipedia-job-{name} not running for {hours(t - since)}: start it "
+                f"(sh {JOBS}/jobs/{name}.cmd), or take it out of {JOBS}/jobs.conf if its work is done"
+            )
+    for name in [n for n in state.down if n not in wanted]:
+        del state.down[name]
 
     for unit in PRESSURE_UNITS:
         cg = unit_prop(unit, "ControlGroup")

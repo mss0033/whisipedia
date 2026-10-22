@@ -5,6 +5,7 @@ stopped on HTTP 429 were found by hand, hours late)."""
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -161,3 +162,28 @@ def test_a_slice_stalled_on_memory_is_raised_until_its_pressure_falls(tmp_path: 
         "some avg10=1 avg60=1 avg300=2 total=1\nfull avg10=0 avg60=0 avg300=1.5 total=1\n"
     )
     assert sum("CLEARED mem-stall:" in e for e in _run(env, 0.4)) == 3
+
+
+def test_jobs_owed_a_start_and_listed_jobs_not_running_are_raised(tmp_path: Path) -> None:
+    """2026-10-22: the memory guard stopped every lane, nothing started them again, and nothing said
+    so for 10 hours."""
+    env = _world(tmp_path, usage=10**9)
+    jobs = tmp_path / ".local" / "state" / "whisipedia"
+    (jobs / "jobs").mkdir(parents=True)
+    owed = jobs / "jobs" / "yield-stopped"
+    owed.write_text("whisipedia-job-collections-std.service\nwhisipedia-job-era5.service\n")
+    os.utime(owed, (T0, T0))
+    (jobs / "jobs.conf").write_text("# resumed after a reboot\nlane  # running\nera5\n")
+    first = " ".join(_run(env, 0.2))
+    assert "jobs-owed" not in first  # 12 minutes: the guard waits for 10 calm minutes first
+    assert "job-down" not in first  # era5 seen down just now
+    later = " ".join(_run(env, 1.5))
+    assert "RAISED jobs-owed: 2 jobs stopped for memory 1.5 h ago are not started again" in later
+    assert "(collections-std, era5)" in later
+    assert "RAISED job-down:era5: whisipedia-job-era5 not running for 1.3 h" in later
+    assert "job-down:lane" not in later  # it runs
+    owed.unlink()
+    (jobs / "jobs.conf").write_text("lane\n")  # era5 done: taken out
+    cleared = " ".join(_run(env, 2))
+    assert "CLEARED jobs-owed" in cleared
+    assert "CLEARED job-down:era5" in cleared
