@@ -151,6 +151,8 @@ def test_activity_marker_counts_interactive_requests_only(tmp_path: Path) -> Non
 
     call("/v1/system")
     call("/v1/health")
+    call("/v1/changes/stream")  # an open page's live feed: a tab left open is not someone reading
+    call("/v1/changes")
     assert not marker.exists()
     # A machine's probe of the start page (the health check, every two minutes) is not the owner.
     asyncio.run(
@@ -169,7 +171,14 @@ def test_activity_marker_counts_interactive_requests_only(tmp_path: Path) -> Non
     assert not recently_active(marker, 60)
     assert (seconds_since(marker) or 0) > 3000
     assert seconds_since(None) is None
-    assert seen == ["/v1/system", "/v1/health", "/v1/portal", "/v1/search"]
+    assert seen == [
+        "/v1/system",
+        "/v1/health",
+        "/v1/changes/stream",
+        "/v1/changes",
+        "/v1/portal",
+        "/v1/search",
+    ]
     off = ActivityMiddleware(app, path=None)
     asyncio.run(off({"type": "http", "path": "/x"}, None, None))  # type: ignore[arg-type]
 

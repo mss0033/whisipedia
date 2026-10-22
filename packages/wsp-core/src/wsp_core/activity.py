@@ -15,7 +15,9 @@ from pathlib import Path
 from typing import Any
 
 MARKER_NAME = "last-interactive"
-QUIET_PREFIXES = ("/v1/health", "/v1/system", "/v1/events", "/v1/openapi.json", "/favicon")
+# The change feed (an open page's live stream, or its polling when the stream is refused) is a page
+# left open, not someone reading: counted, an idle tab kept the background frozen (wsp-yield, 2026-10-22).
+QUIET_PREFIXES = ("/v1/health", "/v1/system", "/v1/events", "/v1/changes", "/v1/openapi.json", "/favicon")
 PROBE_HEADER = b"x-whisipedia-probe"
 """A request carrying this header is a machine's probe, not the owner browsing: the health check asks
 for the start page every two minutes, and counted as interactive use it kept the library "busy" for

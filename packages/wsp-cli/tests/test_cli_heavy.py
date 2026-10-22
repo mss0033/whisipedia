@@ -525,7 +525,10 @@ def test_api_health_waits_when_the_start_time_is_unknown(tmp_path: Path, started
 
 
 def _yield(
-    tmp_path: Path, readings: list[tuple[int, int] | tuple[int, int, int]], active: str = ""
+    tmp_path: Path,
+    readings: list[tuple[int, int] | tuple[int, int, int]],
+    active: str = "",
+    reader: list[bool] | None = None,
 ) -> tuple[str, list[str]]:
     """Run tools/wsp-yield for one check per reading of (MemAvailable MB, "full avg10" percent[, the
     background slice's own "full avg10", 0 if left out]), with a fake systemctl (``active``: its list
@@ -539,6 +542,12 @@ def _yield(
     calls = tmp_path / "calls"
     meminfo, pressure, step = tmp_path / "meminfo", tmp_path / "memory", tmp_path / "step"
     own_pressure = tmp_path / "slice"
+    import time
+
+    marker = tmp_path / "last-interactive"
+    for i, used in enumerate(reader or [False] * len(readings)):
+        # the marker's mtime at each check: just now while reading, an hour ago otherwise
+        (tmp_path / f"marker.{i}").write_text(str(int(time.time()) - (0 if used else 3600)))
     for i, (avail_mb, full, *own) in enumerate(readings):
         (tmp_path / f"meminfo.{i}").write_text(f"MemTotal: 16000000 kB\nMemAvailable: {avail_mb * 1024} kB\n")
         (tmp_path / f"memory.{i}").write_text(
@@ -556,6 +565,7 @@ def _yield(
             f"#!/bin/sh\nn=$(( $(cat {step}) + 1 ))\necho $n > {step}\n"
             f"cp {tmp_path}/meminfo.$n {meminfo}; cp {tmp_path}/memory.$n {pressure}\n"
             f"cp {tmp_path}/slice.$n {own_pressure}\n"
+            f'touch -d "@$(cat {tmp_path}/marker.$n)" {marker}\n'
         ),
     }
     for name, text in scripts.items():
@@ -565,7 +575,13 @@ def _yield(
     (meminfo).write_text((tmp_path / "meminfo.0").read_text())
     (pressure).write_text((tmp_path / "memory.0").read_text())
     own_pressure.write_text((tmp_path / "slice.0").read_text())
+    marker.touch()
+    stamp = int((tmp_path / "marker.0").read_text())
+    import os
+
+    os.utime(marker, (stamp, stamp))
     env = {
+        "WSP_YIELD_MARKER": str(marker),
         "PATH": f"{fakebin}:/usr/bin:/bin",
         "WSP_YIELD_MEMINFO": str(meminfo),
         "WSP_YIELD_PRESSURE": str(pressure),
@@ -616,6 +632,22 @@ def test_yield_leaves_a_job_pressing_on_its_own_ceiling_alone(tmp_path: Path) ->
     # Short of memory is short whoever is waiting.
     out, calls = _yield(tmp_path / "short", [(600, 44, 44), CALM])
     assert calls[0] == "--user freeze whisipedia-background.slice"
+
+
+def test_yield_freezes_the_background_while_the_owner_reads_and_thaws_it_after(tmp_path: Path) -> None:
+    """2026-10-22: the nightly index build and the lanes kept the NAS so busy that a Wikipedia page took
+    15 s while the owner might be reading."""
+    out, calls = _yield(tmp_path, [CALM] * 5, reader=[False, True, True, False, False])
+    assert calls == ["--user freeze whisipedia-background.slice", "--user thaw whisipedia-background.slice"]
+    assert "the owner is reading" in out
+    assert "no use for 300 s" in out
+
+
+def test_yield_keeps_the_background_frozen_for_a_reader_when_memory_comes_back(tmp_path: Path) -> None:
+    out, calls = _yield(tmp_path / "m", [SHORT, CALM, CALM, CALM], reader=[False, True, True, False])
+    # Frozen for memory, kept frozen for the reader, thawed once nobody reads.
+    assert calls == ["--user freeze whisipedia-background.slice", "--user thaw whisipedia-background.slice"]
+    assert "stays frozen" in out
 
 
 def test_yield_stops_the_resumable_jobs_when_freezing_is_not_enough_and_resumes_them(tmp_path: Path) -> None:

@@ -25,6 +25,14 @@
 # WSP_YIELD_RESUME_UNITS (default: the trawler, and whisipedia-resume.service, which restarts the lanes
 # where they stopped). The nightly index waits for its timer.
 #
+#
+# The owner reading comes first too (2026-10-22: the nightly index build and the download lanes kept
+# the NAS so busy that a Wikipedia page took 15 s). The API marks interactive use in
+# WSP_YIELD_MARKER (its mtime; the audit, trawler and health checks send X-Whisipedia-Probe and do
+# not count): while it is younger than WSP_YIELD_READER_SECONDS (default 300; 0 turns this off), the
+# background slice is frozen; once the owner has been idle that long, it is thawed. A shortage of
+# memory while reading is handled as above; memory coming back does not thaw while someone reads.
+#
 # WSP_YIELD_MEMINFO, WSP_YIELD_PRESSURE and WSP_YIELD_TICKS (stop after that many checks) are for tests.
 INTERVAL="${WSP_YIELD_INTERVAL:-5}"
 MIN_AVAIL_MB="${WSP_YIELD_MIN_AVAIL_MB:-1024}"
@@ -37,12 +45,14 @@ RESUME_UNITS="${WSP_YIELD_RESUME_UNITS:-whisipedia-trawler.service whisipedia-re
 MEMINFO="${WSP_YIELD_MEMINFO:-/proc/meminfo}"
 PRESSURE="${WSP_YIELD_PRESSURE:-/proc/pressure/memory}"
 TICKS="${WSP_YIELD_TICKS:-0}"
+READER_SECONDS="${WSP_YIELD_READER_SECONDS:-300}"
+MARKER="${WSP_YIELD_MARKER:-${XDG_DATA_HOME:-$HOME/.local/share}/whisipedia/state/last-interactive}"
 SLICE=whisipedia-background.slice
 SLICE_PRESSURE="${WSP_YIELD_SLICE_PRESSURE:-/sys/fs/cgroup$(systemctl --user show "$SLICE" -p ControlGroup --value 2>/dev/null)/memory.pressure}"
 STOPPABLE="whisipedia-job-* whisipedia-trawler.service whisipedia-index.service whisipedia-quality.service"
 JOBS="${WSP_STATE:-${XDG_STATE_HOME:-$HOME/.local/state}/whisipedia}/jobs"
 
-state=calm  # calm | frozen | stopped
+state=calm  # calm | frozen | stopped | reading
 since=0     # checks spent in this state (frozen) or calm in a row (stopped)
 tick=0
 
@@ -57,6 +67,15 @@ reading() {
   own=$(full_avg10 "$SLICE_PRESSURE")
   avail_mb="${avail_mb:-999999}" full="${full:-0}"  # unreadable: assume calm, never act on a guess
   own="${own:-0}"  # unreadable: all the pressure is the machine's, as before
+}
+
+# reader=1 while the owner used the library within READER_SECONDS (an unreadable marker: nobody).
+reader_now() {
+  reader=""
+  [ "$READER_SECONDS" -gt 0 ] || return 0
+  mtime=$(stat -c %Y "$MARKER" 2>/dev/null) || return 0
+  [ $(( $(date +%s) - mtime )) -lt "$READER_SECONDS" ] && reader=1
+  return 0
 }
 
 thaw() {
@@ -82,6 +101,7 @@ thaw
 
 while :; do
   reading
+  reader_now
   short="" calm=""
   outside=$((full - own))
   [ "$avail_mb" -lt "$MIN_AVAIL_MB" ] || { [ "$full" -ge "$MAX_PSI" ] && [ "$outside" -ge "$CALM_PSI" ]; } && short=1
@@ -92,10 +112,26 @@ while :; do
         systemctl --user freeze "$SLICE" 2>/dev/null || true
         echo "<4>machine short of memory (available ${avail_mb} MB, full avg10=${full}%): froze $SLICE"
         state=frozen since=0
+      elif [ -n "$reader" ]; then
+        systemctl --user freeze "$SLICE" 2>/dev/null || true
+        echo "the owner is reading: froze $SLICE until ${READER_SECONDS} s without use"
+        state=reading
+      fi ;;
+    reading)
+      if [ -n "$short" ]; then
+        echo "<4>machine short of memory (available ${avail_mb} MB, full avg10=${full}%) while reading"
+        state=frozen since=0  # already frozen; the memory rules take over
+      elif [ -z "$reader" ]; then
+        thaw
+        echo "no use for ${READER_SECONDS} s: thawed $SLICE"
+        state=calm
       fi ;;
     frozen)
       since=$((since + 1))
-      if [ -n "$calm" ]; then
+      if [ -n "$calm" ] && [ -n "$reader" ]; then
+        echo "memory available again (${avail_mb} MB); the owner is reading: $SLICE stays frozen"
+        state=reading
+      elif [ -n "$calm" ]; then
         thaw
         echo "memory available again (${avail_mb} MB, full avg10=${full}%): thawed $SLICE"
         state=calm
