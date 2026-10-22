@@ -11,7 +11,9 @@ Description=Whisipedia trawler (unvisited pages checked the way a reader sees th
 After=whisipedia-api.service
 
 [Service]
-Type=exec
+# simple, not exec: a start while tools/wsp-yield has the background frozen (the owner reading) cannot
+# reach exec until the thaw, and an exec unit fails its start timeout (2026-10-22 07:48).
+Type=simple
 WorkingDirectory=@REPO@
 EnvironmentFile=-%h/.config/whisipedia/whisipedia.env
 Environment=WSP_TRAWL_URL=http://127.0.0.1:8737

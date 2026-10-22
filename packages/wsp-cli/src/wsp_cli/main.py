@@ -26,13 +26,16 @@ from collections.abc import Callable, Sequence
 from dataclasses import replace
 from importlib import import_module
 from pathlib import Path
-from typing import Protocol, TextIO, cast
+from typing import TYPE_CHECKING, Protocol, TextIO, cast
 
 import httpx
 from pydantic import BaseModel
 
 from wsp_cli import bootstrap
 from wsp_sdk import WspApiError, WspClient
+
+if TYPE_CHECKING:
+    from wsp_core.diag import RunLog
 
 DEFAULT_HOST = "127.0.0.1"  # = wsp_api.services.DEFAULT_HOST
 DEFAULT_PORT = 8737  # = wsp_api.services.DEFAULT_PORT
@@ -285,13 +288,18 @@ def build_parser(argv: Sequence[str] | None = None) -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="wsp", description="Whisipedia: a private offline library.")
     p.add_argument("--config-dir", type=Path, default=None, help="default: $WSP_CONFIG_DIR or <repo>/config")
     p.add_argument("--url", default=None, help="API base URL (default: $WSP_API_URL, else run in-process)")
+    p.add_argument(
+        "--diag",
+        action="store_true",
+        help="keep a run log (<state>/logs/<command>/, JSON lines: phases, timings, memory); also WSP_DIAG=1",
+    )
     sub = p.add_subparsers(dest="command", required=True, metavar="COMMAND")
 
     builtin: set[str] = set()
 
     def add(name: str, handler: Handler, help_: str, parent: _Subparsers = sub) -> argparse.ArgumentParser:
         sp = parent.add_parser(name, help=help_, description=help_)
-        sp.set_defaults(handler=handler)
+        sp.set_defaults(handler=handler, run_name=sp.prog.split(" ", 1)[-1])
         if parent is sub:
             builtin.add(name)
         return sp
@@ -633,10 +641,51 @@ def _usage(_: argparse.Namespace, __: TextIO) -> int:  # pragma: no cover - argp
     return 2
 
 
+# Long jobs keep a run log always (wsp_core.diag): the nightly index build ran 28 hours on 2026-10-21 and
+# left no record of which step took the time. Any other command keeps one with --diag or WSP_DIAG.
+ALWAYS_LOGGED = frozenset({"index build", "index rank", "index spell", "ingest", "weather era5"})
+
+
+def _run_log(args: argparse.Namespace, raw: Sequence[str]) -> RunLog | None:
+    """The run's log, or ``None`` when this run keeps none."""
+    from wsp_core import diag
+
+    name = str(getattr(args, "run_name", "") or getattr(args, "command", "") or "wsp")
+    level = diag.env_level() or ("INFO" if getattr(args, "diag", False) or name in ALWAYS_LOGGED else None)
+    if level is None:
+        return None
+    try:
+        cfg = bootstrap.load(bootstrap.layout(getattr(args, "config_dir", None)))
+        state_dir = bootstrap.paths(cfg).state_dir
+        if state_dir is None:
+            return None
+        return diag.start_run(state_dir, name, raw, level=level)
+    except Exception as exc:  # a log that cannot be kept must never stop the work
+        print(f"warning: no run log ({type(exc).__name__}: {exc})", file=sys.stderr)
+        return None
+
+
 def main(argv: Sequence[str] | None = None, *, out: TextIO | None = None) -> int:
     raw = list(sys.argv[1:] if argv is None else argv)
     args = build_parser(raw).parse_args(raw)
     handler: Handler = args.handler
+    run = _run_log(args, raw)
+    if run is None:
+        return _main(handler, args, out)
+    from wsp_core import diag
+
+    code: int | str = "crashed"
+    try:
+        code = _main(handler, args, out)
+        return code
+    except BaseException as exc:
+        code = f"{type(exc).__name__}: {exc}"[:500]
+        raise
+    finally:
+        diag.end_run(run, code)
+
+
+def _main(handler: Handler, args: argparse.Namespace, out: TextIO | None) -> int:
     try:
         return handler(args, out or sys.stdout)
     except WspApiError as exc:

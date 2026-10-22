@@ -25,7 +25,9 @@ catalog see every partition, not only the last one ingested.
 
 from __future__ import annotations
 
+import functools
 import json
+import logging
 import os
 import re
 import shutil
@@ -35,9 +37,10 @@ from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TextIO, cast
+from typing import Any, Concatenate, ParamSpec, TextIO, TypeVar, cast
 
 from wsp_adapters.entries import EntrySource, Redirect
+from wsp_core.diag import phase
 from wsp_core.errors import FetchError
 from wsp_core.memory import memory_line
 from wsp_core.model import (
@@ -96,6 +99,36 @@ class OfflineFetcher:
 
     def download(self, remote: RemoteFile, dest: Path) -> FetchResult:
         raise FetchError(f"network access is not allowed while indexing: {remote.url}")
+
+
+PROGRESS = logging.getLogger("wsp.index.progress")
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
+
+def _timed(name: str) -> Callable[[Callable[Concatenate[Any, _P], _R]], Callable[Concatenate[Any, _P], _R]]:
+    """Time an indexer step in the run log (wsp_core.diag.phase), with the source and generation it was
+    given: the nightly build ran 28 hours on 2026-10-21 and nothing said which step took them."""
+
+    def wrap(fn: Callable[Concatenate[Any, _P], _R]) -> Callable[Concatenate[Any, _P], _R]:
+        @functools.wraps(fn)
+        def timed(self: Any, *args: _P.args, **kwargs: _P.kwargs) -> _R:
+            fields: dict[str, str] = {}
+            for a in (*args, *kwargs.values()):
+                if isinstance(a, SourceSpec):
+                    fields["source"] = a.id
+                elif isinstance(a, Generation):
+                    fields["generation"] = a.generation_id
+                elif isinstance(a, str) and "source" in fields and "generation" not in fields:
+                    fields["generation"] = a
+                elif isinstance(a, str) and not fields:
+                    fields["source"] = a
+            with phase(name, **fields):
+                return fn(self, *args, **kwargs)
+
+        return timed
+
+    return wrap
 
 
 @dataclass(frozen=True, slots=True)
@@ -227,6 +260,7 @@ class Indexer:
             if self._feed is not None:
                 self._feed.close()
 
+    @_timed("index-finish")
     def finish(self, *, release_step: bool = False) -> None:
         """Rebuild the suggest trie once (bulk commits defer it) when a rebuild is due
         (:meth:`TantivyIndex.suggest_rebuild_due`); a small overlay on a fresh trie waits for a later
@@ -252,6 +286,7 @@ class Indexer:
     # --- helpers -------------------------------------------------------------------------------
 
     def _say(self, text: str) -> None:
+        PROGRESS.info(text)  # the run log has every progress line, timestamped
         if self.out is not None:
             self.out.write(text + "\n")
             self.out.flush()
@@ -282,6 +317,7 @@ class Indexer:
             return part_dir(self.refinery, spec.id, generation_id)
         return generation_dir(self.refinery, spec.id, generation_id)
 
+    @_timed("refine")
     def refine(
         self,
         spec: SourceSpec,
@@ -343,6 +379,7 @@ class Indexer:
 
     # --- index ---------------------------------------------------------------------------------
 
+    @_timed("index-generation")
     def index_generation(
         self,
         spec: SourceSpec,
@@ -447,6 +484,7 @@ class Indexer:
             )
         return removed
 
+    @_timed("index-partitioned")
     def index_partitioned(self, spec: SourceSpec, include: str | None = None) -> SourceReport:
         """Index the union of a partitioned source's current partitions (ADR-0010).
 
@@ -507,6 +545,7 @@ class Indexer:
 
     # --- static rank (PageRank) ---------------------------------------------------------------
 
+    @_timed("rank")
     def rank(self, config: RankConfig | None = None, *, reuse: bool = False) -> RankStats | None:
         """PageRank over every indexed source's current generation (``wsp index rank``).
 
@@ -569,6 +608,7 @@ class Indexer:
         map_dir = None if self.map_root is None else id_map_dir(self.map_root, gen_dir)
         return RefineryReader(gen_dir, map_dir=map_dir)
 
+    @_timed("spell")
     def spell(self, config: SpellConfig | None = None) -> VocabStats | None:
         """Rebuild the spelling vocabulary from every indexed source (``wsp index spell``)."""
         readers = self._current_readers()
@@ -582,6 +622,7 @@ class Indexer:
 
     # --- whole runs ----------------------------------------------------------------------------
 
+    @_timed("reindex")
     def reindex(self, source_id: str) -> SourceReport:
         """Write every document of the indexed generation of a source to the search index again, in
         place, without change records: the index learned to read more of the same Refinery rows (long
@@ -601,6 +642,7 @@ class Indexer:
         self._say(f"{source_id}: {gid} written again ({stats.upserted:,} documents)")
         return SourceReport(source_id, indexed=gid, upserted=stats.upserted, deleted=stats.deleted)
 
+    @_timed("refine-again")
     def refine_again(self, source_id: str, *, swap: bool = False) -> SourceReport:
         """Refine the current generation of a source once more and index what changed: the adapter
         learned to read more of the same files (LibreTexts pages were app stubs, 2026-10-16).

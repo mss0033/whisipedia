@@ -17,7 +17,9 @@ TimeoutStartSec=90min
 Nice=10
 CPUWeight=20
 # Not the download lanes' slice: its mapped run files (about 1 GB a GFS run) pushed the lanes' 1.5G
-# over the line (2026-10-20).
-Slice=whisipedia-background.slice
+# over the line (2026-10-20). Not the background slice either: tools/wsp-yield freezes that while the
+# owner reads, and the weather page's "Check for newer runs" is the owner asking for this now (a pull
+# frozen until the owner stops reading would also outlast its start timeout). Its own ceiling below.
+Slice=app.slice
 MemoryHigh=768M
 MemoryMax=1G

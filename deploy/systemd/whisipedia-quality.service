@@ -13,7 +13,9 @@ Type=oneshot
 WorkingDirectory=@REPO@
 EnvironmentFile=-%h/.config/whisipedia/whisipedia.env
 ExecStart=@REPO@/.venv/bin/wsp --config-dir @CONFIG_DIR@ quality run --alerts
-TimeoutStartSec=2h
+# A run takes minutes; time frozen by tools/wsp-yield while the owner reads counts too (its searches
+# would compete with the owner's), so the ceiling is for a hung run, not a slow one.
+TimeoutStartSec=12h
 Nice=19
 CPUWeight=20
 Slice=whisipedia-background.slice

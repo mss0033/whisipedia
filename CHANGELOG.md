@@ -3,6 +3,15 @@
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Added: run logs, and the background waits while the owner reads (2026-10-22)
+* Long jobs (`wsp index build`, `rank`, `spell`, `ingest`, `weather era5`) keep a run log under
+  `<state>/logs/<command>/`: JSON lines with the run's start and end, each step's time and peak memory,
+  and the library's log lines. Any command keeps one with `--diag` or `WSP_DIAG=1`
+  (docs/runbooks/diagnostic-logs.md).
+* `tools/wsp-yield` freezes the background slice while the owner reads and thaws it after 5 idle
+  minutes. The trawler starts as `Type=simple` (a start during a pause no longer times out), the
+  weather pull runs outside the slice (its refresh button is the owner asking), and the quality run's
+  start timeout is 12 hours.
 ### Fixed: the ingest budget is shared, and a small release no longer rebuilds the suggest trie (2026-10-14)
 * `[vault] ingest_bytes_per_sec` is the library's budget: the ingests running at once share it (a slot
   file per process under the state directory), a quarter of it while the owner browses. Three lanes
