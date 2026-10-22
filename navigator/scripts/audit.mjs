@@ -483,7 +483,12 @@ async function audit(context, phoneContext, id) {
     // "<p aneetmeeren…", 2026-10-21).
     const flat = (t) => t.replace(/\s+/g, ' ');
     const own = !doc?.html && m && flat(doc?.text ?? '').includes(flat(m[0]).trim());
-    if (m && !written && !escaped && !own)
+    // An entity the archived page writes as text is its words: Wiktionary's character box shows a
+    // character's code, "&#23553;", from &amp;#23553; in its HTML (封, 2026-10-22).
+    const entity =
+      what === 'escaped entities' &&
+      (doc?.html ?? '').includes((m?.[0] ?? '\u0000').replace(/^&/, '&amp;'));
+    if (m && !written && !escaped && !own && !entity)
       add(
         issues,
         'read',
@@ -908,6 +913,15 @@ async function main() {
         await phoneContext.close().catch(() => undefined);
         context = await make(DESKTOP);
         phoneContext = await make(PHONE);
+        r = await once();
+      }
+      // A timeout once is not yet the library's: the audit runs in the background slice, which
+      // tools/wsp-yield freezes while the owner reads, and the browser's clock runs on through a
+      // freeze (earth2studio's intro, 5 frozen minutes, a phone-timeout; 2026-10-22). Once more,
+      // and a page that times out twice is reported.
+      const slow = r.issues.find((i) => /-timeout$/.test(i.code));
+      if (slow) {
+        log(`${slow.dim}:${slow.code}; ${addressOf(id)} once more`);
         r = await once();
       }
       r.source = s.id;
