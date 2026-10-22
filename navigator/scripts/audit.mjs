@@ -419,6 +419,15 @@ async function audit(context, phoneContext, id) {
       page
         .evaluate((src) => !!document.querySelector(`main img[src="${CSS.escape(src)}"]`), img.src)
         .catch(() => false);
+    // A lazy picture below the fold is asked for only when it is scrolled to (LibreTexts' figures,
+    // 2026-10-22): bring it into view, as a reader would.
+    if (r.status === 404)
+      await page
+        .evaluate(
+          (src) => document.querySelector(`main img[src="${CSS.escape(src)}"]`)?.scrollIntoView(),
+          img.src,
+        )
+        .catch(() => undefined);
     let still = r.status === 404 ? await shown() : true;
     for (let t = 0; t < 10 && still && r.status === 404; t++) {
       await page.waitForTimeout(500);
