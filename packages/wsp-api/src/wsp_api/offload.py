@@ -16,8 +16,10 @@ from __future__ import annotations
 import asyncio
 import queue
 import threading
+import time
+from collections import OrderedDict
 from collections.abc import Callable
-from concurrent.futures import Future
+from concurrent.futures import Future, wait
 from typing import Any
 
 from wsp_api.errors import ApiError
@@ -122,3 +124,59 @@ class Offload:
 
     def close(self) -> None:
         self._pool.close()
+
+
+class LinkChecks:
+    """Which of a page's links lead nowhere, remembered: an answer is kept ``ttl`` seconds and a link
+    being looked up is not looked up twice, so a page asked again (the reader does, for links left
+    unchecked) gets the lookups that finished meanwhile. Under a long ingest a page of Wikipedia links
+    took six rounds, each starting the slow lookups again (2026-10-22). ``check`` returns ``True``
+    (missing), ``False`` (there) or ``None`` (unknown just now: busy, not remembered)."""
+
+    def __init__(self, pool: DaemonPool, *, ttl: float = 600.0, size: int = 20_000) -> None:
+        self._pool = pool
+        self._ttl = ttl
+        self._size = size
+        self._clock = time.monotonic
+        self._known: OrderedDict[str, tuple[float, bool]] = OrderedDict()
+        self._running: dict[str, Future[bool | None]] = {}
+        self._lock = threading.Lock()
+
+    def _run(self, address: str, check: Callable[[str], bool | None]) -> bool | None:
+        try:
+            result = check(address)
+        finally:
+            with self._lock:
+                self._running.pop(address, None)
+        if result is not None:
+            with self._lock:
+                self._known[address] = (self._clock(), result)
+                self._known.move_to_end(address)
+                while len(self._known) > self._size:
+                    self._known.popitem(last=False)
+        return result
+
+    def missing(
+        self, addresses: list[str], check: Callable[[str], bool | None], timeout: float
+    ) -> tuple[list[str], list[str]]:
+        """``(missing, unchecked)`` of ``addresses`` within ``timeout`` seconds."""
+        answers: dict[str, bool] = {}
+        waiting: dict[str, Future[bool | None]] = {}
+        now = self._clock()
+        with self._lock:
+            for a in addresses:
+                hit = self._known.get(a)
+                if hit is not None and now - hit[0] < self._ttl:
+                    answers[a] = hit[1]
+                    continue
+                running = self._running.get(a)
+                if running is None:
+                    running = self._pool.submit(lambda a=a: self._run(a, check))
+                    self._running[a] = running
+                waiting[a] = running
+        if waiting:
+            done, _ = wait(list(waiting.values()), timeout=timeout)
+            for a, f in waiting.items():
+                if f in done and f.exception() is None and (r := f.result()) is not None:
+                    answers[a] = r
+        return [a for a in addresses if answers.get(a)], [a for a in addresses if a not in answers]

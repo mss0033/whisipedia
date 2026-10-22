@@ -22,7 +22,7 @@ from wsp_api.catalog import FeedCatalog
 from wsp_api.errors import ApiError
 from wsp_api.htmlrewrite import VERSION as REWRITE_VERSION
 from wsp_api.htmlrewrite import rewrite_html
-from wsp_api.offload import DaemonPool, Offload
+from wsp_api.offload import DaemonPool, LinkChecks, Offload
 from wsp_api.originals import FILE_REF, stored_file
 from wsp_api.outside import OutsideLinks
 from wsp_api.pages import ByteLRU, Rendered, page_links, render
@@ -163,6 +163,7 @@ class Library:
         # /v1/links/missing: four lookups at a time, shared by every page, so one slow archive does not
         # hold up a page's other links. Daemon threads: they never keep a process alive.
         self.link_checks = DaemonPool(4, "link-check")
+        self.link_answers = LinkChecks(self.link_checks)
         self._history: OrderedDict[tuple[DocId, tuple[str, ...]], tuple[tuple[str, str], ...]] = OrderedDict()
         self._history_lock = threading.Lock()
         self._fields = services.documents if isinstance(services.documents, DocumentFields) else None

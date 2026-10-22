@@ -7,8 +7,6 @@ import ipaddress
 import random
 import secrets
 from collections.abc import Callable, Sequence
-from concurrent.futures import wait
-from functools import partial
 from typing import Annotated
 from urllib.parse import quote
 
@@ -337,22 +335,20 @@ def browse_router(lib: Library) -> APIRouter:
         return LinkCheckResult(missing=missing, unchecked=unchecked)
 
     def _missing(addresses: Sequence[str]) -> tuple[list[str], list[str]]:
-        def gone(a: str) -> bool:
+        def gone(a: str) -> bool | None:
             try:
                 resolve(s, a, {}, exists=lib.exists, stand_in=lib.stand_in)
             except ApiError as exc:
+                if exc.status == 503:
+                    return None  # busy: unknown, asked again by the reader
                 return exc.status == 404
             except ZimUnavailable:
-                return False  # busy: unknown, not missing
+                return None  # busy: unknown, not missing
             return False
 
-        asked = list(dict.fromkeys(addresses))
-        futures = [lib.link_checks.submit(partial(gone, a)) for a in asked]
-        done, late = wait(futures, timeout=LINK_CHECK_SECONDS)
-        for f in late:
-            f.cancel()  # not started yet: never started; a running one finishes unheard
-        pairs = list(zip(asked, futures, strict=True))
-        return [a for a, f in pairs if f in done and f.result()], [a for a, f in pairs if f not in done]
+        # Answers are remembered and lookups shared (LinkChecks): a lookup that ends after this
+        # request's deadline answers the reader's next round at once.
+        return lib.link_answers.missing(list(dict.fromkeys(addresses)), gone, LINK_CHECK_SECONDS)
 
     # --- Gaps -----------------------------------------------------------------------------------
 
