@@ -325,7 +325,9 @@ function inspect() {
 }
 
 function add(list, dim, code, detail = '') {
-  list.push({ dim, code, detail: String(detail).slice(0, 200) });
+  // One line: a detail quoting a page's text keeps its line breaks, and they broke the report's
+  // table (Wiktionary's character box, 2026-10-22).
+  list.push({ dim, code, detail: String(detail).replace(/\s+/g, ' ').trim().slice(0, 200) });
 }
 
 // A GET as a browser makes it: once more after a reset. The server closes an idle keep-alive
@@ -797,7 +799,11 @@ function report(sources, results, skipped) {
     for (const i of r.issues) {
       const k = `${i.dim}:${i.code}`;
       if (!codes.has(k))
-        codes.set(k, { n: 0, sources: new Set(), example: `${r.address} — ${i.detail}` });
+        codes.set(k, {
+          n: 0,
+          sources: new Set(),
+          example: `${r.address} — ${i.detail}`.replaceAll('|', '\\|'),
+        });
       const c = codes.get(k);
       c.n += 1;
       c.sources.add(r.source);
