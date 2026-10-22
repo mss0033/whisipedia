@@ -529,6 +529,7 @@ def _yield(
     readings: list[tuple[int, int] | tuple[int, int, int]],
     active: str = "",
     reader: list[bool] | None = None,
+    state: Path | None = None,
 ) -> tuple[str, list[str]]:
     """Run tools/wsp-yield for one check per reading of (MemAvailable MB, "full avg10" percent[, the
     background slice's own "full avg10", 0 if left out]), with a fake systemctl (``active``: its list
@@ -589,6 +590,7 @@ def _yield(
         "WSP_YIELD_TICKS": str(len(readings)),
         "WSP_YIELD_STOP_TICKS": "2",
         "WSP_YIELD_RESUME_TICKS": "3",
+        "WSP_STATE": str(state or tmp_path / "state"),
     }
     done = subprocess.run(
         [str(ROOT / "tools" / "wsp-yield")], capture_output=True, text=True, env=env, check=True
@@ -666,3 +668,22 @@ def test_yield_stops_the_resumable_jobs_when_freezing_is_not_enough_and_resumes_
     assert calls[4:] == ["--user start --no-block whisipedia-trawler.service whisipedia-resume.service"]
     assert "stopped" in out
     assert "started" in out
+
+
+def test_yield_still_starts_the_jobs_it_stopped_before_a_restart(tmp_path: Path) -> None:
+    # 2026-10-22: restarted two minutes after stopping every lane, it forgot them; nothing ran for
+    # 10 hours. The list of stopped jobs is the memory of it.
+    jobs = tmp_path / "state" / "jobs"
+    jobs.mkdir(parents=True)
+    (jobs / "yield-stopped").write_text("whisipedia-job-collections-cia.service\n")
+    out, calls = _yield(tmp_path, [CALM, CALM, MIDDLING, CALM, CALM, CALM])
+    assert calls == ["--user start --no-block whisipedia-trawler.service whisipedia-resume.service"]
+    assert "stopped before this started" in out
+
+
+def test_yield_starts_nothing_after_a_restart_with_nothing_owed(tmp_path: Path) -> None:
+    jobs = tmp_path / "state" / "jobs"
+    jobs.mkdir(parents=True)
+    (jobs / "yield-stopped").write_text("")
+    _, calls = _yield(tmp_path, [CALM, CALM, CALM, CALM])
+    assert calls == []

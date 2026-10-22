@@ -9,6 +9,10 @@
 #                         collections-cia lane-cia cia-reading-room b0001 b0002 b0003
 #                         collections-small lane-small - neets cia-csi crs-reports
 #                       run as: tools/wsp-bg --fetch UNIT -- tools/lanes/lane-run.sh LANE SOURCE ITEM...
+#   jobs.conf           one job NAME per line ('#' starts a comment), started again as tools/wsp-bg
+#                       last started it (jobs/NAME.cmd): the jobs that are not lanes (the ERA5
+#                       backfill, the maps lane, bulk lanes), or lanes whose command lanes.conf
+#                       cannot say. A job without its command is reported, not guessed.
 #   index/rebuild.conf  the sources of a lexical rebuild, whitespace separated (a first word
 #                       --enable-timer enables the nightly index timer at the end); resumed with
 #                       tools/lanes/rebuild-resume.sh unless index/rebuild.paused exists. Memory:
@@ -64,22 +68,32 @@ if [ -f "$S/lanes.conf" ]; then
       echo "<4>$unit not started (already running?)" >&2
   done
 fi
-# Jobs tools/wsp-yield stopped when the machine ran short of memory, started again as tools/wsp-bg
-# started them (jobs/NAME.cmd); one still running, or without its command, is left alone.
+# A job started again as tools/wsp-bg last started it (jobs/NAME.cmd); one still running, or without
+# its command, is left alone.
+start_saved() {
+  unit="whisipedia-job-$1.service"
+  if systemctl --user is-active -q "$unit" 2>/dev/null; then
+    return 0
+  fi
+  if [ -f "$S/jobs/$1.cmd" ]; then
+    sh "$S/jobs/$1.cmd" </dev/null && echo "restarted $unit" ||
+      echo "<4>$unit not restarted (sh $S/jobs/$1.cmd failed)" >&2
+  else
+    echo "<4>$unit: how it was started is not known ($S/jobs/$1.cmd); start it by hand" >&2
+  fi
+}
+if [ -f "$S/jobs.conf" ]; then
+  sed 's/#.*//' "$S/jobs.conf" | while read -r name _; do
+    [ -z "$name" ] || start_saved "$name"
+  done
+fi
+# Jobs tools/wsp-yield stopped when the machine ran short of memory.
 if [ -f "$S/jobs/yield-stopped" ]; then
   sort -u "$S/jobs/yield-stopped" | while read -r unit; do
     name=${unit#whisipedia-job-}
     name=${name%.service}
     [ "$name" != "$unit" ] || continue  # not a tools/wsp-bg job (the index waits for its timer)
-    if systemctl --user is-active -q "$unit" 2>/dev/null; then
-      continue
-    fi
-    if [ -f "$S/jobs/$name.cmd" ]; then
-      sh "$S/jobs/$name.cmd" </dev/null && echo "restarted $unit" ||
-        echo "<4>$unit not restarted (sh $S/jobs/$name.cmd failed)" >&2
-    else
-      echo "<4>$unit was stopped but how it was started is not known; start it by hand" >&2
-    fi
+    start_saved "$name"
   done
   rm -f "$S/jobs/yield-stopped"
 fi

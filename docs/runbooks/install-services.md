@@ -65,7 +65,13 @@ share, and the shares fit under the slice's MemoryHigh, so one job cannot thrott
   it holds the heavy lock for the whole rebuild.
 * Resuming after a reboot: `tools/lanes/whisipedia-resume.service` (install by hand, see the file)
   runs `tools/lanes/resume-after-reboot.sh`, which waits up to 15 minutes for the NAS and restarts
-  the lanes in `~/.local/state/whisipedia/lanes.conf` and a rebuild in `index/rebuild.conf`.
+  the lanes in `~/.local/state/whisipedia/lanes.conf`, the jobs named in `jobs.conf` (from the command
+  `tools/wsp-bg` saved for each, `jobs/NAME.cmd`), a rebuild in `index/rebuild.conf`, and the jobs
+  `tools/wsp-yield` stopped for memory (`jobs/yield-stopped`). Render it with the checkout's path
+  (`sed "s|@REPO@|$PWD|g" tools/lanes/whisipedia-resume.service > ~/.config/systemd/user/...`): until
+  2026-10-22 the installed unit ran a copy of an old script that read none of these, so the lanes the
+  memory guard stopped were never started again. A restart of `tools/wsp-yield` keeps what it owes
+  (`jobs/yield-stopped`).
 
 ## Uninstall
 

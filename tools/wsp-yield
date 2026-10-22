@@ -98,6 +98,12 @@ stop_jobs() {
 # Never leave the slice frozen behind: not when this stops, and not after a restart that lost the state.
 trap 'thaw; exit 0' TERM INT
 thaw
+# Jobs stopped for memory and not started again yet are still owed their start: on 2026-10-22 this
+# was restarted two minutes after stopping every lane, forgot it, and nothing ran for 10 hours.
+if [ -s "$JOBS/yield-stopped" ]; then
+  state=stopped
+  echo "jobs stopped before this started ($JOBS/yield-stopped): started after $RESUME_TICKS calm checks"
+fi
 
 while :; do
   reading

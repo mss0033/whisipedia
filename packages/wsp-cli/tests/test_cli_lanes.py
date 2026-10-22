@@ -420,3 +420,41 @@ def test_jobs_the_memory_guard_stopped_are_started_again_as_they_were(tmp_path: 
     assert started.read_text() == first  # the same unit, slice, limits and words
     assert first.rstrip().endswith("[tools/lanes/lane-run.sh][lane-x][-][it's][a b]")  # words kept
     assert not (jobs / "yield-stopped").exists()
+
+
+def test_jobs_listed_by_name_are_started_after_a_reboot_as_they_last_were(tmp_path: Path) -> None:
+    """Jobs that are not lanes (the ERA5 backfill, the maps lane) restart from the command
+    tools/wsp-bg saved; one without a saved command is reported, not guessed."""
+    fakebin = tmp_path / "bin"
+    fakebin.mkdir()
+    started = tmp_path / "started"
+    (fakebin / "systemd-run").write_text(
+        f'#!/bin/sh\nfor a in "$@"; do printf "[%s]" "$a"; done >> {started}\necho >> {started}\n'
+    )
+    (fakebin / "systemctl").write_text('#!/bin/sh\ncase "$*" in *is-active*) exit 3 ;; *) echo 7G ;; esac\n')
+    for f in fakebin.iterdir():
+        f.chmod(0o755)
+    env = {
+        "PATH": f"{fakebin}:/usr/bin:/bin",
+        "HOME": str(tmp_path),
+        "WSP_STATE": str(tmp_path / "state"),
+        "WSP_NAS_MOUNT": "/",
+        "WSP_RESUME_SETTLE": "0",
+        "WSP_BG_SLICE_HIGH": "7G",
+    }
+    bg = ROOT / "tools" / "wsp-bg"
+    subprocess.run(
+        [str(bg), "--no-heavy-lock", "era5", "2G", "--", "tools/lanes/era5-lane.sh", "2025"],
+        env=env,
+        check=True,
+        timeout=60,
+    )
+    first = started.read_text()
+    started.unlink()
+    (tmp_path / "state" / "jobs.conf").write_text("# the backfill\nera5\nnever-started  # no command\n")
+    script = ROOT / "tools" / "lanes" / "resume-after-reboot.sh"
+    done = subprocess.run([str(script)], env=env, capture_output=True, text=True, timeout=60)
+    assert done.returncode == 0, done.stderr
+    assert "restarted whisipedia-job-era5.service" in done.stdout
+    assert started.read_text() == first
+    assert "whisipedia-job-never-started.service: how it was started is not known" in done.stderr
