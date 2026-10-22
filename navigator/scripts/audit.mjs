@@ -44,8 +44,13 @@ const ONLY = new Set(
     .filter(Boolean),
 );
 // A line that heads a chapter of a book: "CHAPTER IV", "Book 2", "ACT III.", "XII.", "Canto 5".
-const HEADING_LINE =
-  /^(?:(?:chapter|book|part|section|canto|act|scene|letter|stave|lecture)\b.{0,60}|[IVXLC]{1,7}\.?)$/i;
+// A Roman numeral heading is in capitals: "Cl." is a speaker (Cleinias) in Plato's dialogues, and a
+// dialogue has no chapters to list (Epinomis, 2026-10-22).
+const HEADING_LINE = {
+  test: (line) =>
+    /^(?:chapter|book|part|section|canto|act|scene|letter|stave|lecture)\b.{0,60}$/i.test(line) ||
+    /^[IVXLC]{1,7}\.?$/.test(line),
+};
 const PAUSE = Number(process.env.WSP_AUDIT_PAUSE ?? 500);
 const HEADERS = { 'X-Whisipedia-Probe': 'check' };
 const PAGE_TIMEOUT = 120_000;
