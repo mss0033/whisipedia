@@ -3,6 +3,12 @@
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Fixed: the nightly index build re-reads only the languages whose sources changed (2026-10-22)
+* The spelling step read every language of every source again each night, the `lang` column of every
+  part first: about 8 hours of NAS reads. Each generation's language map and each language's counts
+  are kept under `<index root>/spell-cache/`; a rebuild recounts only what changed, with the same
+  result as a full recount.
+* The orchestrator keeps two malloc arenas: 40 per-thread arenas held 878 MB of its 1.6 GB.
 ### Added: run logs, and the background waits while the owner reads (2026-10-22)
 * Long jobs (`wsp index build`, `rank`, `spell`, `ingest`, `weather era5`) keep a run log under
   `<state>/logs/<command>/`: JSON lines with the run's start and end, each step's time and peak memory,

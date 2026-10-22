@@ -355,3 +355,89 @@ def test_unknown_everywhere_is_corrected_in_the_preferred_language_only() -> Non
     assert sp.correct("nie jest zzq") is None or "zza" in (
         sp.correct("nie jest zzq") or ""
     )  # Polish words: Polish may
+
+
+def _two_sources(tmp_path: Path, en_text: str = "insulin diabetes") -> list[tuple[str, RefineryReader]]:
+    ceb = [doc("c", f"ceb/{i:05d}", "Kategoriya", "mga lungsod kategoriya", lang="ceb") for i in range(60)]
+    en = [doc("e", f"en/{i:05d}", "Article", en_text, lang="en") for i in range(60)]
+    gen = "g2" if en_text != "insulin diabetes" else "g1"
+    for sid, gid, docs in (("c", "g1", ceb), ("e", gen, en)):
+        if not generation_dir(tmp_path / "ref", sid, gid).is_dir():
+            with RefineryWriter(tmp_path / "ref", sid, gid, row_group_rows=10) as w:
+                w.write(docs)
+    return [
+        ("c", RefineryReader(generation_dir(tmp_path / "ref", "c", "g1"))),
+        ("e", RefineryReader(generation_dir(tmp_path / "ref", "e", gen))),
+    ]
+
+
+def test_a_rebuild_keeps_the_vocabularies_whose_sources_did_not_change(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 2026-10-22: every nightly build read every language of every source again (8 hours on the NAS).
+    from wsp_index import spelling
+
+    cfg = SpellConfig(min_count=1, min_count_docs=0, min_language_docs=10)
+    readers = _two_sources(tmp_path)
+    first = tmp_path / "first.bin"
+    build_vocabulary(readers, first, cfg, cache=spelling.SpellCache(tmp_path / "cache"))
+
+    reads: list[str] = []
+    real_rg = pq.ParquetFile.read_row_group  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    from wsp_index.text import language_row_groups as real_groups
+
+    def counting_rg(self: pq.ParquetFile, i: int, *args: Any, **kwargs: Any) -> Any:
+        reads.append("row group")
+        return real_rg(self, i, *args, **kwargs)
+
+    def counting_groups(reader: RefineryReader) -> Any:
+        reads.append(f"lang column {reader.dir.parent.name}")
+        return real_groups(reader)
+
+    monkeypatch.setattr(pq.ParquetFile, "read_row_group", counting_rg)
+    monkeypatch.setattr(spelling, "language_row_groups", counting_groups)
+    cache = spelling.SpellCache(tmp_path / "cache")
+    again = tmp_path / "again.bin"
+    build_vocabulary(readers, again, cfg, cache=cache)
+    assert reads == []  # nothing read again
+    assert cache.kept == 2
+    assert again.read_bytes() == first.read_bytes()
+
+    # English changes (a new generation): only English is read and counted again.
+    readers = _two_sources(tmp_path, en_text="insulin glucose")
+    cache = spelling.SpellCache(tmp_path / "cache")
+    changed = tmp_path / "changed.bin"
+    build_vocabulary(readers, changed, cfg, cache=cache)
+    assert cache.kept == 1
+    assert "lang column e" in reads
+    assert "lang column c" not in reads
+    monkeypatch.undo()
+    fresh = tmp_path / "fresh.bin"
+    build_vocabulary(readers, fresh, cfg)  # no cache: the reference
+    assert changed.read_bytes() == fresh.read_bytes()
+    s = Speller.open(changed)
+    assert s is not None
+    assert s.count("glucose", "en") > 0
+    assert s.count("kategoriya", "ceb") > 0
+    # The old English generation's map and counts are gone; one map per source and one vocabulary
+    # per language remain.
+    assert len(list((tmp_path / "cache" / "groups").glob("*.json"))) == 2
+    assert len(list((tmp_path / "cache" / "vocab").glob("*.parquet"))) == 2
+
+
+def test_a_damaged_kept_vocabulary_is_counted_again(tmp_path: Path) -> None:
+    from wsp_index import spelling
+
+    cfg = SpellConfig(min_count=1, min_count_docs=0, min_language_docs=10)
+    readers = _two_sources(tmp_path)
+    first = tmp_path / "first.bin"
+    build_vocabulary(readers, first, cfg, cache=spelling.SpellCache(tmp_path / "cache"))
+    for path in (tmp_path / "cache" / "vocab").glob("*.parquet"):
+        path.write_bytes(b"not parquet")
+    for path in (tmp_path / "cache" / "groups").glob("*.json"):
+        path.write_text("{", encoding="utf-8")
+    cache = spelling.SpellCache(tmp_path / "cache")
+    again = tmp_path / "again.bin"
+    build_vocabulary(readers, again, cfg, cache=cache)
+    assert cache.kept == 0
+    assert again.read_bytes() == first.read_bytes()

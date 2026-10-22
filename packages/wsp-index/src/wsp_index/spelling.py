@@ -37,11 +37,20 @@ files stay readable, as one vocabulary for every script.
 
 Hashes are ``crc32 << 32 | adler32``; a collision can only add a candidate, which the exact distance
 check then rejects.
+
+A rebuild reuses what has not changed (:class:`SpellCache`, ``<index>/lexical/spell-cache/``): each
+generation's language map (the ``lang`` column of every part, read once per generation, not once per
+night) and each vocabulary's counts, kept under a key of everything its sample is drawn from (the
+generations' files, their row groups, the settings). The sample is deterministic, so a kept
+vocabulary is the one a recount would make; only the languages whose sources changed are read again.
+2026-10-22: the nightly rebuild read every language of every source again, 8 hours on the NAS.
 """
 
 from __future__ import annotations
 
 import contextlib
+import hashlib
+import json
 import math
 import mmap
 import os
@@ -293,20 +302,119 @@ def sample_language(
         yield table.filter(pc.equal(table.column("lang"), lang)).select(list(columns))
 
 
+CACHE_FORMAT = 1
+"""Bumped when the counting changes in a way the settings do not show: every kept vocabulary is stale."""
+
+
+def _write_atomic(path: Path, data: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".partial")
+    tmp.write_bytes(data)
+    os.replace(tmp, path)
+
+
+def generation_fingerprint(reader: RefineryReader) -> str:
+    """The generation's directory and each part's size and modification time: a refine (again)
+    writes new parts, so a changed generation gets a new fingerprint."""
+    h = hashlib.sha256(str(reader.dir.resolve()).encode())
+    for path in reader.parts:
+        st = path.stat()
+        h.update(f"{path.name}:{st.st_size}:{st.st_mtime_ns};".encode())
+    return h.hexdigest()[:32]
+
+
+class SpellCache:
+    """What a vocabulary rebuild can reuse (see the module notes): ``groups/<fingerprint>.json``
+    (a generation's language map) and ``vocab/<key>.parquet`` (one vocabulary's counts)."""
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        self.used: set[Path] = set()
+        self.kept = 0
+
+    def row_groups(self, reader: RefineryReader) -> tuple[str, dict[str, list[tuple[int, int, int]]]]:
+        fp = generation_fingerprint(reader)
+        path = self.root / "groups" / f"{fp}.json"
+        self.used.add(path)
+        try:
+            data = cast(dict[str, list[list[int]]], json.loads(path.read_text(encoding="utf-8")))
+            return fp, {lang: [(a, b, c) for a, b, c in rgs] for lang, rgs in data.items()}
+        except (OSError, ValueError, TypeError):
+            pass
+        groups = language_row_groups(reader)
+        _write_atomic(path, json.dumps(groups, separators=(",", ":")).encode())
+        return fp, groups
+
+    def counts(self, key: str) -> tuple[dict[str, int], int, int] | None:
+        """``(words, documents read, distinct tokens)`` kept under ``key``, or ``None``."""
+        path = self.root / "vocab" / f"{key}.parquet"
+        self.used.add(path)
+        try:
+            table = pq.read_table(path)  # pyright: ignore[reportUnknownMemberType]
+            meta = json.loads((table.schema.metadata or {})[b"wsp"])
+            words = cast(list[str], table.column("w").to_pylist())
+            values = cast(list[int], table.column("c").to_pylist())
+            return dict(zip(words, values, strict=True)), int(meta["docs"]), int(meta["distinct"])
+        except (OSError, ValueError, KeyError, TypeError, pa.ArrowException):
+            return None
+
+    def save(self, key: str, words: list[str], values: list[int], docs: int, distinct: int) -> None:
+        table = pa.Table.from_arrays(
+            [pa.array(words, pa.string()), pa.array(values, pa.int64())],
+            names=["w", "c"],
+            metadata={"wsp": json.dumps({"docs": docs, "distinct": distinct})},
+        )
+        path = self.root / "vocab" / f"{key}.parquet"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(path.name + ".partial")
+        pq.write_table(table, tmp)  # pyright: ignore[reportUnknownMemberType]
+        os.replace(tmp, path)
+
+    def prune(self) -> None:
+        """Remove what this rebuild did not use (old generations, languages whose sources changed)."""
+        for folder in ("groups", "vocab"):
+            for path in (self.root / folder).glob("*"):
+                if path not in self.used:
+                    with contextlib.suppress(OSError):
+                        path.unlink()
+
+
+def _vocab_key(
+    cfg: SpellConfig, langs: Sequence[str], sources: Mapping[str, Sequence[tuple[str, str, Sequence[Any]]]]
+) -> str:
+    settings = (
+        cfg.min_count,
+        cfg.min_count_docs,
+        cfg.max_words,
+        cfg.min_length,
+        cfg.max_length,
+        cfg.title_weight,
+        cfg.max_chars,
+        cfg.max_docs,
+    )
+    spec = [CACHE_FORMAT, settings, [(lang, [list(x) for x in sources[lang]]) for lang in langs]]
+    return hashlib.sha256(json.dumps(spec, separators=(",", ":")).encode()).hexdigest()[:32]
+
+
 def count_words(
     readers: Sequence[tuple[str, RefineryReader]],
     cfg: SpellConfig = SpellConfig(),  # noqa: B008 - immutable
     progress: Callable[[str], None] | None = None,
+    cache: SpellCache | None = None,
 ) -> tuple[dict[str, dict[str, int]], dict[str, int], int]:
     """``({lang: {word: count}}, {lang: documents read}, distinct tokens)`` over titles and leads.
 
     One vocabulary per language with at least ``min_language_docs`` documents; the rest share the
-    ``any`` vocabulary. Each language is sampled from row groups spread over its own parts.
+    ``any`` vocabulary. Each language is sampled from row groups spread over its own parts. With a
+    ``cache``, a vocabulary whose sample would be drawn from the same files is reused, not recounted.
     """
     plan: dict[str, list[tuple[RefineryReader, str, list[tuple[int, int, int]]]]] = {}
+    fingerprints: dict[str, list[tuple[str, str, list[tuple[int, int, int]]]]] = {}
     for _source, reader in readers:
-        for raw, rgs in language_row_groups(reader).items():
+        fp, by_lang = cache.row_groups(reader) if cache is not None else ("", language_row_groups(reader))
+        for raw, rgs in by_lang.items():
             plan.setdefault(primary_lang(raw), []).append((reader, raw, rgs))
+            fingerprints.setdefault(primary_lang(raw), []).append((fp, raw, rgs))
     wanted = {primary_lang(x) for x in cfg.languages}
     sizes = {lang: sum(n for _, _, rgs in srcs for _, _, n in rgs) for lang, srcs in plan.items()}
     groups: dict[str, list[str]] = {}
@@ -320,9 +428,18 @@ def count_words(
     docs_by_lang: dict[str, int] = {}
     distinct = 0
     for vocab, langs in sorted(groups.items()):
+        available = sum(sizes[lang] for lang in langs)
+        key = _vocab_key(cfg, langs, fingerprints) if cache is not None else ""
+        kept = cache.counts(key) if cache is not None else None
+        if kept is not None:
+            out[vocab], docs_by_lang[vocab], seen = kept
+            distinct += seen
+            cache.kept += 1  # pyright: ignore[reportOptionalMemberAccess]  # kept implies a cache
+            if progress:
+                progress(f"spell: {vocab}: unchanged, {len(out[vocab]):,} words kept")
+            continue
         counter = _Counter()
         docs = 0
-        available = sum(sizes[lang] for lang in langs)
         for lang in langs:
             for reader, raw, rgs in plan[lang]:
                 share = sum(n for _, _, n in rgs) / available
@@ -338,7 +455,8 @@ def count_words(
         acc = counter.acc
         if acc is None or acc.num_rows == 0:
             continue
-        distinct += acc.num_rows
+        seen = acc.num_rows
+        distinct += seen
         floor = cfg.min_count if docs >= cfg.min_count_docs else 1
         acc = acc.filter(pc.greater_equal(acc.column("c"), floor))
         counts = cast("npt.NDArray[np.int64]", acc.column("c").to_numpy())
@@ -349,6 +467,8 @@ def count_words(
         values = cast(list[int], acc.column("c").to_pylist())
         out[vocab] = dict(zip(words, values, strict=True))
         docs_by_lang[vocab] = docs
+        if cache is not None:
+            cache.save(key, words, values, docs, seen)
         if progress:
             progress(f"spell: {vocab}: {docs:,} of {available:,} documents sampled, {len(words):,} words")
     return out, docs_by_lang, distinct
@@ -469,9 +589,12 @@ def build_vocabulary(
     path: Path,
     cfg: SpellConfig = SpellConfig(),  # noqa: B008 - immutable
     progress: Callable[[str], None] | None = None,
+    cache: SpellCache | None = None,
 ) -> VocabStats:
     t0 = time.monotonic()
-    vocabs, docs, distinct = count_words(readers, cfg, progress)
+    vocabs, docs, distinct = count_words(readers, cfg, progress, cache)
+    if cache is not None and not cfg.languages:  # a partial rebuild must not drop the other languages
+        cache.prune()
     floors = {lang: (cfg.min_count if n >= cfg.min_count_docs else 1) for lang, n in docs.items()}
     n_del = write_vocabularies(path, vocabs, cfg, floors)
     return VocabStats(

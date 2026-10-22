@@ -137,9 +137,15 @@ held as one Arrow string array (~35 bytes per node, ~250 MB at 7M), never as Pyt
 `wsp_index.spelling` is a classic noisy-channel corrector. `wsp index spell` builds the vocabulary;
 `wsp index build` rebuilds it when something changed.
 
-* **Language model:** word counts from the indexed text (first 3,000 characters per document, at most
-  2M documents per source, titles counted ×5), tokenized in Arrow. Words of 3-24 letters; from 100k
-  documents on, words seen fewer than 3 times are dropped (the corpus's own typos); at most 500k words.
+* **Language model:** one vocabulary per language (languages under 50 documents share one), word
+  counts from the indexed text (first 3,000 characters per document, a sample of at most 400k
+  documents per language from row groups spread over its parts, titles counted ×5), tokenized in
+  Arrow. Words of 3-24 letters; from 100k documents on, words seen fewer than 3 times are dropped (the
+  corpus's own typos); at most 300k words per language.
+* **Reuse:** `<index root>/spell-cache/` keeps each generation's language map and each language's
+  counts under a key of the files its sample comes from; a rebuild counts only the languages whose
+  sources changed (the sample is deterministic: a kept vocabulary is the one a recount would make)
+  and removes what it no longer uses. It is safe to delete; the next rebuild reads everything once.
 * **Error model:** each edit (insertion, deletion, substitution, adjacent transposition) costs
   ε = 0.01, plus one more when the first letter changes (people rarely mistype it). A word becomes
   `argmax count(c) · ε^cost`, the word itself included, so a known word is only replaced by a much

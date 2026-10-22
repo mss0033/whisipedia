@@ -75,7 +75,7 @@ from wsp_index.refinery import (
     part_dir,
     set_members,
 )
-from wsp_index.spelling import SPELL_FILE, SpellConfig, VocabStats, build_vocabulary
+from wsp_index.spelling import SPELL_FILE, SpellCache, SpellConfig, VocabStats, build_vocabulary
 from wsp_index.titles import IndexedSource, TitleSources
 from wsp_orchestrator.pipeline import RefineResult
 from wsp_vault.ratelimit import RateLimiter
@@ -616,8 +616,11 @@ class Indexer:
             self._say("spell: nothing indexed")
             return None
         path = self.index.path / SPELL_FILE
-        stats = build_vocabulary(readers, path, config or SpellConfig(), progress=self._say)
-        self._say(f"spell: {stats.line()}; {memory_line()}")
+        # Local disk, beside the index, not inside it: a full relex carries the index files over and
+        # the kept counts stay valid for it (the same generations).
+        cache = SpellCache(self.root / "spell-cache")
+        stats = build_vocabulary(readers, path, config or SpellConfig(), progress=self._say, cache=cache)
+        self._say(f"spell: {stats.line()}; {cache.kept} vocabularies unchanged; {memory_line()}")
         return stats
 
     # --- whole runs ----------------------------------------------------------------------------
