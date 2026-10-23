@@ -19,6 +19,7 @@ def test_the_memory_report_names_each_part(client: httpx.Client) -> None:
     assert body["glibc"]["in_use_mb"] >= 0
     assert body["arrow"]["allocated_mb"] >= 0
     assert body["python"]["objects"] > 0
+    assert body["python"]["types"]["dict"] > 0  # live objects by type: what grows between reports
     assert "WSP_DIAG_TRACEMALLOC" in body["python"]["tracing"]  # off unless asked for
 
 

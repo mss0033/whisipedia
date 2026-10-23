@@ -17,6 +17,7 @@ import gc
 import os
 import time
 import tracemalloc
+from collections import Counter
 from collections.abc import Mapping
 from typing import Any, cast
 
@@ -123,7 +124,16 @@ def _readers(services: Any) -> dict[str, Any] | None:
 
 
 def _python(top: int) -> dict[str, Any]:
-    out: dict[str, Any] = {"gc_counts": gc.get_count(), "objects": len(gc.get_objects())}
+    objects = gc.get_objects()
+    # Live objects by type: two reports apart show which kind grows, without the cost of tracing
+    # (2026-10-23: ~350,000 objects more every 30 minutes while the audit ran).
+    by_type = Counter(type(o).__qualname__ for o in objects)
+    out: dict[str, Any] = {
+        "gc_counts": gc.get_count(),
+        "objects": len(objects),
+        "types": dict(by_type.most_common(top)),
+    }
+    del objects
     if tracemalloc.is_tracing():
         current, peak = tracemalloc.get_traced_memory()
         snap = tracemalloc.take_snapshot().filter_traces([tracemalloc.Filter(False, tracemalloc.__file__)])
