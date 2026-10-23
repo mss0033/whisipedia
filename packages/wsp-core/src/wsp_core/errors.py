@@ -11,6 +11,10 @@ class FetchError(Exception):
     """A download or metadata request failed and left no verified file behind (``Fetcher`` port)."""
 
 
+class RobotsDisallowedError(FetchError):
+    """The host's robots.txt does not allow this URL for us; never retried."""
+
+
 class RedirectRefusedError(FetchError):
     """A redirect leads somewhere the caller's guard (:func:`wsp_core.redirects.redirect_guard`)
     refuses: another origin, or a host whose robots.txt disallows us. Raised before the redirect is

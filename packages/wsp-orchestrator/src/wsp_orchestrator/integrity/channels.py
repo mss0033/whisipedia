@@ -6,7 +6,7 @@ download, the guard fetches the digest again through a second channel and compar
 * **Wikimedia dumps** (``wikimedia-dumps``, ``wikidata``): ``<wiki>-<date>-sha1sums.txt`` and
   ``-md5sums.txt`` from the **primary** (``dumps.wikimedia.org``), while the bytes usually come
   from mirrors;
-* **Kiwix** (``kiwix-opds``): ``<file>.sha256`` from ``download.kiwix.org`` (the bytes come from
+* **Kiwix** (``kiwix-opds``): ``<file>.sha256`` from ``lb.download.kiwix.org`` (the bytes come from
   the mirrors its Metalink lists; the Metalink's own hashes are cross-checked by the fetcher);
 * **everything else**: ``<url>.<algorithm>`` sidecars, preferring a mirror that did not serve the
   bytes, then the origin.
@@ -26,7 +26,8 @@ from urllib.parse import urlsplit, urlunsplit
 from wsp_core.model import RemoteFile
 
 DEFAULT_WIKIMEDIA_PRIMARY = "https://dumps.wikimedia.org/"
-DEFAULT_KIWIX_PRIMARY = "https://download.kiwix.org/"
+# Not download.kiwix.org: its robots.txt disallows every agent (2026-10-23); lb serves the same sidecars.
+DEFAULT_KIWIX_PRIMARY = "https://lb.download.kiwix.org/"
 SIDECAR_ALGORITHMS = ("sha256", "sha1", "md5", "sha512")
 _HEX = re.compile(r"^[0-9a-fA-F]{32,128}$")
 _BSD = re.compile(r"^(?P<algo>[A-Za-z0-9-]+)\s*\((?P<name>.+)\)\s*=\s*(?P<hex>[0-9a-fA-F]+)$")

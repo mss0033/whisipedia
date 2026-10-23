@@ -24,6 +24,7 @@ from wsp_fetch.errors import FetchCancelledError, FetchLockedError, Unverifiable
 
 PIECE = 64 * 1024
 CFG = FetchConfig(
+    robots=False,  # robots.txt has tests of its own (test_fetch_safety)
     user_agent="wsp-test/1.0",
     piece_size=PIECE,
     min_piece_size=PIECE,
@@ -414,3 +415,64 @@ def test_guards_nest_and_a_guard_s_own_requests_are_not_guarded() -> None:
             assert current_guard() is None
     assert calls == ["outer https://x.example/", "inner https://x.example/"]
     assert current_guard() is None
+
+
+def _robots_world(data: bytes) -> tuple[httpx.MockTransport, list[str]]:
+    """good.example allows us, bad.example disallows everything, open.example has no robots.txt."""
+    asked: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        asked.append(f"{request.url.host}{request.url.path}")
+        if request.url.path == "/robots.txt":
+            if request.url.host == "bad.example":
+                return httpx.Response(200, stream=httpx.ByteStream(b"User-agent: *\nDisallow: /\n"))
+            if request.url.host == "good.example":
+                return httpx.Response(200, stream=httpx.ByteStream(b"User-agent: *\nDisallow: /private/\n"))
+            return httpx.Response(404, stream=httpx.ByteStream(b""))
+        if request.url.host == "jump.example":
+            return httpx.Response(302, headers={"Location": "https://bad.example/x.bin"})
+        return _ranged(data, request)
+
+    return httpx.MockTransport(handler), asked
+
+
+def test_every_request_mirror_and_redirect_honours_robots_txt(tmp_path: Path) -> None:
+    """2026-10-23: only document collections checked robots.txt; PubMed's file host, the OSM planet
+    and a Kiwix mirror disallow us. The fetcher itself now refuses them, and drops such a mirror."""
+    from wsp_core.errors import RedirectRefusedError, RobotsDisallowedError
+
+    data = payload(3 * PIECE)
+    transport, asked = _robots_world(data)
+    cfg = replace(CFG, robots=True)
+    with HttpFetcher(cfg, transport=transport) as f:
+        with pytest.raises(RobotsDisallowedError):
+            f.get_bytes("https://bad.example/x.bin")
+        assert "bad.example/x.bin" not in asked
+        with pytest.raises(RobotsDisallowedError):
+            f.get_bytes("https://good.example/private/notes.txt")
+        assert f.get_bytes("https://good.example/x.bin") == data
+        assert f.get_bytes("https://open.example/x.bin") == data  # no robots.txt: no rules
+        # A mirror that disallows us is dropped; the download comes from the others.
+        remote = RemoteFile(
+            "https://bad.example/x.bin",
+            "x.bin",
+            size=len(data),
+            checksums=(sha256_checksum(data),),
+            mirrors=("https://good.example/x.bin",),
+        )
+        f.fetch(remote, tmp_path / "x.bin")
+        assert (tmp_path / "x.bin").read_bytes() == data
+        assert "bad.example/x.bin" not in asked
+        # A redirect onto a disallowing host is not followed.
+        with pytest.raises((RedirectRefusedError, FetchError), match="disallowed"):
+            f.get_bytes("https://jump.example/x.bin")
+        assert "bad.example/x.bin" not in asked
+        assert asked.count("good.example/robots.txt") == 1  # read once per host
+
+
+def test_robots_txt_can_be_turned_off_for_tests() -> None:
+    data = payload(PIECE)
+    transport, asked = _robots_world(data)
+    with HttpFetcher(CFG, transport=transport) as f:  # CFG: robots=False
+        assert f.get_bytes("https://bad.example/x.bin") == data
+    assert not [a for a in asked if a.endswith("/robots.txt")]

@@ -30,6 +30,10 @@ Safety rules (vault-fetch audit #8, #15, #16, LOW):
 * A signed redirect URL that expires mid-download (401/403/410) is re-resolved from the original
   URL instead of dropping the mirror.
 * HTTPS is never downgraded: a redirect from ``https`` to ``http`` fails the request.
+* Every host's robots.txt is honoured (``FetchConfig.robots``): a request, a mirror or a redirect
+  target it disallows is never asked for (read once per host; unreadable sets no rules). 2026-10-23:
+  only document collections had checked it, and PubMed, the OSM planet and some Kiwix mirrors and
+  checksum files were on hosts that disallow us.
 * A caller may guard where redirects lead (:func:`wsp_core.redirects.redirect_guard`): each hop is
   checked before it is followed, in every thread of the download (2026-10-23: BODC's GEBCO link
   redirected to CEDA, whose robots.txt disallows us; 7.5 GB came from there before any check ran).
@@ -60,11 +64,14 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
+from urllib.robotparser import RobotFileParser
 
 import httpx
 
+from wsp_core.errors import RedirectRefusedError, RobotsDisallowedError
 from wsp_core.model import RemoteFile, RemoteHead
-from wsp_core.redirects import current_guard
+from wsp_core.redirects import current_guard, unguarded
 from wsp_fetch import provenance as prov
 from wsp_fetch.config import FetchConfig, host_key
 from wsp_fetch.errors import (
@@ -97,6 +104,9 @@ def _spot_rng() -> random.Random:
     """Where spot-check offsets come from: unpredictable, so a mirror cannot serve the right bytes
     only where it expects to be checked."""
     return random.SystemRandom()
+
+
+_IN_ROBOTS: contextvars.ContextVar[bool] = contextvars.ContextVar("wsp_fetch_in_robots", default=False)
 
 
 def _guard_redirect(response: httpx.Response) -> None:
@@ -251,8 +261,10 @@ class HttpFetcher:
             follow_redirects=True,
             limits=httpx.Limits(max_connections=None, max_keepalive_connections=64),
             transport=transport,
-            event_hooks={"response": [_refuse_downgrade, _guard_redirect]},
+            event_hooks={"response": [_refuse_downgrade, _guard_redirect, self._robots_hop]},
         )
+        self._robots: dict[str, RobotFileParser | None] = {}  # "scheme://host" -> its rules
+        self._robots_lock = threading.Lock()
         self._bucket = TokenBucket(c.bandwidth_limit) if c.bandwidth_limit else None
         self._hosts: dict[str, threading.BoundedSemaphore] = {}
         self._hosts_lock = threading.Lock()
@@ -333,7 +345,55 @@ class HttpFetcher:
 
     # --- small documents ---------------------------------------------------------------------
 
+    # --- robots.txt ------------------------------------------------------------------------------
+
+    def robots_allows(self, url: str) -> bool:
+        """Whether ``url``'s host lets us fetch it (its robots.txt, read once; unreadable: yes)."""
+        if not self.config.robots or _IN_ROBOTS.get():
+            return True
+        parts = urlsplit(url)
+        site = f"{parts.scheme}://{parts.netloc.lower()}"
+        with self._robots_lock:
+            known = site in self._robots
+            rules = self._robots.get(site)
+        if not known:
+            rules = self._read_robots(site)
+            with self._robots_lock:
+                self._robots[site] = rules
+        return rules is None or rules.can_fetch(self.config.user_agent, url)
+
+    def check_robots(self, url: str) -> None:
+        if not self.robots_allows(url):
+            raise RobotsDisallowedError(f"{url}: disallowed by {urlsplit(url).netloc}/robots.txt")
+
+    def _read_robots(self, site: str) -> RobotFileParser | None:
+        token = _IN_ROBOTS.set(True)
+        try:
+            with unguarded():
+                r = self._client.get(f"{site}/robots.txt")
+            if r.status_code != 200:
+                return None
+            body = r.content[: 512 * 1024].decode("utf-8", "replace").lstrip("\ufeff")
+            if body.lstrip()[:20].lower().startswith(("<!doctype", "<html")):
+                return None  # a site that answers every path with a page has no robots.txt
+            rules = RobotFileParser()
+            rules.parse(body.splitlines())
+            return rules
+        except (httpx.HTTPError, OSError):
+            return None
+        finally:
+            _IN_ROBOTS.reset(token)
+
+    def _robots_hop(self, response: httpx.Response) -> None:
+        """Response hook: a redirect to a host whose robots.txt disallows the target is not followed."""
+        if _IN_ROBOTS.get() or not response.has_redirect_location:
+            return
+        target = str(response.request.url.join(response.headers["Location"]))
+        if not self.robots_allows(target):
+            raise RedirectRefusedError(f"redirected to {target}: disallowed by its robots.txt")
+
     def get_bytes(self, url: str, *, max_bytes: int = 64 * 1024 * 1024) -> bytes:
+        self.check_robots(url)
         return self._retrying(f"GET {url}", lambda: self._get_once(url, max_bytes), self.config.max_attempts)
 
     def _retrying[T](self, label: str, fn: Callable[[], T], attempts: int) -> T:
@@ -383,6 +443,7 @@ class HttpFetcher:
 
         For readers of random-access files over HTTP (map archives cut by ``wsp maps fetch``): a server
         that ignores ``Range`` or answers another range is an error, never a silent whole body."""
+        self.check_robots(url)
         if length <= 0:
             return b""
         end = start + length - 1
@@ -422,6 +483,7 @@ class HttpFetcher:
 
     def head(self, url: str) -> RemoteHead:
         """``HEAD`` with redirects followed (optional ``SupportsHead`` capability of the port)."""
+        self.check_robots(url)
 
         def once() -> RemoteHead:
             with self.host_slot(url):
@@ -502,6 +564,12 @@ class HttpFetcher:
     def fetch_target(self, target: Target, dest: Path, *, t0: float | None = None) -> FetchReport:
         """:meth:`fetch` for an already resolved target (used by :class:`~wsp_fetch.aria2.Aria2Fetcher`)."""
         t0 = time.monotonic() if t0 is None else t0
+        allowed = tuple(u for u in target.urls if self.robots_allows(u))
+        if not allowed:
+            raise RobotsDisallowedError(f"{target.url}: every source's robots.txt disallows us")
+        if len(allowed) < len(target.urls):
+            log.info("%s: %d mirror(s) dropped by robots.txt", target.url, len(target.urls) - len(allowed))
+            target = dataclasses.replace(target, urls=allowed)
         dest.parent.mkdir(parents=True, exist_ok=True)
         with self.destination_lock(dest):
             upstream_verified = bool(target.checksums) or target.pieces is not None

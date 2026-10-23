@@ -45,7 +45,10 @@ def test_a_redirect_to_a_host_whose_robots_txt_disallows_us_downloads_nothing(tm
     origins = ("www.bodc.example", "dap.ceda.example")  # even an allowed origin: robots.txt decides
     with (
         HttpFetcher(CFG, transport=transport) as f,
-        pytest.raises(FetchError, match=r"disallowed by dap\.ceda\.example/robots\.txt"),
+        pytest.raises(
+            FetchError,
+            match=r"dap\.ceda\.example.*disallowed by|disallowed by dap\.ceda\.example/robots\.txt",
+        ),
     ):
         download_from_origins(_throttle(f), remote, tmp_path / "gebco.zip", origins)
     assert "dap.ceda.example/gebco.nc" not in reached

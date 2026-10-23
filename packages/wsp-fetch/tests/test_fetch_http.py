@@ -32,6 +32,7 @@ from wsp_fetch.state import partial_path, state_path
 
 PIECE = 64 * 1024
 CFG = FetchConfig(
+    robots=False,  # robots.txt has tests of its own (test_fetch_safety)
     user_agent="wsp-test/1.0",
     piece_size=PIECE,
     min_piece_size=PIECE,

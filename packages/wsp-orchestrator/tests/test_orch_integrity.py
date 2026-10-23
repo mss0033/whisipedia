@@ -57,7 +57,7 @@ from wsp_orchestrator.testing import (
     sha256_hex,
 )
 
-KIWIX = "https://download.kiwix.org/zim/wikipedia/"
+KIWIX = "https://lb.download.kiwix.org/zim/wikipedia/"
 DATA_1 = b"<html><body>generation one</body></html>\n" * 40
 DATA_2 = b"<html><body>generation two</body></html>\n" * 40
 
@@ -160,7 +160,7 @@ def offer(
         remote, len(data), mirrors=srcs, issuer=issuer, **prov
     )
     digest = channel_digest or sha256_hex(data)
-    sidecar = "https://download.kiwix.org/" + remote.url.split("/", 3)[3] + ".sha256"
+    sidecar = "https://lb.download.kiwix.org/" + remote.url.split("/", 3)[3] + ".sha256"
     h.fetcher.documents[sidecar] = f"{digest}  {remote.name}\n".encode()
     h.fetcher.observations[sidecar] = {
         "final_url": sidecar,
@@ -188,10 +188,10 @@ def test_clean_release_is_promoted_with_signed_provenance_and_report(tmp_path: P
     assert doc["channel_status"] == "independent"
     channel = doc["files"][0]["channel"]
     assert channel["status"] == "independent"
-    assert channel["channels"][0]["url"].startswith("https://download.kiwix.org/zim/")
+    assert channel["channels"][0]["url"].startswith("https://lb.download.kiwix.org/zim/")
     assert doc["files"][0]["fetch"]["sources"][0]["host"] == "mirror.example.org"
     assert {(r["host"], r["role"]) for r in h.store.origin_pins("wp")} == {
-        ("download.kiwix.org", "origin"),
+        ("lb.download.kiwix.org", "origin"),
         ("mirror.example.org", "mirror"),
     }
     prov = attest.docs[("wp", "2026-10-01", "PROVENANCE.json")]
@@ -294,7 +294,7 @@ def test_certificate_issuer_change_alerts_but_continues(tmp_path: Path) -> None:
     assert run(h, offer(h, "2026-10-01", DATA_1)) is Outcome.PROMOTED
     assert run(h, offer(h, "2026-11-01", DATA_2, issuer="Shady Certs Ltd")) is Outcome.PROMOTED
     keys = h.sink.alert_keys()
-    assert "origin-drift:wp:origin-issuer-changed:download.kiwix.org" in keys
+    assert "origin-drift:wp:origin-issuer-changed:lb.download.kiwix.org" in keys
 
 
 def test_origin_rules() -> None:
@@ -356,7 +356,7 @@ def test_channel_locations() -> None:
         "https://dumps.wikimedia.org/enwiki/20261001/enwiki-20261001-md5sums.txt",
     ]
     kx = RemoteFile("https://mirror.example/zim/x.zim", "x.zim")
-    assert kiwix_refs(kx)[0].url == "https://download.kiwix.org/zim/x.zim.sha256"
+    assert kiwix_refs(kx)[0].url == "https://lb.download.kiwix.org/zim/x.zim.sha256"
     osm = RemoteFile(
         "https://planet.osm.org/pbf/p.osm.pbf",
         "p.osm.pbf",
@@ -567,5 +567,5 @@ def test_pins_are_staged_until_promotion_and_evidence_is_kept_per_release(tmp_pa
     h.pipeline.step("wp", "2026-11-01")  # VERIFIED: pins staged, not committed
     assert h.store.origin_pins("wp") == []
     assert h.pipeline.run("wp", "2026-11-01").outcome is Outcome.PROMOTED
-    assert {r["host"] for r in h.store.origin_pins("wp")} == {"download.kiwix.org", "mirror.example.org"}
+    assert {r["host"] for r in h.store.origin_pins("wp")} == {"lb.download.kiwix.org", "mirror.example.org"}
     assert evidence.read_bytes() == DATA_1, "a later release never overwrites earlier evidence"

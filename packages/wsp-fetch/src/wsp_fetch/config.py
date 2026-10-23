@@ -57,7 +57,12 @@ class FetchConfig:
     max_retry_after: float = 600.0
     slow_mirror_factor: float = 4.0  # demote a mirror slower than best / factor
     endgame: bool = True  # duplicate straggling tail pieces on idle connections
-    metalink_hosts: tuple[str, ...] = ("download.kiwix.org",)  # probe ``<url>.meta4`` on these hosts
+    # Probe ``<url>.meta4`` on these hosts. Not download.kiwix.org: its robots.txt disallows every agent
+    # (2026-10-23); the catalog's links and the metalinks are on lb.download.kiwix.org.
+    metalink_hosts: tuple[str, ...] = ("lb.download.kiwix.org",)
+    # Honour each host's robots.txt on every request, mirror and redirect (owner decision 2026-10-21:
+    # strictly; until 2026-10-23 only the document collections checked it). Off only in tests.
+    robots: bool = True
     state_interval: float = 2.0  # seconds between durable resume checkpoints
     verify_readback: bool = False  # drop page cache and re-hash from disk before rename (SMB, ADR-0002)
     spot_checks: int = 2  # random ranges re-read from every mirror and compared (ADR-0009); 0 = off

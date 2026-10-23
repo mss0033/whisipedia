@@ -68,7 +68,7 @@ from wsp_adapters.doccollection.model import (
     title_from_url,
 )
 from wsp_adapters.doccollection.policy import DocFacts, Rules, Verdict, classify_metadata
-from wsp_core.errors import FetchError, NotFoundError, RedirectRefusedError
+from wsp_core.errors import FetchError, NotFoundError, RedirectRefusedError, RobotsDisallowedError
 from wsp_core.model import FetchResult, RemoteFile, RemoteHead
 from wsp_core.ports import Fetcher, SupportsHead
 from wsp_core.redirects import redirect_guard, unguarded
@@ -90,10 +90,6 @@ class NoDocuments(Exception):  # noqa: N818 - an answer, not a failure
 
 
 # --- politeness ----------------------------------------------------------------------------------
-
-
-class RobotsDisallowedError(FetchError):
-    """The host's robots.txt does not allow this URL for us."""
 
 
 class Throttle:
