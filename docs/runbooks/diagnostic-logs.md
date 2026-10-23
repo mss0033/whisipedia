@@ -8,7 +8,8 @@ find out why a job was slow or what it did before it failed.
 
 `<state>/logs/<command>/<UTC time>-<pid>.jsonl` (state is `~/.local/share/whisipedia/state` on this
 machine), for example `logs/index-build/20261022T030000Z-12345.jsonl`. The newest 30 of each command are
-kept.
+kept. A log whose process is still running is never removed, and a run that found its lock held and
+left at once (exit 3 within a minute) keeps none: lanes retry a held lock every minute.
 
 * Always kept: `wsp index build`, `index rank`, `index spell`, `ingest`, `weather era5` (long jobs:
   the index build of 2026-10-21 ran 28 hours and left no record of which step took the time).
