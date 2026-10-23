@@ -19,10 +19,12 @@
 #
 #   members at once (MemoryHigh / MemoryMax):
 #   orchestrator                1.5 / 2   GiB  (MemoryLow 256M: the control plane is reclaimed last)
-#   fetch lanes, all together   1.5 / 2   GiB  whisipedia-background-fetch.slice (tools/wsp-bg --fetch)
+#   fetch lanes, all together   2.5 / 3   GiB  whisipedia-background-fetch.slice (tools/wsp-bg --fetch)
 #   one heavy job               3   / 4   GiB  step units, whisipedia-index.service, tools/wsp-bg
 #                               ---------
-#                               6   / 8   GiB  highs below the slice's 7 GiB high, maxima within its 8
+#                               7   / 9   GiB  within the slice's 9 / 10 GiB: a persistent override
+#                                              (~/.config/systemd/user.control, 2026-10-20) raises the
+#                                              values below; tools/wsp-yield guards the machine
 #
 # Only one heavy job runs at a time (the machine-wide "heavy" lock). tools/wsp-bg refuses a job whose
 # MemoryMax reaches this MemoryHigh. A rebuild that needs more than 4 GiB runs with the lanes stopped:

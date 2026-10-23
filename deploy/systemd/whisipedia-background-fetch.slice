@@ -3,7 +3,8 @@
 # they never take more than this, so a heavy job and the orchestrator keep theirs (audit 2026-10-12
 # H1; the arithmetic is in whisipedia-background.slice). Lanes wait on the network, not on memory, but
 # throttling them is not free: at 1G, eleven lanes (30-190 MB each) sat over the line and every lane was
-# stalled 81% of the time (memory.pressure "full", 2026-10-20).
+# stalled 81% of the time (memory.pressure "full", 2026-10-20). 1.5G/2G was raised by hand to 2.5G/3G
+# for sixteen lanes (2026-10-20), and is that here now: a set-property override is lost on reboot.
 #
 # Template: `wsp service install` renders this file (docs/runbooks/install-services.md).
 
@@ -11,8 +12,8 @@
 Description=Whisipedia download lanes (share of the background budget)
 
 [Slice]
-MemoryHigh=1536M
-MemoryMax=2G
+MemoryHigh=2560M
+MemoryMax=3G
 MemorySwapMax=512M
 CPUWeight=20
 IOWeight=10
