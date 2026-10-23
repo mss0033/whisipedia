@@ -1,0 +1,40 @@
+#!/bin/sh
+# Stop the library cleanly before `wsl --shutdown` (which stops the WSL VM at once): the background jobs
+# first (a lane notes the item it stopped at, an ingest or index build resumes where it was), then the
+# trawler, the index build and the orchestrator (its own shutdown grace), the API, and the memory guard
+# last (it thaws the background slice on its way out). Then it says whether anything of the library is
+# still running. After the restart, whisipedia-resume.service starts the jobs in
+# ~/.local/state/whisipedia/jobs.conf again (docs/runbooks/install-services.md).
+set -u
+say() { echo "$(date +%H:%M:%S) $*"; }
+units() { systemctl --user list-units --plain --no-legend --state=active,activating "$@" | awk '{print $1}'; }
+
+jobs=$(units 'whisipedia-job-*')
+if [ -n "$jobs" ]; then
+  say "stopping $(echo "$jobs" | wc -l) background jobs"
+  # shellcheck disable=SC2086  # one unit name per word
+  systemctl --user stop $jobs
+fi
+for u in whisipedia-trawler.service whisipedia-index.service whisipedia-quality.service \
+  whisipedia-weather.service whisipedia-orchestrator.service whisipedia-api.service whisipedia-yield.service; do
+  if systemctl --user is-active -q "$u" || [ "$(systemctl --user show "$u" -p ActiveState --value)" = activating ]; then
+    say "stopping $u"
+    systemctl --user stop "$u"
+  fi
+done
+left=$(units 'whisipedia-*' | grep -v '\.timer$\|\.slice$\|\.target$' || true)
+# The library's programs by their own name (the venv's wsp, wsp-orchestrator, wsp-trawl, node's audit
+# or trawl script), never a pattern over whole command lines (one matched itself, 2026-10-16).
+procs=$(ps -u "$(id -u)" -o pid=,args= | awk '{
+  prog = $2; arg = $3
+  if (prog ~ /(^|\/)\.venv\/bin\/(wsp|wsp-orchestrator)$/ || arg ~ /(^|\/)\.venv\/bin\/(wsp|wsp-orchestrator)$/ ||
+      prog ~ /\/tools\/wsp-trawl$/ || arg ~ /scripts\/(audit|trawl)\.mjs$/) print
+}')
+if [ -z "$left" ] && [ -z "$procs" ]; then
+  say "nothing of the library is running: safe to run 'wsl --shutdown' (from Windows)"
+  exit 0
+fi
+say "still running:"
+[ -z "$left" ] || echo "$left"
+[ -z "$procs" ] || echo "$procs"
+exit 1

@@ -73,6 +73,16 @@ share, and the shares fit under the slice's MemoryHigh, so one job cannot thrott
   memory guard stopped were never started again. A restart of `tools/wsp-yield` keeps what it owes
   (`jobs/yield-stopped`).
 
+## Restarting WSL or the PC
+
+1. In WSL: `tools/wsp-shutdown`. It stops the background jobs (a lane notes where it stopped; ingests
+   and the index build resume), then the trawler, the index build, the orchestrator, the API and the
+   memory guard, and says when nothing of the library is running.
+2. In Windows: `wsl --shutdown`, then shut down or restart the PC.
+3. After the restart, open a WSL terminal (the user services start with it): `whisipedia-resume.service`
+   waits for the NAS, then starts the jobs named in `~/.local/state/whisipedia/jobs.conf` again.
+   Check `systemctl --user --failed` and `tools/wsp-stall --status`.
+
 ## Uninstall
 
 ```sh
