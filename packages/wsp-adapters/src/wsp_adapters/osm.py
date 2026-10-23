@@ -3,7 +3,8 @@
 No map rendering happens here: the planet file itself is the map (any OSM tool opens it). This
 adapter makes OSM *searchable* and *linkable*: it emits one short document per named place.
 
-**Discover.** Lists ``https://planet.openstreetmap.org/pbf/`` for ``planet-YYMMDD.osm.pbf`` and
+**Discover.** Lists the planet directory (``access.endpoints``; default the official FAU mirror,
+``https://ftp.fau.de/osm-planet/pbf/``) for ``planet-YYMMDD.osm.pbf`` and
 reads each ``.md5`` sidecar; the newest file with a checksum is the release (version
 ``YYYY-MM-DD``). ``access.mirrors`` adds byte-identical mirror bases with the same layout.
 
@@ -49,7 +50,8 @@ from wsp_core.ports import Ctx
 
 log = logging.getLogger(__name__)
 
-PLANET_URL = "https://planet.openstreetmap.org/pbf/"
+# The FAU mirror: planet.openstreetmap.org's robots.txt disallows every agent but wget (2026-10-23).
+PLANET_URL = "https://ftp.fau.de/osm-planet/pbf/"
 FILE_RE = re.compile(r"^planet-(\d{2})(\d{2})(\d{2})\.osm\.pbf$")
 _QID_RE = re.compile(r"^Q\d+$")
 PLACE_KINDS = frozenset(

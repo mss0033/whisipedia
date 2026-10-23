@@ -225,7 +225,9 @@ sources:
     publisher: US National Library of Medicine
     domain: [medicine, science]
     tier: T1
-    status: active
+    # Paused 2026-10-23: ftp.ncbi.nlm.nih.gov's robots.txt disallows every agent (found by the source
+    # research); the files are also served over ftp:// (no robots.txt there): owner to decide.
+    status: paused
     license: LicenseRef-NLM-terms
     legal_basis: bulk-access-terms
     # Research abstracts: no medicine-domain ranking bonus, so practical references (MDWiki, Wikipedia)
@@ -333,7 +335,9 @@ sources:
     license: ODbL-1.0
     legal_basis: open-license
     index: false  # map data: not text search material
-    access: {adapter: osm-planet, endpoints: ["https://planet.openstreetmap.org/pbf/"]}
+    # planet.openstreetmap.org's robots.txt disallows every agent but wget (2026-10-23); its official mirror at
+    # FAU serves the same planet files and .md5 sidecars, and its robots.txt allows them.
+    access: {adapter: osm-planet, endpoints: ["https://ftp.fau.de/osm-planet/pbf/"]}
     notes: The osm-planet adapter takes the weekly planet PBF and emits named places; replication diffs are not applied yet.
     update: {strategy: base-plus-incremental}
     size: {planet_pbf_bytes: 95.2e9, measured: true, as_of: 2026-10-09}
