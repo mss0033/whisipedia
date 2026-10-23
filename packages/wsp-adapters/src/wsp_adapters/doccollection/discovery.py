@@ -45,6 +45,7 @@ import re
 import threading
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime
 from html import unescape as html_unescape
@@ -67,9 +68,10 @@ from wsp_adapters.doccollection.model import (
     title_from_url,
 )
 from wsp_adapters.doccollection.policy import DocFacts, Rules, Verdict, classify_metadata
-from wsp_core.errors import FetchError, NotFoundError
+from wsp_core.errors import FetchError, NotFoundError, RedirectRefusedError
 from wsp_core.model import FetchResult, RemoteFile, RemoteHead
 from wsp_core.ports import Fetcher, SupportsHead
+from wsp_core.redirects import redirect_guard, unguarded
 
 log = logging.getLogger(__name__)
 
@@ -103,7 +105,9 @@ class Throttle:
     With ``robots`` (our user agent), each host's robots.txt is read once: a URL it disallows is a
     :class:`RobotsDisallowedError`, and its ``Crawl-delay`` is the least interval for that host. Set by
     hand per source, four crawl delays had been missed and two hosts disallowing every crawler were
-    being fetched (2026-10-21). A robots.txt that cannot be read sets no rules.
+    being fetched (2026-10-21). A robots.txt that cannot be read sets no rules. Every redirect a
+    request takes is checked the same way before it is followed (:func:`wsp_core.redirects.redirect_guard`;
+    BODC's GEBCO link led to CEDA, whose robots.txt disallows every agent, 2026-10-23).
     """
 
     def __init__(
@@ -135,7 +139,8 @@ class Throttle:
                 return self._rules[site]
         rules: RobotFileParser | None = None
         try:
-            body = self.inner.get_bytes(f"{site}/robots.txt", max_bytes=512 * 1024)
+            with unguarded():  # robots.txt itself may be redirected; it is not a page we crawl
+                body = self.inner.get_bytes(f"{site}/robots.txt", max_bytes=512 * 1024)
         except (FetchError, OSError, ValueError):
             body = None
         if body is not None:
@@ -166,6 +171,16 @@ class Throttle:
         if start > now:
             self.sleep(start - now)
 
+    def _hop(self, url: str) -> None:
+        """A redirect target: refused when its host's robots.txt disallows it."""
+        rules = self._robots(url)
+        if rules is not None and self.robots is not None and not rules.can_fetch(self.robots, url):
+            host = urlsplit(url).netloc.lower()
+            raise RedirectRefusedError(f"redirected to {url}: disallowed by {host}/robots.txt")
+
+    def _guarded(self) -> AbstractContextManager[None]:
+        return redirect_guard(self._hop) if self.robots is not None else nullcontext()
+
     def _charge(self, url: str, extra: int) -> None:
         """Count ``extra`` more requests a call made to ``url``'s host (a probe, redirect hops, retries)
         and push the host's next start back by as many intervals, so the budget is per HTTP request,
@@ -184,7 +199,8 @@ class Throttle:
     def get_bytes(self, url: str, *, max_bytes: int = 64 * 1024 * 1024) -> bytes:
         self._wait(url)
         try:
-            return self.inner.get_bytes(url, max_bytes=max_bytes)
+            with self._guarded():
+                return self.inner.get_bytes(url, max_bytes=max_bytes)
         except FetchError as exc:
             self._charge(url, _attempts(exc) - 1)
             raise
@@ -192,7 +208,8 @@ class Throttle:
     def download(self, remote: RemoteFile, dest: Any) -> FetchResult:
         self._wait(remote.url)
         try:
-            result = self.inner.download(remote, dest)
+            with self._guarded():
+                result = self.inner.download(remote, dest)
         except FetchError as exc:
             self._charge(remote.url, _attempts(exc) - 1)
             raise
@@ -203,7 +220,8 @@ class Throttle:
         if not isinstance(self.inner, SupportsHead):
             raise FetchError(f"HEAD not supported by {type(self.inner).__name__}")
         self._wait(url)
-        return self.inner.head(url)
+        with self._guarded():
+            return self.inner.head(url)
 
 
 _ATTEMPTS_RE = re.compile(r"after (\d+) attempt")

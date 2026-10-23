@@ -30,6 +30,9 @@ Safety rules (vault-fetch audit #8, #15, #16, LOW):
 * A signed redirect URL that expires mid-download (401/403/410) is re-resolved from the original
   URL instead of dropping the mirror.
 * HTTPS is never downgraded: a redirect from ``https`` to ``http`` fails the request.
+* A caller may guard where redirects lead (:func:`wsp_core.redirects.redirect_guard`): each hop is
+  checked before it is followed, in every thread of the download (2026-10-23: BODC's GEBCO link
+  redirected to CEDA, whose robots.txt disallows us; 7.5 GB came from there before any check ran).
 * Politeness caps count against the host we were asked to fetch from, not the host a redirect
   lands on; one destination is fetched by one process at a time (a local ``flock``).
 * Spot checks pick their ranges at random (unpredictable to a mirror) and run before the file is
@@ -39,6 +42,7 @@ Safety rules (vault-fetch audit #8, #15, #16, LOW):
 from __future__ import annotations
 
 import bisect
+import contextvars
 import dataclasses
 import email.utils
 import fcntl
@@ -60,6 +64,7 @@ from typing import Any
 import httpx
 
 from wsp_core.model import RemoteFile, RemoteHead
+from wsp_core.redirects import current_guard
 from wsp_fetch import provenance as prov
 from wsp_fetch.config import FetchConfig, host_key
 from wsp_fetch.errors import (
@@ -92,6 +97,14 @@ def _spot_rng() -> random.Random:
     """Where spot-check offsets come from: unpredictable, so a mirror cannot serve the right bytes
     only where it expects to be checked."""
     return random.SystemRandom()
+
+
+def _guard_redirect(response: httpx.Response) -> None:
+    """Response hook: the caller's :func:`wsp_core.redirects.redirect_guard`, if any, on the target."""
+    check = current_guard()
+    if check is None or not response.has_redirect_location:
+        return
+    check(str(response.request.url.join(response.headers["Location"])))
 
 
 def _refuse_downgrade(response: httpx.Response) -> None:
@@ -238,7 +251,7 @@ class HttpFetcher:
             follow_redirects=True,
             limits=httpx.Limits(max_connections=None, max_keepalive_connections=64),
             transport=transport,
-            event_hooks={"response": [_refuse_downgrade]},
+            event_hooks={"response": [_refuse_downgrade, _guard_redirect]},
         )
         self._bucket = TokenBucket(c.bandwidth_limit) if c.bandwidth_limit else None
         self._hosts: dict[str, threading.BoundedSemaphore] = {}
@@ -557,7 +570,10 @@ class HttpFetcher:
                 rejected.append({"url": url, "reason": f"unreachable: {exc}"})
                 log.info("mirror %s unusable: %s", url, exc)
 
-        threads = [threading.Thread(target=run, args=(i, u), daemon=True) for i, u in enumerate(target.urls)]
+        threads = [
+            threading.Thread(target=contextvars.copy_context().run, args=(run, i, u), daemon=True)
+            for i, u in enumerate(target.urls)
+        ]
         started: list[threading.Thread] = []
         for i, t in enumerate(threads):
             try:
@@ -943,7 +959,10 @@ class _SegmentedDownload:
             for slot in range(m.workers):
                 threads.append(
                     threading.Thread(
-                        target=self._worker, args=(m, slot), name=f"wsp-fetch-{m.id}.{slot}", daemon=True
+                        target=contextvars.copy_context().run,  # the caller's redirect guard
+                        args=(self._worker, m, slot),
+                        name=f"wsp-fetch-{m.id}.{slot}",
+                        daemon=True,
                     )
                 )
         self.live_workers = len(threads)

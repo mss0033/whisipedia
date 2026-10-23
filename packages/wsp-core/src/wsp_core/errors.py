@@ -11,6 +11,12 @@ class FetchError(Exception):
     """A download or metadata request failed and left no verified file behind (``Fetcher`` port)."""
 
 
+class RedirectRefusedError(FetchError):
+    """A redirect leads somewhere the caller's guard (:func:`wsp_core.redirects.redirect_guard`)
+    refuses: another origin, or a host whose robots.txt disallows us. Raised before the redirect is
+    followed, so nothing of the target is downloaded; not retried."""
+
+
 class NotFoundError(FetchError):
     """Upstream answered 404 / 410: the resource does not exist (not a transient failure)."""
 

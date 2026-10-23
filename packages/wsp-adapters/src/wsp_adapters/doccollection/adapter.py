@@ -93,6 +93,7 @@ from wsp_adapters.doccollection.policy import (
 from wsp_adapters.html_text import html_to_text
 from wsp_adapters.pdftext import Section, outline_marks, page_text, plan_sections
 from wsp_core.banners import banner_for
+from wsp_core.errors import RedirectRefusedError
 from wsp_core.ids import content_hash, make_doc_id
 from wsp_core.memory import drop_file_cache
 from wsp_core.model import (
@@ -110,6 +111,7 @@ from wsp_core.model import (
     Verdict as FileVerdict,
 )
 from wsp_core.ports import Ctx, Fetcher
+from wsp_core.redirects import redirect_guard
 
 log = logging.getLogger(__name__)
 
@@ -797,15 +799,22 @@ def download_from_origins(
 ) -> FetchResult:
     """``fetcher.download`` restricted to ``origins`` on every URL the download touched.
 
-    The configured URL and mirrors are checked before the request; every redirect hop and final URL
-    the fetcher recorded (``FetchReport.provenance``) after it. Off-origin or unverifiable bytes are
-    deleted at once and :class:`OriginError` is raised. (The fetcher follows redirects itself, so the
-    bytes do reach local disk first; they never reach the vault.)
+    The configured URL and mirrors are checked before the request, and every redirect before it is
+    followed (:func:`wsp_core.redirects.redirect_guard`, for a fetcher that honours it): a redirect off
+    the origins downloads nothing. The hops and final URL the fetcher recorded
+    (``FetchReport.provenance``) are checked after it too, for a fetcher that does not; off-origin or
+    unverifiable bytes are deleted at once and :class:`OriginError` is raised.
     """
     for url in (remote.url, *remote.mirrors):
         if not origin_ok(url, origins):
             raise OriginError(f"{url} is not an allowed HTTPS origin {tuple(origins)}")
-    result = fetcher.download(remote, dest)
+
+    def hop(url: str) -> None:
+        if not origin_ok(url, origins):
+            raise RedirectRefusedError(f"redirected to {url}: not an allowed HTTPS origin {tuple(origins)}")
+
+    with redirect_guard(hop):
+        result = fetcher.download(remote, dest)
     bad = off_origin_hops(result, origins)
     if bad is None or bad:
         Path(result.path).unlink(missing_ok=True)

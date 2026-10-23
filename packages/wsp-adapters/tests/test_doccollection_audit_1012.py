@@ -9,7 +9,7 @@ import json
 import zipfile
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 
 import pytest
 
@@ -737,9 +737,9 @@ def test_a_cia_release_keeps_its_old_banners_but_not_the_deny_core() -> None:
 
     repo = Path(__file__).resolve().parents[3]
     sources = yaml.safe_load((repo / "registry" / "sources.yaml").read_text(encoding="utf-8"))
-    rows = sources["sources"] if isinstance(sources, dict) else sources
+    rows = cast(list[dict[str, Any]], sources["sources"] if isinstance(sources, dict) else sources)
     spec = next(s for s in rows if s["id"] == "cia-reading-room")
-    rules = load_rules(spec["access"]["filter"], repo_root=repo)
+    rules = load_rules(cast(dict[str, Any], spec["access"]["filter"]), repo_root=repo)
     cover = Extracted("SECRET NOFORN\nROUTING AND RECORD SHEET\nSoviet grain harvest estimates" + FILLER)
     assert screen_text(cover, rules).decision.verdict is Verdict.ALLOW
     harmful = Extracted("Demolition Charges and Calculations\nshaped charges, demolition charges" + FILLER)

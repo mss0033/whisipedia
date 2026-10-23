@@ -15,7 +15,9 @@ from pathlib import Path
 import httpx
 import pytest
 
+from wsp_core.errors import RedirectRefusedError
 from wsp_core.model import RemoteFile, VerdictStatus
+from wsp_core.redirects import current_guard, redirect_guard, unguarded
 from wsp_core.testing.fetcher_contract import RangeServer, payload, sha256_checksum
 from wsp_fetch import ChecksumMismatchError, FetchConfig, FetchError, HttpFetcher
 from wsp_fetch.errors import FetchCancelledError, FetchLockedError, UnverifiableError
@@ -355,3 +357,60 @@ def test_aria2_checksum_failure_keeps_the_newest_stage_as_evidence(tmp_path: Pat
     assert (kept / "big.zim").read_bytes() == b"250 GB, in spirit"
     assert not old.exists()
     assert not stage.exists()
+
+
+def test_a_guarded_redirect_is_refused_before_anything_comes_from_its_target(tmp_path: Path) -> None:
+    """2026-10-23: BODC's GEBCO link redirected to CEDA, whose robots.txt disallows us; 7.5 GB came
+    from CEDA before the collection's checks ran. A guard set around the download refuses the hop
+    itself, in the probe threads and the piece workers alike."""
+    data = payload(5 * PIECE)
+    reached: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        reached.append(request.url.host)
+        if request.url.host == "origin.example":
+            return httpx.Response(302, headers={"Location": "https://cdn.example/x.bin"})
+        return _ranged(data, request)
+
+    seen: list[tuple[str, str]] = []
+
+    def refuse_cdn(url: str) -> None:
+        seen.append((threading.current_thread().name, url))
+        if "cdn.example" in url:
+            raise RedirectRefusedError(f"redirected to {url}: not allowed")
+
+    remote = RemoteFile(
+        "https://origin.example/x.bin", "x.bin", size=len(data), checksums=(sha256_checksum(data),)
+    )
+    with HttpFetcher(CFG, transport=httpx.MockTransport(handler)) as f:
+        with redirect_guard(refuse_cdn), pytest.raises(FetchError, match="not allowed"):
+            f.fetch(remote, tmp_path / "x.bin")
+        assert "cdn.example" not in reached  # the hop was never followed
+        assert not (tmp_path / "x.bin").exists()
+        assert any(name != "MainThread" for name, _ in seen)  # the fetcher's own threads were guarded
+
+        # Allowed: the same download completes, every hop checked; outside the block nothing is.
+        reached.clear()
+        seen.clear()
+        with redirect_guard(lambda url: seen.append(("", url))):
+            f.fetch(remote, tmp_path / "ok.bin")
+        assert (tmp_path / "ok.bin").read_bytes() == data
+        assert seen
+        seen.clear()
+        f.fetch(remote, tmp_path / "again.bin")
+        assert seen == []
+
+
+def test_guards_nest_and_a_guard_s_own_requests_are_not_guarded() -> None:
+    calls: list[str] = []
+    with (
+        redirect_guard(lambda u: calls.append(f"outer {u}")),
+        redirect_guard(lambda u: calls.append(f"inner {u}")),
+    ):
+        guard = current_guard()
+        assert guard is not None
+        guard("https://x.example/")
+        with unguarded():
+            assert current_guard() is None
+    assert calls == ["outer https://x.example/", "inner https://x.example/"]
+    assert current_guard() is None
