@@ -82,9 +82,11 @@ def source_info(
     doc_count: int | None = None,
     home_doc_id: str | None = None,
     members: Sequence[Generation] = (),
+    sizes: Mapping[str, tuple[int, int]] | None = None,
 ) -> SourceInfo:
     """``members``: a partitioned source's current set (ADR-0010). The site is all of them: its size is
-    their sum and it is as fresh as the newest; ``current`` is then the newest member."""
+    their sum and it is as fresh as the newest; ``current`` is then the newest member. ``sizes``:
+    (files, bytes) by generation, for generations that come without their artifacts."""
     if members:
         current = max(members, key=lambda g: (g.sealed_at is not None, g.sealed_at, g.generation_id))
     held = members or ([current] if current is not None else [])
@@ -108,7 +110,14 @@ def source_info(
         kind=sites.kind_of(spec),
         health=SourceHealth.OFFLINE if fresh is None else fresh.health,
         doc_count=doc_count,
-        bytes=sum(a.size for g in held for a in g.artifacts) if held else None,
+        bytes=sum(
+            sizes[g.generation_id][1]
+            if sizes and g.generation_id in sizes
+            else sum(a.size for a in g.artifacts)
+            for g in held
+        )
+        if held
+        else None,
         as_of=None if current is None else current.sealed_at,
         home_doc_id=sites.raw_str(spec, "home_doc_id") or home_doc_id,
         related=sites.related(spec, specs),

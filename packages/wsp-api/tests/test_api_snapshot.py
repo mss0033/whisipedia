@@ -384,3 +384,22 @@ def test_generation_lists_show_sizes_from_the_snapshot(client: Any) -> None:
     body = client.get("/v1/sources/rfc/generations").json()
     assert body["items"]
     assert all(item["artifact_count"] >= 0 and item["total_bytes"] >= 0 for item in body["items"])
+
+
+def test_a_partitioned_sources_size_comes_from_the_sizes_when_its_members_are_light() -> None:
+    """CIA's batches will be a million files: members are kept without their artifacts too."""
+    from wsp_api import convert
+
+    spec = sample_services().sources[0]
+    members = [
+        Generation(
+            spec.id, "2026-10-20.b0001", GenerationStatus.SEALED, (), datetime(2026, 10, 20, tzinfo=UTC)
+        ),
+        Generation(
+            spec.id, "2026-10-21.b0002", GenerationStatus.SEALED, (), datetime(2026, 10, 21, tzinfo=UTC)
+        ),
+    ]
+    sizes = {"2026-10-20.b0001": (9000, 4_000_000_000), "2026-10-21.b0002": (8000, 3_000_000_000)}
+    info = convert.source_info(spec, None, members=members, sizes=sizes)
+    assert info.bytes == 7_000_000_000
+    assert info.current_generation == "2026-10-21.b0002"

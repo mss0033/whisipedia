@@ -32,6 +32,7 @@ from wsp_api import weatherdata as wd
 from wsp_api.browse import is_loopback
 from wsp_api.errors import ApiError, errors
 from wsp_api.offload import Offload
+from wsp_api.seams import full_generation
 
 if TYPE_CHECKING:
     from wsp_api.views import Library
@@ -316,7 +317,7 @@ class WeatherLibrary:
             root = Path(vault.generation_path(ERA5_SOURCE, gen.generation_id))
             metas = [
                 root / Path(str(a.relpath))
-                for a in gen.artifacts
+                for a in full_generation(vault, gen).artifacts
                 if str(a.relpath).endswith(wd.era5_meta_name(year))
             ]
             if not metas:

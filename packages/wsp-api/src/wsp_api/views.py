@@ -241,6 +241,7 @@ class Library:
             doc_count=snap.doc_counts.get(spec.id) or self._zim_count(spec.id, st.current),
             home_doc_id=self.state.home_doc_id(spec, st.current),
             members=st.members if spec.partitioned else (),
+            sizes=st.sizes,
         )
         return info.model_copy(update={"readable": self.is_readable(info)})
 

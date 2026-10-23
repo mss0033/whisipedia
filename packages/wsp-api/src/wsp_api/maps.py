@@ -42,6 +42,7 @@ from pydantic import BaseModel, Field
 
 from wsp_api.errors import ApiError, errors
 from wsp_api.offload import Offload
+from wsp_api.seams import full_generation
 from wsp_core.gazetteer import Gazetteer, Place
 from wsp_core.mapsources import MapConfigError, map_source
 from wsp_core.model import SourceSpec
@@ -273,7 +274,7 @@ class MapLibrary:
                 s.attribution.append(ms.attribution)
             for gen in gens:
                 root = Path(vault.generation_path(spec.id, gen.generation_id))
-                for art in gen.artifacts:
+                for art in full_generation(vault, gen).artifacts:
                     if art.relpath.suffix != ".pmtiles":
                         continue
                     path = root / Path(str(art.relpath))

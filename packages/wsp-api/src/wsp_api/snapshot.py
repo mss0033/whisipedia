@@ -113,7 +113,13 @@ def build_snapshot(
             gens = tuple(replace(g, artifacts=()) for g in full)
             del full
             current = vault.current(spec.id)
-            members = tuple(vault.current_set(spec.id)) if spec.partitioned else ()
+            # A partitioned source's current set is light too: CIA's batches alone will be a million
+            # files (its sizes are in ``sizes``; :meth:`SnapshotVault.full` reads a member's files).
+            members = (
+                tuple(replace(g, artifacts=()) for g in vault.current_set(spec.id))
+                if spec.partitioned
+                else ()
+            )
             usable = {g.generation_id for g in gens if g.status is not GenerationStatus.STAGING}
             paths = {gid: vault.generation_path(spec.id, gid) for gid in sorted(usable)}
             sources[spec.id] = SourceState(current, members, gens, paths, sizes=sizes)
@@ -478,12 +484,12 @@ class SnapshotVault:
         return self._source(source_id).generations
 
     def full(self, gen: Generation) -> Generation:
-        """``gen`` with its artifacts: the current generation and the members as the snapshot keeps
-        them, another read once from the vault (its manifest) and kept while it is among the recent."""
+        """``gen`` with its artifacts: a source's current generation as the snapshot keeps it, any other
+        (an older one, a partitioned source's member) read once from the vault (its manifest) and kept
+        while it is among the recent."""
         st = self._source(gen.source_id)
-        for held in (st.current, *st.members):
-            if held is not None and held.generation_id == gen.generation_id:
-                return held
+        if st.current is not None and st.current.generation_id == gen.generation_id:
+            return st.current  # the source's current generation keeps its artifacts
         if gen.artifacts or not st.sizes.get(gen.generation_id, (0, 0))[0]:
             return gen  # it lists no files: nothing to read
         key = (gen.source_id, gen.generation_id)
