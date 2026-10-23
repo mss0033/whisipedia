@@ -1125,6 +1125,74 @@
         }
       }
     },
+    "/v1/system/memory": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "System Memory",
+        "description": "Where the API's memory is (wsp_api.memory): process, glibc heap, Arrow, open readers,\nPython objects (allocation sites when started with WSP_DIAG_TRACEMALLOC).",
+        "operationId": "system_memory_v1_system_memory_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response System Memory V1 System Memory Get"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/system/memory/trim": {
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "summary": "System Memory Trim",
+        "description": "Return free heap memory to the system; the size before and after (a large drop: fragmentation).",
+        "operationId": "system_memory_trim_v1_system_memory_trim_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response System Memory Trim V1 System Memory Trim Post"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/system": {
       "get": {
         "tags": [

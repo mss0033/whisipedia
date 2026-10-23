@@ -32,7 +32,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response, Streamin
 from fastapi.telemetry import TelemetryConfig
 from starlette.middleware.gzip import GZipMiddleware
 
-from wsp_api import convert, sites
+from wsp_api import convert, memory, sites
 from wsp_api.addresses import resolve
 from wsp_api.browse import browse_router
 from wsp_api.errors import ApiError, error_response, errors, install_error_handlers, streamed
@@ -140,6 +140,7 @@ class WspApp(FastAPI):
 
 def create_app(services: Services, settings: ApiSettings | None = None) -> FastAPI:
     settings = settings or ApiSettings()
+    memory.start_tracing_from_env()  # WSP_DIAG_TRACEMALLOC: where Python memory goes (/v1/system/memory)
     lib = Library(services, settings)
 
     @contextlib.asynccontextmanager
@@ -479,6 +480,17 @@ def _v1(lib: Library, settings: ApiSettings) -> APIRouter:
         return await state.run(
             lambda: ProposalPage(items=proposals_with(state.proposals.get() or (), status))
         )
+
+    @r.get("/system/memory", tags=["system"])
+    async def system_memory() -> dict[str, Any]:
+        """Where the API's memory is (wsp_api.memory): process, glibc heap, Arrow, open readers,
+        Python objects (allocation sites when started with WSP_DIAG_TRACEMALLOC)."""
+        return await state.run(lambda: memory.report(s))
+
+    @r.post("/system/memory/trim", tags=["system"])
+    async def system_memory_trim() -> dict[str, Any]:
+        """Return free heap memory to the system; the size before and after (a large drop: fragmentation)."""
+        return await state.run(memory.trim)
 
     @r.get("/system", tags=["system"], responses=errors(503))
     async def system(
