@@ -687,3 +687,11 @@ def test_yield_starts_nothing_after_a_restart_with_nothing_owed(tmp_path: Path) 
     (jobs / "yield-stopped").write_text("")
     _, calls = _yield(tmp_path, [CALM, CALM, CALM, CALM])
     assert calls == []
+
+
+def test_the_cli_s_busy_exit_is_the_locks_one() -> None:
+    """main.EXIT_BUSY mirrors it (the CLI does not import wsp_cli.locks at start): busy runs' logs go."""
+    from wsp_cli import main
+    from wsp_cli.locks import EXIT_BUSY
+
+    assert main.EXIT_BUSY == EXIT_BUSY

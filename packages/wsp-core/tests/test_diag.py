@@ -58,7 +58,7 @@ def test_only_the_newest_run_logs_of_a_command_are_kept(
     folder = tmp_path / "logs" / "ingest"
     folder.mkdir(parents=True)
     for i in range(5):
-        (folder / f"20260101T00000{i}Z-1.jsonl").write_text("{}\n")
+        (folder / f"20260101T00000{i}Z-999999999.jsonl").write_text("{}\n")  # long ended
     run = diag.start_run(tmp_path, "ingest", [])
     diag.end_run(run, 0)
     assert len(list(folder.glob("*.jsonl"))) == 3
@@ -70,3 +70,29 @@ def test_wsp_diag_turns_run_logs_on() -> None:
     assert diag.env_level({"WSP_DIAG": "0"}) is None
     assert diag.env_level({"WSP_DIAG": "1"}) == "INFO"
     assert diag.env_level({"WSP_DIAG": "debug"}) == "DEBUG"
+
+
+def test_a_running_command_s_log_is_never_pruned_and_a_discarded_one_is_gone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-10-23: lanes retrying a held lock every minute pushed a six-hour ingest's log out of the
+    newest 30 while it was still being written."""
+    import subprocess
+
+    monkeypatch.setattr(diag, "KEEP", 2)
+    folder = tmp_path / "logs" / "ingest"
+    folder.mkdir(parents=True)
+    live = subprocess.Popen(["sleep", "30"])
+    try:
+        long_run = folder / f"20260101T000000Z-{live.pid}.jsonl"  # the oldest, and still running
+        long_run.write_text("{}\n")
+        for i in range(4):
+            (folder / f"20260102T00000{i}Z-999999999.jsonl").write_text("{}\n")  # ended long ago
+        run = diag.start_run(tmp_path, "ingest", [])
+        assert long_run.exists()
+        diag.end_run(run, 3, discard=True)
+        assert not run.path.exists()
+        assert len(list(folder.glob("*.jsonl"))) == 2  # the live one and the newest finished one
+    finally:
+        live.kill()
+        live.wait()

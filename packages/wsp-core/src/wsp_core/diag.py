@@ -125,7 +125,9 @@ def start_run(state_dir: Path, command: str, argv: Sequence[str], *, level: str 
     """Open ``<state_dir>/logs/<command>/<time>-<pid>.jsonl`` and log the run's start."""
     folder = state_dir / "logs" / _slug(command)
     folder.mkdir(parents=True, exist_ok=True)
-    for old in sorted(folder.glob("*.jsonl"))[: -(KEEP - 1) or None]:
+    # Never the log of a run still going: lanes retrying a held lock every minute pushed a six-hour
+    # ingest's log out while it was still being written (2026-10-23).
+    for old in [f for f in sorted(folder.glob("*.jsonl")) if not _running(f)][: -(KEEP - 1) or None]:
         with contextlib.suppress(OSError):
             old.unlink()
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
@@ -157,8 +159,17 @@ def start_run(state_dir: Path, command: str, argv: Sequence[str], *, level: str 
     return run
 
 
-def end_run(run: RunLog, exit_code: int | str) -> None:
-    """Log the run's end (exit code, wall time, peak memory) and close its file."""
+def _running(path: Path) -> bool:
+    """The log's run (``<time>-<pid>.jsonl``) is still going: its process lives, and not this one."""
+    pid = path.stem.rpartition("-")[2]
+    if not pid.isdigit() or int(pid) == os.getpid():
+        return False
+    return Path(f"/proc/{pid}").exists()
+
+
+def end_run(run: RunLog, exit_code: int | str, *, discard: bool = False) -> None:
+    """Log the run's end (exit code, wall time, peak memory) and close its file; ``discard`` removes
+    it instead (a run that did nothing worth a record, such as one that found a lock held)."""
     LOG.info(
         "run end",
         extra={
@@ -176,6 +187,9 @@ def end_run(run: RunLog, exit_code: int | str) -> None:
         root.removeHandler(run.handler)
         root.setLevel(level)
     run.handler.close()
+    if discard:
+        with contextlib.suppress(OSError):
+            run.path.unlink()
 
 
 @contextlib.contextmanager

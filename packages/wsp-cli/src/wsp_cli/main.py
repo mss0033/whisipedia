@@ -22,6 +22,7 @@ import ipaddress
 import json
 import os
 import sys
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import replace
 from importlib import import_module
@@ -643,6 +644,8 @@ def _usage(_: argparse.Namespace, __: TextIO) -> int:  # pragma: no cover - argp
 
 # Long jobs keep a run log always (wsp_core.diag): the nightly index build ran 28 hours on 2026-10-21 and
 # left no record of which step took the time. Any other command keeps one with --diag or WSP_DIAG.
+EXIT_BUSY = 3  # = wsp_cli.locks.EXIT_BUSY (not imported: the CLI starts light)
+BUSY_LOG_S = 60.0
 ALWAYS_LOGGED = frozenset({"index build", "index rank", "index spell", "ingest", "weather era5"})
 
 
@@ -682,7 +685,9 @@ def main(argv: Sequence[str] | None = None, *, out: TextIO | None = None) -> int
         code = f"{type(exc).__name__}: {exc}"[:500]
         raise
     finally:
-        diag.end_run(run, code)
+        # A run that found its lock held and left at once (exit 3) is not worth one of the kept logs:
+        # lanes retry every minute (a run that yielded after --max-seconds ran long, and is kept).
+        diag.end_run(run, code, discard=code == EXIT_BUSY and time.monotonic() - run.started < BUSY_LOG_S)
 
 
 def _main(handler: Handler, args: argparse.Namespace, out: TextIO | None) -> int:
