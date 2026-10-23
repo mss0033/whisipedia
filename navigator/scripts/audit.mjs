@@ -55,6 +55,7 @@ const HEADING_LINE = {
 // circuit's labels ("C", "V", "I") are lines of their own in Kuphaldt's exams (2026-10-23).
 const ROMAN = /^(?=[IVXLC]{2,}\.?$|[IVXLC]\.$)C{0,3}(?:XC|XL|L?X{0,3})(?:IX|IV|V?I{0,3})\.?$/;
 const PAUSE = Number(process.env.WSP_AUDIT_PAUSE ?? 500);
+const BUSY_TRIES = 4; // = IMAGE_BUSY_TRIES in src/core/links.ts
 const HEADERS = { 'X-Whisipedia-Probe': 'check' };
 const PAGE_TIMEOUT = 120_000;
 const DESKTOP = { width: 1280, height: 900 };
@@ -359,11 +360,21 @@ const causeOf = (e) => {
 // the HTTP status, or what went wrong when no answer came.
 async function getAsBrowser(context, url, headers = {}) {
   let failure = '';
+  let busy = 0;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       // As long as a browser waits for a file to start: the library holds a request up to 120 s for
       // a transfer slot before it answers busy (wsp_api.files.TRANSFER_WAIT).
       const r = await context.request.get(url, { timeout: 150_000, headers });
+      // Busy (503) is not an answer: asked again after its Retry-After, as the reader asks for a
+      // busy picture again (IMAGE_BUSY_TRIES in src/core/links.ts). A file and a picture came 503
+      // while a 44 GB archive was being profiled (2026-10-23).
+      if (r.status() === 503 && busy < BUSY_TRIES) {
+        busy += 1;
+        attempt -= 1;
+        await sleep(1000 * Math.min(30, Number(r.headers()['retry-after']) || 5));
+        continue;
+      }
       return { ok: r.ok(), status: r.status(), headers: r.headers() };
     } catch (e) {
       failure = String(e).split('\n')[0].slice(0, 80);
