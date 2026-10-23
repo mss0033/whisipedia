@@ -1502,7 +1502,10 @@ def screen_text(got: Extracted, rules: Rules, *, keys: Iterable[str] = ()) -> Sc
         return Screen(content, marking, text_found)
     if gate.verdict is Verdict.REVIEW and not owner_allowed:
         return Screen(gate, marking, text_found)
-    image_only_ok = (got.problem == "no-text-layer" and rules.allow_image_only) or (
+    # A data file has no prose to screen, whichever way the reader says so: "unsupported-format", or
+    # "no-text-layer" for an archive whose one member is too large to read (GeoNames' allCountries.zip,
+    # a 1.6 GB table, 2026-10-23).
+    image_only_ok = (got.problem == "no-text-layer" and (rules.allow_image_only or rules.data_files)) or (
         got.problem == "unsupported-format" and rules.data_files
     )
     if not text_found and not owner_allowed and not image_only_ok:

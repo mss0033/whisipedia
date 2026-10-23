@@ -465,7 +465,8 @@ class Rules:
     # and extraction errors are held regardless...
     allow_image_only: bool = False
     # ...except in a collection of data files (a gazetteer, a bathymetry grid, a planet extract) the
-    # registry says is one: no text to screen is what such a file is (owner request 2026-10-18).
+    # registry says is one: no text to screen is what such a file is (owner request 2026-10-18), an
+    # unsupported format or an archive whose members are too large to read.
     data_files: bool = False
 
     @property

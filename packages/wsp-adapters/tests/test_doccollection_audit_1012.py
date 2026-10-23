@@ -744,3 +744,12 @@ def test_a_cia_release_keeps_its_old_banners_but_not_the_deny_core() -> None:
     assert screen_text(cover, rules).decision.verdict is Verdict.ALLOW
     harmful = Extracted("Demolition Charges and Calculations\nshaped charges, demolition charges" + FILLER)
     assert screen_text(harmful, rules).decision.verdict is Verdict.DENY
+
+
+def test_a_data_file_without_readable_text_is_what_a_data_collection_holds() -> None:
+    """GeoNames' allCountries.zip (2026-10-23): one 1.6 GB table, too large to read, came back
+    "no-text-layer" and was held for review although the source is a data collection."""
+    nothing = Extracted("", "no-text-layer")
+    assert screen_text(nothing, Rules(allow_all=True)).decision.verdict is Verdict.REVIEW
+    data = Rules(allow_all=True, public_issuer=True, data_files=True)
+    assert screen_text(nothing, data).decision.verdict is Verdict.ALLOW

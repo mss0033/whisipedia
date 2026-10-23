@@ -820,14 +820,26 @@ def test_files_downloaded_by_hand_are_taken_in_and_nothing_is_fetched(
     assert not (drop / "allCountries.zip").exists()  # moved into the cycle
     assert report.planned
 
+    # A copy an earlier run held for review is taken from the quarantine (screened again today).
+    from wsp_adapters.doccollection.model import Candidate
+    from wsp_core.errors import FetchError
+
+    held_cand = Candidate(
+        key="gaz:CODES", url="https://dl.example.org/dump/countryInfo.txt", title="C", issuer="T"
+    )
+    quarantine = vault.root / "_incoming" / "_quarantine" / "test-gazetteer"
+    quarantine.mkdir(parents=True)
+    (quarantine / held_cand.file_name).write_text("#ISO\tCountry\n")
+    cycle = vault.root / "_incoming" / "test-gazetteer" / "2026-10-24"
+    got = fetch._download(_Offline(), held_cand, cycle, ["dl.example.org"])  # pyright: ignore[reportPrivateUsage]
+    assert got == cycle / held_cand.file_name
+    assert not (quarantine / held_cand.file_name).exists()
+
     # A zip that does not read whole is refused and left for the owner to download again.
     bad = vault.root / "_incoming" / "_manual" / "bad"
     bad.mkdir()
     (bad / "allCountries.zip").write_bytes(b"<html>503 Service Unavailable</html>")
     fetch.manual_dir = bad
-    from wsp_adapters.doccollection.model import Candidate
-    from wsp_core.errors import FetchError
-
     cand = Candidate(
         key="gaz:all", url="https://dl.example.org/dump/allCountries.zip", title="All", issuer="T"
     )

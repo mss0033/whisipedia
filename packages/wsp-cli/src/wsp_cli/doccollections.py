@@ -670,8 +670,10 @@ class CollectionFetcher:
         """The owner's download of ``cand`` from ``folder`` (by the name a browser gives it, or ours),
         moved into the cycle. A zip must read whole; an error page saved in a file's place is caught by
         the screen like any download (CA-2)."""
-        for name in dict.fromkeys([manual_name(cand), cand.file_name]):
-            path = folder / name
+        # Also a copy an earlier run held for review: screened again under today's rules, and the owner
+        # need not download it twice (GeoNames' allCountries.zip, 2026-10-23).
+        held = self.incoming / "_quarantine" / done.parent.parent.name / cand.file_name
+        for path in (*(folder / n for n in dict.fromkeys([manual_name(cand), cand.file_name])), held):
             if path.is_file():
                 break
         else:
@@ -1550,6 +1552,16 @@ def cmd_manual(args: argparse.Namespace, out: TextIO) -> int:
         time.sleep(60)
     else:
         return BUSY
+    env = DiscoverEnv(fetcher=cast(Fetcher, _Offline()), issuer="", prefix=spec.id)
+    known = {manual_name(c) for d in discovery for c in fixed_list(d, env)}
+    left = sorted(p.name for p in folder.iterdir() if p.is_file())
+    if same := [n for n in left if n in known]:
+        # Unchanged from what the library holds: not needed (the owner may delete them).
+        out.write(f"already in the library, not taken (you may delete them): {', '.join(same)}\n")
+    if other := [n for n in left if n not in known]:
+        out.write(
+            f"not one of {spec.id}'s files (check the name; a browser may add ' (1)'): {', '.join(other)}\n"
+        )
     if code == EXIT_PARTIAL:
         out.write(f"some files were not in {folder}; download them and run --import again\n")
         return EXIT_PARTIAL
