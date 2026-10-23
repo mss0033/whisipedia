@@ -49,8 +49,11 @@ const ONLY = new Set(
 const HEADING_LINE = {
   test: (line) =>
     /^(?:chapter|book|part|section|canto|act|scene|letter|stave|lecture)\b.{0,60}$/i.test(line) ||
-    /^[IVXLC]{1,7}\.?$/.test(line),
+    ROMAN.test(line),
 };
+// A well-formed numeral (not "VCC", a supply rail), and a single letter only with its full stop: a
+// circuit's labels ("C", "V", "I") are lines of their own in Kuphaldt's exams (2026-10-23).
+const ROMAN = /^(?=[IVXLC]{2,}\.?$|[IVXLC]\.$)C{0,3}(?:XC|XL|L?X{0,3})(?:IX|IV|V?I{0,3})\.?$/;
 const PAUSE = Number(process.env.WSP_AUDIT_PAUSE ?? 500);
 const HEADERS = { 'X-Whisipedia-Probe': 'check' };
 const PAGE_TIMEOUT = 120_000;
