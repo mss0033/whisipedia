@@ -752,3 +752,99 @@ def test_a_kept_download_the_owner_takes_is_used_as_it_is_and_nothing_is_fetched
     with pytest.raises(FetchError, match=r"CRC|does not read whole"):
         fetch._download(_NoNetwork(), grid, dest, ["bodc.example"])  # pyright: ignore[reportPrivateUsage]
     assert kept.exists()
+
+
+def _manual_spec() -> SourceSpec:
+    return SourceSpec(
+        id="test-gazetteer",
+        name="Test gazetteer",
+        tier=Tier.T1,
+        status=SourceStatus.PAUSED,  # its host's robots.txt disallows crawlers
+        license="CC-BY-4.0",
+        legal_basis="open-license",
+        domain=("geography",),
+        adapter="doc-collection",
+        raw={
+            "id": "test-gazetteer",
+            "access": {
+                "adapter": "doc-collection",
+                "issuer": "Test",
+                "key_prefix": "gaz",
+                "origins": ["dl.example.org"],
+                "discovery": [
+                    {
+                        "kind": "list",
+                        "items": [
+                            {"pub_number": "all", "url": "https://dl.example.org/dump/allCountries.zip"},
+                            {"pub_number": "codes", "url": "https://dl.example.org/dump/countryInfo.txt"},
+                            {"pub_number": "readme", "url": "https://dl.example.org/dump/readme.txt"},
+                        ],
+                    }
+                ],
+                "filter": {"allow_all": True, "public_issuer": True, "data_files": True},
+            },
+        },
+    )
+
+
+def test_files_downloaded_by_hand_are_taken_in_and_nothing_is_fetched(
+    vault: FileVault, tmp_path: Path
+) -> None:
+    """GeoNames and GEBCO (2026-10-23): hosts whose robots.txt disallows crawlers; the owner downloads
+    the files and the library takes them from a folder, making no request at all."""
+    import zipfile
+
+    from wsp_cli.doccollections import _Offline  # pyright: ignore[reportPrivateUsage]
+
+    drop = vault.root / "_incoming" / "_manual" / "test-gazetteer"
+    drop.mkdir(parents=True)
+    with zipfile.ZipFile(drop / "allCountries.zip", "w") as z:
+        z.writestr("allCountries.txt", "2988507\tParis\t48.85\t2.35\n" * 200)
+    (drop / "countryInfo.txt").write_text("#ISO\tCountry\nFR\tFrance\n" * 50)
+    fetch = CollectionFetcher(
+        vault.root,
+        _Offline(),
+        keys={},
+        user_agent="t",
+        workdir=tmp_path / "work",
+        out=io.StringIO(),
+        throttle=False,
+        offline=True,
+        manual_dir=drop,
+    )
+    report = fetch.run(_manual_spec(), version="2026-10-23")
+    assert sorted(d.cand.key for d in report.fetched) == ["gaz:ALL", "gaz:CODES"]
+    assert [k for k, _ in report.failed] == ["gaz:README"]  # not downloaded yet: named, with its link
+    assert "readme.txt is not in" in report.failed[0][1]
+    assert "https://dl.example.org/dump/readme.txt" in report.failed[0][1]
+    assert not (drop / "allCountries.zip").exists()  # moved into the cycle
+    assert report.planned
+
+    # A zip that does not read whole is refused and left for the owner to download again.
+    bad = vault.root / "_incoming" / "_manual" / "bad"
+    bad.mkdir()
+    (bad / "allCountries.zip").write_bytes(b"<html>503 Service Unavailable</html>")
+    fetch.manual_dir = bad
+    from wsp_adapters.doccollection.model import Candidate
+    from wsp_core.errors import FetchError
+
+    cand = Candidate(
+        key="gaz:all", url="https://dl.example.org/dump/allCountries.zip", title="All", issuer="T"
+    )
+    with pytest.raises(FetchError, match="does not read whole"):
+        fetch._download(_Offline(), cand, tmp_path / "cycle", ["dl.example.org"])  # pyright: ignore[reportPrivateUsage]
+    assert (bad / "allCountries.zip").exists()
+
+
+def test_a_share_mounted_path_is_named_as_windows_names_it(tmp_path: Path) -> None:
+    from wsp_cli.doccollections import windows_path
+
+    mounts = tmp_path / "mounts"
+    mounts.write_text(
+        "C:\\134 /mnt/c 9p rw 0 0\n"
+        "//192.168.1.169/Bellerophon /mnt/z cifs rw,vers=3.1.1 0 0\n"
+        "tmpfs /tmp tmpfs rw 0 0\n"
+    )
+    got = windows_path(Path("/mnt/z/whisipedia/_incoming/_manual/geonames"), mounts)
+    assert got == "\\\\192.168.1.169\\Bellerophon\\whisipedia\\_incoming\\_manual\\geonames"
+    assert windows_path(Path("/home/x"), mounts) is None

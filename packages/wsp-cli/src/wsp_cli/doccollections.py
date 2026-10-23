@@ -31,6 +31,7 @@ import statistics
 import subprocess
 import sys
 import tempfile
+import time
 import zipfile
 from collections import deque
 from collections.abc import Collection, Mapping, Sequence
@@ -39,7 +40,7 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, TextIO, cast
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 import yaml
 
@@ -64,7 +65,7 @@ from wsp_adapters.doccollection.catalog import (
     read_catalog_file,
     write_catalog,
 )
-from wsp_adapters.doccollection.discovery import Throttle
+from wsp_adapters.doccollection.discovery import DiscoverEnv, Throttle, fixed_list
 from wsp_adapters.doccollection.model import Candidate, DocumentMeta
 from wsp_adapters.doccollection.policy import (
     DECISION_KEYS,
@@ -77,7 +78,7 @@ from wsp_adapters.doccollection.policy import (
 )
 from wsp_cli import bootstrap
 from wsp_core.errors import FetchError
-from wsp_core.model import RemoteFile, SourceSpec, SourceStatus
+from wsp_core.model import FetchResult, RemoteFile, SourceSpec, SourceStatus
 from wsp_core.partitions import PartitionError, check_partition, partition_generation_id, partition_of
 from wsp_core.ports import Ctx, Fetcher, SupportsHead
 
@@ -455,6 +456,25 @@ class HostBreaker:
         return f"HostUnreachable: {host} took no connection {n} times in a row; left for the next run"
 
 
+MANUAL_DIR = "_manual"  # <vault>/_incoming/_manual/<source>/: files the owner downloaded by hand
+
+
+class _Offline:
+    """A fetcher that fetches nothing: a manual import makes no request, so the hosts whose robots.txt
+    disallows us (the reason the owner downloads by hand) are never asked for anything."""
+
+    def get_bytes(self, url: str, *, max_bytes: int = 64 * 1024 * 1024) -> bytes:
+        raise FetchError(f"{url}: a manual import fetches nothing")
+
+    def download(self, remote: RemoteFile, dest: Path) -> FetchResult:
+        raise FetchError(f"{remote.url}: a manual import fetches nothing")
+
+
+def manual_name(cand: Candidate) -> str:
+    """The name a browser saves the document's URL under (``allCountries.zip``)."""
+    return unquote(urlsplit(cand.url).path.rstrip("/").rpartition("/")[2]) or cand.file_name
+
+
 class CollectionFetcher:
     """Downloads one collection's allowed documents into ``_incoming`` and screens them."""
 
@@ -471,11 +491,14 @@ class CollectionFetcher:
         throttle: bool = True,
         adopt_kept: Collection[str] = (),
         offline: bool = False,
+        manual_dir: Path | None = None,
     ) -> None:
         """``adopt_kept``: document keys whose download was kept as ``<file>.uncorroborated`` (no
         checksum upstream, no second download) and that the owner takes as they are: used in place of
         a download, a zip's members CRC-checked first. ``offline``: nothing else is downloaded (a
-        paused source)."""
+        paused source). ``manual_dir``: every document comes from the files the owner downloaded by
+        hand into that folder (``wsp collections manual``), none from the network."""
+        self.manual_dir = manual_dir
         self.adopt_kept = frozenset(adopt_kept)
         self.offline = offline
         self.vault_root = vault_root
@@ -627,6 +650,8 @@ class CollectionFetcher:
         Without a published checksum the file is fetched again (its origin cannot be re-checked).
         """
         done = dest_dir / cand.file_name
+        if self.manual_dir is not None:
+            return self._take_manual(cand, done, self.manual_dir)
         if cand.key in self.adopt_kept:
             return self._adopt_kept(cand, done)
         if self.offline:
@@ -640,6 +665,33 @@ class CollectionFetcher:
                 return done
         remote = RemoteFile(url=cand.url, name=cand.file_name, size=cand.size, mirrors=cand.mirrors)
         return Path(download_from_origins(fetcher, remote, dest_dir / cand.file_name, origins).path)
+
+    def _take_manual(self, cand: Candidate, done: Path, folder: Path) -> Path:
+        """The owner's download of ``cand`` from ``folder`` (by the name a browser gives it, or ours),
+        moved into the cycle. A zip must read whole; an error page saved in a file's place is caught by
+        the screen like any download (CA-2)."""
+        for name in dict.fromkeys([manual_name(cand), cand.file_name]):
+            path = folder / name
+            if path.is_file():
+                break
+        else:
+            if done.is_file():
+                return done  # taken by an earlier run of this cycle
+            raise FetchError(f"{cand.key}: {manual_name(cand)} is not in {folder} (download {cand.url})")
+        if path.suffix.lower() == ".zip" or zipfile.is_zipfile(path):
+            try:
+                with zipfile.ZipFile(path) as z:
+                    bad = z.testzip()
+            except (zipfile.BadZipFile, OSError) as exc:
+                raise FetchError(
+                    f"{cand.key}: {path.name} does not read whole (download it again): {exc}"
+                ) from exc
+            if bad is not None:
+                raise FetchError(f"{cand.key}: {path.name}: {bad} fails its CRC (download it again)")
+        done.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(path, done)
+        self._say(f"  {cand.key}: taken from {path} (downloaded by hand)")
+        return done
 
     def _adopt_kept(self, cand: Candidate, done: Path) -> Path:
         """The kept ``<file>.uncorroborated`` as the download (owner decision; nothing is fetched).
@@ -1234,7 +1286,8 @@ def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
         print(f"error: {spec.id} is excluded or has no legal basis", file=sys.stderr)
         return EXIT_REFUSED
     adopt = frozenset(getattr(args, "adopt_kept", None) or ())
-    if spec.status is SourceStatus.PAUSED and not adopt:
+    manual: Path | None = getattr(args, "manual", None)
+    if spec.status is SourceStatus.PAUSED and not adopt and manual is None:
         # What is held stays served; nothing new is fetched until the owner says (army-pubs-public:
         # its robots.txt disallows every crawler, 2026-10-21). A download already kept may still be
         # taken (--adopt-kept): nothing is fetched for it.
@@ -1259,14 +1312,16 @@ def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
     workdir = (paths.workdir or state_dir()) / "collections"
     runner = CollectionFetcher(
         vault_root,
-        # Downloads land on the NAS (_incoming): the library's shared, reader-yielding write budget.
-        bootstrap.build_fetcher(cfg, pace=bootstrap.ingest_pace(cfg)),
+        # Downloads land on the NAS (_incoming): the library's shared, reader-yielding write budget. A
+        # manual import fetches nothing at all.
+        _Offline() if manual is not None else bootstrap.build_fetcher(cfg, pace=bootstrap.ingest_pace(cfg)),
         keys=api_keys(cfg),
         user_agent=bootstrap.user_agent(cfg),
         workdir=workdir,
         out=out,
         adopt_kept=adopt,
         offline=spec.status is SourceStatus.PAUSED,
+        manual_dir=manual,
     )
     report = runner.run(
         spec,
@@ -1371,6 +1426,7 @@ def register(sub: Any, add: Any) -> None:
         metavar="KEY",
         help="download this document key again even if the held copy looks current (repeatable)",
     )
+    s.add_argument("--manual", type=Path, default=None, help=argparse.SUPPRESS)  # wsp collections manual
     s.add_argument(
         "--adopt-kept",
         action="append",
@@ -1384,6 +1440,124 @@ def register(sub: Any, add: Any) -> None:
         default=None,
         help="partitioned sets: one state (usgs-historical-topo) or batch b0001 (cycle <date>.<partition>)",
     )
+    s = add(
+        "manual",
+        cmd_manual,
+        "Files the library may not download (the host's robots.txt disallows crawlers) but you may: "
+        "lists what to download and where to save it; --import then checks, screens and ingests them. "
+        "Nothing is fetched. For sources that are a fixed list of files (geonames, gebco-grid).",
+        co_sub,
+    )
+    s.add_argument("source", help="source id, e.g. geonames")
+    s.add_argument("--import", dest="do_import", action="store_true", help="take in the saved files")
+    s.add_argument("--version", default=None, help="cycle label (default: today, YYYY-MM-DD)")
+
+
+def windows_path(path: Path, mounts: Path = Path("/proc/mounts")) -> str | None:
+    """``path`` as Windows names it: the network share it is mounted from (``\\\\host\\share\\...``),
+    for the owner's browser to save into. ``None`` when it is not on a mounted share."""
+    best: tuple[str, str] | None = None
+    try:
+        rows = mounts.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    for row in rows:
+        f = row.split()
+        if len(f) < 3 or f[2] not in ("cifs", "smb3", "9p", "drvfs") or not f[0].startswith("//"):
+            continue
+        point = f[1].replace("\\040", " ")
+        if (str(path) == point or str(path).startswith(point.rstrip("/") + "/")) and (
+            best is None or len(point) > len(best[1])
+        ):
+            best = (f[0], point)
+    if best is None:
+        return None
+    rest = str(path)[len(best[1].rstrip("/")) :].strip("/")
+    return best[0].replace("/", "\\") + ("\\" + rest.replace("/", "\\") if rest else "")
+
+
+def cmd_manual(args: argparse.Namespace, out: TextIO) -> int:
+    """``wsp collections manual SOURCE``: what to download by hand and where to save it; ``--import``
+    then takes those files in (checked, screened, planned) and ingests them. For a source the library
+    may not crawl (its robots.txt disallows us) but whose files a person may download: GeoNames, GEBCO."""
+    lay = bootstrap.layout(args.config_dir)
+    cfg = bootstrap.load(lay)
+    specs = {s.id: s for s in bootstrap.load_sources(cfg, lay)}
+    spec = specs.get(args.source)
+    coll = collection_spec(spec) if spec is not None else None
+    if spec is None or coll is None:
+        print(f"error: {args.source!r} is not a document collection", file=sys.stderr)
+        return EXIT_REFUSED
+    access = cast(dict[str, Any], spec.raw.get("access") or {})
+    discovery = cast(list[dict[str, Any]], access.get("discovery") or [])
+    if not discovery or any(d.get("kind") != "list" for d in discovery):
+        print(
+            f"error: {spec.id} is not a fixed list of files (its listing would have to be crawled); "
+            "a manual import takes only those",
+            file=sys.stderr,
+        )
+        return EXIT_REFUSED
+    folder = bootstrap.paths(cfg).require_vault() / "_incoming" / MANUAL_DIR / spec.id
+    folder.mkdir(parents=True, exist_ok=True)
+    if not args.do_import:
+        env = DiscoverEnv(fetcher=cast(Fetcher, _Offline()), issuer="", prefix=spec.id)
+        cands = [c for d in discovery for c in fixed_list(d, env)]
+        win = windows_path(folder)
+        out.write(f"{spec.name}: {len(cands)} file(s) to download by hand\n\n")
+        out.write("1. Open each link in your browser and save the file (keep its name):\n")
+        for c in cands:
+            out.write(f"     {c.url}\n")
+        out.write(f"2. Save them into:\n     {win or folder}\n")
+        if win:
+            out.write(f"   (from this computer: {folder})\n")
+        out.write(f"3. Then run:\n     wsp collections manual {spec.id} --import\n")
+        return 0
+    today = datetime.now(UTC).strftime("%Y-%m-%d")
+    fetch_args = argparse.Namespace(
+        config_dir=args.config_dir,
+        source=spec.id,
+        version=args.version or today,
+        limit=None,
+        max_pages=None,
+        dry_run=False,
+        partition=None,
+        refetch=None,
+        adopt_kept=None,
+        manual=folder,
+    )
+    code = cmd_fetch(fetch_args, out)
+    if code not in (EXIT_COMPLETE, EXIT_ALERT, EXIT_PARTIAL):
+        return code
+    from wsp_cli import ops  # the ingest (lazy: not needed to list the steps)
+
+    ingest_args = argparse.Namespace(
+        config_dir=args.config_dir,
+        source=spec.id,
+        version=fetch_args.version,
+        partition=None,
+        dry_run=False,
+        offline=True,
+        json=False,
+        settle_seconds=0.0,
+        allow_mirror=False,
+        max_seconds=None,
+    )
+    for _ in range(INGEST_WAITS):
+        icode = ops.cmd_ingest(ingest_args, out)
+        if icode != BUSY:
+            break
+        out.write("another ingest is running; waiting a minute\n")
+        time.sleep(60)
+    else:
+        return BUSY
+    if code == EXIT_PARTIAL:
+        out.write(f"some files were not in {folder}; download them and run --import again\n")
+        return EXIT_PARTIAL
+    return icode
+
+
+INGEST_WAITS = 240  # a manual import waits up to four hours for another ingest to finish
+BUSY = 3  # = wsp_cli.locks.EXIT_BUSY
 
 
 def _usage(_: argparse.Namespace, __: TextIO) -> int:  # pragma: no cover - argparse requires a subcommand

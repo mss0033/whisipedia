@@ -11,6 +11,7 @@ Step-by-step procedures for the owner (PLAN §12.6). Start with `wsp doctor`.
 | [Rotate the signing key](rotate-signing-key.md) | Suspected key leak, scheduled rotation |
 | [Rebuild indexes](rebuild-indexes.md) | Format bump, local disk failure, broken search |
 | [Move the bulk index files to the NAS](move-to-nas.md) | Freeing the PC disk (ADR-0011) |
+| [Downloading by hand](manual-downloads.md) | A source whose host disallows crawlers (GeoNames, GEBCO): three steps |
 | [Diagnostic run logs](diagnostic-logs.md) | A job was slow or failed and you want to know which step and why |
 
 Restoring from a second copy is not written yet: there is no second copy (decision D2). When one
