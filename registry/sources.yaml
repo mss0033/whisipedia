@@ -4119,7 +4119,10 @@ sources:
     publisher: General Bathymetric Chart of the Oceans (GEBCO)
     domain: [geography, maps, science]
     tier: T1
-    status: candidate
+    # Paused 2026-10-23: BODC's download redirects to dap.ceda.ac.uk, whose robots.txt disallows every
+    # agent (owner decision 2026-10-21: a host whose robots.txt disallows us is not fetched, even when
+    # another host links it, as WBDG's files bucket).
+    status: paused
     license: LicenseRef-GEBCO-Public-Domain
     legal_basis: public-domain
     index: false
