@@ -369,7 +369,7 @@ def test_throttle_spaces_requests_per_host() -> None:
 def test_throttle_keeps_each_hosts_robots_txt() -> None:
     """Crawl-delay and Disallow, read once per host (2026-10-21: four crawl delays had been missed,
     and armypubs.army.mil, behind a byte-order mark, and download.geonames.org disallow everything)."""
-    from wsp_adapters.doccollection.discovery import RobotsDisallowedError
+    from wsp_core.errors import RobotsDisallowedError
 
     now = [0.0]
     slept: list[float] = []
