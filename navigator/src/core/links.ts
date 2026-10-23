@@ -425,6 +425,7 @@ export function withoutTemplateLeftovers(text: string): string {
       })
       .replace(BROKEN_TEMPLATE, '$1')
       .replace(UNCLOSED_TEMPLATE, '')
+      .replace(UNCLOSED_BOX, '')
       .replace(PARAM_TEMPLATE, '')
       .replace(CUT_LINK, '')
       .replace(TEMPLATE_OPENER, '');
@@ -446,6 +447,12 @@ const BROKEN_TEMPLATE = /\{\{[A-Z][A-Za-z]{1,20}\|([^{}|]{1,100})\}\s+\}/g;
 /** A template the wiki left open and printed, nothing after it: LibrePathology's reference
  * `{{Ref HospAuto|` (2026-10-20 audit). */
 const UNCLOSED_TEMPLATE = /\{\{[A-Z][\w ]{0,30}\|\s*$/;
+
+/** A notice box a translation opened and never closed, its words after it: Gentoo's French and Italian
+ * handbooks show `{{Tip|Une liste commentée…` and `{{Warning|Normalmente…` with no `}}` anywhere on
+ * the page (2026-10-23 audit). Only the opening goes; one the text closes (`{{Tip|x}}`) is left. */
+const UNCLOSED_BOX =
+  /\{\{(?:Tip|Note|Notice|Warning|Important|Caution|Info|Hint|Attention|Todo)\|(?![^{}]*\}\})/g;
 
 /** A template with named parameters the wiki printed instead of expanding: Gentoo's outdated
  * translations show `{{Talk|open|date=28 mars, 2017}}`, Energypedia's upload summaries

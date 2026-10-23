@@ -28,6 +28,14 @@ describe('wiki leftovers an archived page shows (2026-10-19 audit)', () => {
       ),
     ).toBe('DC.     (please sign)');
     expect(withoutTemplateLeftovers('call main() then [[User:|]] ok')).toBe('call main() then  ok');
+    // A notice box a translation opened and never closed (Gentoo, 2026-10-23 audit); a closed one
+    // a page writes stays.
+    expect(withoutTemplateLeftovers('avec attention. {{Tip|Une liste commentée')).toBe(
+      'avec attention. Une liste commentée',
+    );
+    expect(withoutTemplateLeftovers('Write {{Tip|text}} for a tip box.')).toBe(
+      'Write {{Tip|text}} for a tip box.',
+    );
     expect(
       withoutTemplateLeftovers(
         '{{Information |Description =  |Source =  |Date = ~~~~~ <!-- do not change -->  |Permission =  }}  Solar',
