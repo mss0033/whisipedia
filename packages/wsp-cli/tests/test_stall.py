@@ -187,3 +187,16 @@ def test_jobs_owed_a_start_and_listed_jobs_not_running_are_raised(tmp_path: Path
     cleared = " ".join(_run(env, 2))
     assert "CLEARED jobs-owed" in cleared
     assert "CLEARED job-down:era5" in cleared
+
+
+def test_a_watcher_idle_by_design_is_not_a_stalled_job(tmp_path: Path) -> None:
+    """The API memory watcher samples every 30 minutes and used no CPU in 3 hours (2026-10-23)."""
+    env = _world(tmp_path, usage=5_000_000)
+    rows = (
+        (tmp_path / "units")
+        .read_text()
+        .replace("whisipedia-job-lane.service", "whisipedia-job-api-memory-watch.service")
+    )
+    (tmp_path / "units").write_text(rows)
+    _run(env, 0)
+    assert not [e for e in _run(env, 3.5) if "job-idle" in e]

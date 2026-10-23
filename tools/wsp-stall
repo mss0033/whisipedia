@@ -10,7 +10,8 @@ log) or the owner sees it at once:
 * ``unit-failed:<unit>``      a whisipedia unit failed; a core service (API, orchestrator) not running
 * ``job-idle:<unit>``         a background job (whisipedia-job-*) used under IDLE_CPU_S of CPU in the
                               last WSP_STALL_IDLE_H hours (default 3): stuck, or waiting on something
-                              (the message names a long-held lock, or a frozen background slice)
+                              (the message names a long-held lock, or a frozen background slice); not
+                              the jobs named by WSP_STALL_IDLE_OK (default whisipedia-job-*-watch.service)
 * ``lock-held:<lock>``        a lock (ingest, heavy, index...) held by one process over WSP_STALL_LOCK_H
                               hours (8), counted from the first run that saw it held (the scrub lock
                               is the orchestrator's for its whole life, and is not counted)
@@ -41,6 +42,7 @@ for tests.
 
 from __future__ import annotations
 
+import fnmatch
 import glob
 import hashlib
 import json
@@ -76,6 +78,8 @@ LOGS = os.environ.get(
 ).split(":")
 IDLE_H = float(os.environ.get("WSP_STALL_IDLE_H", "3"))
 IDLE_CPU_S = 10.0
+# Jobs idle by design (a watcher that samples every half hour): never "job-idle" (2026-10-23).
+IDLE_OK = os.environ.get("WSP_STALL_IDLE_OK", "whisipedia-job-*-watch.service").split(":")
 LOCK_H = float(os.environ.get("WSP_STALL_LOCK_H", "8"))
 OWED_MIN = float(os.environ.get("WSP_STALL_OWED_MIN", "30"))
 DOWN_H = float(os.environ.get("WSP_STALL_DOWN_H", "1"))
@@ -357,6 +361,8 @@ def check(state: State, t: float) -> tuple[dict[str, str], list[str]]:
             if files is not None and files[0] > 0.8 * files[1]:
                 cond[f"files-high:{unit}"] = f"{unit} holds {files[0]} open files of {files[1]} it may open"
         if not (unit.startswith("whisipedia-job-") and active == "active"):
+            continue
+        if any(fnmatch.fnmatchcase(unit, pat) for pat in IDLE_OK):
             continue
         cg = unit_prop(unit, "ControlGroup")
         use = cpu_usec(cg) if cg else None
