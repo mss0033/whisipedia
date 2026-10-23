@@ -379,13 +379,15 @@ const HIDDEN_CLASSES = ['cs1-maint', 'cs1-hidden-error', 'hiddenStructure'];
 
 /** Wiki template leftovers in a page's text: a parameter never filled in (`{{{name}}}`), and a category
  * or file link with no name (`[[Category:]]`, `[[File:|thumb|]]`, an unsigned comment's `[[User:|]]`
- * on explain xkcd), a magic word (`{{PAGENAME}}`,
+ * and `[[Special:Contributions/|]]` on explain xkcd), a magic word (`{{PAGENAME}}`,
  * Energypedia's file pages), a link to a template (`[[Template:Pub Tag Improved Cookstoves}]]`,
  * Energypedia, 2026-10-21 audit). Never a page's words: Gardenology
  * and Appropedia pages showed them in place of the values their templates lacked (2026-10-19 audit).
  * Text in code blocks is left alone. */
 const TEMPLATE_LEFTOVERS =
-  /\[\[\s*(?:\{\{\{[^{}]{1,40}\}\}\}|[A-Z][A-Za-z]{1,20}(?:[ _][A-Za-z]{1,20})?\s*:\s*(?:\|[^[\]|]{0,40})*|Template\s*:[^[\]]{1,80})\s*\]\]|\{\{\{[\w -]{1,40}(?:\|[^{}]{0,40})?\}\}\}|\{\{(?:FULL|BASE|SUB)?PAGENAMEE?\}\}|\{\{(?:SITENAME|NAMESPACE)\}\}/g;
+  /\[\[\s*(?:\{\{\{[^{}]{1,40}\}\}\}|[A-Z][A-Za-z]{1,20}(?:[ _][A-Za-z]{1,20})?\s*:\s*(?:[A-Z][A-Za-z]{1,30}\/)?(?:\|[^[\]|]{0,40})*|Template\s*:[^[\]]{1,80})\s*\]\]|\{\{\{[\w -]{1,40}(?:\|[^{}]{0,40})?\}\}\}|\{\{(?:FULL|BASE|SUB)?PAGENAMEE?\}\}|\{\{(?:SITENAME|NAMESPACE)\}\}/g;
+const LEFTOVER_MARK = '\uE000'; // private use: a page's text has it only from an icon font, if ever
+const EMPTIED_BRACKETS = /\(\s*\uE000[\s\uE000]*\)/g;
 const CODE_TAGS = new Set(['pre', 'code', 'kbd', 'samp', 'textarea']);
 
 /** The page a `<frame>` or `<iframe>` showed: its source rewritten to the archive's asset route
@@ -410,11 +412,17 @@ function framePage(el: Element): { address: string; name: string } | null {
 
 export function withoutTemplateLeftovers(text: string): string {
   let t = text;
+  let marked = false;
   // Again until nothing changes: [[Image:{{{range_map}}}|{{{width}}}|]] is a nameless image link
   // once its parameters are gone (Gardenology, 2026-10-20 audit).
   for (let i = 0; i < 3 && (t.includes('[[') || t.includes('{{')); i++) {
     const next = t
-      .replace(TEMPLATE_LEFTOVERS, '')
+      // A removed link leaves a mark, so the brackets it alone filled go too (below).
+      .replace(TEMPLATE_LEFTOVERS, (m) => {
+        if (!m.startsWith('[[')) return '';
+        marked = true;
+        return LEFTOVER_MARK;
+      })
       .replace(BROKEN_TEMPLATE, '$1')
       .replace(UNCLOSED_TEMPLATE, '')
       .replace(PARAM_TEMPLATE, '')
@@ -423,6 +431,9 @@ export function withoutTemplateLeftovers(text: string): string {
     if (next === t) break;
     t = next;
   }
+  // `([[User talk:{{{1}}}|talk]])` is `()` once its link is gone (explain xkcd's unsigned comments,
+  // 2026-10-22 audit); parentheses a page writes itself (`main()`) never held a mark.
+  if (marked) t = t.replace(EMPTIED_BRACKETS, '').replaceAll(LEFTOVER_MARK, '');
   if (t.includes('[['))
     t = t.replace(UNLINKED, (_m, title: string, label?: string) => label ?? title);
   return t.includes('&') ? t.replace(ESCAPED_TWICE, (e) => UNESCAPE[e] ?? e) : t;

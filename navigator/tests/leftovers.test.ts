@@ -20,6 +20,14 @@ describe('wiki leftovers an archived page shows (2026-10-19 audit)', () => {
     expect(withoutTemplateLeftovers('[[Image:{{{range_map}}}|{{{range_map_width}}}|]]x')).toBe('x');
     expect(withoutTemplateLeftovers('story)? -- [[User:|]] (talk)')).toBe('story)? --  (talk)');
     expect(withoutTemplateLeftovers('[[User talk:|]]x [[Paris]]')).toBe('x Paris');
+    // explain xkcd's unsigned comment, its parameter never filled in (2026-10-22 audit): no link, no
+    // empty brackets; brackets the page writes itself stay.
+    expect(
+      withoutTemplateLeftovers(
+        'DC.  [[Special:Contributions/{{{1}}}|{{{1}}}]] ([[User talk:{{{1}}}|talk]])  (please sign)',
+      ),
+    ).toBe('DC.     (please sign)');
+    expect(withoutTemplateLeftovers('call main() then [[User:|]] ok')).toBe('call main() then  ok');
     expect(
       withoutTemplateLeftovers(
         '{{Information |Description =  |Source =  |Date = ~~~~~ <!-- do not change -->  |Permission =  }}  Solar',
