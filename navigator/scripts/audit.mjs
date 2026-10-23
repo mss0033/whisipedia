@@ -940,8 +940,14 @@ async function main() {
     /* a first run */
   }
   const skipped = [];
+  // Samples are drawn at random: a rerun (the memory guard stopped the round and started it again,
+  // 2026-10-23) takes only what each source still lacks, not a second full sample.
+  const have = new Map();
+  for (const r of results) have.set(r.source, (have.get(r.source) ?? 0) + 1);
   let n = 0;
   for (const s of sources) {
+    const owed = SAMPLES - (have.get(s.id) ?? 0);
+    if (owed <= 0) continue;
     if (!s.readable) {
       skipped.push({ id: s.id, why: 'not readable as documents (data, tiles or a history feed)' });
       continue;
@@ -961,8 +967,7 @@ async function main() {
       });
       continue;
     }
-    for (const id of ids) {
-      if (seen.has(id)) continue;
+    for (const id of ids.filter((i) => !seen.has(i)).slice(0, owed)) {
       const once = () =>
         audit(context, phoneContext, id).catch((e) => ({
           id,
