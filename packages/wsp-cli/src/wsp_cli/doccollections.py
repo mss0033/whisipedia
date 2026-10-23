@@ -31,6 +31,7 @@ import statistics
 import subprocess
 import sys
 import tempfile
+import zipfile
 from collections import deque
 from collections.abc import Collection, Mapping, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -468,7 +469,15 @@ class CollectionFetcher:
         out: TextIO | None = None,
         git: str | None = None,
         throttle: bool = True,
+        adopt_kept: Collection[str] = (),
+        offline: bool = False,
     ) -> None:
+        """``adopt_kept``: document keys whose download was kept as ``<file>.uncorroborated`` (no
+        checksum upstream, no second download) and that the owner takes as they are: used in place of
+        a download, a zip's members CRC-checked first. ``offline``: nothing else is downloaded (a
+        paused source)."""
+        self.adopt_kept = frozenset(adopt_kept)
+        self.offline = offline
         self.vault_root = vault_root
         self.incoming = vault_root / "_incoming"
         self.fetcher = fetcher
@@ -618,6 +627,10 @@ class CollectionFetcher:
         Without a published checksum the file is fetched again (its origin cannot be re-checked).
         """
         done = dest_dir / cand.file_name
+        if cand.key in self.adopt_kept:
+            return self._adopt_kept(cand, done)
+        if self.offline:
+            raise FetchError(f"{cand.key}: the source is paused; only --adopt-kept documents are taken")
         if cand.md5 and done.is_file() and (cand.size is None or done.stat().st_size == cand.size):
             digest = hashlib.md5(usedforsecurity=False)
             with done.open("rb") as fh:
@@ -627,6 +640,29 @@ class CollectionFetcher:
                 return done
         remote = RemoteFile(url=cand.url, name=cand.file_name, size=cand.size, mirrors=cand.mirrors)
         return Path(download_from_origins(fetcher, remote, dest_dir / cand.file_name, origins).path)
+
+    def _adopt_kept(self, cand: Candidate, done: Path) -> Path:
+        """The kept ``<file>.uncorroborated`` as the download (owner decision; nothing is fetched).
+        A zip must read whole (every member's CRC); other kinds have no offline check and are refused."""
+        kept = done.with_name(done.name + ".uncorroborated")
+        if not kept.is_file():
+            if done.is_file():
+                return done  # adopted by an earlier run
+            raise FetchError(f"{cand.key}: no kept download at {kept}")
+        if not zipfile.is_zipfile(kept):
+            raise FetchError(
+                f"{cand.key}: {kept.name} is not a zip; a kept file is taken only when it checks"
+            )
+        try:
+            with zipfile.ZipFile(kept) as z:
+                bad = z.testzip()
+        except (zipfile.BadZipFile, OSError) as exc:
+            raise FetchError(f"{cand.key}: {kept.name} does not read whole: {exc}") from exc
+        if bad is not None:
+            raise FetchError(f"{cand.key}: {kept.name}: {bad} fails its CRC")
+        kept.replace(done)
+        self._say(f"  {cand.key}: the kept download taken as it is (owner); every zip member's CRC checks")
+        return done
 
     def _git(self, *args: str, cwd: Path | None = None, capture: bool = False) -> str:
         """``git`` over HTTPS only, no redirects, no prompts, no hooks from the remote."""
@@ -1197,9 +1233,11 @@ def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
     if spec.status is SourceStatus.EXCLUDED or spec.raw.get("legal_basis") == "none":
         print(f"error: {spec.id} is excluded or has no legal basis", file=sys.stderr)
         return EXIT_REFUSED
-    if spec.status is SourceStatus.PAUSED:
+    adopt = frozenset(getattr(args, "adopt_kept", None) or ())
+    if spec.status is SourceStatus.PAUSED and not adopt:
         # What is held stays served; nothing new is fetched until the owner says (army-pubs-public:
-        # its robots.txt disallows every crawler, 2026-10-21).
+        # its robots.txt disallows every crawler, 2026-10-21). A download already kept may still be
+        # taken (--adopt-kept): nothing is fetched for it.
         print(f"error: {spec.id} is paused (see its registry entry)", file=sys.stderr)
         return EXIT_REFUSED
     if spec.partitioned and not args.partition and not args.dry_run:
@@ -1227,6 +1265,8 @@ def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
         user_agent=bootstrap.user_agent(cfg),
         workdir=workdir,
         out=out,
+        adopt_kept=adopt,
+        offline=spec.status is SourceStatus.PAUSED,
     )
     report = runner.run(
         spec,
@@ -1330,6 +1370,14 @@ def register(sub: Any, add: Any) -> None:
         action="append",
         metavar="KEY",
         help="download this document key again even if the held copy looks current (repeatable)",
+    )
+    s.add_argument(
+        "--adopt-kept",
+        action="append",
+        metavar="KEY",
+        help="take this document's kept download (<file>.uncorroborated: no checksum upstream, no second "
+        "download) as it is, a zip's CRCs checked first; nothing is fetched for it (owner decision; "
+        "also for a paused source, where nothing else is fetched)",
     )
     s.add_argument(
         "--partition",

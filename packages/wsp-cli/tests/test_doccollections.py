@@ -697,3 +697,58 @@ def test_files_fetched_again_for_a_sealed_version_are_a_failure_not_sealed(
     (vp,) = [v for v in result.versions if v.generation_id == "2026-10-10"]
     assert vp.status is VersionStatus.FAILED
     assert "not ingested" in vp.reason
+
+
+class _NoNetwork(FakeFetcher):
+    def download(self, remote: RemoteFile, dest: Path) -> Any:
+        raise AssertionError(f"downloaded {remote.url}")
+
+
+def test_a_kept_download_the_owner_takes_is_used_as_it_is_and_nothing_is_fetched(tmp_path: Path) -> None:
+    """GEBCO (2026-10-23): kept as .uncorroborated (no checksum upstream, no second download), and
+    the owner keeps it. Its zip must read whole; a paused source fetches nothing else."""
+    import zipfile
+
+    from wsp_adapters.doccollection.model import Candidate
+    from wsp_core.errors import FetchError
+
+    fetch = CollectionFetcher(
+        tmp_path / "vault",
+        _NoNetwork(),
+        keys={},
+        user_agent="t",
+        workdir=tmp_path,
+        throttle=False,
+        adopt_kept={"g:grid"},
+        offline=True,
+    )
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    grid = Candidate(
+        key="g:grid", url="https://bodc.example/grid/", title="Grid", issuer="G", extra={"suffix": ".zip"}
+    )
+    other = Candidate(key="g:other", url="https://bodc.example/other.zip", title="Other", issuer="G")
+    kept = dest / f"{grid.file_name}.uncorroborated"
+    with zipfile.ZipFile(kept, "w") as z:
+        z.writestr("GEBCO_2024.nc", b"elevation " * 1000)
+    got = fetch._download(_NoNetwork(), grid, dest, ["bodc.example"])  # pyright: ignore[reportPrivateUsage]
+    assert got == dest / grid.file_name
+    assert zipfile.ZipFile(got).read("GEBCO_2024.nc").startswith(b"elevation")
+    assert not kept.exists()
+    assert fetch._download(_NoNetwork(), grid, dest, ["bodc.example"]) == got  # pyright: ignore[reportPrivateUsage]
+    with pytest.raises(FetchError, match="paused"):
+        fetch._download(_NoNetwork(), other, dest, ["bodc.example"])  # pyright: ignore[reportPrivateUsage]
+
+    # A kept file that does not read whole is refused, and stays where it is.
+    got.unlink()
+    kept.write_bytes(b"<html>Service unavailable</html>")  # not a zip at all
+    with pytest.raises(FetchError, match="not a zip"):
+        fetch._download(_NoNetwork(), grid, dest, ["bodc.example"])  # pyright: ignore[reportPrivateUsage]
+    with zipfile.ZipFile(kept, "w") as z:
+        z.writestr("GEBCO_2024.nc", b"elevation " * 1000)
+    raw = bytearray(kept.read_bytes())
+    raw[40] ^= 0xFF  # a byte of the member's data
+    kept.write_bytes(bytes(raw))
+    with pytest.raises(FetchError, match=r"CRC|does not read whole"):
+        fetch._download(_NoNetwork(), grid, dest, ["bodc.example"])  # pyright: ignore[reportPrivateUsage]
+    assert kept.exists()
