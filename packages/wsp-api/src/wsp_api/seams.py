@@ -13,7 +13,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import Protocol, cast, runtime_checkable
 
 from wsp_api.schemas import OpsStatus, ProposalInfo
 from wsp_core.ids import DocId
@@ -89,3 +89,19 @@ __all__ = [
     "SpellingCorrector",
     "VaultView",
 ]
+
+
+def load_generation(vault: object, source_id: str, generation_id: str) -> Generation | None:
+    """One generation with its artifacts: the vault's own lookup, else from its list of them."""
+    one = getattr(vault, "generation", None)
+    if callable(one):
+        return cast(Generation | None, one(source_id, generation_id))
+    gens = cast(Sequence[Generation], getattr(vault, "generations")(source_id))  # noqa: B009
+    return next((g for g in gens if g.generation_id == generation_id), None)
+
+
+def full_generation(vault: object, gen: Generation) -> Generation:
+    """``gen`` with its artifacts, from a :class:`SnapshotVault` (whose lists leave them out); any
+    other vault lists them already."""
+    full = getattr(vault, "full", None)
+    return cast(Generation, full(gen)) if callable(full) else gen

@@ -115,14 +115,16 @@ def source_info(
     )
 
 
-def generation_info(gen: Generation, *, current: bool) -> GenerationInfo:
+def generation_info(gen: Generation, *, current: bool, size: tuple[int, int] | None = None) -> GenerationInfo:
+    """``size``: (files, bytes) when ``gen`` comes without its artifacts (the snapshot's lists)."""
+    files, total = size if size is not None else (len(gen.artifacts), sum(a.size for a in gen.artifacts))
     return GenerationInfo(
         source_id=gen.source_id,
         generation_id=gen.generation_id,
         status=gen.status.value,
         sealed_at=gen.sealed_at,
-        artifact_count=len(gen.artifacts),
-        total_bytes=sum(a.size for a in gen.artifacts),
+        artifact_count=files,
+        total_bytes=total,
         current=current,
     )
 

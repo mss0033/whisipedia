@@ -246,7 +246,12 @@ def _v1(lib: Library, settings: ApiSettings) -> APIRouter:
             current = {g.generation_id for g in (st.members or ([st.current] if st.current else []))}
             gens = sorted(st.generations, key=lambda g: g.generation_id, reverse=True)
             chunk, nxt = convert.page(gens, cursor, limit)
-            items = [convert.generation_info(g, current=g.generation_id in current) for g in chunk]
+            items = [
+                convert.generation_info(
+                    g, current=g.generation_id in current, size=st.sizes.get(g.generation_id)
+                )
+                for g in chunk
+            ]
             return GenerationPage(items=items, next_cursor=nxt)
 
         return await state.run(build)
@@ -524,7 +529,12 @@ def _v1(lib: Library, settings: ApiSettings) -> APIRouter:
             return SystemStatus(
                 generated_at=now,
                 freshness=fresh,
-                degraded=[convert.generation_info(g, current=c) for g, c in snap.degraded()],
+                degraded=[
+                    convert.generation_info(
+                        g, current=c, size=snap.source(g.source_id).sizes.get(g.generation_id)
+                    )
+                    for g, c in snap.degraded()
+                ],
                 ledger_tail=[convert.ledger_entry(e) for e in tail],
                 ledger_ok=state.ledger_ok.get(),
                 uptime_seconds=round(time.monotonic() - started, 3),

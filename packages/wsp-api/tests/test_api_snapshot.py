@@ -335,3 +335,52 @@ def test_archives_other_pages_render_with_open_first() -> None:
         spec("wikipedia-en-zim"),
     ]
     assert [s.id for s in warm_order(specs)] == ["wikipedia-en-zim", "askubuntu", "dump", "stackexchange"]
+
+
+def _art(source: str, gen: str, name: str, size: int) -> Any:
+    from pathlib import PurePosixPath
+
+    from wsp_core.model import Artifact
+
+    return Artifact(source, gen, PurePosixPath(f"upstream/{name}"), size, "0" * 64, "0" * 64)
+
+
+def test_the_snapshot_keeps_older_generations_without_their_files_and_reads_one_when_asked() -> None:
+    """2026-10-23: every file of every generation in memory grew with the library (505,000 artifacts,
+    twice during a refresh). Lists keep sizes; a page that needs an older generation's files gets them."""
+    from wsp_api.seams import full_generation
+    from wsp_api.snapshot import FULL_ARTIFACTS, SnapshotVault
+
+    services = sample_services()
+    vault = cast(InMemoryVault, services.vault)
+    old = Generation(
+        "rfc",
+        "2020-01-01",
+        GenerationStatus.SEALED,
+        (_art("rfc", "2020-01-01", "a.txt", 10), _art("rfc", "2020-01-01", "b.txt", 5)),
+    )
+    vault.add(old)
+    lib = Library(services)
+    snap = build_snapshot(services.vault, services.sources, lib.catalog)
+    st = snap.source("rfc")
+    listed = next(g for g in st.generations if g.generation_id == "2020-01-01")
+    assert listed.artifacts == ()
+    assert st.sizes["2020-01-01"] == (2, 15)
+    assert st.current == services.vault.current("rfc")  # the served generation as the vault has it
+
+    class _State:
+        def snapshot(self) -> Any:
+            return snap
+
+    view = SnapshotVault(cast(Any, _State()), services.vault)
+    full = full_generation(view, listed)
+    assert [str(a.relpath) for a in full.artifacts] == ["upstream/a.txt", "upstream/b.txt"]
+    assert full_generation(view, listed) is full  # read once, then kept
+    assert full_generation(services.vault, old) is old  # a plain vault lists them already
+    assert FULL_ARTIFACTS > 0
+
+
+def test_generation_lists_show_sizes_from_the_snapshot(client: Any) -> None:
+    body = client.get("/v1/sources/rfc/generations").json()
+    assert body["items"]
+    assert all(item["artifact_count"] >= 0 and item["total_bytes"] >= 0 for item in body["items"])

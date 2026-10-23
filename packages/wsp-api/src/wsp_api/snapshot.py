@@ -24,8 +24,9 @@ import os
 import pickle
 import threading
 import time
+from collections import OrderedDict
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 from types import MethodType
@@ -33,7 +34,7 @@ from typing import Protocol, cast
 
 from wsp_api.errors import ApiError
 from wsp_api.schemas import OpsStatus, ProposalInfo
-from wsp_api.seams import OpsProvider, VaultView
+from wsp_api.seams import OpsProvider, VaultView, load_generation
 from wsp_core.ids import make_doc_id
 from wsp_core.model import Generation, GenerationStatus, LedgerEvent, SourceSpec
 from wsp_core.ports import Catalog, Ledger
@@ -55,9 +56,14 @@ class HomeFinder(Protocol):
 class SourceState:
     current: Generation | None = None
     members: tuple[Generation, ...] = ()  # a partitioned source's current set (ADR-0010)
-    generations: tuple[Generation, ...] = ()  # oldest first
+    # Oldest first, without their artifacts: every file of every generation held in memory grew with
+    # the library (505,000 artifacts, a second copy during each refresh: 2026-10-23). The current one
+    # and the members above keep theirs; :meth:`SnapshotVault.full` reads another's when asked.
+    generations: tuple[Generation, ...] = ()
     paths: Mapping[str, Path] = field(default_factory=dict[str, Path])
     error: str | None = None  # the last refresh failed; the values are from the one before
+    sizes: Mapping[str, tuple[int, int]] = field(default_factory=dict[str, tuple[int, int]])
+    """Generation id -> (files, bytes): what the generation lists showed from the artifacts."""
 
 
 _EMPTY = SourceState()
@@ -102,16 +108,21 @@ def build_snapshot(
     counts: dict[str, int | None] = {}
     for spec in specs:
         try:
-            gens = tuple(sorted(vault.generations(spec.id), key=lambda g: g.generation_id))
+            full = sorted(vault.generations(spec.id), key=lambda g: g.generation_id)
+            sizes = {g.generation_id: (len(g.artifacts), sum(a.size for a in g.artifacts)) for g in full}
+            gens = tuple(replace(g, artifacts=()) for g in full)
+            del full
             current = vault.current(spec.id)
             members = tuple(vault.current_set(spec.id)) if spec.partitioned else ()
             usable = {g.generation_id for g in gens if g.status is not GenerationStatus.STAGING}
             paths = {gid: vault.generation_path(spec.id, gid) for gid in sorted(usable)}
-            sources[spec.id] = SourceState(current, members, gens, paths)
+            sources[spec.id] = SourceState(current, members, gens, paths, sizes=sizes)
         except Exception as exc:
             log.warning("snapshot: cannot read %s: %s", spec.id, exc)
             old = previous.source(spec.id) if previous is not None else _EMPTY
-            sources[spec.id] = SourceState(old.current, old.members, old.generations, old.paths, str(exc))
+            sources[spec.id] = SourceState(
+                old.current, old.members, old.generations, old.paths, str(exc), sizes=old.sizes
+            )
         try:
             counts[spec.id] = catalog.doc_count(spec.id)
         except Exception:
@@ -119,7 +130,7 @@ def build_snapshot(
     return LibrarySnapshot(time.monotonic(), sources, counts)
 
 
-SNAPSHOT_CACHE_VERSION = 1
+SNAPSHOT_CACHE_VERSION = 2  # 2: generations without artifacts, and their sizes
 
 
 def save_snapshot(path: Path, snap: LibrarySnapshot) -> None:
@@ -445,6 +456,8 @@ class SnapshotVault:
     def __init__(self, state: LibraryState, vault: VaultView) -> None:
         self._state = state
         self._vault = vault
+        self._full: OrderedDict[tuple[str, str], Generation] = OrderedDict()
+        self._full_lock = threading.Lock()
 
     @property
     def root(self) -> object:
@@ -461,11 +474,38 @@ class SnapshotVault:
         return st.members or ([st.current] if st.current is not None else [])
 
     def generations(self, source_id: str) -> Sequence[Generation]:
+        """Every generation, without its artifacts (:meth:`full` has them)."""
         return self._source(source_id).generations
+
+    def full(self, gen: Generation) -> Generation:
+        """``gen`` with its artifacts: the current generation and the members as the snapshot keeps
+        them, another read once from the vault (its manifest) and kept while it is among the recent."""
+        st = self._source(gen.source_id)
+        for held in (st.current, *st.members):
+            if held is not None and held.generation_id == gen.generation_id:
+                return held
+        if gen.artifacts or not st.sizes.get(gen.generation_id, (0, 0))[0]:
+            return gen  # it lists no files: nothing to read
+        key = (gen.source_id, gen.generation_id)
+        with self._full_lock:
+            hit = self._full.get(key)
+            if hit is not None:
+                self._full.move_to_end(key)
+                return hit
+        loaded = load_generation(self._vault, gen.source_id, gen.generation_id) or gen
+        with self._full_lock:
+            self._full[key] = loaded
+            self._full.move_to_end(key)
+            while len(self._full) > 1 and sum(len(g.artifacts) for g in self._full.values()) > FULL_ARTIFACTS:
+                self._full.popitem(last=False)
+        return loaded
 
     def generation_path(self, source_id: str, generation_id: str) -> Path:
         found = self._source(source_id).paths.get(generation_id)
         return found if found is not None else self._vault.generation_path(source_id, generation_id)
+
+
+FULL_ARTIFACTS = 100_000  # artifacts of older generations kept read (about 70 MB)
 
 
 # --- source -> domain memo (until FileVault caches it itself) ----------------------------------------

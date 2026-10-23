@@ -35,7 +35,7 @@ from wsp_api.renditions import (
     stand_ins,
 )
 from wsp_api.schemas import Change, DocRef, DocumentLink, SourceInfo, VaultLocation
-from wsp_api.seams import DocumentFields, VaultView
+from wsp_api.seams import DocumentFields, VaultView, full_generation
 from wsp_api.services import ApiSettings, Services
 from wsp_api.snapshot import LibrarySnapshot, LibraryState, StateSettings
 from wsp_api.zim import BookIndex, ZimAssetStore
@@ -711,6 +711,7 @@ class Library:
     def vault_location(self, gen: Generation, html_ref: str | None, source_id: str) -> VaultLocation:
         """The file that holds the page: the stored original, the ZIM archive holding the entry, or the
         generation's only file. Otherwise the generation directory (no size or hashes)."""
+        gen = full_generation(self.vault, gen)  # the snapshot's lists leave artifacts out
         art: Artifact | None = None
         entry: str | None = None
         if html_ref is not None and html_ref.startswith("zim:"):
@@ -720,8 +721,11 @@ class Library:
                 # A bundle release reads unchanged books from the release that stored them.
                 holder = Path(file).parent.parent.name
                 if holder != gen.generation_id:
-                    gen = next(
-                        (g for g in self.vault.generations(source_id) if g.generation_id == holder), gen
+                    gen = full_generation(
+                        self.vault,
+                        next(
+                            (g for g in self.vault.generations(source_id) if g.generation_id == holder), gen
+                        ),
                     )
             zims = [a for a in gen.artifacts if a.relpath.suffix == ".zim"]
             if file is not None:

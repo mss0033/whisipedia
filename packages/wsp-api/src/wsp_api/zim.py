@@ -38,7 +38,7 @@ from urllib.parse import unquote, urlsplit
 from wsp_api.encoded import decoded, html_as_image
 from wsp_api.outside import Site
 from wsp_api.pdftext import pdf_text
-from wsp_api.seams import VaultView
+from wsp_api.seams import VaultView, full_generation
 from wsp_api.zimread import (
     EntryData,
     InProcessZimReader,
@@ -248,6 +248,7 @@ class ZimAssetStore:
 
     def _own_files(self, source_id: str, gen: Generation) -> dict[str, Path]:
         """A generation's own ZIMs by book key (the newest build of a book wins)."""
+        gen = full_generation(self._vault, gen)  # the snapshot's lists leave artifacts out
         root = self._vault.generation_path(source_id, gen.generation_id)
         files = [root / str(a.relpath) for a in gen.artifacts if a.relpath.suffix == ".zim"]
         if not files:  # older generations list no artifacts: the downloaded ZIMs under upstream/

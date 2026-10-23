@@ -990,6 +990,14 @@ class FileVault:
             out.append(self._generation(source_id, generation_id, lib))
         return out
 
+    def generation(self, source_id: str, generation_id: str) -> Generation | None:
+        """One sealed generation with its artifacts (its manifest only), or ``None``: the API's snapshot
+        keeps generations without artifacts and reads one when a page needs its files."""
+        lib = self.library_path(source_id, generation_id)
+        if not (lib / MANIFEST_NAME).is_file():
+            return None
+        return self._generation(source_id, generation_id, lib)
+
     def generations(self, source_id: str) -> Sequence[Generation]:
         out: list[Generation] = []
         src = self.source_dir(source_id)
