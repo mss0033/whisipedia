@@ -4134,7 +4134,8 @@ sources:
       discovery:
         - kind: list
           items:
-            - {pub_number: GEBCO_2024, title: "GEBCO_2024 Grid (netCDF, 15 arc-second)", url: "https://www.bodc.ac.uk/data/open_download/gebco/gebco_2024/zip/", suffix: ".zip"}
+            # The link now answers with the netCDF-4 grid itself (GEBCO_2024_CF.nc on CEDA), not a zip.
+            - {pub_number: GEBCO_2024, title: "GEBCO_2024 Grid (netCDF, 15 arc-second)", url: "https://www.bodc.ac.uk/data/open_download/gebco/gebco_2024/zip/", suffix: ".nc"}
       filter: {allow_all: true, public_issuer: true, data_files: true}
     update: {cadence: P1Y, strategy: snapshot-retention}
     size: {bytes: 7.47e9, measured: true, as_of: '2026-10-20'}

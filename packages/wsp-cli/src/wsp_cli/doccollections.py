@@ -38,6 +38,7 @@ from collections.abc import Collection, Mapping, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
+from glob import escape as glob_escape
 from pathlib import Path
 from typing import Any, TextIO, cast
 from urllib.parse import unquote, urlsplit
@@ -470,6 +471,37 @@ class _Offline:
         raise FetchError(f"{remote.url}: a manual import fetches nothing")
 
 
+HDF5_SIGNATURE = b"\x89HDF\r\n\x1a\n"
+
+
+def whole(path: Path) -> tuple[str, str | None]:
+    """``(kind, problem)``: whether a file that came without a checksum is complete, from what the
+    file says of itself. A zip: every member's CRC. HDF5 (netCDF-4: GEBCO's grid): the superblock's
+    end-of-file address is the file's size (a cut-off download is shorter). Other kinds: ``("", None)``,
+    nothing to check offline."""
+    if zipfile.is_zipfile(path):
+        try:
+            with zipfile.ZipFile(path) as z:
+                bad = z.testzip()
+        except (zipfile.BadZipFile, OSError) as exc:
+            return "zip", f"does not read whole: {exc}"
+        return "zip", None if bad is None else f"{bad} fails its CRC"
+    with path.open("rb") as fh:
+        head = fh.read(96)
+    if head.startswith(HDF5_SIGNATURE) and len(head) >= 48:
+        version = head[8]
+        if version in (2, 3):
+            size, at = head[9], 12 + 2 * head[9]
+        elif version in (0, 1):
+            size, at = head[13], (24 if version == 0 else 28) + 2 * head[13]
+        else:
+            return "hdf5", f"superblock version {version} unknown"
+        end = int.from_bytes(head[at : at + size], "little")
+        actual = path.stat().st_size
+        return "hdf5", None if end == actual else f"{actual:,} bytes where its header says {end:,}"
+    return "", None
+
+
 def manual_name(cand: Candidate) -> str:
     """The name a browser saves the document's URL under (``allCountries.zip``)."""
     return unquote(urlsplit(cand.url).path.rstrip("/").rpartition("/")[2]) or cand.file_name
@@ -680,42 +712,39 @@ class CollectionFetcher:
             if done.is_file():
                 return done  # taken by an earlier run of this cycle
             raise FetchError(f"{cand.key}: {manual_name(cand)} is not in {folder} (download {cand.url})")
-        if path.suffix.lower() == ".zip" or zipfile.is_zipfile(path):
-            try:
-                with zipfile.ZipFile(path) as z:
-                    bad = z.testzip()
-            except (zipfile.BadZipFile, OSError) as exc:
-                raise FetchError(
-                    f"{cand.key}: {path.name} does not read whole (download it again): {exc}"
-                ) from exc
-            if bad is not None:
-                raise FetchError(f"{cand.key}: {path.name}: {bad} fails its CRC (download it again)")
+        kind, problem = whole(path)
+        if problem is None and not kind and path.suffix.lower() == ".zip":
+            problem = "does not read whole: not a zip"  # an error page saved under the zip's name
+        if problem is not None:
+            raise FetchError(f"{cand.key}: {path.name}: {problem} (download it again)")
         done.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(path, done)
         self._say(f"  {cand.key}: taken from {path} (downloaded by hand)")
         return done
 
     def _adopt_kept(self, cand: Candidate, done: Path) -> Path:
-        """The kept ``<file>.uncorroborated`` as the download (owner decision; nothing is fetched).
-        A zip must read whole (every member's CRC); other kinds have no offline check and are refused."""
+        """The kept ``<file>.uncorroborated`` as the download (owner decision; nothing is fetched). It
+        must check whole (:func:`whole`: a zip's CRCs, an HDF5 file's own length); a kind with no
+        offline check is refused. Found also under an older suffix of the same document (GEBCO's
+        grid was named .zip until BODC served netCDF)."""
         kept = done.with_name(done.name + ".uncorroborated")
         if not kept.is_file():
             if done.is_file():
                 return done  # adopted by an earlier run
-            raise FetchError(f"{cand.key}: no kept download at {kept}")
-        if not zipfile.is_zipfile(kept):
+            older = sorted(done.parent.glob(f"{glob_escape(done.stem)}.*.uncorroborated"))
+            if not older:
+                raise FetchError(f"{cand.key}: no kept download at {kept}")
+            kept = older[0]
+        kind, problem = whole(kept)
+        if not kind:
             raise FetchError(
-                f"{cand.key}: {kept.name} is not a zip; a kept file is taken only when it checks"
+                f"{cand.key}: {kept.name}: no offline check for this kind "
+                "(a kept file is taken only when it checks)"
             )
-        try:
-            with zipfile.ZipFile(kept) as z:
-                bad = z.testzip()
-        except (zipfile.BadZipFile, OSError) as exc:
-            raise FetchError(f"{cand.key}: {kept.name} does not read whole: {exc}") from exc
-        if bad is not None:
-            raise FetchError(f"{cand.key}: {kept.name}: {bad} fails its CRC")
+        if problem is not None:
+            raise FetchError(f"{cand.key}: {kept.name}: {problem}")
         kept.replace(done)
-        self._say(f"  {cand.key}: the kept download taken as it is (owner); every zip member's CRC checks")
+        self._say(f"  {cand.key}: the kept download taken as it is (owner); it checks whole ({kind})")
         return done
 
     def _git(self, *args: str, cwd: Path | None = None, capture: bool = False) -> str:
@@ -1535,7 +1564,7 @@ def cmd_manual(args: argparse.Namespace, out: TextIO) -> int:
     ingest_args = argparse.Namespace(
         config_dir=args.config_dir,
         source=spec.id,
-        version=fetch_args.version,
+        version=None,  # every planned version: the fetch may have taken a new one (today's sealed)
         partition=None,
         dry_run=False,
         offline=True,

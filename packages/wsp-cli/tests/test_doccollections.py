@@ -742,7 +742,7 @@ def test_a_kept_download_the_owner_takes_is_used_as_it_is_and_nothing_is_fetched
     # A kept file that does not read whole is refused, and stays where it is.
     got.unlink()
     kept.write_bytes(b"<html>Service unavailable</html>")  # not a zip at all
-    with pytest.raises(FetchError, match="not a zip"):
+    with pytest.raises(FetchError, match="no offline check"):
         fetch._download(_NoNetwork(), grid, dest, ["bodc.example"])  # pyright: ignore[reportPrivateUsage]
     with zipfile.ZipFile(kept, "w") as z:
         z.writestr("GEBCO_2024.nc", b"elevation " * 1000)
@@ -860,3 +860,48 @@ def test_a_share_mounted_path_is_named_as_windows_names_it(tmp_path: Path) -> No
     got = windows_path(Path("/mnt/z/whisipedia/_incoming/_manual/geonames"), mounts)
     assert got == "\\\\192.168.1.169\\Bellerophon\\whisipedia\\_incoming\\_manual\\geonames"
     assert windows_path(Path("/home/x"), mounts) is None
+
+
+def _hdf5(length: int) -> bytes:
+    """An HDF5 file's start (superblock version 2) saying it is ``length`` bytes long."""
+    head = b"\x89HDF\r\n\x1a\n" + bytes([2, 8, 8, 0]) + (0).to_bytes(8, "little") * 2
+    head += length.to_bytes(8, "little") + (48).to_bytes(8, "little") + b"\0" * 4
+    return head + b"\0" * (length - len(head))
+
+
+def test_a_kept_netcdf_grid_is_taken_when_it_is_as_long_as_it_says(tmp_path: Path) -> None:
+    """GEBCO (2026-10-23): BODC's link came to serve netCDF-4 (HDF5), kept under the registry's old
+    ".zip" name. Its own header gives its length: a cut-off download is refused."""
+    from wsp_adapters.doccollection.model import Candidate
+    from wsp_cli.doccollections import whole
+    from wsp_core.errors import FetchError
+
+    dest = tmp_path / "cycle"
+    dest.mkdir()
+    grid = Candidate(
+        key="g:grid", url="https://bodc.example/grid/", title="Grid", issuer="G", extra={"suffix": ".nc"}
+    )
+    old_name = grid.file_name.removesuffix(".nc") + ".zip.uncorroborated"
+    (dest / old_name).write_bytes(_hdf5(4096))
+    assert whole(dest / old_name) == ("hdf5", None)
+    fetch = CollectionFetcher(
+        tmp_path / "vault",
+        _NoNetwork(),
+        keys={},
+        user_agent="t",
+        workdir=tmp_path,
+        throttle=False,
+        adopt_kept={"g:grid"},
+    )
+    got = fetch._download(_NoNetwork(), grid, dest, ["bodc.example"])  # pyright: ignore[reportPrivateUsage]
+    assert got == dest / grid.file_name
+    assert got.stat().st_size == 4096
+
+    got.unlink()
+    (dest / old_name).write_bytes(_hdf5(4096)[:3000])  # cut off
+    kind, problem = whole(dest / old_name)
+    assert kind == "hdf5"
+    assert problem is not None
+    assert "3,000 bytes where its header says 4,096" in problem
+    with pytest.raises(FetchError, match="header says"):
+        fetch._download(_NoNetwork(), grid, dest, ["bodc.example"])  # pyright: ignore[reportPrivateUsage]
