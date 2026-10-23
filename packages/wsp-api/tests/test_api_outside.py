@@ -65,6 +65,9 @@ HELD = {s.source_id for s in SITES} | {
         ("https://datatracker.ietf.org/doc/html/rfc791", (("rfc", "rfc:RFC-791"), "")),
         ("https://pubmed.ncbi.nlm.nih.gov/21792337/", (("pubmed", "21792337"), "")),
         ("https://openlibrary.org/works/OL45804W/Fantastic_Mr_Fox", (("open-library", "works/OL45804W"), "")),
+        # Wikipedia's authority control links a person as /works/: the id's letter decides (A: author).
+        ("https://openlibrary.org/works/OL4591117A", (("open-library", "authors/OL4591117A"), "")),
+        ("https://openlibrary.org/works/OL7353617M", (("open-library", "books/OL7353617M"), "")),
         ("https://www.law.cornell.edu/uscode/text/26/501", (("us-code", "t26/s501"), "")),
         (
             "https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title42-section1983&num=0",

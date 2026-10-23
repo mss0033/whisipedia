@@ -72,8 +72,14 @@ def _pubmed(host: str, path: str, query: str) -> Target | None:
 def _open_library(host: str, path: str, query: str) -> Target | None:
     if host != "openlibrary.org":
         return None
-    m = re.match(r"^/(books|works|authors)/(OL\d+[MWA])(?:/|$)", path)
-    return ("open-library", f"{m.group(1)}/{m.group(2)}") if m else None
+    m = re.match(r"^/(?:books|works|authors)/(OL\d+([MWA]))(?:/|$)", path)
+    # The id's last letter says what it is, as openlibrary.org itself redirects: Wikipedia's authority
+    # control links every Open Library id as /works/, a person's too (/works/OL4591117A is the author
+    # Jean-Baptiste Tavernier, 2026-10-23 audit), and the library holds it under authors/.
+    return ("open-library", f"{OL_KINDS[m.group(2)]}/{m.group(1)}") if m else None
+
+
+OL_KINDS = {"A": "authors", "W": "works", "M": "books"}
 
 
 def _courtlistener(host: str, path: str, query: str) -> Target | None:

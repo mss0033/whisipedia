@@ -125,6 +125,16 @@ async function api(path) {
 
 /** Wait (up to 15 minutes) for the library to answer again: a deploy restarts the API mid-audit, and
  * every page in that minute would otherwise count as unreachable (the first run lost 135 sources so). */
+// Stopped (a shutdown, the memory guard): the page in hand is not recorded, its errors are the stop's
+// (round 21i: an American Stories page "browser has been closed", a US Code page "connection
+// refused"), and a rerun into the same round does it again (2026-10-23).
+let stopping = false;
+for (const sig of ['SIGTERM', 'SIGINT'])
+  process.on(sig, () => {
+    stopping = true;
+    setTimeout(() => process.exit(143), 20_000).unref();
+  });
+
 async function waitForLibrary() {
   for (let i = 0; i < 180; i++) {
     try {
@@ -946,6 +956,7 @@ async function main() {
   for (const r of results) have.set(r.source, (have.get(r.source) ?? 0) + 1);
   let n = 0;
   for (const s of sources) {
+    if (stopping) break;
     const owed = SAMPLES - (have.get(s.id) ?? 0);
     if (owed <= 0) continue;
     if (!s.readable) {
@@ -953,10 +964,15 @@ async function main() {
       continue;
     }
     let ids = await samplesOf(s).catch(() => null);
-    if (ids === null || ids.length === 0) {
+    // A library just started opens its archives cold, for minutes: ask again, a few times, before
+    // saying a source has no page (English Wikipedia "found nothing" after a reboot, 2026-10-23).
+    for (let t = 0; t < 3 && (ids === null || ids.length === 0) && !stopping; t++) {
       await waitForLibrary();
+      await sleep(60_000);
       ids = (await samplesOf(s).catch(() => [])) ?? [];
     }
+    if (stopping) break;
+    if (ids.length === 0 && have.get(s.id)) continue; // it gave pages before: this is the moment
     if (ids.length === 0) {
       skipped.push({ id: s.id, why: 'no page to draw (random and home both empty)' });
       results.push({
@@ -976,6 +992,7 @@ async function main() {
           issues: [{ dim: 'reach', code: 'audit-error', detail: String(e).slice(0, 200) }],
         }));
       let r = await once();
+      if (stopping) break; // the browser is going too: no retries, no fresh contexts
       // The library went away under the page (a restart): wait for it and look again.
       const gone = r.issues.find((i) => RESTARTED.test(i.detail));
       if (gone) {
@@ -1011,6 +1028,7 @@ async function main() {
         log(`${slow.dim}:${slow.code}; ${addressOf(id)} once more`);
         r = await once();
       }
+      if (stopping) break; // the page in hand is the stop's, not the library's
       r.source = s.id;
       results.push(r);
       await appendFile(join(OUT, 'results.jsonl'), `${JSON.stringify(r)}\n`);
