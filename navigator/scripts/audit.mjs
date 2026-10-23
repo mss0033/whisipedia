@@ -142,7 +142,15 @@ async function waitForLibrary() {
         headers: HEADERS,
         signal: AbortSignal.timeout(10_000),
       });
-      if (r.ok) return true;
+      // Up is not yet ready: a library just started answers health at once and pages "warming up"
+      // (503) until its snapshot is built (round 21j: two pages of one book during a restart).
+      const ready =
+        r.ok &&
+        (await fetch(`${BASE}/v1/sources?limit=1`, {
+          headers: HEADERS,
+          signal: AbortSignal.timeout(30_000),
+        }).then((s) => s.ok));
+      if (ready) return true;
     } catch {
       /* not up yet */
     }
@@ -994,7 +1002,10 @@ async function main() {
       let r = await once();
       if (stopping) break; // the browser is going too: no retries, no fresh contexts
       // The library went away under the page (a restart): wait for it and look again.
-      const gone = r.issues.find((i) => RESTARTED.test(i.detail));
+      // Gone, or still warming up after its retries (a library restarted under the page).
+      const gone = r.issues.find(
+        (i) => RESTARTED.test(i.detail) || (i.code === 'api-status' && i.detail === '503'),
+      );
       if (gone) {
         // The detail says which request failed and how (a restart, a reset, a refused connection).
         log(
