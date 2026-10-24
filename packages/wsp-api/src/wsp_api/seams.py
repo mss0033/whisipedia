@@ -13,7 +13,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
-from typing import Protocol, cast, runtime_checkable
+from typing import Any, Protocol, cast, runtime_checkable
 
 from wsp_api.schemas import OpsStatus, ProposalInfo
 from wsp_core.ids import DocId
@@ -42,6 +42,24 @@ class SpellingCorrector(Protocol):
     def unknown(self, query: str) -> Sequence[str]:
         """Words of the query (lower case) that the vocabulary does not know."""
         ...
+
+
+@runtime_checkable
+class Translator(Protocol):
+    """Machine translation into English on the reader's request (ADR-0013; ``wsp_oracle.translation``)."""
+
+    def status(self) -> Mapping[str, object]:
+        """``available``, ``reason``, ``model``, ``state`` (stopped, starting, ready), ``error``,
+        ``languages``."""
+        ...
+
+    def translate(self, lang: str, segments: Sequence[str]) -> Sequence[Any]:
+        """Each segment checked: objects with ``text`` (None when it failed its checks), ``ok``,
+        ``reason``, ``cached``. Raises an exception with ``retry_after`` while it cannot run (starting,
+        the GPU busy), ``ValueError`` for a language it does not translate."""
+        ...
+
+    def close(self) -> None: ...
 
 
 class VaultView(Protocol):

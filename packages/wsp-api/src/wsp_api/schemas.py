@@ -814,3 +814,38 @@ class Resolution(_Wire):
         "home", "search", "directory", "system", "whatsnew", "random", "client", "source", "document"
     ] = Field(description="`client`: a page drawn entirely by the Navigator (history, hotlist, …).")
     href: str | None = Field(description="API resource to fetch; null for pages rendered client-side.")
+
+
+# --- Machine translation (ADR-0013) -------------------------------------------------------------
+
+
+class TranslationStatus(_Wire):
+    """Whether translation into English can be asked for, and of which languages."""
+
+    available: bool
+    reason: str | None = None  # why not (switched off, model not installed)
+    model: str | None = None  # the model every translation names in its banner
+    state: str = "stopped"  # stopped | starting | ready: the on-demand server
+    error: str | None = None  # the server's last failure
+    languages: list[str] = Field(default_factory=list)
+
+
+class TranslateRequest(_Wire):
+    """Segments of one document, in its language: block texts, with ``<xN>…</xN>`` and ``⟦N⟧``
+    placeholders standing for links, formatting and pictures."""
+
+    lang: str = Field(min_length=2, max_length=8)
+    segments: list[str] = Field(min_length=1, max_length=32)
+
+
+class TranslatedSegment(_Wire):
+    text: str | None = None  # English, or None when it failed a check (show the original)
+    ok: bool
+    reason: str | None = None  # why it is not shown translated
+    cached: bool = False
+
+
+class TranslateResponse(_Wire):
+    model: str
+    prompt_version: str
+    segments: list[TranslatedSegment]

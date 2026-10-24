@@ -29,6 +29,8 @@ import type {
   Suggestions,
   SystemStatus,
   Tilesets,
+  TranslateResponse,
+  TranslationStatus,
   WeatherStatus,
 } from './types.ts';
 
@@ -228,6 +230,39 @@ export class WspClient {
 
   system(signal?: AbortSignal): Promise<SystemStatus> {
     return this.get('GET /v1/system', NO_PATH, {}, signal);
+  }
+
+  /** Whether English machine translation can be asked for (ADR-0013), of which languages. */
+  translationStatus(signal?: AbortSignal): Promise<TranslationStatus> {
+    return this.get('GET /v1/translate', NO_PATH, {}, signal);
+  }
+
+  /** Up to 32 segments of a document translated into English, each checked by the library. While
+   * the translation server starts (or the GPU is busy) the answer is `{ retryAfter }`, the seconds to
+   * wait; any other failure throws. */
+  async translate(
+    lang: string,
+    segments: string[],
+    signal?: AbortSignal,
+  ): Promise<TranslateResponse | { retryAfter: number; message: string }> {
+    const body: Routes['POST /v1/translate']['body'] = { lang, segments };
+    const res = await this.fetchImpl(this.base + routePath('POST /v1/translate', NO_PATH), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(body),
+      ...(signal ? { signal } : {}),
+    });
+    const retry = res.headers.get('Retry-After');
+    if (res.status === 503 && retry !== null) {
+      let message = 'the translator is busy';
+      try {
+        message = ((await res.json()) as Partial<ErrorResponse>).error?.message ?? message;
+      } catch {
+        /* non-JSON */
+      }
+      return { retryAfter: Number(retry) || 10, message };
+    }
+    return (await this.parse(res)) as TranslateResponse;
   }
 
   /** The map tilesets the library holds (the Atlas). */

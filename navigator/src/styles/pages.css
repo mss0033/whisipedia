@@ -606,6 +606,49 @@
 .notice-tm {
   font-family: var(--ui-font);
 }
+/* Machine translation (ADR-0013): the banner cannot be dismissed and looks like no other. */
+.mt-banner {
+  background: var(--notice-mt-bg);
+  border: 2px solid var(--box-border);
+  border-left: 8px solid var(--accent);
+  font-family: var(--ui-font);
+  margin: 0.5em 0;
+}
+.mt-controls {
+  display: block;
+  margin-top: 4px;
+}
+.mt-progress,
+.mt-failed {
+  color: var(--page-muted);
+  font-size: 0.85em;
+}
+.mt-failed {
+  font-style: italic;
+}
+.mt-offer {
+  font-family: var(--ui-font);
+}
+.mt-title {
+  margin-top: -0.4em;
+  color: var(--page-muted);
+  font-style: italic;
+}
+.mt-toggle {
+  margin-left: 0.4em;
+  padding: 0 3px;
+  font-size: 0.75em;
+  line-height: 1.2;
+  vertical-align: baseline;
+  opacity: 0.55;
+}
+.mt-toggle:hover,
+.mt-toggle:focus-visible {
+  opacity: 1;
+}
+[data-mt="original"] {
+  outline: 1px dashed var(--box-border);
+}
 .diff-body {
   padding: 8px;
   font-size: 0.8rem;

@@ -44,6 +44,7 @@ if TYPE_CHECKING:  # heavy imports stay lazy so `wsp search --url ...` starts fa
     from wsp_index.feedarchive import ChangeArchive
     from wsp_index.spelling import ReloadingSpeller
     from wsp_index.titles import TitleSources
+    from wsp_oracle.translation import Translator
     from wsp_vault.ledger import JsonlLedger
     from wsp_vault.vault import FileVault
 
@@ -677,6 +678,7 @@ def build_services(cfg: Mapping[str, Any], lay: Layout) -> Services:
             if section(cfg, "api").get("query_log", True)
             else None,
             speller=open_speller(cfg),
+            translator=open_translator(cfg),
         )
 
     from wsp_api.testing.fakes import (
@@ -742,6 +744,17 @@ class RefineryDocuments:
         gen = self.store.current(source_id)
         reader = None if gen is None else self.store.reader(source_id, gen, current=True)
         return None if reader is None else reader.lookup(doc_id, tuple(columns))
+
+
+def open_translator(cfg: Mapping[str, Any]) -> Translator | None:
+    """Machine translation on the reader's request (ADR-0013) from ``[oracle.translation]``; None when
+    it is switched off. The server starts only when a reader first asks."""
+    from wsp_oracle.config import OracleConfig
+    from wsp_oracle.translation import build_translator
+
+    return build_translator(
+        OracleConfig.from_mapping(section(cfg, "oracle")).translation, paths(cfg).require_state()
+    )
 
 
 def open_speller(cfg: Mapping[str, Any]) -> ReloadingSpeller | None:

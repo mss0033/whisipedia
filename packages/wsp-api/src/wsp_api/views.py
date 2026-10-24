@@ -220,6 +220,8 @@ class Library:
         self.link_checks.close()
         if self.zim is not None:
             self.zim.close()
+        if self.s.translator is not None:
+            self.s.translator.close()  # stops the translation server: its GPU memory goes back
 
     # --- sources ---
 

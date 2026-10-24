@@ -3,6 +3,14 @@
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Added: English machine translation on the reader's request (ADR-0013, 2026-10-24)
+* "Read in English (machine translation)" on a non-English page. A banner that cannot be dismissed
+  names the language and model, and says the original is the authority. Translation goes block by
+  block, with links and formatting kept, and each block and the page switch back to the original. A
+  segment that fails a check stays in its own language, with the reason.
+* `GET/POST /v1/translate`. MiLMMT-46-12B (llama.cpp) is started on demand in its own 4 GB scope and
+  stopped after 15 idle minutes. Every segment is checked for numbers (by value, with magnitude
+  words), placeholders, length and sentences, and cached (docs/components/translation.md).
 ### Added: the owner's daily downloads by hand from hosts that refuse crawlers (2026-10-24)
 * `wsp collections manual --sync` (hourly, `whisipedia-manual.timer`) writes
   `_incoming/_manual/TODAY.html` once a day: up to ten links per source, each with the exact name to

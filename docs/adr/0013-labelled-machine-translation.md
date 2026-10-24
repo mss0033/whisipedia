@@ -1,6 +1,7 @@
 # ADR-0013: Labelled machine translation of non-English documents
 
-- Status: Accepted (owner decision D19, 2026-10-24); implementation pending
+- Status: Accepted (owner decision D19, 2026-10-24); on-request translation implemented 2026-10-24
+  (docs/components/translation.md). No pre-translation (owner, 2026-10-24).
 - Date: 2026-10-24
 - Amends: [ADR-0008](0008-no-generative-ui.md) (no generative AI where the user reads), for this one use
 

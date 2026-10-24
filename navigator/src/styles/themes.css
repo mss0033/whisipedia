@@ -57,6 +57,7 @@
   --rule: #808080;
   --notice-bg: #ffffe0;
   --notice-warn-bg: #ffe4e1;
+  --notice-mt-bg: #fff3c4; /* machine translation (ADR-0013): a colour no other banner uses */
   --new-bg: #ff0000;
   --new-fg: #ffff00;
   --icon-fill: #c0c0c0;
@@ -109,6 +110,7 @@
   --badge-bg: #d8d8d8;
   --notice-bg: #d0d0d0;
   --notice-warn-bg: #d8c0c0;
+  --notice-mt-bg: #e0d8a8; /* machine translation (ADR-0013): a colour no other banner uses */
   --throbber-sky: #102040;
   --throbber-letter: #fff;
   --logo-0: #000;
@@ -164,6 +166,7 @@
   --rule: #c79a2e;
   --notice-bg: #2b2260;
   --notice-warn-bg: #4a1a3a;
+  --notice-mt-bg: #4a3f10; /* machine translation (ADR-0013): a colour no other banner uses */
   --icon-fill: #ffd970;
   --icon-stroke: #07041a;
   --throbber-sky: #07041a;
@@ -233,6 +236,7 @@
   --rule: var(--phos-dim);
   --notice-bg: #000;
   --notice-warn-bg: #000;
+  --notice-mt-bg: #000; /* machine translation (ADR-0013): a colour no other banner uses */
   --new-bg: var(--phos);
   --new-fg: #000;
   --icon-fill: var(--phos);
@@ -338,6 +342,7 @@
   --rule: #000;
   --notice-bg: #fff;
   --notice-warn-bg: #fff;
+  --notice-mt-bg: #fff; /* machine translation (ADR-0013): a colour no other banner uses */
   --new-bg: #000;
   --new-fg: #fff;
   --icon-fill: #fff;
@@ -438,6 +443,7 @@
   --rule: #5d5d62;
   --notice-bg: #302f1d;
   --notice-warn-bg: #3f2326;
+  --notice-mt-bg: #3a3216; /* machine translation (ADR-0013): a colour no other banner uses */
   --new-bg: #c40000;
   --new-fg: #ffff00;
   --icon-fill: #8c8c91;
@@ -484,6 +490,7 @@
   --badge-fg: #e2e2e2;
   --notice-bg: #3a3a3c;
   --notice-warn-bg: #4a3436;
+  --notice-mt-bg: #4a4426; /* machine translation (ADR-0013): a colour no other banner uses */
   --throbber-sky: #0a1428;
   --logo-0: #e2e2e2;
   --logo-1: #e2e2e2;
@@ -536,6 +543,7 @@
   --rule: #fff;
   --notice-bg: #000;
   --notice-warn-bg: #000;
+  --notice-mt-bg: #000; /* machine translation (ADR-0013): a colour no other banner uses */
   --new-bg: #fff;
   --new-fg: #000;
   --icon-fill: #000;
@@ -601,6 +609,7 @@
   --rule: #fff;
   --notice-bg: #000;
   --notice-warn-bg: #000;
+  --notice-mt-bg: #000; /* machine translation (ADR-0013): a colour no other banner uses */
   --new-bg: #ffff00;
   --new-fg: #000;
   --icon-fill: #fff;

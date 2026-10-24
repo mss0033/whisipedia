@@ -42,3 +42,12 @@ class ChecksumMismatchError(FetchError):
 
 class InvalidCursorError(ValueError):
     """A change-feed cursor this feed did not issue (foreign, malformed, or ahead of the feed)."""
+
+
+class TranslationUnavailableError(Exception):
+    """Machine translation cannot run now (ADR-0013): ``retry_after`` seconds when it may (the server
+    is starting, the GPU is busy with an index build), None when it cannot at all (not installed)."""
+
+    def __init__(self, message: str, *, retry_after: float | None = None) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after

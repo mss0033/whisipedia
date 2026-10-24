@@ -100,6 +100,31 @@ class VectorConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class TranslationConfig:
+    """``[oracle.translation]``: machine translation into English on the reader's request (ADR-0013).
+
+    The defaults are the bake-off's choice (docs/research/MT-BAKEOFF-2026-10-24.md): MiLMMT-46-12B v1.0
+    as GGUF Q8_0 on llama.cpp, 8 slots of 2,048 tokens, beside the API's search models on one GPU."""
+
+    enabled: bool = True
+    model: str = "~/.cache/whisipedia/mt/models/gguf/MiLMMT-46-12B-v1.0.Q8_0.gguf"
+    model_label: str = "MiLMMT-46-12B v1.0 (Q8_0)"
+    server: str = "~/.local/share/whisipedia/llama.cpp/current/llama-server"
+    port: int = 8790
+    slots: int = 8
+    context_per_slot: int = 2048
+    idle_seconds: float = 900.0
+    """The server stops after this long with no translation: the GPU memory goes back to the index."""
+    min_free_vram_mb: int = 15500
+    """Started only with this much GPU memory free (it uses about 14.5 GB beside the search models)."""
+    memory_max: str = "4G"
+    """Host memory cap of its scope (the bake-off measured 0.6 GB resident, 2 GB peak)."""
+    request_seconds: float = 180.0
+    cache: str = ""
+    """The checked-translation cache (SQLite); empty: ``<state>/translations/cache.sqlite``."""
+
+
+@dataclass(frozen=True, slots=True)
 class OracleConfig:
     enabled: bool = True
     models_dir: str = DEFAULT_MODELS_DIR
@@ -129,6 +154,7 @@ class OracleConfig:
     embedder: EmbedderConfig = field(default_factory=EmbedderConfig)
     reranker: RerankerConfig = field(default_factory=RerankerConfig)
     vectors: VectorConfig = field(default_factory=VectorConfig)
+    translation: TranslationConfig = field(default_factory=TranslationConfig)
 
     def model_path(self, name: str) -> Path:
         p = Path(name).expanduser()
@@ -163,11 +189,12 @@ class OracleConfig:
             "embedder",
             "reranker",
             "vectors",
+            "translation",
         }
         unknown = sorted(set(section) - known)
         if unknown:
             raise OracleConfigError(f"unknown [oracle] keys: {', '.join(unknown)}")
-        emb, rr, vec = (_section(section, k) for k in ("embedder", "reranker", "vectors"))
+        emb, rr, vec, tr = (_section(section, k) for k in ("embedder", "reranker", "vectors", "translation"))
         try:
             embedder = EmbedderConfig(
                 model=str(emb.get("model", DEFAULT_EMBED_MODEL)),
@@ -195,6 +222,13 @@ class OracleConfig:
                 expansion_search=int(vec.get("expansion_search", 96)),
                 store_text=bool(vec.get("store_text", True)),
             )
+            tr_known = set(TranslationConfig.__dataclass_fields__)
+            if bad := sorted(set(tr) - tr_known):
+                raise OracleConfigError(f"unknown [oracle.translation] keys: {', '.join(bad)}")
+            defaults = TranslationConfig()
+            translation = TranslationConfig(
+                **{k: type(getattr(defaults, k))(v) for k, v in tr.items()}  # each key as its default's type
+            )
             cfg = cls(
                 enabled=bool(section.get("enabled", True)),
                 models_dir=str(section.get("models_dir", DEFAULT_MODELS_DIR)),
@@ -216,6 +250,7 @@ class OracleConfig:
                 embedder=embedder,
                 reranker=reranker,
                 vectors=vectors,
+                translation=translation,
             )
         except (TypeError, ValueError) as exc:
             if isinstance(exc, OracleConfigError):

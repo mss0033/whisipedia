@@ -1125,6 +1125,118 @@
         }
       }
     },
+    "/v1/translate": {
+      "get": {
+        "tags": [
+          "translation"
+        ],
+        "summary": "Translation Status",
+        "description": "Whether a reader may ask for an English machine translation, of which languages, and with\nwhich model. ``state`` is the on-demand server's (started by the first request).",
+        "operationId": "translation_status_v1_translate_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TranslationStatus"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "translation"
+        ],
+        "summary": "Translate",
+        "description": "Translate up to 32 segments of one document into English. Each is checked (numbers,\nplaceholders, length, sentences): one that fails comes back with ``text: null`` and the\nreason, for the reader to see in its own language. 503 with ``Retry-After`` while the server\nstarts (about half a minute) or while the GPU is busy.",
+        "operationId": "translate_v1_translate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TranslateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TranslateResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "bad_request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "not_implemented",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid_request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/system/memory": {
       "get": {
         "tags": [
@@ -7486,6 +7598,165 @@
           "fonts"
         ],
         "title": "Tilesets"
+      },
+      "TranslateRequest": {
+        "properties": {
+          "lang": {
+            "type": "string",
+            "maxLength": 8,
+            "minLength": 2,
+            "title": "Lang"
+          },
+          "segments": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Segments"
+          }
+        },
+        "type": "object",
+        "required": [
+          "lang",
+          "segments"
+        ],
+        "title": "TranslateRequest",
+        "description": "Segments of one document, in its language: block texts, with ``<xN>…</xN>`` and ``⟦N⟧``\nplaceholders standing for links, formatting and pictures."
+      },
+      "TranslateResponse": {
+        "properties": {
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "prompt_version": {
+            "type": "string",
+            "title": "Prompt Version"
+          },
+          "segments": {
+            "items": {
+              "$ref": "#/components/schemas/TranslatedSegment"
+            },
+            "type": "array",
+            "title": "Segments"
+          }
+        },
+        "type": "object",
+        "required": [
+          "model",
+          "prompt_version",
+          "segments"
+        ],
+        "title": "TranslateResponse"
+      },
+      "TranslatedSegment": {
+        "properties": {
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          },
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "cached": {
+            "type": "boolean",
+            "title": "Cached",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "text",
+          "ok",
+          "reason",
+          "cached"
+        ],
+        "title": "TranslatedSegment"
+      },
+      "TranslationStatus": {
+        "properties": {
+          "available": {
+            "type": "boolean",
+            "title": "Available"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "state": {
+            "type": "string",
+            "title": "State",
+            "default": "stopped"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "languages": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Languages"
+          }
+        },
+        "type": "object",
+        "required": [
+          "available",
+          "reason",
+          "model",
+          "state",
+          "error",
+          "languages"
+        ],
+        "title": "TranslationStatus",
+        "description": "Whether translation into English can be asked for, and of which languages."
       },
       "TrawlProblem": {
         "properties": {

@@ -61,6 +61,10 @@ from wsp_api.schemas import (
     SourcePage,
     Suggestions,
     SystemStatus,
+    TranslatedSegment,
+    TranslateRequest,
+    TranslateResponse,
+    TranslationStatus,
 )
 from wsp_api.searching import WINDOW, Searcher
 from wsp_api.security import SecurityMiddleware
@@ -72,6 +76,7 @@ from wsp_api.views import Library, parse_doc
 from wsp_api.weather import weather_router
 from wsp_api.zimread import ZimUnavailable
 from wsp_core.activity import ActivityMiddleware
+from wsp_core.errors import TranslationUnavailableError
 from wsp_core.ids import DocId
 from wsp_core.listing import is_replay_stub
 
@@ -205,6 +210,9 @@ def _not_modified(request: Request, etag: str) -> bool:
         return False
     tags = {t.strip() for t in wanted.split(",")}
     return "*" in tags or etag in tags or etag.removeprefix("W/") in tags
+
+
+MAX_SEGMENT = 4000  # characters of one translated segment (a long paragraph; split longer ones)
 
 
 def _v1(lib: Library, settings: ApiSettings) -> APIRouter:
@@ -484,6 +492,45 @@ def _v1(lib: Library, settings: ApiSettings) -> APIRouter:
         """Curator proposals (newest first). Deciding them is an owner action: `wsp proposals`."""
         return await state.run(
             lambda: ProposalPage(items=proposals_with(state.proposals.get() or (), status))
+        )
+
+    # --- Machine translation (ADR-0013) ---------------------------------------------------------
+
+    @r.get("/translate", tags=["translation"])
+    def translation_status() -> TranslationStatus:
+        """Whether a reader may ask for an English machine translation, of which languages, and with
+        which model. ``state`` is the on-demand server's (started by the first request)."""
+        if s.translator is None:
+            return TranslationStatus(available=False, reason="translation is not set up on this library")
+        st = s.translator.status()
+        return TranslationStatus.model_validate(
+            {k: v for k, v in st.items() if k in TranslationStatus.model_fields}
+        )
+
+    @r.post("/translate", tags=["translation"], responses=errors(400, 501, 503))
+    def translate(body: TranslateRequest) -> TranslateResponse:
+        """Translate up to 32 segments of one document into English. Each is checked (numbers,
+        placeholders, length, sentences): one that fails comes back with ``text: null`` and the
+        reason, for the reader to see in its own language. 503 with ``Retry-After`` while the server
+        starts (about half a minute) or while the GPU is busy."""
+        if s.translator is None:
+            raise ApiError(501, "not_implemented", "translation is not set up on this library")
+        if any(len(seg) > MAX_SEGMENT for seg in body.segments):
+            raise ApiError(400, "bad_request", f"a segment is longer than {MAX_SEGMENT} characters")
+        try:
+            done = s.translator.translate(body.lang, body.segments)
+        except TranslationUnavailableError as exc:
+            retry = None if exc.retry_after is None else str(int(exc.retry_after))
+            raise ApiError(503, "translation_unavailable", str(exc), retry_after=retry) from exc
+        except ValueError as exc:
+            raise ApiError(400, "bad_request", str(exc)) from exc
+        st = s.translator.status()
+        return TranslateResponse(
+            model=str(st.get("model") or ""),
+            prompt_version=str(st.get("prompt_version") or ""),
+            segments=[
+                TranslatedSegment(text=d.text, ok=d.ok, reason=d.reason, cached=d.cached) for d in done
+            ],
         )
 
     @r.get("/system/memory", tags=["system"])

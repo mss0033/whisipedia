@@ -21,6 +21,7 @@ import {
 import type { Route } from '../core/router.ts';
 import { hasTex, typesetSoon } from '../core/tex.ts';
 import { renderPlainText } from '../core/text.ts';
+import { translationBar } from '../core/translate.ts';
 import {
   asOf,
   badge,
@@ -1262,6 +1263,16 @@ export async function render(ctx: PageContext): Promise<PageResult> {
     broken = r.broken;
   }
   const uncapturedNote = h('p', { class: 'fineprint uncaptured-note', hidden: true });
+  // English machine translation on request (ADR-0013): the current page only, not a diff or a code page.
+  let titleOf: () => HTMLElement | null = () => null;
+  const translation =
+    route.at || route.diff || isPreformatted(doc)
+      ? null
+      : translationBar(ctx.app.api, doc, content, {
+          legal: source?.domain.includes('law') ?? false,
+          heading: () => titleOf(),
+          signal: ctx.signal,
+        });
 
   const body = h(
     'article',
@@ -1270,6 +1281,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
     webring(source, sources),
     tmBanner,
     documentWarning(doc),
+    translation,
     catalogNotice(doc, source, {
       bookSources: new Set(sources.filter((s) => s.kind === 'books').map((s) => s.id)),
       lookup: (q) => lookupBooks(ctx, q),
@@ -1313,6 +1325,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
   else void markUncaptured(ctx, content, uncapturedNote);
   if (doc.format === 'html' && doc.html && hasTex(doc.html)) typesetSoon(content);
   replaceBrokenImages(content);
+  titleOf = () => titleHeading(body);
   const title = titleHeading(body);
   if (title) {
     // The page's own id for its heading stays a place to land: TruePrepper's "Skip to content"

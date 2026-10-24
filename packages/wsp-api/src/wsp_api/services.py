@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-from wsp_api.seams import OpsProvider, QueryLog, SpellingCorrector
+from wsp_api.seams import OpsProvider, QueryLog, SpellingCorrector, Translator
 from wsp_core.model import SourceSpec
 from wsp_core.ports import (
     AssetStore,
@@ -43,6 +43,7 @@ class Services:
     ops: OpsProvider | None = None  # None: /v1/system has no `ops`, /v1/proposals is empty
     queries: QueryLog | None = None  # None: searches are not logged
     speller: SpellingCorrector | None = None  # None: no "did you mean"
+    translator: Translator | None = None  # None: /v1/translate says translation is not available
     _by_id: dict[str, SourceSpec] = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:

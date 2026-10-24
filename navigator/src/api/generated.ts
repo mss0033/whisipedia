@@ -868,6 +868,38 @@ export interface Tilesets {
   fonts: Array<string>;
 }
 
+/**
+ * Segments of one document, in its language: block texts, with ``<xN>…</xN>`` and ``⟦N⟧``
+ * placeholders standing for links, formatting and pictures.
+ */
+export interface TranslateRequest {
+  lang: string;
+  segments: Array<string>;
+}
+
+export interface TranslateResponse {
+  model: string;
+  prompt_version: string;
+  segments: Array<TranslatedSegment>;
+}
+
+export interface TranslatedSegment {
+  text: string | null;
+  ok: boolean;
+  reason: string | null;
+  cached: boolean;
+}
+
+/** Whether translation into English can be asked for, and of which languages. */
+export interface TranslationStatus {
+  available: boolean;
+  reason: string | null;
+  model: string | null;
+  state: string;
+  error: string | null;
+  languages: Array<string>;
+}
+
 export interface TrawlProblem {
   at: string;
   address: string;
@@ -1076,6 +1108,20 @@ export interface Routes {
     };
     body: null;
     response: ProposalPage;
+  };
+  /** Translation Status */
+  'GET /v1/translate': {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: null;
+    response: TranslationStatus;
+  };
+  /** Translate */
+  'POST /v1/translate': {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: TranslateRequest;
+    response: TranslateResponse;
   };
   /** System Memory */
   'GET /v1/system/memory': {
