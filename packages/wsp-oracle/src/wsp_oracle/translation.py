@@ -107,8 +107,10 @@ class TranslationCache:
 
     def get(self, key: str) -> Segment | None:
         with self._lock:
-            row = self._db.execute("SELECT text, ok, reason FROM segments WHERE key = ?", (key,)).fetchone()
-        return None if row is None else Segment(row[0], bool(row[1]), row[2], cached=True)
+            row = self._db.execute(
+                "SELECT text, ok, reason, rejected FROM segments WHERE key = ?", (key,)
+            ).fetchone()
+        return None if row is None else Segment(row[0], bool(row[1]), row[2], cached=True, rejected=row[3])
 
     def put(self, key: str, seg: Segment) -> None:
         with self._lock:
@@ -331,7 +333,9 @@ class Translator:
         if lang not in LANGUAGES:
             raise ValueError(f"no translation from {lang!r}")
         keys = [TranslationCache.key(self.model, lang, s) for s in segments]
-        out: list[Segment | None] = [self.cache.get(k) for k in keys]
+        out: list[Segment | None] = [
+            self._recheck(lang, s, self.cache.get(k)) for s, k in zip(segments, keys, strict=True)
+        ]
         todo = [i for i, seg in enumerate(out) if seg is None and segments[i].strip()]
         for i, text in enumerate(segments):
             if not text.strip():
@@ -349,6 +353,24 @@ class Translator:
                     self.cache.put(keys[i], seg)
         self.server.touch()
         return [s if s is not None else Segment(None, False, "no translation came back") for s in out]
+
+    @staticmethod
+    def _recheck(lang: str, text: str, seg: Segment | None) -> Segment | None:
+        """A cached answer judged again by today's checks (they change: "both" may be "two" since
+        2026-10-24). The model's text is kept either way; an old failure without it is asked again."""
+        if seg is None:
+            return None
+        raw = seg.text if seg.ok else seg.rejected
+        if raw is None:
+            return None
+        verdict = check(text, raw, lang)
+        return Segment(
+            raw if verdict.ok else None,
+            verdict.ok,
+            verdict.reason,
+            cached=True,
+            rejected=None if verdict.ok else raw,
+        )
 
     def _one(self, lang: str, text: str) -> Segment:
         try:

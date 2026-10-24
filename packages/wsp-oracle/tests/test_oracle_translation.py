@@ -14,7 +14,7 @@ import pytest
 from wsp_core.errors import TranslationUnavailableError
 from wsp_oracle.config import TranslationConfig
 from wsp_oracle.mtcheck import check
-from wsp_oracle.translation import LlamaServer, TranslationCache, Translator, prompt
+from wsp_oracle.translation import LlamaServer, Segment, TranslationCache, Translator, prompt
 
 
 @pytest.mark.parametrize(
@@ -191,3 +191,26 @@ def test_an_idle_server_is_stopped(tmp_path: Path) -> None:
     assert server.stop_if_idle()
     assert server.state == "stopped"
     assert ran == [["systemctl", "--user", "stop", "whisipedia-translate.scope"]]
+
+
+def test_a_cached_answer_is_judged_again_by_todays_checks(tmp_path: Path) -> None:
+    """A segment rejected under an older check (the Rhine's "beiden" as an added 2) passes once the
+    check knows better, without asking the model again."""
+    cache = TranslationCache(tmp_path / "cache.sqlite")
+    source = "Ab dem Zusammenfluss der beiden Quelläste."
+    model = TranslationConfig().model_label
+    key = TranslationCache.key(model, "de", source)
+    english = "From the confluence of the two source streams."
+    cache.put(key, Segment(None, False, "numbers differ (added 2)", rejected=english))
+    calls: list[str] = []
+    t = Translator(TranslationConfig(), cache, FakeServer(), complete=lambda p, n: calls.append(p) or "")  # type: ignore[arg-type]
+    try:
+        (seg,) = t.translate("de", [source])
+        assert (seg.ok, seg.text, seg.cached) == (True, english, True)
+        assert calls == []
+        old = TranslationCache.key(model, "de", "Alt.")
+        cache.put(old, Segment(None, False, "an old failure"))  # no text kept: asked again
+        t.translate("de", ["Alt."])
+        assert len(calls) == 1
+    finally:
+        t.close()
