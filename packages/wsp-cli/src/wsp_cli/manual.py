@@ -605,7 +605,9 @@ def cmd_sync(args: argparse.Namespace, out: TextIO) -> int:
     root = vault_root / "_incoming" / MANUAL_DIR
     state = bootstrap.paths(cfg).require_state() / "manual"
     today = date.today().isoformat()
-    page_due = bool(args.today) or _page_due(root, today)
+    # One source's run (``manual SOURCE --sync``) takes its files in and rebuilds its list; the page,
+    # which shows every source, is written by a run over all of them.
+    page_due = not args.source and (bool(args.today) or _page_due(root, today))
     user_agent = bootstrap.user_agent(cfg)
     fetcher: Fetcher | None = None
     offers: list[tuple[SourceSpec, Queue, list[Item], str, int]] = []
@@ -662,7 +664,7 @@ def cmd_sync(args: argparse.Namespace, out: TextIO) -> int:
             picked = todays_offer(queue, int(mc.get("daily") or DEFAULT_DAILY), today)
             queue.save(qpath)
             offers.append((spec, queue, picked, windows_path(folder) or str(folder), len(queue.pending())))
-    if page_due and not args.source:
+    if page_due:
         page, text = render_today(today, offers, windows_path(root))
         for name, body in (("TODAY.html", page), ("TODAY.txt", text)):
             tmp = root / (name + ".partial")
