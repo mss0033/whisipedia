@@ -64,3 +64,31 @@ def test_metalink_piece_corruption_is_repaired(servers: Servers, tmp_path: Path)
     with Aria2Fetcher(CFG) as f:
         f.download(RemoteFile(url, "z.zim"), tmp_path / "z.zim")
     assert (tmp_path / "z.zim").read_bytes() == data
+
+
+def test_a_metalink_mirror_whose_robots_txt_disallows_us_is_not_used(
+    servers: Servers, tmp_path: Path
+) -> None:
+    """aria2 downloads skipped the robots.txt check until 2026-10-24."""
+    data = payload(4 * PIECE, seed=32)
+    shut, open_, ml = servers(), servers(), servers()
+    shut.add("robots.txt", b"User-agent: *\nDisallow: /\n")
+    shut.add("z.zim", data)
+    open_.add("z.zim", data)
+    hashes = tuple(hashlib.sha1(data[i : i + PIECE]).hexdigest() for i in range(0, len(data), PIECE))
+    doc = build_metalink(
+        [
+            MetalinkFile(
+                "z.zim",
+                len(data),
+                (Checksum("sha256", hashlib.sha256(data).hexdigest()),),
+                Pieces(PIECE, "sha1", hashes),
+                (MetalinkUrl(shut.url("z.zim"), 1), MetalinkUrl(open_.url("z.zim"), 2)),
+            )
+        ]
+    )
+    url = ml.add("z.zim.meta4", doc)
+    with Aria2Fetcher(CFG) as f:
+        f.download(RemoteFile(url, "z.zim"), tmp_path / "z.zim")
+    assert (tmp_path / "z.zim").read_bytes() == data
+    assert not [r for r in shut.requests if r.path.endswith("z.zim")]

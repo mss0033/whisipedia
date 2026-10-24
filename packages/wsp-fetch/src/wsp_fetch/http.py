@@ -65,13 +65,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
-from urllib.robotparser import RobotFileParser
 
 import httpx
 
 from wsp_core.errors import RedirectRefusedError, RobotsDisallowedError
 from wsp_core.model import RemoteFile, RemoteHead
 from wsp_core.redirects import current_guard, unguarded
+from wsp_core.robots import Robots
+from wsp_core.robots import parse as parse_robots
 from wsp_fetch import ftp
 from wsp_fetch import provenance as prov
 from wsp_fetch.config import FetchConfig, host_key
@@ -264,7 +265,7 @@ class HttpFetcher:
             transport=transport,
             event_hooks={"response": [_refuse_downgrade, _guard_redirect, self._robots_hop]},
         )
-        self._robots: dict[str, RobotFileParser | None] = {}  # "scheme://host" -> its rules
+        self._robots: dict[str, Robots | None] = {}  # "scheme://host" -> its rules
         self._robots_lock = threading.Lock()
         self._bucket = TokenBucket(c.bandwidth_limit) if c.bandwidth_limit else None
         self._hosts: dict[str, threading.BoundedSemaphore] = {}
@@ -369,7 +370,7 @@ class HttpFetcher:
         if not self.robots_allows(url):
             raise RobotsDisallowedError(f"{url}: disallowed by {urlsplit(url).netloc}/robots.txt")
 
-    def _read_robots(self, site: str) -> RobotFileParser | None:
+    def _read_robots(self, site: str) -> Robots | None:
         token = _IN_ROBOTS.set(True)
         try:
             if site.startswith("ftp://"):
@@ -602,15 +603,22 @@ class HttpFetcher:
                 os.unlink(path)
             os.close(fd)
 
-    def fetch_target(self, target: Target, dest: Path, *, t0: float | None = None) -> FetchReport:
-        """:meth:`fetch` for an already resolved target (used by :class:`~wsp_fetch.aria2.Aria2Fetcher`)."""
-        t0 = time.monotonic() if t0 is None else t0
+    def robots_filter(self, target: Target) -> Target:
+        """``target`` without the sources whose robots.txt disallows us; :class:`RobotsDisallowedError`
+        when none is left. The aria2 engine uses it too (its downloads skipped the check until
+        2026-10-24; a Kiwix metalink names mirrors of every kind)."""
         allowed = tuple(u for u in target.urls if self.robots_allows(u))
         if not allowed:
             raise RobotsDisallowedError(f"{target.url}: every source's robots.txt disallows us")
         if len(allowed) < len(target.urls):
             log.info("%s: %d mirror(s) dropped by robots.txt", target.url, len(target.urls) - len(allowed))
-            target = dataclasses.replace(target, urls=allowed)
+            return dataclasses.replace(target, urls=allowed)
+        return target
+
+    def fetch_target(self, target: Target, dest: Path, *, t0: float | None = None) -> FetchReport:
+        """:meth:`fetch` for an already resolved target (used by :class:`~wsp_fetch.aria2.Aria2Fetcher`)."""
+        t0 = time.monotonic() if t0 is None else t0
+        target = self.robots_filter(target)
         dest.parent.mkdir(parents=True, exist_ok=True)
         with self.destination_lock(dest):
             upstream_verified = bool(target.checksums) or target.pieces is not None
@@ -1052,15 +1060,8 @@ def _file_provenance(
     }
 
 
-def _parse_robots(raw: bytes | None) -> RobotFileParser | None:
-    if raw is None:
-        return None
-    body = raw[: 512 * 1024].decode("utf-8", "replace").lstrip("\ufeff")
-    if body.lstrip()[:20].lower().startswith(("<!doctype", "<html")):
-        return None  # a site that answers every path with a page has no robots.txt
-    rules = RobotFileParser()
-    rules.parse(body.splitlines())
-    return rules
+def _parse_robots(raw: bytes | None) -> Robots | None:
+    return parse_robots(raw)
 
 
 def _raise_for_status(r: httpx.Response) -> None:

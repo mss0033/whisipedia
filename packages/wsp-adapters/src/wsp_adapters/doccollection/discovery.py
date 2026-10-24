@@ -52,7 +52,6 @@ from html import unescape as html_unescape
 from pathlib import Path
 from typing import Any, cast
 from urllib.parse import quote, urlencode, urljoin, urlsplit
-from urllib.robotparser import RobotFileParser
 from xml.etree import ElementTree as ET
 
 from selectolax.lexbor import LexborHTMLParser, LexborNode
@@ -72,6 +71,8 @@ from wsp_core.errors import FetchError, NotFoundError, RedirectRefusedError, Rob
 from wsp_core.model import FetchResult, RemoteFile, RemoteHead
 from wsp_core.ports import Fetcher, SupportsHead
 from wsp_core.redirects import redirect_guard, unguarded
+from wsp_core.robots import Robots
+from wsp_core.robots import parse as parse_robots
 
 log = logging.getLogger(__name__)
 
@@ -122,27 +123,27 @@ class Throttle:
         self.clock = clock
         self.sleep = sleep
         self.robots = robots
-        self._rules: dict[str, RobotFileParser | None] = {}  # "scheme://host" -> its robots.txt
+        self._rules: dict[str, Robots | None] = {}  # "scheme://host" -> its robots.txt
         self._last: dict[str, float] = {}  # host -> start time of its latest (reserved) request
         self.requests: dict[str, int] = {}
         self._lock = threading.Lock()
 
-    def _robots(self, url: str) -> RobotFileParser | None:
+    def _robots(self, url: str) -> Robots | None:
         parts = urlsplit(url)
         site = f"{parts.scheme}://{parts.netloc.lower()}"
         with self._lock:
             if site in self._rules:
                 return self._rules[site]
-        rules: RobotFileParser | None = None
+        rules: Robots | None = None
         try:
             with unguarded():  # robots.txt itself may be redirected; it is not a page we crawl
                 body = self.inner.get_bytes(f"{site}/robots.txt", max_bytes=512 * 1024)
         except (FetchError, OSError, ValueError):
             body = None
         if body is not None:
-            rules = RobotFileParser()
-            # A byte-order mark hides the first rule from the parser (armypubs.army.mil).
-            rules.parse(body.decode("utf-8", "replace").lstrip("\ufeff").splitlines())
+            # RFC 9309 (wildcards, longest match); a byte-order mark no longer hides the first rule
+            # (armypubs.army.mil). An HTML page answered for /robots.txt sets no rules.
+            rules = parse_robots(body)
         with self._lock:
             self._rules[site] = rules
             self.requests[parts.netloc.lower()] = self.requests.get(parts.netloc.lower(), 0) + 1

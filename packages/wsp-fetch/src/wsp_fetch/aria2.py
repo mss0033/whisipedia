@@ -172,6 +172,9 @@ class Aria2Fetcher:
         target = resolve_target(remote, lambda u, n: self._http.get_bytes(u, max_bytes=n), self.config)
         if target.pieces is None:  # no way to re-verify a resumed aria2 file: use the HTTP engine
             return self._http.fetch_target(target, dest, t0=t0)
+        # Every mirror's robots.txt, as the HTTP engine checks it. aria2c follows a mirror's redirects
+        # itself, where no robots.txt is read: metalink mirrors name their files directly.
+        target = self._http.robots_filter(target)
         with self._http.destination_lock(dest):
             return self._fetch_aria2(target, dest, t0)
 
