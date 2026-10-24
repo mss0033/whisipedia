@@ -4288,6 +4288,34 @@ sources:
     size: {bytes: 1.44e11, measured: true, as_of: '2026-10-24'}
     notes: "Measured over FTP 2026-10-24: Extras 21 files, 27.3 GB (CID-LCSS.xml.gz 0.48 GB); CURRENT-Full SDF 359 files, 116.8 GB (~120 million compounds). Substances and bioassays (another ~300 GB) are not taken. Owner approval D20; FTP channel D16 (2026-10-24)."
 
+  - id: nara-catalog
+    name: National Archives Catalog (NARA) - descriptions of US federal records, with their transcriptions and extracted text
+    publisher: US National Archives and Records Administration
+    domain: [history, government, archives, reference]
+    tier: T2
+    status: candidate
+    license: LicenseRef-US-Gov-PD
+    legal_basis: public-domain
+    access:
+      adapter: doc-collection
+      rate: {requests_per_second: 2, concurrency: 3}
+      issuer: National Archives and Records Administration
+      key_prefix: nara
+      # NARA's AWS Open Data bucket (it has no robots.txt; catalog.archives.gov's disallows every agent
+      # and is never fetched; owner decision D16, 2026-10-24). JSON lines, one description per line,
+      # verified by each object's MD5 ETag. Partitions: one per record group (rg_1 ... rg_589),
+      # collections (presidential libraries' and donated collections), authority-records.
+      partitioned: true
+      origins: [nara-national-archives-catalog.s3.amazonaws.com]
+      discovery:
+        - {kind: s3-listing, label: nara-record-groups, bucket_url: "https://nara-national-archives-catalog.s3.amazonaws.com", prefix: "descriptions/record-groups/", key_pattern: "\\.jsonl$", partition: "descriptions/record-groups/([^/]+)/", partition_prefix: "descriptions/record-groups/{partition}/"}
+        - {kind: s3-listing, label: nara-collections, bucket_url: "https://nara-national-archives-catalog.s3.amazonaws.com", prefix: "descriptions/collections/", key_pattern: "\\.jsonl$", partition: "descriptions/(collections)/", partition_prefix: "descriptions/{partition}/"}
+        - {kind: s3-listing, label: nara-authorities, bucket_url: "https://nara-national-archives-catalog.s3.amazonaws.com", prefix: "authority-records/", key_pattern: "\\.jsonl$", partition: "^(authority-records)/", partition_prefix: "{partition}/"}
+      filter: {allow_all: true, public_issuer: true, data_files: true}
+    update: {cadence: P6M, strategy: snapshot-retention}
+    size: {bytes: 9.5e11, measured: true, as_of: '2026-10-24'}
+    notes: "Listed 2026-10-24: descriptions/ 366,961 objects, 949 GB (updated to 2026-09-30), authority-records/ 1,961 objects. Kept as data files (no reader yet: a description-per-document reader is a follow-up). The record-group folder coll_Wattenberg (capital letters) is not reached by the lower-cased partitions. The digital objects themselves (NARAprodstorage, TB to PB) are not taken. Owner approval D20, channel D16 (2026-10-24)."
+
   - id: natural-earth
     name: Natural Earth vector data (all scales)
     publisher: Natural Earth (NACIS)

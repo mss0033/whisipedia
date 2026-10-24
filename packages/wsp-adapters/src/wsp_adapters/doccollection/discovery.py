@@ -1869,7 +1869,10 @@ def _s3_candidates(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candida
     # but answers 403 to reads; planet.openhistoricalmap.org serves the same keys (2026-10-21).
     files = _s(cfg.get("download_url")).rstrip("/") or bucket
     prefix = _s(cfg.get("prefix"))
-    if env.partition and cfg.get("partition_in_prefix"):
+    if env.partition and cfg.get("partition_prefix"):
+        # list one partition, not the whole bucket: NARA's "descriptions/record-groups/{partition}/"
+        prefix = _s(cfg["partition_prefix"]).format(partition=env.partition)
+    elif env.partition and cfg.get("partition_in_prefix"):
         prefix += env.partition.upper() + "/"  # list one state, not the whole bucket
     key_rx = re.compile(_s(cfg.get("key_pattern")) or r".", re.IGNORECASE)
     part_rx = re.compile(_s(cfg["partition"])) if cfg.get("partition") else None
@@ -1890,7 +1893,10 @@ def _s3_candidates(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candida
             size = int(c.findtext(f"{_S3}Size") or 0)
             part = m.group(1).lower() if part_rx and (m := part_rx.search(key)) else ""
             yield Candidate(
-                key=make_key(env.prefix, key.removeprefix(prefix)),
+                key=make_key(
+                    env.prefix,
+                    key.removeprefix(_s(cfg.get("prefix")) if cfg.get("partition_prefix") else prefix),
+                ),
                 url=f"{files}/{quote(key)}",
                 title=display_title(title_from_url(key)),
                 issuer=env.issuer,

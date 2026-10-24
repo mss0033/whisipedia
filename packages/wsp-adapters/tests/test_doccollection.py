@@ -6,7 +6,7 @@ import json
 from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlencode
 
 import pytest
@@ -1664,3 +1664,24 @@ def test_ftp_is_an_origin_only_where_one_names_it() -> None:
     assert not origin_ok("ftp://user@ftp.ncbi.nlm.nih.gov/a.gz", ncbi)
     assert not origin_ok("https://ftp.ncbi.nlm.nih.gov/a.gz", ncbi)  # its HTTPS host is not admitted
     assert origin_ok("https://www.govinfo.gov/a.pdf", ("www.govinfo.gov",))
+
+
+def test_s3_listing_lists_one_partition_by_a_prefix_template() -> None:
+    """NARA's catalogue: one partition per record group, listed alone (descriptions/record-groups/rg_95/)."""
+    listing = s3_listing(
+        "descriptions/record-groups/rg_95/", [("rg_95-1.jsonl", b"{}"), ("rg_95-2.jsonl", b"{ }")]
+    )
+    env = env_for({f"{BUCKET}/": listing}, origins=("bucket.example.gov",), partition="rg_95")
+    cfg = {
+        "kind": "s3-listing",
+        "bucket_url": BUCKET,
+        "prefix": "descriptions/record-groups/",
+        "partition": "descriptions/record-groups/([^/]+)/",
+        "partition_prefix": "descriptions/record-groups/{partition}/",
+    }
+    cands = list(discover_all([cfg], env))
+    assert [(c.key, c.partition, c.md5) for c in cands] == [
+        ("t:rg_95-rg_95-1.jsonl", "rg_95", md5(b"{}")),
+        ("t:rg_95-rg_95-2.jsonl", "rg_95", md5(b"{ }")),
+    ]
+    assert "prefix=descriptions%2Frecord-groups%2Frg_95%2F" in cast(Any, env.fetcher).requests[0]
