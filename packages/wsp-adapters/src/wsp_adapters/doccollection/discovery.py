@@ -2387,9 +2387,13 @@ def _s3_candidates(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candida
     # but answers 403 to reads; planet.openhistoricalmap.org serves the same keys (2026-10-21).
     files = _s(cfg.get("download_url")).rstrip("/") or bucket
     prefix = _s(cfg.get("prefix"))
+    # ``partition_sep``: the character the bucket's folder names use where a partition name may only
+    # have "-" (NARA's "rg_56/" is partition rg-56: partition names refused "rg_56", 2026-10-24).
+    sep = _s(cfg.get("partition_sep"))
     if env.partition and cfg.get("partition_prefix"):
         # list one partition, not the whole bucket: NARA's "descriptions/record-groups/{partition}/"
-        prefix = _s(cfg["partition_prefix"]).format(partition=env.partition)
+        folder = env.partition.replace("-", sep) if sep else env.partition
+        prefix = _s(cfg["partition_prefix"]).format(partition=folder)
     elif env.partition and cfg.get("partition_in_prefix"):
         prefix += env.partition.upper() + "/"  # list one state, not the whole bucket
     key_rx = re.compile(_s(cfg.get("key_pattern")) or r".", re.IGNORECASE)
@@ -2410,6 +2414,8 @@ def _s3_candidates(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candida
             etag = (c.findtext(f"{_S3}ETag") or "").strip('"').lower()
             size = int(c.findtext(f"{_S3}Size") or 0)
             part = m.group(1).lower() if part_rx and (m := part_rx.search(key)) else ""
+            if sep:
+                part = part.replace(sep, "-")
             yield Candidate(
                 key=make_key(
                     env.prefix,

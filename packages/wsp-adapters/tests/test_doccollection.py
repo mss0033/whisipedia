@@ -1675,19 +1675,23 @@ def test_s3_listing_lists_one_partition_by_a_prefix_template() -> None:
     listing = s3_listing(
         "descriptions/record-groups/rg_95/", [("rg_95-1.jsonl", b"{}"), ("rg_95-2.jsonl", b"{ }")]
     )
-    env = env_for({f"{BUCKET}/": listing}, origins=("bucket.example.gov",), partition="rg_95")
+    env = env_for({f"{BUCKET}/": listing}, origins=("bucket.example.gov",), partition="rg-95")
     cfg = {
         "kind": "s3-listing",
         "bucket_url": BUCKET,
         "prefix": "descriptions/record-groups/",
         "partition": "descriptions/record-groups/([^/]+)/",
         "partition_prefix": "descriptions/record-groups/{partition}/",
+        "partition_sep": "_",  # partition names refuse "_" (rg_95 in the bucket, rg-95 here)
     }
     cands = list(discover_all([cfg], env))
     assert [(c.key, c.partition, c.md5) for c in cands] == [
-        ("t:rg_95-rg_95-1.jsonl", "rg_95", md5(b"{}")),
-        ("t:rg_95-rg_95-2.jsonl", "rg_95", md5(b"{ }")),
+        ("t:rg_95-rg_95-1.jsonl", "rg-95", md5(b"{}")),
+        ("t:rg_95-rg_95-2.jsonl", "rg-95", md5(b"{ }")),
     ]
+    from wsp_core.partitions import check_partition
+
+    assert check_partition("rg-95") == "rg-95"
     assert "prefix=descriptions%2Frecord-groups%2Frg_95%2F" in cast(Any, env.fetcher).requests[0]
 
 

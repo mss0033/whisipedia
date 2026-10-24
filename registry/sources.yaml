@@ -4412,12 +4412,12 @@ sources:
       key_prefix: nara
       # NARA's AWS Open Data bucket (it has no robots.txt; catalog.archives.gov's disallows every agent
       # and is never fetched; owner decision D16, 2026-10-24). JSON lines, one description per line,
-      # verified by each object's MD5 ETag. Partitions: one per record group (rg_1 ... rg_589),
+      # verified by each object's MD5 ETag. Partitions: one per record group (rg-1 ... rg-589, the bucket's rg_1 ... rg_589),
       # collections (presidential libraries' and donated collections), authority-records.
       partitioned: true
       origins: [nara-national-archives-catalog.s3.amazonaws.com]
       discovery:
-        - {kind: s3-listing, label: nara-record-groups, bucket_url: "https://nara-national-archives-catalog.s3.amazonaws.com", prefix: "descriptions/record-groups/", key_pattern: "\\.jsonl$", partition: "descriptions/record-groups/([^/]+)/", partition_prefix: "descriptions/record-groups/{partition}/"}
+        - {kind: s3-listing, label: nara-record-groups, bucket_url: "https://nara-national-archives-catalog.s3.amazonaws.com", prefix: "descriptions/record-groups/", key_pattern: "\\.jsonl$", partition: "descriptions/record-groups/([^/]+)/", partition_prefix: "descriptions/record-groups/{partition}/", partition_sep: "_"}
         - {kind: s3-listing, label: nara-collections, bucket_url: "https://nara-national-archives-catalog.s3.amazonaws.com", prefix: "descriptions/collections/", key_pattern: "\\.jsonl$", partition: "descriptions/(collections)/", partition_prefix: "descriptions/{partition}/"}
         - {kind: s3-listing, label: nara-authorities, bucket_url: "https://nara-national-archives-catalog.s3.amazonaws.com", prefix: "authority-records/", key_pattern: "\\.jsonl$", partition: "^(authority-records)/", partition_prefix: "{partition}/"}
       filter: {allow_all: true, public_issuer: true, data_files: true}
