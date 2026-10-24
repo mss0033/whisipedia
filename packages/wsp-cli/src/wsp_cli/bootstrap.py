@@ -520,13 +520,19 @@ def build_ledger(cfg: Mapping[str, Any], signer: Signer) -> JsonlLedger:
     return JsonlLedger(p.ledger_dir, signer, lock_path=lock)
 
 
-def build_fetcher(cfg: Mapping[str, Any], *, pace: Callable[[int], None] | None = None) -> Fetcher:
+def build_fetcher(
+    cfg: Mapping[str, Any], *, pace: Callable[[int], None] | None = None, unverified_policy: str | None = None
+) -> Fetcher:
     """``HttpFetcher`` (default) or ``Aria2Fetcher`` (``acquirer.fetcher = "aria2"``) from ``[acquirer]``.
-    ``pace`` (HTTP only): paces the bytes it writes (:func:`ingest_pace` for downloads into the vault)."""
+    ``pace`` (HTTP only): paces the bytes it writes (:func:`ingest_pace` for downloads into the vault).
+    ``unverified_policy``: this source's own rule for files without an upstream checksum (a source whose
+    issuer generates each file on request, so no two downloads are the same bytes: DLA ASSIST)."""
     from wsp_fetch import Aria2Fetcher, FetchConfig, HttpFetcher, find_aria2c, load_wikimedia_catalog
 
     acq = section(cfg, "acquirer")
     fc = FetchConfig.from_mapping(acq)
+    if unverified_policy is not None:
+        fc = dataclasses.replace(fc, unverified_policy=unverified_policy)
     catalog = load_wikimedia_catalog()
     fc = dataclasses.replace(fc, host_connections={**catalog.host_connections(), **fc.host_connections})
     if not fc.lock_dir and (index_root := paths(cfg).index_root) is not None:

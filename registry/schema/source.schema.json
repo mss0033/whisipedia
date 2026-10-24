@@ -80,6 +80,7 @@
       "properties": {
         "adapter": {"const": "doc-collection"},
         "manual": {"$ref": "#/$defs/manualAccess"},
+        "unverified": {"enum": ["allow"], "description": "files without an upstream checksum are kept from one download (the issuer generates each file on request); the default is a second, corroborating download"},
         "issuer": {"type": "string"},
         "key_prefix": {"type": "string"},
         "origins": {"type": "array", "items": {"type": "string"}},

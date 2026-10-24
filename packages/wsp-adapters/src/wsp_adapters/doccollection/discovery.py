@@ -1596,9 +1596,9 @@ def dla_assist(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
             continue
         pages += 1
         tree = LexborHTMLParser(html)
-        row_id = tree.css_first("tr#trDocumentId")
-        cells = row_id.css("td") if row_id is not None else []
-        doc_id = " ".join(cells[1].text().split()) if len(cells) > 1 else ""
+        # The id has its own span; its cell also says "Scroll down to access document images", which
+        # became part of every key when the cell was read whole (2026-10-24).
+        doc_id = _css_text(tree, "span#general_doc_idLabel")
         if not doc_id:
             continue  # no document under this number
         fsc = _css_text(tree, "span#general_fsc_codeLabel")

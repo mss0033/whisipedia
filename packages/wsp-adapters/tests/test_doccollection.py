@@ -1703,7 +1703,10 @@ def _assist_page(doc_id: str, fsc: str, rows: list[tuple[str, str, str]], title:
         for tok, dist, when in rows
     )
     return (
-        f'<table><tr id="trDocumentId"><td>Document ID:</td><td>&nbsp; {doc_id} &nbsp;</td></tr></table>'
+        # As QuickSearch writes it (2026-10-24): the cell holds the id and the images notice.
+        f'<table><tr id="trDocumentId"><td>Document ID:</td><td><b><span id="general_doc_idLabel">{doc_id}'
+        '</span></b>&nbsp;<span id="general_image_existsLabel">Scroll down to access document images</span>'
+        "</td></tr></table>"
         f'<span id="general_titleLabel">{title}</span>'
         '<span id="general_statusLabel"><font>Active</font></span>'
         f'<span id="general_doc_dateLabel">18-MAY-2022</span><span id="general_fsc_codeLabel">{fsc}</span>'
@@ -1724,7 +1727,7 @@ def test_dla_assist_takes_the_newest_distribution_a_image_and_skips_weapons_clas
             "MIL-HDBK-5", "1560", [("7", "D", "01-JAN-2001"), ("6", "A", "02-FEB-1998")]
         ),
         page + "4": _assist_page("STANAG-1", "-", [("5", "C", "01-JAN-2001")]),  # no Distribution A image
-        page + "5": b"<html>no document</html>",
+        page + "5": b"<html>no document</html>",  # no id span: not a document
     }
     cfg = {
         "kind": "api",

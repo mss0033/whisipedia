@@ -1370,7 +1370,18 @@ def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
         vault_root,
         # Downloads land on the NAS (_incoming): the library's shared, reader-yielding write budget. A
         # manual import fetches nothing at all.
-        _Offline() if manual is not None else bootstrap.build_fetcher(cfg, pace=bootstrap.ingest_pace(cfg)),
+        _Offline()
+        if manual is not None
+        else bootstrap.build_fetcher(
+            cfg,
+            pace=bootstrap.ingest_pace(cfg),
+            # ``access.unverified: allow``: one download of a file generated on request is kept (marked
+            # unverified); a second download, never the same bytes, cannot corroborate it (DLA ASSIST's
+            # PDFs, stamped on each request: 3,083 mismatches, 2026-10-24).
+            unverified_policy="allow"
+            if cast(Mapping[str, Any], spec.raw.get("access") or {}).get("unverified") == "allow"
+            else None,
+        ),
         keys=api_keys(cfg),
         user_agent=bootstrap.user_agent(cfg),
         workdir=workdir,
