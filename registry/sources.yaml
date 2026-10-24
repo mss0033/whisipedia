@@ -225,10 +225,10 @@ sources:
     publisher: US National Library of Medicine
     domain: [medicine, science]
     tier: T1
-    # ftp.ncbi.nlm.nih.gov's HTTPS robots.txt disallows every agent; NCBI serves the same files over
-    # anonymous FTP, its documented bulk channel, which the owner allowed (D16, 2026-10-24). Paused
-    # 2026-10-23 until then.
-    status: active
+    # Paused 2026-10-23: ftp.ncbi.nlm.nih.gov's robots.txt disallows every agent, over HTTPS and over
+    # FTP alike (ftp://ftp.ncbi.nlm.nih.gov/robots.txt, "Disallow: /"; RFC 9309 covers FTP). D16 was
+    # decided on the belief that FTP had no robots.txt (2026-10-24): back to the owner.
+    status: paused
     license: LicenseRef-NLM-terms
     legal_basis: bulk-access-terms
     # Research abstracts: no medicine-domain ranking bonus, so practical references (MDWiki, Wikipedia)
@@ -4259,6 +4259,34 @@ sources:
     update: {cadence: P1Y, strategy: snapshot-retention}
     size: {bytes: 1.5e10, measured: false, as_of: '2026-10-24'}
     notes: "61,315 texts (TCP.csv, 2026-10-24): A 48,941, B 4,889 (EEBO), K 2,473 (ECCO), N 5,012 (Evans, early America). The catalogue's 'Restricted' status (28,462 rows) predates the 2020 release of EEBO-TCP phase II: sampled 'Restricted' files are public and carry the CC0 waiver. The early modern spelling is kept as keyed (fiue, heauen). Owner approval D20 (2026-10-24)."
+
+  - id: pubchem
+    name: PubChem compounds - identifiers, names, safety summaries (LCSS) and full structure records
+    publisher: US National Library of Medicine, National Center for Biotechnology Information
+    domain: [chemistry, science, medicine, hazmat, reference-data]
+    tier: T1
+    # Paused: NCBI's FTP service has a robots.txt that disallows every agent (see pubmed); the fetcher
+    # honours it, so nothing is fetched until the owner rules again on D16.
+    status: paused
+    license: LicenseRef-US-Gov-PD
+    legal_basis: public-domain
+    access:
+      adapter: doc-collection
+      rate: {requests_per_second: 1, concurrency: 2}
+      issuer: National Center for Biotechnology Information
+      key_prefix: pubchem
+      # NCBI's anonymous FTP service (D16, 2026-10-24). Two partitions: extras (CID to names, synonyms, IUPAC names, InChI, SMILES, masses,
+      # parents, MeSH, PubMed and patent links, and CID-LCSS.xml.gz, the Laboratory Chemical Safety
+      # Summary: GHS hazards and handling for each compound) and sdf (every compound's full record).
+      partitioned: true
+      origins: ["ftp://ftp.ncbi.nlm.nih.gov"]
+      discovery:
+        - {kind: index-page, partition: extras, url: "ftp://ftp.ncbi.nlm.nih.gov/pubchem/Compound/Extras/", documents: "/Compound/Extras/CID-[^/]+(?<!\\.md5)$", md5_sidecars: true}
+        - {kind: index-page, partition: sdf, url: "ftp://ftp.ncbi.nlm.nih.gov/pubchem/Compound/CURRENT-Full/SDF/", documents: "/Compound_\\d+_\\d+\\.sdf\\.gz$", md5_sidecars: true}
+      filter: {allow_all: true, public_issuer: true, data_files: true}
+    update: {cadence: P6M, strategy: snapshot-retention}
+    size: {bytes: 1.44e11, measured: true, as_of: '2026-10-24'}
+    notes: "Measured over FTP 2026-10-24: Extras 21 files, 27.3 GB (CID-LCSS.xml.gz 0.48 GB); CURRENT-Full SDF 359 files, 116.8 GB (~120 million compounds). Substances and bioassays (another ~300 GB) are not taken. Owner approval D20; FTP channel D16 (2026-10-24)."
 
   - id: natural-earth
     name: Natural Earth vector data (all scales)

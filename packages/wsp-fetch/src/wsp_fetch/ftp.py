@@ -1,10 +1,10 @@
 """Anonymous FTP for issuers whose bulk files are served over ``ftp://`` (owner decision D16, 2026-10-24).
 
-NCBI serves PubMed, PubChem and PMC from ``ftp.ncbi.nlm.nih.gov`` over HTTPS and FTP; the HTTPS host's
-robots.txt disallows every agent, and FTP has no robots.txt. The owner allowed the FTP channel for
-issuers that document it as their bulk channel (PLAN §16, D16). This module is the FTP half of
-:class:`~wsp_fetch.http.HttpFetcher`: the fetcher routes ``ftp://`` URLs here, so adapters need no
-change.
+An issuer's FTP service is fetched like its HTTPS host, and its ``ftp://HOST/robots.txt`` is honoured
+the same way: RFC 9309 covers FTP. NCBI's (``ftp.ncbi.nlm.nih.gov``) disallows every agent, over FTP as
+over HTTPS, which was found after D16 was decided on the belief that FTP had none (2026-10-24). This
+module is the FTP half of :class:`~wsp_fetch.http.HttpFetcher`: the fetcher routes ``ftp://`` URLs here,
+so adapters need no change.
 
 * A directory (a URL ending in ``/``) is returned as a minimal HTML index, one
   ``<a href="NAME">NAME</a> YYYY-MM-DD HH:MM SIZE`` line per file from ``MLSD``, the form adapters

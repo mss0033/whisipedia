@@ -317,18 +317,28 @@ def origin_ok(url: str, origins: Sequence[str]) -> bool:
 
     Parsed strictly: a netloc with userinfo, a backslash or a non-443 port is refused, because
     HTTP clients and ``urlsplit`` disagree about where such a host begins.
+
+    FTP only where an origin names it as ``ftp://HOST`` (exactly that host, port 21): an issuer's FTP
+    service the owner allowed (D16, 2026-10-24). A bare host never admits FTP, and an origin list
+    with no HTTPS host admits no other HTTPS host.
     """
     try:
         parts = urlsplit(url)
         port = parts.port
     except ValueError:
         return False
-    if parts.scheme.lower() != "https" or "@" in parts.netloc or "\\" in url or port not in (None, 443):
+    scheme = parts.scheme.lower()
+    if "@" in parts.netloc or "\\" in url:
         return False
     host = (parts.hostname or "").rstrip(".").lower()
     if not host:
         return False
-    return not origins or any(host == o or host.endswith("." + o) for o in origins)
+    if scheme == "ftp":
+        return port in (None, 21) and f"ftp://{host}" in origins
+    if scheme != "https" or port not in (None, 443):
+        return False
+    hosts = [o for o in origins if "://" not in o]
+    return not origins or any(host == o or host.endswith("." + o) for o in hosts)
 
 
 def off_origin_hops(result: object, origins: Sequence[str]) -> list[str] | None:
@@ -431,13 +441,25 @@ def _pub_number(pattern: str | None, *texts: str) -> str:
 def index_page(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
     """Document links on index pages. ``newest``: a regex with groups ``series`` and ``date`` matched
     on each document URL; of a dated series only the newest file is kept (FoodData Central lists every
-    release since 2019 on one page). URLs it does not match pass unchanged."""
+    release since 2019 on one page). URLs it does not match pass unchanged.
+
+    ``partition``: these pages are a partition of their own, read only when it is fetched.
+    ``md5_sidecars``: a document listed with a ``<file>.md5`` beside it gets that digest (NCBI's FTP
+    directories), so its download is verified instead of corroborated by a second download."""
+    part = _s(cfg.get("partition"))
+    if part and env.partition and env.partition != part:
+        return
+    found = _index_page(cfg, env)
+    if part:
+        found = (replace(c, partition=part) for c in found)
+    if cfg.get("md5_sidecars"):
+        found = (_with_md5_sidecar(c, env) for c in found)
     if not cfg.get("newest"):
-        yield from _index_page(cfg, env)
+        yield from found
         return
     newest_rx = re.compile(_s(cfg["newest"]))
     best: dict[str, tuple[str, Candidate]] = {}
-    for cand in _index_page(cfg, env):
+    for cand in found:
         m = newest_rx.search(cand.url)
         if m is None:
             yield cand
@@ -447,6 +469,20 @@ def index_page(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
             best[series] = (stamp, cand)
     for _stamp, cand in best.values():
         yield cand
+
+
+_MD5_HEX = re.compile(r"\b([0-9a-fA-F]{32})\b")
+
+
+def _with_md5_sidecar(cand: Candidate, env: DiscoverEnv) -> Candidate:
+    """``cand`` with the digest of its ``.md5`` sidecar; unchanged when there is none."""
+    try:
+        m = _MD5_HEX.search(
+            env.fetcher.get_bytes(cand.url + ".md5", max_bytes=4096).decode("ascii", "replace")
+        )
+    except NotFoundError:
+        return cand
+    return replace(cand, md5=m.group(1).lower()) if m else cand
 
 
 def _index_page(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:

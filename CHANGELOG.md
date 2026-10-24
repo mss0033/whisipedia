@@ -12,8 +12,9 @@ All notable changes are documented here. The format follows [Keep a Changelog](h
 * Discovery: a `crossref` API flavor (a DOI prefix), `newest` on index pages, GovInfo partitions,
   skips and HTML, sitemap `key_pattern`/`partition`/`expand_match`, and CSV URL templates.
 * `ftp://` in the fetcher: directory listings, sizes, resumable downloads, an anonymous login that
-  never sends an email. PubMed is active again over NCBI's FTP service (D16). See the runbook's "FTP
-  channels" section.
+  never sends an email, and each FTP service's robots.txt honoured (RFC 9309). NCBI's FTP robots.txt
+  disallows every agent, so `pubmed` and `pubchem` stay paused for the owner (D16). See the runbook's
+  "FTP channels" section.
 ### Fixed: the nightly index build re-reads only the languages whose sources changed (2026-10-22)
 * The spelling step read every language of every source again each night, the `lang` column of every
   part first: about 8 hours of NAS reads. Each generation's language map and each language's counts

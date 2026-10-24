@@ -349,10 +349,10 @@ class HttpFetcher:
     # --- robots.txt ------------------------------------------------------------------------------
 
     def robots_allows(self, url: str) -> bool:
-        """Whether ``url``'s host lets us fetch it (its robots.txt, read once; unreadable: yes). FTP has
-        no robots.txt: an issuer's FTP service is used where the owner allowed it (D16, 2026-10-24),
-        which the registry records per source."""
-        if not self.config.robots or _IN_ROBOTS.get() or url.startswith("ftp://"):
+        """Whether ``url``'s host lets us fetch it (its robots.txt, read once; unreadable: yes). An FTP
+        service's rules are its ``ftp://HOST/robots.txt`` (RFC 9309 covers FTP: NCBI's disallows every
+        agent, 2026-10-24)."""
+        if not self.config.robots or _IN_ROBOTS.get():
             return True
         parts = urlsplit(url)
         site = f"{parts.scheme}://{parts.netloc.lower()}"
@@ -372,20 +372,28 @@ class HttpFetcher:
     def _read_robots(self, site: str) -> RobotFileParser | None:
         token = _IN_ROBOTS.set(True)
         try:
+            if site.startswith("ftp://"):
+                return _parse_robots(self._ftp_robots(site))
             with unguarded():
                 r = self._client.get(f"{site}/robots.txt")
             if r.status_code != 200:
                 return None
-            body = r.content[: 512 * 1024].decode("utf-8", "replace").lstrip("\ufeff")
-            if body.lstrip()[:20].lower().startswith(("<!doctype", "<html")):
-                return None  # a site that answers every path with a page has no robots.txt
-            rules = RobotFileParser()
-            rules.parse(body.splitlines())
-            return rules
+            return _parse_robots(r.content)
         except (httpx.HTTPError, OSError):
             return None
         finally:
             _IN_ROBOTS.reset(token)
+
+    def _ftp_robots(self, site: str) -> bytes | None:
+        try:
+            return ftp.get(
+                f"{site}/robots.txt",
+                max_bytes=512 * 1024,
+                timeout=self.config.read_timeout,
+                on_chunk=self.throttle,
+            )
+        except (ftp.FtpNotFoundError, ftp.FtpTooLargeError, *ftp.TRANSIENT):
+            return None
 
     def _robots_hop(self, response: httpx.Response) -> None:
         """Response hook: a redirect to a host whose robots.txt disallows the target is not followed."""
@@ -1042,6 +1050,17 @@ def _file_provenance(
         "resumed_bytes": resumed,
         "fetched_at": datetime.now(UTC).isoformat(timespec="seconds"),
     }
+
+
+def _parse_robots(raw: bytes | None) -> RobotFileParser | None:
+    if raw is None:
+        return None
+    body = raw[: 512 * 1024].decode("utf-8", "replace").lstrip("\ufeff")
+    if body.lstrip()[:20].lower().startswith(("<!doctype", "<html")):
+        return None  # a site that answers every path with a page has no robots.txt
+    rules = RobotFileParser()
+    rules.parse(body.splitlines())
+    return rules
 
 
 def _raise_for_status(r: httpx.Response) -> None:

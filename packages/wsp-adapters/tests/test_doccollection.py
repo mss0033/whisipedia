@@ -1620,3 +1620,47 @@ def test_a_csv_catalogue_builds_urls_and_partitions_from_its_columns() -> None:
     ]
     one = env_for({"https://raw.g.com/tcp/TCP.csv": rows}, origins=("raw.g.com",), partition="n")
     assert [c.key for c in discover_all([cfg], one)] == ["t:N00001"]
+
+
+def test_an_ftp_index_page_in_a_partition_takes_md5_sidecars() -> None:
+    base = "ftp://ftp.ncbi.example/pubchem/Compound/Extras/"
+    page = (
+        b'<a href="CID-LCSS.xml.gz">CID-LCSS.xml.gz</a> 2026-10-23 10:50 479540055\n'
+        b'<a href="CID-LCSS.xml.gz.md5">CID-LCSS.xml.gz.md5</a> 2026-10-23 10:50 50\n'
+        b'<a href="CID-MeSH">CID-MeSH</a> 2026-10-23 10:28 3015104\n'
+    )
+    routes = {
+        base: page,
+        base + "CID-LCSS.xml.gz.md5": b"MD5(CID-LCSS.xml.gz)= 0123456789ABCDEF0123456789abcdef\n",
+    }
+    cfg = {
+        "kind": "index-page",
+        "url": base,
+        "documents": r"/CID-[^/]+(?<!\.md5)$",
+        "partition": "extras",
+        "md5_sidecars": True,
+    }
+    env = env_for(routes, origins=("ftp://ftp.ncbi.example",))
+    got = {c.url.rsplit("/", 1)[1]: (c.partition, c.md5) for c in discover_all([cfg], env)}
+    assert got == {
+        "CID-LCSS.xml.gz": ("extras", "0123456789abcdef0123456789abcdef"),
+        "CID-MeSH": ("extras", None),  # no sidecar listed: fetched and corroborated as before
+    }
+    assert (
+        list(discover_all([cfg], env_for(routes, origins=("ftp://ftp.ncbi.example",), partition="sdf"))) == []
+    )
+
+
+def test_ftp_is_an_origin_only_where_one_names_it() -> None:
+    from wsp_adapters.doccollection.discovery import origin_ok
+
+    ncbi = ("ftp://ftp.ncbi.nlm.nih.gov",)
+    assert origin_ok("ftp://ftp.ncbi.nlm.nih.gov/pubchem/a.gz", ncbi)
+    assert not origin_ok(
+        "ftp://ftp.ncbi.nlm.nih.gov/pubchem/a.gz", ("ftp.ncbi.nlm.nih.gov",)
+    )  # a bare host: HTTPS
+    assert not origin_ok("ftp://evil.ftp.ncbi.nlm.nih.gov/a.gz", ncbi)  # exactly that host
+    assert not origin_ok("ftp://ftp.ncbi.nlm.nih.gov:2121/a.gz", ncbi)
+    assert not origin_ok("ftp://user@ftp.ncbi.nlm.nih.gov/a.gz", ncbi)
+    assert not origin_ok("https://ftp.ncbi.nlm.nih.gov/a.gz", ncbi)  # its HTTPS host is not admitted
+    assert origin_ok("https://www.govinfo.gov/a.pdf", ("www.govinfo.gov",))

@@ -11,7 +11,7 @@ from typing import Any, ClassVar
 
 import pytest
 
-from wsp_core.errors import NotFoundError
+from wsp_core.errors import NotFoundError, RobotsDisallowedError
 from wsp_core.model import Checksum, RemoteFile
 from wsp_fetch import ChecksumMismatchError, FetchConfig, HttpFetcher
 from wsp_fetch.state import partial_path
@@ -125,3 +125,15 @@ def test_a_file_missing_on_every_source_is_not_found(tmp_path: Path) -> None:
     remote = RemoteFile(url=BASE + "gone.xml.gz", name="g", checksums=(Checksum("md5", "0" * 32),))
     with HttpFetcher(CFG) as f, pytest.raises(NotFoundError):
         f.download(remote, tmp_path / "g")
+
+
+def test_an_ftp_services_robots_txt_is_honoured(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """RFC 9309 covers FTP; NCBI's FTP root serves "User-agent: * / Disallow: /" (2026-10-24)."""
+    monkeypatch.setitem(FILES, "/robots.txt", b"User-agent: *\nDisallow: /\n")
+    remote = RemoteFile(url=BASE + "README.txt", name="r", checksums=(Checksum("md5", "0" * 32),))
+    with HttpFetcher(CFG) as f:
+        with pytest.raises(RobotsDisallowedError):
+            f.get_bytes(BASE)
+        with pytest.raises(RobotsDisallowedError):
+            f.download(remote, tmp_path / "r")
+    assert not (tmp_path / "r").exists()
