@@ -222,6 +222,7 @@ interface Translated {
   english: string | null;
   showing: 'original' | 'translation';
   toggle: HTMLButtonElement;
+  note?: HTMLElement; // "part of this passage is not translated"
 }
 
 /**
@@ -318,7 +319,18 @@ function startTranslation(
       }
     }
     const segments = [titleText, ...jobs.map((j) => pieces[j.i]?.pieces[j.piece] ?? '')];
+    const shown = new Map<number, Translated>(); // block index -> its translation on the page
     let translated = 0;
+    // A block's English so far: translated pieces, and the others in their own language (a piece
+    // still to come, or one that failed its check).
+    const englishOf = (i: number): string | null => {
+      const split = pieces[i];
+      const got = answers[i];
+      if (!split || !got?.some((g) => g?.ok && g.text)) return null;
+      return split.pieces
+        .map((orig, n) => (got[n]?.ok && got[n]?.text ? (got[n]?.text ?? orig) : orig))
+        .reduce((acc, piece, n) => acc + (n ? (split.seps[n - 1] ?? ' ') : '') + piece, '');
+    };
     // The title first: it says at once whether the translation reads.
     for (let at = 0; at < segments.length; at += BATCH) {
       if (opts.signal?.aborted || (!banner.isConnected && at > 0)) return;
@@ -329,6 +341,7 @@ function startTranslation(
           'The translator is not available now; the rest of the page stays in its own language.';
         return;
       }
+      const touched = new Set<number>();
       for (let k = 0; k < answer.length; k++) {
         const index = at + k;
         const seg = answer[k];
@@ -341,42 +354,45 @@ function startTranslation(
         const got = job ? answers[job.i] : undefined;
         if (!job || !got) continue;
         got[job.piece] = seg;
-        if (got.some((g) => g === null)) continue; // the block's other pieces are still to come
-        const block = blocks[job.i];
-        const text = texts[job.i];
-        const split = pieces[job.i];
-        if (!block || !text || !split) continue;
-        const ok = got.filter((g) => g?.ok && g.text);
-        if (!ok.length) {
-          failed += 1;
-          block.append(
-            h(
-              'span',
-              { class: 'mt-failed' },
-              ` (not translated: ${got[0]?.reason ?? 'it did not pass its checks'})`,
-            ),
-          );
-          continue;
+        touched.add(job.i);
+      }
+      // Each block shows what has come so far: a long one fills in batch by batch.
+      for (const i of touched) {
+        const block = blocks[i];
+        const text = texts[i];
+        const got = answers[i];
+        if (!block || !text || !got) continue;
+        const complete = got.every((g) => g !== null);
+        const english = englishOf(i);
+        let t = shown.get(i);
+        if (english !== null) {
+          if (t) refresh(t, english);
+          else {
+            t = applyToBlock(block, text, english) ?? undefined;
+            if (t) {
+              shown.set(i, t);
+              done.push(t);
+              if (view.page === 'original') show(t, 'original');
+            }
+          }
         }
-        // Pieces that failed stay in their own language, and the block says so.
-        const english = split.pieces
-          .map((orig, n) => (got[n]?.ok && got[n]?.text ? got[n]!.text! : orig))
-          .reduce((acc, piece, n) => acc + (n ? (split.seps[n - 1] ?? ' ') : '') + piece, '');
-        const t = applyToBlock(block, text, english);
+        if (!complete) continue;
         if (!t) {
           failed += 1;
+          const why = got.find((g) => !g?.ok)?.reason ?? 'it did not pass its checks';
+          block.append(h('span', { class: 'mt-failed' }, ` (not translated: ${why})`));
           continue;
         }
         translated += 1;
-        done.push(t);
-        if (ok.length < got.length) {
+        if (got.some((g) => !g?.ok)) {
           const why = got.find((g) => !g?.ok)?.reason ?? 'it did not pass its checks';
-          block.insertBefore(
-            h('span', { class: 'mt-failed' }, ` (part of this passage is not translated: ${why})`),
-            t.toggle,
+          t.note = h(
+            'span',
+            { class: 'mt-failed' },
+            ` (part of this passage is not translated: ${why})`,
           );
+          if (t.showing === 'translation') t.block.insertBefore(t.note, t.toggle);
         }
-        if (view.page === 'original') show(t, 'original');
       }
       progress.textContent = `Translated ${translated} of ${blocks.length} passages…`;
     }
@@ -435,6 +451,14 @@ export function applyToBlock(block: Element, text: BlockText, english: string): 
   return t;
 }
 
+/** A translation that grew (the next pieces of a long block came): shown when it is on view. */
+function refresh(t: Translated, english: string): void {
+  t.english = english;
+  if (t.showing !== 'translation') return;
+  const built = buildTranslated(english, t.text);
+  if (built) t.block.replaceChildren(...built, ...(t.note ? [t.note] : []), t.toggle);
+}
+
 function show(t: Translated, which: 'original' | 'translation'): void {
   if (t.showing === which) return;
   if (which === 'original') {
@@ -443,7 +467,7 @@ function show(t: Translated, which: 'original' | 'translation'): void {
   } else {
     const built = t.english ? buildTranslated(t.english, t.text) : null;
     if (!built) return;
-    t.block.replaceChildren(...built, t.toggle);
+    t.block.replaceChildren(...built, ...(t.note ? [t.note] : []), t.toggle);
     t.block.setAttribute('data-mt', 'translated');
   }
   t.showing = which;

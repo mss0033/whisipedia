@@ -176,6 +176,14 @@ def _numbers(text: str, lang: str) -> list[set[str]]:
     return out
 
 
+# "Both" words: German "der beiden Quelläste" is rightly "the two source streams" (2026-10-24, the
+# Rhine article), so an English "two" may stand for one of them.
+_BOTH = re.compile(
+    r"\b(beide|beiden|beider|beides|les deux|ambos|ambas|entrambi|entrambe|ambedue|оба|обе|обоих|обеих)\b",
+    re.IGNORECASE,
+)
+
+
 def numbers_differ(source: str, target: str, lang: str) -> str | None:
     """Why the numbers do not match, or None. A number may change script (digits, words) or how it
     is written ("1400万", "14 million"), not its value."""
@@ -189,6 +197,9 @@ def numbers_differ(source: str, target: str, lang: str) -> str | None:
         else:
             unmatched_tgt.remove(hit)
     added = [min(tgt[k], key=len) for k in unmatched_tgt]
+    for _ in _BOTH.finditer(source):
+        if "2" in added:
+            added.remove("2")
     if not missing and not added:
         return None
     parts: list[str] = []

@@ -179,3 +179,57 @@ describe('a long block in pieces (German Wikipedia\'s "Rhein" is one paragraph o
     expect(splitSegment('kurz')).toEqual({ pieces: ['kurz'], seps: [] });
   });
 });
+
+describe('a long block translated piece by piece', () => {
+  it('shows the translated pieces, keeps a failed piece in its own language, and says so', async () => {
+    const s = 'Der Rhein fließt durch Europa und ist lang. ';
+    const long = `${s.repeat(40)}FEHLER hier. ${s.repeat(40)}`;
+    const api = {
+      translationStatus: async () => ({
+        available: true,
+        model: 'M',
+        state: 'ready',
+        languages: ['de'],
+        reason: null,
+        error: null,
+      }),
+      translate: async (_lang: string, segments: string[]) => ({
+        model: 'M',
+        prompt_version: 'v',
+        segments: segments.map((seg) =>
+          seg.includes('FEHLER')
+            ? { text: null, ok: false, reason: 'numbers differ (added 2)', cached: false }
+            : {
+                text: seg.replaceAll(
+                  'Der Rhein fließt durch Europa und ist lang.',
+                  'The Rhine flows through Europe.',
+                ),
+                ok: true,
+                reason: null,
+                cached: false,
+              },
+        ),
+      }),
+    } as unknown as WspClient;
+    const page = frag(`<div class="doc-body"><p>${long}</p></div>`);
+    const content = page.querySelector<HTMLElement>('.doc-body')!;
+    const bar = translationBar(api, { lang: 'de', title: 'Rhein' }, content)!;
+    page.prepend(bar);
+    await new Promise((r) => setTimeout(r, 0));
+    bar.querySelector<HTMLButtonElement>('.mt-start')!.click();
+    for (
+      let i = 0;
+      i < 100 && !page.querySelector('.mt-progress')?.textContent?.includes('passages translated');
+      i++
+    )
+      await new Promise((r) => setTimeout(r, 10));
+    const p = content.querySelector('p')!;
+    expect(p.textContent).toContain('The Rhine flows through Europe.');
+    expect(p.textContent).toContain('FEHLER hier.'); // the failed piece, in its own language
+    expect(p.querySelector('.mt-failed')?.textContent).toBe(
+      ' (part of this passage is not translated: numbers differ (added 2))',
+    );
+    expect(page.querySelector('.mt-progress')?.textContent).toBe('1 of 1 passages translated.');
+    page.remove();
+  });
+});

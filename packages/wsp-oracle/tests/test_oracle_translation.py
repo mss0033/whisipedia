@@ -55,6 +55,11 @@ def test_a_translation_that_fails_a_check_is_not_shown(
         ("Der Fluss ist 1.234,5 km lang.", "The river is 1,234.5 km long.", "de"),
         ("<x1>Berlin</x1> ist die Hauptstadt ⟦1⟧.", "<x1>Berlin</x1> is the capital ⟦1⟧.", "de"),
         ("Un pays, une langue.", "One country, one language.", "fr"),  # "one": every language's article
+        (
+            "Ab dem Zusammenfluss der beiden Quelläste.",
+            "From the confluence of the two source streams.",
+            "de",
+        ),
         ("東京は日本の首都である。", "Tokyo is the capital of Japan.", "ja"),
         # The same value written another way (2026-10-24: "1400万" is "14 million").
         ("東京の人口は約1400万人である。", "Tokyo has a population of about 14 million.", "ja"),

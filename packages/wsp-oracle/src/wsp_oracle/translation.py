@@ -61,6 +61,7 @@ class Segment:
     ok: bool
     reason: str | None = None
     cached: bool = False
+    rejected: str | None = None  # what the model wrote when it failed a check: kept to diagnose, never shown
 
 
 def language_name(lang: str, text: str) -> str:
@@ -95,6 +96,9 @@ class TranslationCache:
             "CREATE TABLE IF NOT EXISTS segments"
             " (key TEXT PRIMARY KEY, text TEXT, ok INTEGER, reason TEXT, at REAL)"
         )
+        cols = {row[1] for row in self._db.execute("PRAGMA table_info(segments)")}
+        if "rejected" not in cols:  # what a failed check saw (2026-10-24): for diagnosis only
+            self._db.execute("ALTER TABLE segments ADD COLUMN rejected TEXT")
         self._lock = threading.Lock()
 
     @staticmethod
@@ -109,8 +113,9 @@ class TranslationCache:
     def put(self, key: str, seg: Segment) -> None:
         with self._lock:
             self._db.execute(
-                "INSERT OR REPLACE INTO segments VALUES (?, ?, ?, ?, ?)",
-                (key, seg.text, int(seg.ok), seg.reason, time.time()),
+                "INSERT OR REPLACE INTO segments (key, text, ok, reason, at, rejected)"
+                " VALUES (?, ?, ?, ?, ?, ?)",
+                (key, seg.text, int(seg.ok), seg.reason, time.time(), seg.rejected),
             )
             self._db.commit()
 
@@ -356,7 +361,12 @@ class Translator:
             if target.startswith(lead):
                 target = target[len(lead) :].strip()
         verdict = check(text, target, lang)
-        return Segment(target if verdict.ok else None, verdict.ok, verdict.reason)
+        return Segment(
+            target if verdict.ok else None,
+            verdict.ok,
+            verdict.reason,
+            rejected=None if verdict.ok else target,
+        )
 
     def _http_complete(self, text: str, limit: int) -> str:
         body = {
