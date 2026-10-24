@@ -1639,9 +1639,12 @@ def test_an_ftp_index_page_in_a_partition_takes_md5_sidecars() -> None:
         "documents": r"/CID-[^/]+(?<!\.md5)$",
         "partition": "extras",
         "md5_sidecars": True,
+        "language": "fr",
     }
     env = env_for(routes, origins=("ftp://ftp.ncbi.example",))
-    got = {c.url.rsplit("/", 1)[1]: (c.partition, c.md5) for c in discover_all([cfg], env)}
+    found = list(discover_all([cfg], env))
+    assert {c.language for c in found} == {"fr"}
+    got = {c.url.rsplit("/", 1)[1]: (c.partition, c.md5) for c in found}
     assert got == {
         "CID-LCSS.xml.gz": ("extras", "0123456789abcdef0123456789abcdef"),
         "CID-MeSH": ("extras", None),  # no sidecar listed: fetched and corroborated as before

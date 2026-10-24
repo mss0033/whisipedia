@@ -4353,6 +4353,41 @@ sources:
     size: {bytes: 2.0e11, measured: false, as_of: '2026-10-24'}
     notes: "About 105,000 documents, most of them canceled specifications kept as engineering history (status recorded; current ones include MIL-STD-810 environmental tests, MIL-STD-461 EMI, MIL-HDBK-338 reliability, MIL-STD-1472 human engineering). Adopted industry standards (ASTM, SAE) carry no public image and are not fetched. ~100-300 GB (research 2026-10-23). Owner decisions D18 and D20 (2026-10-24)."
 
+  - id: dila-opendata
+    name: DILA OPENDATA - French law in bulk (Légifrance codes and laws, Journal officiel, case law)
+    publisher: Direction de l'information légale et administrative (France)
+    domain: [law, government]
+    tier: T1
+    status: candidate
+    license: LicenseRef-Licence-Ouverte-2.0
+    legal_basis: open-license
+    access:
+      adapter: doc-collection
+      rate: {requests_per_second: 1, concurrency: 2}
+      issuer: Direction de l'information légale et administrative
+      key_prefix: dila
+      # The bulk feed behind Légifrance (echanges.dila.gouv.fr has no robots.txt; legifrance.gouv.fr is
+      # behind a bot challenge and is never fetched). Each dataset is a full dump
+      # (Freemium_<set>_global_<date>.tar.gz) and a daily delta since; every tarball is kept, so the
+      # current state is the dump plus its deltas in order. Kept as data files: a reader that applies
+      # the deltas and makes each article a document is a follow-up. One partition per dataset.
+      partitioned: true
+      origins: [echanges.dila.gouv.fr]
+      discovery:
+        - {kind: index-page, partition: legi, language: fr, url: "https://echanges.dila.gouv.fr/OPENDATA/LEGI/", documents: "/OPENDATA/LEGI/[^/]+\\.tar\\.gz$"}  # consolidated codes and laws, with every version
+        - {kind: index-page, partition: jorf, language: fr, url: "https://echanges.dila.gouv.fr/OPENDATA/JORF/", documents: "/OPENDATA/JORF/[^/]+\\.tar\\.gz$"}  # Journal officiel since 1947
+        - {kind: index-page, partition: kali, language: fr, url: "https://echanges.dila.gouv.fr/OPENDATA/KALI/", documents: "/OPENDATA/KALI/[^/]+\\.tar\\.gz$"}  # collective agreements
+        - {kind: index-page, partition: cass, language: fr, url: "https://echanges.dila.gouv.fr/OPENDATA/CASS/", documents: "/OPENDATA/CASS/[^/]+\\.tar\\.gz$"}  # Cour de cassation
+        - {kind: index-page, partition: capp, language: fr, url: "https://echanges.dila.gouv.fr/OPENDATA/CAPP/", documents: "/OPENDATA/CAPP/[^/]+\\.tar\\.gz$"}  # courts of appeal
+        - {kind: index-page, partition: inca, language: fr, url: "https://echanges.dila.gouv.fr/OPENDATA/INCA/", documents: "/OPENDATA/INCA/[^/]+\\.tar\\.gz$"}  # unpublished Cour de cassation rulings
+        - {kind: index-page, partition: jade, language: fr, url: "https://echanges.dila.gouv.fr/OPENDATA/JADE/", documents: "/OPENDATA/JADE/[^/]+\\.tar\\.gz$"}  # Conseil d'État and administrative courts
+        - {kind: index-page, partition: constit, language: fr, url: "https://echanges.dila.gouv.fr/OPENDATA/CONSTIT/", documents: "/OPENDATA/CONSTIT/[^/]+\\.tar\\.gz$"}  # Conseil constitutionnel
+        - {kind: index-page, partition: cnil, language: fr, url: "https://echanges.dila.gouv.fr/OPENDATA/CNIL/", documents: "/OPENDATA/CNIL/[^/]+\\.tar\\.gz$"}  # CNIL deliberations
+      filter: {allow_all: true, public_issuer: true, data_files: true}
+    update: {cadence: P1M, strategy: snapshot-retention}
+    size: {bytes: 1.5e10, measured: false, as_of: '2026-10-24'}
+    notes: "Full dumps 2025-07-13: LEGI 1.1 GB, JORF 1.6 GB, JADE 1.2 GB, INCA 655 MB, CAPP 279 MB, CASS 248 MB, KALI 173 MB, CNIL 18 MB, CONSTIT 12 MB, plus daily deltas (LEGI 479 files, JORF 869). Licence Ouverte / Etalab 2.0. SERVICE-PUBLIC (citizen guides), CIRCULAIRES and the parliamentary debates sit in nested folders and are not taken yet. Owner approval D20 (2026-10-24)."
+
   - id: natural-earth
     name: Natural Earth vector data (all scales)
     publisher: Natural Earth (NACIS)

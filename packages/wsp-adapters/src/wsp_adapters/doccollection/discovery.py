@@ -444,6 +444,7 @@ def index_page(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
     release since 2019 on one page). URLs it does not match pass unchanged.
 
     ``partition``: these pages are a partition of their own, read only when it is fetched.
+    ``language``: the documents' language code (default English).
     ``md5_sidecars``: a document listed with a ``<file>.md5`` beside it gets that digest (NCBI's FTP
     directories), so its download is verified instead of corroborated by a second download."""
     part = _s(cfg.get("partition"))
@@ -452,6 +453,8 @@ def index_page(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
     found = _index_page(cfg, env)
     if part:
         found = (replace(c, partition=part) for c in found)
+    if lang := _s(cfg.get("language")):  # the documents' language (DILA's French law: "fr")
+        found = (replace(c, language=lang) for c in found)
     if cfg.get("md5_sidecars"):
         found = (_with_md5_sidecar(c, env) for c in found)
     if not cfg.get("newest"):
