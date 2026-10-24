@@ -4536,7 +4536,9 @@ sources:
     publisher: "US Nuclear Regulatory Commission"
     domain: [engineering, preparedness, physics]
     tier: T1
-    status: candidate
+    # www.nrc.gov let the first requests through, then its Akamai wall answered 403 and served a
+    # 2.6 kB holding page in a PDF's place (2026-10-24): downloaded by hand from the daily page.
+    status: paused
     license: LicenseRef-US-Gov-PD
     legal_basis: public-domain
     access:
@@ -4544,6 +4546,7 @@ sources:
       issuer: "Nuclear Regulatory Commission"
       key_prefix: nrc
       origins: [www.nrc.gov]
+      manual: {daily: 10, list: {kind: discovery}}
       discovery:
         - kind: list
           items:
@@ -4565,7 +4568,7 @@ sources:
       filter: {allow_all: true, public_issuer: true}
     update: {cadence: P1Y, strategy: snapshot-retention}
     size: {bytes: 5.0e8, measured: false, as_of: '2026-10-24'}
-    notes: "Curated 2026-10-24; www.nrc.gov allows us and answered the library's fetcher (it refused the 2026-10-23 research's client). Reactor operation, safety and radiological emergency response; no weapons material. Owner request 2026-10-24."
+    notes: "Curated 2026-10-24; www.nrc.gov's bot wall refuses the library after a few requests: downloaded by hand. Reactor operation, safety and radiological emergency response; no weapons material. Owner request 2026-10-24."
 
   - id: usace-engineer-manuals
     name: "USACE Engineer Manuals and HEC hydraulic manuals (safety EM 385-1-1, hydraulics, geotechnical, concrete, levees, water supply)"
@@ -4670,6 +4673,7 @@ sources:
       origins: [www.fema.gov]
       discovery:
         - kind: list
+          resolve_landing: true  # its landing-page items: the PDF they link
           items:
             - {title: "CERT Basic Training Participant Manual (2011)", url: "https://www.fema.gov/sites/default/files/2020-07/fema-cert_basic-training-participant-manual_01-01-2011.pdf"}
             - {title: "FEMA P-320 Taking Shelter from the Storm: Building or Installing a Safe Room for Your Home (6th ed., Dec 2024)", url: "https://www.fema.gov/sites/default/files/documents/fema_rsl_fema-p-320-taking-shelter-from-the-storm_042025.pdf"}

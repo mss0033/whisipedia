@@ -2504,9 +2504,13 @@ def fixed_list(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
     items = cast(list[Json], cfg.get("items") or ([{"url": cfg["url"]}] if cfg.get("url") else []))
     for it in items:
         urls = _strs(it.get("urls")) or _strs(it.get("url"))
-        # ``landing`` alone: a page where a person finds the file (a store page, a Box share); only
-        # the owner's daily downloads use such an item (wsp_cli.manual), saved as ``save_as``.
+        # ``landing`` alone: a page where a person finds the file (a store page, a Box share), saved
+        # as ``save_as`` by the owner's daily downloads (wsp_cli.manual). With ``resolve_landing``
+        # (a host that allows us) the library opens the page and takes its first document link
+        # (``detail_documents``, default a PDF) instead: a landing page fetched as the document made
+        # NRC's NUREG-1350 an HTML page that differed on every download (2026-10-24).
         page = not urls and bool(_s(it.get("landing")))
+        resolve_landing = page and bool(cfg.get("resolve_landing"))
         if page:
             urls = (_s(it.get("landing")),)
         if not urls:
@@ -2519,7 +2523,9 @@ def fixed_list(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
         extra = {"suffix": suffix} if re.fullmatch(r"\.[a-z0-9]{1,8}", suffix) else {}
         if save_as := _s(it.get("save_as")):  # the name a manual download is saved under
             extra["save_as"] = save_as
-        if page:
+        if resolve_landing:
+            extra["detail_documents"] = _s(cfg.get("detail_documents")) or r"\.pdf(?:$|[?#])"
+        elif page:
             extra["page"] = "1"
         yield Candidate(
             key=pub_key(env.prefix, pub, edition, key_stem_from_url(urls[0], decode=env.decode_url_keys)),
@@ -2532,6 +2538,7 @@ def fixed_list(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
             size=int(it["size"]) if isinstance(it.get("size"), int) else None,
             landing_url=_s(it.get("landing")),
             discovered_by="list",
+            resolve="detail-page" if resolve_landing else "",
             extra=extra,
         )
 

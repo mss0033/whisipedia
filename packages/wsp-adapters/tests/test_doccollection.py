@@ -1808,3 +1808,16 @@ def test_data_files_keep_their_own_extension() -> None:
         ("https://e.org/report", ".pdf"),
     ]:
         assert extension_of(url) == ext
+
+
+def test_a_listed_landing_page_is_resolved_to_its_document_where_the_host_allows_us() -> None:
+    page = b'<a href="/docs/ML2400/ML24001.pdf">NUREG-1350 Vol. 35 (PDF)</a>'
+    routes = {"https://www.nrc.gov/nuregs/sr1350/index": page}
+    item = {"title": "NUREG-1350 Vol. 35", "landing": "https://www.nrc.gov/nuregs/sr1350/index"}
+    env = env_for(routes, origins=("www.nrc.gov",))
+    (doc,) = list(discover_all([{"kind": "list", "resolve_landing": True, "items": [item]}], env))
+    assert doc.resolve == "detail-page"
+    (got,) = resolve(doc, env)
+    assert got.url == "https://www.nrc.gov/docs/ML2400/ML24001.pdf"
+    (manual_item,) = list(discover_all([{"kind": "list", "items": [item]}], env_for({})))
+    assert manual_item.extra == {"page": "1"}  # without the option: a page for the owner (wsp_cli.manual)
