@@ -1,0 +1,12 @@
+# Take in the owner's downloads every hour, and write the day's list at the first run of the day.
+
+[Unit]
+Description=Whisipedia manual downloads every hour
+
+[Timer]
+OnBootSec=15min
+OnUnitInactiveSec=1h
+AccuracySec=5min
+
+[Install]
+WantedBy=timers.target

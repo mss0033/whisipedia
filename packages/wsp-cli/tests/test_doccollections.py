@@ -905,3 +905,44 @@ def test_a_kept_netcdf_grid_is_taken_when_it_is_as_long_as_it_says(tmp_path: Pat
     assert "3,000 bytes where its header says 4,096" in problem
     with pytest.raises(FetchError, match="header says"):
         fetch._download(_NoNetwork(), grid, dest, ["bodc.example"])  # pyright: ignore[reportPrivateUsage]
+
+
+def test_files_received_from_the_daily_list_stand_for_the_listing_and_withdraw_nothing(
+    vault: FileVault, tmp_path: Path
+) -> None:
+    """wsp collections manual --sync (2026-10-24): the queue's received items are the listing, a
+    sample: what they lack (the hundreds not downloaded yet) is never inferred withdrawn."""
+    import dataclasses
+
+    from wsp_adapters.doccollection import DocCollectionAdapter
+    from wsp_adapters.doccollection.model import Candidate
+    from wsp_cli.doccollections import _Offline  # pyright: ignore[reportPrivateUsage]
+    from wsp_core.ports import Ctx
+
+    drop = vault.root / "_incoming" / "_manual" / "test-gazetteer"
+    drop.mkdir(parents=True)
+    (drop / "countryInfo.txt").write_text("#ISO\tCountry\nFR\tFrance\n" * 50)
+    got = Candidate(
+        key="gaz:CODES", url="https://dl.example.org/dump/countryInfo.txt", title="Codes", issuer="Test"
+    )
+    spec = _manual_spec()
+    access = {**dict(spec.raw["access"]), "discovery": [{"kind": "candidates", "items": [got.to_json()]}]}  # type: ignore[arg-type]
+    spec = dataclasses.replace(spec, raw={**spec.raw, "access": access})
+    adapter = DocCollectionAdapter(throttle=False)
+    ctx = Ctx(source=spec, fetcher=_Offline(), workdir=tmp_path / "w", user_agent="t")
+    survey = adapter.survey(ctx, env=adapter.env(ctx))
+    assert not survey.listing_complete  # a sample
+    fetch = CollectionFetcher(
+        vault.root,
+        _Offline(),
+        keys={},
+        user_agent="t",
+        workdir=tmp_path / "work",
+        out=io.StringIO(),
+        throttle=False,
+        offline=True,
+        manual_dir=drop,
+    )
+    report = fetch.run(spec, version="2026-10-24")
+    assert [d.cand.key for d in report.fetched] == ["gaz:CODES"]
+    assert report.failed == []  # nothing else was offered as a document of this run

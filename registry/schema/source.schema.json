@@ -50,6 +50,28 @@
         }
       ]
     },
+    "manualAccess": {
+      "description": "the owner's daily downloads by hand from hosts the library may not crawl (wsp_cli.manual)",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["list"],
+      "properties": {
+        "daily": {"type": "integer", "minimum": 1, "maximum": 100},
+        "browse": {"type": "array", "items": {"type": "string"}, "minItems": 2, "maxItems": 2},
+        "page_ext": {"type": "string"},
+        "first": {"type": "array", "items": {"type": "string"}},
+        "again_days": {"type": "integer", "minimum": 1},
+        "list": {
+          "type": "object",
+          "required": ["kind"],
+          "properties": {
+            "kind": {"enum": ["discovery", "saved", "pubmed", "list"]},
+            "pages": {"type": "array", "items": {"type": "object", "required": ["url", "save_as"]}},
+            "items": {"type": "array", "items": {"type": "object"}}
+          }
+        }
+      }
+    },
     "docCollectionAccess": {
       "description": "access block of a doc-collection source (wsp_adapters.doccollection); a misspelled key would be ignored, so unknown keys are refused.",
       "type": "object",
@@ -57,6 +79,7 @@
       "additionalProperties": false,
       "properties": {
         "adapter": {"const": "doc-collection"},
+        "manual": {"$ref": "#/$defs/manualAccess"},
         "issuer": {"type": "string"},
         "key_prefix": {"type": "string"},
         "origins": {"type": "array", "items": {"type": "string"}},

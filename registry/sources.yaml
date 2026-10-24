@@ -234,7 +234,12 @@ sources:
     # Research abstracts: no medicine-domain ranking bonus, so practical references (MDWiki, Wikipedia)
     # lead lay questions at equal relevance ("how to treat a snake bite" led with 1890s case reports).
     rank_prior: 0
-    access: {adapter: pubmed, endpoints: ["ftp://ftp.ncbi.nlm.nih.gov/pubmed/baseline/", "ftp://ftp.ncbi.nlm.nih.gov/pubmed/updatefiles/"]}
+    access:
+      adapter: pubmed
+      endpoints: ["ftp://ftp.ncbi.nlm.nih.gov/pubmed/baseline/", "ftp://ftp.ncbi.nlm.nih.gov/pubmed/updatefiles/"]
+      # The owner downloads the new update files by hand (wsp collections manual --sync, 2026-10-24): the
+      # next numbers after the newest sealed generation, about one a day.
+      manual: {daily: 10, list: {kind: pubmed}}
     update: {strategy: base-plus-incremental}
     size: {files: 1334, bytes: 50e9, measured: false, as_of: 2026-10-09}
 
@@ -1283,6 +1288,18 @@ sources:
     legal_basis: public-domain
     access:
       adapter: doc-collection
+      # robots.txt disallows every agent, the product maps too: the owner saves the four maps once, then
+      # opens ten publication pages a day and saves each one's PDF under the name shown.
+      manual:
+        daily: 10
+        first: ["^ADP ", "^FM ", "^ATP 4-02", "^TC 4-02", "^ATP 3-50.21", "^TC 3-25.26"]
+        list:
+          kind: saved
+          pages:
+            - {url: "https://armypubs.army.mil/ProductMaps/PubForm/ADP.aspx", save_as: ADP.aspx.html}
+            - {url: "https://armypubs.army.mil/ProductMaps/PubForm/FM.aspx", save_as: FM.aspx.html}
+            - {url: "https://armypubs.army.mil/ProductMaps/PubForm/ATP.aspx", save_as: ATP.aspx.html}
+            - {url: "https://armypubs.army.mil/ProductMaps/PubForm/TC.aspx", save_as: TC.aspx.html}
       issuer: Department of the Army
       key_prefix: army
       origins: [armypubs.army.mil]
@@ -4076,6 +4093,7 @@ sources:
     index: false  # a data set: the Atlas reads places from OSM; GeoNames adds alternate names and codes
     access:
       adapter: doc-collection
+      manual: {daily: 10, again_days: 90, list: {kind: discovery}}  # a fixed list; refreshed quarterly
       issuer: GeoNames
       key_prefix: geonames
       origins: [download.geonames.org]
@@ -4272,6 +4290,18 @@ sources:
     legal_basis: public-domain
     access:
       adapter: doc-collection
+      # Downloaded by hand from NCBI's https:// folders (the same files as its FTP service, whose robots.txt
+      # disallows crawlers too): the owner saves the two folder pages once, then ten files a day,
+      # the chemical safety summaries (LCSS) and names first.
+      manual:
+        daily: 10
+        first: ["CID-LCSS", "CID-Title", "CID-Synonym-filtered", "CID-IUPAC", "CID-MeSH", "CID-Mass", "CID-Parent", "CID-Component", "CID-Identifiers", "CID-Date"]
+        again_days: 365
+        list:
+          kind: saved
+          pages:
+            - {url: "https://ftp.ncbi.nlm.nih.gov/pubchem/Compound/Extras/", save_as: pubchem-extras.html}
+            - {url: "https://ftp.ncbi.nlm.nih.gov/pubchem/Compound/CURRENT-Full/SDF/", save_as: pubchem-sdf.html}
       rate: {requests_per_second: 1, concurrency: 2}
       issuer: National Center for Biotechnology Information
       key_prefix: pubchem
@@ -4279,10 +4309,10 @@ sources:
       # parents, MeSH, PubMed and patent links, and CID-LCSS.xml.gz, the Laboratory Chemical Safety
       # Summary: GHS hazards and handling for each compound) and sdf (every compound's full record).
       partitioned: true
-      origins: ["ftp://ftp.ncbi.nlm.nih.gov"]
+      origins: [ftp.ncbi.nlm.nih.gov]
       discovery:
-        - {kind: index-page, partition: extras, url: "ftp://ftp.ncbi.nlm.nih.gov/pubchem/Compound/Extras/", documents: "/Compound/Extras/CID-[^/]+(?<!\\.md5)$", md5_sidecars: true}
-        - {kind: index-page, partition: sdf, url: "ftp://ftp.ncbi.nlm.nih.gov/pubchem/Compound/CURRENT-Full/SDF/", documents: "/Compound_\\d+_\\d+\\.sdf\\.gz$", md5_sidecars: true}
+        - {kind: index-page, partition: extras, url: "https://ftp.ncbi.nlm.nih.gov/pubchem/Compound/Extras/", documents: "/Compound/Extras/CID-[^/]+(?<!\\.md5)$"}
+        - {kind: index-page, partition: sdf, url: "https://ftp.ncbi.nlm.nih.gov/pubchem/Compound/CURRENT-Full/SDF/", documents: "/Compound_\\d+_\\d+\\.sdf\\.gz$"}
       filter: {allow_all: true, public_issuer: true, data_files: true}
     update: {cadence: P6M, strategy: snapshot-retention}
     size: {bytes: 1.44e11, measured: true, as_of: '2026-10-24'}
@@ -4425,6 +4455,7 @@ sources:
     index: false
     access:
       adapter: doc-collection
+      manual: {daily: 10, again_days: 365, list: {kind: discovery}}  # one grid a year
       issuer: GEBCO Compilation Group
       key_prefix: gebco
       origins: [www.bodc.ac.uk]
@@ -4852,6 +4883,9 @@ sources:
     legal_basis: public-domain
     access:
       adapter: doc-collection
+      # wbdg.org lists the criteria (its robots.txt allows us); their files sit on a bucket whose robots.txt
+      # disallows every agent: the owner downloads them by hand, Unified Facilities Criteria first.
+      manual: {daily: 10, first: ["^UFC ", "UFGS", "^UFC"], list: {kind: discovery}}
       issuer: US Department of Defense and federal agencies (via WBDG)
       key_prefix: wbdg
       origins: [www.wbdg.org, nibs-s3-wbdg3-production.s3.us-east-1.amazonaws.com]

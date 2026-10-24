@@ -1,0 +1,20 @@
+# The owner's downloads by hand (`wsp collections manual --sync`, wsp_cli.manual): takes in what was
+# saved into <vault>/_incoming/_manual/<source>/, rebuilds stale lists, and writes _manual/TODAY.html
+# once a day. The hosts it concerns are never asked for anything. Started by whisipedia-manual.timer.
+#
+# Template: `wsp service install` renders @REPO@ and @CONFIG_DIR@ (docs/runbooks/install-services.md).
+
+[Unit]
+Description=Whisipedia manual downloads (daily list, import)
+
+[Service]
+Type=oneshot
+Slice=whisipedia-background.slice
+WorkingDirectory=@REPO@
+EnvironmentFile=-%h/.config/whisipedia/whisipedia.env
+ExecStart=@REPO@/.venv/bin/wsp --config-dir @CONFIG_DIR@ collections manual --sync
+# An import may wait hours in the ingest lock's queue (wsp ingest --wait) behind a long ingest.
+TimeoutStartSec=6h
+MemoryHigh=1536M
+MemoryMax=2G
+Nice=10

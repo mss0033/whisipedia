@@ -3,6 +3,17 @@
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Added: the owner's daily downloads by hand from hosts that refuse crawlers (2026-10-24)
+* `wsp collections manual --sync` (hourly, `whisipedia-manual.timer`) writes
+  `_incoming/_manual/TODAY.html` once a day: up to ten links per source, each with the exact name to
+  save it under. It takes in whatever was saved into `_manual/<source>/`: the file is checked whole,
+  screened and ingested. Lists come from hosts that allow us, from file-name patterns, from listing
+  pages the owner saved once, or from curated lists; the refusing hosts are never asked for anything.
+  First sources: PubMed's daily update files, PubChem, WBDG's criteria, Army publications, GeoNames
+  and GEBCO (docs/runbooks/manual-downloads.md).
+### Fixed: robots.txt read as RFC 9309 says (2026-10-24)
+* Rules with `*` and `$` were read literally, so some disallowed paths looked allowed. The longest
+  rule now wins, and aria2 downloads drop disallowed mirrors.
 ### Added: the first sources of the 2026-10-23 research, and FTP for NCBI (2026-10-24)
 * New sources (owner approval D20): `mit-ocw-stem` (984 more courses), `nist-technical-series`
   (32,661 DOIs under 10.6028), `usda-fooddata-central`, `govinfo-collections` (23 GPO collections,

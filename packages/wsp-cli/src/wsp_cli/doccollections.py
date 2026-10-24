@@ -21,7 +21,9 @@ skipped duplicates stay within the partition.
 from __future__ import annotations
 
 import argparse
+import bz2
 import dataclasses
+import gzip
 import hashlib
 import json
 import os
@@ -488,6 +490,16 @@ def whole(path: Path) -> tuple[str, str | None]:
         return "zip", None if bad is None else f"{bad} fails its CRC"
     with path.open("rb") as fh:
         head = fh.read(96)
+    if head[:2] == b"\x1f\x8b" or head[:3] == b"BZh":  # gzip or bzip2: every block and its CRC
+        kind = "gzip" if head[:2] == b"\x1f\x8b" else "bzip2"
+        opener = gzip.open if kind == "gzip" else bz2.open
+        try:
+            with opener(path, "rb") as z:
+                while z.read(8 << 20):
+                    pass
+        except (OSError, EOFError, ValueError) as exc:
+            return kind, f"does not read whole: {exc}"
+        return kind, None
     if head.startswith(HDF5_SIGNATURE) and len(head) >= 48:
         version = head[8]
         if version in (2, 3):
@@ -503,8 +515,13 @@ def whole(path: Path) -> tuple[str, str | None]:
 
 
 def manual_name(cand: Candidate) -> str:
-    """The name a browser saves the document's URL under (``allCountries.zip``)."""
-    return unquote(urlsplit(cand.url).path.rstrip("/").rpartition("/")[2]) or cand.file_name
+    """The name a browser saves the document's URL under (``allCountries.zip``), or the name the daily
+    page asks the owner to save it as (``extra['save_as']``: a document behind a landing page)."""
+    return (
+        cand.extra.get("save_as")
+        or unquote(urlsplit(cand.url).path.rstrip("/").rpartition("/")[2])
+        or cand.file_name
+    )
 
 
 class CollectionFetcher:
@@ -1313,6 +1330,10 @@ def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
     spec = specs.get(args.source)
     if spec is None:
         raise bootstrap.ConfigError(f"unknown source {args.source!r}")
+    if (override := getattr(args, "discovery", None)) is not None:
+        # The owner's downloads stand for the listing (wsp_cli.manual): the issuer's is not read.
+        access = cast(Mapping[str, Any], spec.raw.get("access") or {})
+        spec = dataclasses.replace(spec, raw={**spec.raw, "access": {**access, "discovery": override}})
     if spec.status is SourceStatus.EXCLUDED or spec.raw.get("legal_basis") == "none":
         print(f"error: {spec.id} is excluded or has no legal basis", file=sys.stderr)
         return EXIT_REFUSED
@@ -1363,6 +1384,8 @@ def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
         partition=partition,
         refetch=frozenset(getattr(args, "refetch", None) or ()),
     )
+    if (sink := getattr(args, "report_sink", None)) is not None:
+        cast(list[FetchReport], sink).append(report)
     if report.pending:
         out.write(
             f"{spec.id}: fetched but not ingested yet: {', '.join(report.pending)}; "
@@ -1479,9 +1502,19 @@ def register(sub: Any, add: Any) -> None:
         "Nothing is fetched. For sources that are a fixed list of files (geonames, gebco-grid).",
         co_sub,
     )
-    s.add_argument("source", help="source id, e.g. geonames")
+    s.add_argument("source", nargs="?", default=None, help="source id, e.g. geonames")
     s.add_argument("--import", dest="do_import", action="store_true", help="take in the saved files")
     s.add_argument("--version", default=None, help="cycle label (default: today, YYYY-MM-DD)")
+    s.add_argument(
+        "--sync",
+        action="store_true",
+        help="the daily routine (wsp_cli.manual): take in what was saved into _manual/<source>/ for every "
+        "source with access.manual, rebuild stale lists, write _manual/TODAY.html once a day",
+    )
+    s.add_argument("--today", action="store_true", help="with --sync: write today's page again now")
+    s.add_argument("--rebuild", action="store_true", help="with --sync: rebuild the lists now")
+    s.add_argument("--no-import", action="store_true", help="with --sync: take nothing in this run")
+    s.add_argument("--status", action="store_true", help="each manual source's progress")
 
 
 def windows_path(path: Path, mounts: Path = Path("/proc/mounts")) -> str | None:
@@ -1511,6 +1544,13 @@ def cmd_manual(args: argparse.Namespace, out: TextIO) -> int:
     """``wsp collections manual SOURCE``: what to download by hand and where to save it; ``--import``
     then takes those files in (checked, screened, planned) and ingests them. For a source the library
     may not crawl (its robots.txt disallows us) but whose files a person may download: GeoNames, GEBCO."""
+    if getattr(args, "sync", False) or getattr(args, "status", False):
+        from wsp_cli import manual
+
+        return manual.status(args, out) if args.status else manual.cmd_sync(args, out)
+    if args.source is None:
+        print("error: name a source, or use --sync / --status", file=sys.stderr)
+        return EXIT_REFUSED
     lay = bootstrap.layout(args.config_dir)
     cfg = bootstrap.load(lay)
     specs = {s.id: s for s in bootstrap.load_sources(cfg, lay)}

@@ -2065,6 +2065,16 @@ def git_repo(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
         )
 
 
+def stored_candidates(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
+    """Candidates recorded earlier (``items``, :meth:`Candidate.to_json`): the files the owner downloaded
+    by hand (``wsp collections manual``), whose listing the library may not read. No request is made,
+    and the listing is a sample: what it lacks is never inferred withdrawn."""
+    items = cast(list[Mapping[str, Any]], cfg.get("items") or [])
+    env.sampled.append(f"candidates: {len(items)} file(s) downloaded by hand, not the issuer's listing")
+    for raw in items:
+        yield Candidate.from_json(raw)
+
+
 def fixed_list(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
     items = cast(list[Json], cfg.get("items") or ([{"url": cfg["url"]}] if cfg.get("url") else []))
     for it in items:
@@ -2184,6 +2194,7 @@ DISCOVERERS: dict[str, Discoverer] = {
     "sitemap": sitemap,
     "document": fixed_list,
     "csv": csv_list,
+    "candidates": stored_candidates,
     "latest-dated": latest_dated,
 }
 
