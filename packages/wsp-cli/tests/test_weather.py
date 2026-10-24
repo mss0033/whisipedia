@@ -498,3 +498,35 @@ def test_an_archive_ingest_queues_for_the_lock_then_runs_under_it(tmp_path: Path
             ["/bin/sh", "-c", w.QUEUED_INGEST, str(lock), "1", *probe], capture_output=True, text=True
         )
     assert busy.returncode == 3  # as a busy lock reads: retried by the next pull
+
+
+def test_a_copy_the_nas_refuses_for_a_moment_is_started_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-10-24: "BlockingIOError: Resource temporarily unavailable" from the NAS failed a whole ERA5
+    year at its last step; the copy is tried again after a pause."""
+    import hashlib
+
+    from wsp_cli import weather
+
+    src = tmp_path / "tiles.npz"
+    src.write_bytes(b"era5 tiles " * 100)
+    real_open = Path.open
+    refusals = [2]
+
+    def flaky_open(self: Path, *args: Any, **kwargs: Any) -> Any:
+        if self.name.endswith(".partial") and refusals[0] > 0:
+            refusals[0] -= 1
+            raise BlockingIOError(11, "Resource temporarily unavailable")
+        return real_open(self, *args, **kwargs)  # pyright: ignore[reportUnknownVariableType]
+
+    monkeypatch.setattr(Path, "open", flaky_open)
+    pauses: list[float] = []
+    sha = weather.copy_hashed(src, tmp_path / "out.npz", None, sleep=pauses.append)
+    assert sha == hashlib.sha256(src.read_bytes()).hexdigest()
+    assert (tmp_path / "out.npz").read_bytes() == src.read_bytes()
+    assert pauses == [2.0, 4.0]
+
+    refusals[0] = 99  # refused every time: the error stands
+    with pytest.raises(BlockingIOError):
+        weather.copy_hashed(src, tmp_path / "again.npz", None, sleep=pauses.append)

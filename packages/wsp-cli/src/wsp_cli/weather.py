@@ -454,7 +454,26 @@ def archive_version(run: str) -> str:
     return f"{run[:4]}-{run[4:6]}-{run[6:8]}.r{run}"
 
 
-def copy_hashed(src: Path, dest: Path, pace: Callable[[int], None] | None) -> str:
+COPY_TRIES = 5  # the NAS answers EAGAIN for a moment when it is busy
+
+
+def copy_hashed(
+    src: Path, dest: Path, pace: Callable[[int], None] | None, *, sleep: Callable[[float], None] = time.sleep
+) -> str:
+    """Copy ``src`` to ``dest`` (through ``dest.partial``) and return its SHA-256. A copy the NAS
+    refuses for a moment (EAGAIN: "Resource temporarily unavailable", which failed a whole ERA5
+    year on 2026-10-24) is started again, a few times, after a growing pause."""
+    for attempt in range(1, COPY_TRIES + 1):
+        try:
+            return _copy_hashed_once(src, dest, pace)
+        except BlockingIOError:
+            if attempt == COPY_TRIES:
+                raise
+            sleep(2.0**attempt)
+    raise AssertionError("unreachable")
+
+
+def _copy_hashed_once(src: Path, dest: Path, pace: Callable[[int], None] | None) -> str:
     tmp = dest.with_name(dest.name + ".partial")
     digest = hashlib.sha256()
     with src.open("rb") as fin, tmp.open("wb") as fout:
