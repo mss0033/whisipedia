@@ -741,7 +741,9 @@ export function replaceBrokenImages(root: ParentNode): void {
         try {
           const res = await fetch(url, { cache: 'no-store' });
           if (res.status === 503) wait = Number(res.headers.get('Retry-After')) || 5;
-          else if (res.ok) wait = 1; // it came this time: the error was the moment, not the file
+          // An empty answer is the archive's own empty file (MDWiki's rabies chart is 0 bytes in its
+          // ZIM, 2026-10-24 audit): no picture to wait for.
+          else if (res.ok && res.headers.get('Content-Length') !== '0') wait = 1; // it came this time
         } catch {
           wait = 0; // the library itself is gone: nothing to wait for
         }

@@ -344,3 +344,31 @@ describe('a page heading with its own id', () => {
     expect(root.querySelector('#doc-main')).not.toBeNull();
   });
 });
+
+describe('an image the archive holds as an empty file (2026-10-24 audit: MDWiki)', () => {
+  it('becomes the placeholder at once, without asking again', async () => {
+    const { replaceBrokenImages } = await import('../src/core/links.ts');
+    let asked = 0;
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () => {
+      asked += 1;
+      return new Response(new Uint8Array(0), {
+        status: 200,
+        headers: { 'Content-Type': 'image/png', 'Content-Length': '0' },
+      });
+    }) as typeof fetch;
+    try {
+      const div = document.createElement('div');
+      div.innerHTML = '<img src="/v1/assets/mdwiki/2025-11/x/rabies.png" alt="Rabies incidence">';
+      document.body.append(div);
+      replaceBrokenImages(div);
+      div.querySelector('img')?.dispatchEvent(new Event('error'));
+      await new Promise((r) => setTimeout(r, 50));
+      expect(div.querySelector('.broken-image')?.textContent).toBe('[IMAGE: Rabies incidence]');
+      expect(asked).toBe(1);
+      div.remove();
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+});
