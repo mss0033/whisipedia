@@ -960,20 +960,57 @@ sources:
     publisher: Food and Agriculture Organization of the United Nations
     domain: [preparedness, agriculture]
     tier: T2
-    status: paused  # robots.txt disallows /server/api/* (search, items) and /server/oai/*, Crawl-delay 10 (found 2026-10-21); a sitemap + item-page discovery is to replace dspace7 here
+    status: candidate
     license: LicenseRef-per-item
     legal_basis: open-license
-    access: {adapter: oai-pmh, oai_endpoint: "https://openknowledge.fao.org/server/oai/request", filter: doc-collection}
+    access:
+      adapter: doc-collection
+      issuer: Food and Agriculture Organization of the United Nations
+      key_prefix: fao
+      origins: [openknowledge.fao.org]
+      # robots.txt (DSpace 7's stock one, read 2026-10-24) disallows /server/api/* (search, the item API),
+      # /server/oai/*, /search and /browse, with Crawl-delay: 10; it allows the sitemaps, the item pages
+      # and the bitstream content endpoint, which is all dspace-sitemap reads (2026-10-21 pause lifted).
+      # Item pages render their record server-side (DSpace 7.2.1), dc.rights.license per item. Four
+      # sitemaps, ~190,000 items; the handle names the language (ca8818en, x5328e: English), so only
+      # English items are read: ~95,000 pages, five runs of max_items for the first pass.
+      discovery:
+        - kind: dspace-sitemap
+          base: "https://openknowledge.fao.org"
+          match: "/handle/20\\.500\\.14283/[a-z]+\\d+(?:en|e)$"
+          max_items: 20000  # item pages a run: 2.3 days at the 10 s crawl delay
+          topics:
+            - "\"food security\""
+            - "\"crop production\""
+            - "\"plant protection\""
+            - "\"integrated pest management\""
+            - "\"post-harvest\""
+            - "\"food preservation\""
+            - "\"food processing\""
+            - "\"seed production\""
+            - "\"soil conservation\""
+            - "\"water harvesting\""
+            - "irrigation"
+            - "agroforestry"
+            - "\"home gardens\""
+            - "aquaculture"
+            - "\"small-scale fisheries\""
+            - "\"fishing gear\""
+            - "\"fish processing\""
+            - "\"animal health\""
+            - "\"animal production\""
+            - "\"emergency\" agriculture"
+      filter: {allow_all: true, allow_image_only: true, rules: registry/filters/fao-knowledge-repository.yaml}  # older documents are scans
     update: {cadence: P3M, strategy: base-plus-incremental}
     size: {bytes: 200e9, measured: false, as_of: 2026-10-10}
-    notes: Score 3.9. CC BY 4.0 since January 2025; older items mostly CC BY-NC-SA 3.0 IGO. Licence read per item.
+    notes: Score 3.9. CC BY 4.0 since January 2025; older items mostly CC BY-NC-SA 3.0 IGO. Licence read per item. Bytes are for the whole repository; the English topical subset is a fraction of it.
 
   - id: who-iris
     name: WHO IRIS (water, sanitation, emergency and clinical guidance subsets)
     publisher: World Health Organization
     domain: [preparedness, medicine, water]
     tier: T1
-    status: paused  # robots.txt disallows /server/api/* (search, items) and /server/oai/*, Crawl-delay 10 (found 2026-10-21); a sitemap + item-page discovery is to replace dspace7 here
+    status: candidate
     license: CC-BY-NC-SA-3.0-IGO
     legal_basis: open-license
     access:
@@ -982,11 +1019,17 @@ sources:
       key_prefix: who
       origins: [iris.who.int]
       oai_endpoint: "https://iris.who.int/server/oai/request"
+      # robots.txt (DSpace 7's stock one, read 2026-10-24) disallows /server/api/* (search, the item API),
+      # /server/oai/*, /search and /browse, with Crawl-delay: 10; it allows the sitemaps, the item pages
+      # and the bitstream content endpoint, which is all dspace-sitemap reads (2026-10-21 pause lifted).
+      # Six sitemaps, ~277,000 items: a first pass is ~32 days of item pages at 10 s, fourteen runs of
+      # max_items; later runs read only new items and items whose sitemap date moved. The topics are
+      # the old search queries, matched on each item's metadata (the search also read full texts).
       discovery:
-        - kind: api
-          flavor: dspace7
+        - kind: dspace-sitemap
           base: "https://iris.who.int"
-          queries:
+          max_items: 20000  # item pages a run: 2.3 days at the 10 s crawl delay
+          topics:
             - "\"guidelines for drinking-water quality\""
             - "\"household water treatment\""
             - "\"emergency sanitation\""
@@ -1385,7 +1428,7 @@ sources:
     publisher: Naval Postgraduate School
     domain: [defense, science]
     tier: T2
-    status: paused  # robots.txt disallows /server/api/* (search, items) and /server/oai/*, Crawl-delay 10 (found 2026-10-21); a sitemap + item-page discovery is to replace dspace7 here
+    status: paused  # robots.txt disallows the dspace7 search (2026-10-21); dspace-sitemap replaces it, but Calhoun's item pages are not server-rendered (an empty <ds-app> shell, no metadata, 2026-10-24), so nothing can be selected yet
     license: LicenseRef-per-item
     legal_basis: public-domain
     access:
@@ -1394,14 +1437,20 @@ sources:
       key_prefix: nps
       origins: [calhoun.nps.edu]
       oai_endpoint: "https://calhoun.nps.edu/server/oai/request"
-      # DSpace 7 search (the OAI feed has no subject query); the research doc §3.3 subjects. Only items
-      # whose rights say "Approved for public release; distribution is unlimited" pass the gate.
+      # robots.txt (DSpace 7's stock one, read 2026-10-24) disallows /server/api/* (search, the item API),
+      # /server/oai/*, /search and /browse, with Crawl-delay: 10; it allows the sitemaps, the item pages
+      # and the bitstream content endpoint, which is all dspace-sitemap reads (2026-10-21 pause lifted).
+      # Two sitemaps, 72,213 publications (/entities/publication/). Calhoun answered every item page
+      # with a client-side shell on 2026-10-24: the discovery stops after ten such pages and the
+      # listing is incomplete, so nothing is fetched until the pages render again. The topics are the
+      # research doc §3.3 subjects (the old search queries). Only items whose rights or front matter
+      # say "Approved for public release; distribution is unlimited" pass the gate.
       discovery:
-        - kind: api
-          flavor: dspace7
+        - kind: dspace-sitemap
           base: "https://calhoun.nps.edu"
           cover_page: true  # Calhoun serves each PDF with its citation cover page added
-          queries:
+          max_items: 20000  # item pages a run: 2.3 days at the 10 s crawl delay
+          topics:
             - "\"mesh network\""
             - "\"wireless sensor network\""
             - "\"software defined radio\""

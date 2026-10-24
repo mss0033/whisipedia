@@ -3,6 +3,15 @@
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Added: DSpace repositories through their sitemaps (2026-10-24)
+* `dspace-sitemap` discovery: a DSpace 7 repository through what its robots.txt allows (sitemaps,
+  server-rendered item pages, the bitstream content endpoint), with `topics` (the old search queries)
+  matched on item metadata, `max_items` item pages a run, and every page read kept in the source's
+  workdir so later runs read only new and changed items. Keys and URLs are the `dspace7` flavor's, so
+  held documents are not fetched again. `who-iris` and `fao-knowledge-repository` (now a
+  doc-collection, English items on agriculture, fisheries and food security) are candidates again;
+  `nps-calhoun` stays paused: its item pages are empty client-side shells. Runbook: "DSpace 7
+  repositories through their sitemaps".
 ### Added: the first sources of the 2026-10-23 research, and FTP for NCBI (2026-10-24)
 * New sources (owner approval D20): `mit-ocw-stem` (984 more courses), `nist-technical-series`
   (32,661 DOIs under 10.6028), `usda-fooddata-central`, `govinfo-collections` (23 GPO collections,

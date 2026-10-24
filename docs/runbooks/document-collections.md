@@ -181,6 +181,49 @@ Limits:
 * NCBI's server refuses `AUTH TLS`. The transfer is unencrypted, and the MD5 sidecars come over the same
   channel: they catch corruption, but not a tampering man in the middle.
 
+## DSpace 7 repositories through their sitemaps (`dspace-sitemap`)
+
+WHO IRIS, NPS Calhoun and the FAO Knowledge Repository run DSpace 7. Its stock robots.txt (read
+2026-10-24 on all three) disallows the REST API (`/server/api/*`, search included), OAI-PMH
+(`/server/oai/*`), `/search` and `/browse`, with `Crawl-delay: 10`; it allows the sitemaps, the item
+pages (`/items/<uuid>`, `/entities/publication/<uuid>`, `/handle/...`) and the bitstream content
+endpoint (`Allow: /server/api/core/bitstreams`). The `dspace-sitemap` discovery reads only those:
+
+1. `<base>/sitemap_index.xml` and every sitemap it names: the item pages with their `<lastmod>`
+   (`match` narrows them first: FAO's handle ends in the language, `ca8818en`).
+2. Each item page. It is rendered on the server: the Highwire `citation_*` tags (title, date,
+   language, keywords, one `citation_pdf_url`; no rights, no Dublin Core tags) and the REST answers
+   the page was built from (`<script id="dspace-angular-state">`): the item's whole metadata record
+   and its ORIGINAL bundle's files in order with sizes. Keys and URLs are those the old `dspace7`
+   search made (`who:10665-102539`, `-1` for the second file; the content endpoint), so documents
+   already held are recognised and not fetched again.
+3. `topics` (the old search queries) select items on their title, subjects, abstract, series and
+   descriptions; the search also matched full texts, so a topic now selects fewer items.
+
+**Request budget.** Every item page costs a request at 10 s, and which items are on topic is only on
+the page. A run reads at most `max_items` item pages (20,000 in the registry: 2.3 days), newest
+`<lastmod>` first, and keeps every page it read in `<workdir>/<source>/dspace-items-*.sqlite`
+(committed every 20 pages, so a killed run keeps its work). Later runs read only pages not read yet
+and pages whose sitemap date moved; a page is read again after a year regardless. First passes:
+
+| source | items in the sitemaps | pages read | first pass | runs of 20,000 |
+|---|---|---|---|---|
+| who-iris | ~277,000 (6 sitemaps) | all | ~32 days | 14 |
+| fao-knowledge-repository | ~190,000 (4 sitemaps) | English only, ~95,000 | ~11 days | 5 |
+| nps-calhoun | ~72,000 publications (2 sitemaps) | all | ~8.4 days | 4 |
+
+A run that leaves pages unread is a *sample*: what it found is fetched, and nothing is inferred
+withdrawn. A topical source's listing is always a sample (an item left out by `topics` is still
+listed upstream), so held documents are never labelled withdrawn because a topic stopped matching.
+A dry run (`--max-pages N`) reads N sitemaps and 5×N item pages, and keeps nothing.
+
+Answers that are not failures: a page whose item request was refused (WHO lists items edited the day
+before whose request answers 401) and a page that is gone (404) are remembered until their sitemap date
+moves. Failures: a page without its item record. After ten failures with fewer successes the run
+stops reading and the listing is incomplete, so nothing is fetched: **NPS Calhoun answers every item
+page with an empty client-side shell (2026-10-24)**, so `nps-calhoun` stays paused until its pages
+render on the server again (`wsp collections dry-run --source nps-calhoun --max-pages 1` shows it).
+
 ## When an issuer is blocked (403)
 
 Never change the User-Agent or retry around a WAF. Record the official alternative (GovInfo, an
