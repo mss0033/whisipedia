@@ -10,10 +10,10 @@ import re
 from urllib.parse import unquote
 
 # Documents, and the data files of data sources (filter data_files): a name the pattern misses gets
-# ".pdf" and fails the PDF check (GHCN-Daily's .tar.gz, 2026-10-20).
+# ".pdf" and fails the PDF check (GHCN-Daily's .tar.gz, 2026-10-20; NARA's .jsonl, 2026-10-24).
 _EXT_RE = re.compile(
-    r"\.(pdf|epub|html?|txt|docx?|xml|json|zip|tiff?|jpe?g|png|bundle"
-    r"|gz|tgz|bz2|xz|zst|tar|7z|pbf|npz|nc|grib2|csv|tsv)$",
+    r"\.(pdf|epub|html?|txt|docx?|xml|json|jsonl|ndjson|zip|tiff?|jpe?g|png|bundle"
+    r"|gz|tgz|bz2|xz|zst|tar|7z|pbf|npz|nc|grib2|csv|tsv|sdf|obo|owl|dat|fasta|cif|sql|sqlite)$",
     re.IGNORECASE,
 )
 _PCT_RE = re.compile(r"%[0-9A-Fa-f]{2}")

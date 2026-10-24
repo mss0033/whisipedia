@@ -1795,3 +1795,16 @@ def test_nass_quick_stats_keeps_the_newest_file_of_each_dated_series() -> None:
     ]
     keys = sorted(c.key for c in index_page(cfg, env))
     assert keys == ["nass:ANIMALS_PRODUCTS", "nass:CENSUS-2022", "nass:CROPS", "nass:README"]
+
+
+def test_data_files_keep_their_own_extension() -> None:
+    """NARA's catalogue is JSON lines: named .pdf by default, every file failed the PDF check (2026-10-24)."""
+    from wsp_adapters.doccollection.model import extension_of
+
+    for url, ext in [
+        ("https://b.s3.amazonaws.com/descriptions/rg_95-1.jsonl", ".jsonl"),
+        ("https://ftp.ebi.ac.uk/pub/chebi/chebi.obo", ".obo"),
+        ("https://ftp.ncbi.nlm.nih.gov/pubchem/Compound_000000001_000500000.sdf.gz", ".gz"),
+        ("https://e.org/report", ".pdf"),
+    ]:
+        assert extension_of(url) == ext
