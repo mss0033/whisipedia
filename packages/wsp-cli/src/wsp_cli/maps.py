@@ -37,6 +37,7 @@ from typing import Any, TextIO, cast
 
 from wsp_adapters.maptiles import Cut, MapConfigError, MapPart, check_cut, map_parts, map_source
 from wsp_cli import bootstrap
+from wsp_cli.nasretry import retrying
 from wsp_core.errors import FetchError
 from wsp_core.gazetteer import Place, place_rank, write_gazetteer
 from wsp_core.model import Checksum, RemoteFile, SourceSpec
@@ -133,7 +134,12 @@ def reusable_cut(local: Path, cut: Cut) -> bool:
 
 
 def copy_hashed(src: Path, dest: Path, pace: Callable[[int], None] | None) -> str:
-    """Copy ``src`` to ``dest`` (via ``dest.partial``, renamed when whole); its SHA-256."""
+    """Copy ``src`` to ``dest`` (via ``dest.partial``, renamed when whole); its SHA-256. Started again
+    when the NAS drops the connection for a moment (a part's fsync, 2026-10-24: :mod:`wsp_cli.nasretry`)."""
+    return retrying(f"copy {src.name}", lambda: _copy_hashed_once(src, dest, pace))
+
+
+def _copy_hashed_once(src: Path, dest: Path, pace: Callable[[int], None] | None) -> str:
     tmp = dest.with_name(dest.name + ".partial")
     digest = hashlib.sha256()
     with src.open("rb") as fin, tmp.open("wb") as fout:

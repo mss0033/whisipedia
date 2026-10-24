@@ -43,6 +43,7 @@ import numpy as np
 
 from wsp_api import weatherdata as wd
 from wsp_cli import bootstrap, locks
+from wsp_cli.nasretry import retrying
 from wsp_core.errors import FetchError, NotFoundError
 
 EXIT_OK, EXIT_REFUSED, EXIT_FAILED = 0, 2, 6
@@ -454,23 +455,12 @@ def archive_version(run: str) -> str:
     return f"{run[:4]}-{run[4:6]}-{run[6:8]}.r{run}"
 
 
-COPY_TRIES = 5  # the NAS answers EAGAIN for a moment when it is busy
-
-
 def copy_hashed(
     src: Path, dest: Path, pace: Callable[[int], None] | None, *, sleep: Callable[[float], None] = time.sleep
 ) -> str:
-    """Copy ``src`` to ``dest`` (through ``dest.partial``) and return its SHA-256. A copy the NAS
-    refuses for a moment (EAGAIN: "Resource temporarily unavailable", which failed a whole ERA5
-    year on 2026-10-24) is started again, a few times, after a growing pause."""
-    for attempt in range(1, COPY_TRIES + 1):
-        try:
-            return _copy_hashed_once(src, dest, pace)
-        except BlockingIOError:
-            if attempt == COPY_TRIES:
-                raise
-            sleep(2.0**attempt)
-    raise AssertionError("unreachable")
+    """Copy ``src`` to ``dest`` (through ``dest.partial``) and return its SHA-256, started again when the
+    NAS refuses it for a moment (:mod:`wsp_cli.nasretry`: an ERA5 year failed so on 2026-10-24)."""
+    return retrying(f"copy {src.name}", lambda: _copy_hashed_once(src, dest, pace), sleep=sleep)
 
 
 def _copy_hashed_once(src: Path, dest: Path, pace: Callable[[int], None] | None) -> str:
