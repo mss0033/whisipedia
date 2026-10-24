@@ -1,33 +1,60 @@
 # Downloading by hand what the library may not crawl
 
-Some hosts disallow crawlers in their robots.txt, and the library honours that strictly (owner
-decision 2026-10-21): it never fetches from them, not even through another host's redirect. A
-person may still download their public files with a browser. For a source that is a short, fixed
-list of files, that takes three steps, and the library then makes no request of its own.
+Some hosts disallow crawlers in their robots.txt, and some answer a plain client with a bot wall.
+The library honours both strictly (owner decision 2026-10-21): it never fetches from them, not even
+through another host's redirect. A person may still download their public files with a browser, and
+the owner does, about ten files a day per source (owner request 2026-10-24). The library makes no
+request of those hosts at any step: its lists come from hosts that allow it, from file-name patterns,
+from curated lists, or from listing pages the owner saved.
 
-## The three steps
+## Every day
 
-1. In a WSL terminal: `wsp collections manual geonames`. It prints the links to download and the
-   folder to save them in (a Windows path, `\\192.168.1.169\Bellerophon\whisipedia\_incoming\_manual\geonames`,
-   which a browser's Save dialog takes as it is).
-2. Open each link in the browser and save the file into that folder, keeping its name.
-3. `wsp collections manual geonames --import`. Each file is checked (a zip must read whole: every
-   member's CRC), screened like any download, planned, and ingested; the folder is emptied as files
-   are taken. A file still missing is named with its link: download it and run step 3 again.
+1. Open `Z:\whisipedia\_incoming\_manual\TODAY.html` (also `TODAY.txt`). It lists, per source, up
+   to ten links and the exact name to save each one under. Links offered before and not received
+   come first. A listing page that is needed first is listed as such ("save the page into `_listing`
+   as ...": Ctrl+S, "Webpage, HTML only").
+2. Open each link and save the file into that source's folder,
+   `Z:\whisipedia\_incoming\_manual\<source>\`, under the name shown. For a landing page ("open the
+   page and save its document"), save the PDF it offers under the name shown.
+3. Nothing else. Within the hour, `whisipedia-manual.timer` takes the files in: each is checked (an
+   archive must read whole, with every zip, gzip and bzip2 CRC; a PDF must be one; an HTML page saved
+   in a file's place is refused), screened like any download, and ingested. A file that fails its
+   check is renamed `<name>.bad` and offered again the next day, with the reason on the page.
 
-Nothing is fetched by the library in step 3 (its fetcher refuses every request).
+`wsp collections manual --status` shows each source's progress. `--sync --today` writes the page
+again now; `--sync --rebuild` remakes the lists.
 
-## Sources
+## How each list is made
 
-| Source | Why by hand | Files |
+`access.manual` in the registry (wsp_cli.manual):
+
+| kind | the list comes from | used by |
 |---|---|---|
-| `geonames` | download.geonames.org: robots.txt `Disallow: /` | 9 (about 1 GB): the gazetteer, alternate names, hierarchy, admin and country codes, readme |
-| `gebco-grid` | BODC's link redirects to dap.ceda.ac.uk: robots.txt `Disallow: /` | 1 (7.5 GB, the yearly grid; 2024 is in the library) |
+| `pubmed` | the update files after the newest sealed `pubmedYY-uNNNN` generation | `pubmed` |
+| `saved` | the source's own discovery, reading listing pages the owner saved into `_listing/` | `pubchem`, `army-pubs-public` |
+| `discovery` | the source's own discovery, on hosts that allow us | `wbdg-criteria` (wbdg.org), `geonames`, `gebco-grid` |
+| `list` | a curated list in the registry | curated sources |
 
-Not offered: sources whose documents are many (Army publications, about 30 GB of separate PDFs;
-WBDG's criteria, hundreds of PDFs from a disallowed files bucket), and the DSpace repositories (WHO
-IRIS, NPS Calhoun, FAO), whose robots.txt disallows only their API: those are to be read through
-their sitemaps instead. `wsp collections manual` refuses a source that is not a fixed list of files.
+`first` puts the most valuable items first, for example PubChem's chemical safety summaries
+(`CID-LCSS.xml.gz`) and WBDG's Unified Facilities Criteria. `again_days` offers a file again when its
+issuer refreshes it: GeoNames every 90 days, PubChem and GEBCO yearly.
+
+A document collection's received files go through `wsp collections fetch` with them standing for the
+listing (`kind: candidates`, a sample, so nothing held is inferred withdrawn). PubMed's become a
+generation of the new update files, `pubmedYY-uNNNN`, in an unbroken run of numbers. A gap waits for
+the missing file.
+
+## Limits
+
+* NCBI's MD5 sidecars are not downloaded by hand: a PubMed or PubChem file is checked by its gzip
+  CRCs, and its SHA-256 recorded on arrival checks the copy into the vault, not the origin.
+* No browser extension or script may download the lists: that would be an automated client, which
+  is what these hosts refuse. The page is for a person.
+
+## The older one-shot form
+
+`wsp collections manual SOURCE` prints a fixed list's links and folder, and `--import` takes them in.
+It is kept for GeoNames and GEBCO, which also take part in the daily page.
 
 ## A download kept without a check
 
