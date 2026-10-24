@@ -54,4 +54,6 @@ answers 404 (no route) or 405.
   llama.cpp install step. The weights under `~/.cache/whisipedia/models/llm/` can be deleted.
 - Whisipedia Living (PLAN §11) is unaffected: it is a separate project whose models write an overlay,
   never the Navigator's pages.
-- Reintroducing generated text in the UI would need a new ADR and the owner's decision.
+- Reintroducing generated text in the UI would need a new ADR and the owner's decision. One such
+  exception: labelled machine translation of non-English documents, on the reader's request
+  ([ADR-0013](0013-labelled-machine-translation.md), owner decision D19, 2026-10-24).
