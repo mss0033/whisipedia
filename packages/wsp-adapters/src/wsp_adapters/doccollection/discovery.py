@@ -1956,19 +1956,34 @@ def fixed_list(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
         )
 
 
+def _csv_date(text: str) -> str:
+    """A catalogue's date column: a bare year of any century (TCP's books are 1473-1800, which
+    ``iso_date`` does not take from running text), else the first date ``iso_date`` finds."""
+    text = text.strip()
+    return text if re.fullmatch(r"1[0-9]\d\d|20\d\d", text) else iso_date(text)
+
+
 def csv_list(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
     """A published CSV of documents (EveryCRSReport's reports.csv): ``url`` the CSV; ``base`` what its
     paths are relative to; columns named by ``key``, ``file`` (tried in order: ``[latestHTML,
-    latestPDF]``), ``title``, ``date``."""
+    latestPDF]``), ``title``, ``date``. ``url_template`` builds the URL from the row's columns where
+    the CSV names no file (``.../{TCP}/master/{TCP}.xml``); ``partition`` likewise names each row's
+    partition (``"{TCP[0]}"``, lower-cased): only that partition's rows are listed when it is fetched."""
     text = env.get_text(_s(cfg.get("url")))
     base = _s(cfg.get("base"))
     files = _strs(cfg.get("file"))
+    template = _s(cfg.get("url_template"))
+    part_template = _s(cfg.get("partition"))
     rows = list(csv.DictReader(io.StringIO(text)))
     env.totals["csv"] = len(rows)
     for row in rows:
-        path = next((row[c] for c in files if row.get(c)), "")
         key = (row.get(_s(cfg.get("key"))) or "").strip()
-        if not path or not key:
+        try:
+            path = template.format_map(row) if template else next((row[c] for c in files if row.get(c)), "")
+            part = part_template.format_map(row).lower() if part_template else ""
+        except (KeyError, IndexError):
+            continue  # a row without the columns the templates name
+        if not path or not key or (env.partition and part != env.partition):
             continue
         url = path if path.startswith("https://") else base.rstrip("/") + "/" + path.lstrip("/")
         yield Candidate(
@@ -1977,8 +1992,9 @@ def csv_list(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
             title=" ".join((row.get(_s(cfg.get("title"))) or key).split()),
             issuer=env.issuer,
             pub_number=key,
-            edition_date=iso_date(row.get(_s(cfg.get("date"))) or ""),
+            edition_date=_csv_date(row.get(_s(cfg.get("date"))) or ""),
             discovered_by="csv",
+            partition=part,
         )
 
 

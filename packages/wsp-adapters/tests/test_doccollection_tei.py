@@ -133,3 +133,25 @@ def test_kernel_translations_are_left_out(tmp_path: Path) -> None:
         z.writestr("Documentation/translations/zh_CN/admin-guide/cgroup-v2.rst", RST)
         z.writestr("kernel/cgroup/cgroup.c", "int x;")
     assert [d.key for d in read_snapshot(zpath, "rst-kernel")] == ["admin-guide/cgroup-v2"]
+
+
+TCP = """<TEI xmlns="http://www.tei-c.org/ns/1.0"><teiHeader><fileDesc><titleStmt>
+<title>The brides ornaments viz. fiue meditations</title><author>Aylett, Robert, 1583-1655?</author>
+</titleStmt><sourceDesc><biblFull><publicationStmt><pubPlace>London :</pubPlace><date>1625.</date>
+</publicationStmt></biblFull></sourceDesc></fileDesc></teiHeader>
+<text><front><div><head>TO THE READER</head><p>Gentle reader<note>A marginal note.</note>, behold.</p></div></front>
+<body><div><pb n="1"/><head>KNOWLEDGE</head><l>Of all the gifts</l><l>that heauen doth bestow,</l></div></body></text></TEI>"""
+
+
+def test_a_tcp_book_is_one_document_stored_under_its_key_or_published_name(tmp_path: Path) -> None:
+    stored = tmp_path / "tcp__A00002-1a2b3c4d.xml"  # the vault's name for the file
+    stored.write_text(TCP)
+    for name in (None, "A00002.xml"):
+        (doc,) = list(read_snapshot(stored, "tei-tcp", name))
+        assert doc.key == "A00002"
+        assert doc.title == "The brides ornaments viz. fiue meditations (Aylett, Robert, 1583-1655?, 1625)"
+        assert (
+            doc.text
+            == "TO THE READER\n\nGentle reader, behold.\n\nKNOWLEDGE\n\nOf all the gifts\n\nthat heauen doth bestow,"
+        )
+        assert doc.url == "https://github.com/textcreationpartnership/A00002"

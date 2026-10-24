@@ -4222,6 +4222,43 @@ sources:
     size: {bytes: 3.0e10, measured: false, as_of: '2026-10-24'}
     notes: "All UK legislation from 1267, with point-in-time revised versions maintained by The National Archives' editors. About 100,000-150,000 items; at the 5 s crawl delay a full pass takes 1-3 weeks, partition by partition (the uksi sitemap index alone names 18,214 final sitemaps). Open Government Licence v3.0. Owner approval D20 (2026-10-24)."
 
+  - id: text-creation-partnership
+    name: Text Creation Partnership - EEBO-TCP, ECCO-TCP and Evans-TCP (hand-keyed English books 1473-1800)
+    publisher: Text Creation Partnership (University of Michigan, Bodleian Libraries)
+    domain: [history, literature, religion, philosophy, science]
+    tier: T1
+    status: candidate
+    license: CC0-1.0
+    legal_basis: open-license
+    access:
+      adapter: doc-collection
+      rate: {requests_per_second: 2, concurrency: 2}
+      issuer: Text Creation Partnership
+      key_prefix: tcp
+      # The partnership's catalogue (Texts/TCP.csv, 61,315 rows) names every text; each is one TEI file
+      # in its own repository (A00001/A00001.xml), read raw. One partition per series letter: a (EEBO
+      # phase I and II), b (EEBO), k (ECCO), n (Evans). Every file's header carries the CC0 waiver.
+      reader: tei-tcp
+      partitioned: true
+      origins: [raw.githubusercontent.com]
+      discovery:
+        - kind: csv
+          url: "https://raw.githubusercontent.com/textcreationpartnership/Texts/master/TCP.csv"
+          key: TCP
+          title: Title
+          date: Date
+          url_template: "https://raw.githubusercontent.com/textcreationpartnership/{TCP}/master/{TCP}.xml"
+          partition: "{TCP[0]}"
+      # B02024: Charles I's proclamation of 1643 pardoning the Office of the Ordnance's "gunners,
+      # armourers, gunsmiths, carpenters, wheele-wrights" and summoning them to Oxford; a historical
+      # summons, not gunsmithing (its title matched the deny core, 2026-10-24).
+      filter:
+        allow_all: true
+        override_safety: {B02024: "1643 royal proclamation pardoning and summoning Ordnance artificers; history, no gunsmithing content (2026-10-24, under D18; owner may veto)"}
+    update: {cadence: P1Y, strategy: snapshot-retention}
+    size: {bytes: 1.5e10, measured: false, as_of: '2026-10-24'}
+    notes: "61,315 texts (TCP.csv, 2026-10-24): A 48,941, B 4,889 (EEBO), K 2,473 (ECCO), N 5,012 (Evans, early America). The catalogue's 'Restricted' status (28,462 rows) predates the 2020 release of EEBO-TCP phase II: sampled 'Restricted' files are public and carry the CC0 waiver. The early modern spelling is kept as keyed (fiue, heauen). Owner approval D20 (2026-10-24)."
+
   - id: natural-earth
     name: Natural Earth vector data (all scales)
     publisher: Natural Earth (NACIS)

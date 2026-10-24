@@ -1599,3 +1599,24 @@ def test_a_sitemap_index_keyed_by_path_in_partitions_survives_one_unreadable_sit
     assert any("sm-gone.xml" in n for n in env.notes)  # not found: noted, the rest still listed
     other = env_for(routes, origins=("leg.gov",), partition="uksi")
     assert list(discover_all([cfg], other)) == []
+
+
+def test_a_csv_catalogue_builds_urls_and_partitions_from_its_columns() -> None:
+    rows = b'"TCP","Title","Date"\n"A00002","The brides ornaments","1625"\n"N00001","An almanack","1639"\n'
+    cfg = {
+        "kind": "csv",
+        "url": "https://raw.g.com/tcp/TCP.csv",
+        "key": "TCP",
+        "title": "Title",
+        "date": "Date",
+        "url_template": "https://raw.g.com/tcp/{TCP}/master/{TCP}.xml",
+        "partition": "{TCP[0]}",
+    }
+    env = env_for({"https://raw.g.com/tcp/TCP.csv": rows}, origins=("raw.g.com",))
+    got = [(c.key, c.url, c.partition, c.edition_date) for c in discover_all([cfg], env)]
+    assert got == [
+        ("t:A00002", "https://raw.g.com/tcp/A00002/master/A00002.xml", "a", "1625"),
+        ("t:N00001", "https://raw.g.com/tcp/N00001/master/N00001.xml", "n", "1639"),
+    ]
+    one = env_for({"https://raw.g.com/tcp/TCP.csv": rows}, origins=("raw.g.com",), partition="n")
+    assert [c.key for c in discover_all([cfg], one)] == ["t:N00001"]

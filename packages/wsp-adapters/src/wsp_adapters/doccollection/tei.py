@@ -14,6 +14,10 @@ A repository is fetched as a snapshot of its files (``git archive`` of the defau
   books is one document. Chapter numbers stay at the start of their paragraphs ("9. In the year...")
   so a citation such as "Appian, Civil Wars 1.9" can be followed in the text.
 
+* ``tei-tcp`` (the Text Creation Partnership's EEBO, ECCO and Evans texts, one TEI file per book,
+  ``A00001.xml``): the book is one document, titled "<title> (<author>, <year>)" from its header,
+  linked to the text's repository; front matter, body and back matter in order, notes left out.
+
 * ``rst-kernel`` (the Linux kernel's ``Documentation/``, reStructuredText): each page a document,
   native id its path below ``Documentation/`` without ``.rst``, linked to docs.kernel.org;
   translations (``Documentation/translations/``) left out.
@@ -210,6 +214,38 @@ def rst_page(data: bytes, stem: str) -> Iterator[TeiDoc]:
     yield TeiDoc(key=stem, title=title, text=text, url=f"https://docs.kernel.org/{stem}.html")
 
 
+# --- Text Creation Partnership ------------------------------------------------------------------
+
+_TCP_ID = re.compile(r"(?:^|[/_])([ABKN]\d{5})(?:-[0-9a-f]{8})?\.xml$")
+
+
+def tcp_text(xml: bytes, stem: str) -> Iterator[TeiDoc]:
+    """One TCP book (``<stem>.xml``)."""
+    root = ET.fromstring(xml)  # noqa: S314 - the Text Creation Partnership's own TEI
+    stmt = root.find(f"{TEI}teiHeader/{TEI}fileDesc/{TEI}titleStmt")
+    title = _flat(stmt.find(f"{TEI}title")) if stmt is not None else ""
+    author = _flat(stmt.find(f"{TEI}author")) if stmt is not None else ""
+    pub = root.find(f"{TEI}teiHeader/{TEI}fileDesc/{TEI}sourceDesc/{TEI}biblFull/{TEI}publicationStmt")
+    year = re.search(r"1[4-8]\d\d", _flat(pub.find(f"{TEI}date")) if pub is not None else "")
+    text_el = root.find(f"{TEI}text")
+    text = blocks(text_el) if text_el is not None else ""
+    if not text:
+        return
+    title = title if len(title) <= 200 else title[:200].rsplit(" ", 1)[0] + "..."
+    who = ", ".join(x for x in (author.rstrip("."), year.group(0) if year else "") if x)
+    yield TeiDoc(
+        key=stem,
+        title=f"{title or stem} ({who})" if who else title or stem,
+        text=text,
+        url=f"https://github.com/textcreationpartnership/{stem}",
+    )
+
+
+def _tcp_member(name: str) -> str | None:
+    m = _TCP_ID.search(name)
+    return m.group(1) if m else None
+
+
 def _kernel_member(name: str) -> str | None:
     m = re.fullmatch(r"(?:[^/]+/)?Documentation/([\w./+-]+)\.rst", name)
     return m.group(1) if m and "/translations/" not in f"/{m.group(1)}" else None
@@ -218,6 +254,7 @@ def _kernel_member(name: str) -> str | None:
 READERS: dict[str, tuple[Callable[[str], str | None], Callable[[bytes, str], Iterator[TeiDoc]]]] = {
     "tei-frus": (_frus_member, frus_volume),
     "tei-cts": (_cts_member, cts_work),
+    "tei-tcp": (_tcp_member, tcp_text),
     "rst-kernel": (_kernel_member, rst_page),
 }
 
