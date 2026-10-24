@@ -1685,3 +1685,54 @@ def test_s3_listing_lists_one_partition_by_a_prefix_template() -> None:
         ("t:rg_95-rg_95-2.jsonl", "rg_95", md5(b"{ }")),
     ]
     assert "prefix=descriptions%2Frecord-groups%2Frg_95%2F" in cast(Any, env.fetcher).requests[0]
+
+
+def _assist_page(doc_id: str, fsc: str, rows: list[tuple[str, str, str]], title: str = "A title") -> bytes:
+    trs = "".join(
+        f"<tr class='grid_item'><td><a href=\"javascript:spawnPDFWindow("
+        f"'./ImageRedirector.aspx?token={tok}.1',{tok});\">"
+        f"<img/></a></td><td>Revision</td><td>{dist}</td><td>{when}</td><td>9</td><td>1 KB</td></tr>"
+        for tok, dist, when in rows
+    )
+    return (
+        f'<table><tr id="trDocumentId"><td>Document ID:</td><td>&nbsp; {doc_id} &nbsp;</td></tr></table>'
+        f'<span id="general_titleLabel">{title}</span>'
+        '<span id="general_statusLabel"><font>Active</font></span>'
+        f'<span id="general_doc_dateLabel">18-MAY-2022</span><span id="general_fsc_codeLabel">{fsc}</span>'
+        '<span id="doc_categoryLabel">Military Standard</span>'
+        '<span id="scope_scope_descriptionLabel">Scope.</span>'
+        f'<table id="GVRevisionHistory"><tr><th>Media</th></tr>{trs}</table>'
+    ).encode()
+
+
+def test_dla_assist_takes_the_newest_distribution_a_image_and_skips_weapons_classes() -> None:
+    page = "https://quicksearch.dla.mil/qsDocDetails.aspx?ident_number="
+    routes = {
+        page + "1": _assist_page(
+            "MIL-STD-810", "ENVR", [("57", "A", "18-MAY-2022"), ("41", "A", "31-JAN-2019")]
+        ),
+        page + "2": _assist_page("MIL-DTL-48425", "1310", [("9", "A", "01-JAN-2001")]),  # FSC 13: ammunition
+        page + "3": _assist_page(
+            "MIL-HDBK-5", "1560", [("7", "D", "01-JAN-2001"), ("6", "A", "02-FEB-1998")]
+        ),
+        page + "4": _assist_page("STANAG-1", "-", [("5", "C", "01-JAN-2001")]),  # no Distribution A image
+        page + "5": b"<html>no document</html>",
+    }
+    cfg = {
+        "kind": "api",
+        "flavor": "dla-assist",
+        "start": 1,
+        "stop": 7,
+        "partition": "i00",
+        "skip_fsc_groups": [10, 11, 12, 13, 14],
+    }
+    env = env_for(routes, origins=("quicksearch.dla.mil",))
+    got = [(c.key, c.url, c.edition_date, c.subjects[0]) for c in discover_all([cfg], env)]
+    assert got == [
+        ("t:MIL-STD-810", "https://quicksearch.dla.mil/WMX/Default.aspx?token=57", "2022-05-18", "FSC ENVR"),
+        ("t:MIL-HDBK-5", "https://quicksearch.dla.mil/WMX/Default.aspx?token=6", "1998-02-02", "FSC 1560"),
+    ]
+    assert "dla-assist: 1 document(s) skipped: FSC group excluded" in env.notes
+    assert "dla-assist: 1 document(s) skipped: no Distribution A image" in env.notes
+    assert not env.incomplete
+    assert list(discover_all([cfg], env_for(routes, origins=("quicksearch.dla.mil",), partition="i01"))) == []

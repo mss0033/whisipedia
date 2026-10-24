@@ -1,0 +1,58 @@
+# Document-level rules for dla-assist (owner decision D18, 2026-10-24: "accept all that your own
+# ethics and policies will allow"; PLAN §13 deny core). Deny-first; the built-in safety lists apply on
+# top and cannot be switched off. The discoverer already leaves out FSC groups 10 (weapons), 11
+# (nuclear ordnance), 12 (fire control equipment), 13 (ammunition and explosives) and 14 (guided
+# missiles): these rules catch the same matter where a document's FSC is an area code (ENVR, SESS...)
+# or missing. General engineering standards and handbooks (environmental tests, EMI, reliability,
+# human engineering, materials, fasteners, welding, electronics, food, clothing) are in scope.
+deny_series_prefix:
+  - "MIL-STD-1316"   # fuze design safety
+  - "MIL-STD-1901"   # munition rocket and missile motor ignition system design safety
+  - "MIL-STD-1911"   # hand-emplaced ordnance design safety
+  - "MIL-STD-2105"   # hazard assessment tests for non-nuclear munitions
+  - "MIL-HDBK-1904"  # fuze design
+  - "MIL-DTL-45444"  # pyrotechnic ingredients and compositions
+deny_keywords:
+  - explosive
+  - explosives
+  - propellant
+  - propellants
+  - pyrotechnic
+  - pyrotechnics
+  - fuze
+  - fuzes
+  - fuzing
+  - warhead
+  - warheads
+  - ammunition
+  - detonator
+  - detonators
+  - detonating
+  - primer composition
+  - blasting cap
+  - demolition
+  - booby trap
+  - incendiary
+  - energetic material
+  - energetic materials
+  - nitrocellulose
+  - nitroglycerin
+  - TNT
+  - RDX
+  - HMX
+  - PETN
+  - black powder
+  - smokeless powder
+  - grenade
+  - landmine
+  - land mine
+  - projectile
+  - projectiles
+  - cartridge, caliber
+  - rocket motor
+  - chemical agent
+  - nerve agent
+  - blister agent
+review_keywords: []
+allow_documents: []
+deny_documents: []

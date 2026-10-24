@@ -1123,6 +1123,94 @@ def crossref(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
     env.listing_end("crossref", stopped=more, seen=seen, total=total)
 
 
+ASSIST = "https://quicksearch.dla.mil"
+_ASSIST_TOKEN = re.compile(r"ImageRedirector\.aspx\?token=(\d+)\.\d+")
+_ASSIST_DATE = re.compile(r"(\d{2})-([A-Z]{3})-(\d{4})")
+
+
+def _assist_date(text: str) -> str:
+    """``18-MAY-2022`` -> ``2022-05-18``."""
+    months = {m[:3].upper(): i for i, m in enumerate(_MONTHS, start=1)}
+    m = _ASSIST_DATE.search(text)
+    if not m or m.group(2) not in months:
+        return ""
+    return f"{m.group(3)}-{months[m.group(2)]:02d}-{m.group(1)}"
+
+
+def _css_text(tree: LexborHTMLParser, sel: str) -> str:
+    node = tree.css_first(sel)
+    return " ".join(node.text().split()) if node is not None else ""
+
+
+def dla_assist(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
+    """DLA ASSIST QuickSearch, the DoD standardization library (D18, 2026-10-24): every document detail
+    page of an ident-number range (``start`` to ``stop``; ``partition`` names the range), its newest
+    revision whose distribution statement is A. The site has no listing a GET can read (its searches
+    are ASP.NET postbacks); a detail page is ``qsDocDetails.aspx?ident_number=N`` and its image
+    ``WMX/Default.aspx?token=T`` redirects to the PDF.
+
+    ``skip_fsc_groups``: Federal Supply Classification groups left out by their first two digits
+    (10 weapons, 11 nuclear ordnance, 12 fire control, 13 ammunition and explosives, 14 guided
+    missiles); the deny core screens the titles of the rest."""
+    part = _s(cfg.get("partition"))
+    if part and env.partition and env.partition != part:
+        return
+    start, stop = int(cfg["start"]), int(cfg["stop"])
+    groups = {int(g) for g in cast(list[Any], cfg.get("skip_fsc_groups") or [])}
+    skipped: dict[str, int] = {}
+    pages, n = 0, start
+    while n < stop and pages < env.pages():
+        ident, n = n, n + 1
+        try:
+            html = env.get_text(f"{ASSIST}/qsDocDetails.aspx?ident_number={ident}")
+        except NotFoundError:
+            continue
+        pages += 1
+        tree = LexborHTMLParser(html)
+        row_id = tree.css_first("tr#trDocumentId")
+        cells = row_id.css("td") if row_id is not None else []
+        doc_id = " ".join(cells[1].text().split()) if len(cells) > 1 else ""
+        if not doc_id:
+            continue  # no document under this number
+        fsc = _css_text(tree, "span#general_fsc_codeLabel")
+        if fsc[:2].isdigit() and int(fsc[:2]) in groups:
+            skipped["FSC group excluded"] = skipped.get("FSC group excluded", 0) + 1
+            continue
+        chosen: tuple[str, str] | None = None
+        for row in tree.css("table#GVRevisionHistory tr"):
+            tds = row.css("td")
+            link = row.css_first("a")
+            m = _ASSIST_TOKEN.search(link.attributes.get("href") or "") if link is not None else None
+            if m and len(tds) >= 4 and " ".join(tds[2].text().split()) == "A":
+                chosen = (m.group(1), _assist_date(tds[3].text()))
+                break
+        if chosen is None:
+            skipped["no Distribution A image"] = skipped.get("no Distribution A image", 0) + 1
+            continue
+        title = _css_text(tree, "span#general_titleLabel")
+        yield Candidate(
+            key=make_key(env.prefix, doc_id),
+            url=f"{ASSIST}/WMX/Default.aspx?token={chosen[0]}",
+            title=f"{doc_id}: {title}" if title else doc_id,
+            issuer=env.issuer,
+            pub_number=doc_id,
+            edition_date=chosen[1] or _assist_date(_css_text(tree, "span#general_doc_dateLabel")),
+            subjects=tuple(
+                x for x in (f"FSC {fsc}" if fsc else "", _css_text(tree, "span#doc_categoryLabel")) if x
+            ),
+            abstract=_css_text(tree, "span#scope_scope_descriptionLabel")[:2000],
+            rights="Distribution Statement A",
+            status=_css_text(tree, "span#general_statusLabel").upper(),
+            landing_url=f"{ASSIST}/qsDocDetails.aspx?ident_number={ident}",
+            discovered_by="api:dla-assist",
+            partition=part,
+            extra={"suffix": ".pdf"},
+        )
+    for why, count in sorted(skipped.items()):
+        env.notes.append(f"dla-assist: {count} document(s) skipped: {why}")
+    env.listing_end("dla-assist", stopped=n < stop, seen=pages)
+
+
 def usgs_pubs(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
     """USGS Publications Warehouse API (``query`` / ``params``); document links only."""
     page, pages, seen, more = 1, 0, 0, True
@@ -1622,6 +1710,7 @@ _API: dict[str, Discoverer] = {
     "ntrs": ntrs,
     "osti": osti,
     "crossref": crossref,
+    "dla-assist": dla_assist,
     "usgs-pubs": usgs_pubs,
     "govuk-search": govuk_search,
     "dspace7": dspace7,
