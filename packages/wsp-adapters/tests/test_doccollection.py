@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
 
 import pytest
 from adapters_testkit import make_ctx, make_spec, pages_pdf
@@ -1450,3 +1451,46 @@ def test_data_files_keep_their_extension_and_a_list_item_can_name_one(tmp_path: 
     assert names[1].endswith(".zip")
     assert names[2].endswith(".pdf")  # a suffix that is not an extension is ignored
     assert names[3].endswith(".pbf")
+
+
+def test_crossref_lists_a_doi_prefix_by_cursor_and_skips_components_and_exclusions() -> None:
+    select = "DOI,type,title,resource,issued,container-title,subject"
+
+    def url(cursor: str) -> str:
+        query = urlencode({"rows": 1000, "cursor": cursor, "select": select})
+        return f"https://api.crossref.org/prefixes/10.6028/works?{query}"
+
+    def item(doi: str, kind: str = "report") -> dict[str, Any]:
+        return {
+            "DOI": doi,
+            "type": kind,
+            "title": [f"Title {doi}"],
+            "issued": {"date-parts": [[1952, 3]]},
+            "resource": {"primary": {"URL": f"http://nvlpubs.nist.gov/{doi}.pdf"}},
+        }
+
+    def page(nxt: str, *items: dict[str, Any]) -> bytes:
+        return json.dumps(
+            {"message": {"total-results": 4, "next-cursor": nxt, "items": list(items)}}
+        ).encode()
+
+    routes = {
+        url("*"): page("c2", item("10.6028/NBS.HB.46"), item("10.6028/nist.sp.800-53r5")),
+        url("c2"): page("c3", item("10.6028/x.1", "component")),
+        url("c3"): page("c4", item("10.6028/jres.045.022")),
+        url("c4"): page("c5"),
+    }
+    env = env_for(routes, origins=("nvlpubs.nist.gov",))
+    cfg = {
+        "kind": "api",
+        "flavor": "crossref",
+        "prefix": "10.6028",
+        "exclude": r"^10\.6028/nist\.(sp\.800|fips)",
+    }
+    got = list(discover_all([cfg], env))
+    assert [c.key for c in got] == ["t:nbs.hb.46", "t:jres.045.022"]
+    assert got[0].url == "https://nvlpubs.nist.gov/10.6028/NBS.HB.46.pdf"  # the deposit's spelling
+    assert got[0].edition_date == "1952-03"
+    assert got[0].pub_number == "doi:10.6028/nbs.hb.46"
+    assert "crossref: 2 work(s) skipped (components, excluded or without a file URL)" in env.notes
+    assert not env.incomplete  # 4 of the 4 stated records were read

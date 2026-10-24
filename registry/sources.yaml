@@ -4669,6 +4669,55 @@ sources:
     size: {bytes: 8.0e9, measured: false, as_of: '2026-10-21'}
     notes: "About 225 courses: Course 2 (mechanical: design and manufacturing, machine elements, thermofluids, controls), Course 3 (materials: solid-state chemistry, metallurgy, processing, failure, electronic materials), Course 16 (aero/astro structures and propulsion), and microfabrication and semiconductor manufacturing (6.152J, 6.774, 6.780, 6.012), the library's lithography and cleanroom process material. CC BY-NC-SA 4.0 (owner: non-commercial licences are fine)."
 
+  - id: mit-ocw-stem
+    name: MIT OpenCourseWare, science, mathematics, computing and the other engineering departments
+    publisher: Massachusetts Institute of Technology
+    domain: [education, science, mathematics, computing, engineering, medicine, textbooks]
+    tier: T1
+    status: candidate
+    license: CC-BY-NC-SA-4.0
+    legal_basis: open-license
+    access:
+      adapter: doc-collection
+      issuer: MIT OpenCourseWare
+      key_prefix: ocw
+      origins: [ocw.mit.edu]
+      # The same per-course download and reader as mit-ocw-engineering, for the departments it does not
+      # take; the courses it holds (6.152J, 6.774, 6.780, 6.012, 10.490) are left out here.
+      reader: ocw-course
+      discovery:
+        - kind: sitemap
+          url: "https://ocw.mit.edu/sitemap.xml"
+          match: "/courses/(?:(?:1|5|7|8|9|12|18|20|22|hst|es)-[^/]+|10-(?!490-)[^/]+|6-(?!152j-|774-|780-|012-)[^/]+|res-(?:1|2|3|5|6|7|8|9|10|12|16|18|20|22|env|es)-[^/]+)/sitemap\\.xml$"
+          rewrite: ["/sitemap\\.xml$", "/download/"]
+          detail_documents: "/courses/[^/]+/[^/]+\\.zip$"
+      filter: {allow_all: true}
+    update: {cadence: P1Y, strategy: snapshot-retention}
+    size: {bytes: 3.5e10, measured: false, as_of: '2026-10-24'}
+    notes: "984 courses (sitemap 2026-10-24): 6 EECS 210, 18 mathematics 167, 12 earth/atmospheric/planetary 97, 9 brain and cognitive 76, 8 physics 67, 1 civil/environmental 64, HST 44, 22 nuclear 42, 5 chemistry 30, 20 biological engineering 29, ES 27, 7 biology 26, 10 chemical engineering 21, and 84 RES items of those departments. Size estimated from mit-ocw-engineering (8 GB for ~225 courses). Owner approval D20 (2026-10-24); CC BY-NC-SA 4.0 (non-commercial licences are fine)."
+
+  - id: nist-technical-series
+    name: NIST and NBS technical publications since 1901 (Journal of Research, Handbooks, Monographs, Circulars, Technical Notes, NSRDS, IRs)
+    publisher: National Institute of Standards and Technology
+    domain: [science, engineering, standards, chemistry, physics, materials, measurement]
+    tier: T1
+    status: candidate
+    license: LicenseRef-US-Gov-PD
+    legal_basis: public-domain
+    access:
+      adapter: doc-collection
+      issuer: National Institute of Standards and Technology
+      key_prefix: nist
+      origins: [nvlpubs.nist.gov]
+      # NIST deposits every report and article under DOI prefix 10.6028 with the PDF's address on
+      # nvlpubs.nist.gov (whose directory listings answer 403). SP 800 and FIPS are nist-csrc's.
+      discovery:
+        - {kind: api, flavor: crossref, prefix: "10.6028", exclude: "^10\\.6028/nist\\.(?:sp\\.800|fips)"}
+      filter: {allow_all: true, public_issuer: true}
+    update: {cadence: P1Y, strategy: snapshot-retention}
+    size: {bytes: 1.5e11, measured: false, as_of: '2026-10-24'}
+    notes: "32,661 DOIs under 10.6028 (Crossref, 2026-10-23): 21,530 reports, 7,874 Journal of Research articles, 3,146 components (skipped: parts of other deposits). The national metrology lab's reference output: weights and measures (HB 44), critical data compilations (NSRDS-NBS), building science, fire research. Owner approval D20 (2026-10-24)."
+
   - id: doe-technical-standards
     name: DOE technical standards and handbooks in force (safety, chemical management, electrical, fire protection, natural phenomena)
     publisher: US Department of Energy, Office of Environment, Health, Safety and Security

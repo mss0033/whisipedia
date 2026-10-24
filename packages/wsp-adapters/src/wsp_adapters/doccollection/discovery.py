@@ -956,6 +956,70 @@ def osti(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
     env.listing_end("osti", stopped=more, seen=0)
 
 
+def _crossref_date(issued: object) -> str:
+    parts = cast(Json, issued).get("date-parts") if isinstance(issued, dict) else None
+    first = cast(list[object], parts)[0] if isinstance(parts, list) and parts else None
+    nums = [x for x in cast(list[object], first) if isinstance(x, int)] if isinstance(first, list) else []
+    if not nums or len(nums) != len(cast(list[object], first)):
+        return ""
+    return "-".join(f"{x:02d}" if i else f"{x:04d}" for i, x in enumerate(nums))
+
+
+def crossref(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
+    """Every work registered under a DOI ``prefix`` (Crossref REST API, cursor paging), where the
+    issuer's own deposit names the document's file (``resource.primary.URL``; NIST's 10.6028 points at
+    the PDF on nvlpubs.nist.gov). ``exclude`` (regex on the DOI) leaves out what another source holds;
+    ``component`` works (a part of another deposit) are skipped."""
+    prefix = _s(cfg.get("prefix"))
+    if not prefix:
+        raise DiscoveryError("crossref: no prefix")
+    exclude = re.compile(_s(cfg.get("exclude")), re.I) if _s(cfg.get("exclude")) else None
+    select = "DOI,type,title,resource,issued,container-title,subject"
+    cursor, pages, seen, total, more = "*", 0, 0, None, True
+    skipped = 0
+    while pages < env.pages():
+        query = urlencode({"rows": 1000, "cursor": cursor, "select": select})
+        body = env.get_json(f"https://api.crossref.org/prefixes/{quote(prefix)}/works?{query}")
+        pages += 1
+        msg = cast(Json, body.get("message") or {}) if isinstance(body, dict) else {}
+        if total is None and isinstance(msg.get("total-results"), int):
+            total = cast(int, msg["total-results"])
+        items = cast(list[Json], msg.get("items") or [])
+        if not items:
+            more = False
+            break
+        for it in items:
+            seen += 1
+            doi = _s(it.get("DOI")).lower()
+            resource = cast(Json, it.get("resource") or {})
+            url = _s(cast(Json, resource.get("primary") or {}).get("URL"))
+            if not doi or not url or it.get("type") == "component" or (exclude and exclude.search(doi)):
+                skipped += 1
+                continue
+            titles = _strs(it.get("title"))
+            container = _strs(it.get("container-title"))
+            yield Candidate(
+                key=make_key(env.prefix, doi.partition("/")[2]),
+                url=https(url, upgrade=True),
+                title=titles[0] if titles else doi,
+                issuer=env.issuer,
+                pub_number=f"doi:{doi}",
+                edition_date=_crossref_date(it.get("issued")),
+                subjects=_strs(it.get("subject")) + container[:1],
+                landing_url=f"https://doi.org/{doi}",
+                discovered_by="api:crossref",
+            )
+        nxt = _s(msg.get("next-cursor"))
+        if not nxt or nxt == cursor:
+            more = False
+            break
+        cursor = nxt
+    if skipped:
+        env.notes.append(f"crossref: {skipped} work(s) skipped (components, excluded or without a file URL)")
+    env.totals["crossref"] = total or 0
+    env.listing_end("crossref", stopped=more, seen=seen, total=total)
+
+
 def usgs_pubs(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
     """USGS Publications Warehouse API (``query`` / ``params``); document links only."""
     page, pages, seen, more = 1, 0, 0, True
@@ -1454,6 +1518,7 @@ _API: dict[str, Discoverer] = {
     "congress-crs": congress_crs,
     "ntrs": ntrs,
     "osti": osti,
+    "crossref": crossref,
     "usgs-pubs": usgs_pubs,
     "govuk-search": govuk_search,
     "dspace7": dspace7,
