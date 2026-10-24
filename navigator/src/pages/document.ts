@@ -1164,6 +1164,10 @@ export async function markUncaptured(
     }
     pending = later;
   }
+  // Still unanswered after every round: the library was too busy to say. Not marked missing (it may
+  // be there), but known unchecked, so nothing takes them for checked and found (2026-10-24: a
+  // LibreTexts link to a page the archive lacks went unmarked while the NAS was saturated).
+  for (const at of pending) for (const a of byAddress.get(at) ?? []) a.dataset.unchecked = '1';
   if (marked) {
     note.textContent = `${marked} link(s) on this page go to pages the library does not hold: this site’s archive did not capture them. They are marked.`;
     note.hidden = false;

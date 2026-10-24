@@ -321,7 +321,12 @@ function inspect() {
       src: i.getAttribute('src'),
       broken: i.complete && i.naturalWidth === 0 && !!i.getAttribute('src'),
     })),
-    links: [...(main?.querySelectorAll('.doc-body a[data-wsp]:not([data-missing])') ?? [])]
+    // Links the library had no time to check (data-unchecked: busy) are not judged as found or not.
+    links: [
+      ...(main?.querySelectorAll(
+        '.doc-body a[data-wsp]:not([data-missing]):not([data-unchecked])',
+      ) ?? []),
+    ]
       .map((a) => a.getAttribute('data-wsp') ?? '')
       .filter((x) => x.startsWith('wsp://')),
     missingAnchors: [...new Set(fragments.filter((f) => !ids.has(f)))].slice(0, 5),

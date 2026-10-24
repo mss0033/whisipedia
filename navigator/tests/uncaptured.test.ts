@@ -82,6 +82,30 @@ describe('links to pages the site archive never captured (2026-10-19 audit)', ()
     }
   });
 
+  it('are known unchecked when the library stays too busy to answer (2026-10-24)', async () => {
+    vi.useFakeTimers();
+    try {
+      const ctx = {
+        signal: new AbortController().signal,
+        app: { api: { missingLinks: async (a: string[]) => ({ missing: [], unchecked: a }) } },
+      } as unknown as Pick<PageContext, 'app' | 'signal'>;
+      const body = page();
+      const note = document.createElement('p');
+      note.hidden = true;
+      const done = markUncaptured(ctx, body, note);
+      await vi.runAllTimersAsync();
+      await done;
+      expect(body.querySelectorAll('a.uncaptured-link')).toHaveLength(0); // not called missing
+      const unchecked = [...body.querySelectorAll<HTMLAnchorElement>('a[data-unchecked]')].map(
+        (a) => a.textContent,
+      );
+      expect(unchecked).toEqual(['A', 'Contact', 'Contact again', 'A, a section']);
+      expect(note.hidden).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('name the web address a page of an archived website had', () => {
     expect(originalWebAddress('www.nhs.uk/social-care-and-support/')).toBe(
       'https://www.nhs.uk/social-care-and-support/',
