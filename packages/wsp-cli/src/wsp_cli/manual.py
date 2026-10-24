@@ -203,7 +203,8 @@ def _items_from_survey(survey: Survey, rule: Sequence[str], page_ext: str) -> li
             name = stem + (cand.extra.get("suffix") or Path(cand.file_name).suffix)
         # The name travels with the candidate: the import takes exactly the file the page asked for.
         doc = cand.with_url(cand.url, extra={**cand.extra, "save_as": name})
-        out.append(Item(cand.key, _browse(cand.url, rule), name, cand.title, cand=doc.to_json()))
+        page = cand.extra.get("page") == "1"  # a landing page: the owner saves the file it offers
+        out.append(Item(cand.key, _browse(cand.url, rule), name, cand.title, page=page, cand=doc.to_json()))
     for cand, decision in survey.decisions:
         if decision.verdict is not Verdict.ALLOW or cand.key not in unresolved:
             continue

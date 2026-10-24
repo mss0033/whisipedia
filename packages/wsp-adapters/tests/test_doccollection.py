@@ -1739,3 +1739,23 @@ def test_dla_assist_takes_the_newest_distribution_a_image_and_skips_weapons_clas
     assert "dla-assist: 1 document(s) skipped: no Distribution A image" in env.notes
     assert not env.incomplete
     assert list(discover_all([cfg], env_for(routes, origins=("quicksearch.dla.mil",), partition="i01"))) == []
+
+
+def test_newest_reads_dates_that_do_not_sort_as_text() -> None:
+    """NLM dates RxNorm files MMDDYYYY: December 2025 must not beat October 2026."""
+    page = (
+        b'<a href="https://dl.gov/RxNorm_full_12012025.zip">a</a><a href="https://dl.gov/RxNorm_full_10052026.zip">b</a>'
+        b'<a href="https://dl.gov/RxNorm_full_prescribe_10052026.zip">c</a>'
+    )
+    cfg = {
+        "kind": "index-page",
+        "url": "https://www.gov/files.html",
+        "documents": r"RxNorm_full(?:_prescribe)?_\d{8}\.zip$",
+        "newest": r"/(?P<series>RxNorm_full(?:_prescribe)?)_(?P<date>\d{8})\.zip$",
+        "newest_date_format": "%m%d%Y",
+    }
+    env = env_for({"https://www.gov/files.html": page}, origins=("dl.gov",))
+    assert sorted(c.url for c in discover_all([cfg], env)) == [
+        "https://dl.gov/RxNorm_full_10052026.zip",
+        "https://dl.gov/RxNorm_full_prescribe_10052026.zip",
+    ]

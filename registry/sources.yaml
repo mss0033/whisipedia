@@ -4418,6 +4418,598 @@ sources:
     size: {bytes: 1.5e10, measured: false, as_of: '2026-10-24'}
     notes: "Full dumps 2025-07-13: LEGI 1.1 GB, JORF 1.6 GB, JADE 1.2 GB, INCA 655 MB, CAPP 279 MB, CASS 248 MB, KALI 173 MB, CNIL 18 MB, CONSTIT 12 MB, plus daily deltas (LEGI 479 files, JORF 869). Licence Ouverte / Etalab 2.0. SERVICE-PUBLIC (citizen guides), CIRCULAIRES and the parliamentary debates sit in nested folders and are not taken yet. Owner approval D20 (2026-10-24)."
 
+  - id: cdc-core-clinical
+    name: "CDC core clinical references (Pink Book, STI treatment guidelines, NIOSH Pocket Guide, infection-control guidelines, Principles of Epidemiology)"
+    publisher: "US Centers for Disease Control and Prevention"
+    domain: [medicine, health]
+    tier: T1
+    status: candidate
+    license: LicenseRef-US-Gov-PD
+    legal_basis: public-domain
+    access:
+      adapter: doc-collection
+      issuer: "Centers for Disease Control and Prevention"
+      key_prefix: cdc
+      origins: [www.cdc.gov, stacks.cdc.gov]
+      discovery:
+        - kind: list
+          items:
+            - {title: "Epidemiology and Prevention of Vaccine-Preventable Diseases (Pink Book), 14th ed., Aug 2021 - full book", url: "https://stacks.cdc.gov/view/cdc/252997/cdc_252997_DS1.pdf", landing: "https://stacks.cdc.gov/view/cdc/252997"}
+            - {title: "Sexually Transmitted Infections Treatment Guidelines, 2021 (MMWR Recomm Rep 70(4))", url: "https://www.cdc.gov/mmwr/volumes/70/rr/pdfs/rr7004a1-H.pdf", landing: "https://www.cdc.gov/mmwr/volumes/70/rr/rr7004a1.htm"}
+            - {title: "NIOSH Pocket Guide to Chemical Hazards (DHHS/NIOSH Pub. 2005-149)", url: "https://www.cdc.gov/niosh/docs/2005-149/pdfs/2005-149.pdf"}
+            - {title: "2007 Guideline for Isolation Precautions (updated 2023)", url: "https://www.cdc.gov/infection-control/media/pdfs/Guideline-Isolation-H.pdf"}
+            - {title: "Guideline for Disinfection and Sterilization in Healthcare Facilities, 2008 (updated)", url: "https://www.cdc.gov/infection-control/media/pdfs/Guideline-Disinfection-H.pdf"}
+            - {title: "Guidelines for Environmental Infection Control in Health-Care Facilities, 2003 (updated)", url: "https://www.cdc.gov/infection-control/media/pdfs/Guideline-Environmental-H.pdf"}
+            - {title: "Principles of Epidemiology in Public Health Practice, 3rd ed. (SS1978, updated 2012), 511 pp", url: "https://stacks.cdc.gov/view/cdc/13178/cdc_13178_DS1.pdf", landing: "https://stacks.cdc.gov/view/cdc/13178"}
+            - {title: "Guideline for Hand Hygiene in Health-Care Settings, 2002 (MMWR RR-16)", url: "https://www.cdc.gov/infection-control/media/pdfs/guideline-hand-hygiene-p.pdf"}
+            - {title: "Management of Multidrug-Resistant Organisms in Healthcare Settings, 2006", url: "https://www.cdc.gov/infection-control/media/pdfs/Guideline-MDRO-H.pdf"}
+            - {title: "Infection Control in Healthcare Personnel (2019 infrastructure/routine practices)", url: "https://www.cdc.gov/infection-control/media/pdfs/Guideline-Infection-Control-HCP-H.pdf"}
+            - {title: "Guidelines for the Prevention of Intravascular Catheter-Related Infections, 2011", url: "https://www.cdc.gov/infection-control/media/pdfs/Guideline-BSI-H.pdf"}
+            - {title: "Guideline for Prevention of Catheter-Associated Urinary Tract Infections, 2009", url: "https://www.cdc.gov/infection-control/media/pdfs/Guideline-CAUTI-H.pdf"}
+            - {title: "Guideline for Prevention and Control of Norovirus Gastroenteritis Outbreaks in Healthcare Settings, 2011", url: "https://www.cdc.gov/infection-control/media/pdfs/Guideline-Norovirus-H.pdf"}
+      filter: {allow_all: true, public_issuer: true}
+    update: {cadence: P1Y, strategy: snapshot-retention}
+    size: {bytes: 2.0e8, measured: false, as_of: '2026-10-24'}
+    notes: "Curated 2026-10-24 (state/research/2026-10-24-manual-lists.yaml). The hosts allow us and answered the library's fetcher. The current Pink Book has no chapter PDFs: the 14th-edition book on CDC Stacks is taken. Owner request 2026-10-24."
+
+  - id: nrc-reference
+    name: "US NRC reference documents (Reactor Concepts, Response Technical Manual RTM-96, Fault Tree Handbook, THERP, NUREG-0654, training manuals)"
+    publisher: "US Nuclear Regulatory Commission"
+    domain: [engineering, preparedness, physics]
+    tier: T1
+    status: candidate
+    license: LicenseRef-US-Gov-PD
+    legal_basis: public-domain
+    access:
+      adapter: doc-collection
+      issuer: "Nuclear Regulatory Commission"
+      key_prefix: nrc
+      origins: [www.nrc.gov]
+      discovery:
+        - kind: list
+          items:
+            - {title: "NRC Reactor Concepts course manual (R-100), full PDF", url: "https://www.nrc.gov/sites/default/files/doc_library/cdn/legacy/reading-rm/training/reactor-concepts-training-course.pdf", landing: "https://www.nrc.gov/reading-rm/training.html"}
+            - {title: "NUREG/BR-0150 Vol. 1 Rev. 4, RTM-96 Response Technical Manual (radiological emergency dose assessment)", url: "https://www.nrc.gov/docs/ML0919/ML091980341.pdf", landing: "https://www.nrc.gov/reading-rm/doc-collections/nuregs/brochures/br0150/index"}
+            - {title: "NUREG-0492 Fault Tree Handbook (1981)", url: "https://www.nrc.gov/docs/ML1007/ML100780465.pdf", landing: "https://www.nrc.gov/reading-rm/doc-collections/nuregs/staff/sr0492/index.html"}
+            - {title: "NUREG/CR-1278 Handbook of Human Reliability Analysis (THERP), Swain & Guttmann 1983", url: "https://www.nrc.gov/docs/ML0712/ML071210299.pdf"}
+            - {title: "NUREG-0654/FEMA-REP-1 Rev. 2 (2019) Criteria for Radiological Emergency Response Plans", url: "https://www.nrc.gov/docs/ML1934/ML19347D139.pdf", landing: "https://www.nrc.gov/reading-rm/doc-collections/nuregs/staff/sr0654/r2/index.html"}
+            - {title: "NRC Power Plant Engineering course manual", url: "https://www.nrc.gov/docs/ML0230/ML023020604.pdf"}
+            - {title: "Reactor Concepts Manual: Biological Effects of Radiation / Radioactive Waste (chapters 9-10)", url: "https://www.nrc.gov/docs/ML0230/ML023020586.pdf"}
+            - {title: "GE BWR/4 Advanced Technology course manual (R-504B, Rev 1210)", url: "https://www.nrc.gov/docs/ML1126/ML11263A312.pdf"}
+            - {title: "B&W Pressurized Water Reactor Technology Crosstraining Course Manual (2011)", url: "https://www.nrc.gov/docs/ML1122/ML11220A280.pdf"}
+            - {title: "Reactor Technology Training Branch, PWR systems Part I (Rev 0408)", url: "https://www.nrc.gov/docs/ML1215/ML12159A222.pdf"}
+            - {title: "Westinghouse Technology Systems Manual, Section 1.2 Introduction to PWR Generating Systems (the first of ~40 section PDFs)", url: "https://www.nrc.gov/docs/ML1122/ML11223A195.pdf"}
+            - {title: "General Health Physics Practices for Fuel Cycle Facilities, Module 1.0 Health Physics Fundamentals", url: "https://www.nrc.gov/docs/ML1125/ML11259A277.pdf"}
+            - {title: "NRC Site Access Training Manual (H-100; includes radiation protection basics)", url: "https://www.nrc.gov/docs/ML1117/ML111710330.pdf", landing: "https://www.nrc.gov/reading-rm/training.html"}
+            - {title: "Research and Test Reactor Hands-On Operations Instructor Manual (R1)", url: "https://www.nrc.gov/docs/ML1406/ML14064A220.pdf", landing: "https://www.nrc.gov/reading-rm/training.html"}
+            - {title: "NUREG-1350 Vol. 35 Information Digest 2024-2025 (full PDF ~96 MB)", landing: "https://www.nrc.gov/reading-rm/doc-collections/nuregs/staff/sr1350/index", save_as: "unknown"}
+      filter: {allow_all: true, public_issuer: true}
+    update: {cadence: P1Y, strategy: snapshot-retention}
+    size: {bytes: 5.0e8, measured: false, as_of: '2026-10-24'}
+    notes: "Curated 2026-10-24; www.nrc.gov allows us and answered the library's fetcher (it refused the 2026-10-23 research's client). Reactor operation, safety and radiological emergency response; no weapons material. Owner request 2026-10-24."
+
+  - id: usace-engineer-manuals
+    name: "USACE Engineer Manuals and HEC hydraulic manuals (safety EM 385-1-1, hydraulics, geotechnical, concrete, levees, water supply)"
+    publisher: "US Army Corps of Engineers"
+    domain: [engineering, water]
+    tier: T1
+    status: candidate
+    license: LicenseRef-US-Gov-PD
+    legal_basis: public-domain
+    access:
+      adapter: doc-collection
+      issuer: "US Army Corps of Engineers"
+      key_prefix: usace
+      origins: [www.publications.usace.army.mil, www.hec.usace.army.mil]
+      discovery:
+        - kind: list
+          items:
+            - {title: "EM 385-1-1 Safety and Occupational Health Requirements (15 Mar 2024)", url: "https://www.publications.usace.army.mil/Portals/76/EM%20385-1-1%20_EFFECTIVE%2015%20March%202024.pdf"}
+            - {title: "EM 1110-2-1601 Hydraulic Design of Flood Control Channels (1991, Ch1 1994)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-1601.pdf"}
+            - {title: "EM 1110-2-1913 Design and Construction of Levees (2000)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-1913.pdf"}
+            - {title: "EM 1110-2-1417 Flood-Runoff Analysis (1994)", url: "https://www.publications.usace.army.mil/portals/76/publications/engineermanuals/em_1110-2-1417.pdf"}
+            - {title: "EM 1110-2-1415 Hydrologic Frequency Analysis (1993)", url: "https://www.publications.usace.army.mil/portals/76/publications/engineermanuals/em_1110-2-1415.pdf"}
+            - {title: "EM 1110-2-1416 River Hydraulics (1993)", url: "https://www.publications.usace.army.mil/portals/76/publications/engineermanuals/em_1110-2-1416.pdf"}
+            - {title: "EM 1110-2-1420 Hydrologic Engineering Requirements for Reservoirs (2018)", url: "https://www.publications.usace.army.mil/Portals/76/Users/182/86/2486/EM_1110-2-1420.pdf?ver=CjRXa4pEi5SXva0UuneAZQ%3D%3D"}
+            - {title: "EM 1110-2-1418 Channel Stability Assessment for Flood Control Projects (1994)", url: "https://www.publications.usace.army.mil/portals/76/publications/engineermanuals/em_1110-2-1418.pdf"}
+            - {title: "EM 1110-2-4000 Sedimentation Investigations of Rivers and Reservoirs (1989/1995)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-4000.pdf"}
+            - {title: "EM 1110-2-1901 Seepage Analysis and Control for Dams (1986, Ch1 1993)", url: "https://www.publications.usace.army.mil/portals/76/publications/engineermanuals/em_1110-2-1901.pdf"}
+            - {title: "EM 1110-2-1902 Slope Stability (2003)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-1902.pdf"}
+            - {title: "EM 1110-1-1905 Bearing Capacity of Soils (1992; a 2025 successor exists, see note)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-1-1905.pdf"}
+            - {title: "EM 1110-1-1904 Settlement Analysis (1990)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-1-1904.pdf"}
+            - {title: "EM 1110-1-1804 Geotechnical Investigations (2001)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-1-1804.pdf"}
+            - {title: "EM 1110-1-1906 Soil Sampling (1996)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-1-1906.pdf"}
+            - {title: "EM 1110-2-1906 Laboratory Soils Testing (1970 w/ changes; scanned)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-1906.pdf"}
+            - {title: "EM 1110-1-1802 Geophysical Exploration for Engineering and Environmental Investigations (1995)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-1-1802.pdf"}
+            - {title: "EM 1110-2-2300 General Design and Construction Considerations for Earth and Rock-Fill Dams (2004)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-2300.pdf?ver=2014-04-07-145941-947"}
+            - {title: "EM 1110-2-1914 Design, Construction, and Maintenance of Relief Wells (1992)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-1914.pdf"}
+            - {title: "EM 1110-2-1908 Instrumentation of Embankment Dams and Levees (2020)", url: "https://www.publications.usace.army.mil/Portals/76/Users/182/86/2486/EM%201110-2-1908.pdf"}
+            - {title: "EM 1110-2-1911 Construction Control for Earth and Rock-Fill Dams (1995)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/em_1110-2-1911.pdf"}
+            - {title: "EM 1110-2-2000 Standard Practice for Concrete for Civil Works Structures (1994 w/ changes)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-2000.pdf"}
+            - {title: "EM 1110-2-2002 Evaluation and Repair of Concrete Structures (1995)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-2002.pdf"}
+            - {title: "EM 1110-2-2005 Standard Practice for Shotcrete (1993)", url: "https://www.publications.usace.army.mil/portals/76/publications/engineermanuals/em_1110-2-2005.pdf"}
+            - {title: "EM 1110-2-2104 Strength Design for Reinforced Concrete Hydraulic Structures (2025 file)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM%201110-2-2104_2025%2001%2008%20-%20Final.pdf"}
+            - {title: "EM 1110-2-2502 Retaining and Flood Walls (1989)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-2502.pdf?ver=OICp1hSiUUXsNyIHGHv5lA%3D%3D"}
+            - {title: "EM 1110-2-2906 Design of Pile Foundations (1991)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-2906.pdf"}
+            - {title: "EM 1110-2-2504 Design of Sheet Pile Walls (1994)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-2504.pdf?ver=qHEac96DMIScmfwrQ21Cmg%3D%3D"}
+            - {title: "EM 1110-2-2100 Stability Analysis of Concrete Structures (2005)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-2100.pdf"}
+            - {title: "EM 1110-2-2200 Gravity Dam Design (1995)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-2200.pdf"}
+            - {title: "EM 1110-2-2006 Roller-Compacted Concrete (2000)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-2006.pdf"}
+            - {title: "EM 1110-1-2908 Rock Foundations (1994)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-1-2908.pdf"}
+            - {title: "EM 1110-2-2901 Tunnels and Shafts in Rock (1997)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-2901.pdf"}
+            - {title: "EM 1110-2-3506 Grouting Technology (2017)", url: "https://www.publications.usace.army.mil/portals/76/publications/engineermanuals/em_1110-2-3506.pdf"}
+            - {title: "EM 1110-2-1603 Hydraulic Design of Spillways (1990, errata 1992)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-1603.pdf"}
+            - {title: "EM 1110-2-1602 Hydraulic Design of Reservoir Outlet Works (1980)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-1602.pdf?ver=2013-09-04-161103-333"}
+            - {title: "EM 1110-2-2902 Conduits, Culverts, and Pipes (1997, Ch1 1998)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-2902.pdf"}
+            - {title: "EM 1110-2-2007 Structural Design of Concrete Lined Flood Control Channels (1995)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/em_1110-2-2007.pdf"}
+            - {title: "EM 1110-2-1614 Design of Coastal Revetments, Seawalls, and Bulkheads (1995)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-1614.pdf"}
+            - {title: "EM 1110-2-1100 Coastal Engineering Manual Part I (2002 w/ changes)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-1100_Part-01.pdf"}
+            - {title: "EM 1110-2-1100 CEM Part II Coastal Hydrodynamics", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-1100_Part-02.pdf"}
+            - {title: "EM 1110-2-1100 CEM Part III Coastal Sediment Processes", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-1100_Part-03.pdf"}
+            - {title: "EM 1110-2-1100 CEM Part IV Coastal Geology", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-1100_Part-04.pdf"}
+            - {title: "EM 1110-2-1100 CEM Part V Coastal Project Planning and Design", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-1100_Part-05.pdf"}
+            - {title: "EM 1110-2-1100 CEM Part VI Design of Coastal Project Elements", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-1100_Part-06.pdf"}
+            - {title: "EM 1110-2-1100 CEM Appendix A Glossary of Coastal Terminology", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-1100_App_A.pdf"}
+            - {title: "EM 1110-2-1615 Hydraulic Design of Small Boat Harbors (1984)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-1615.pdf"}
+            - {title: "EM 1110-2-1003 Hydrographic Surveying (2013)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-1003.pdf"}
+            - {title: "EM 1110-1-1005 Control and Topographic Surveying (2007)", url: "https://www.publications.usace.army.mil/portals/76/publications/engineermanuals/em_1110-1-1005.pdf"}
+            - {title: "EM 1110-1-1003 NAVSTAR GPS Surveying (2011)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-1-1003.pdf"}
+            - {title: "EM 1110-1-1000 Photogrammetric and LiDAR Mapping (2015?)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-1-1000.pdf"}
+            - {title: "EM 1110-1-1002 Survey Markers and Monumentation (2012)", url: "https://www.publications.usace.army.mil/portals/76/publications/engineermanuals/em_1110-1-1002.pdf"}
+            - {title: "EM 1110-2-1201 Reservoir Water Quality Analysis (1987)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-1201.pdf"}
+            - {title: "EM 1110-2-1612 Ice Engineering (2002/2006)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-1612.pdf"}
+            - {title: "EM 1110-2-1406 Runoff from Snowmelt (1998)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-1406.pdf"}
+            - {title: "EM 1110-2-1419 Hydrologic Engineering Requirements for Flood Damage Reduction Studies (1995)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/em_1110-2-1419.pdf"}
+            - {title: "EM 1110-2-3600 Management of Water Control Systems (2017)", url: "https://www.publications.usace.army.mil/portals/76/publications/engineermanuals/em_1110-2-3600.pdf"}
+            - {title: "EM 1110-2-3102 General Principles of Pumping Station Design and Layout (1995)", url: "https://www.publications.usace.army.mil/portals/76/publications/engineermanuals/em_1110-2-3102.pdf"}
+            - {title: "EM 1110-2-3104 Structural and Architectural Design of Pumping Stations (1989)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-3104.pdf"}
+            - {title: "EM 1110-2-3400 Painting: New Construction and Maintenance (1995)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-3400.pdf?ver=AGhMuuzbj4SaIHhTOdHa9g%3D%3D"}
+            - {title: "EM 1110-2-2704 Cathodic Protection Systems for Civil Works Structures (2021)", url: "https://www.publications.usace.army.mil/Portals/76/Users/182/86/2486/11EM_1110-2-2704%20(003).pdf"}
+            - {title: "EM 1110-2-5025 Dredging and Dredged Material Management (2015)", url: "https://www.publications.usace.army.mil/portals/76/publications/engineermanuals/em_1110-2-5025.pdf"}
+            - {title: "ETL 1110-2-584 Design of Hydraulic Steel Structures (2014; replaces EM 1110-2-2105)", url: "https://www.publications.usace.army.mil/portals/76/publications/engineertechnicalletters/etl_1110-2-584.pdf"}
+            - {title: "HEC-RAS 6.0 Hydraulic Reference Manual (2021)", url: "https://www.hec.usace.army.mil/software/hec-ras/documentation/HEC-RAS_6.0_Reference_Manual.pdf"}
+            - {title: "HEC-HMS Technical Reference Manual (2023-10-18 export)", url: "https://www.hec.usace.army.mil/software/hec-hms/documentation/HEC-HMS_Technical_Reference_Manual-20231018.pdf"}
+            - {title: "HEC-HMS Applications Guide (June 2017)", url: "https://www.hec.usace.army.mil/software/hec-hms/documentation/HEC-HMS_Applications_Guide_June2017.pdf"}
+            - {title: "HEC-SSP 2.3 User's Manual (statistical/flood-frequency analysis)", url: "https://www.hec.usace.army.mil/software/hec-ssp/documentation/HEC-SSP_v2.3_Users_Manual_20231026.pdf"}
+      filter: {allow_all: true, public_issuer: true}
+    update: {cadence: P1Y, strategy: snapshot-retention}
+    size: {bytes: 1.0e9, measured: false, as_of: '2026-10-24'}
+    notes: "67 manuals curated 2026-10-24; 13 URLs follow the site's naming pattern and may 404 (reported per document). The publications site answered the library's fetcher. Blasting and protective-design manuals left out (deny core). Owner request 2026-10-24."
+
+  - id: fema-publications-direct
+    name: "FEMA building science and preparedness publications (CERT manual, safe rooms, coastal construction, flood retrofitting)"
+    publisher: "US Federal Emergency Management Agency"
+    domain: [emergency-management, preparedness, engineering]
+    tier: T1
+    status: candidate
+    license: LicenseRef-US-Gov-PD
+    legal_basis: public-domain
+    access:
+      adapter: doc-collection
+      issuer: "Federal Emergency Management Agency"
+      key_prefix: fema-direct
+      origins: [www.fema.gov]
+      discovery:
+        - kind: list
+          items:
+            - {title: "CERT Basic Training Participant Manual (2011)", url: "https://www.fema.gov/sites/default/files/2020-07/fema-cert_basic-training-participant-manual_01-01-2011.pdf"}
+            - {title: "FEMA P-320 Taking Shelter from the Storm: Building or Installing a Safe Room for Your Home (6th ed., Dec 2024)", url: "https://www.fema.gov/sites/default/files/documents/fema_rsl_fema-p-320-taking-shelter-from-the-storm_042025.pdf"}
+            - {title: "FEMA P-55 Coastal Construction Manual, Vol. I (4th ed., 2011)", url: "https://www.fema.gov/sites/default/files/2020-08/fema55_voli_combined.pdf"}
+            - {title: "FEMA P-499 Home Builder's Guide to Coastal Construction (37 fact sheets, 2010)", url: "https://www.fema.gov/sites/default/files/2020-07/p-499_homebuilders-guide-coastal-construction.pdf"}
+            - {title: "FEMA P-312 Homeowner's Guide to Retrofitting (3rd ed., 2023)", landing: "https://www.fema.gov/building-science-publications/homeowners-guide-retrofitting", save_as: "unknown"}
+            - {title: "FEMA P-361 Safe Rooms for Tornadoes and Hurricanes (5th ed., 2024)", landing: "https://www.fema.gov/emergency-managers/risk-management/safe-rooms/resources", save_as: "unknown"}
+            - {title: "FEMA E-74 Reducing the Risks of Nonstructural Earthquake Damage (4th ed., 2012)", landing: "https://www.fema.gov/emergency-managers/risk-management/earthquake/training/fema-e-74", save_as: "unknown"}
+            - {title: "FEMA P-2064 Are You Ready? An In-Depth Guide to Citizen Preparedness (current edition on ready.gov)", landing: "https://www.ready.gov/", save_as: "unknown"}
+            - {title: "FEMA B-526 Earthquake Safety Checklist (Oct 2023)", url: "https://www.fema.gov/sites/default/files/documents/fema_b-526-eq-safety-checklist.pdf"}
+            - {title: "Food and Water in an Emergency (FEMA/American Red Cross, older brochure)", url: "https://www.fema.gov/pdf/library/f&web.pdf"}
+      filter: {allow_all: true, public_issuer: true}
+    update: {cadence: P1Y, strategy: snapshot-retention}
+    size: {bytes: 3.0e8, measured: false, as_of: '2026-10-24'}
+    notes: "Curated 2026-10-24; www.fema.gov answered the library's fetcher (it refused the research's client). Complements fema-building-science, which takes FEMA's GovInfo deposits. Owner request 2026-10-24."
+
+  - id: icrc-publications
+    name: "ICRC publications (War Surgery, First Aid in Armed Conflicts, water and habitat engineering manuals)"
+    publisher: "International Committee of the Red Cross"
+    domain: [medicine, preparedness, engineering, water]
+    tier: T1
+    status: candidate
+    license: LicenseRef-ICRC-Free-Download
+    legal_basis: bulk-access-terms
+    access:
+      adapter: doc-collection
+      issuer: "International Committee of the Red Cross"
+      key_prefix: icrc
+      origins: [www.icrc.org]
+      discovery:
+        - kind: list
+          items:
+            - {title: "War Surgery: Working with Limited Resources in Armed Conflict..., Vol. 1 (Giannou & Baldan, rev. 2010)", url: "https://www.icrc.org/sites/default/files/external/doc/en/assets/files/other/icrc-002-0973.pdf", landing: "https://www.icrc.org/en/publication/0973-war-surgery-working-limited-resources-armed-conflict-and-other-situations-violence"}
+            - {title: "War Surgery, Vol. 2 (Giannou, Baldan, Molde, 2013; English text despite the /fr/ path)", url: "https://www.icrc.org/sites/default/files/external/doc/fr/assets/files/publications/icrc-002-4105.pdf", landing: "https://www.icrc.org/en/publication/4105-war-surgery-working-limited-resources-armed-conflict-and-other-situations-violence"}
+            - {title: "First Aid in Armed Conflicts and Other Situations of Violence", url: "https://www.icrc.org/sites/default/files/external/doc/en/assets/files/other/icrc-002-0870.pdf", landing: "https://www.icrc.org/en/publication/0870-first-aid-armed-conflicts-and-other-situations-violence"}
+            - {title: "Hospitals for War-Wounded: practical guide for setting up and running a surgical hospital (2005)", url: "https://www.icrc.org/sites/default/files/external/doc/en/assets/files/other/icrc_002_0714.pdf"}
+            - {title: "Surgery for Victims of War, 3rd ed. (1998), 222 pp", url: "https://www.icrc.org/sites/default/files/external/doc/en/assets/files/other/icrc_002_0446.pdf"}
+            - {title: "Nutrition Manual for Humanitarian Action (Mourey), 712 pp", url: "https://www.icrc.org/sites/default/files/external/doc/en/assets/files/other/icrc_002_0820.pdf"}
+            - {title: "Water, Sanitation, Hygiene and Habitat in Prisons, 2nd ed. (2013)", url: "https://www.icrc.org/sites/default/files/external/doc/en/assets/files/other/icrc-002-0823.pdf"}
+            - {title: "Technical Review: Borehole Drilling and Rehabilitation under Field Conditions (2nd ed. 2012)", url: "https://www.icrc.org/sites/default/files/external/doc/en/assets/files/other/icrc-002-0998.pdf"}
+            - {title: "Technical Review: Practical Guidelines for Test Pumping in Water Wells (2011)", url: "https://www.icrc.org/sites/default/files/external/doc/en/assets/files/publications/icrc-002-4033.pdf"}
+            - {title: "Management of Dead Bodies after Disasters: A Field Manual for First Responders (probably the 2009 printing)", url: "https://www.icrc.org/sites/default/files/external/doc/en/assets/files/other/icrc_002_0880.pdf", landing: "https://missingpersons.icrc.org/library/management-dead-bodies-after-disasters-field-manual-first-responders"}
+            - {title: "Health Care in Detention: A Practical Guide (2nd ed. 2015)", url: "https://www.icrc.org/sites/default/files/external/doc/en/assets/files/publications/icrc-002-4213.pdf"}
+            - {title: "Geneva Conventions of 12 August 1949 (ICRC ed. 2010)", url: "https://www.icrc.org/sites/default/files/external/doc/en/assets/files/publications/icrc-002-0173.pdf"}
+            - {title: "Protocols Additional to the Geneva Conventions (I, II, III; ed. 2010)", url: "https://www.icrc.org/sites/default/files/external/doc/en/assets/files/other/icrc_002_0321.pdf"}
+            - {title: "Customary International Humanitarian Law, Vol. I: Rules (2005), 689 pp", url: "https://www.icrc.org/sites/default/files/external/doc/en/assets/files/other/customary-international-humanitarian-law-i-icrc-eng.pdf"}
+            - {title: "Trans-Tibial Prosthesis - Manufacturing Guidelines (2006)", url: "https://www.icrc.org/sites/default/files/external/doc/en/assets/files/other/eng-transtibial.pdf"}
+            - {title: "Trans-Femoral Prosthesis - Manufacturing Guidelines (2006)", url: "https://www.icrc.org/sites/default/files/external/doc/en/assets/files/other/eng-transfemoral.pdf"}
+            - {title: "Ankle-Foot Orthosis - Manufacturing Guidelines (2010)", url: "https://www.icrc.org/sites/default/files/external/doc/en/assets/files/other/eng-afo-2010.pdf"}
+            - {title: "Knee-Ankle-Foot Orthosis - Manufacturing Guidelines", url: "https://www.icrc.org/sites/default/files/external/doc/en/assets/files/other/eng-kafo.pdf"}
+            - {title: "Patellar Tendon Bearing Orthosis - Manufacturing Guidelines", url: "https://www.icrc.org/sites/default/files/external/doc/en/assets/files/other/eng-ptbo.pdf"}
+            - {title: "Alignment Jig - Manufacturing Guidelines", url: "https://www.icrc.org/sites/default/files/external/doc/en/assets/files/other/eng-alignment-jig.pdf"}
+            - {title: "Symes Prosthesis (push-fit) - Manufacturing Guidelines", url: "https://www.icrc.org/sites/default/files/external/doc/en/assets/files/publications/icrc-mg-symes-pushfit-web-0868.pdf"}
+            - {title: "WASH and Habitat in Prisons - Supplementary Guidance (2012)", url: "https://www.icrc.org/sites/default/files/external/doc/en/assets/files/publications/icrc-002-4083.pdf"}
+            - {title: "Water and War: ICRC Response (2009)", url: "https://www.icrc.org/sites/default/files/external/doc/en/assets/files/other/icrc_002_0969.pdf"}
+            - {title: "Restoring Family Links Strategy (2009)", url: "https://www.icrc.org/sites/default/files/external/doc/en/assets/files/other/icrc_002_0967.pdf"}
+      filter: {allow_all: true, public_issuer: true}
+    update: {cadence: P1Y, strategy: snapshot-retention}
+    size: {bytes: 5.0e8, measured: false, as_of: '2026-10-24'}
+    notes: "Curated 2026-10-24: the items on www.icrc.org, which allows us. ICRC copyright, free download for non-commercial use (private library). Owner request 2026-10-24."
+
+  - id: icrc-library
+    name: "ICRC publications only on library.icrc.org (Anaesthesia Handbook, limb-injury handbook)"
+    publisher: "International Committee of the Red Cross"
+    domain: [medicine]
+    tier: T1
+    status: paused
+    license: LicenseRef-ICRC-Free-Download
+    legal_basis: bulk-access-terms
+    access:
+      adapter: doc-collection
+      issuer: "International Committee of the Red Cross"
+      key_prefix: icrc
+      origins: [library.icrc.org]
+      manual: {daily: 10, list: {kind: discovery}}
+      discovery:
+        - kind: list
+          items:
+            - {title: "Anaesthesia Handbook (ICRC ref. 4270, 2017)", url: "https://library.icrc.org/library/docs/DOC/icrc-4270-002.pdf", landing: "https://shop.icrc.org/anaesthesia-handbook.html"}
+            - {title: "Management of Limb Injuries during Disasters and Conflicts (ICRC/WHO/AO, 2016)", landing: "https://icrc.org/en/document/launch-handbook-management-limb-injuries-during-disasters-and-conflicts", save_as: "unknown"}
+      filter: {allow_all: true, public_issuer: true}
+    update: {cadence: P1Y, strategy: snapshot-retention}
+    notes: "library.icrc.org: robots.txt 'Disallow: /'. Downloaded by hand (wsp collections manual --sync). Owner request 2026-10-24."
+
+  - id: osha-publications
+    name: "OSHA safety publications (job hazard analysis, small business handbook, construction, trenching, electrical, confined spaces)"
+    publisher: "US Occupational Safety and Health Administration"
+    domain: [preparedness, health, engineering]
+    tier: T1
+    status: paused
+    license: LicenseRef-US-Gov-PD
+    legal_basis: public-domain
+    access:
+      adapter: doc-collection
+      issuer: "Occupational Safety and Health Administration"
+      key_prefix: osha
+      origins: [www.osha.gov]
+      manual: {daily: 10, list: {kind: discovery}}
+      discovery:
+        - kind: list
+          items:
+            - {title: "OSHA 3071 Job Hazard Analysis (2002 rev.)", url: "https://www.osha.gov/sites/default/files/publications/OSHA3071.pdf"}
+            - {title: "OSHA 2209 Small Business Safety and Health Handbook (2024)", url: "https://www.osha.gov/sites/default/files/publications/small-business.pdf"}
+            - {title: "OSHA 3885 Recommended Practices for Safety and Health Programs (2016)", url: "https://www.osha.gov/sites/default/files/publications/OSHA3885.pdf"}
+            - {title: "OSHA 3886 Recommended Practices for Safety and Health Programs in Construction (2016)", url: "https://www.osha.gov/sites/default/files/publications/OSHA3886.pdf"}
+            - {title: "OSHA 2226 Trenching and Excavation Safety (2015)", url: "https://www.osha.gov/sites/default/files/publications/OSHA2226.pdf"}
+            - {title: "OSHA 3075 Controlling Electrical Hazards (2002)", url: "https://www.osha.gov/sites/default/files/publications/OSHA3075.pdf"}
+            - {title: "OSHA 3138 Permit-Required Confined Spaces (general industry, 2004)", url: "https://www.osha.gov/sites/default/files/publications/OSHA3138.pdf"}
+            - {title: "OSHA 3825 Protecting Construction Workers in Confined Spaces: Small Entity Compliance Guide (2015)", url: "https://www.osha.gov/sites/default/files/publications/OSHA3825.pdf"}
+            - {title: "OSHA 3146 Fall Protection in Construction (2015)", url: "https://www.osha.gov/sites/default/files/publications/OSHA3146.pdf"}
+            - {title: "OSHA 3150 A Guide to Scaffold Use in the Construction Industry (2002), 2.1 MB", url: "https://www.osha.gov/sites/default/files/publications/OSHA3150.pdf"}
+            - {title: "OSHA 3124 Stairways and Ladders: A Guide to OSHA Rules (2003)", url: "https://www.osha.gov/sites/default/files/publications/OSHA3124.pdf"}
+            - {title: "OSHA 3120 Control of Hazardous Energy (Lockout/Tagout) (2002)", url: "https://www.osha.gov/sites/default/files/publications/OSHA3120.pdf"}
+            - {title: "OSHA 3170 Safeguarding Equipment and Protecting Employees from Amputations (2007)", url: "https://www.osha.gov/sites/default/files/publications/OSHA3170.pdf"}
+            - {title: "OSHA 3151 Personal Protective Equipment (2023)", url: "https://www.osha.gov/sites/default/files/publications/OSHA3151.pdf"}
+            - {title: "OSHA 3384 Small Entity Compliance Guide for the Respiratory Protection Standard (2011)", url: "https://www.osha.gov/sites/default/files/publications/3384SMALL-ENTITY-FOR-RESPIRATORY-PROTECTION-STANDARD-REV.pdf"}
+            - {title: "OSHA 3695 Hazard Communication: Small Entity Compliance Guide (2014)", url: "https://www.osha.gov/sites/default/files/publications/OSHA3695.pdf"}
+            - {title: "OSHA 3114 Hazardous Waste Operations and Emergency Response (HAZWOPER) (2008)", url: "https://www.osha.gov/sites/default/files/publications/OSHA-3114-HAZWOPER.pdf"}
+            - {title: "OSHA 3122 Principal Emergency Response and Preparedness Requirements and Guidance (2004)", url: "https://www.osha.gov/sites/default/files/publications/OSHA3122.pdf"}
+            - {title: "OSHA 3088 How to Plan for Workplace Emergencies and Evacuations", url: "https://www.osha.gov/sites/default/files/publications/OSHA3088.pdf"}
+            - {title: "OSHA 3074 Hearing Conservation (2002)", url: "https://www.osha.gov/sites/default/files/publications/OSHA3074.pdf"}
+            - {title: "OSHA 3132 Process Safety Management (2000)", url: "https://www.osha.gov/sites/default/files/publications/OSHA3132.pdf"}
+            - {title: "OSHA 3902 Small Entity Compliance Guide for Respirable Crystalline Silica in Construction (2024)", url: "https://www.osha.gov/sites/default/files/publications/OSHA3902.pdf"}
+            - {title: "OSHA 3911 Small Entity Compliance Guide for Respirable Crystalline Silica, General Industry and Maritime", url: "https://www.osha.gov/sites/default/files/publications/OSHA3911.pdf"}
+            - {title: "OSHA 2254 Training Requirements in OSHA Standards (2015)", url: "https://www.osha.gov/sites/default/files/publications/OSHA2254.pdf"}
+            - {title: "OSHA 2201 General Industry Digest (2015)", url: "https://osha.gov/sites/default/files/publications/osha_2201.pdf"}
+            - {title: "OSHA 2236 Materials Handling and Storage (2002)", url: "https://www.osha.gov/sites/default/files/publications/OSHA2236.pdf"}
+            - {title: "OSHA 3148 Guidelines for Preventing Workplace Violence for Healthcare and Social Service Workers (2016)", url: "https://www.osha.gov/sites/default/files/publications/OSHA3148.pdf"}
+            - {title: "OSHA 3767 Hospital Respiratory Protection Program Toolkit (2022)", url: "https://www.osha.gov/sites/default/files/publications/OSHA3767.pdf"}
+            - {title: "OSHA-NIOSH InfoSheet: Protecting Workers from Heat Illness", url: "https://www.osha.gov/sites/default/files/publications/OSHA-NIOSH-HEAT-ILLNESS-INFOSHEET.pdf"}
+            - {title: "OSHA 3371 Hazard Communication Guidance for Combustible Dusts (2009)", url: "https://www.osha.gov/sites/default/files/publications/3371COMBUSTIBLE-DUST.pdf"}
+            - {title: "OSHA 3103 Grain Handling", url: "https://www.osha.gov/sites/default/files/publications/OSHA3103.pdf"}
+            - {title: "OSHA 3221 Concrete Manufacturing (Worker Safety Series, 2004)", url: "https://www.osha.gov/sites/default/files/publications/3221_CONCRETE.pdf"}
+            - {title: "OSHA 3182 Guidelines for Nursing Homes: Ergonomics for the Prevention of MSDs (2009)", url: "https://www.osha.gov/sites/default/files/publications/FINAL_NH_GUIDELINES.pdf"}
+            - {title: "OSHA 3498 Noise in Construction Pocket Guide (2011)", url: "https://www.osha.gov/sites/default/files/publications/3498noise-in-construction-pocket-guide.pdf"}
+      filter: {allow_all: true, public_issuer: true}
+    update: {cadence: P1Y, strategy: snapshot-retention}
+    size: {bytes: 2.0e8, measured: false, as_of: '2026-10-24'}
+    notes: "www.osha.gov answers the library's fetcher with a bot wall (403, 2026-10-24): downloaded by hand. URLs from osha.gov search results, unverified. Owner request 2026-10-24."
+
+  - id: intel-arm-architecture
+    name: "Intel 64 and IA-32 Software Developer's Manuals and the Arm Architecture Reference Manual"
+    publisher: "Intel Corporation; Arm Ltd"
+    domain: [computing, electronics]
+    tier: T1
+    status: paused
+    license: LicenseRef-Free-Download-Personal-Use
+    legal_basis: bulk-access-terms
+    access:
+      adapter: doc-collection
+      issuer: "Intel Corporation; Arm Ltd"
+      key_prefix: cpu-arch
+      origins: [cdrdv2.intel.com, documentation-service.arm.com, www.intel.com, developer.arm.com]
+      manual: {daily: 10, list: {kind: discovery}}
+      discovery:
+        - kind: list
+          items:
+            - {title: "Intel 64 and IA-32 Architectures SDM, Combined Volumes 1, 2A-2D, 3A-3D, 4 (Order 325462-093)", url: "https://cdrdv2.intel.com/v1/dl/getContent/671200", landing: "https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html", save_as: "325462-093-sdm-vol-1-2abcd-3abcd-4.pdf"}
+            - {title: "Intel SDM Documentation Changes (252046-085)", url: "https://cdrdv2.intel.com/v1/dl/getContent/671294", save_as: "252046-085-sdm-change-document.pdf"}
+            - {title: "Intel Architecture Instruction Set Extensions Programming Reference (319433-062)", url: "https://cdrdv2.intel.com/v1/dl/getContent/671368", save_as: "319433-062-architecture-instruction-set-extensions-programming-reference.pdf"}
+            - {title: "Intel Virtualization Technology for Directed I/O Architecture Specification (D51397-019)", url: "https://cdrdv2.intel.com/v1/dl/getContent/671081", save_as: "D51397-019-vt-directed-io-spec.pdf"}
+            - {title: "Intel APX Architecture Specification (355828-009)", url: "https://cdrdv2.intel.com/v1/dl/getContent/784266", save_as: "355828-009-intel-apx-arch-spec.pdf"}
+            - {title: "Intel AVX10.2 Architecture Specification (361050-007)", url: "https://cdrdv2.intel.com/v1/dl/getContent/828965", save_as: "361050-007-intel-avx10.2-arch-spec.pdf"}
+            - {title: "Intel 64 and IA-32 Architectures Optimization Reference Manual, Volume 1 (v050)", landing: "https://www.intel.com/content/www/us/en/content-details/821612/intel-64-and-ia-32-architectures-optimization-reference-manual-volume-1.html", save_as: "unknown"}
+            - {title: "Arm Architecture Reference Manual for A-profile architecture (DDI 0487, latest issue; ~100 MB PDF)", landing: "https://developer.arm.com/documentation/ddi0487/latest/", save_as: "Arm-Architecture-Reference-Manual-for-A-profile-ar.pdf"}
+            - {title: "Arm A-profile ARM Known Issues companion (102105), latest issue", landing: "https://developer.arm.com/documentation/102105/latest/", save_as: "unknown"}
+      filter: {allow_all: true, public_issuer: true}
+    update: {cadence: P1Y, strategy: snapshot-retention}
+    size: {bytes: 3.0e8, measured: false, as_of: '2026-10-24'}
+    notes: "cdrdv2.intel.com and documentation-service.arm.com: robots.txt 'Disallow: /'. Free download for personal use, no redistribution. Downloaded by hand. Owner request 2026-10-24."
+
+  - id: ebi-uniprot-bulk
+    name: "UniProtKB/Swiss-Prot, ChEBI and ChEMBL bulk releases"
+    publisher: "EMBL-EBI; UniProt Consortium"
+    domain: [science, chemistry, reference-data]
+    tier: T1
+    status: paused
+    license: CC-BY-4.0
+    legal_basis: open-license
+    access:
+      adapter: doc-collection
+      issuer: "EMBL-EBI"
+      key_prefix: ebi
+      origins: [ftp.uniprot.org, ftp.ebi.ac.uk, www.uniprot.org, www.ebi.ac.uk]
+      manual: {daily: 10, list: {kind: discovery}}
+      discovery:
+        - kind: list
+          items:
+            - {title: "UniProtKB/Swiss-Prot, flat-file text format (current release)", url: "https://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/complete/uniprot_sprot.dat.gz", landing: "https://www.uniprot.org/help/downloads"}
+            - {title: "UniProtKB/Swiss-Prot, FASTA sequences", url: "https://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/complete/uniprot_sprot.fasta.gz"}
+            - {title: "UniProtKB/Swiss-Prot, XML (richest format, optional if .dat is taken)", url: "https://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/complete/uniprot_sprot.xml.gz"}
+            - {title: "ChEBI ontology, OBO (full)", url: "https://ftp.ebi.ac.uk/pub/databases/chebi/ontology/chebi.obo.gz", landing: "https://www.ebi.ac.uk/chebi/downloads"}
+            - {title: "ChEBI ontology, OWL (full)", url: "https://ftp.ebi.ac.uk/pub/databases/chebi/ontology/chebi.owl.gz"}
+            - {title: "ChEBI structures, SDF FULL (2-star + 3-star entries)", landing: "https://ftp.ebi.ac.uk/pub/databases/chebi/SDF/", save_as: "unknown after the ChEBI 2.0 relaunch (Oct 2025); the old ChEBI_complete.sdf.gz now returns 404"}
+            - {title: "ChEMBL 37 (May 2026) SQLite database", url: "https://ftp.ebi.ac.uk/pub/databases/chembl/ChEMBLdb/latest/chembl_37_sqlite.tar.gz", landing: "https://ftp.ebi.ac.uk/pub/databases/chembl/ChEMBLdb/latest/"}
+            - {title: "ChEMBL 37 PostgreSQL dump (alternative to SQLite)", url: "https://ftp.ebi.ac.uk/pub/databases/chembl/ChEMBLdb/latest/chembl_37_postgresql.tar.gz"}
+            - {title: "ChEMBL 37 structures SDF", url: "https://ftp.ebi.ac.uk/pub/databases/chembl/ChEMBLdb/latest/chembl_37.sdf.gz"}
+      filter: {allow_all: true, public_issuer: true, data_files: true}
+    update: {cadence: P1Y, strategy: snapshot-retention}
+    size: {bytes: 1.0e10, measured: false, as_of: '2026-10-24'}
+    notes: "ftp.uniprot.org and ftp.ebi.ac.uk: robots.txt 'Disallow: /' over HTTPS and FTP. Downloaded by hand: Swiss-Prot ~0.8 GB, ChEMBL ~5 GB. ChEMBL 37 file names inferred; ChEBI's 2025 relaunch renamed its files. CC BY 4.0 (ChEMBL CC BY-SA 3.0). Owner request 2026-10-24."
+
+  - id: nrcs-gssurgo
+    name: "NRCS gSSURGO gridded soil survey, one file geodatabase per state"
+    publisher: "USDA Natural Resources Conservation Service"
+    domain: [agriculture, geography, reference-data]
+    tier: T1
+    status: paused
+    license: LicenseRef-US-Gov-PD
+    legal_basis: public-domain
+    access:
+      adapter: doc-collection
+      issuer: "USDA NRCS"
+      key_prefix: gssurgo
+      origins: [nrcs.app.box.com]
+      manual: {daily: 10, list: {kind: discovery}}
+      discovery:
+        - kind: list
+          items:
+            - {title: "gSSURGO state database, AL", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_AL.zip", pub_number: "gSSURGO_AL"}
+            - {title: "gSSURGO state database, AK", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_AK.zip", pub_number: "gSSURGO_AK"}
+            - {title: "gSSURGO state database, AZ", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_AZ.zip", pub_number: "gSSURGO_AZ"}
+            - {title: "gSSURGO state database, AR", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_AR.zip", pub_number: "gSSURGO_AR"}
+            - {title: "gSSURGO state database, CA", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_CA.zip", pub_number: "gSSURGO_CA"}
+            - {title: "gSSURGO state database, CO", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_CO.zip", pub_number: "gSSURGO_CO"}
+            - {title: "gSSURGO state database, CT", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_CT.zip", pub_number: "gSSURGO_CT"}
+            - {title: "gSSURGO state database, DE", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_DE.zip", pub_number: "gSSURGO_DE"}
+            - {title: "gSSURGO state database, DC", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_DC.zip", pub_number: "gSSURGO_DC"}
+            - {title: "gSSURGO state database, FL", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_FL.zip", pub_number: "gSSURGO_FL"}
+            - {title: "gSSURGO state database, GA", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_GA.zip", pub_number: "gSSURGO_GA"}
+            - {title: "gSSURGO state database, HI", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_HI.zip", pub_number: "gSSURGO_HI"}
+            - {title: "gSSURGO state database, ID", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_ID.zip", pub_number: "gSSURGO_ID"}
+            - {title: "gSSURGO state database, IL", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_IL.zip", pub_number: "gSSURGO_IL"}
+            - {title: "gSSURGO state database, IN", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_IN.zip", pub_number: "gSSURGO_IN"}
+            - {title: "gSSURGO state database, IA", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_IA.zip", pub_number: "gSSURGO_IA"}
+            - {title: "gSSURGO state database, KS", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_KS.zip", pub_number: "gSSURGO_KS"}
+            - {title: "gSSURGO state database, KY", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_KY.zip", pub_number: "gSSURGO_KY"}
+            - {title: "gSSURGO state database, LA", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_LA.zip", pub_number: "gSSURGO_LA"}
+            - {title: "gSSURGO state database, ME", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_ME.zip", pub_number: "gSSURGO_ME"}
+            - {title: "gSSURGO state database, MD", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_MD.zip", pub_number: "gSSURGO_MD"}
+            - {title: "gSSURGO state database, MA", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_MA.zip", pub_number: "gSSURGO_MA"}
+            - {title: "gSSURGO state database, MI", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_MI.zip", pub_number: "gSSURGO_MI"}
+            - {title: "gSSURGO state database, MN", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_MN.zip", pub_number: "gSSURGO_MN"}
+            - {title: "gSSURGO state database, MS", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_MS.zip", pub_number: "gSSURGO_MS"}
+            - {title: "gSSURGO state database, MO", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_MO.zip", pub_number: "gSSURGO_MO"}
+            - {title: "gSSURGO state database, MT", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_MT.zip", pub_number: "gSSURGO_MT"}
+            - {title: "gSSURGO state database, NE", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_NE.zip", pub_number: "gSSURGO_NE"}
+            - {title: "gSSURGO state database, NV", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_NV.zip", pub_number: "gSSURGO_NV"}
+            - {title: "gSSURGO state database, NH", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_NH.zip", pub_number: "gSSURGO_NH"}
+            - {title: "gSSURGO state database, NJ", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_NJ.zip", pub_number: "gSSURGO_NJ"}
+            - {title: "gSSURGO state database, NM", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_NM.zip", pub_number: "gSSURGO_NM"}
+            - {title: "gSSURGO state database, NY", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_NY.zip", pub_number: "gSSURGO_NY"}
+            - {title: "gSSURGO state database, NC", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_NC.zip", pub_number: "gSSURGO_NC"}
+            - {title: "gSSURGO state database, ND", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_ND.zip", pub_number: "gSSURGO_ND"}
+            - {title: "gSSURGO state database, OH", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_OH.zip", pub_number: "gSSURGO_OH"}
+            - {title: "gSSURGO state database, OK", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_OK.zip", pub_number: "gSSURGO_OK"}
+            - {title: "gSSURGO state database, OR", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_OR.zip", pub_number: "gSSURGO_OR"}
+            - {title: "gSSURGO state database, PA", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_PA.zip", pub_number: "gSSURGO_PA"}
+            - {title: "gSSURGO state database, PR", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_PR.zip", pub_number: "gSSURGO_PR"}
+            - {title: "gSSURGO state database, RI", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_RI.zip", pub_number: "gSSURGO_RI"}
+            - {title: "gSSURGO state database, SC", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_SC.zip", pub_number: "gSSURGO_SC"}
+            - {title: "gSSURGO state database, SD", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_SD.zip", pub_number: "gSSURGO_SD"}
+            - {title: "gSSURGO state database, TN", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_TN.zip", pub_number: "gSSURGO_TN"}
+            - {title: "gSSURGO state database, TX", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_TX.zip", pub_number: "gSSURGO_TX"}
+            - {title: "gSSURGO state database, UT", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_UT.zip", pub_number: "gSSURGO_UT"}
+            - {title: "gSSURGO state database, VT", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_VT.zip", pub_number: "gSSURGO_VT"}
+            - {title: "gSSURGO state database, VA", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_VA.zip", pub_number: "gSSURGO_VA"}
+            - {title: "gSSURGO state database, WA", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_WA.zip", pub_number: "gSSURGO_WA"}
+            - {title: "gSSURGO state database, WV", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_WV.zip", pub_number: "gSSURGO_WV"}
+            - {title: "gSSURGO state database, WI", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_WI.zip", pub_number: "gSSURGO_WI"}
+            - {title: "gSSURGO state database, WY", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_WY.zip", pub_number: "gSSURGO_WY"}
+      filter: {allow_all: true, public_issuer: true, data_files: true}
+    update: {cadence: P1Y, strategy: snapshot-retention}
+    size: {bytes: 7.0e10, measured: false, as_of: '2026-10-24'}
+    notes: "A Box share (robots.txt disallows us): open the share, find the state's zip in the current fiscal year's folder and save it under the name shown. File naming from the older state readme. ~40-100 GB in all. Owner request 2026-10-24."
+
+  - id: cod-full-archive
+    name: "Crystallography Open Database, full release (all CIFs and the MySQL dump)"
+    publisher: "Crystallography Open Database"
+    domain: [science, chemistry, materials, reference-data]
+    tier: T1
+    status: paused
+    license: CC0-1.0
+    legal_basis: open-license
+    access:
+      adapter: doc-collection
+      issuer: "Crystallography Open Database"
+      key_prefix: cod
+      origins: [www.crystallography.net]
+      manual: {daily: 10, list: {kind: discovery}}
+      discovery:
+        - kind: list
+          items:
+            - {title: "COD most recent full release: all CIFs + MySQL dump (tar.gz)", url: "https://www.crystallography.net/cod/archives/cod-cifs-mysql.tgz", landing: "https://wiki.crystallography.net/howtoobtaincod/"}
+      filter: {allow_all: true, public_issuer: true, data_files: true}
+    update: {cadence: P1Y, strategy: snapshot-retention}
+    size: {bytes: 1.7e10, measured: false, as_of: '2026-10-24'}
+    notes: "www.crystallography.net: robots.txt 'Disallow: /'. One archive, over 17 GB: a long download by hand. CC0. Owner request 2026-10-24."
+
+  - id: usfs-wood-handbook
+    name: "Wood Handbook: Wood as an Engineering Material (FPL-GTR-282, 2021)"
+    publisher: "USDA Forest Service, Forest Products Laboratory"
+    domain: [engineering, materials]
+    tier: T1
+    status: paused
+    license: LicenseRef-US-Gov-PD
+    legal_basis: public-domain
+    access:
+      adapter: doc-collection
+      issuer: "USDA Forest Service"
+      key_prefix: usfs
+      origins: [research.fs.usda.gov, www.fpl.fs.usda.gov]
+      manual: {daily: 10, list: {kind: discovery}}
+      discovery:
+        - kind: list
+          items:
+            - {title: "Wood Handbook, FPL-GTR-282 (March 2021), full PDF, 543 pp", url: "https://research.fs.usda.gov/download/treesearch/62200.pdf", landing: "https://research.fs.usda.gov/treesearch/62200"}
+            - {title: "Wood Handbook FPL-GTR-282 front matter (to confirm chapter-file naming at FPL)", url: "https://www.fpl.fs.usda.gov/documnts/fplgtr/fplgtr282/front_matter_fpl_gtr282.pdf"}
+      filter: {allow_all: true, public_issuer: true}
+    update: {cadence: P1Y, strategy: snapshot-retention}
+    size: {bytes: 1.1e8, measured: false, as_of: '2026-10-24'}
+    notes: "research.fs.usda.gov: robots.txt 'Disallow: /'. Downloaded by hand; the direct PDF path (~104 MB) is inferred from the Treesearch pattern. Owner request 2026-10-24."
+
+  - id: lovdata-public
+    name: "Lovdata public datasets: Norwegian acts and central regulations in force (XML)"
+    publisher: "Lovdata"
+    domain: [law]
+    tier: T1
+    status: paused
+    license: NLOD-2.0
+    legal_basis: open-license
+    access:
+      adapter: doc-collection
+      issuer: "Lovdata"
+      key_prefix: lovdata
+      origins: [api.lovdata.no]
+      manual: {daily: 10, list: {kind: discovery}}
+      discovery:
+        - kind: list
+          items:
+            - {title: "Current acts (gjeldende lover), XML archive", url: "https://api.lovdata.no/v1/publicData/get/gjeldende-lover.tar.bz2", landing: "https://api.lovdata.no/publicData"}
+            - {title: "Current central regulations (gjeldende sentrale forskrifter), XML archive", url: "https://api.lovdata.no/v1/publicData/get/gjeldende-sentrale-forskrifter.tar.bz2", landing: "https://api.lovdata.no/publicData"}
+            - {title: "Dataset list (JSON): shows every public file name and its lastModified", url: "https://api.lovdata.no/v1/publicData/list", landing: "https://api.lovdata.no/publicData", save_as: "list (JSON)"}
+      filter: {allow_all: true, public_issuer: true, data_files: true}
+    update: {cadence: P1Y, strategy: snapshot-retention}
+    size: {bytes: 2.0e8, measured: false, as_of: '2026-10-24'}
+    notes: "api.lovdata.no: robots.txt 'Disallow: /'. Downloaded by hand. Norwegian Licence for Open Government Data 2.0. Owner request 2026-10-24."
+
+  - id: iso-iec-free-standards
+    name: "ISO/IEC standards offered at no charge (OOXML, ODF and others)"
+    publisher: "ISO; IEC"
+    domain: [standards, computing]
+    tier: T1
+    status: paused
+    license: LicenseRef-ISO-Free-Personal-Use
+    legal_basis: bulk-access-terms
+    access:
+      adapter: doc-collection
+      issuer: "International Organization for Standardization"
+      key_prefix: iso-free
+      origins: [www.iso.org, webstore.iec.ch]
+      manual: {daily: 10, list: {kind: discovery}}
+      discovery:
+        - kind: list
+          items:
+            - {title: "ISO/IEC 29500-1:2016 Office Open XML, Part 1 Fundamentals and Markup Language Reference", landing: "https://www.iso.org/standard/71691.html", save_as: "ISO-IEC-29500-1.pdf", pub_number: "ISO-IEC-29500-1"}
+            - {title: "ISO/IEC 26300-1:2015 ODF 1.2 Part 1 OpenDocument Schema", landing: "https://www.iso.org/standard/66363.html", save_as: "ISO-IEC-26300-1.pdf", pub_number: "ISO-IEC-26300-1"}
+            - {title: "ISO/IEC 26300-2:2015 ODF 1.2 Part 2 OpenFormula", landing: "https://www.iso.org/standard/66375.html", save_as: "ISO-IEC-26300-2.pdf", pub_number: "ISO-IEC-26300-2"}
+            - {title: "ISO/IEC 26300-3:2015 ODF 1.2 Part 3 Packages", landing: "https://www.iso.org/standard/66376.html", save_as: "ISO-IEC-26300-3.pdf", pub_number: "ISO-IEC-26300-3"}
+            - {title: "ISO/IEC 7498-1:1994 OSI Basic Reference Model", landing: "https://www.iso.org/standard/20269.html", save_as: "ISO-IEC-7498-1.pdf", pub_number: "ISO-IEC-7498-1"}
+            - {title: "ISO/IEC 27000:2018 ISMS Overview and vocabulary", landing: "https://www.iso.org/standard/73906.html", save_as: "ISO-IEC-27000.pdf", pub_number: "ISO-IEC-27000"}
+            - {title: "ISO/IEC 10646:2020 Universal Coded Character Set (with code charts)", landing: "https://www.iso.org/standard/76835.html", save_as: "ISO-IEC-10646.pdf", pub_number: "ISO-IEC-10646"}
+            - {title: "ISO/IEC 14977:1996 Extended BNF", landing: "https://www.iso.org/standard/26153.html", save_as: "ISO-IEC-14977.pdf", pub_number: "ISO-IEC-14977"}
+            - {title: "ISO/IEC 21320-1:2015 Document Container File (ZIP) Part 1 Core", landing: "https://www.iso.org/standard/60101.html", save_as: "ISO-IEC-21320-1.pdf", pub_number: "ISO-IEC-21320-1"}
+            - {title: "ISO/IEC 19757-2:2008 DSDL Part 2 RELAX NG", landing: "https://www.iso.org/standard/52348.html", save_as: "ISO-IEC-19757-2.pdf", pub_number: "ISO-IEC-19757-2"}
+            - {title: "ISO/IEC 2382:2015 Information technology - Vocabulary", landing: "https://www.iso.org/standard/63598.html", save_as: "ISO-IEC-2382.pdf", pub_number: "ISO-IEC-2382"}
+            - {title: "ISO/IEC 14662:2010 Open-edi reference model", landing: "https://www.iso.org/standard/55290.html", save_as: "ISO-IEC-14662.pdf", pub_number: "ISO-IEC-14662"}
+            - {title: "ISO/IEC 11179 Parts 1-6 Metadata registries (2003-2005 editions)", landing: "https://www.iso.org/search.html?q=11179", save_as: "ISO-IEC-11179.pdf", pub_number: "ISO-IEC-11179"}
+            - {title: "ISO/IEC 5218:2004 Codes for the representation of human sexes", landing: "https://www.iso.org/standard/36266.html", save_as: "ISO-IEC-5218.pdf", pub_number: "ISO-IEC-5218"}
+            - {title: "ISO/IEC TR 10032:2003 Reference Model of Data Management", landing: "https://www.iso.org/standard/38607.html", save_as: "ISO-IEC-TR-10032-2003-Reference-Model-of.pdf", pub_number: "ISO-IEC-TR-10032-2003-Reference-Model-of"}
+            - {title: "ISO/IEC 15944 series (Business Operational View / Open-edi, incl. Part 7 vocabulary)", landing: "https://www.iso.org/search.html?q=15944", save_as: "ISO-IEC-15944.pdf", pub_number: "ISO-IEC-15944"}
+            - {title: "ISO/IEC TR 20943-1:2003 and -3:2004 Metadata registry content consistency", landing: "https://www.iso.org/search.html?q=20943", save_as: "ISO-IEC-TR-20943-1-2003-and--3-2004-Meta.pdf", pub_number: "ISO-IEC-TR-20943-1-2003-and--3-2004-Meta"}
+            - {title: "ISO/IEC 17788:2014 Cloud computing - Overview and vocabulary (withdrawn; see 22123-1:2023)", landing: "https://www.iso.org/standard/60544.html", save_as: "ISO-IEC-17788.pdf", pub_number: "ISO-IEC-17788"}
+            - {title: "ISO/IEC 17789:2014 Cloud computing - Reference architecture (withdrawn; see 22123-3)", landing: "https://www.iso.org/standard/60545.html", save_as: "ISO-IEC-17789.pdf", pub_number: "ISO-IEC-17789"}
+            - {title: "ISO/IEC 24707:2007 Common Logic", landing: "https://www.iso.org/standard/39175.html", save_as: "ISO-IEC-24707.pdf", pub_number: "ISO-IEC-24707"}
+            - {title: "ISO/IEC TR 24772:2013 Guidance to avoiding vulnerabilities in programming languages (defensive coding)", landing: "https://www.iso.org/standard/61457.html", save_as: "ISO-IEC-TR-24772-2013-Guidance-to-avoidi.pdf", pub_number: "ISO-IEC-TR-24772-2013-Guidance-to-avoidi"}
+            - {title: "ISO/IEC 14496-12:2015 ISO base media file format (MP4) (withdrawn edition)", landing: "https://www.iso.org/standard/68960.html", save_as: "ISO-IEC-14496-12.pdf", pub_number: "ISO-IEC-14496-12"}
+      filter: {allow_all: true, public_issuer: true}
+    update: {cadence: P1Y, strategy: snapshot-retention}
+    notes: "The old free-standards page was retired (2025-2026): each zero-cost standard is a store page (CHF 0; an account and a licence click). One personal copy, no redistribution: never served beyond this private library. Only OOXML and ODF are known still free; the rest may now cost money (skip those). Owner request 2026-10-24."
+
+  - id: rxnorm
+    name: "RxNorm monthly releases: the full release (UMLS licence login) and the current prescribable content"
+    publisher: "US National Library of Medicine"
+    domain: [medicine, reference-data]
+    tier: T1
+    status: paused
+    license: LicenseRef-UMLS-Metathesaurus
+    legal_basis: bulk-access-terms
+    access:
+      adapter: doc-collection
+      issuer: "National Library of Medicine"
+      key_prefix: rxnorm
+      origins: [download.nlm.nih.gov]
+      # NLM's files page (www.nlm.nih.gov allows us) names each month's files on download.nlm.nih.gov,
+      # whose robots.txt disallows every agent: the owner downloads them (the full release after a
+      # free UMLS licence login). The list follows the page, so a new month's file is offered by itself.
+      manual: {daily: 10, again_days: 28, list: {kind: discovery}}
+      discovery:
+        - kind: index-page
+          url: "https://www.nlm.nih.gov/research/umls/rxnorm/docs/rxnormfiles.html"
+          documents: "download\\.nlm\\.nih\\.gov/.*RxNorm_full(?:_prescribe)?_\\d{8}\\.zip$"
+          newest: "/(?P<series>RxNorm_full(?:_prescribe)?)_(?P<date>\\d{8})\\.zip$"
+          newest_date_format: "%m%d%Y"
+      filter: {allow_all: true, public_issuer: true, data_files: true}
+    update: {cadence: P1M, strategy: snapshot-retention}
+    size: {bytes: 1.0e9, measured: false, as_of: '2026-10-24'}
+    notes: "Normalised names and codes for clinical drugs, linking the US drug vocabularies. The full release needs a free UMLS Metathesaurus licence (the owner's own account); the prescribable subset needs no login. Owner request 2026-10-24."
+
   - id: natural-earth
     name: Natural Earth vector data (all scales)
     publisher: Natural Earth (NACIS)

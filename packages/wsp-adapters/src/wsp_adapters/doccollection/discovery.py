@@ -462,6 +462,9 @@ def index_page(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
         yield from found
         return
     newest_rx = re.compile(_s(cfg["newest"]))
+    # ``newest_date_format``: how the date group reads when it does not sort as text (NLM's RxNorm files
+    # are dated MMDDYYYY: RxNorm_full_10052026.zip).
+    fmt = _s(cfg.get("newest_date_format"))
     best: dict[str, tuple[str, Candidate]] = {}
     for cand in found:
         m = newest_rx.search(cand.url)
@@ -469,6 +472,11 @@ def index_page(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
             yield cand
             continue
         series, stamp = m.group("series"), m.group("date")
+        if fmt:
+            try:
+                stamp = datetime.strptime(stamp, fmt).strftime("%Y-%m-%d")
+            except ValueError:
+                continue  # not a date of this series: not a candidate for the newest
         if series not in best or stamp > best[series][0]:
             best[series] = (stamp, cand)
     for _stamp, cand in best.values():
@@ -2079,6 +2087,11 @@ def fixed_list(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
     items = cast(list[Json], cfg.get("items") or ([{"url": cfg["url"]}] if cfg.get("url") else []))
     for it in items:
         urls = _strs(it.get("urls")) or _strs(it.get("url"))
+        # ``landing`` alone: a page where a person finds the file (a store page, a Box share); only
+        # the owner's daily downloads use such an item (wsp_cli.manual), saved as ``save_as``.
+        page = not urls and bool(_s(it.get("landing")))
+        if page:
+            urls = (_s(it.get("landing")),)
         if not urls:
             continue
         pub = _s(it.get("pub_number"))
@@ -2087,6 +2100,10 @@ def fixed_list(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
         # The stored file's extension when the URL has none (GEBCO's ".../gebco_2024/zip/").
         suffix = _s(it.get("suffix"))
         extra = {"suffix": suffix} if re.fullmatch(r"\.[a-z0-9]{1,8}", suffix) else {}
+        if save_as := _s(it.get("save_as")):  # the name a manual download is saved under
+            extra["save_as"] = save_as
+        if page:
+            extra["page"] = "1"
         yield Candidate(
             key=pub_key(env.prefix, pub, edition, key_stem_from_url(urls[0], decode=env.decode_url_keys)),
             url=urls[0],
@@ -2096,6 +2113,7 @@ def fixed_list(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
             edition_date=edition,
             mirrors=urls[1:],
             size=int(it["size"]) if isinstance(it.get("size"), int) else None,
+            landing_url=_s(it.get("landing")),
             discovered_by="list",
             extra=extra,
         )

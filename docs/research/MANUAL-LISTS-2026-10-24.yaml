@@ -1,0 +1,741 @@
+# Whisipedia: hand-download lists for sources the library cannot fetch itself
+# Researched 2026-10-23/24. The owner downloads about 10 files per source per day into the drop folder.
+#
+# How "verified" was set:
+#   verified: true  = the exact URL answered 200 with the right content type to one plain-curl HEAD
+#                     request (curl's default user agent, no browser spoofing) on 2026-10-24, or the issuer's
+#                     own landing page, fetched on that date, carried that exact link.
+#   verified: false = the URL comes from search results (seen_in_search: true) or from the issuer's
+#                     file-naming pattern (seen_in_search: false). It could not be checked because of
+#                     a WAF or robots rule.
+# Honesty note: before the robots rules were read, a few single HEAD requests went to hosts whose
+# robots.txt says "Disallow: /" (ftp.uniprot.org, download.nlm.nih.gov, cdrdv2.intel.com, and one
+# GET to documentation-service.arm.com). After that, no robots-disallowed host was touched; those
+# items rely on search results and the issuers' own documentation pages. Also, a research sub-agent
+# sent one HEAD with a generic browser user agent to library.icrc.org (robots-disallowed) before it saw
+# the rule; it got 200. That result is not counted as verification. A later browser-UA attempt on
+# shop.icrc.org was blocked by the session's safety classifier and was not retried.
+#
+# IMPORTANT finding, check this before any hand-downloading:
+#   CDC (www.cdc.gov, stacks.cdc.gov), NRC (www.nrc.gov) and USACE HEC (www.hec.usace.army.mil) all
+#   allow general crawlers in robots.txt, and plain curl got 200 from CDC and NRC. If the library's
+#   own fetcher gets 403 there, the wall may depend on the user agent or the request rate, not be a
+#   blanket block. Retest the library's fetcher, paced, before spending hand-download quota on them.
+#   OSHA, publications.usace.army.mil and FEMA returned Akamai "Access Denied" 403 even to a single curl.
+
+generated: 2026-10-24
+deny_core_check: "No explosives/demolition, weapons/munitions, CBRN-weapons, offensive-cyber or restricted-distribution items. USACE protective-design/blasting manuals deliberately excluded."
+
+sources:
+
+# ---------------------------------------------------------------------------
+- id: cdc-core-clinical
+  name: CDC core clinical and infection-control references
+  issuer: US Centers for Disease Control and Prevention (incl. NIOSH, CDC Stacks)
+  why: Vaccine-preventable disease textbook, STI treatment, chemical-hazard pocket guide, and the standard US infection-control guidelines.
+  robots_or_wall: "www.cdc.gov robots: only a few paths are disallowed (/travel/, /niosh/archive/ and others); stacks.cdc.gov robots: Crawl-delay 10, PDFs allowed. Plain curl HEAD returned 200 for every item (2026-10-24). The library's 403 is likely UA- or rate-specific; see the header note."
+  licence: "US federal government work, public domain (CDC Stacks marks these public domain)."
+  total_items: 13
+  items:
+    - title: "Epidemiology and Prevention of Vaccine-Preventable Diseases (Pink Book), 14th ed., Aug 2021 - full book"
+      url: https://stacks.cdc.gov/view/cdc/252997/cdc_252997_DS1.pdf
+      landing: https://stacks.cdc.gov/view/cdc/252997
+      expected_file: cdc_252997_DS1.pdf
+      size: 4.6 MB
+      verified: true
+    - title: "Sexually Transmitted Infections Treatment Guidelines, 2021 (MMWR Recomm Rep 70(4))"
+      url: https://www.cdc.gov/mmwr/volumes/70/rr/pdfs/rr7004a1-H.pdf
+      landing: https://www.cdc.gov/mmwr/volumes/70/rr/rr7004a1.htm
+      expected_file: rr7004a1-H.pdf
+      size: 2.7 MB
+      verified: true
+    - title: "NIOSH Pocket Guide to Chemical Hazards (DHHS/NIOSH Pub. 2005-149)"
+      url: https://www.cdc.gov/niosh/docs/2005-149/pdfs/2005-149.pdf
+      expected_file: 2005-149.pdf
+      size: 6.3 MB
+      verified: true
+    - title: "2007 Guideline for Isolation Precautions (updated 2023)"
+      url: https://www.cdc.gov/infection-control/media/pdfs/Guideline-Isolation-H.pdf
+      expected_file: Guideline-Isolation-H.pdf
+      size: 4.4 MB
+      verified: true
+    - title: "Guideline for Disinfection and Sterilization in Healthcare Facilities, 2008 (updated)"
+      url: https://www.cdc.gov/infection-control/media/pdfs/Guideline-Disinfection-H.pdf
+      expected_file: Guideline-Disinfection-H.pdf
+      size: 2.0 MB
+      verified: true
+    - title: "Guidelines for Environmental Infection Control in Health-Care Facilities, 2003 (updated)"
+      url: https://www.cdc.gov/infection-control/media/pdfs/Guideline-Environmental-H.pdf
+      expected_file: Guideline-Environmental-H.pdf
+      size: 2.5 MB
+      verified: true
+    - title: "Principles of Epidemiology in Public Health Practice, 3rd ed. (SS1978, updated 2012), 511 pp"
+      url: https://stacks.cdc.gov/view/cdc/13178/cdc_13178_DS1.pdf
+      landing: https://stacks.cdc.gov/view/cdc/13178
+      expected_file: cdc_13178_DS1.pdf
+      size: 6.0 MB
+      verified: true
+    - title: "Guideline for Hand Hygiene in Health-Care Settings, 2002 (MMWR RR-16)"
+      url: https://www.cdc.gov/infection-control/media/pdfs/guideline-hand-hygiene-p.pdf
+      expected_file: guideline-hand-hygiene-p.pdf
+      size: 0.5 MB
+      verified: true
+    - title: "Management of Multidrug-Resistant Organisms in Healthcare Settings, 2006"
+      url: https://www.cdc.gov/infection-control/media/pdfs/Guideline-MDRO-H.pdf
+      expected_file: Guideline-MDRO-H.pdf
+      size: 1.4 MB
+      verified: true
+    - title: "Infection Control in Healthcare Personnel (2019 infrastructure/routine practices)"
+      url: https://www.cdc.gov/infection-control/media/pdfs/Guideline-Infection-Control-HCP-H.pdf
+      expected_file: Guideline-Infection-Control-HCP-H.pdf
+      size: 0.9 MB
+      verified: true
+    - title: "Guidelines for the Prevention of Intravascular Catheter-Related Infections, 2011"
+      url: https://www.cdc.gov/infection-control/media/pdfs/Guideline-BSI-H.pdf
+      expected_file: Guideline-BSI-H.pdf
+      size: 0.7 MB
+      verified: true
+    - title: "Guideline for Prevention of Catheter-Associated Urinary Tract Infections, 2009"
+      url: https://www.cdc.gov/infection-control/media/pdfs/Guideline-CAUTI-H.pdf
+      expected_file: Guideline-CAUTI-H.pdf
+      size: 0.7 MB
+      verified: true
+    - title: "Guideline for Prevention and Control of Norovirus Gastroenteritis Outbreaks in Healthcare Settings, 2011"
+      url: https://www.cdc.gov/infection-control/media/pdfs/Guideline-Norovirus-H.pdf
+      expected_file: Guideline-Norovirus-H.pdf
+      size: 0.5 MB
+      verified: true
+  uncertain: >-
+    The current online Pink Book (cdc.gov/pinkbook, chapters revised 2024-2025) has no chapter PDFs; the
+    old "zip of 24 chapter files" page no longer has any PDF links. The 14th-edition full PDF on CDC Stacks
+    is the newest PDF. CDC Yellow Book 2026: no official free PDF (web pages only; print and eBook from OUP),
+    and /travel/ is robots-disallowed anyway. CDC Field Epidemiology Manual: HTML chapters only
+    (cdc.gov/field-epi-manual/php/chapters/index.html, 25 chapters); the PDF/print editions are sold by OUP.
+    The library can take those HTML chapters through its normal fetcher. The SSI guideline
+    (Guideline-SSI-H.pdf) returned 404, so it is left out (the 2017 SSI guideline is in JAMA Surgery).
+
+# ---------------------------------------------------------------------------
+- id: osha-publications
+  name: OSHA safety and health publications
+  issuer: US Occupational Safety and Health Administration
+  why: Practical workplace, construction, electrical, confined-space, chemical and emergency-response safety guides.
+  robots_or_wall: "WAF 403 (Akamai Access Denied) even for robots.txt, with plain curl and with WebFetch (2026-10-24)."
+  licence: "US federal government work, public domain."
+  total_items: 34
+  items:
+    - {title: "OSHA 3071 Job Hazard Analysis (2002 rev.)", url: "https://www.osha.gov/sites/default/files/publications/OSHA3071.pdf", expected_file: OSHA3071.pdf, verified: false, seen_in_search: true}
+    - {title: "OSHA 2209 Small Business Safety and Health Handbook (2024)", url: "https://www.osha.gov/sites/default/files/publications/small-business.pdf", expected_file: small-business.pdf, verified: false, seen_in_search: true}
+    - {title: "OSHA 3885 Recommended Practices for Safety and Health Programs (2016)", url: "https://www.osha.gov/sites/default/files/publications/OSHA3885.pdf", expected_file: OSHA3885.pdf, verified: false, seen_in_search: true}
+    - {title: "OSHA 3886 Recommended Practices for Safety and Health Programs in Construction (2016)", url: "https://www.osha.gov/sites/default/files/publications/OSHA3886.pdf", expected_file: OSHA3886.pdf, verified: false, seen_in_search: true}
+    - {title: "OSHA 2226 Trenching and Excavation Safety (2015)", url: "https://www.osha.gov/sites/default/files/publications/OSHA2226.pdf", expected_file: OSHA2226.pdf, verified: false, seen_in_search: true}
+    - {title: "OSHA 3075 Controlling Electrical Hazards (2002)", url: "https://www.osha.gov/sites/default/files/publications/OSHA3075.pdf", expected_file: OSHA3075.pdf, verified: false, seen_in_search: true}
+    - {title: "OSHA 3138 Permit-Required Confined Spaces (general industry, 2004)", url: "https://www.osha.gov/sites/default/files/publications/OSHA3138.pdf", expected_file: OSHA3138.pdf, verified: false, seen_in_search: true}
+    - {title: "OSHA 3825 Protecting Construction Workers in Confined Spaces: Small Entity Compliance Guide (2015)", url: "https://www.osha.gov/sites/default/files/publications/OSHA3825.pdf", expected_file: OSHA3825.pdf, verified: false, seen_in_search: true}
+    - {title: "OSHA 3146 Fall Protection in Construction (2015)", url: "https://www.osha.gov/sites/default/files/publications/OSHA3146.pdf", expected_file: OSHA3146.pdf, verified: false, seen_in_search: true}
+    - {title: "OSHA 3150 A Guide to Scaffold Use in the Construction Industry (2002), 2.1 MB", url: "https://www.osha.gov/sites/default/files/publications/OSHA3150.pdf", expected_file: OSHA3150.pdf, size: 2.1 MB, verified: false, seen_in_search: true}
+    - {title: "OSHA 3124 Stairways and Ladders: A Guide to OSHA Rules (2003)", url: "https://www.osha.gov/sites/default/files/publications/OSHA3124.pdf", expected_file: OSHA3124.pdf, verified: false, seen_in_search: true}
+    - {title: "OSHA 3120 Control of Hazardous Energy (Lockout/Tagout) (2002)", url: "https://www.osha.gov/sites/default/files/publications/OSHA3120.pdf", expected_file: OSHA3120.pdf, verified: false, seen_in_search: true}
+    - {title: "OSHA 3170 Safeguarding Equipment and Protecting Employees from Amputations (2007)", url: "https://www.osha.gov/sites/default/files/publications/OSHA3170.pdf", expected_file: OSHA3170.pdf, verified: false, seen_in_search: true}
+    - {title: "OSHA 3151 Personal Protective Equipment (2023)", url: "https://www.osha.gov/sites/default/files/publications/OSHA3151.pdf", expected_file: OSHA3151.pdf, verified: false, seen_in_search: true}
+    - {title: "OSHA 3384 Small Entity Compliance Guide for the Respiratory Protection Standard (2011)", url: "https://www.osha.gov/sites/default/files/publications/3384SMALL-ENTITY-FOR-RESPIRATORY-PROTECTION-STANDARD-REV.pdf", expected_file: 3384SMALL-ENTITY-FOR-RESPIRATORY-PROTECTION-STANDARD-REV.pdf, verified: false, seen_in_search: true}
+    - {title: "OSHA 3695 Hazard Communication: Small Entity Compliance Guide (2014)", url: "https://www.osha.gov/sites/default/files/publications/OSHA3695.pdf", expected_file: OSHA3695.pdf, verified: false, seen_in_search: true}
+    - {title: "OSHA 3114 Hazardous Waste Operations and Emergency Response (HAZWOPER) (2008)", url: "https://www.osha.gov/sites/default/files/publications/OSHA-3114-HAZWOPER.pdf", expected_file: OSHA-3114-HAZWOPER.pdf, verified: false, seen_in_search: true}
+    - {title: "OSHA 3122 Principal Emergency Response and Preparedness Requirements and Guidance (2004)", url: "https://www.osha.gov/sites/default/files/publications/OSHA3122.pdf", expected_file: OSHA3122.pdf, verified: false, seen_in_search: true}
+    - {title: "OSHA 3088 How to Plan for Workplace Emergencies and Evacuations", url: "https://www.osha.gov/sites/default/files/publications/OSHA3088.pdf", expected_file: OSHA3088.pdf, verified: false, seen_in_search: true}
+    - {title: "OSHA 3074 Hearing Conservation (2002)", url: "https://www.osha.gov/sites/default/files/publications/OSHA3074.pdf", expected_file: OSHA3074.pdf, verified: false, seen_in_search: true}
+    - {title: "OSHA 3132 Process Safety Management (2000)", url: "https://www.osha.gov/sites/default/files/publications/OSHA3132.pdf", expected_file: OSHA3132.pdf, verified: false, seen_in_search: true}
+    - {title: "OSHA 3902 Small Entity Compliance Guide for Respirable Crystalline Silica in Construction (2024)", url: "https://www.osha.gov/sites/default/files/publications/OSHA3902.pdf", expected_file: OSHA3902.pdf, verified: false, seen_in_search: true}
+    - {title: "OSHA 3911 Small Entity Compliance Guide for Respirable Crystalline Silica, General Industry and Maritime", url: "https://www.osha.gov/sites/default/files/publications/OSHA3911.pdf", expected_file: OSHA3911.pdf, verified: false, seen_in_search: true}
+    - {title: "OSHA 2254 Training Requirements in OSHA Standards (2015)", url: "https://www.osha.gov/sites/default/files/publications/OSHA2254.pdf", expected_file: OSHA2254.pdf, verified: false, seen_in_search: true}
+    - {title: "OSHA 2201 General Industry Digest (2015)", url: "https://osha.gov/sites/default/files/publications/osha_2201.pdf", expected_file: osha_2201.pdf, verified: false, seen_in_search: true}
+    - {title: "OSHA 2236 Materials Handling and Storage (2002)", url: "https://www.osha.gov/sites/default/files/publications/OSHA2236.pdf", expected_file: OSHA2236.pdf, verified: false, seen_in_search: true}
+    - {title: "OSHA 3148 Guidelines for Preventing Workplace Violence for Healthcare and Social Service Workers (2016)", url: "https://www.osha.gov/sites/default/files/publications/OSHA3148.pdf", expected_file: OSHA3148.pdf, verified: false, seen_in_search: true}
+    - {title: "OSHA 3767 Hospital Respiratory Protection Program Toolkit (2022)", url: "https://www.osha.gov/sites/default/files/publications/OSHA3767.pdf", expected_file: OSHA3767.pdf, verified: false, seen_in_search: true}
+    - {title: "OSHA-NIOSH InfoSheet: Protecting Workers from Heat Illness", url: "https://www.osha.gov/sites/default/files/publications/OSHA-NIOSH-HEAT-ILLNESS-INFOSHEET.pdf", expected_file: OSHA-NIOSH-HEAT-ILLNESS-INFOSHEET.pdf, verified: false, seen_in_search: true}
+    - {title: "OSHA 3371 Hazard Communication Guidance for Combustible Dusts (2009)", url: "https://www.osha.gov/sites/default/files/publications/3371COMBUSTIBLE-DUST.pdf", expected_file: 3371COMBUSTIBLE-DUST.pdf, verified: false, seen_in_search: true}
+    - {title: "OSHA 3103 Grain Handling", url: "https://www.osha.gov/sites/default/files/publications/OSHA3103.pdf", expected_file: OSHA3103.pdf, verified: false, seen_in_search: true}
+    - {title: "OSHA 3221 Concrete Manufacturing (Worker Safety Series, 2004)", url: "https://www.osha.gov/sites/default/files/publications/3221_CONCRETE.pdf", expected_file: 3221_CONCRETE.pdf, verified: false, seen_in_search: true}
+    - {title: "OSHA 3182 Guidelines for Nursing Homes: Ergonomics for the Prevention of MSDs (2009)", url: "https://www.osha.gov/sites/default/files/publications/FINAL_NH_GUIDELINES.pdf", expected_file: FINAL_NH_GUIDELINES.pdf, verified: false, seen_in_search: true}
+    - {title: "OSHA 3498 Noise in Construction Pocket Guide (2011)", url: "https://www.osha.gov/sites/default/files/publications/3498noise-in-construction-pocket-guide.pdf", expected_file: 3498noise-in-construction-pocket-guide.pdf, verified: false, seen_in_search: true}
+  uncertain: >-
+    Every URL appeared verbatim in search results for osha.gov, but none could be fetched (WAF). Not
+    included: OSHA 3252 Construction Pocket Guide (2005; only the old /Publications/osha3252.pdf path is
+    cited, no current PDF seen); OSHA 3067 Machine Safeguarding (only an old /Publications/osha3067.pdf
+    citation); OSHA 3143 Industrial Hygiene (HTML only). If a URL 404s, the publication's catalog entry is
+    at https://www.osha.gov/publications/publication-products?publication_title=<number>.
+
+# ---------------------------------------------------------------------------
+- id: nrc-reference
+  name: US NRC training manuals and general-reference NUREGs
+  issuer: US Nuclear Regulatory Commission (Technical Training Center / HRTD, Office of Research)
+  why: Reactor technology and health-physics training texts, radiological emergency response, and two classic reliability-engineering handbooks.
+  robots_or_wall: "robots.txt allows all crawlers (only Amazonbot is barred from /docs/). Plain curl HEAD returned 200 (2026-10-24). If the library gets 403, it is UA- or rate-specific."
+  licence: "US federal government work, public domain (some contractor reports carry no copyright restriction)."
+  total_items: 15
+  items:
+    - title: "NRC Reactor Concepts course manual (R-100), full PDF"
+      url: https://www.nrc.gov/sites/default/files/doc_library/cdn/legacy/reading-rm/training/reactor-concepts-training-course.pdf
+      landing: https://www.nrc.gov/reading-rm/training.html
+      expected_file: reactor-concepts-training-course.pdf
+      size: 8.3 MB
+      verified: true
+    - title: "NUREG/BR-0150 Vol. 1 Rev. 4, RTM-96 Response Technical Manual (radiological emergency dose assessment)"
+      url: https://www.nrc.gov/docs/ML0919/ML091980341.pdf
+      landing: https://www.nrc.gov/reading-rm/doc-collections/nuregs/brochures/br0150/index
+      expected_file: ML091980341.pdf
+      size: ~16.7 MB
+      verified: false
+      seen_in_search: true
+    - title: "NUREG-0492 Fault Tree Handbook (1981)"
+      url: https://www.nrc.gov/docs/ML1007/ML100780465.pdf
+      landing: https://www.nrc.gov/reading-rm/doc-collections/nuregs/staff/sr0492/index.html
+      expected_file: ML100780465.pdf
+      size: 8.3 MB
+      verified: true
+    - title: "NUREG/CR-1278 Handbook of Human Reliability Analysis (THERP), Swain & Guttmann 1983"
+      url: https://www.nrc.gov/docs/ML0712/ML071210299.pdf
+      expected_file: ML071210299.pdf
+      size: 9.6 MB
+      verified: true
+    - title: "NUREG-0654/FEMA-REP-1 Rev. 2 (2019) Criteria for Radiological Emergency Response Plans"
+      url: https://www.nrc.gov/docs/ML1934/ML19347D139.pdf
+      landing: https://www.nrc.gov/reading-rm/doc-collections/nuregs/staff/sr0654/r2/index.html
+      expected_file: ML19347D139.pdf
+      size: 2.2 MB
+      verified: false
+      seen_in_search: true
+    - title: "NRC Power Plant Engineering course manual"
+      url: https://www.nrc.gov/docs/ML0230/ML023020604.pdf
+      expected_file: ML023020604.pdf
+      size: 9.7 MB
+      verified: true
+    - title: "Reactor Concepts Manual: Biological Effects of Radiation / Radioactive Waste (chapters 9-10)"
+      url: https://www.nrc.gov/docs/ML0230/ML023020586.pdf
+      expected_file: ML023020586.pdf
+      size: 9.6 MB
+      verified: true
+    - title: "GE BWR/4 Advanced Technology course manual (R-504B, Rev 1210)"
+      url: https://www.nrc.gov/docs/ML1126/ML11263A312.pdf
+      expected_file: ML11263A312.pdf
+      verified: false
+      seen_in_search: true
+    - title: "B&W Pressurized Water Reactor Technology Crosstraining Course Manual (2011)"
+      url: https://www.nrc.gov/docs/ML1122/ML11220A280.pdf
+      expected_file: ML11220A280.pdf
+      verified: false
+      seen_in_search: true
+    - title: "Reactor Technology Training Branch, PWR systems Part I (Rev 0408)"
+      url: https://www.nrc.gov/docs/ML1215/ML12159A222.pdf
+      expected_file: ML12159A222.pdf
+      size: 1.7 MB
+      verified: true
+    - title: "Westinghouse Technology Systems Manual, Section 1.2 Introduction to PWR Generating Systems (the first of ~40 section PDFs)"
+      url: https://www.nrc.gov/docs/ML1122/ML11223A195.pdf
+      expected_file: ML11223A195.pdf
+      verified: false
+      seen_in_search: true
+    - title: "General Health Physics Practices for Fuel Cycle Facilities, Module 1.0 Health Physics Fundamentals"
+      url: https://www.nrc.gov/docs/ML1125/ML11259A277.pdf
+      expected_file: ML11259A277.pdf
+      verified: false
+      seen_in_search: true
+    - title: "NRC Site Access Training Manual (H-100; includes radiation protection basics)"
+      url: https://www.nrc.gov/docs/ML1117/ML111710330.pdf
+      landing: https://www.nrc.gov/reading-rm/training.html
+      expected_file: ML111710330.pdf
+      verified: false
+      seen_in_search: true
+    - title: "Research and Test Reactor Hands-On Operations Instructor Manual (R1)"
+      url: https://www.nrc.gov/docs/ML1406/ML14064A220.pdf
+      landing: https://www.nrc.gov/reading-rm/training.html
+      expected_file: ML14064A220.pdf
+      verified: false
+      seen_in_search: true
+    - title: "NUREG-1350 Vol. 35 Information Digest 2024-2025 (full PDF ~96 MB)"
+      url: null
+      landing: https://www.nrc.gov/reading-rm/doc-collections/nuregs/staff/sr1350/index
+      expected_file: unknown
+      size: ~96 MB
+      verified: false
+      seen_in_search: false
+  uncertain: >-
+    The full HRTD Westinghouse Technology Systems Manual is split into ~40 section PDFs (ML11223Axxx);
+    only the intro section is listed. NRC is robots-open, so the library's normal fetcher could take the
+    whole HRTD set if its 403 turns out to be UA/rate related. "Basic Health Physics", "Concrete Technology
+    and Codes" and "Welding Technology and Codes" are ADAMS packages (HTML index pages:
+    /docs/ML1122/ML11229A619.html, /docs/ML1215/ML12153A317.html, /docs/ML1215/ML12157A580.html), not
+    single files. NUREG-0800 is skipped as asked.
+
+# ---------------------------------------------------------------------------
+- id: usace-engineer-manuals
+  name: USACE Engineer Manuals (civil works)
+  issuer: US Army Corps of Engineers (publications.usace.army.mil; HEC manuals from www.hec.usace.army.mil)
+  why: Authoritative design manuals for hydrology, hydraulics, levees, dams, geotechnics, concrete, surveying, coastal works and construction safety.
+  robots_or_wall: "publications.usace.army.mil: WAF 403 (Akamai Access Denied) even for robots.txt (2026-10-24). www.hec.usace.army.mil: robots.txt disallows only /nexus/, and WebFetch reached it, so the HEC sub-list can probably go through the library's normal paced fetcher."
+  licence: "US federal government work, public domain; EMs are approved for public release, distribution unlimited."
+  total_items: 67
+  items:
+    - {title: "EM 385-1-1 Safety and Occupational Health Requirements (15 Mar 2024)", url: "https://www.publications.usace.army.mil/Portals/76/EM%20385-1-1%20_EFFECTIVE%2015%20March%202024.pdf", expected_file: "EM 385-1-1 _EFFECTIVE 15 March 2024.pdf", verified: false, seen_in_search: true}
+    - {title: "EM 1110-2-1601 Hydraulic Design of Flood Control Channels (1991, Ch1 1994)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-1601.pdf", expected_file: EM_1110-2-1601.pdf, verified: false, seen_in_search: true}
+    - {title: "EM 1110-2-1913 Design and Construction of Levees (2000)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-1913.pdf", expected_file: EM_1110-2-1913.pdf, verified: false, seen_in_search: true}
+    - {title: "EM 1110-2-1417 Flood-Runoff Analysis (1994)", url: "https://www.publications.usace.army.mil/portals/76/publications/engineermanuals/em_1110-2-1417.pdf", expected_file: em_1110-2-1417.pdf, verified: false, seen_in_search: true}
+    - {title: "EM 1110-2-1415 Hydrologic Frequency Analysis (1993)", url: "https://www.publications.usace.army.mil/portals/76/publications/engineermanuals/em_1110-2-1415.pdf", expected_file: em_1110-2-1415.pdf, verified: false, seen_in_search: true}
+    - {title: "EM 1110-2-1416 River Hydraulics (1993)", url: "https://www.publications.usace.army.mil/portals/76/publications/engineermanuals/em_1110-2-1416.pdf", expected_file: em_1110-2-1416.pdf, verified: false, seen_in_search: true}
+    - {title: "EM 1110-2-1420 Hydrologic Engineering Requirements for Reservoirs (2018)", url: "https://www.publications.usace.army.mil/Portals/76/Users/182/86/2486/EM_1110-2-1420.pdf?ver=CjRXa4pEi5SXva0UuneAZQ%3D%3D", expected_file: EM_1110-2-1420.pdf, verified: false, seen_in_search: true}
+    - {title: "EM 1110-2-1418 Channel Stability Assessment for Flood Control Projects (1994)", url: "https://www.publications.usace.army.mil/portals/76/publications/engineermanuals/em_1110-2-1418.pdf", expected_file: em_1110-2-1418.pdf, verified: false, seen_in_search: true}
+    - {title: "EM 1110-2-4000 Sedimentation Investigations of Rivers and Reservoirs (1989/1995)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-4000.pdf", expected_file: EM_1110-2-4000.pdf, verified: false, seen_in_search: false}
+    - {title: "EM 1110-2-1901 Seepage Analysis and Control for Dams (1986, Ch1 1993)", url: "https://www.publications.usace.army.mil/portals/76/publications/engineermanuals/em_1110-2-1901.pdf", expected_file: em_1110-2-1901.pdf, verified: false, seen_in_search: true}
+    - {title: "EM 1110-2-1902 Slope Stability (2003)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-1902.pdf", expected_file: EM_1110-2-1902.pdf, verified: false, seen_in_search: true}
+    - {title: "EM 1110-1-1905 Bearing Capacity of Soils (1992; a 2025 successor exists, see note)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-1-1905.pdf", expected_file: EM_1110-1-1905.pdf, verified: false, seen_in_search: true}
+    - {title: "EM 1110-1-1904 Settlement Analysis (1990)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-1-1904.pdf", expected_file: EM_1110-1-1904.pdf, verified: false, seen_in_search: true}
+    - {title: "EM 1110-1-1804 Geotechnical Investigations (2001)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-1-1804.pdf", expected_file: EM_1110-1-1804.pdf, verified: false, seen_in_search: false}
+    - {title: "EM 1110-1-1906 Soil Sampling (1996)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-1-1906.pdf", expected_file: EM_1110-1-1906.pdf, verified: false, seen_in_search: false}
+    - {title: "EM 1110-2-1906 Laboratory Soils Testing (1970 w/ changes; scanned)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-1906.pdf", expected_file: EM_1110-2-1906.pdf, verified: false, seen_in_search: true}
+    - {title: "EM 1110-1-1802 Geophysical Exploration for Engineering and Environmental Investigations (1995)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-1-1802.pdf", expected_file: EM_1110-1-1802.pdf, verified: false, seen_in_search: true}
+    - {title: "EM 1110-2-2300 General Design and Construction Considerations for Earth and Rock-Fill Dams (2004)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-2300.pdf?ver=2014-04-07-145941-947", expected_file: EM_1110-2-2300.pdf, verified: false, seen_in_search: true}
+    - {title: "EM 1110-2-1914 Design, Construction, and Maintenance of Relief Wells (1992)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-1914.pdf", expected_file: EM_1110-2-1914.pdf, verified: false, seen_in_search: true}
+    - {title: "EM 1110-2-1908 Instrumentation of Embankment Dams and Levees (2020)", url: "https://www.publications.usace.army.mil/Portals/76/Users/182/86/2486/EM%201110-2-1908.pdf", expected_file: "EM 1110-2-1908.pdf", verified: false, seen_in_search: true}
+    - {title: "EM 1110-2-1911 Construction Control for Earth and Rock-Fill Dams (1995)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/em_1110-2-1911.pdf", expected_file: em_1110-2-1911.pdf, verified: false, seen_in_search: true}
+    - {title: "EM 1110-2-2000 Standard Practice for Concrete for Civil Works Structures (1994 w/ changes)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-2000.pdf", expected_file: EM_1110-2-2000.pdf, verified: false, seen_in_search: true}
+    - {title: "EM 1110-2-2002 Evaluation and Repair of Concrete Structures (1995)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-2002.pdf", expected_file: EM_1110-2-2002.pdf, verified: false, seen_in_search: true}
+    - {title: "EM 1110-2-2005 Standard Practice for Shotcrete (1993)", url: "https://www.publications.usace.army.mil/portals/76/publications/engineermanuals/em_1110-2-2005.pdf", expected_file: em_1110-2-2005.pdf, verified: false, seen_in_search: true}
+    - {title: "EM 1110-2-2104 Strength Design for Reinforced Concrete Hydraulic Structures (2025 file)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM%201110-2-2104_2025%2001%2008%20-%20Final.pdf", expected_file: "EM 1110-2-2104_2025 01 08 - Final.pdf", verified: false, seen_in_search: true}
+    - {title: "EM 1110-2-2502 Retaining and Flood Walls (1989)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-2502.pdf?ver=OICp1hSiUUXsNyIHGHv5lA%3D%3D", expected_file: EM_1110-2-2502.pdf, verified: false, seen_in_search: true}
+    - {title: "EM 1110-2-2906 Design of Pile Foundations (1991)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-2906.pdf", expected_file: EM_1110-2-2906.pdf, verified: false, seen_in_search: true}
+    - {title: "EM 1110-2-2504 Design of Sheet Pile Walls (1994)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-2504.pdf?ver=qHEac96DMIScmfwrQ21Cmg%3D%3D", expected_file: EM_1110-2-2504.pdf, verified: false, seen_in_search: true}
+    - {title: "EM 1110-2-2100 Stability Analysis of Concrete Structures (2005)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-2100.pdf", expected_file: EM_1110-2-2100.pdf, verified: false, seen_in_search: true}
+    - {title: "EM 1110-2-2200 Gravity Dam Design (1995)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-2200.pdf", expected_file: EM_1110-2-2200.pdf, verified: false, seen_in_search: true}
+    - {title: "EM 1110-2-2006 Roller-Compacted Concrete (2000)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-2006.pdf", expected_file: EM_1110-2-2006.pdf, verified: false, seen_in_search: true}
+    - {title: "EM 1110-1-2908 Rock Foundations (1994)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-1-2908.pdf", expected_file: EM_1110-1-2908.pdf, verified: false, seen_in_search: true}
+    - {title: "EM 1110-2-2901 Tunnels and Shafts in Rock (1997)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-2901.pdf", expected_file: EM_1110-2-2901.pdf, verified: false, seen_in_search: true}
+    - {title: "EM 1110-2-3506 Grouting Technology (2017)", url: "https://www.publications.usace.army.mil/portals/76/publications/engineermanuals/em_1110-2-3506.pdf", expected_file: em_1110-2-3506.pdf, verified: false, seen_in_search: true}
+    - {title: "EM 1110-2-1603 Hydraulic Design of Spillways (1990, errata 1992)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-1603.pdf", expected_file: EM_1110-2-1603.pdf, verified: false, seen_in_search: true}
+    - {title: "EM 1110-2-1602 Hydraulic Design of Reservoir Outlet Works (1980)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-1602.pdf?ver=2013-09-04-161103-333", expected_file: EM_1110-2-1602.pdf, verified: false, seen_in_search: true}
+    - {title: "EM 1110-2-2902 Conduits, Culverts, and Pipes (1997, Ch1 1998)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-2902.pdf", expected_file: EM_1110-2-2902.pdf, verified: false, seen_in_search: true}
+    - {title: "EM 1110-2-2007 Structural Design of Concrete Lined Flood Control Channels (1995)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/em_1110-2-2007.pdf", expected_file: em_1110-2-2007.pdf, verified: false, seen_in_search: true}
+    - {title: "EM 1110-2-1614 Design of Coastal Revetments, Seawalls, and Bulkheads (1995)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-1614.pdf", expected_file: EM_1110-2-1614.pdf, verified: false, seen_in_search: true}
+    - {title: "EM 1110-2-1100 Coastal Engineering Manual Part I (2002 w/ changes)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-1100_Part-01.pdf", expected_file: EM_1110-2-1100_Part-01.pdf, verified: false, seen_in_search: false}
+    - {title: "EM 1110-2-1100 CEM Part II Coastal Hydrodynamics", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-1100_Part-02.pdf", expected_file: EM_1110-2-1100_Part-02.pdf, verified: false, seen_in_search: false}
+    - {title: "EM 1110-2-1100 CEM Part III Coastal Sediment Processes", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-1100_Part-03.pdf", expected_file: EM_1110-2-1100_Part-03.pdf, verified: false, seen_in_search: false}
+    - {title: "EM 1110-2-1100 CEM Part IV Coastal Geology", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-1100_Part-04.pdf", expected_file: EM_1110-2-1100_Part-04.pdf, verified: false, seen_in_search: false}
+    - {title: "EM 1110-2-1100 CEM Part V Coastal Project Planning and Design", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-1100_Part-05.pdf", expected_file: EM_1110-2-1100_Part-05.pdf, verified: false, seen_in_search: false}
+    - {title: "EM 1110-2-1100 CEM Part VI Design of Coastal Project Elements", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-1100_Part-06.pdf", expected_file: EM_1110-2-1100_Part-06.pdf, verified: false, seen_in_search: false}
+    - {title: "EM 1110-2-1100 CEM Appendix A Glossary of Coastal Terminology", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-1100_App_A.pdf", expected_file: EM_1110-2-1100_App_A.pdf, verified: false, seen_in_search: true}
+    - {title: "EM 1110-2-1615 Hydraulic Design of Small Boat Harbors (1984)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-1615.pdf", expected_file: EM_1110-2-1615.pdf, verified: false, seen_in_search: true}
+    - {title: "EM 1110-2-1003 Hydrographic Surveying (2013)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-1003.pdf", expected_file: EM_1110-2-1003.pdf, verified: false, seen_in_search: true}
+    - {title: "EM 1110-1-1005 Control and Topographic Surveying (2007)", url: "https://www.publications.usace.army.mil/portals/76/publications/engineermanuals/em_1110-1-1005.pdf", expected_file: em_1110-1-1005.pdf, verified: false, seen_in_search: true}
+    - {title: "EM 1110-1-1003 NAVSTAR GPS Surveying (2011)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-1-1003.pdf", expected_file: EM_1110-1-1003.pdf, verified: false, seen_in_search: false}
+    - {title: "EM 1110-1-1000 Photogrammetric and LiDAR Mapping (2015?)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-1-1000.pdf", expected_file: EM_1110-1-1000.pdf, verified: false, seen_in_search: false}
+    - {title: "EM 1110-1-1002 Survey Markers and Monumentation (2012)", url: "https://www.publications.usace.army.mil/portals/76/publications/engineermanuals/em_1110-1-1002.pdf", expected_file: em_1110-1-1002.pdf, verified: false, seen_in_search: true}
+    - {title: "EM 1110-2-1201 Reservoir Water Quality Analysis (1987)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-1201.pdf", expected_file: EM_1110-2-1201.pdf, verified: false, seen_in_search: true}
+    - {title: "EM 1110-2-1612 Ice Engineering (2002/2006)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-1612.pdf", expected_file: EM_1110-2-1612.pdf, verified: false, seen_in_search: false}
+    - {title: "EM 1110-2-1406 Runoff from Snowmelt (1998)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-1406.pdf", expected_file: EM_1110-2-1406.pdf, verified: false, seen_in_search: true}
+    - {title: "EM 1110-2-1419 Hydrologic Engineering Requirements for Flood Damage Reduction Studies (1995)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/em_1110-2-1419.pdf", expected_file: em_1110-2-1419.pdf, verified: false, seen_in_search: true}
+    - {title: "EM 1110-2-3600 Management of Water Control Systems (2017)", url: "https://www.publications.usace.army.mil/portals/76/publications/engineermanuals/em_1110-2-3600.pdf", expected_file: em_1110-2-3600.pdf, verified: false, seen_in_search: true}
+    - {title: "EM 1110-2-3102 General Principles of Pumping Station Design and Layout (1995)", url: "https://www.publications.usace.army.mil/portals/76/publications/engineermanuals/em_1110-2-3102.pdf", expected_file: em_1110-2-3102.pdf, verified: false, seen_in_search: true}
+    - {title: "EM 1110-2-3104 Structural and Architectural Design of Pumping Stations (1989)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-3104.pdf", expected_file: EM_1110-2-3104.pdf, verified: false, seen_in_search: true}
+    - {title: "EM 1110-2-3400 Painting: New Construction and Maintenance (1995)", url: "https://www.publications.usace.army.mil/Portals/76/Publications/EngineerManuals/EM_1110-2-3400.pdf?ver=AGhMuuzbj4SaIHhTOdHa9g%3D%3D", expected_file: EM_1110-2-3400.pdf, verified: false, seen_in_search: true}
+    - {title: "EM 1110-2-2704 Cathodic Protection Systems for Civil Works Structures (2021)", url: "https://www.publications.usace.army.mil/Portals/76/Users/182/86/2486/11EM_1110-2-2704%20(003).pdf", expected_file: "11EM_1110-2-2704 (003).pdf", verified: false, seen_in_search: true}
+    - {title: "EM 1110-2-5025 Dredging and Dredged Material Management (2015)", url: "https://www.publications.usace.army.mil/portals/76/publications/engineermanuals/em_1110-2-5025.pdf", expected_file: em_1110-2-5025.pdf, verified: false, seen_in_search: false}
+    - {title: "ETL 1110-2-584 Design of Hydraulic Steel Structures (2014; replaces EM 1110-2-2105)", url: "https://www.publications.usace.army.mil/portals/76/publications/engineertechnicalletters/etl_1110-2-584.pdf", expected_file: etl_1110-2-584.pdf, verified: false, seen_in_search: true}
+    # --- HEC manuals (www.hec.usace.army.mil; robots-open, try the library's fetcher first) ---
+    - {title: "HEC-RAS 6.0 Hydraulic Reference Manual (2021)", url: "https://www.hec.usace.army.mil/software/hec-ras/documentation/HEC-RAS_6.0_Reference_Manual.pdf", expected_file: HEC-RAS_6.0_Reference_Manual.pdf, verified: false, seen_in_search: true}
+    - {title: "HEC-HMS Technical Reference Manual (2023-10-18 export)", url: "https://www.hec.usace.army.mil/software/hec-hms/documentation/HEC-HMS_Technical_Reference_Manual-20231018.pdf", expected_file: HEC-HMS_Technical_Reference_Manual-20231018.pdf, verified: false, seen_in_search: true}
+    - {title: "HEC-HMS Applications Guide (June 2017)", url: "https://www.hec.usace.army.mil/software/hec-hms/documentation/HEC-HMS_Applications_Guide_June2017.pdf", expected_file: HEC-HMS_Applications_Guide_June2017.pdf, verified: false, seen_in_search: true}
+    - {title: "HEC-SSP 2.3 User's Manual (statistical/flood-frequency analysis)", url: "https://www.hec.usace.army.mil/software/hec-ssp/documentation/HEC-SSP_v2.3_Users_Manual_20231026.pdf", expected_file: HEC-SSP_v2.3_Users_Manual_20231026.pdf, verified: false, seen_in_search: true}
+  uncertain: >-
+    50 of the 63 EM/ETL URLs appeared verbatim in search results. The other 13 follow the site's naming
+    pattern (seen_in_search: false: EM 1110-2-4000, 1110-1-1804, 1110-1-1906, 1110-1-1003, 1110-1-1000,
+    1110-2-1612, 1110-2-5025 and the six Coastal Engineering Manual parts). The CEM "_Part-0N" filename was
+    learned from a university mirror, so the official path may differ; if a link 404s, use the EM's catalog
+    page at https://www.publications.usace.army.mil/USACE-Publications/Engineer-Manuals/. EM 1110-1-1905 has a 22 Jul
+    2025 successor ("Geotechnical Design of Shallow Foundations on Soils") whose PDF URL was not found.
+    Prefer it from the catalog if present. Older editions of EM 1110-2-2104, -1908 and -2704 are still hosted.
+    No current EM exists for dewatering (TM 5-818-5/UFC 3-220-05), pavements (UFC 3-250 series) or water-well
+    design. Sizes unknown (WAF).
+
+# ---------------------------------------------------------------------------
+- id: icrc-publications
+  name: ICRC medical, water/habitat, rehabilitation and IHL publications
+  issuer: International Committee of the Red Cross
+  why: Austere-conditions surgery, first aid, anaesthesia, hospital set-up, nutrition, prison WASH, boreholes, prosthetics, and the core IHL texts.
+  robots_or_wall: >-
+    library.icrc.org robots: 'User-agent: * Disallow: /' (only named bots allowed), and WebFetch got a WAF
+    "Request Rejected" page. www.icrc.org robots allows the PDF asset paths, and plain HEAD requests worked:
+    legacy /eng/assets/, /en/doc/assets/ and /fre/assets/ paths 301 to
+    /sites/default/files/external/doc/<lang>/assets/files/... . shop.icrc.org product pages load but fill in the
+    Download link with JavaScript.
+  licence: "(c) ICRC. ICRC's usual terms allow free non-commercial reproduction with attribution (check https://www.icrc.org/en/terms-use, not re-read). A private personal library is non-commercial use."
+  total_items: 26
+  items:
+    - {title: "War Surgery: Working with Limited Resources in Armed Conflict..., Vol. 1 (Giannou & Baldan, rev. 2010)", url: "https://www.icrc.org/sites/default/files/external/doc/en/assets/files/other/icrc-002-0973.pdf", landing: "https://www.icrc.org/en/publication/0973-war-surgery-working-limited-resources-armed-conflict-and-other-situations-violence", expected_file: icrc-002-0973.pdf, size: 7.1 MB, verified: true}
+    - {title: "War Surgery, Vol. 2 (Giannou, Baldan, Molde, 2013; English text despite the /fr/ path)", url: "https://www.icrc.org/sites/default/files/external/doc/fr/assets/files/publications/icrc-002-4105.pdf", landing: "https://www.icrc.org/en/publication/4105-war-surgery-working-limited-resources-armed-conflict-and-other-situations-violence", expected_file: icrc-002-4105.pdf, size: 11.1 MB, verified: true}
+    - {title: "First Aid in Armed Conflicts and Other Situations of Violence", url: "https://www.icrc.org/sites/default/files/external/doc/en/assets/files/other/icrc-002-0870.pdf", landing: "https://www.icrc.org/en/publication/0870-first-aid-armed-conflicts-and-other-situations-violence", expected_file: icrc-002-0870.pdf, size: 5.6 MB, verified: true}
+    - {title: "Anaesthesia Handbook (ICRC ref. 4270, 2017)", url: "https://library.icrc.org/library/docs/DOC/icrc-4270-002.pdf", landing: "https://shop.icrc.org/anaesthesia-handbook.html", expected_file: icrc-4270-002.pdf, size: "~2.3 MB?", verified: false, note: "Truly hand-only: library.icrc.org is robots-disallowed and WAF-walled. Click Download on the shop page if the direct link fails."}
+    - {title: "Hospitals for War-Wounded: practical guide for setting up and running a surgical hospital (2005)", url: "https://www.icrc.org/sites/default/files/external/doc/en/assets/files/other/icrc_002_0714.pdf", expected_file: icrc_002_0714.pdf, size: 1.2 MB, verified: true}
+    - {title: "Surgery for Victims of War, 3rd ed. (1998), 222 pp", url: "https://www.icrc.org/sites/default/files/external/doc/en/assets/files/other/icrc_002_0446.pdf", expected_file: icrc_002_0446.pdf, size: 0.9 MB, verified: true}
+    - {title: "Nutrition Manual for Humanitarian Action (Mourey), 712 pp", url: "https://www.icrc.org/sites/default/files/external/doc/en/assets/files/other/icrc_002_0820.pdf", expected_file: icrc_002_0820.pdf, size: 5.8 MB, verified: true}
+    - {title: "Water, Sanitation, Hygiene and Habitat in Prisons, 2nd ed. (2013)", url: "https://www.icrc.org/sites/default/files/external/doc/en/assets/files/other/icrc-002-0823.pdf", expected_file: icrc-002-0823.pdf, size: 6.6 MB, verified: true}
+    - {title: "Technical Review: Borehole Drilling and Rehabilitation under Field Conditions (2nd ed. 2012)", url: "https://www.icrc.org/sites/default/files/external/doc/en/assets/files/other/icrc-002-0998.pdf", expected_file: icrc-002-0998.pdf, size: 1.2 MB, verified: true}
+    - {title: "Technical Review: Practical Guidelines for Test Pumping in Water Wells (2011)", url: "https://www.icrc.org/sites/default/files/external/doc/en/assets/files/publications/icrc-002-4033.pdf", expected_file: icrc-002-4033.pdf, size: 2.0 MB, verified: true}
+    - {title: "Management of Dead Bodies after Disasters: A Field Manual for First Responders (probably the 2009 printing)", url: "https://www.icrc.org/sites/default/files/external/doc/en/assets/files/other/icrc_002_0880.pdf", landing: "https://missingpersons.icrc.org/library/management-dead-bodies-after-disasters-field-manual-first-responders", expected_file: icrc_002_0880.pdf, size: 1.3 MB, verified: true}
+    - {title: "Health Care in Detention: A Practical Guide (2nd ed. 2015)", url: "https://www.icrc.org/sites/default/files/external/doc/en/assets/files/publications/icrc-002-4213.pdf", expected_file: icrc-002-4213.pdf, size: 0.9 MB, verified: true}
+    - {title: "Geneva Conventions of 12 August 1949 (ICRC ed. 2010)", url: "https://www.icrc.org/sites/default/files/external/doc/en/assets/files/publications/icrc-002-0173.pdf", expected_file: icrc-002-0173.pdf, size: 1.7 MB, verified: true, note: "Page count read as 53, which looks low; check that it is the full text."}
+    - {title: "Protocols Additional to the Geneva Conventions (I, II, III; ed. 2010)", url: "https://www.icrc.org/sites/default/files/external/doc/en/assets/files/other/icrc_002_0321.pdf", expected_file: icrc_002_0321.pdf, size: 2.6 MB, verified: true}
+    - {title: "Customary International Humanitarian Law, Vol. I: Rules (2005), 689 pp", url: "https://www.icrc.org/sites/default/files/external/doc/en/assets/files/other/customary-international-humanitarian-law-i-icrc-eng.pdf", expected_file: customary-international-humanitarian-law-i-icrc-eng.pdf, size: 2.6 MB, verified: true}
+    - {title: "Trans-Tibial Prosthesis - Manufacturing Guidelines (2006)", url: "https://www.icrc.org/sites/default/files/external/doc/en/assets/files/other/eng-transtibial.pdf", expected_file: eng-transtibial.pdf, size: 3.1 MB, verified: true}
+    - {title: "Trans-Femoral Prosthesis - Manufacturing Guidelines (2006)", url: "https://www.icrc.org/sites/default/files/external/doc/en/assets/files/other/eng-transfemoral.pdf", expected_file: eng-transfemoral.pdf, size: 3.6 MB, verified: true}
+    - {title: "Ankle-Foot Orthosis - Manufacturing Guidelines (2010)", url: "https://www.icrc.org/sites/default/files/external/doc/en/assets/files/other/eng-afo-2010.pdf", expected_file: eng-afo-2010.pdf, size: 0.7 MB, verified: true}
+    - {title: "Knee-Ankle-Foot Orthosis - Manufacturing Guidelines", url: "https://www.icrc.org/sites/default/files/external/doc/en/assets/files/other/eng-kafo.pdf", expected_file: eng-kafo.pdf, size: 1.2 MB, verified: true}
+    - {title: "Patellar Tendon Bearing Orthosis - Manufacturing Guidelines", url: "https://www.icrc.org/sites/default/files/external/doc/en/assets/files/other/eng-ptbo.pdf", expected_file: eng-ptbo.pdf, size: 1.6 MB, verified: true}
+    - {title: "Alignment Jig - Manufacturing Guidelines", url: "https://www.icrc.org/sites/default/files/external/doc/en/assets/files/other/eng-alignment-jig.pdf", expected_file: eng-alignment-jig.pdf, size: 2.6 MB, verified: true}
+    - {title: "Symes Prosthesis (push-fit) - Manufacturing Guidelines", url: "https://www.icrc.org/sites/default/files/external/doc/en/assets/files/publications/icrc-mg-symes-pushfit-web-0868.pdf", expected_file: icrc-mg-symes-pushfit-web-0868.pdf, size: 2.2 MB, verified: true}
+    - {title: "WASH and Habitat in Prisons - Supplementary Guidance (2012)", url: "https://www.icrc.org/sites/default/files/external/doc/en/assets/files/publications/icrc-002-4083.pdf", expected_file: icrc-002-4083.pdf, size: 1.5 MB, verified: true}
+    - {title: "Water and War: ICRC Response (2009)", url: "https://www.icrc.org/sites/default/files/external/doc/en/assets/files/other/icrc_002_0969.pdf", expected_file: icrc_002_0969.pdf, size: 1.8 MB, verified: true}
+    - {title: "Restoring Family Links Strategy (2009)", url: "https://www.icrc.org/sites/default/files/external/doc/en/assets/files/other/icrc_002_0967.pdf", expected_file: icrc_002_0967.pdf, size: 3.3 MB, verified: true}
+    - {title: "Management of Limb Injuries during Disasters and Conflicts (ICRC/WHO/AO, 2016)", url: null, landing: "https://icrc.org/en/document/launch-handbook-management-limb-injuries-during-disasters-and-conflicts", expected_file: unknown, verified: false, note: "No ICRC-hosted PDF found. AO Foundation (co-publisher) hosts a copy, but on what looks like a staging host, not opened."}
+  uncertain: >-
+    KEY FINDING: 24 of the 26 items live on www.icrc.org, whose robots.txt allows these PDF paths and which
+    answered plain HEAD requests. The library's normal fetcher can probably take them itself. Only the
+    Anaesthesia Handbook (library.icrc.org) and the limb-injuries handbook need hand work. Sizes are
+    Content-Length values from 2026-10-24. Editions come from search snippets (most files were not opened).
+    War Surgery Vol. 3 was not found (the guessed shop slug returned 404). Not found as ICRC PDFs: TB control in prisons (a WHO document;
+    only a Chinese ICRC copy), hand pumps, cholera, How Does Law Protect in War (online casebook only), and
+    the updated GC Commentaries (web database / CUP print). The Emergency Items Catalogue is web-only
+    (itemscatalogue.redcross.int).
+# ---------------------------------------------------------------------------
+- id: intel-arm-architecture
+  name: Intel 64/IA-32 Software Developer's Manuals and Arm Architecture Reference Manual
+  issuer: Intel Corporation; Arm Ltd
+  why: The definitive CPU architecture and instruction-set references for x86-64 and Arm A-profile.
+  robots_or_wall: "cdrdv2.intel.com robots: Disallow / (it redirects to cdrdv2-public.intel.com, whose robots.txt returns 403). documentation-service.arm.com robots: Disallow /. The developer.arm.com/support.arm.com pages are a JS app (no content without a browser)."
+  licence: "Intel: free download, Intel copyright, no redistribution (personal reference copy is fine). Arm: free (non-confidential) download under Arm's proprietary notice; no redistribution."
+  total_items: 9
+  items:
+    - title: "Intel 64 and IA-32 Architectures SDM, Combined Volumes 1, 2A-2D, 3A-3D, 4 (Order 325462-093)"
+      url: https://cdrdv2.intel.com/v1/dl/getContent/671200
+      landing: https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html
+      expected_file: 325462-093-sdm-vol-1-2abcd-3abcd-4.pdf
+      size: 26.7 MB
+      verified: true
+    - title: "Intel SDM Documentation Changes (252046-085)"
+      url: https://cdrdv2.intel.com/v1/dl/getContent/671294
+      expected_file: 252046-085-sdm-change-document.pdf
+      size: 8.4 MB
+      verified: true
+    - title: "Intel Architecture Instruction Set Extensions Programming Reference (319433-062)"
+      url: https://cdrdv2.intel.com/v1/dl/getContent/671368
+      expected_file: 319433-062-architecture-instruction-set-extensions-programming-reference.pdf
+      size: 8.1 MB
+      verified: true
+    - title: "Intel Virtualization Technology for Directed I/O Architecture Specification (D51397-019)"
+      url: https://cdrdv2.intel.com/v1/dl/getContent/671081
+      expected_file: D51397-019-vt-directed-io-spec.pdf
+      size: 12.8 MB
+      verified: true
+    - title: "Intel APX Architecture Specification (355828-009)"
+      url: https://cdrdv2.intel.com/v1/dl/getContent/784266
+      expected_file: 355828-009-intel-apx-arch-spec.pdf
+      size: 1.0 MB
+      verified: true
+    - title: "Intel AVX10.2 Architecture Specification (361050-007)"
+      url: https://cdrdv2.intel.com/v1/dl/getContent/828965
+      expected_file: 361050-007-intel-avx10.2-arch-spec.pdf
+      size: 0.7 MB
+      verified: true
+    - title: "Intel 64 and IA-32 Architectures Optimization Reference Manual, Volume 1 (v050)"
+      url: null
+      landing: https://www.intel.com/content/www/us/en/content-details/821612/intel-64-and-ia-32-architectures-optimization-reference-manual-volume-1.html
+      expected_file: unknown
+      verified: false
+      seen_in_search: true
+    - title: "Arm Architecture Reference Manual for A-profile architecture (DDI 0487, latest issue; ~100 MB PDF)"
+      url: null
+      landing: https://developer.arm.com/documentation/ddi0487/latest/
+      expected_file: "DDI0487_<issue>_a-profile_architecture_reference_manual.pdf (exact name unknown)"
+      size: ~100 MB
+      verified: false
+      seen_in_search: false
+    - title: "Arm A-profile ARM Known Issues companion (102105), latest issue"
+      url: null
+      landing: https://developer.arm.com/documentation/102105/latest/
+      expected_file: unknown
+      verified: false
+      seen_in_search: true
+  uncertain: >-
+    The four separate SDM volumes (getContent/671436, 671110, 671447, 671098) duplicate the combined PDF, so
+    they are left out. The Optimization Reference Manual has no direct link on the SDM page; use the
+    content-details page's Download button. The Arm DDI 0487 PDF needed no login in recent issues (L.a was
+    a 100.3 MB PDF, Dec 2024), but the current issue letter (L.b or M.a) and its static URL could not be
+    confirmed without a browser. Click "Download PDF" on the landing page. The Armv7-A/R (DDI 0406) and
+    Armv8-M (DDI 0553) manuals are worthwhile additions found the same way.
+
+# ---------------------------------------------------------------------------
+- id: ebi-uniprot-bulk
+  name: UniProt Swiss-Prot, ChEBI and ChEMBL bulk files
+  issuer: UniProt Consortium; EMBL-EBI
+  why: Curated protein knowledgebase, chemical-entity ontology, and bioactive-molecule/drug database for offline biochemistry and pharmacology.
+  robots_or_wall: "ftp.uniprot.org robots: Disallow /. ftp.ebi.ac.uk robots: Disallow /. (www.ebi.ac.uk landing pages are crawlable.)"
+  licence: "UniProt: CC BY 4.0. ChEBI: CC BY 4.0. ChEMBL: CC BY-SA 3.0."
+  total_items: 9
+  items:
+    - title: "UniProtKB/Swiss-Prot, flat-file text format (current release)"
+      url: https://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/complete/uniprot_sprot.dat.gz
+      landing: https://www.uniprot.org/help/downloads
+      expected_file: uniprot_sprot.dat.gz
+      size: 700 MB
+      verified: true
+    - title: "UniProtKB/Swiss-Prot, FASTA sequences"
+      url: https://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/complete/uniprot_sprot.fasta.gz
+      expected_file: uniprot_sprot.fasta.gz
+      size: 94 MB
+      verified: true
+    - title: "UniProtKB/Swiss-Prot, XML (richest format, optional if .dat is taken)"
+      url: https://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/complete/uniprot_sprot.xml.gz
+      expected_file: uniprot_sprot.xml.gz
+      size: 942 MB
+      verified: true
+    - title: "ChEBI ontology, OBO (full)"
+      url: https://ftp.ebi.ac.uk/pub/databases/chebi/ontology/chebi.obo.gz
+      landing: https://www.ebi.ac.uk/chebi/downloads
+      expected_file: chebi.obo.gz
+      size: 47 MB
+      verified: true
+    - title: "ChEBI ontology, OWL (full)"
+      url: https://ftp.ebi.ac.uk/pub/databases/chebi/ontology/chebi.owl.gz
+      expected_file: chebi.owl.gz
+      size: 66 MB
+      verified: true
+    - title: "ChEBI structures, SDF FULL (2-star + 3-star entries)"
+      url: null
+      landing: https://ftp.ebi.ac.uk/pub/databases/chebi/SDF/
+      expected_file: "unknown after the ChEBI 2.0 relaunch (Oct 2025); the old ChEBI_complete.sdf.gz now returns 404"
+      verified: false
+      seen_in_search: false
+    - title: "ChEMBL 37 (May 2026) SQLite database"
+      url: https://ftp.ebi.ac.uk/pub/databases/chembl/ChEMBLdb/latest/chembl_37_sqlite.tar.gz
+      landing: https://ftp.ebi.ac.uk/pub/databases/chembl/ChEMBLdb/latest/
+      expected_file: chembl_37_sqlite.tar.gz
+      size: "~5 GB (ChEMBL 36 was ~5 GB)"
+      verified: false
+      seen_in_search: false
+    - title: "ChEMBL 37 PostgreSQL dump (alternative to SQLite)"
+      url: https://ftp.ebi.ac.uk/pub/databases/chembl/ChEMBLdb/latest/chembl_37_postgresql.tar.gz
+      expected_file: chembl_37_postgresql.tar.gz
+      verified: false
+      seen_in_search: false
+    - title: "ChEMBL 37 structures SDF"
+      url: https://ftp.ebi.ac.uk/pub/databases/chembl/ChEMBLdb/latest/chembl_37.sdf.gz
+      expected_file: chembl_37.sdf.gz
+      verified: false
+      seen_in_search: false
+  uncertain: >-
+    The Swiss-Prot XML (942 MB) and dat (700 MB) files and the ChEMBL SQLite (~5 GB) take more than "a minute
+    or two" on most links; take one Swiss-Prot format, not both. ChEMBL 37 / May 2026 comes from ChEMBL's
+    documentation page; the file names follow the naming used through ChEMBL 36 (chembl_NN_sqlite.tar.gz
+    etc.) but were not seen for 37. ChEBI 2.0 (launched 20 Oct 2025) changed the SDF layout; the downloads
+    page says FULL and LITE variants exist, in 2-star+3-star and 3-star-only sets, but the file names are only
+    visible in the FTP listing. A SQL dump (generic_dumps/pgsql_allstar.dump) also exists.
+
+# ---------------------------------------------------------------------------
+- id: rxnorm-full
+  name: RxNorm monthly release
+  issuer: US National Library of Medicine
+  why: The normalized US drug-name and ingredient vocabulary that links brands, generics, strengths and dose forms.
+  robots_or_wall: "download.nlm.nih.gov robots: Disallow /. The full release also needs a free UMLS (UTS) account login."
+  licence: "Full release: UMLS Metathesaurus License (free; some source vocabularies restricted). Current Prescribable Content: no licence required."
+  total_items: 3
+  items:
+    - title: "RxNorm Full Monthly Release, 5 Oct 2026 (UMLS login)"
+      url: https://download.nlm.nih.gov/umls/kss/rxnorm/RxNorm_full_10052026.zip
+      landing: https://www.nlm.nih.gov/research/umls/rxnorm/docs/rxnormfiles.html
+      expected_file: RxNorm_full_10052026.zip
+      md5: a32e2f2f80d5fc0c21dc034968c8ee74
+      verified: true
+      note: "Redirects to the UTS login; that file name changes every month (first Monday; next is about RxNorm_full_11022026.zip)."
+    - title: "RxNorm Current Prescribable Content, Monthly, 5 Oct 2026 (no login)"
+      url: https://download.nlm.nih.gov/rxnorm/RxNorm_full_prescribe_10052026.zip
+      landing: https://www.nlm.nih.gov/research/umls/rxnorm/docs/rxnormfiles.html
+      expected_file: RxNorm_full_prescribe_10052026.zip
+      size: 75 MB
+      md5: a3bfab544c6a67c127ebcd10ab914aa9
+      verified: true
+    - title: "RxNorm Weekly Update (current)"
+      url: https://download.nlm.nih.gov/umls/kss/rxnorm/RxNorm_weekly_current.zip
+      landing: https://www.nlm.nih.gov/research/umls/rxnorm/docs/rxnormfiles.html
+      expected_file: RxNorm_weekly_current.zip
+      verified: false
+  uncertain: "Full-release size not shown on the page (typically several hundred MB zipped). Take the full release monthly; weekly updates are optional."
+
+# ---------------------------------------------------------------------------
+- id: nrcs-gssurgo
+  name: gSSURGO gridded soil survey, per-state file geodatabases
+  issuer: USDA Natural Resources Conservation Service
+  why: Detailed US soil map units and properties (drainage, texture, hydrologic group, farmland class) for land, water and building decisions.
+  robots_or_wall: "nrcs.app.box.com is a Box share (JS app; downloads need a browser). www.nrcs.usda.gov pages timed out on WebFetch twice (2026-10-24)."
+  licence: "US federal government data, public domain."
+  total_items: 1
+  items:
+    - title: "gSSURGO State Databases folder, FY2026 release (one zip per state/territory)"
+      url: null
+      landing: https://nrcs.app.box.com/v/soils
+      expected_file: "gSSURGO_<ST>.zip (e.g. gSSURGO_MT.zip, contains gSSURGO_MT.gdb); naming from the older state readme, not confirmed for FY2026"
+      size: "~0.2-4 GB per state"
+      verified: false
+      seen_in_search: true
+  uncertain: >-
+    The official gSSURGO page (https://www.nrcs.usda.gov/resources/data-and-reports/gridded-soil-survey-geographic-gssurgo-database)
+    links "State Databases - soils | Powered by Box" and "CONUS". The exact subfolder and FY2026 file
+    names were not visible. CONUS comes in several parts (all are needed) and is far beyond a minute or
+    two. Suggest the owner start with the home state and its neighbours, about one state a day. gNATSGO
+    (same Box share) fills SSURGO gaps with STATSGO2 where it exists.
+
+# ---------------------------------------------------------------------------
+- id: cod-full-archive
+  name: Crystallography Open Database, full archive
+  issuer: Crystallography Open Database (Vilnius University and partners)
+  why: Open crystal structures (CIF) of minerals, organics and inorganics.
+  robots_or_wall: "www.crystallography.net robots: Disallow /."
+  licence: "COD data are dedicated to the public domain (CC0)."
+  total_items: 1
+  items:
+    - title: "COD most recent full release: all CIFs + MySQL dump (tar.gz)"
+      url: https://www.crystallography.net/cod/archives/cod-cifs-mysql.tgz
+      landing: https://wiki.crystallography.net/howtoobtaincod/
+      expected_file: cod-cifs-mysql.tgz
+      size: ">17 GB (17 GB in Oct 2021; .txz ~12 GB and .zip ~18 GB variants also exist)"
+      verified: false
+      seen_in_search: true
+  uncertain: >-
+    Yes, a single full archive exists, but it is a large multi-hour download, not a one-minute file, and COD
+    archives it only every 3-4 months. COD itself recommends rsync/Subversion; those are crawler-style access
+    and also fall under robots. The .txz variant (smaller) should sit next to the .tgz in /cod/archives/.
+
+# ---------------------------------------------------------------------------
+- id: usfs-wood-handbook
+  name: Wood Handbook - Wood as an Engineering Material (2021)
+  issuer: USDA Forest Service, Forest Products Laboratory
+  why: The standard reference on wood properties, fasteners, drying, preservation and timber design.
+  robots_or_wall: "research.fs.usda.gov robots: 'User-agent: * Disallow: /' (only named bots get rules). www.fpl.fs.usda.gov robots.txt returns an HTML page."
+  licence: "US federal government work, public domain."
+  total_items: 2
+  items:
+    - title: "Wood Handbook, FPL-GTR-282 (March 2021), full PDF, 543 pp"
+      url: https://research.fs.usda.gov/download/treesearch/62200.pdf
+      landing: https://research.fs.usda.gov/treesearch/62200
+      expected_file: 62200.pdf
+      size: ~104 MB
+      verified: false
+      seen_in_search: false
+    - title: "Wood Handbook FPL-GTR-282 front matter (to confirm chapter-file naming at FPL)"
+      url: https://www.fpl.fs.usda.gov/documnts/fplgtr/fplgtr282/front_matter_fpl_gtr282.pdf
+      expected_file: front_matter_fpl_gtr282.pdf
+      verified: false
+      seen_in_search: true
+  uncertain: >-
+    The Treesearch record 62200 (FPL-GTR-282, 2021, ~104 MB PDF) was seen in search; the /download/treesearch/62200.pdf
+    path follows the pattern seen for other Treesearch records (e.g. 37440.pdf), but is not confirmed for this one.
+    Per-chapter PDFs are in www.fpl.fs.usda.gov/documnts/fplgtr/fplgtr282/ (only the front matter was seen).
+
+# ---------------------------------------------------------------------------
+- id: lovdata-public
+  name: Lovdata public datasets (Norwegian law)
+  issuer: Lovdata (foundation), Norway
+  why: Consolidated current Norwegian statutes and central regulations as XML, updated daily.
+  robots_or_wall: "api.lovdata.no robots: Disallow /."
+  licence: "Norwegian Licence for Open Government Data (NLOD 2.0); no API key needed for the public datasets."
+  total_items: 3
+  items:
+    - title: "Current acts (gjeldende lover), XML archive"
+      url: https://api.lovdata.no/v1/publicData/get/gjeldende-lover.tar.bz2
+      landing: https://api.lovdata.no/publicData
+      expected_file: gjeldende-lover.tar.bz2
+      size: "~51 MB unpacked (759 acts, Aug 2026 snapshot)"
+      verified: false
+      seen_in_search: false
+    - title: "Current central regulations (gjeldende sentrale forskrifter), XML archive"
+      url: https://api.lovdata.no/v1/publicData/get/gjeldende-sentrale-forskrifter.tar.bz2
+      landing: https://api.lovdata.no/publicData
+      expected_file: gjeldende-sentrale-forskrifter.tar.bz2
+      size: "~199 MB unpacked (3,426 regulations, Aug 2026 snapshot)"
+      verified: false
+      seen_in_search: false
+    - title: "Dataset list (JSON): shows every public file name and its lastModified"
+      url: https://api.lovdata.no/v1/publicData/list
+      landing: https://api.lovdata.no/publicData
+      expected_file: list (JSON)
+      verified: false
+      seen_in_search: false
+  uncertain: >-
+    The file names gjeldende-lover.tar.bz2 and gjeldende-sentrale-forskrifter.tar.bz2 are confirmed by
+    third-party tools that use the API. The "/v1/publicData/list" and "/v1/publicData/get/<file>" paths
+    follow Lovdata's documented list-then-get pattern; the "v1" prefix is not confirmed. Open the Swagger
+    page at api.lovdata.no first and copy the exact link. Other public datasets (e.g. Norsk Lovtidend parts)
+    may appear in /list.
+
+# ---------------------------------------------------------------------------
+- id: fema-building-science-preparedness
+  name: FEMA preparedness and building-science guides
+  issuer: US Federal Emergency Management Agency
+  why: Safe rooms, flood and coastal construction, retrofitting, earthquake hazard reduction, and community emergency response training.
+  robots_or_wall: "WAF 403 for www.fema.gov and www.ready.gov, even for robots.txt (2026-10-24)."
+  licence: "US federal government work, public domain."
+  total_items: 10
+  items:
+    - {title: "CERT Basic Training Participant Manual (2011)", url: "https://www.fema.gov/sites/default/files/2020-07/fema-cert_basic-training-participant-manual_01-01-2011.pdf", expected_file: fema-cert_basic-training-participant-manual_01-01-2011.pdf, verified: false, seen_in_search: true}
+    - {title: "FEMA P-320 Taking Shelter from the Storm: Building or Installing a Safe Room for Your Home (6th ed., Dec 2024)", url: "https://www.fema.gov/sites/default/files/documents/fema_rsl_fema-p-320-taking-shelter-from-the-storm_042025.pdf", expected_file: fema_rsl_fema-p-320-taking-shelter-from-the-storm_042025.pdf, verified: false, seen_in_search: true}
+    - {title: "FEMA P-55 Coastal Construction Manual, Vol. I (4th ed., 2011)", url: "https://www.fema.gov/sites/default/files/2020-08/fema55_voli_combined.pdf", expected_file: fema55_voli_combined.pdf, verified: false, seen_in_search: true}
+    - {title: "FEMA P-499 Home Builder's Guide to Coastal Construction (37 fact sheets, 2010)", url: "https://www.fema.gov/sites/default/files/2020-07/p-499_homebuilders-guide-coastal-construction.pdf", expected_file: p-499_homebuilders-guide-coastal-construction.pdf, verified: false, seen_in_search: true}
+    - {title: "FEMA P-312 Homeowner's Guide to Retrofitting (3rd ed., 2023)", url: null, landing: "https://www.fema.gov/building-science-publications/homeowners-guide-retrofitting", expected_file: unknown, verified: false, seen_in_search: true}
+    - {title: "FEMA P-361 Safe Rooms for Tornadoes and Hurricanes (5th ed., 2024)", url: null, landing: "https://www.fema.gov/emergency-managers/risk-management/safe-rooms/resources", expected_file: unknown, verified: false, seen_in_search: true}
+    - {title: "FEMA E-74 Reducing the Risks of Nonstructural Earthquake Damage (4th ed., 2012)", url: null, landing: "https://www.fema.gov/emergency-managers/risk-management/earthquake/training/fema-e-74", expected_file: unknown, verified: false, seen_in_search: true}
+    - {title: "FEMA P-2064 Are You Ready? An In-Depth Guide to Citizen Preparedness (current edition on ready.gov)", url: null, landing: "https://www.ready.gov/", expected_file: unknown, verified: false, seen_in_search: false}
+    - {title: "FEMA B-526 Earthquake Safety Checklist (Oct 2023)", url: "https://www.fema.gov/sites/default/files/documents/fema_b-526-eq-safety-checklist.pdf", expected_file: fema_b-526-eq-safety-checklist.pdf, verified: false, seen_in_search: true}
+    - {title: "Food and Water in an Emergency (FEMA/American Red Cross, older brochure)", url: "https://www.fema.gov/pdf/library/f&web.pdf", expected_file: f&web.pdf, verified: false, seen_in_search: true}
+  uncertain: >-
+    Extra source (not in the brief) in the same spirit: robots/WAF-walled, high value, few files. The CERT
+    manual may have a newer edition on FEMA's CERT training-materials page. The old /pdf/... paths (Food
+    and Water) may now redirect or 404. Volume II of P-55 sits next to Volume I (file name not seen).
+
+# ---------------------------------------------------------------------------
+- id: iso-iec-free-standards
+  name: ISO/IEC freely available standards (formerly the ITTF "Publicly Available Standards" list)
+  issuer: ISO / IEC JTC 1
+  why: Free normative texts for document formats, character sets, networking models, metalanguages and data-management vocabularies.
+  robots_or_wall: "standards.iso.org/ittf/PubliclyAvailableStandards robots-disallowed (not fetched). www.iso.org: WAF 403 to WebFetch, including robots.txt."
+  licence: "One copy for personal or standardization use only; no redistribution or network posting. Keep these out of any shared or served Whisipedia index."
+  total_items: 22
+  items:
+    - {title: "ISO/IEC 29500-1:2016 Office Open XML, Part 1 Fundamentals and Markup Language Reference", url: "https://www.iso.org/standard/71691.html", legacy_ittf: "c071691_ISO_IEC_29500-1_2016(E).zip", verified: false, confidence: high, note: "Parts 2-4 (OPC, Markup Compatibility, Transitional) are on the same store; their numbers were not confirmed."}
+    - {title: "ISO/IEC 26300-1:2015 ODF 1.2 Part 1 OpenDocument Schema", url: "https://www.iso.org/standard/66363.html", legacy_ittf: c066363_ISO_IEC_26300-1_2015.zip, verified: false, confidence: high}
+    - {title: "ISO/IEC 26300-2:2015 ODF 1.2 Part 2 OpenFormula", url: "https://www.iso.org/standard/66375.html", legacy_ittf: c066375_ISO_IEC_26300-2_2015.zip, verified: false, confidence: high}
+    - {title: "ISO/IEC 26300-3:2015 ODF 1.2 Part 3 Packages", url: "https://www.iso.org/standard/66376.html", legacy_ittf: c066376_ISO_IEC_26300-3_2015.zip, verified: false, confidence: high}
+    - {title: "ISO/IEC 7498-1:1994 OSI Basic Reference Model", url: "https://www.iso.org/standard/20269.html", legacy_ittf: "c020269_ISO_IEC_7498-1_1994(E).zip", verified: false, confidence: medium}
+    - {title: "ISO/IEC 27000:2018 ISMS Overview and vocabulary", url: "https://www.iso.org/standard/73906.html", legacy_ittf: "c073906_ISO_IEC_27000_2018(E).zip", verified: false, confidence: medium, note: "May be withdrawn; check for a newer CHF 0 edition."}
+    - {title: "ISO/IEC 10646:2020 Universal Coded Character Set (with code charts)", url: "https://www.iso.org/standard/76835.html", verified: false, confidence: medium, note: "Unicode's own free charts (unicode.org) are the safer alternative."}
+    - {title: "ISO/IEC 14977:1996 Extended BNF", url: "https://www.iso.org/standard/26153.html", legacy_ittf: "s026153_ISO_IEC_14977_1996(E).zip", verified: false, confidence: medium}
+    - {title: "ISO/IEC 21320-1:2015 Document Container File (ZIP) Part 1 Core", url: "https://www.iso.org/standard/60101.html", legacy_ittf: c060101_ISO_IEC_21320-1_2015.zip, verified: false, confidence: medium}
+    - {title: "ISO/IEC 19757-2:2008 DSDL Part 2 RELAX NG", url: "https://www.iso.org/standard/52348.html", legacy_ittf: "c052348_ISO_IEC_19757-2_2008(E).zip", verified: false, confidence: medium}
+    - {title: "ISO/IEC 2382:2015 Information technology - Vocabulary", url: "https://www.iso.org/standard/63598.html", legacy_ittf: c063598_ISO_IEC_2382_2015.zip, verified: false, confidence: medium, note: "May be browse-only on the ISO OBP, not a PDF."}
+    - {title: "ISO/IEC 14662:2010 Open-edi reference model", url: "https://www.iso.org/standard/55290.html", legacy_ittf: "c055290_ISO_IEC_14662_2010(E).zip", verified: false, confidence: medium}
+    - {title: "ISO/IEC 11179 Parts 1-6 Metadata registries (2003-2005 editions)", url: "https://www.iso.org/search.html?q=11179", verified: false, confidence: medium, note: "6 files; the old ITTF codes c035343, c035345, c031367, c035346, c035347, c035348 were listed on jtc1sc32.org/free_standards.html."}
+    - {title: "ISO/IEC 5218:2004 Codes for the representation of human sexes", url: "https://www.iso.org/standard/36266.html", legacy_ittf: "c036266_ISO_IEC_5218_2004(E_F).zip", verified: false, confidence: medium}
+    - {title: "ISO/IEC TR 10032:2003 Reference Model of Data Management", url: "https://www.iso.org/standard/38607.html", legacy_ittf: "c038607_ISO_IEC_TR_10032_2003(E).zip", verified: false, confidence: medium}
+    - {title: "ISO/IEC 15944 series (Business Operational View / Open-edi, incl. Part 7 vocabulary)", url: "https://www.iso.org/search.html?q=15944", verified: false, confidence: medium}
+    - {title: "ISO/IEC TR 20943-1:2003 and -3:2004 Metadata registry content consistency", url: "https://www.iso.org/search.html?q=20943", verified: false, confidence: medium}
+    - {title: "ISO/IEC 17788:2014 Cloud computing - Overview and vocabulary (withdrawn; see 22123-1:2023)", url: "https://www.iso.org/standard/60544.html", legacy_ittf: c060544_ISO_IEC_17788_2014.zip, verified: false, confidence: low}
+    - {title: "ISO/IEC 17789:2014 Cloud computing - Reference architecture (withdrawn; see 22123-3)", url: "https://www.iso.org/standard/60545.html", legacy_ittf: c060545_ISO_IEC_17789_2014.zip, verified: false, confidence: low}
+    - {title: "ISO/IEC 24707:2007 Common Logic", url: "https://www.iso.org/standard/39175.html", verified: false, confidence: low}
+    - {title: "ISO/IEC TR 24772:2013 Guidance to avoiding vulnerabilities in programming languages (defensive coding)", url: "https://www.iso.org/standard/61457.html", verified: false, confidence: low}
+    - {title: "ISO/IEC 14496-12:2015 ISO base media file format (MP4) (withdrawn edition)", url: "https://www.iso.org/standard/68960.html", legacy_ittf: c068960_ISO_IEC_14496-12_2015.zip, verified: false, confidence: low}
+  uncertain: >-
+    MAJOR CHANGE: the ITTF Publicly Available Standards page appears to be retired. An ITTF update relayed
+    to SC 22 (Nov 2025) says zero-cost documents "have now been moved ... into the ISO and IEC web stores";
+    an MPEG list post (Aug 2026) says the ITTF site was dismantled. It names OOXML and ODF as still free and
+    says Schematron (19757-3) and the new 14496-22:2026 are no longer free. So each item points at its
+    iso.org store page (look for CHF 0; an ISO account may be needed). The legacy ITTF zip names are kept only
+    for matching or deduplication and probably 404. Medium and low confidence items may no longer be free.
+    Several have official free twins from their original issuers, which are better sources: Ecma-262 /
+    334 / 335 (ECMAScript, C#, CLI, i.e. ISO/IEC 16262, 23270, 23271), Common Criteria at
+    commoncriteriaportal.org (= ISO/IEC 15408/18045), Unicode (= 10646), OASIS ODF. The Schematron 2016 edition
+    is left out (reported no longer free). Not free, don't chase: ISO 8601, ISO/IEC 9899, 14882, 9075, 18004.
