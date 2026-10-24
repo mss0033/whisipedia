@@ -22,6 +22,7 @@ from wsp_adapters.doccollection.discovery import (
     DiscoveryError,
     Throttle,
     discover_all,
+    index_page,
     origin_ok,
     resolve,
 )
@@ -1759,3 +1760,38 @@ def test_newest_reads_dates_that_do_not_sort_as_text() -> None:
         "https://dl.gov/RxNorm_full_10052026.zip",
         "https://dl.gov/RxNorm_full_prescribe_10052026.zip",
     ]
+
+
+def test_nass_quick_stats_keeps_the_newest_file_of_each_dated_series() -> None:
+    nass = "https://www.nass.usda.gov"
+    links = [
+        "Readme.txt",
+        "qs.crops_20261022.txt.gz",
+        "qs.crops_20261023.txt.gz",
+        "qs.animals_products_20261023.txt.gz",
+        "qs.census2022.txt.gz",
+    ]
+    page = "".join(f'<a href="/datasets/{n}">{n}</a>' for n in links)
+    page += '<a href="https://quickstats.nass.usda.gov/">Quick Stats</a>'  # disallows every robot
+    page += '<a href="/Quick_Stats/CDQT/chapter/1">x</a>'  # disallowed by www.nass.usda.gov/robots.txt
+    env = DiscoverEnv(
+        fetcher=FakeFetcher({f"{nass}/datasets/": page.encode()}),
+        issuer="USDA NASS",
+        prefix="nass",
+        origins=("www.nass.usda.gov",),
+    )
+    cfg = {
+        "url": f"{nass}/datasets/",
+        "documents": r"/datasets/(?:qs\.[a-z0-9_]+\.txt\.gz|Readme\.txt)$",
+        "newest": r"/datasets/qs\.(?P<series>[a-z_]+)_(?P<date>\d{8})\.txt\.gz$",
+        "pub_number": r"/datasets/(?:qs\.)?([A-Za-z0-9_]+?)(?:_\d{8})?\.txt",
+    }
+    urls = sorted(c.url.rsplit("/", 1)[1] for c in index_page(cfg, env))
+    assert urls == [
+        "Readme.txt",
+        "qs.animals_products_20261023.txt.gz",
+        "qs.census2022.txt.gz",
+        "qs.crops_20261023.txt.gz",
+    ]
+    keys = sorted(c.key for c in index_page(cfg, env))
+    assert keys == ["nass:ANIMALS_PRODUCTS", "nass:CENSUS-2022", "nass:CROPS", "nass:README"]

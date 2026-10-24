@@ -24,6 +24,9 @@ longer interval where ``robots.txt`` asks for one). Kinds (``access.discovery[].
     A GitHub repository (size from the GitHub API); fetched as a ``git bundle`` of a mirror clone.
 ``list`` / ``document``
     Fixed items (``items``) or a single ``url``.
+``dspace-sitemap``
+    A DSpace 7 repository through its sitemaps and item pages (what its robots.txt allows); topical
+    selection on item metadata (``topics``), ``max_items`` pages a run, read pages kept between runs.
 
 Discoverers yield candidates lazily and report the upstream total when the API states one
 (:attr:`DiscoverEnv.totals`), so a dry run can sample a few pages of a million-document collection
@@ -42,6 +45,7 @@ import json
 import logging
 import os
 import re
+import sqlite3
 import threading
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
@@ -761,6 +765,419 @@ def resolve_detail_page(cand: Candidate, env: DiscoverEnv) -> list[Candidate]:
         if pattern.search(url) and origin_ok(url, env.origins):
             return [cand.with_url(url)]
     return []
+
+
+# --- DSpace 7 sitemaps and item pages --------------------------------------------------------------
+
+# A DSpace 7 site's stock robots.txt disallows its REST API (/server/api/*, search included), OAI-PMH
+# (/server/oai/*), /search and /browse, with Crawl-delay: 10. It allows the sitemaps, the item pages
+# and the bitstream content endpoint (``Allow: /server/api/core/bitstreams``). WHO IRIS, NPS Calhoun
+# and the FAO Knowledge Repository were paused when the robots-aware throttle refused the dspace7
+# search (2026-10-21); this reads only what robots.txt allows (2026-10-24).
+#
+# The item page is server-side rendered (Angular Universal). Its Highwire tags carry the title, date,
+# language, keywords and *one* PDF (``citation_pdf_url``, not always the first file: WHO's 10665/102539
+# names its second PDF), and no rights; there are no Dublin Core tags. The page also embeds the REST
+# answers it was rendered from (``<script id="dspace-angular-state">``): the item's whole metadata
+# record (dc.rights, every subject field, the handle) and its ORIGINAL bundle's files in order with
+# their sizes. That is the record the dspace7 search returned, so documents keep their keys.
+
+DSPACE_STATE = re.compile(r'<script id="dspace-angular-state" type="application/json">(.*?)</script>', re.S)
+DSPACE_ITEM_URL = r"/(?:items|entities/publication|handle)/[^?#]+$"
+DSPACE_UUID = re.compile(
+    r"/(?:items|entities/[a-z]+)/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"
+)
+DSPACE_HANDLE = re.compile(r"/handle/(\d[\d.]*/[^/?#]+)")
+DSPACE_MAX_ITEMS = 5000  # item pages a run reads by default: about 14 hours at a 10 s crawl delay
+DSPACE_RECORD_VERSION = 1  # bumped when the record read from a page changes, so cached pages are read again
+DSPACE_RECORD_TTL = 365 * 86400.0  # a page whose sitemap date never moves is still read once a year
+_URL_BLOCK = re.compile(r"<url>(.*?)</url>", re.S | re.IGNORECASE)
+_LASTMOD = re.compile(r"<lastmod>\s*([^<\s]+)\s*</lastmod>", re.IGNORECASE)
+_LANGUAGES = {
+    "english": "en",
+    "french": "fr",
+    "spanish": "es",
+    "arabic": "ar",
+    "chinese": "zh",
+    "russian": "ru",
+    "portuguese": "pt",
+    "german": "de",
+    "italian": "it",
+}
+
+
+def _angular_state(html: str) -> Json | None:
+    """The REST answers an Angular Universal page was rendered with. Angular before 16 escapes the
+    JSON (``&q;`` for a quote, ``&a;`` for an ampersand, ...); later versions embed it as it is."""
+    m = DSPACE_STATE.search(html)
+    if m is None:
+        return None
+    raw = m.group(1)
+    try:
+        data: object = json.loads(raw)
+    except ValueError:
+        raw = raw.replace("&q;", '"').replace("&s;", "'").replace("&l;", "<").replace("&g;", ">")
+        try:
+            data = json.loads(raw.replace("&a;", "&"))  # last: "&a;q;" is an escaped "&q;", not a quote
+        except ValueError:
+            return None
+    return cast(Json, data) if isinstance(data, dict) else None
+
+
+def _meta_tags(html: str) -> dict[str, list[str]]:
+    out: dict[str, list[str]] = {}
+    for node in LexborHTMLParser(html).css("head meta[name]"):
+        name = (node.attributes.get("name") or "").strip()
+        value = (node.attributes.get("content") or "").strip()
+        if name and value:
+            out.setdefault(name, []).append(value)
+    return out
+
+
+def _language(value: str) -> str:
+    v = value.strip().lower()
+    if re.fullmatch(r"[a-z]{2}(?:[_-][a-z]{2})?|[a-z]{3}", v):
+        return v[:2]
+    return _LANGUAGES.get(v, "")
+
+
+def parse_dspace_item(html: str, page_url: str) -> Json | None:
+    """The record :func:`dspace_sitemap` keeps for one item page, or ``None`` when the page does not
+    show its item: a client-side shell (NPS Calhoun answers every page with an empty ``<ds-app>``,
+    2026-10-24), another item's page, or an item whose file list is not on the page.
+
+    The record: ``uuid``, ``handle``, ``title``, ``date``, ``pub_number``, ``subjects``, ``abstract``,
+    ``rights``, ``language``, ``topic_text`` (series and descriptions, for ``topics``), ``withdrawn``,
+    ``files`` (``[index, bitstream uuid, name, size]`` in the ORIGINAL bundle's order) and
+    ``files_total`` (the bundle's file count, which may exceed the files the page lists)."""
+    state = _angular_state(html)
+    if state is None:
+        return None
+    meta = _meta_tags(html)
+    core = cast(Json, cast(Json, state.get("NGRX_STATE") or {}).get("core") or {})
+    objects = cast(Json, core.get("cache/object") or {})
+
+    def data(href: str) -> Json:
+        entry = objects.get(href)
+        return cast(Json, cast(Json, entry).get("data") or {}) if isinstance(entry, dict) else {}
+
+    def paged(prefix: str) -> list[Json]:
+        """The paginated lists cached under ``prefix`` (a list's URL varies with its query)."""
+        return [
+            data(h) for h in objects if h.startswith(prefix) and isinstance(data(h).get("pageInfo"), dict)
+        ]
+
+    def page_links(listing: Json) -> list[str]:
+        return [
+            _s(p.get("href"))
+            for p in cast(list[Json], cast(Json, listing.get("_links") or {}).get("page") or [])
+        ]
+
+    uuid_m = DSPACE_UUID.search(page_url)
+    handle_m = DSPACE_HANDLE.search(page_url) or DSPACE_HANDLE.search(
+        (meta.get("citation_abstract_html_url") or [""])[0]
+    )
+    item: Json | None = None
+    self_href = ""
+    for href in objects:
+        d = data(href)
+        if d.get("type") == "item" and (
+            (uuid_m is not None and d.get("uuid") == uuid_m.group(1))
+            or (uuid_m is None and handle_m is not None and d.get("handle") == handle_m.group(1))
+        ):
+            item, self_href = d, href
+            break
+    if item is None:
+        # A restricted item is in the sitemap too, and its page renders the site's frame: the item's
+        # own request was refused (WHO IRIS: "401 Authentication is required" for items edited the
+        # day before, 2026-10-24). That is an answer, kept until the item's sitemap date moves.
+        ident = uuid_m.group(1) if uuid_m else (quote(handle_m.group(1), safe="") if handle_m else "")
+        for entry in cast(Json, core.get("data/request") or {}).values():
+            req = cast(Json, cast(Json, entry).get("request") or {}) if isinstance(entry, dict) else {}
+            resp = cast(Json, cast(Json, entry).get("response") or {}) if isinstance(entry, dict) else {}
+            href = _s(req.get("href"))
+            refused = resp.get("statusCode") in (401, 403, 404, 410)
+            if refused and ident and ident in href and ("/core/items/" in href or "/pid/find" in href):
+                return {"v": DSPACE_RECORD_VERSION, "gone": True, "status": resp.get("statusCode")}
+        return None  # never guess: the page renders other items too (FAO's related items)
+    md = cast(dict[str, list[Json]], item.get("metadata") or {})
+
+    def values(name: str) -> list[str]:
+        return [_s(v.get("value")) for v in md.get(name) or [] if _s(v.get("value"))]
+
+    def first(*names: str) -> str:
+        return next((v for n in names for v in values(n)), "")
+
+    # The ORIGINAL bundle's files in order: the item's bundle list names its bundles, and the first
+    # page of each bundle's bitstreams (5 on these sites) is in the state.
+    bundle_lists = paged(f"{self_href}/bundles")
+    if not bundle_lists:
+        return None  # the file section was not rendered: nothing says the item has no files
+    files: list[list[object]] = []
+    total = 0
+    for bundle_href in page_links(bundle_lists[0]):
+        bundle = data(bundle_href)
+        if _s(bundle.get("_name") or bundle.get("name")) != "ORIGINAL":
+            continue
+        listings = paged(f"{bundle_href}/bitstreams")
+        if not listings:
+            return None
+        listing = max(listings, key=lambda p: len(page_links(p)))
+        total = int(cast(Json, listing.get("pageInfo") or {}).get("totalElements") or 0)
+        for i, href in enumerate(page_links(listing)):
+            bs = data(href)
+            if not bs.get("uuid"):
+                return None  # a file the page names but does not describe
+            titles = cast(list[Json], cast(Json, bs.get("metadata") or {}).get("dc.title") or [])
+            name = _s(bs.get("name") or bs.get("_name")) or next((_s(t.get("value")) for t in titles), "")
+            size = bs.get("sizeBytes")
+            files.append([i, _s(bs.get("uuid")), name, size if isinstance(size, int) else None])
+        break
+    subjects = [
+        v
+        for name in md
+        if ".subject" in name and not name.endswith(("Identifiers", "qualifier"))
+        for v in values(name)
+    ] or [k.strip() for v in meta.get("citation_keywords") or [] for k in v.split(";") if k.strip()]
+    rights = dict.fromkeys(values("dc.rights") + values("dc.rights.license") + values("dc.rights.uri"))
+    handle = _s(item.get("handle"))
+    return {
+        "v": DSPACE_RECORD_VERSION,
+        "uuid": _s(item.get("uuid")),
+        "handle": handle,
+        "title": first("dc.title") or _s(item.get("name")) or (meta.get("citation_title") or [""])[0],
+        "date": first("dc.date.issued")[:10] or iso_date((meta.get("citation_date") or [""])[0]),
+        "pub_number": first("dc.identifier.govdoc") or handle,
+        "subjects": list(dict.fromkeys(subjects))[:20],
+        "abstract": (first("dc.description.abstract") or (meta.get("description") or [""])[0])[:2000],
+        "rights": " ; ".join(rights),
+        "language": _language(first("dc.language.iso", "dc.language"))
+        or _language((meta.get("citation_language") or [""])[0])
+        or "en",
+        "topic_text": " ".join(values("dc.relation.ispartofseries") + values("dc.description"))[:2000],
+        "withdrawn": bool(item.get("withdrawn")),
+        "files": files,
+        "files_total": max(total, len(files)),
+    }
+
+
+class _Topics:
+    """``topics``: the dspace7 ``queries`` kept as a metadata filter, since /search is disallowed.
+    A topic is quoted phrases and bare words that must all occur, or alternatives joined by ``OR``.
+    Matched on whole words (case and punctuation ignored: "drinking-water" matches "drinking water")
+    in the title, subjects, abstract, series and descriptions. The search also read the full text,
+    so a topic selects fewer items than its query did: the ones that are about it."""
+
+    def __init__(self, topics: Sequence[str]) -> None:
+        self.alternatives: list[list[str]] = []
+        for topic in topics:
+            for alt in re.split(r"\s+OR\s+", topic):
+                terms = [self.norm(p or w) for p, w in re.findall(r'"([^"]+)"|(\S+)', alt)]
+                if terms := [t for t in terms if t]:
+                    self.alternatives.append(terms)
+
+    @staticmethod
+    def norm(text: str) -> str:
+        return " ".join(re.findall(r"[^\W_]+", text.casefold()))
+
+    def match(self, record: Mapping[str, Any]) -> bool:
+        if not self.alternatives:
+            return True
+        parts = [record.get("title"), *cast(list[str], record.get("subjects") or [])]
+        parts += [record.get("abstract"), record.get("topic_text")]
+        text = f" {self.norm(' '.join(_s(p) for p in parts))} "
+        return any(all(f" {t} " in text for t in terms) for terms in self.alternatives)
+
+
+class _ItemCache:
+    """Records read from DSpace item pages, by page URL, with the sitemap ``<lastmod>`` they were read
+    at (SQLite in the source's workdir; in memory without one). At 10 s a page WHO IRIS's ~277,000
+    items are a month of reading: a run reads ``max_items`` pages and keeps them, so later runs read
+    only pages not read yet and pages whose sitemap date moved. Committed every 20 pages, so a run
+    killed after hours keeps what it read."""
+
+    def __init__(self, path: Path | None) -> None:
+        self._db = sqlite3.connect(":memory:" if path is None else path, isolation_level=None)
+        if path is not None:
+            self._db.execute("PRAGMA journal_mode=WAL")
+        self._db.execute(
+            "CREATE TABLE IF NOT EXISTS items"
+            " (url TEXT PRIMARY KEY, lastmod TEXT NOT NULL, at REAL NOT NULL, rec TEXT NOT NULL)"
+        )
+        self._pending = 0
+
+    @classmethod
+    def open(cls, cache_dir: Path | None, base: str) -> _ItemCache:
+        if cache_dir is not None:
+            name = hashlib.sha256(base.encode()).hexdigest()[:12]
+            try:
+                cache_dir.mkdir(parents=True, exist_ok=True)
+                return cls(cache_dir / f"dspace-items-{name}.sqlite")
+            except (OSError, sqlite3.Error) as exc:
+                log.warning("dspace item cache unavailable in %s: %s", cache_dir, exc)
+        return cls(None)
+
+    def get(self, url: str, lastmod: str, *, now: float) -> Json | None:
+        """The record read at this ``lastmod`` or a later one, unless it is a year old."""
+        row = self._db.execute("SELECT lastmod, at, rec FROM items WHERE url = ?", (url,)).fetchone()
+        if row is None or (lastmod and str(row[0]) < lastmod) or now - float(row[1]) > DSPACE_RECORD_TTL:
+            return None
+        rec = cast(Json, json.loads(row[2]))
+        return rec if rec.get("v") == DSPACE_RECORD_VERSION else None
+
+    def put(self, url: str, lastmod: str, rec: Json, *, now: float) -> None:
+        if self._pending == 0:
+            self._db.execute("BEGIN")
+        self._db.execute(
+            "INSERT OR REPLACE INTO items VALUES (?, ?, ?, ?)", (url, lastmod, now, json.dumps(rec))
+        )
+        self._pending += 1
+        if self._pending >= 20:
+            self.flush()
+
+    def flush(self) -> None:
+        if self._pending:
+            self._db.execute("COMMIT")
+            self._pending = 0
+
+    def close(self) -> None:
+        self.flush()
+        self._db.close()
+
+
+def _dspace_sitemaps(base: str, cfg: Mapping[str, Any], env: DiscoverEnv, label: str) -> dict[str, str]:
+    """Item page URL -> its sitemap ``<lastmod>`` ("" when none), from every sitemap of the index."""
+    item_rx = re.compile(_s(cfg.get("items")) or DSPACE_ITEM_URL)
+    match_rx = re.compile(_s(cfg["match"])) if cfg.get("match") else None
+    maps = [https(u, upgrade=True) for u in _LOC.findall(env.get_text(f"{base}/sitemap_index.xml"))]
+    maps = [u for u in maps if origin_ok(u, env.origins)]
+    if len(maps) > env.pages():
+        env.sampled.append(f"{label}: read {env.pages()} of {len(maps)} sitemaps (max_pages): a sample")
+        maps = maps[: env.pages()]
+    listed: dict[str, str] = {}
+    for u in maps:
+        try:
+            text = env.get_text(u)
+        except FetchError as exc:  # a sitemap the index names: its items are unknown this run
+            env.notes.append(f"{label}: {u}: {exc}")
+            env.incomplete.append(f"{label}: {u}: {exc}")
+            continue
+        for block in _URL_BLOCK.findall(text):
+            if (loc := _LOC.search(block)) is None:
+                continue
+            url = https(html_unescape(loc.group(1)), upgrade=True)
+            if (
+                item_rx.search(url)
+                and (match_rx is None or match_rx.search(url))
+                and origin_ok(url, env.origins)
+            ):
+                lastmod = _LASTMOD.search(block)
+                listed[url] = lastmod.group(1) if lastmod else ""
+    return listed
+
+
+def dspace_sitemap(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
+    """A DSpace 7 repository through what its robots.txt allows: the sitemaps (``base``
+    ``/sitemap_index.xml``) for its item pages, each page's server-rendered record for the item's
+    metadata and PDFs (:func:`parse_dspace_item`), and the bitstream content endpoint for the bytes.
+
+    ``items``: regex for item page URLs in the sitemaps (default ``/items/``, ``/entities/publication/``
+    and ``/handle/``); ``match``: a further regex on them (FAO's handle names the language,
+    ``.../ca8818en``). ``topics``: the old ``queries`` as a metadata filter (:class:`_Topics`).
+    ``max_items``: item pages read per run (default 5,000; five per ``max_pages`` in a dry run); pages
+    read before are kept in ``env.cache_dir`` and read again only when their sitemap ``<lastmod>``
+    moves. ``cover_page``: as in :func:`dspace7`.
+
+    Keys are the dspace7 flavor's (``<prefix>:<handle>``, ``-<n>`` for the n-th file of the ORIGINAL
+    bundle) and so is the URL (the content endpoint), so documents already held are recognised and
+    not fetched again. A run that leaves pages unread, or reads a topical selection, is a *sample*:
+    what it finds is fetched, and nothing is inferred withdrawn from what it lacks."""
+    base = _s(cfg.get("base")).rstrip("/")
+    label = "dspace-sitemap"
+    topics = _Topics(_strs(cfg.get("topics")))
+    budget = int(cfg.get("max_items", DSPACE_MAX_ITEMS))
+    if env.max_pages is not None:
+        budget = min(budget, 5 * env.max_pages)
+    cover = {"cover_page": "1"} if cfg.get("cover_page") else {}
+    listed = _dspace_sitemaps(base, cfg, env, label)
+    env.totals[label] = len(listed)
+    partial_files = 0
+
+    def candidates(rec: Json, page: str) -> Iterator[Candidate]:
+        nonlocal partial_files
+        if rec.get("gone") or rec.get("withdrawn") or not topics.match(rec):
+            return
+        files = cast(list[list[Any]], rec.get("files") or [])
+        if int(rec.get("files_total") or 0) > len(files):
+            partial_files += 1
+        handle = _s(rec.get("handle"))
+        key = make_key(env.prefix, handle.replace("/", "-") or _s(rec.get("uuid")))
+        for index, bitstream, name, size in files:
+            if not _s(name).lower().endswith(".pdf"):
+                continue
+            yield Candidate(
+                key=f"{key}-{index}" if index else key,
+                url=f"{base}/server/api/core/bitstreams/{bitstream}/content",
+                title=_s(rec.get("title")) or _s(name),
+                issuer=env.issuer,
+                pub_number=_s(rec.get("pub_number")),
+                edition_date=_s(rec.get("date")),
+                size=size if isinstance(size, int) and not cover else None,
+                subjects=tuple(cast(list[str], rec.get("subjects") or [])),
+                abstract=_s(rec.get("abstract")),
+                rights=_s(rec.get("rights")),
+                language=_s(rec.get("language")) or "en",
+                landing_url=f"{base}/handle/{handle}" if handle else page,
+                discovered_by=label,
+                extra=cover,
+            )
+
+    cache = _ItemCache.open(env.cache_dir, base)
+    try:
+        now = time.time()
+        pending: list[tuple[str, str]] = []
+        for url, lastmod in listed.items():
+            rec = cache.get(url, lastmod, now=now)
+            if rec is None:
+                pending.append((lastmod, url))
+            else:
+                yield from candidates(rec, url)
+        pending.sort(reverse=True)  # new and changed items first (ISO dates sort as text)
+        read = failed = 0
+        for lastmod, url in pending[:budget]:
+            if failed >= 10 and failed > read:
+                break  # a site that stopped rendering its pages would cost max_items requests for nothing
+            why = "no item record on the page"
+            try:
+                rec = parse_dspace_item(env.get_text(url), url)
+            except NotFoundError:
+                rec = {"v": DSPACE_RECORD_VERSION, "gone": True}  # listed but not there, until its date moves
+            except FetchError as exc:
+                rec, why = None, str(exc)
+            if rec is None:
+                failed += 1
+                if failed <= 20:
+                    env.notes.append(f"{label}: {url}: {why}")
+                continue
+            read += 1
+            cache.put(url, lastmod, rec, now=time.time())
+            yield from candidates(rec, url)
+        if unread := len(pending) - read:
+            env.sampled.append(
+                f"{label}: {unread:,} of {len(listed):,} item pages not read yet ({read:,} read this run, "
+                f"max_items {budget:,}): later runs read them"
+            )
+        if (failed > read and (failed >= 10 or read == 0)) or failed > max(10, read // 5):
+            # Mostly failures is a site problem (Calhoun's empty shells), not a few pages left unread.
+            env.incomplete.append(f"{label}: {failed} of {read + failed} item pages read could not be used")
+        if topics.alternatives:
+            env.sampled.append(
+                f"{label}: a topical selection (topics); the items it leaves out are still listed"
+            )
+        if partial_files:
+            env.sampled.append(f"{label}: {partial_files} item(s) list more files than their page shows")
+    finally:
+        cache.close()
 
 
 # --- APIs ------------------------------------------------------------------------------------------
@@ -2210,6 +2627,7 @@ DISCOVERERS: dict[str, Discoverer] = {
     "git": git_repo,
     "list": fixed_list,
     "sitemap": sitemap,
+    "dspace-sitemap": dspace_sitemap,
     "document": fixed_list,
     "csv": csv_list,
     "candidates": stored_candidates,

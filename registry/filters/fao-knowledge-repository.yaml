@@ -1,0 +1,5 @@
+# Document-level rules for fao-knowledge-repository. The source filter in registry/sources.yaml
+# (allow_all) decides; this file exists so owner review decisions
+# (registry/filters/decisions/fao-knowledge-repository.yaml) are loaded.
+allow_documents: []
+deny_documents: []
