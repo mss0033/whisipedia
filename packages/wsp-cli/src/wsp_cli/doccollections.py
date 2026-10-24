@@ -524,6 +524,22 @@ def manual_name(cand: Candidate) -> str:
     )
 
 
+def current_catalog(
+    vault_root: Path, spec: SourceSpec, partition: str | None = None
+) -> tuple[str | None, list[DocumentMeta]]:
+    """The current generation's id and catalog; for a partition, that partition's (ADR-0010)."""
+    lib = vault_root / "library" / spec.vault_domain / spec.id
+    gen = _pointer(lib / "CURRENT.txt")
+    if partition is not None:
+        own = _pointer(lib / "CURRENT.d" / f"{partition}.txt")
+        gen = (
+            own if own is not None else (gen if gen is not None and partition_of(gen) == partition else None)
+        )
+    if gen is None:
+        return None, []
+    return gen, read_catalog_file(lib / gen / CATALOG)
+
+
 class CollectionFetcher:
     """Downloads one collection's allowed documents into ``_incoming`` and screens them."""
 
@@ -567,19 +583,7 @@ class CollectionFetcher:
     def previous_catalog(
         self, spec: SourceSpec, partition: str | None = None
     ) -> tuple[str | None, list[Any]]:
-        """The current generation's id and catalog; for a partition, that partition's (ADR-0010)."""
-        lib = self.vault_root / "library" / spec.vault_domain / spec.id
-        gen = _pointer(lib / "CURRENT.txt")
-        if partition is not None:
-            own = _pointer(lib / "CURRENT.d" / f"{partition}.txt")
-            gen = (
-                own
-                if own is not None
-                else (gen if gen is not None and partition_of(gen) == partition else None)
-            )
-        if gen is None:
-            return None, []
-        return gen, read_catalog_file(lib / gen / CATALOG)
+        return current_catalog(self.vault_root, spec, partition)
 
     def run(
         self,

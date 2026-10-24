@@ -272,3 +272,24 @@ def test_the_newest_sealed_pubmed_generation_is_found_current_or_not(
     spec = _spec("pubmed", {"adapter": "pubmed"})
     monkeypatch.setattr(SourceSpec, "vault_domain", property(lambda self: "medicine"))
     assert manual.held_generation({}, spec) == "pubmed26-u1682"
+
+
+def test_what_the_library_holds_is_never_asked_for_and_a_url_without_a_name_gets_one() -> None:
+    from wsp_adapters.doccollection.adapter import Survey
+    from wsp_adapters.doccollection.model import Candidate
+
+    grid = Candidate(
+        key="gebco:GEBCO_2024",
+        url="https://www.bodc.ac.uk/data/open_download/gebco/gebco_2024/zip/",
+        title="GEBCO 2024",
+        issuer="BODC",
+        pub_number="GEBCO_2024",
+        extra={"suffix": ".zip"},
+    )
+    survey = Survey("gebco-grid", allowed=[grid])
+    (item,) = manual._items_from_survey(survey, [], ".pdf")  # pyright: ignore[reportPrivateUsage]
+    assert item.save_as == "GEBCO_2024.zip"
+    assert item.cand["extra"]["save_as"] == "GEBCO_2024.zip"  # the import looks for this very name
+    q = Queue("geonames", items=[Item("geo:ALL", "u", "allCountries.zip"), Item("geo:NEW", "u2", "new.zip")])
+    assert manual.mark_held(q, {"geo:ALL": "2026-10-23r2"}) == 1
+    assert [(i.status, i.taken) for i in q.items] == [("taken", "2026-10-23"), ("pending", "")]

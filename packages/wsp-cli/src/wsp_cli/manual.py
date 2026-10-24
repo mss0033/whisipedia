@@ -197,8 +197,13 @@ def _items_from_survey(survey: Survey, rule: Sequence[str], page_ext: str) -> li
     out: list[Item] = []
     unresolved = set(survey.unresolved_keys)
     for cand in survey.allowed:
-        name = cand.extra.get("save_as") or _url_name(cand.url) or cand.file_name
-        out.append(Item(cand.key, _browse(cand.url, rule), name, cand.title, cand=cand.to_json()))
+        name = cand.extra.get("save_as") or _url_name(cand.url)
+        if "." not in name:  # GEBCO's ".../gebco_2024/zip/": the number and the stored extension
+            stem = key_part(cand.pub_number or cand.key.partition(":")[2])
+            name = stem + (cand.extra.get("suffix") or Path(cand.file_name).suffix)
+        # The name travels with the candidate: the import takes exactly the file the page asked for.
+        doc = cand.with_url(cand.url, extra={**cand.extra, "save_as": name})
+        out.append(Item(cand.key, _browse(cand.url, rule), name, cand.title, cand=doc.to_json()))
     for cand, decision in survey.decisions:
         if decision.verdict is not Verdict.ALLOW or cand.key not in unresolved:
             continue
@@ -292,6 +297,34 @@ def _pubmed_items(held: str | None, ahead: int) -> list[Item]:
 
 
 # --- the daily page --------------------------------------------------------------------------------
+
+
+def mark_held(queue: Queue, held: Mapping[str, str]) -> int:
+    """Items the library already holds (``held``: document key -> its generation) are taken, dated by
+    that generation, so a fresh list never asks for what an earlier fetch brought (GeoNames'
+    files, imported the day before the daily page began)."""
+    n = 0
+    for item in queue.items:
+        gen = held.get(item.id)
+        if gen is None or item.status == "taken" or item.offered:
+            continue
+        stamp = gen[:10] if re.match(r"\d{4}-\d{2}-\d{2}", gen) else date.today().isoformat()
+        item.status, item.taken = "taken", stamp
+        n += 1
+    return n
+
+
+def held_documents(vault_root: Path, spec: SourceSpec, queue: Queue) -> dict[str, str]:
+    """Every document key in the source's current catalogs (each partition the queue names)."""
+    from wsp_cli.doccollections import current_catalog
+
+    parts = {str(i.cand.get("partition") or "") or None for i in queue.items}
+    out: dict[str, str] = {}
+    for part in parts:
+        gen, catalog = current_catalog(vault_root, spec, part if spec.partitioned else None)
+        for meta in catalog:
+            out[meta.doc_key] = meta.generation or gen or ""
+    return out
 
 
 def todays_offer(queue: Queue, daily: int, day: str) -> list[Item]:
@@ -620,6 +653,8 @@ def cmd_sync(args: argparse.Namespace, out: TextIO) -> int:
                 elif items or not queue.items:
                     queue.merge(items)
                 queue.prioritise([str(x) for x in cast(list[object], mc.get("first") or [])])
+                if kind != "pubmed":
+                    mark_held(queue, held_documents(vault_root, spec, queue))
                 queue.save_pages, queue.notes, queue.built = to_save, notes, today
                 queue.save(qpath)
         if page_due:
