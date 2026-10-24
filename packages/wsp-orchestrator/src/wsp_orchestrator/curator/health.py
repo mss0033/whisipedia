@@ -167,7 +167,9 @@ def _release_problems(version: str, files: Sequence[tuple[str, str]]) -> list[st
     if not files:
         out.append("release has no files")
     for url, name in files:
-        if not url.startswith("https://"):
+        # ftp:// is an issuer's FTP service, allowed where the owner chose it over a robots-disallowed
+        # HTTPS host (D16, 2026-10-24: NCBI); plain http:// never.
+        if not url.startswith(("https://", "ftp://")):
             out.append(f"{name}: not https ({url[:40]})")
         if not name or "/" in name:
             out.append(f"bad file name {name!r}")

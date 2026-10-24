@@ -3,6 +3,17 @@
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Added: the first sources of the 2026-10-23 research, and FTP for NCBI (2026-10-24)
+* New sources (owner approval D20): `mit-ocw-stem` (984 more courses), `nist-technical-series`
+  (32,661 DOIs under 10.6028), `usda-fooddata-central`, `govinfo-collections` (23 GPO collections,
+  614,521 packages, one partition each), `legislation-gov-uk` (28 types of UK legislation at the 5 s
+  crawl delay) and `text-creation-partnership` (61,315 EEBO, ECCO and Evans texts, read by a
+  `tei-tcp` reader).
+* Discovery: a `crossref` API flavor (a DOI prefix), `newest` on index pages, GovInfo partitions,
+  skips and HTML, sitemap `key_pattern`/`partition`/`expand_match`, and CSV URL templates.
+* `ftp://` in the fetcher: directory listings, sizes, resumable downloads, an anonymous login that
+  never sends an email. PubMed is active again over NCBI's FTP service (D16). See the runbook's "FTP
+  channels" section.
 ### Fixed: the nightly index build re-reads only the languages whose sources changed (2026-10-22)
 * The spelling step read every language of every source again each night, the `lang` column of every
   part first: about 8 hours of NAS reads. Each generation's language map and each language's counts

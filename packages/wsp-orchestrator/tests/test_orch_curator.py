@@ -328,3 +328,13 @@ def test_registry_text_edit_and_overlay(tmp_path: Path) -> None:
     assert load_overlay(overlay) == [{"id": "c", "name": "C2"}]
     assert remove_from_overlay(overlay, "c")
     assert load_overlay(overlay) == []
+
+
+def test_a_release_over_an_issuers_ftp_service_is_well_formed_and_plain_http_is_not() -> None:
+    """NCBI's PubMed files come over ftp:// (owner decision D16, 2026-10-24)."""
+    from wsp_orchestrator.curator.health import _release_problems  # pyright: ignore[reportPrivateUsage]
+
+    ftp = [("ftp://ftp.ncbi.nlm.nih.gov/pubmed/baseline/pubmed26n0001.xml.gz", "pubmed26n0001.xml.gz")]
+    assert _release_problems("pubmed2026", ftp) == []
+    plain = [("http://example.org/a.gz", "a.gz")]
+    assert _release_problems("v1", plain) == ["a.gz: not https (http://example.org/a.gz)"]

@@ -225,15 +225,16 @@ sources:
     publisher: US National Library of Medicine
     domain: [medicine, science]
     tier: T1
-    # Paused 2026-10-23: ftp.ncbi.nlm.nih.gov's robots.txt disallows every agent (found by the source
-    # research); the files are also served over ftp:// (no robots.txt there): owner to decide.
-    status: paused
+    # ftp.ncbi.nlm.nih.gov's HTTPS robots.txt disallows every agent; NCBI serves the same files over
+    # anonymous FTP, its documented bulk channel, which the owner allowed (D16, 2026-10-24). Paused
+    # 2026-10-23 until then.
+    status: active
     license: LicenseRef-NLM-terms
     legal_basis: bulk-access-terms
     # Research abstracts: no medicine-domain ranking bonus, so practical references (MDWiki, Wikipedia)
     # lead lay questions at equal relevance ("how to treat a snake bite" led with 1890s case reports).
     rank_prior: 0
-    access: {adapter: pubmed, endpoints: ["https://ftp.ncbi.nlm.nih.gov/pubmed/baseline/", "https://ftp.ncbi.nlm.nih.gov/pubmed/updatefiles/"]}
+    access: {adapter: pubmed, endpoints: ["ftp://ftp.ncbi.nlm.nih.gov/pubmed/baseline/", "ftp://ftp.ncbi.nlm.nih.gov/pubmed/updatefiles/"]}
     update: {strategy: base-plus-incremental}
     size: {files: 1334, bytes: 50e9, measured: false, as_of: 2026-10-09}
 

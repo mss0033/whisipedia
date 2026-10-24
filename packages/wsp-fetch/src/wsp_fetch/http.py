@@ -72,6 +72,7 @@ import httpx
 from wsp_core.errors import RedirectRefusedError, RobotsDisallowedError
 from wsp_core.model import RemoteFile, RemoteHead
 from wsp_core.redirects import current_guard, unguarded
+from wsp_fetch import ftp
 from wsp_fetch import provenance as prov
 from wsp_fetch.config import FetchConfig, host_key
 from wsp_fetch.errors import (
@@ -348,8 +349,10 @@ class HttpFetcher:
     # --- robots.txt ------------------------------------------------------------------------------
 
     def robots_allows(self, url: str) -> bool:
-        """Whether ``url``'s host lets us fetch it (its robots.txt, read once; unreadable: yes)."""
-        if not self.config.robots or _IN_ROBOTS.get():
+        """Whether ``url``'s host lets us fetch it (its robots.txt, read once; unreadable: yes). FTP has
+        no robots.txt: an issuer's FTP service is used where the owner allowed it (D16, 2026-10-24),
+        which the registry records per source."""
+        if not self.config.robots or _IN_ROBOTS.get() or url.startswith("ftp://"):
             return True
         parts = urlsplit(url)
         site = f"{parts.scheme}://{parts.netloc.lower()}"
@@ -394,7 +397,24 @@ class HttpFetcher:
 
     def get_bytes(self, url: str, *, max_bytes: int = 64 * 1024 * 1024) -> bytes:
         self.check_robots(url)
+        if url.startswith("ftp://"):
+            return self._retrying(
+                f"RETR {url}", lambda: self._ftp_get_once(url, max_bytes), self.config.max_attempts
+            )
         return self._retrying(f"GET {url}", lambda: self._get_once(url, max_bytes), self.config.max_attempts)
+
+    def _ftp_get_once(self, url: str, max_bytes: int) -> bytes:
+        with self.host_slot(url):
+            try:
+                return ftp.get(
+                    url, max_bytes=max_bytes, timeout=self.config.read_timeout, on_chunk=self.throttle
+                )
+            except ftp.FtpNotFoundError as exc:
+                raise _RetryableError(str(exc), status=404) from exc
+            except ftp.FtpTooLargeError as exc:
+                raise ResponseTooLargeError(str(exc)) from exc
+            except ftp.TRANSIENT as exc:
+                raise _RetryableError(f"{type(exc).__name__}: {exc}") from exc
 
     def _retrying[T](self, label: str, fn: Callable[[], T], attempts: int) -> T:
         """Retry transient failures with jittered backoff, honouring ``Retry-After``."""
@@ -482,8 +502,21 @@ class HttpFetcher:
         return self._retrying(f"GET {url} bytes={start}-{end}", once, self.config.max_attempts)
 
     def head(self, url: str) -> RemoteHead:
-        """``HEAD`` with redirects followed (optional ``SupportsHead`` capability of the port)."""
+        """``HEAD`` with redirects followed (optional ``SupportsHead`` capability of the port); for
+        ``ftp://``, the file's ``SIZE``."""
         self.check_robots(url)
+        if url.startswith("ftp://"):
+
+            def ftp_once() -> RemoteHead:
+                with self.host_slot(url):
+                    try:
+                        return RemoteHead(url=url, size=ftp.size(url, timeout=self.config.read_timeout))
+                    except ftp.FtpNotFoundError as exc:
+                        raise _RetryableError(str(exc), status=404) from exc
+                    except ftp.TRANSIENT as exc:
+                        raise _RetryableError(f"{type(exc).__name__}: {exc}") from exc
+
+            return self._retrying(f"SIZE {url}", ftp_once, self.config.max_attempts)
 
         def once() -> RemoteHead:
             with self.host_slot(url):
@@ -589,6 +622,8 @@ class HttpFetcher:
             return self._corroborate(target, dest, report)
 
     def _download(self, target: Target, dest: Path, t0: float, *, single_source: bool) -> FetchReport:
+        if target.urls[0].startswith("ftp://"):
+            return self._ftp_download(target, dest, t0)
         probes, rejected = self._probe_all(target)
         ranged = [p for p in probes if p.ranges and p.size is not None]
         if single_source and len(ranged) > 1:  # never splice unverifiable bytes from several mirrors
@@ -813,6 +848,75 @@ class HttpFetcher:
             {p.url: got},
             provenance=_file_provenance(target, got, sources, rejected, resumed=0),
         )
+
+    # --- FTP (D16) ----------------------------------------------------------------------------
+
+    def _ftp_download(self, target: Target, dest: Path, t0: float) -> FetchReport:
+        """One stream per attempt from the target's ``ftp://`` sources in order, resumed with ``REST``
+        from the partial file (whose bytes are hashed again first), checked like an HTTP single
+        stream (size, then every upstream digest in :func:`finalize`)."""
+        urls = [u for u in target.urls if u.startswith("ftp://")]
+        partial = partial_path(dest)
+        errors: list[str] = []
+        missing = 0
+        for url in urls:
+            for attempt in range(1, self.config.max_attempts + 1):
+                try:
+                    got, digests = self._ftp_once(target, url, partial)
+                except FetchCancelledError:
+                    raise
+                except ftp.FtpNotFoundError as exc:
+                    errors.append(f"{url}: {exc}")
+                    missing += 1
+                    break
+                except (*ftp.TRANSIENT, _RetryableError) as exc:
+                    errors.append(f"{url} (attempt {attempt}): {exc}")
+                    if attempt == self.config.max_attempts:
+                        break
+                    delay = backoff_delay(attempt, self.config.backoff_base, self.config.backoff_max)
+                    if self._cancel.wait(delay):
+                        raise FetchCancelledError(f"{target.url}: cancelled (shutdown)") from exc
+                    continue
+                probe = _Probe(url, url, got, False, None)
+                return self._single_report(target, [probe], probe, dest, partial, got, digests, t0, [])
+        if missing == len(urls):
+            partial.unlink(missing_ok=True)
+            raise NotFoundError(target.url, "; ".join(errors))
+        raise MirrorsExhaustedError(f"all sources failed for {target.url}: {'; '.join(errors)}")
+
+    def _ftp_once(self, target: Target, url: str, partial: Path) -> tuple[int, dict[str, str]]:
+        expected = target.size if target.size is not None else ftp.size(url, timeout=self.config.read_timeout)
+        hasher = MultiHasher(c.algorithm for c in target.checksums)
+        try:
+            have = partial.stat().st_size if partial.exists() else 0
+            if expected is not None and have > expected:
+                partial.unlink()
+                have = 0
+            if have:
+                with partial.open("rb") as fh:
+                    while chunk := fh.read(1 << 20):
+                        hasher.update(chunk)
+            got = have
+            with self.host_slot(url), partial.open("ab") as fh:
+
+                def sink(chunk: bytes) -> None:
+                    nonlocal got
+                    if self._cancel.is_set():
+                        raise FetchCancelledError(f"{target.url}: cancelled (shutdown)")
+                    fh.write(chunk)
+                    hasher.update(chunk)
+                    self.throttle(len(chunk))
+                    self.wrote(len(chunk))
+                    got += len(chunk)
+
+                ftp.retrieve(url, offset=have, timeout=self.config.read_timeout, sink=sink)
+                fh.flush()
+                os.fsync(fh.fileno())
+            if expected is not None and got != expected:
+                raise _RetryableError(f"transfer ended after {got} of {expected} bytes")
+            return got, hasher.hexdigests()
+        finally:
+            hasher.close()
 
     # --- corroboration (sources without upstream digests) -------------------------------------
 

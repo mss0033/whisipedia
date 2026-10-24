@@ -164,6 +164,22 @@ ledger has a `release.withheld` event, and held documents get one review proposa
 (`wsp proposals list`, decided as in §3). This never pauses the source. A release in which every
 document is withheld ends quarantined (`wsp status`), again without pausing the source.
 
+## FTP channels (owner decision D16)
+
+NCBI serves PubMed, PubChem and PMC from `ftp.ncbi.nlm.nih.gov` over HTTPS and over anonymous FTP. The
+HTTPS host's robots.txt disallows every agent; FTP has no robots.txt. The owner allowed an issuer's
+own FTP service where its HTTPS host disallows crawlers (PLAN §16, D16, 2026-10-24), so these sources
+name `ftp://` endpoints. The fetcher (`wsp_fetch.ftp`) logs in as `anonymous` with the password
+`anonymous@`, never an email address. It lists a directory with MLSD, which it returns in the HTML
+index form adapters read. Downloads are resumed with REST and checked against the issuer's MD5
+sidecars.
+
+Limits:
+* NCBI's server refuses `AUTH TLS`. The transfer is unencrypted, and the MD5 sidecars come over the same
+  channel: they catch corruption, but not a tampering man in the middle.
+* Every other host's robots.txt still applies. An `ftp://` address is used only where a registry entry
+  names it.
+
 ## When an issuer is blocked (403)
 
 Never change the User-Agent or retry around a WAF. Record the official alternative (GovInfo, an
