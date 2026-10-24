@@ -429,6 +429,27 @@ def _pub_number(pattern: str | None, *texts: str) -> str:
 
 
 def index_page(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
+    """Document links on index pages. ``newest``: a regex with groups ``series`` and ``date`` matched
+    on each document URL; of a dated series only the newest file is kept (FoodData Central lists every
+    release since 2019 on one page). URLs it does not match pass unchanged."""
+    if not cfg.get("newest"):
+        yield from _index_page(cfg, env)
+        return
+    newest_rx = re.compile(_s(cfg["newest"]))
+    best: dict[str, tuple[str, Candidate]] = {}
+    for cand in _index_page(cfg, env):
+        m = newest_rx.search(cand.url)
+        if m is None:
+            yield cand
+            continue
+        series, stamp = m.group("series"), m.group("date")
+        if series not in best or stamp > best[series][0]:
+            best[series] = (stamp, cand)
+    for _stamp, cand in best.values():
+        yield cand
+
+
+def _index_page(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
     urls = _strs(cfg.get("urls")) or _strs(cfg.get("url"))
     doc_rx = re.compile(_s(cfg.get("documents")) or r"\.pdf(?:$|[?#])", re.IGNORECASE)
     follow_rx = re.compile(_s(cfg["follow"]), re.IGNORECASE) if cfg.get("follow") else None
@@ -617,23 +638,56 @@ def sitemap(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
     ``<loc>`` matching ``match`` is a landing page (``rewrite``: ``[pattern, replacement]`` applied
     first), whose document link (``detail_documents``) is found when it is resolved. MIT OpenCourseWare
     lists one sitemap per course; ``…/sitemap.xml`` becomes ``…/download/``, whose zip is the course
-    (2026-10-21)."""
+    (2026-10-21).
+
+    ``key_pattern``: a regex on the page URL whose groups, joined by ``-``, name the document, where
+    every URL ends alike (legislation.gov.uk's ``/ukpga/2010/15/data.html``). ``partition``: this
+    sitemap is a partition of its own, read only when that partition is fetched. ``upgrade_http``:
+    ``http://`` locations are fetched over HTTPS. With ``expand``, a sitemap of the index that cannot
+    be read leaves the listing incomplete, and the others are still read; ``expand_match`` reads only
+    the sitemaps it matches (each act is in legislation.gov.uk's "final" sitemaps once, and again in
+    "revised" ones: 35,000 sitemaps for statutory instruments alone at a 5 s crawl delay)."""
+    part = _s(cfg.get("partition"))
+    if part and env.partition and env.partition != part:
+        return
     match = re.compile(_s(cfg.get("match")) or r".", re.IGNORECASE)
     rewrite = cast(list[str], cfg.get("rewrite") or [])
     detail_docs = _s(cfg.get("detail_documents"))
     title_from = re.compile(_s(cfg["title_from"]), re.IGNORECASE) if cfg.get("title_from") else None
-    locs = _LOC.findall(env.get_text(_s(cfg.get("url"))))
+    key_rx = re.compile(_s(cfg["key_pattern"])) if cfg.get("key_pattern") else None
+    upgrade = bool(cfg.get("upgrade_http", False))
+    locs = _LOC.findall(env.get_text(https(_s(cfg.get("url")), upgrade=upgrade)))
     if cfg.get("expand"):  # a sitemap index: the pages are in the sitemaps it names
-        locs = [loc for u in locs for loc in _LOC.findall(env.get_text(u))]
+        pages: list[str] = []
+        only = re.compile(_s(cfg["expand_match"])) if cfg.get("expand_match") else None
+        wanted = [u for u in locs if only is None or only.search(u)]
+        if len(wanted) > env.pages():
+            env.listing_end("sitemap", stopped=True, seen=0)  # a sample (max_pages), or the page limit
+            wanted = wanted[: env.pages()]
+        for u in wanted:
+            try:
+                pages += _LOC.findall(env.get_text(https(u, upgrade=upgrade)))
+            except FetchError as exc:
+                env.notes.append(f"sitemap: {u}: {exc}")
+                if not isinstance(exc, NotFoundError):
+                    env.incomplete.append(f"sitemap: {u}: {exc}")
+        locs = pages
     seen = 0
     for loc in dict.fromkeys(locs):
         if not match.search(loc):
             continue
-        url = re.sub(rewrite[0], rewrite[1], loc) if len(rewrite) == 2 else loc
+        url = https(re.sub(rewrite[0], rewrite[1], loc) if len(rewrite) == 2 else loc, upgrade=upgrade)
         if not origin_ok(url, env.origins):
             continue
+        km = key_rx.search(url) if key_rx else None
+        if key_rx and km is None:
+            continue
         seen += 1
-        slug = url.rstrip("/").split("/")[-2 if url.endswith("/download/") else -1]
+        slug = (
+            "-".join(g for g in km.groups() if g)
+            if km
+            else url.rstrip("/").split("/")[-2 if url.endswith("/download/") else -1]
+        )
         m = title_from.search(url) if title_from else None
         name = (m.group(1) if m else slug).replace("-", " ")
         yield Candidate(
@@ -645,6 +699,7 @@ def sitemap(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
             landing_url=url,
             discovered_by="sitemap",
             resolve="detail-page" if detail_docs else "",
+            partition=part,
             extra={"detail_documents": detail_docs} if detail_docs else {},
         )
     env.listing_end("sitemap", stopped=False, seen=seen)
@@ -749,10 +804,21 @@ def openstax(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
 
 
 def govinfo(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
-    """GovInfo collection listing (official GPO API). ``collection``, ``since``, ``package_prefix``."""
+    """GovInfo collection listing (official GPO API). ``collection``, ``since``, ``package_prefix``;
+    ``package_skip``: prefixes left out (Serial Set volumes, which GPO also files under BUDGET, CRPT and
+    the House and Senate Journals); ``format``: ``pdf`` or ``htm`` (GAO reports have no PDF);
+    ``partition: true``: each collection is a partition of its own, listed only when it is fetched."""
     collection = _s(cfg.get("collection")) or "GOVPUB"
+    part = collection.lower() if cfg.get("partition") else ""
+    if part and env.partition and env.partition != part:
+        return
     since = _s(cfg.get("since")) or "1990-01-01T00:00:00Z"
     prefixes = _strs(cfg.get("package_prefix"))
+    skip = _strs(cfg.get("package_skip"))
+    fmt = _s(cfg.get("format")) or "pdf"
+    if fmt not in ("pdf", "htm"):
+        raise DiscoveryError(f"govinfo: unknown format {fmt!r}")
+    folder = "html" if fmt == "htm" else "pdf"
     key = env.key(_s(cfg.get("api_key")) or "govinfo")
     url: str | None = f"https://api.govinfo.gov/collections/{collection}/{since}?" + urlencode(
         {"pageSize": 1000, "offsetMark": "*", "api_key": key}
@@ -769,17 +835,18 @@ def govinfo(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
             break
         for pkg in packages:
             pid = _s(pkg.get("packageId"))
-            if prefixes and not pid.startswith(prefixes):
+            if (prefixes and not pid.startswith(prefixes)) or (skip and pid.startswith(skip)):
                 continue
             yield Candidate(
                 key=make_key(env.prefix, pid),
-                url=f"https://www.govinfo.gov/content/pkg/{pid}/pdf/{pid}.pdf",
+                url=f"https://www.govinfo.gov/content/pkg/{pid}/{folder}/{pid}.{fmt}",
                 title=_s(pkg.get("title")) or pid,
                 issuer=env.issuer,
                 pub_number=pid,
                 edition_date=_s(pkg.get("dateIssued"))[:10],
                 landing_url=f"https://www.govinfo.gov/app/details/{pid}",
                 discovered_by=f"api:govinfo:{collection}",
+                partition=part,
             )
         nxt = _s(data.get("nextPage"))
         url = f"{nxt}&api_key={key}" if nxt and "api_key=" not in nxt else (nxt or None)

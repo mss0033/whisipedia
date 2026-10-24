@@ -4095,6 +4095,133 @@ sources:
     size: {bytes: 1.0e9, measured: false, as_of: '2026-10-20'}
     notes: "12 million place names with coordinates, population, elevation and alternate names in many languages (owner request 2026-10-18, geography)."
 
+  - id: usda-fooddata-central
+    name: USDA FoodData Central (food composition, all data types)
+    publisher: US Department of Agriculture, Agricultural Research Service
+    domain: [nutrition, food, agriculture, health, reference-data]
+    tier: T1
+    status: candidate
+    license: CC0-1.0
+    legal_basis: public-domain
+    access:
+      adapter: doc-collection
+      issuer: USDA Agricultural Research Service
+      key_prefix: fdc
+      origins: [fdc.nal.usda.gov]
+      # The download page lists every release since 2019; the newest full CSV bundle (Foundation, SR
+      # Legacy, FNDDS survey foods, Branded) is taken, with the field descriptions.
+      discovery:
+        - kind: index-page
+          url: "https://fdc.nal.usda.gov/download-datasets/"
+          documents: "/(?:fdc-datasets/FoodData_Central_csv_\\d{4}-\\d\\d-\\d\\d\\.zip|docs/Download_Field_Descriptions[^/]*\\.pdf)$"
+          newest: "/fdc-datasets/(?P<series>FoodData_Central_csv)_(?P<date>\\d{4}-\\d\\d-\\d\\d)\\.zip$"
+          dates: true
+      filter: {allow_all: true, public_issuer: true, data_files: true}
+    update: {cadence: P6M, strategy: snapshot-retention}
+    size: {bytes: 5.0e8, measured: false, as_of: '2026-10-24'}
+    notes: "The official US food-composition database that replaced the SR28 nutrient tables: about 0.5 GB zipped (2025-12-18 release, 480 MB), released about twice a year. Owner approval D20 (2026-10-24)."
+
+  - id: govinfo-collections
+    name: GovInfo (GPO) federal publications - Federal Register, Statutes, US Reports, Congress, the presidency, economics
+    publisher: US Government Publishing Office
+    domain: [law, government, history, economics, reference]
+    tier: T1
+    status: candidate
+    license: LicenseRef-US-Gov-PD
+    legal_basis: public-domain
+    access:
+      adapter: doc-collection
+      rate: {requests_per_second: 1, concurrency: 3}
+      issuer: US Government Publishing Office
+      key_prefix: govinfo
+      # One partition per GovInfo collection (wsp collections fetch --partition fr|chrg|serialset...).
+      # Serial Set volumes, which GPO also files under BUDGET, CRPT and the Journals, are taken once, in
+      # the serialset partition. USCOURTS is left out (CourtListener holds the opinions); ECFR and the US
+      # Code are us-law's; GOVPUB is listed by the agency sources that use it.
+      partitioned: true
+      origins: [www.govinfo.gov]
+      discovery:
+        - {kind: api, flavor: govinfo, collection: FR, partition: true, api_key: govinfo, package_skip: ["SERIALSET-"]}  # Federal Register, 1936-
+        - {kind: api, flavor: govinfo, collection: STATUTE, partition: true, api_key: govinfo, package_skip: ["SERIALSET-"]}  # Statutes at Large
+        - {kind: api, flavor: govinfo, collection: PLAW, partition: true, api_key: govinfo, package_skip: ["SERIALSET-"]}  # Public and Private Laws
+        - {kind: api, flavor: govinfo, collection: USREPORTS, partition: true, api_key: govinfo, package_skip: ["SERIALSET-"]}  # United States Reports
+        - {kind: api, flavor: govinfo, collection: PPP, partition: true, api_key: govinfo, package_skip: ["SERIALSET-"]}  # Public Papers of the Presidents
+        - {kind: api, flavor: govinfo, collection: CPD, partition: true, api_key: govinfo, package_skip: ["SERIALSET-"]}  # Compilation of Presidential Documents
+        - {kind: api, flavor: govinfo, collection: ERP, partition: true, api_key: govinfo, package_skip: ["SERIALSET-"]}  # Economic Report of the President
+        - {kind: api, flavor: govinfo, collection: ECONI, partition: true, api_key: govinfo, package_skip: ["SERIALSET-"]}  # Economic Indicators
+        - {kind: api, flavor: govinfo, collection: BUDGET, partition: true, api_key: govinfo, package_skip: ["SERIALSET-"]}  # US Budget
+        - {kind: api, flavor: govinfo, collection: GAOREPORTS, partition: true, api_key: govinfo, package_skip: ["SERIALSET-"], format: htm}  # GAO reports and Comptroller General decisions, 1994-2008 (text only)
+        - {kind: api, flavor: govinfo, collection: GOVMAN, partition: true, api_key: govinfo, package_skip: ["SERIALSET-"]}  # US Government Manual
+        - {kind: api, flavor: govinfo, collection: CDIR, partition: true, api_key: govinfo, package_skip: ["SERIALSET-"]}  # Congressional Directory
+        - {kind: api, flavor: govinfo, collection: CHRG, partition: true, api_key: govinfo, package_skip: ["SERIALSET-"]}  # Congressional hearings
+        - {kind: api, flavor: govinfo, collection: CRPT, partition: true, api_key: govinfo, package_skip: ["SERIALSET-"]}  # Congressional committee reports
+        - {kind: api, flavor: govinfo, collection: CDOC, partition: true, api_key: govinfo, package_skip: ["SERIALSET-"]}  # Congressional documents
+        - {kind: api, flavor: govinfo, collection: CPRT, partition: true, api_key: govinfo, package_skip: ["SERIALSET-"]}  # Committee prints
+        - {kind: api, flavor: govinfo, collection: CREC, partition: true, api_key: govinfo, package_skip: ["SERIALSET-"]}  # Congressional Record, daily
+        - {kind: api, flavor: govinfo, collection: CRECB, partition: true, api_key: govinfo, package_skip: ["SERIALSET-"]}  # Congressional Record, bound
+        - {kind: api, flavor: govinfo, collection: HJOURNAL, partition: true, api_key: govinfo, package_skip: ["SERIALSET-"]}  # House Journal
+        - {kind: api, flavor: govinfo, collection: SJOURNAL, partition: true, api_key: govinfo, package_skip: ["SERIALSET-"]}  # Senate Journal
+        - {kind: api, flavor: govinfo, collection: CMR, partition: true, api_key: govinfo, package_skip: ["SERIALSET-"]}  # Congressionally mandated reports
+        - {kind: api, flavor: govinfo, collection: COMPS, partition: true, api_key: govinfo, package_skip: ["SERIALSET-"]}  # Statute compilations
+        - {kind: api, flavor: govinfo, collection: SERIALSET, partition: true, api_key: govinfo}  # Congressional Serial Set
+      filter: {allow_all: true, public_issuer: true, allow_image_only: true}  # older volumes are page scans
+    update: {cadence: P3M, strategy: snapshot-retention}
+    size: {bytes: 4.0e12, measured: false, as_of: '2026-10-24'}
+    notes: "Packages per collection (GovInfo API, 2026-10-24): FR 22,831; CREC 6,036; CRECB 2,422; SERIALSET 233,921; CHRG 48,638; CRPT 162,806; CDOC 82,404; CPRT 7,789; STATUTE 138; PLAW 6,021; USREPORTS 585; PPP 180; CPD 18,659; ERP 80; ECONI 377; BUDGET 459; GAOREPORTS 16,569; GOVMAN 98; CDIR 239; HJOURNAL 155; SJOURNAL 178; CMR 1,223; COMPS 2,713. Sample PDFs 0.2 MB (a public law) to 530 MB (a bound Congressional Record part); 3-6 TB in all (research 2026-10-23). Owner approval D20 (2026-10-24)."
+
+  - id: legislation-gov-uk
+    name: legislation.gov.uk - the UK statute book (Acts and Statutory Instruments of every UK legislature, current versions)
+    publisher: The National Archives (UK)
+    domain: [law, government, history]
+    tier: T1
+    status: candidate
+    license: OGL-UK-3.0
+    legal_basis: open-license
+    access:
+      adapter: doc-collection
+      rate: {requests_per_second: 0.2, concurrency: 1}  # robots.txt: Crawl-delay 5
+      issuer: The National Archives (legislation.gov.uk)
+      key_prefix: uk-leg
+      # One partition per type of legislation. Each item is listed once, from its type's "final"
+      # sitemaps (as enacted or made), and taken as data.html: the whole item in its latest version
+      # (revised where the editors have revised it). robots.txt disallows the data.pdf and data.docx
+      # renditions, which are not fetched.
+      partitioned: true
+      origins: [www.legislation.gov.uk]
+      discovery:
+        - {kind: sitemap, match: "/contents/(?:enacted|made|adopted|created)$", rewrite: ["/contents/[a-z]+$", "/data.html"], key_pattern: "legislation\\.gov\\.uk/([a-z]+)/(.+)/data\\.html$", expand: true, upgrade_http: true, partition: ukpga, url: "https://www.legislation.gov.uk/sitemap-ukpga.xml", expand_match: "/sitemap-ukpga-final-"}  # UK Public General Acts
+        - {kind: sitemap, match: "/contents/(?:enacted|made|adopted|created)$", rewrite: ["/contents/[a-z]+$", "/data.html"], key_pattern: "legislation\\.gov\\.uk/([a-z]+)/(.+)/data\\.html$", expand: true, upgrade_http: true, partition: ukla, url: "https://www.legislation.gov.uk/sitemap-ukla.xml", expand_match: "/sitemap-ukla-final-"}  # UK Local Acts
+        - {kind: sitemap, match: "/contents/(?:enacted|made|adopted|created)$", rewrite: ["/contents/[a-z]+$", "/data.html"], key_pattern: "legislation\\.gov\\.uk/([a-z]+)/(.+)/data\\.html$", expand: true, upgrade_http: true, partition: ukppa, url: "https://www.legislation.gov.uk/sitemap-ukppa.xml", expand_match: "/sitemap-ukppa-final-"}  # UK Private and Personal Acts
+        - {kind: sitemap, match: "/contents/(?:enacted|made|adopted|created)$", rewrite: ["/contents/[a-z]+$", "/data.html"], key_pattern: "legislation\\.gov\\.uk/([a-z]+)/(.+)/data\\.html$", expand: true, upgrade_http: true, partition: gbppa, url: "https://www.legislation.gov.uk/sitemap-gbppa.xml", expand_match: "/sitemap-gbppa-final-"}  # Private Acts of the Parliament of Great Britain
+        - {kind: sitemap, match: "/contents/(?:enacted|made|adopted|created)$", rewrite: ["/contents/[a-z]+$", "/data.html"], key_pattern: "legislation\\.gov\\.uk/([a-z]+)/(.+)/data\\.html$", expand: true, upgrade_http: true, partition: gbla, url: "https://www.legislation.gov.uk/sitemap-gbla.xml", expand_match: "/sitemap-gbla-final-"}  # Local Acts of the Parliament of Great Britain
+        - {kind: sitemap, match: "/contents/(?:enacted|made|adopted|created)$", rewrite: ["/contents/[a-z]+$", "/data.html"], key_pattern: "legislation\\.gov\\.uk/([a-z]+)/(.+)/data\\.html$", expand: true, upgrade_http: true, partition: apgb, url: "https://www.legislation.gov.uk/sitemap-apgb.xml", expand_match: "/sitemap-apgb-final-"}  # Acts of the Parliament of Great Britain
+        - {kind: sitemap, match: "/contents/(?:enacted|made|adopted|created)$", rewrite: ["/contents/[a-z]+$", "/data.html"], key_pattern: "legislation\\.gov\\.uk/([a-z]+)/(.+)/data\\.html$", expand: true, upgrade_http: true, partition: aep, url: "https://www.legislation.gov.uk/sitemap-aep.xml", expand_match: "/sitemap-aep-final-"}  # Acts of the English Parliament
+        - {kind: sitemap, match: "/contents/(?:enacted|made|adopted|created)$", rewrite: ["/contents/[a-z]+$", "/data.html"], key_pattern: "legislation\\.gov\\.uk/([a-z]+)/(.+)/data\\.html$", expand: true, upgrade_http: true, partition: aosp, url: "https://www.legislation.gov.uk/sitemap-aosp.xml", expand_match: "/sitemap-aosp-final-"}  # Acts of the Old Scottish Parliament
+        - {kind: sitemap, match: "/contents/(?:enacted|made|adopted|created)$", rewrite: ["/contents/[a-z]+$", "/data.html"], key_pattern: "legislation\\.gov\\.uk/([a-z]+)/(.+)/data\\.html$", expand: true, upgrade_http: true, partition: asp, url: "https://www.legislation.gov.uk/sitemap-asp.xml", expand_match: "/sitemap-asp-final-"}  # Acts of the Scottish Parliament
+        - {kind: sitemap, match: "/contents/(?:enacted|made|adopted|created)$", rewrite: ["/contents/[a-z]+$", "/data.html"], key_pattern: "legislation\\.gov\\.uk/([a-z]+)/(.+)/data\\.html$", expand: true, upgrade_http: true, partition: aip, url: "https://www.legislation.gov.uk/sitemap-aip.xml", expand_match: "/sitemap-aip-final-"}  # Acts of the Old Irish Parliament
+        - {kind: sitemap, match: "/contents/(?:enacted|made|adopted|created)$", rewrite: ["/contents/[a-z]+$", "/data.html"], key_pattern: "legislation\\.gov\\.uk/([a-z]+)/(.+)/data\\.html$", expand: true, upgrade_http: true, partition: apni, url: "https://www.legislation.gov.uk/sitemap-apni.xml", expand_match: "/sitemap-apni-final-"}  # Acts of the Northern Ireland Parliament
+        - {kind: sitemap, match: "/contents/(?:enacted|made|adopted|created)$", rewrite: ["/contents/[a-z]+$", "/data.html"], key_pattern: "legislation\\.gov\\.uk/([a-z]+)/(.+)/data\\.html$", expand: true, upgrade_http: true, partition: mnia, url: "https://www.legislation.gov.uk/sitemap-mnia.xml", expand_match: "/sitemap-mnia-final-"}  # Measures of the Northern Ireland Assembly
+        - {kind: sitemap, match: "/contents/(?:enacted|made|adopted|created)$", rewrite: ["/contents/[a-z]+$", "/data.html"], key_pattern: "legislation\\.gov\\.uk/([a-z]+)/(.+)/data\\.html$", expand: true, upgrade_http: true, partition: nia, url: "https://www.legislation.gov.uk/sitemap-nia.xml", expand_match: "/sitemap-nia-final-"}  # Acts of the Northern Ireland Assembly
+        - {kind: sitemap, match: "/contents/(?:enacted|made|adopted|created)$", rewrite: ["/contents/[a-z]+$", "/data.html"], key_pattern: "legislation\\.gov\\.uk/([a-z]+)/(.+)/data\\.html$", expand: true, upgrade_http: true, partition: ukcm, url: "https://www.legislation.gov.uk/sitemap-ukcm.xml", expand_match: "/sitemap-ukcm-final-"}  # Church Measures
+        - {kind: sitemap, match: "/contents/(?:enacted|made|adopted|created)$", rewrite: ["/contents/[a-z]+$", "/data.html"], key_pattern: "legislation\\.gov\\.uk/([a-z]+)/(.+)/data\\.html$", expand: true, upgrade_http: true, partition: mwa, url: "https://www.legislation.gov.uk/sitemap-mwa.xml", expand_match: "/sitemap-mwa-final-"}  # Measures of the National Assembly for Wales
+        - {kind: sitemap, match: "/contents/(?:enacted|made|adopted|created)$", rewrite: ["/contents/[a-z]+$", "/data.html"], key_pattern: "legislation\\.gov\\.uk/([a-z]+)/(.+)/data\\.html$", expand: true, upgrade_http: true, partition: anaw, url: "https://www.legislation.gov.uk/sitemap-anaw.xml", expand_match: "/sitemap-anaw-final-"}  # Acts of the National Assembly for Wales
+        - {kind: sitemap, match: "/contents/(?:enacted|made|adopted|created)$", rewrite: ["/contents/[a-z]+$", "/data.html"], key_pattern: "legislation\\.gov\\.uk/([a-z]+)/(.+)/data\\.html$", expand: true, upgrade_http: true, partition: asc, url: "https://www.legislation.gov.uk/sitemap-asc.xml", expand_match: "/sitemap-asc-final-"}  # Acts of Senedd Cymru
+        - {kind: sitemap, match: "/contents/(?:enacted|made|adopted|created)$", rewrite: ["/contents/[a-z]+$", "/data.html"], key_pattern: "legislation\\.gov\\.uk/([a-z]+)/(.+)/data\\.html$", expand: true, upgrade_http: true, partition: uksi, url: "https://www.legislation.gov.uk/sitemap-uksi.xml", expand_match: "/sitemap-uksi-final-"}  # UK Statutory Instruments
+        - {kind: sitemap, match: "/contents/(?:enacted|made|adopted|created)$", rewrite: ["/contents/[a-z]+$", "/data.html"], key_pattern: "legislation\\.gov\\.uk/([a-z]+)/(.+)/data\\.html$", expand: true, upgrade_http: true, partition: ssi, url: "https://www.legislation.gov.uk/sitemap-ssi.xml", expand_match: "/sitemap-ssi-final-"}  # Scottish Statutory Instruments
+        - {kind: sitemap, match: "/contents/(?:enacted|made|adopted|created)$", rewrite: ["/contents/[a-z]+$", "/data.html"], key_pattern: "legislation\\.gov\\.uk/([a-z]+)/(.+)/data\\.html$", expand: true, upgrade_http: true, partition: wsi, url: "https://www.legislation.gov.uk/sitemap-wsi.xml", expand_match: "/sitemap-wsi-final-"}  # Wales Statutory Instruments
+        - {kind: sitemap, match: "/contents/(?:enacted|made|adopted|created)$", rewrite: ["/contents/[a-z]+$", "/data.html"], key_pattern: "legislation\\.gov\\.uk/([a-z]+)/(.+)/data\\.html$", expand: true, upgrade_http: true, partition: nisr, url: "https://www.legislation.gov.uk/sitemap-nisr.xml", expand_match: "/sitemap-nisr-final-"}  # Northern Ireland Statutory Rules
+        - {kind: sitemap, match: "/contents/(?:enacted|made|adopted|created)$", rewrite: ["/contents/[a-z]+$", "/data.html"], key_pattern: "legislation\\.gov\\.uk/([a-z]+)/(.+)/data\\.html$", expand: true, upgrade_http: true, partition: ukci, url: "https://www.legislation.gov.uk/sitemap-ukci.xml", expand_match: "/sitemap-ukci-final-"}  # Church Instruments
+        - {kind: sitemap, match: "/contents/(?:enacted|made|adopted|created)$", rewrite: ["/contents/[a-z]+$", "/data.html"], key_pattern: "legislation\\.gov\\.uk/([a-z]+)/(.+)/data\\.html$", expand: true, upgrade_http: true, partition: nisi, url: "https://www.legislation.gov.uk/sitemap-nisi.xml", expand_match: "/sitemap-nisi-final-"}  # Northern Ireland Orders in Council
+        - {kind: sitemap, match: "/contents/(?:enacted|made|adopted|created)$", rewrite: ["/contents/[a-z]+$", "/data.html"], key_pattern: "legislation\\.gov\\.uk/([a-z]+)/(.+)/data\\.html$", expand: true, upgrade_http: true, partition: ukmo, url: "https://www.legislation.gov.uk/sitemap-ukmo.xml", expand_match: "/sitemap-ukmo-final-"}  # UK Ministerial Orders
+        - {kind: sitemap, match: "/contents/(?:enacted|made|adopted|created)$", rewrite: ["/contents/[a-z]+$", "/data.html"], key_pattern: "legislation\\.gov\\.uk/([a-z]+)/(.+)/data\\.html$", expand: true, upgrade_http: true, partition: eur, url: "https://www.legislation.gov.uk/sitemap-eur.xml", expand_match: "/sitemap-eur-final-"}  # Retained EU regulations
+        - {kind: sitemap, match: "/contents/(?:enacted|made|adopted|created)$", rewrite: ["/contents/[a-z]+$", "/data.html"], key_pattern: "legislation\\.gov\\.uk/([a-z]+)/(.+)/data\\.html$", expand: true, upgrade_http: true, partition: eudn, url: "https://www.legislation.gov.uk/sitemap-eudn.xml", expand_match: "/sitemap-eudn-final-"}  # Retained EU decisions
+        - {kind: sitemap, match: "/contents/(?:enacted|made|adopted|created)$", rewrite: ["/contents/[a-z]+$", "/data.html"], key_pattern: "legislation\\.gov\\.uk/([a-z]+)/(.+)/data\\.html$", expand: true, upgrade_http: true, partition: eudr, url: "https://www.legislation.gov.uk/sitemap-eudr.xml", expand_match: "/sitemap-eudr-final-"}  # Retained EU directives
+        - {kind: sitemap, match: "/contents/(?:enacted|made|adopted|created)$", rewrite: ["/contents/[a-z]+$", "/data.html"], key_pattern: "legislation\\.gov\\.uk/([a-z]+)/(.+)/data\\.html$", expand: true, upgrade_http: true, partition: eut, url: "https://www.legislation.gov.uk/sitemap-eut.xml", expand_match: "/sitemap-eut-final-"}  # Retained EU treaties
+      filter: {allow_all: true, public_issuer: true}
+    update: {cadence: P6M, strategy: snapshot-retention}
+    size: {bytes: 3.0e10, measured: false, as_of: '2026-10-24'}
+    notes: "All UK legislation from 1267, with point-in-time revised versions maintained by The National Archives' editors. About 100,000-150,000 items; at the 5 s crawl delay a full pass takes 1-3 weeks, partition by partition (the uksi sitemap index alone names 18,214 final sitemaps). Open Government Licence v3.0. Owner approval D20 (2026-10-24)."
+
   - id: natural-earth
     name: Natural Earth vector data (all scales)
     publisher: Natural Earth (NACIS)

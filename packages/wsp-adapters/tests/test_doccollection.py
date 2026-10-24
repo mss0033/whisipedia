@@ -1494,3 +1494,108 @@ def test_crossref_lists_a_doi_prefix_by_cursor_and_skips_components_and_exclusio
     assert got[0].pub_number == "doi:10.6028/nbs.hb.46"
     assert "crossref: 2 work(s) skipped (components, excluded or without a file URL)" in env.notes
     assert not env.incomplete  # 4 of the 4 stated records were read
+
+
+def test_index_page_keeps_only_the_newest_file_of_each_dated_series() -> None:
+    page = (
+        b'<a href="/d/FDC_csv_2025-04-24.zip">a</a><a href="/d/FDC_csv_2026-04-30.zip">b</a>'
+        b'<a href="/d/FDC_csv_2025-12-18.zip">c</a><a href="/d/FDC_json_2025-12-18.zip">d</a>'
+        b'<a href="/d/sr_legacy_2018-04.zip">e</a>'
+    )
+    env = env_for({"https://f.gov/": page}, origins=("f.gov",))
+    cfg = {
+        "kind": "index-page",
+        "url": "https://f.gov/",
+        "documents": r"\.zip$",
+        "newest": r"/d/(?P<series>FDC_\w+?)_(?P<date>\d{4}-\d\d-\d\d)\.zip$",
+    }
+    got = sorted(c.url for c in discover_all([cfg], env))
+    assert got == [
+        "https://f.gov/d/FDC_csv_2026-04-30.zip",
+        "https://f.gov/d/FDC_json_2025-12-18.zip",
+        "https://f.gov/d/sr_legacy_2018-04.zip",  # not a dated series the pattern names: kept
+    ]
+
+
+def test_govinfo_collections_are_partitions_and_serial_set_volumes_are_taken_once() -> None:
+    def listing(*pids: str) -> bytes:
+        return json.dumps({"count": len(pids), "packages": [{"packageId": p} for p in pids]}).encode()
+
+    api = "https://api.govinfo.gov/collections/"
+    routes = {
+        api + "CRPT/1990-01-01T00:00:00Z": listing("CRPT-118hrpt1", "SERIALSET-15001_00_00-001-0001-0000"),
+        api + "SERIALSET/1990-01-01T00:00:00Z": listing("SERIALSET-15001_00_00-001-0001-0000"),
+        api + "GAOREPORTS/1990-01-01T00:00:00Z": listing("GAOREPORTS-T-RCED-94-121"),
+    }
+    cfgs = [
+        {
+            "kind": "api",
+            "flavor": "govinfo",
+            "collection": "CRPT",
+            "partition": True,
+            "package_skip": ["SERIALSET-"],
+        },
+        {"kind": "api", "flavor": "govinfo", "collection": "SERIALSET", "partition": True},
+        {"kind": "api", "flavor": "govinfo", "collection": "GAOREPORTS", "partition": True, "format": "htm"},
+    ]
+    keys = {"govinfo": "k"}
+    env = env_for(routes, origins=("www.govinfo.gov",), keys=keys)
+    got = {c.key: (c.partition, c.url) for c in discover_all(cfgs, env)}
+    assert got == {
+        "t:CRPT-118hrpt1": (
+            "crpt",
+            "https://www.govinfo.gov/content/pkg/CRPT-118hrpt1/pdf/CRPT-118hrpt1.pdf",
+        ),
+        "t:SERIALSET-15001_00_00-001-0001-0000": (
+            "serialset",
+            "https://www.govinfo.gov/content/pkg/SERIALSET-15001_00_00-001-0001-0000/pdf/"
+            "SERIALSET-15001_00_00-001-0001-0000.pdf",
+        ),
+        "t:GAOREPORTS-T-RCED-94-121": (
+            "gaoreports",
+            "https://www.govinfo.gov/content/pkg/GAOREPORTS-T-RCED-94-121/html/GAOREPORTS-T-RCED-94-121.htm",
+        ),
+    }
+    one = env_for(
+        {k: v for k, v in routes.items() if "GAO" in k},
+        origins=("www.govinfo.gov",),
+        keys=keys,
+        partition="gaoreports",
+    )
+    assert [c.partition for c in discover_all(cfgs, one)] == ["gaoreports"]  # the others are not listed
+    assert not one.incomplete
+
+
+def test_a_sitemap_index_keyed_by_path_in_partitions_survives_one_unreadable_sitemap() -> None:
+    index = (
+        b"<sitemapindex><sitemap><loc>http://leg.gov/sm-a.xml</loc></sitemap>"
+        b"<sitemap><loc>http://leg.gov/sm-gone.xml</loc></sitemap>"
+        b"<sitemap><loc>http://leg.gov/sm-revised.xml</loc></sitemap></sitemapindex>"
+    )
+    sm = (
+        b"<urlset><url><loc>http://leg.gov/ukpga/2010/15/contents</loc></url>"
+        b"<url><loc>http://leg.gov/ukpga/2010/15/section/1</loc></url>"
+        b"<url><loc>http://leg.gov/ukpga/1998/42/contents</loc></url></urlset>"
+    )
+    cfg = {
+        "kind": "sitemap",
+        "url": "http://leg.gov/sm-ukpga.xml",
+        "expand": True,
+        "expand_match": r"/sm-(?:a|gone)\.xml$",  # sm-revised.xml is not read (no route: it would fail)
+        "upgrade_http": True,
+        "partition": "ukpga",
+        "match": r"/contents$",
+        "rewrite": ["/contents$", "/data.html"],
+        "key_pattern": r"leg\.gov/(\w+)/(\d{4})/(\d+)/data\.html$",
+    }
+    routes = {"https://leg.gov/sm-ukpga.xml": index, "https://leg.gov/sm-a.xml": sm}
+    env = env_for(routes, origins=("leg.gov",))
+    got = [(c.key, c.url, c.partition) for c in discover_all([cfg], env)]
+    assert got == [
+        ("t:ukpga-2010-15", "https://leg.gov/ukpga/2010/15/data.html", "ukpga"),
+        ("t:ukpga-1998-42", "https://leg.gov/ukpga/1998/42/data.html", "ukpga"),
+    ]
+    assert not any("sm-revised" in n for n in env.notes)
+    assert any("sm-gone.xml" in n for n in env.notes)  # not found: noted, the rest still listed
+    other = env_for(routes, origins=("leg.gov",), partition="uksi")
+    assert list(discover_all([cfg], other)) == []
