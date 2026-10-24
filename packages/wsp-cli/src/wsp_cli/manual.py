@@ -307,8 +307,8 @@ def mark_held(queue: Queue, held: Mapping[str, str]) -> int:
     n = 0
     for item in queue.items:
         gen = held.get(item.id)
-        if gen is None or item.status == "taken" or item.offered:
-            continue
+        if gen is None or item.status == "taken":
+            continue  # (offered or not: what is held needs no download)
         stamp = gen[:10] if re.match(r"\d{4}-\d{2}-\d{2}", gen) else date.today().isoformat()
         item.status, item.taken = "taken", stamp
         n += 1

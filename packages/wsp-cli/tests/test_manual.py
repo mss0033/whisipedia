@@ -290,6 +290,12 @@ def test_what_the_library_holds_is_never_asked_for_and_a_url_without_a_name_gets
     (item,) = manual._items_from_survey(survey, [], ".pdf")  # pyright: ignore[reportPrivateUsage]
     assert item.save_as == "GEBCO_2024.zip"
     assert item.cand["extra"]["save_as"] == "GEBCO_2024.zip"  # the import looks for this very name
-    q = Queue("geonames", items=[Item("geo:ALL", "u", "allCountries.zip"), Item("geo:NEW", "u2", "new.zip")])
+    q = Queue(
+        "geonames",
+        items=[
+            Item("geo:ALL", "u", "allCountries.zip", offered=["2026-10-24"]),
+            Item("geo:NEW", "u2", "new.zip"),
+        ],
+    )
     assert manual.mark_held(q, {"geo:ALL": "2026-10-23r2"}) == 1
     assert [(i.status, i.taken) for i in q.items] == [("taken", "2026-10-23"), ("pending", "")]
