@@ -117,6 +117,7 @@ class State:
     offsets: dict[str, int] = field(default_factory=dict[str, int])  # log -> bytes read
     noted: dict[str, float] = field(default_factory=dict[str, float])  # problem kind -> when noted
     down: dict[str, float] = field(default_factory=dict[str, float])  # jobs.conf name -> first seen down
+    runs: dict[str, str] = field(default_factory=dict[str, str])  # job unit -> InvocationID of its samples
 
     @classmethod
     def load(cls, path: Path) -> State:
@@ -129,6 +130,7 @@ class State:
                 offsets={k: int(v) for k, v in raw.get("offsets", {}).items()},
                 noted={k: float(v) for k, v in raw.get("noted", {}).items()},
                 down={k: float(v) for k, v in raw.get("down", {}).items()},
+                runs={k: str(v) for k, v in raw.get("runs", {}).items()},
             )
         except (OSError, ValueError, TypeError, AttributeError, IndexError):
             return cls()
@@ -369,6 +371,12 @@ def check(state: State, t: float) -> tuple[dict[str, str], list[str]]:
         if use is None:
             continue
         seen.add(unit)
+        # A restarted unit (a reboot, a resume) counts its CPU from zero: samples of its last run are
+        # not a baseline (2026-10-24: six jobs 12 minutes into a fresh boot were "idle for 12.1 h").
+        run = unit_prop(unit, "InvocationID")
+        if state.runs.get(unit) != run:
+            samples.pop(unit, None)
+            state.runs[unit] = run
         hist = [s for s in samples.get(unit, []) if t - s[0] <= KEEP_SAMPLES_S and s[1] <= use]
         hist.append((t, use))
         samples[unit] = hist
@@ -400,6 +408,8 @@ def check(state: State, t: float) -> tuple[dict[str, str], list[str]]:
             )
     for unit in [u for u in samples if u not in seen]:
         del samples[unit]
+    for unit in [u for u in state.runs if u not in seen]:
+        del state.runs[unit]
 
     owed = JOBS / "jobs" / "yield-stopped"
     try:
@@ -408,9 +418,10 @@ def check(state: State, t: float) -> tuple[dict[str, str], list[str]]:
     except OSError:
         age, names = 0.0, []
     if names and age >= OWED_MIN * 60:
+        short_names = ", ".join(n.removeprefix("whisipedia-job-").removesuffix(".service") for n in names)
         cond["jobs-owed"] = (
             f"{len(names)} jobs stopped for memory {hours(age)} ago are not started again "
-            f"({', '.join(n.removeprefix('whisipedia-job-').removesuffix('.service') for n in names)[:300]}): "
+            f"({short_names[:300]}): "
             "systemctl --user start whisipedia-resume"
         )
     active = {u for u, a, _ in rows if a == "active"}

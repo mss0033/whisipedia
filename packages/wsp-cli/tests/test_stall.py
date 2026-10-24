@@ -15,7 +15,7 @@ CG = "/whisipedia.slice/whisipedia-job-lane.service"
 T0 = 1_800_000_000
 
 
-def _world(tmp: Path, *, usage: int, failed: bool = False) -> dict[str, str]:
+def _world(tmp: Path, *, usage: int, failed: bool = False, run: str = "r1") -> dict[str, str]:
     fakebin = tmp / "bin"
     fakebin.mkdir(exist_ok=True)
     rows = "whisipedia-job-lane.service loaded active running lane\n"
@@ -25,7 +25,7 @@ def _world(tmp: Path, *, usage: int, failed: bool = False) -> dict[str, str]:
     (tmp / "units").write_text(rows)
     (fakebin / "systemctl").write_text(
         f'#!/bin/sh\ncase "$*" in *list-units*) cat {tmp}/units ;; *ControlGroup*) echo {CG} ;;'
-        " *MainPID*) echo 99 ;; esac\n"
+        f" *MainPID*) echo 99 ;; *InvocationID*) echo {run} ;; esac\n"
     )
     (fakebin / "systemctl").chmod(0o755)
     cg = tmp / "cgroup" / CG.strip("/")
@@ -200,3 +200,14 @@ def test_a_watcher_idle_by_design_is_not_a_stalled_job(tmp_path: Path) -> None:
     (tmp_path / "units").write_text(rows)
     _run(env, 0)
     assert not [e for e in _run(env, 3.5) if "job-idle" in e]
+
+
+def test_a_job_restarted_by_a_reboot_starts_a_new_baseline(tmp_path: Path) -> None:
+    """After a reboot the unit's CPU counter starts again from zero: 12 minutes into the boot, six
+    jobs compared with a sample from before it were "idle for 12.1 h" (2026-10-24)."""
+    env = _world(tmp_path, usage=1_000_000)  # the last boot's run, 1 s in
+    _run(env, 0)
+    env = _world(tmp_path, usage=2_000_000, run="r2")  # rebooted: 2 s of CPU in its first minutes
+    assert not [e for e in _run(env, 12) if "job-idle" in e]
+    env = _world(tmp_path, usage=3_000_000, run="r2")  # 1 s in the 3.5 h since: idle for real
+    assert [e for e in _run(env, 15.5) if "RAISED job-idle" in e]
