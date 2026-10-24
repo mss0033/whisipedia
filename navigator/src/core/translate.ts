@@ -44,7 +44,8 @@ const INLINE = new Set([
   'tt',
 ]); // prettier-ignore
 const BATCH = 8;
-const MAX_SEGMENT = 4000;
+const PIECE = 1500; // characters of one segment at most: a longer block is translated in pieces
+const MAX_SEGMENT = 4000; // what the library takes (POST /v1/translate)
 const MAX_WAITS = 30; // starting the server takes about half a minute; a busy GPU longer
 
 /** A block as a segment: its text with placeholders, and what each placeholder stands for. */
@@ -95,6 +96,39 @@ export function blockText(block: Element): BlockText {
     .replace(/[ \t]+/g, ' ')
     .trim();
   return { text, wraps, keeps };
+}
+
+/** A block's text in pieces of at most `max` characters, split at line breaks and then at sentence
+ * ends, never inside a `<xN>…</xN>` pair; `seps[n]` is what joined piece n to piece n + 1. */
+export function splitSegment(text: string, max = PIECE): { pieces: string[]; seps: string[] } {
+  if (text.length <= max) return { pieces: [text], seps: [] };
+  const pieces: string[] = [];
+  const seps: string[] = [];
+  let current = '';
+  let depth = 0;
+  // Cut points: a line break, or a space after a sentence end, at depth 0 (outside every pair).
+  const tokens = text.split(/(<\/?x\d+>|\n|(?<=[.!?。！？])\s+)/);
+  for (const tok of tokens) {
+    if (!tok) continue;
+    if (/^<x\d+>$/.test(tok)) depth += 1;
+    else if (/^<\/x\d+>$/.test(tok)) depth = Math.max(0, depth - 1);
+    const cut = depth === 0 && (tok === '\n' || /^\s+$/.test(tok));
+    if (cut && current.length >= max * 0.5) {
+      pieces.push(current);
+      seps.push(tok);
+      current = '';
+      continue;
+    }
+    if (cut && current.length + tok.length > max && current) {
+      pieces.push(current);
+      seps.push(tok);
+      current = '';
+      continue;
+    }
+    current += tok;
+  }
+  if (current) pieces.push(current);
+  return { pieces, seps };
 }
 
 /** The nodes of a translated segment: text, clones of the wrapped elements, the kept nodes. `null`
@@ -267,23 +301,34 @@ function startTranslation(
   const titleText = title.trim();
   void (async () => {
     let failed = 0;
+    // A block is one segment, or pieces of one when it is long (a plain-text article can be a
+    // single paragraph of 100,000 characters: German Wikipedia's "Rhein", 2026-10-24).
+    const jobs: { i: number; piece: number }[] = [];
+    const pieces = texts.map((t) => splitSegment(t.text));
+    const answers = pieces.map((p) =>
+      new Array<TranslatedSegment | null>(p.pieces.length).fill(null),
+    );
+    for (const [i, split] of pieces.entries()) {
+      for (const [piece, text] of split.pieces.entries()) {
+        // One sentence longer than the library takes (4,000 characters) is left as it is.
+        const got = answers[i];
+        if (text.length > MAX_SEGMENT && got)
+          got[piece] = { text: null, ok: false, reason: 'too long to translate', cached: false };
+        else jobs.push({ i, piece });
+      }
+    }
+    const segments = [titleText, ...jobs.map((j) => pieces[j.i]?.pieces[j.piece] ?? '')];
+    let translated = 0;
     // The title first: it says at once whether the translation reads.
-    const jobs: { i: number; text: string }[] = texts
-      .map((t, i) => ({ i, text: t.text }))
-      .filter((j) => j.text.length > 0 && j.text.length <= MAX_SEGMENT);
-    for (const t of texts) if (t.text.length > MAX_SEGMENT) failed += 1;
-    const segments = [titleText, ...jobs.map((j) => j.text)];
-    const results: (TranslatedSegment | null)[] = [];
     for (let at = 0; at < segments.length; at += BATCH) {
       if (opts.signal?.aborted || (!banner.isConnected && at > 0)) return;
       const batch = segments.slice(at, at + BATCH);
       const answer = await translateBatch(api, lang, batch, progress, opts.signal);
       if (!answer) {
         progress.textContent =
-          'The translator is not available now; the page stays in its own language.';
+          'The translator is not available now; the rest of the page stays in its own language.';
         return;
       }
-      results.push(...answer);
       for (let k = 0; k < answer.length; k++) {
         const index = at + k;
         const seg = answer[k];
@@ -293,31 +338,50 @@ function startTranslation(
           continue;
         }
         const job = jobs[index - 1];
-        if (!job) continue;
+        const got = job ? answers[job.i] : undefined;
+        if (!job || !got) continue;
+        got[job.piece] = seg;
+        if (got.some((g) => g === null)) continue; // the block's other pieces are still to come
         const block = blocks[job.i];
         const text = texts[job.i];
-        if (!block || !text) continue;
-        if (!seg.ok || !seg.text) {
+        const split = pieces[job.i];
+        if (!block || !text || !split) continue;
+        const ok = got.filter((g) => g?.ok && g.text);
+        if (!ok.length) {
           failed += 1;
           block.append(
             h(
               'span',
               { class: 'mt-failed' },
-              ` (not translated: ${seg.reason ?? 'it did not pass its checks'})`,
+              ` (not translated: ${got[0]?.reason ?? 'it did not pass its checks'})`,
             ),
           );
           continue;
         }
-        const t = applyToBlock(block, text, seg.text);
-        if (t) {
-          done.push(t);
-          if (view.page === 'original') show(t, 'original');
-        } else failed += 1;
+        // Pieces that failed stay in their own language, and the block says so.
+        const english = split.pieces
+          .map((orig, n) => (got[n]?.ok && got[n]?.text ? got[n]!.text! : orig))
+          .reduce((acc, piece, n) => acc + (n ? (split.seps[n - 1] ?? ' ') : '') + piece, '');
+        const t = applyToBlock(block, text, english);
+        if (!t) {
+          failed += 1;
+          continue;
+        }
+        translated += 1;
+        done.push(t);
+        if (ok.length < got.length) {
+          const why = got.find((g) => !g?.ok)?.reason ?? 'it did not pass its checks';
+          block.insertBefore(
+            h('span', { class: 'mt-failed' }, ` (part of this passage is not translated: ${why})`),
+            t.toggle,
+          );
+        }
+        if (view.page === 'original') show(t, 'original');
       }
-      progress.textContent = `Translated ${Math.min(results.length - 1, jobs.length)} of ${jobs.length} passages…`;
+      progress.textContent = `Translated ${translated} of ${blocks.length} passages…`;
     }
     progress.textContent =
-      `${done.length} of ${blocks.length} passages translated` +
+      `${translated} of ${blocks.length} passages translated` +
       (failed ? `; ${failed} left in ${name} (marked).` : '.');
   })();
   return banner;

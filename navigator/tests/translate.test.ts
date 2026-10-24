@@ -5,6 +5,7 @@ import {
   blockText,
   buildTranslated,
   sourceLanguage,
+  splitSegment,
   translatableBlocks,
   translationBar,
 } from '../src/core/translate.ts';
@@ -160,5 +161,21 @@ describe('the translation bar and banner', () => {
     expect(
       translationBar(api, { lang: 'en', title: 'x' }, document.createElement('div')),
     ).toBeNull();
+  });
+});
+
+describe('a long block in pieces (German Wikipedia\'s "Rhein" is one paragraph of 100,000 characters)', () => {
+  it('splits at sentence ends, never inside a placeholder pair, and the pieces join back', () => {
+    const sentence = 'Der Rhein ist ein Strom in Europa. ';
+    const text =
+      `${sentence.repeat(30)}Er fließt durch <x1>Basel. Und Köln.</x1> ${sentence.repeat(30)}`.trim();
+    const { pieces, seps } = splitSegment(text, 300);
+    expect(pieces.length).toBeGreaterThan(3);
+    expect(pieces.every((p) => p.length <= 400)).toBe(true);
+    const joined = pieces.reduce((acc, p, n) => acc + (n ? seps[n - 1] : '') + p, '');
+    expect(joined).toBe(text);
+    const withPair = pieces.find((p) => p.includes('<x1>'))!;
+    expect(withPair).toContain('</x1>'); // the pair is in one piece
+    expect(splitSegment('kurz')).toEqual({ pieces: ['kurz'], seps: [] });
   });
 });
