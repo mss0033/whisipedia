@@ -4507,6 +4507,7 @@ sources:
     legal_basis: public-domain
     access:
       adapter: doc-collection
+      rate: {requests_per_second: 0.2, concurrency: 1}  # behind bot walls that rate-limit (NRC's tripped, 2026-10-24)
       issuer: "Centers for Disease Control and Prevention"
       key_prefix: cdc
       origins: [www.cdc.gov, stacks.cdc.gov]
@@ -4580,6 +4581,7 @@ sources:
     legal_basis: public-domain
     access:
       adapter: doc-collection
+      rate: {requests_per_second: 0.2, concurrency: 1}  # behind bot walls that rate-limit (NRC's tripped, 2026-10-24)
       issuer: "US Army Corps of Engineers"
       key_prefix: usace
       origins: [www.publications.usace.army.mil, www.hec.usace.army.mil]
@@ -4668,6 +4670,7 @@ sources:
     legal_basis: public-domain
     access:
       adapter: doc-collection
+      rate: {requests_per_second: 0.2, concurrency: 1}  # behind bot walls that rate-limit (NRC's tripped, 2026-10-24)
       issuer: "Federal Emergency Management Agency"
       key_prefix: fema-direct
       origins: [www.fema.gov]
@@ -4700,6 +4703,7 @@ sources:
     legal_basis: bulk-access-terms
     access:
       adapter: doc-collection
+      rate: {requests_per_second: 0.2, concurrency: 1}  # behind bot walls that rate-limit (NRC's tripped, 2026-10-24)
       issuer: "International Committee of the Red Cross"
       key_prefix: icrc
       origins: [www.icrc.org]
