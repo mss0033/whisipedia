@@ -4171,6 +4171,36 @@ sources:
     size: {bytes: 5.0e8, measured: false, as_of: '2026-10-24'}
     notes: "The official US food-composition database that replaced the SR28 nutrient tables: about 0.5 GB zipped (2025-12-18 release, 480 MB), released about twice a year. Owner approval D20 (2026-10-24)."
 
+  - id: nass-quick-stats
+    name: USDA NASS Quick Stats bulk files (crops, livestock, economics, demographics, Census of Agriculture)
+    publisher: US Department of Agriculture, National Agricultural Statistics Service
+    domain: [agriculture, economics, reference-data]
+    tier: T2
+    status: candidate
+    license: LicenseRef-US-Gov-PD
+    legal_basis: public-domain
+    access:
+      adapter: doc-collection
+      issuer: USDA National Agricultural Statistics Service
+      key_prefix: nass
+      origins: [www.nass.usda.gov]
+      # The whole Quick Stats database as gzipped tab-separated files on the "Large Datasets" page
+      # (read 2026-10-24): five sector files rebuilt daily (qs.crops_20261023.txt.gz, 1.05 GB), the
+      # Census of Agriculture 2002-2022 (undated names) and a Readme. Only the newest file of each
+      # dated series is kept, under one key per series. www.nass.usda.gov/robots.txt disallows only
+      # /Quick_Stats/CDQT/; quickstats.nass.usda.gov disallows every robot and is never fetched (it is
+      # outside origins).
+      discovery:
+        - kind: index-page
+          url: "https://www.nass.usda.gov/datasets/"
+          documents: "/datasets/(?:qs\\.[a-z0-9_]+\\.txt\\.gz|Readme\\.txt)$"
+          newest: "/datasets/qs\\.(?P<series>[a-z_]+)_(?P<date>\\d{8})\\.txt\\.gz$"
+          pub_number: "/datasets/(?:qs\\.)?([A-Za-z0-9_]+?)(?:_\\d{8})?\\.txt"
+      filter: {allow_all: true, public_issuer: true, data_files: true}
+    update: {cadence: P3M, strategy: snapshot-retention}
+    size: {bytes: 3.3e9, measured: true, as_of: '2026-10-24'}
+    notes: "Listed sizes 2026-10-24: crops 1.05 GB, economics 557 MB, demographics 445 MB, animals and products 442 MB, environmental 72 MB, Census 2022 295 MB, 2017 132 MB, 2012 106 MB, 2007 73 MB, 2002 47 MB, zip-code tables 42 MB: 3.26 GB. The sector files are regenerated daily, so each cycle fetches them again (about 2.6 GB)."
+
   - id: govinfo-collections
     name: GovInfo (GPO) federal publications - Federal Register, Statutes, US Reports, Congress, the presidency, economics
     publisher: US Government Publishing Office
