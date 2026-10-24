@@ -1077,6 +1077,20 @@ export interface Routes {
     body: null;
     response: ProposalPage;
   };
+  /** System Memory */
+  'GET /v1/system/memory': {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: null;
+    response: Record<string, unknown>;
+  };
+  /** System Memory Trim */
+  'POST /v1/system/memory/trim': {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: null;
+    response: Record<string, unknown>;
+  };
   /** System */
   'GET /v1/system': {
     path: Record<string, never>;
