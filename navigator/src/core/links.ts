@@ -424,7 +424,7 @@ export function withoutTemplateLeftovers(text: string): string {
         return LEFTOVER_MARK;
       })
       .replace(BROKEN_TEMPLATE, '$1')
-      .replace(UNCLOSED_TEMPLATE, '')
+      .replace(UNCLOSED_TEMPLATE, unclosedTemplate)
       .replace(UNCLOSED_BOX, '')
       .replace(PARAM_TEMPLATE, '')
       .replace(CUT_LINK, '')
@@ -444,9 +444,18 @@ export function withoutTemplateLeftovers(text: string): string {
  * `{{Package|net-wireless/wpa_supplicant} }`): its argument, the words it would have shown. */
 const BROKEN_TEMPLATE = /\{\{[A-Z][A-Za-z]{1,20}\|([^{}|]{1,100})\}\s+\}/g;
 
-/** A template the wiki left open and printed, nothing after it: LibrePathology's reference
- * `{{Ref HospAuto|` (2026-10-20 audit). */
-const UNCLOSED_TEMPLATE = /\{\{[A-Z][\w ]{0,30}\|\s*$/;
+/** A template the wiki left open and printed at the end of its text: LibrePathology's references
+ * `{{Ref HospAuto|` (2026-10-20 audit) and `{{Ref APBR|344 Q2` (2026-10-24). What it would have shown
+ * stays: its arguments, after the cited work's abbreviation for a `Ref` template ("APBR 344 Q2");
+ * one with no arguments goes. */
+const UNCLOSED_TEMPLATE = /\{\{([A-Z][\w ]{0,30})\|([^{}\n]{0,80})$/;
+
+function unclosedTemplate(_m: string, name: string, args: string): string {
+  const rest = args.trim().replace(/\s*\|\s*/g, ', ');
+  if (!rest) return '';
+  const work = name.startsWith('Ref ') ? name.slice(4).trim() : '';
+  return work ? `${work} ${rest}` : rest;
+}
 
 /** A notice box a translation opened and never closed, its words after it: Gentoo's French and Italian
  * handbooks show `{{Tip|Une liste commentée…` and `{{Warning|Normalmente…` with no `}}` anywhere on

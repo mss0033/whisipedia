@@ -54,6 +54,9 @@ describe('wiki leftovers an archived page shows (2026-10-19 audit)', () => {
       '和 net-wireless/wpa_supplicant。',
     );
     expect(withoutTemplateLeftovers('{{Ref HospAuto|')).toBe('');
+    // 2026-10-24 audit: the argument is the citation (a page and question of the cited work).
+    expect(withoutTemplateLeftovers('{{Ref APBR|344 Q2')).toBe('APBR 344 Q2');
+    expect(withoutTemplateLeftovers('see {{Cite|Smith 2001|p. 4')).toBe('see Smith 2001, p. 4');
     expect(
       withoutTemplateLeftovers(
         '{{CodeBox|title=Eksempel på åpen diskusjon|lang=text|1=\n{{Talk|open|date=28 mars, 2017}}\nHei',
