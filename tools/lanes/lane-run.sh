@@ -48,10 +48,13 @@ LISTING_TRIES=${LANE_LISTING_TRIES:-8}     # fetch attempts while the listing is
 LISTING_WAIT=${LANE_LISTING_WAIT:-900}
 PARTIAL_TRIES=${LANE_PARTIAL_TRIES:-3}     # fetch attempts while downloads fail (exit 6)
 PARTIAL_WAIT=${LANE_PARTIAL_WAIT:-900}
-# Ingest attempts while another ingest runs (exit 3), a minute apart: a day. Four hours gave up behind
-# a USGS topo ingest, leaving a one-shot lane's fetched cycle unsealed (lane-doe, 2026-10-21).
-BUSY_TRIES=${LANE_BUSY_TRIES:-1440}
-BUSY_WAIT=${LANE_BUSY_WAIT:-60}
+# Ingest attempts while another ingest runs (exit 3): each waits up to QUEUE_WAIT in the lock's queue
+# (`wsp ingest --wait`), so it takes the lock when the holder lets go. Retrying once a minute lost
+# to the maps lane, whose next ingest took the lock within a second of each release (2026-10-24).
+# 48 waits of 30 minutes: a day. Four hours gave up behind a USGS topo ingest (lane-doe, 2026-10-21).
+BUSY_TRIES=${LANE_BUSY_TRIES:-48}
+QUEUE_WAIT=${LANE_QUEUE_WAIT:-1800}
+BUSY_WAIT=${LANE_BUSY_WAIT:-5}
 # An ingest gives the lock up after this long (exit 3, like a held lock) and is asked again after
 # BUSY_WAIT, so one large version does not keep every other lane's ingest waiting for hours.
 INGEST_SLICE=${LANE_INGEST_SLICE:-3600}
@@ -133,7 +136,7 @@ ingest_cycle() {
   ingest_from=$(wc -c < "$out" 2>/dev/null || echo 0)
   while :; do
     # shellcheck disable=SC2086  # $part is "--partition X" or empty, split on purpose
-    run "$out" "$WSP" ingest --max-seconds "$INGEST_SLICE" --source "$src" $part --version "$cyc"
+    run "$out" "$WSP" ingest --max-seconds "$INGEST_SLICE" --wait "$QUEUE_WAIT" --source "$src" $part --version "$cyc"
     irc=$?
     [ "$irc" -ne 3 ] && break
     tries=$((tries + 1))
@@ -211,7 +214,7 @@ for item in "$@"; do
         for v in $waiting; do
           [ -n "$part" ] && v=${v%".$item"}
           # shellcheck disable=SC2086
-          run "$out" "$WSP" ingest --max-seconds "$INGEST_SLICE" --source "$src" $part --version "$v"
+          run "$out" "$WSP" ingest --max-seconds "$INGEST_SLICE" --wait "$QUEUE_WAIT" --source "$src" $part --version "$v"
           say "ingest of the pending $src $part --version $v: exit $?"
         done
         ;;

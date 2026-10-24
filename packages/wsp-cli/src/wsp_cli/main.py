@@ -371,6 +371,12 @@ def build_parser(argv: Sequence[str] | None = None) -> argparse.ArgumentParser:
         default=None,
         help="stop after the current file once this long has passed, so other ingests can run (exit 3)",
     )
+    s.add_argument(
+        "--wait",
+        type=float,
+        default=0.0,
+        help="wait up to this many seconds in the ingest lock's queue (exit 3 if still busy)",
+    )
     s.add_argument("--json", action="store_true")
 
     qu = add("quality", _usage, "Search quality: the gold queries through the running library.")

@@ -26,6 +26,7 @@ from __future__ import annotations
 import contextlib
 import fcntl
 import os
+import signal
 import time
 from collections.abc import Callable, Generator
 from pathlib import Path
@@ -77,6 +78,33 @@ def _holds_inherited(name: str, path: Path) -> bool:
     return False
 
 
+class _QueueTimeoutError(Exception):
+    pass
+
+
+def _queue_for(fd: int, path: Path, name: str, wait: float) -> None:
+    """Block in ``flock`` for at most ``wait`` seconds (a real-time timer interrupts it)."""
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return
+    except BlockingIOError:
+        pass
+
+    def expire(_signum: int, _frame: object) -> None:
+        raise _QueueTimeoutError
+
+    previous = signal.signal(signal.SIGALRM, expire)
+    signal.setitimer(signal.ITIMER_REAL, max(wait, 0.001))
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+    except _QueueTimeoutError:
+        holder = path.read_text(encoding="utf-8").strip() or "unknown"
+        raise LockHeldError(f"another '{name}' is running (pid {holder}); lock: {path}") from None
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
+
+
 @contextlib.contextmanager
 def exclusive(
     lock_dir: Path,
@@ -85,6 +113,7 @@ def exclusive(
     wait: float | None = None,
     poll: float = 5.0,
     cancel: Callable[[], bool] | None = None,
+    queue: bool = False,
 ) -> Generator[Path]:
     """Hold ``<lock_dir>/<name>.lock`` for the duration.
 
@@ -92,6 +121,11 @@ def exclusive(
     ``wait=seconds`` keeps trying every ``poll`` seconds for that long (``float("inf")``: forever)
     and stops early when ``cancel()`` turns true. ``flock`` locks are released by the kernel when the
     process exits, so a crash never leaves a stale lock behind. The file records the holder's pid.
+
+    ``queue=True`` (with ``wait``, main thread only) waits in the lock's queue instead: a blocking
+    ``flock`` bounded by a timer. A process blocked in ``flock`` takes the lock the moment it is
+    released, before a newcomer's first try; polling lost to the maps lane, whose next ingest took the
+    lock within a second of each release, for hours (2026-10-24, as ERA5 did on 2026-10-20).
 
     A lock already held by a parent (``tools/wsp-bg`` holding ``HEAVY`` across a whole rebuild) is
     passed down as an open descriptor named in ``$WSP_INHERITED_LOCKS`` (``heavy:9``); it is used as
@@ -106,7 +140,9 @@ def exclusive(
     fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
     try:
         deadline = None if wait is None else time.monotonic() + wait
-        while True:
+        if queue and wait is not None:
+            _queue_for(fd, path, name, wait)
+        while not queue or wait is None:
             try:
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 break

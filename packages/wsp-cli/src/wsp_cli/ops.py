@@ -103,7 +103,8 @@ def cmd_ingest(args: argparse.Namespace, out: TextIO) -> int:
     if args.dry_run:
         return _ingest(args, out, lay, cfg, specs)
     try:
-        with exclusive(_lock_dir(cfg), "ingest"):
+        wait: float | None = args.wait or None
+        with exclusive(_lock_dir(cfg), "ingest", wait=wait, queue=wait is not None):
             return _ingest(args, out, lay, cfg, specs)
     except LockHeldError as exc:
         return _busy(exc)
