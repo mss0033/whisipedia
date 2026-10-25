@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -71,11 +72,11 @@ def spec() -> SourceSpec:
     )
 
 
-def indexer(tmp_path: Path, adapter: Adapter) -> Indexer:
+def indexer(tmp_path: Path, adapter: Adapter, source: SourceSpec | None = None) -> Indexer:
     root = tmp_path / "index"
     return Indexer(
         Vault(tmp_path / "vault"),  # type: ignore[arg-type]
-        [spec()],
+        [source or spec()],
         {"fake": adapter},  # type: ignore[dict-item]
         root,
         TantivyIndex(root / "lexical"),
@@ -226,5 +227,21 @@ def test_reindex_writes_the_indexed_generation_again_without_change_records(tmp_
         assert [h.doc_id for h in ix.index.search("moon")] == [make_doc_id(SID, "tides")]
         assert ix.feed.since(None, limit=1000)[0] == records  # no change records
         assert ix.reindex("nope").skipped == "not in the registry"
+    finally:
+        ix.close()
+
+
+def test_the_spelling_vocabulary_leaves_out_catalogues(tmp_path: Path) -> None:
+    # 2026-10-25: Open Library's records (book titles in 458 languages) made the vocabulary step read
+    # 5.5 million row groups, and its titles outweighed the library's own text in every language.
+    ix = indexer(tmp_path, Adapter())
+    try:
+        ix.build([SID])
+        assert ix.spell() is not None
+    finally:
+        ix.close()
+    ix = indexer(tmp_path, Adapter(), replace(spec(), domain=("catalog",)))
+    try:
+        assert ix.spell() is None
     finally:
         ix.close()

@@ -82,6 +82,7 @@ from wsp_vault.ratelimit import RateLimiter
 
 PROGRESS_EVERY = 10_000
 STATE_FILE = "index-state.json"
+CATALOG_DOMAIN = "catalog"  # registry domain of catalogue sources (records about books, not their text)
 REPLACED_DIR = "_replaced"  # <refinery>/<source>/_replaced/: refined copies a refine-again replaced
 PENDING_FILE = "PENDING"  # in REPLACED_DIR: the replaced copy a refine-again still diffs from
 STAGING_DIR = "_staging"  # <refinery>/<source>/_staging/<gid>: a refine-again waiting for its swap
@@ -610,10 +611,14 @@ class Indexer:
 
     @_timed("spell")
     def spell(self, config: SpellConfig | None = None) -> VocabStats | None:
-        """Rebuild the spelling vocabulary from every indexed source (``wsp index spell``)."""
-        readers = self._current_readers()
+        """Rebuild the spelling vocabulary from every indexed source (``wsp index spell``), except
+        catalogues (registry domain ``catalog``): their records are book titles in hundreds of
+        languages, not the words people search the library's text for."""
+        readers = [
+            (sid, r) for sid, r in self._current_readers() if CATALOG_DOMAIN not in self.specs[sid].domain
+        ]
         if not readers:
-            self._say("spell: nothing indexed")
+            self._say("spell: no indexed source to read")
             return None
         path = self.index.path / SPELL_FILE
         # Local disk, beside the index, not inside it: a full relex carries the index files over and

@@ -203,6 +203,13 @@ class SpellConfig:
     """Languages with fewer documents share one ``any`` vocabulary instead of getting their own."""
     languages: tuple[str, ...] = ()
     """Only these languages (primary subtags); empty: every language with enough documents."""
+    sparse_rows: int = 8
+    """A source's language with fewer rows than this per row group, on average, is *sparse*: each
+    row group is read whole for a few of its rows."""
+    max_sparse_groups: int = 64
+    """Row groups read for a sparse language of one source (spread evenly over them). 2026-10-25:
+    Open Library's catalogue scattered 458 languages one row per row group, and the step read 5.5
+    million row groups from the NAS (Abkhaz: 102 of them for 102 records, 23 minutes)."""
     batch_size: int = 4096
 
 
@@ -396,6 +403,14 @@ def _vocab_key(
     return hashlib.sha256(json.dumps(spec, separators=(",", ":")).encode()).hexdigest()[:32]
 
 
+def _thin(rgs: list[tuple[int, int, int]], cfg: SpellConfig) -> list[tuple[int, int, int]]:
+    """The row groups to read for one language of one source: all of them, or for a sparse language
+    at most ``max_sparse_groups`` spread evenly. What is kept is what the cache key records."""
+    if len(rgs) <= cfg.max_sparse_groups or sum(n for _, _, n in rgs) >= cfg.sparse_rows * len(rgs):
+        return rgs
+    return [rgs[i] for i in _even(len(rgs), cfg.max_sparse_groups)]
+
+
 def count_words(
     readers: Sequence[tuple[str, RefineryReader]],
     cfg: SpellConfig = SpellConfig(),  # noqa: B008 - immutable
@@ -412,7 +427,8 @@ def count_words(
     fingerprints: dict[str, list[tuple[str, str, list[tuple[int, int, int]]]]] = {}
     for _source, reader in readers:
         fp, by_lang = cache.row_groups(reader) if cache is not None else ("", language_row_groups(reader))
-        for raw, rgs in by_lang.items():
+        for raw, every in by_lang.items():
+            rgs = _thin(every, cfg)
             plan.setdefault(primary_lang(raw), []).append((reader, raw, rgs))
             fingerprints.setdefault(primary_lang(raw), []).append((fp, raw, rgs))
     wanted = {primary_lang(x) for x in cfg.languages}

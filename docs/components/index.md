@@ -142,6 +142,10 @@ held as one Arrow string array (~35 bytes per node, ~250 MB at 7M), never as Pyt
   documents per language from row groups spread over its parts, titles counted ×5), tokenized in
   Arrow. Words of 3-24 letters; from 100k documents on, words seen fewer than 3 times are dropped (the
   corpus's own typos); at most 300k words per language.
+* **Not read:** catalogues (registry domain `catalog`, i.e. Open Library): their records are book titles
+  in hundreds of languages, not the library's text. A language a source scatters thinly (under 8 rows
+  per row group on average) is sampled from at most 64 of that source's row groups, because each is
+  read whole for its few rows. Before 2026-10-25 the step read 5.5 million row groups and ran ~40 hours.
 * **Reuse:** `<index root>/spell-cache/` keeps each generation's language map and each language's
   counts under a key of the files its sample comes from; a rebuild counts only the languages whose
   sources changed (the sample is deterministic: a kept vocabulary is the one a recount would make)

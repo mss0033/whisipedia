@@ -290,6 +290,42 @@ def test_a_rare_language_reads_only_the_row_groups_holding_it(
     assert len(reads) == 1
 
 
+def test_a_scattered_language_reads_a_bounded_number_of_row_groups(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 2026-10-25: Open Library holds Abkhaz as 102 records in 102 row groups, each read whole from
+    # the NAS (23 minutes); 458 such languages kept the nightly build in this step for 40 hours.
+    from wsp_index import spelling
+
+    docs = [doc("w", f"e{i:04d}", f"English {i}", "plain english words") for i in range(400)]
+    for i in range(0, 400, 10):
+        docs[i] = replace(docs[i], lang="ab", title="Аҧсны", text="аҧсуа бызшәа")  # one per row group
+    with RefineryWriter(tmp_path / "ref", "w", "g1", row_group_rows=10) as w:
+        w.write(docs)
+    reader = RefineryReader(generation_dir(tmp_path / "ref", "w", "g1"))
+    cfg = SpellConfig(min_count=1, min_count_docs=0, min_language_docs=5, max_sparse_groups=8)
+    reads: list[int] = []
+    real = pq.ParquetFile.read_row_group  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+
+    def counting(self: pq.ParquetFile, i: int, *args: Any, **kwargs: Any) -> Any:
+        reads.append(i)
+        return real(self, i, *args, **kwargs)
+
+    monkeypatch.setattr(pq.ParquetFile, "read_row_group", counting)
+    stats = build_vocabulary(
+        [("w", reader)], tmp_path / "s.bin", cfg, cache=spelling.SpellCache(tmp_path / "c")
+    )
+    assert stats.languages["ab"] == 3  # its three words, from 8 of its 40 row groups
+    assert len(reads) == 40 + 8  # English (9 rows per group: not sparse) is read whole
+    s = Speller.open(tmp_path / "s.bin")
+    assert s is not None
+    assert s.count("бызшәа", "ab") > 0
+    reads.clear()
+    cache = spelling.SpellCache(tmp_path / "c")
+    build_vocabulary([("w", reader)], tmp_path / "again.bin", cfg, cache=cache)
+    assert (reads, cache.kept) == ([], 2)  # the thinned sample is what the cache key records
+
+
 def test_a_rare_language_that_knows_the_misspellings_does_not_hide_the_correction() -> None:
     """2026-10-17: the Latin vocabulary (Gutenberg's Latin books) knows "diabetis" and "insulen", so
     it won over English, which knows neither, and "diabetis insulen" got no "Did you mean"."""
