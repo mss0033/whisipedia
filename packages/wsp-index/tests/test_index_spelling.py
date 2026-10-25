@@ -326,6 +326,24 @@ def test_a_scattered_language_reads_a_bounded_number_of_row_groups(
     assert (reads, cache.kept) == ([], 2)  # the thinned sample is what the cache key records
 
 
+def test_untagged_documents_make_no_vocabulary(tmp_path: Path) -> None:
+    # 2026-10-25: an "und" vocabulary knew "diabetis" from untagged documents, won the language choice
+    # over English and kept the misspelling.
+    docs = [doc("w", f"e{i:03d}", "Diabetes", "diabetes insulin glucose", lang="en") for i in range(60)]
+    docs += [doc("w", f"u{i:03d}", "Diabetis", "diabetis insulin", lang="und") for i in range(60)]
+    with RefineryWriter(tmp_path / "ref", "w", "g1", row_group_rows=10) as w:
+        w.write(docs)
+    reader = RefineryReader(generation_dir(tmp_path / "ref", "w", "g1"))
+    path = tmp_path / "s.bin"
+    stats = build_vocabulary(
+        [("w", reader)], path, SpellConfig(min_count=1, min_count_docs=0, min_language_docs=10)
+    )
+    assert set(stats.languages) == {"en"}
+    s = Speller.open(path)
+    assert s is not None
+    assert s.correct("diabetis insulen") == "diabetes insulin"
+
+
 def test_a_rare_language_that_knows_the_misspellings_does_not_hide_the_correction() -> None:
     """2026-10-17: the Latin vocabulary (Gutenberg's Latin books) knows "diabetis" and "insulen", so
     it won over English, which knows neither, and "diabetis insulen" got no "Did you mean"."""

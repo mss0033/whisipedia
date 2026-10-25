@@ -146,6 +146,8 @@ held as one Arrow string array (~35 bytes per node, ~250 MB at 7M), never as Pyt
   in hundreds of languages, not the library's text. A language a source scatters thinly (under 8 rows
   per row group on average) is sampled from at most 64 of that source's row groups, because each is
   read whole for its few rows. Before 2026-10-25 the step read 5.5 million row groups and ran ~40 hours.
+  Documents tagged with no one language (`und`, `mul`, `zxx`, `mis`) make no vocabulary: words seen a
+  few times among untagged texts are no evidence of a spelling ("diabetis").
 * **Reuse:** `<index root>/spell-cache/` keeps each generation's language map and each language's
   counts under a key of the files its sample comes from; a rebuild counts only the languages whose
   sources changed (the sample is deterministic: a kept vocabulary is the one a recount would make)

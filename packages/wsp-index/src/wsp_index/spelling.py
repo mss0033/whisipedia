@@ -309,6 +309,11 @@ def sample_language(
         yield table.filter(pc.equal(table.column("lang"), lang)).select(list(columns))
 
 
+NOT_LANGUAGES = frozenset({"und", "mul", "zxx", "mis"})
+"""Codes that name no one language: no vocabulary of their own, nor a share of ``any``. Untagged
+documents in many languages made an ``und`` vocabulary that knew "diabetis" (6 times), so "diabetis
+insulen" was corrected under it to "diabetis insulin" (2026-10-25)."""
+
 CACHE_FORMAT = 1
 """Bumped when the counting changes in a way the settings do not show: every kept vocabulary is stale."""
 
@@ -428,6 +433,8 @@ def count_words(
     for _source, reader in readers:
         fp, by_lang = cache.row_groups(reader) if cache is not None else ("", language_row_groups(reader))
         for raw, every in by_lang.items():
+            if primary_lang(raw) in NOT_LANGUAGES:
+                continue
             rgs = _thin(every, cfg)
             plan.setdefault(primary_lang(raw), []).append((reader, raw, rgs))
             fingerprints.setdefault(primary_lang(raw), []).append((fp, raw, rgs))

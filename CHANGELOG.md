@@ -17,6 +17,8 @@ All notable changes are documented here. The format follows [Keep a Changelog](h
 * `wsp index spell` leaves out catalogue sources (Open Library), and reads at most 64 row groups for
   a language a source scatters thinly. Before, it read 5.5 million row groups from the NAS: 458 of
   Open Library's languages at one record per row group (Abkhaz: 102 records, 23 minutes).
+* Untagged documents (`und`) make no vocabulary of their own: it knew "diabetis", so "Did you mean"
+  kept that misspelling.
 ### Added: English machine translation on the reader's request (ADR-0013, 2026-10-24)
 * "Read in English (machine translation)" on a non-English page. A banner that cannot be dismissed
   names the language and model, and says the original is the authority. Translation goes block by
