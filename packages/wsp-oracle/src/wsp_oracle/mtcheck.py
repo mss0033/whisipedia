@@ -317,6 +317,11 @@ def check(source: str, target: str, lang: str) -> Verdict:
     if len(bare_s) >= 20:
         lo, hi = _LENGTH_BAND.get(lang, _DEFAULT_BAND)
         ratio = len(bare_t) / max(1, len(bare_s))
+        if lang in CJK and lang in _SCRIPT:
+            # The band is for the dense script; dates, digits and Latin names come out as long as they
+            # went in (2026-10-25: a broadcast schedule, "東京電視台 • 2006年10月2日 ... 星期一 25:30").
+            dense = len(re.findall(_SCRIPT[lang], bare_s))
+            ratio = (len(bare_t) - (len(bare_s) - dense)) / dense if dense >= 10 else lo
         if not lo <= ratio <= hi:
             return Verdict(
                 False, "much shorter than the original" if ratio < lo else "much longer than the original"

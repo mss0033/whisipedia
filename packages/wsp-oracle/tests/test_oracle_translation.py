@@ -2,7 +2,7 @@
 on-demand llama.cpp server. The model is a fake here; the bake-off measured the real one
 (docs/research/MT-BAKEOFF-2026-10-24.md)."""
 
-# ruff: noqa: E501 - the parametrized cases read better unwrapped
+# ruff: noqa: E501, RUF001 - the parametrized cases read better unwrapped, in their own scripts
 
 from __future__ import annotations
 
@@ -33,6 +33,8 @@ from wsp_oracle.translation import LlamaServer, Segment, TranslationCache, Trans
         ("Москва — столица России и крупнейший город страны.", "Москва — столица России, the largest city.", "ru",
          "not translated"),
         ("紡野高中二年A班學生。", "A student in Class 3-A at Tsumugino High School.", "zh", "numbers differ"),
+        ("東京是日本的首都，也是日本最大的城市，人口超過一千萬，是世界上最大的都市圈之一。", "Tokyo is the capital.", "zh",
+         "much shorter"),
         ("Die Stadt liegt am Rhein.", "Here is the translation: The city lies on the Rhine.", "de", "words of its own"),
         ("東京は日本の首都である。人口は多い。経済の中心である。",
          "Tokyo is the capital of Japan, with a very large population that keeps on growing.", "ja",
@@ -73,6 +75,12 @@ def test_a_translation_that_fails_a_check_is_not_shown(
         ("第二十六話は二〇〇七年に放送された。", "Episode 26 was broadcast in 2007.", "ja"),
         ("人口約三千万人。", "The population is about 30 million.", "zh"),
         ("鈴木一郎は九州で生まれた。", "Ichiro Suzuki was born in Kyushu.", "ja"),  # names, never "missing"
+        # Mostly dates and times: the dense script's band is for the Chinese words only.
+        (
+            "東京電視台 • 2006年10月2日～2007年3月26日 • 星期一 25:30～26:00",
+            "Tokyo Television • October 2, 2006 – March 26, 2007 • Mondays 25:30–26:00",
+            "zh",
+        ),
     ],
 )
 def test_a_faithful_translation_passes(source: str, target: str, lang: str) -> None:
