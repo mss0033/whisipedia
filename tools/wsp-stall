@@ -78,6 +78,10 @@ LOGS = os.environ.get(
 ).split(":")
 IDLE_H = float(os.environ.get("WSP_STALL_IDLE_H", "3"))
 IDLE_CPU_S = 10.0
+# A job waiting its turn in a lock's queue (wsp_cli.locks: a ticket in <lock>.queue/) is not stalled; it
+# is reported only after this long in the queue (2026-10-25: NARA, third behind two hour-long ingests,
+# was "idle" every 3 hours).
+QUEUE_IDLE_H = float(os.environ.get("WSP_STALL_QUEUE_IDLE_H", "12"))
 # Jobs idle by design (a watcher that samples every half hour): never "job-idle" (2026-10-23).
 IDLE_OK = os.environ.get("WSP_STALL_IDLE_OK", "whisipedia-job-*-watch.service").split(":")
 LOCK_H = float(os.environ.get("WSP_STALL_LOCK_H", "8"))
@@ -251,6 +255,25 @@ def lock_waiters() -> dict[str, str]:
     return out
 
 
+def queued(now: float) -> dict[str, tuple[str, int, float]]:
+    """``pid -> (lock name, place in its queue from 1, seconds waited)`` of every waiter holding a ticket
+    (``<lock>.queue/<time_ns>-<pid>``) whose process is alive."""
+    out: dict[str, tuple[str, int, float]] = {}
+    for q in sorted(LOCKS.glob("*.queue")):
+        try:
+            names = sorted(n.name for n in q.iterdir() if not n.name.startswith("."))
+        except OSError:
+            continue
+        place = 0
+        for name in names:
+            stamp, _, pid = name.partition("-")
+            if not (stamp.isdigit() and pid.isdigit() and (PROC / pid).is_dir()):
+                continue
+            place += 1
+            out[pid] = (q.name.removesuffix(".queue"), place, max(0.0, now - int(stamp) / 1e9))
+    return out
+
+
 def _lock_inodes() -> dict[int, str]:
     by_inode: dict[int, str] = {}
     for p in LOCKS.glob("*.lock"):
@@ -349,6 +372,7 @@ def check(state: State, t: float) -> tuple[dict[str, str], list[str]]:
 
     samples = state.cpu
     waiters = lock_waiters()
+    in_queue = queued(t)
     seen: set[str] = set()
     rows = units()
     for unit, active, sub in rows:
@@ -386,7 +410,12 @@ def check(state: State, t: float) -> tuple[dict[str, str], list[str]]:
         since, base = window[-1]  # the newest sample at least IDLE_H old
         if (use - base) / 1e6 < IDLE_CPU_S:
             why = ""
-            if frozen(cg):
+            turn = next((in_queue[p] for p in cgroup_pids(cg) if p in in_queue), None)
+            if turn is not None and turn[2] < QUEUE_IDLE_H * 3600:
+                continue  # waiting its turn, not stalled
+            if turn is not None:
+                why = f"; it is number {turn[1]} in the {turn[0]} lock's queue, waiting {hours(turn[2])}"
+            elif frozen(cg):
                 why = "; its slice is frozen (tools/wsp-yield: the machine is short of memory)"
             elif held:
                 # The lock the job is blocked on, when one of its processes waits in flock (2026-10-19:

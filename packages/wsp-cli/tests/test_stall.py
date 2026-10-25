@@ -211,3 +211,20 @@ def test_a_job_restarted_by_a_reboot_starts_a_new_baseline(tmp_path: Path) -> No
     assert not [e for e in _run(env, 12) if "job-idle" in e]
     env = _world(tmp_path, usage=3_000_000, run="r2")  # 1 s in the 3.5 h since: idle for real
     assert [e for e in _run(env, 15.5) if "RAISED job-idle" in e]
+
+
+def test_a_job_waiting_its_turn_in_the_ingest_queue_is_not_idle(tmp_path: Path) -> None:
+    """2026-10-25: NARA, third in the ingest queue behind two hour-long ingests, was raised as idle
+    every 3 hours. A ticket of a living process is a turn being waited for; after 12 hours it is
+    reported, with its place."""
+    env = _world(tmp_path, usage=5_000_000)
+    queue = tmp_path / "locks" / "ingest.queue"
+    queue.mkdir()
+    (tmp_path / "proc" / "76").mkdir(parents=True)  # the lane's ingest, alive
+    (queue / f"{(T0 - 600) * 10**9:020d}-31337").touch()  # ahead of it: a dead waiter's ticket
+    (queue / f"{T0 * 10**9:020d}-76").touch()
+    _run(env, 0)
+    assert not [e for e in _run(env, 3.5) if "job-idle" in e]
+    raised = [e for e in _run(env, 12.5) if "RAISED job-idle" in e]
+    assert raised
+    assert "number 1 in the ingest lock's queue, waiting 12.5 h" in raised[0]
