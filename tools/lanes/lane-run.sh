@@ -51,9 +51,11 @@ PARTIAL_WAIT=${LANE_PARTIAL_WAIT:-900}
 # Ingest attempts while another ingest runs (exit 3): each waits up to QUEUE_WAIT in the lock's queue
 # (`wsp ingest --wait`), so it takes the lock when the holder lets go. Retrying once a minute lost
 # to the maps lane, whose next ingest took the lock within a second of each release (2026-10-24).
-# 48 waits of 30 minutes: a day. Four hours gave up behind a USGS topo ingest (lane-doe, 2026-10-21).
-BUSY_TRIES=${LANE_BUSY_TRIES:-48}
-QUEUE_WAIT=${LANE_QUEUE_WAIT:-1800}
+# Four waits of 6 hours: a day. Four hours gave up behind a USGS topo ingest (lane-doe, 2026-10-21).
+# A wait longer than an ingest slice (an hour) keeps the lane's place in the queue, which is first come,
+# first served; a 30-minute wait gave up and came back last, and OpenAlex waited 8 hours (2026-10-25).
+BUSY_TRIES=${LANE_BUSY_TRIES:-4}
+QUEUE_WAIT=${LANE_QUEUE_WAIT:-21600}
 BUSY_WAIT=${LANE_BUSY_WAIT:-5}
 # An ingest gives the lock up after this long (exit 3, like a held lock) and is asked again after
 # BUSY_WAIT, so one large version does not keep every other lane's ingest waiting for hours.

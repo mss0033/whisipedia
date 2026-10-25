@@ -82,7 +82,7 @@ class _QueueTimeoutError(Exception):
     pass
 
 
-def _queue_for(fd: int, path: Path, name: str, wait: float) -> None:
+def _block_for(fd: int, path: Path, name: str, wait: float) -> None:
     """Block in ``flock`` for at most ``wait`` seconds (a real-time timer interrupts it)."""
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -98,11 +98,64 @@ def _queue_for(fd: int, path: Path, name: str, wait: float) -> None:
     try:
         fcntl.flock(fd, fcntl.LOCK_EX)
     except _QueueTimeoutError:
-        holder = path.read_text(encoding="utf-8").strip() or "unknown"
-        raise LockHeldError(f"another '{name}' is running (pid {holder}); lock: {path}") from None
+        raise LockHeldError(_held_message(path, name)) from None
     finally:
         signal.setitimer(signal.ITIMER_REAL, 0)
         signal.signal(signal.SIGALRM, previous)
+
+
+def _held_message(path: Path, name: str) -> str:
+    holder = path.read_text(encoding="utf-8").strip() or "unknown"
+    return f"another '{name}' is running (pid {holder}); lock: {path}"
+
+
+def _alive(ticket: Path) -> bool:
+    """A ticket is alive while its waiter holds its lock (the kernel drops it when the waiter dies)."""
+    try:
+        fd = os.open(ticket, os.O_RDONLY)
+    except OSError:
+        return False  # gone: its waiter took the lock or gave up
+    try:
+        fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return True
+    finally:
+        os.close(fd)
+    with contextlib.suppress(OSError):
+        ticket.unlink()  # its waiter died
+    return False
+
+
+def _queue_for(fd: int, path: Path, name: str, wait: float, poll: float) -> None:
+    """Take the lock in turn: first come, first served among queued waiters.
+
+    A blocked ``flock`` is not a queue: the kernel wakes every waiter and whichever runs first takes
+    the lock. The OpenAlex works ingest lost to a dozen lane ingests for 8 hours (2026-10-25), by
+    giving up after 30 minutes and coming back last; a long wait keeps a waiter's place only if
+    places are kept in order. Each waiter holds a
+    ticket, ``<name>.queue/<time>-<pid>``, locked while it waits, and takes its turn when no older
+    living ticket is left; then it blocks in ``flock`` for the lock itself. A ticket is locked before
+    it appears in the queue (renamed in), so no one takes a new waiter's ticket for a dead one's.
+    """
+    queue = path.with_name(f"{name}.queue")
+    queue.mkdir(exist_ok=True)
+    mine = queue / f"{time.time_ns():020d}-{os.getpid()}"
+    draft = queue / f".{mine.name}"
+    tfd = os.open(draft, os.O_RDWR | os.O_CREAT, 0o644)
+    deadline = time.monotonic() + wait
+    try:
+        fcntl.flock(tfd, fcntl.LOCK_EX)
+        os.rename(draft, mine)
+        while any(t.name < mine.name and _alive(t) for t in queue.iterdir() if not t.name.startswith(".")):
+            if time.monotonic() >= deadline:
+                raise LockHeldError(_held_message(path, name))
+            time.sleep(min(poll, max(0.0, deadline - time.monotonic())))
+        _block_for(fd, path, name, deadline - time.monotonic())
+    finally:
+        for ticket in (mine, draft):
+            with contextlib.suppress(OSError):
+                ticket.unlink()
+        os.close(tfd)
 
 
 @contextlib.contextmanager
@@ -122,10 +175,11 @@ def exclusive(
     and stops early when ``cancel()`` turns true. ``flock`` locks are released by the kernel when the
     process exits, so a crash never leaves a stale lock behind. The file records the holder's pid.
 
-    ``queue=True`` (with ``wait``, main thread only) waits in the lock's queue instead: a blocking
-    ``flock`` bounded by a timer. A process blocked in ``flock`` takes the lock the moment it is
-    released, before a newcomer's first try; polling lost to the maps lane, whose next ingest took the
-    lock within a second of each release, for hours (2026-10-24, as ERA5 did on 2026-10-20).
+    ``queue=True`` (with ``wait``, main thread only) waits in the lock's queue instead, in turn
+    (:func:`_queue_for`), then in a blocking ``flock`` bounded by a timer. A process blocked in
+    ``flock`` takes the lock the moment it is released, before a newcomer's first try; polling lost to
+    the maps lane, whose next ingest took the lock within a second of each release, for hours
+    (2026-10-24, as ERA5 did on 2026-10-20).
 
     A lock already held by a parent (``tools/wsp-bg`` holding ``HEAVY`` across a whole rebuild) is
     passed down as an open descriptor named in ``$WSP_INHERITED_LOCKS`` (``heavy:9``); it is used as
@@ -141,7 +195,7 @@ def exclusive(
     try:
         deadline = None if wait is None else time.monotonic() + wait
         if queue and wait is not None:
-            _queue_for(fd, path, name, wait)
+            _queue_for(fd, path, name, wait, min(poll, 2.0))
         while not queue or wait is None:
             try:
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -149,8 +203,7 @@ def exclusive(
             except BlockingIOError:
                 done = deadline is None or time.monotonic() >= deadline or (cancel is not None and cancel())
                 if done:
-                    holder = path.read_text(encoding="utf-8").strip() or "unknown"
-                    raise LockHeldError(f"another '{name}' is running (pid {holder}); lock: {path}") from None
+                    raise LockHeldError(_held_message(path, name)) from None
                 time.sleep(poll)
         os.ftruncate(fd, 0)
         os.write(fd, str(os.getpid()).encode())

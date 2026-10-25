@@ -33,7 +33,7 @@ case $code in *:*) echo "${code#*:}"; code=${code%%:*} ;; esac  # "CODE:LINE" al
 exit "${code:-98}"
 """
 
-ING = "--max-seconds 3600 --wait 1800"  # every lane ingest: a time slice, then a queued wait for the lock
+ING = "--max-seconds 3600 --wait 21600"  # every lane ingest: a time slice, then a queued wait for the lock
 
 
 FAKE_ALERTS = """#!/bin/sh
@@ -103,7 +103,7 @@ def test_complete_fetch_and_ingest_of_this_cycle_is_done(lane: Lane) -> None:
     assert lane.calls() == [
         f"collections fetch --source neets --version {cyc}",
         # this cycle only, never the whole source
-        f"ingest --max-seconds 3600 --wait 1800 --source neets --version {cyc}",
+        f"ingest --max-seconds 3600 --wait 21600 --source neets --version {cyc}",
     ]
     lane.script(fetch=[], ingest=[])
     assert lane.run("neets") == 0  # done items are skipped

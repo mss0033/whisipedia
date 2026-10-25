@@ -70,3 +70,47 @@ def test_a_queued_wait_takes_the_lock_when_it_is_released_and_gives_up_after_its
     import signal
 
     assert signal.getsignal(signal.SIGALRM) in (signal.SIG_DFL, signal.default_int_handler, None)
+
+
+_WAITER = (
+    "import sys,time;sys.path[:0]=sys.argv[4:];from pathlib import Path;from wsp_cli.locks import exclusive\n"
+    "with exclusive(Path(sys.argv[1]),'ingest',wait=20,queue=True,poll=0.05):\n"
+    " open(sys.argv[2],'a').write(sys.argv[3]+'\\n');time.sleep(0.3)"
+)
+
+
+def test_queued_waiters_take_the_lock_in_the_order_they_came(tmp_path: Path) -> None:
+    # 2026-10-25: a blocked flock is not a queue; the OpenAlex works ingest lost to a dozen lane
+    # ingests for 8 hours.
+    import subprocess
+    import sys
+    import time
+
+    from wsp_cli.locks import exclusive
+
+    order = tmp_path / "order"
+    with exclusive(tmp_path, "ingest"):
+        waiters: list[subprocess.Popen[bytes]] = []
+        for name in ("first", "second", "third"):
+            waiters.append(
+                subprocess.Popen([sys.executable, "-c", _WAITER, str(tmp_path), str(order), name, *sys.path])
+            )
+            time.sleep(0.5)  # each waiting before the next comes
+    for w in waiters:
+        assert w.wait(30) == 0
+    assert order.read_text().split() == ["first", "second", "third"]
+    assert not list((tmp_path / "ingest.queue").glob("*"))  # every ticket removed
+
+
+def test_a_dead_waiters_ticket_does_not_hold_up_the_queue(tmp_path: Path) -> None:
+    import time
+
+    from wsp_cli.locks import exclusive
+
+    queue = tmp_path / "ingest.queue"
+    queue.mkdir()
+    (queue / f"{1:020d}-999999").write_text("")  # older than any, and nobody holds it
+    t0 = time.monotonic()
+    with exclusive(tmp_path, "ingest", wait=10, queue=True):
+        assert time.monotonic() - t0 < 1
+    assert list(queue.iterdir()) == []

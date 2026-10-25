@@ -3,6 +3,10 @@
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Fixed: a big ingest no longer waits behind every lane (2026-10-25)
+* `wsp ingest --wait` waits in turn, first come first served (a ticket per waiter in
+  `locks/ingest.queue/`); lanes wait up to 6 hours, longer than an ingest slice, so they keep their
+  place. Before, OpenAlex gave up after each 30-minute wait, came back last, and waited 8 hours.
 ### Fixed: translation of Chinese and Japanese pages, and plain-text articles (2026-10-25)
 * The number check reads Chinese and Japanese numerals (二年A班 is "Class 2-A") and English compound
   number words ("twenty-six"); before, a Chinese article was rejected for numbers it had kept.
