@@ -144,6 +144,20 @@ describe('plain text', () => {
     ).toHaveLength(2);
     expect(renderPlainText('  x\n  y', true).tagName).toBe('PRE');
   });
+
+  it('gives a text of long lines and no blank line one paragraph per line', () => {
+    const long = '《心跳回憶 Only Love》是科樂美數位娛樂製作的日本電視動畫。'.repeat(4);
+    const ps = renderPlainText(`${long}\n故事簡介\n${long}`, false).querySelectorAll('p');
+    expect(Array.from(ps).map((p) => p.textContent?.slice(0, 4))).toEqual([
+      '《心跳回',
+      '故事簡介',
+      '《心跳回',
+    ]);
+    // A hard-wrapped paragraph is still one paragraph.
+    expect(
+      renderPlainText('It is a truth\nuniversally acknowledged.', false).querySelectorAll('p'),
+    ).toHaveLength(1);
+  });
 });
 
 describe('links to mirrored Wikimedia projects', () => {

@@ -93,7 +93,12 @@ export function renderPlainText(text: string, preformatted: boolean): HTMLElemen
   }
   const div = document.createElement('div');
   div.className = 'doc-prose';
-  for (const para of text.split(/\n\s*\n/)) {
+  // Paragraphs are separated by blank lines; a hard-wrapped book also breaks lines inside them. A
+  // text with no blank line whose lines are longer than any wrap has one paragraph per line (the
+  // Wikipedia text dumps, 2026-10-25: a Chinese article showed as one block of 4,600 characters).
+  const lines = text.split('\n');
+  const perLine = !/\n\s*\n/.test(text) && lines.length > 1 && lines.some((l) => l.length > 100);
+  for (const para of perLine ? lines : text.split(/\n\s*\n/)) {
     const t = para.replace(/\s*\n\s*/g, ' ').trim();
     if (!t) continue;
     const isHeading = t.length < 60 && t === t.toUpperCase() && /[A-Z]/.test(t);

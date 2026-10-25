@@ -3,6 +3,12 @@
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Fixed: translation of Chinese and Japanese pages, and plain-text articles (2026-10-25)
+* The number check reads Chinese and Japanese numerals (二年A班 is "Class 2-A") and English compound
+  number words ("twenty-six"); before, a Chinese article was rejected for numbers it had kept.
+* A plain-text article with one paragraph per line (the Wikipedia text dumps) is shown, and
+  translated, paragraph by paragraph rather than as one block.
+* A passage translated only in part is counted as such ("0 of 1 passages translated, 1 in part").
 ### Fixed: the spelling vocabulary step no longer runs for days (2026-10-25)
 * `wsp index spell` leaves out catalogue sources (Open Library), and reads at most 64 row groups for
   a language a source scatters thinly. Before, it read 5.5 million row groups from the NAS: 458 of

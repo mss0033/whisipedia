@@ -44,7 +44,9 @@ warnings, when the library can translate that language (`GET /v1/translate`). On
     language and text.
 * **Checks (`wsp_oracle.mtcheck`).**
   - Numbers are compared by value: digits across localisation, the magnitude words (万, Millionen,
-    million), and number words 2-90 in eight languages.
+    million), and number words 2-90 in eight languages ("twenty-six" is 26). Chinese and Japanese
+    numerals (二年 is "year 2", 二十六 is 26) may explain a number in the English, but are never
+    counted as missing, because they are also part of names and words (一郎, 九州, 一起).
   - Placeholders must come back exactly and well nested.
   - The length must be within a band per language.
   - At most one sentence fewer than the source.

@@ -302,6 +302,7 @@ function startTranslation(
   const titleText = title.trim();
   void (async () => {
     let failed = 0;
+    let partly = 0; // passages with a piece that failed its check (2026-10-25: counted as translated)
     // A block is one segment, or pieces of one when it is long (a plain-text article can be a
     // single paragraph of 100,000 characters: German Wikipedia's "Rhein", 2026-10-24).
     const jobs: { i: number; piece: number }[] = [];
@@ -383,7 +384,8 @@ function startTranslation(
           block.append(h('span', { class: 'mt-failed' }, ` (not translated: ${why})`));
           continue;
         }
-        translated += 1;
+        if (got.every((g) => g?.ok)) translated += 1;
+        else partly += 1;
         if (got.some((g) => !g?.ok)) {
           const why = got.find((g) => !g?.ok)?.reason ?? 'it did not pass its checks';
           t.note = h(
@@ -398,7 +400,9 @@ function startTranslation(
     }
     progress.textContent =
       `${translated} of ${blocks.length} passages translated` +
-      (failed ? `; ${failed} left in ${name} (marked).` : '.');
+      (partly ? `, ${partly} in part` : '') +
+      (failed ? `; ${failed} left in ${name}` : '') +
+      (partly || failed ? ' (marked).' : '.');
   })();
   return banner;
 }

@@ -229,7 +229,11 @@ describe('a long block translated piece by piece', () => {
     expect(p.querySelector('.mt-failed')?.textContent).toBe(
       ' (part of this passage is not translated: numbers differ (added 2))',
     );
-    expect(page.querySelector('.mt-progress')?.textContent).toBe('1 of 1 passages translated.');
+    // Not counted as translated: part of it is not (2026-10-25: "1 of 1 passages translated" over a
+    // passage whose every piece but one had failed).
+    expect(page.querySelector('.mt-progress')?.textContent).toBe(
+      '0 of 1 passages translated, 1 in part (marked).',
+    );
     page.remove();
   });
 });

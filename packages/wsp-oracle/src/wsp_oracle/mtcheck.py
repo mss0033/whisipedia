@@ -76,6 +76,18 @@ _WORD_TEXT: dict[str, tuple[str, tuple[int, ...]]] = {
 }
 
 
+# "twenty-six" is one number, 26, not 20 and 6.
+_EN_TENS = {"twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80,
+            "ninety": 90}  # fmt: skip
+_EN_UNITS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8,
+             "nine": 9}  # fmt: skip
+_EN_COMPOUND = re.compile(rf"\b({'|'.join(_EN_TENS)})[- ]({'|'.join(_EN_UNITS)})\b", re.IGNORECASE)
+
+
+def _en_compound(m: re.Match[str]) -> str:
+    return str(_EN_TENS[m.group(1).lower()] + _EN_UNITS[m.group(2).lower()])
+
+
 def _table(words: str, values: tuple[int, ...]) -> dict[str, int]:
     names = words.split()
     if len(names) != len(values):
@@ -157,6 +169,8 @@ def _numbers(text: str, lang: str) -> list[set[str]]:
     t = PLACEHOLDER.sub(" ", unicodedata.normalize("NFKC", text).translate(_AR_DIGITS))
     if lang in CJK:
         t = _CJK_SKIP.sub(" ", t)
+    if lang == "en":
+        t = _EN_COMPOUND.sub(_en_compound, t)
     out: list[set[str]] = []
     for m in _NUM.finditer(t):
         keys = {re.sub(r"[.,\u00a0\u202f'’٫٬ ]", "", m.group(0))}
@@ -173,6 +187,45 @@ def _numbers(text: str, lang: str) -> list[set[str]]:
         for w in re.findall(r"[^\W\d_]+", t.lower()):
             if w in words:
                 out.append({str(words[w])})
+    return out
+
+
+# Chinese and Japanese numerals: 二年A班 is "Class 2-A" (2026-10-25, a Chinese anime article). They are
+# also in names and words (一郎, 九州, 千葉, 一起, 十分), so they never count as missing from the
+# English; they only explain a number the English has.
+_HAN_DIGIT = {"〇": 0, "零": 0, "一": 1, "二": 2, "两": 2, "兩": 2, "三": 3, "四": 4, "五": 5, "六": 6,
+              "七": 7, "八": 8, "九": 9}  # fmt: skip
+_HAN_UNIT = {"十": 10, "百": 100, "千": 1000}
+_HAN_RUN = re.compile("[〇零一二两兩三四五六七八九十百千]+")
+
+
+def _han_value(run: str) -> int | None:
+    if all(c in _HAN_DIGIT for c in run):  # 二〇〇六: digit by digit
+        return int("".join(str(_HAN_DIGIT[c]) for c in run))
+    total, digit = 0, None
+    for c in run:
+        if c in _HAN_DIGIT:
+            if digit is not None:
+                return None  # 二三十: not a number
+            digit = _HAN_DIGIT[c]
+        else:
+            total += (1 if digit is None else digit) * _HAN_UNIT[c]
+            digit = None
+    return total + (digit or 0)
+
+
+def _han_numbers(text: str) -> list[set[str]]:
+    out: list[set[str]] = []
+    for m in _HAN_RUN.finditer(text):
+        value = _han_value(m.group(0))
+        if value is None:
+            continue
+        keys = {str(value)}
+        after = _AFTER.match(text, m.end())
+        word = (after.group(1) or "") if after else ""
+        if word in _MAGNITUDE:
+            keys.add(_key(value * _MAGNITUDE[word]))
+        out.append(keys)
     return out
 
 
@@ -196,6 +249,11 @@ def numbers_differ(source: str, target: str, lang: str) -> str | None:
             missing.append(min(keys, key=len))
         else:
             unmatched_tgt.remove(hit)
+    if lang in ("zh", "ja"):
+        for keys in _han_numbers(source):
+            hit = next((k for k in unmatched_tgt if keys & tgt[k]), None)
+            if hit is not None:
+                unmatched_tgt.remove(hit)
     added = [min(tgt[k], key=len) for k in unmatched_tgt]
     for _ in _BOTH.finditer(source):
         if "2" in added:

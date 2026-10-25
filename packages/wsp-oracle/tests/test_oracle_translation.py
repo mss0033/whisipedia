@@ -32,6 +32,7 @@ from wsp_oracle.translation import LlamaServer, Segment, TranslationCache, Trans
          "fr", "not translated"),
         ("Москва — столица России и крупнейший город страны.", "Москва — столица России, the largest city.", "ru",
          "not translated"),
+        ("紡野高中二年A班學生。", "A student in Class 3-A at Tsumugino High School.", "zh", "numbers differ"),
         ("Die Stadt liegt am Rhein.", "Here is the translation: The city lies on the Rhine.", "de", "words of its own"),
         ("東京は日本の首都である。人口は多い。経済の中心である。",
          "Tokyo is the capital of Japan, with a very large population that keeps on growing.", "ja",
@@ -65,6 +66,13 @@ def test_a_translation_that_fails_a_check_is_not_shown(
         ("東京の人口は約1400万人である。", "Tokyo has a population of about 14 million.", "ja"),
         ("Berlin hat rund 3,9 Millionen Einwohner.", "Berlin has around 3.9 million inhabitants.", "de"),
         ("Der Fluss ist 1.233 km lang.", "The river is 1,233 km long.", "de"),
+        # Numbers written in characters (2026-10-25: 二年A班 is "Class 2-A").
+        ("紡野高中二年A班學生。", "A student in Class 2-A at Tsumugino High School.", "zh"),
+        ("全書共二十六話。", "The series has twenty-six episodes in all.", "zh"),
+        ("Die Serie hat 26 Folgen.", "The series has twenty-six episodes.", "de"),
+        ("第二十六話は二〇〇七年に放送された。", "Episode 26 was broadcast in 2007.", "ja"),
+        ("人口約三千万人。", "The population is about 30 million.", "zh"),
+        ("鈴木一郎は九州で生まれた。", "Ichiro Suzuki was born in Kyushu.", "ja"),  # names, never "missing"
     ],
 )
 def test_a_faithful_translation_passes(source: str, target: str, lang: str) -> None:
