@@ -410,9 +410,12 @@ def check(state: State, t: float) -> tuple[dict[str, str], list[str]]:
         since, base = window[-1]  # the newest sample at least IDLE_H old
         if (use - base) / 1e6 < IDLE_CPU_S:
             why = ""
-            turn = next((in_queue[p] for p in cgroup_pids(cg) if p in in_queue), None)
+            pids = cgroup_pids(cg)
+            turn = next((in_queue[p] for p in pids if p in in_queue), None)
             if turn is not None and turn[2] < QUEUE_IDLE_H * 3600:
                 continue  # waiting its turn, not stalled
+            if any(pid in pids and age < IDLE_H * 3600 for pid, _, age in held.values()):
+                continue  # its turn just came: it holds a lock it took after the quiet hours of waiting
             if turn is not None:
                 why = f"; it is number {turn[1]} in the {turn[0]} lock's queue, waiting {hours(turn[2])}"
             elif frozen(cg):

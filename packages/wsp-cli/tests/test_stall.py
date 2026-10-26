@@ -228,3 +228,19 @@ def test_a_job_waiting_its_turn_in_the_ingest_queue_is_not_idle(tmp_path: Path) 
     raised = [e for e in _run(env, 12.5) if "RAISED job-idle" in e]
     assert raised
     assert "number 1 in the ingest lock's queue, waiting 12.5 h" in raised[0]
+
+
+def test_a_job_that_just_took_the_lock_after_its_wait_is_not_idle(tmp_path: Path) -> None:
+    """2026-10-26: NARA waited 3 hours in the queue, took the ingest lock, and was raised as idle in
+    that minute: its ticket was gone and the waiting hours counted as idle."""
+    env = _world(tmp_path, usage=5_000_000)
+    locks, proc = tmp_path / "locks", tmp_path / "proc"
+    ingest = (locks / "ingest.lock").stat().st_ino
+    (proc / "76").mkdir(parents=True, exist_ok=True)
+    (proc / "76" / "cmdline").write_bytes(b"wsp\0ingest\0--source\0nara-catalog\0")
+    (proc / "76" / "stat").write_text(
+        "76 (wsp) S " + " ".join(["0"] * 18) + " 8999900 0 0\n"
+    )  # started a second ago
+    (proc / "locks").write_text(f"1: FLOCK  ADVISORY  WRITE 76 08:30:{ingest} 0 EOF\n")
+    _run(env, 0)
+    assert not [e for e in _run(env, 3.5) if "job-idle" in e]
