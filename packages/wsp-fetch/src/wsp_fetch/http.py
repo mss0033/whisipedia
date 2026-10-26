@@ -1076,6 +1076,20 @@ def _raise_for_status(r: httpx.Response) -> None:
 # --- segmented engine ---------------------------------------------------------------------------
 
 
+def _pwrite_all(fd: int, data: bytes | bytearray, offset: int) -> int:
+    """Write all of ``data`` at ``offset``. A write may store only part of its bytes (the SMB share
+    did so 95 GB into a 101 GB map, 2026-10-26, and the download stopped); the rest is written after
+    it. Only a write that stores nothing is an error."""
+    view = memoryview(data)
+    done = 0
+    while done < len(view):
+        n = os.pwrite(fd, view[done:], offset + done)
+        if n <= 0:
+            raise OSError(f"no bytes written at {offset + done}")
+        done += n
+    return done
+
+
 class _SegmentedDownload:
     def __init__(self, fetcher: HttpFetcher, plan: _Plan, t0: float) -> None:
         self.f = fetcher
@@ -1522,9 +1536,7 @@ class _SegmentedDownload:
                 return
             self.claimed.add(i)
         offset, _ = self.span(i)
-        written = os.pwrite(self.fd, data, offset)
-        if written != len(data):
-            raise OSError(f"short write at {offset}")
+        written = _pwrite_all(self.fd, data, offset)
         self.f.wrote(written)
         with self.cond:
             self.done.add(i)

@@ -3,6 +3,9 @@
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Fixed: a download no longer stops when the share stores part of a write (2026-10-26)
+* The segmented downloader writes the rest of a piece after a partial write instead of failing: the
+  SMB share stored part of one write 95 GB into a 101 GB terrain map ("short write").
 ### Fixed: a big ingest no longer waits behind every lane (2026-10-25)
 * `wsp ingest --wait` waits in turn, first come first served (a ticket per waiter in
   `locks/ingest.queue/`); lanes wait up to 6 hours, longer than an ingest slice, so they keep their

@@ -336,3 +336,27 @@ def test_written_bytes_are_paced_by_the_library_budget(servers: Servers, tmp_pat
         assert f.get_bytes(s.url("f.bin")) == data  # read into memory, never written: not paced
     assert (tmp_path / "f.bin").read_bytes() == data
     assert sum(paced) == len(data)
+
+
+def test_a_write_that_stores_part_of_a_piece_is_finished_not_fatal(
+    servers: Servers, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 2026-10-26: the SMB share stored part of one write 95 GB into a 101 GB map, and the download
+    # stopped with "short write".
+    data = payload(512 * 1024, seed=21)
+    s = servers()
+    s.add("f.bin", data)
+    real = os.pwrite
+    calls = {"n": 0}
+
+    def halves(fd: int, buf: bytes | memoryview, offset: int) -> int:
+        calls["n"] += 1
+        if calls["n"] % 2 and len(buf) > 1:
+            return real(fd, bytes(buf[: len(buf) // 2]), offset)  # half of every other write
+        return real(fd, buf, offset)
+
+    monkeypatch.setattr(os, "pwrite", halves)
+    with HttpFetcher(CFG) as f:
+        f.download(remote_for(data, s.url("f.bin")), tmp_path / "f.bin")
+    assert (tmp_path / "f.bin").read_bytes() == data
+    assert calls["n"] > 1
