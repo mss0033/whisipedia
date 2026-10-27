@@ -539,6 +539,21 @@ def test_classified_errors_from_hooks(tmp_path: Path) -> None:
     assert (rec.attempts, rec.crash_count) == (0, 0)
 
 
+def test_a_step_stopped_at_its_time_limit_is_not_called_out_of_memory(tmp_path: Path) -> None:
+    # 2026-10-25: a 204 GB ZIM profile timed out three times and was reported "probably OOM".
+    h = PipelineHarness(tmp_path, retry=RetryPolicy(max_attempts=3, base_delay=timedelta(minutes=10)))
+    timeout = ResourceExhaustedError("refine (whisipedia-step-refine-x) stopped: timeout after 86400s")
+    h.refinery.failures += [timeout, timeout]
+    h.pipeline.register(h.adapter.add_release("2026-10-01", FILES))
+    for _ in range(2):
+        h.pipeline.run("src", "2026-10-01")
+    rec = h.store.get_release("src", "2026-10-01")
+    assert rec is not None
+    assert rec.state is S.FAILED
+    assert "stopped at its time limit" in (rec.last_error or "")
+    assert "OOM" not in (rec.last_error or "")
+
+
 # --- adapters C1 follow-up: an unchanged release plans no files -----------------------------------------
 
 

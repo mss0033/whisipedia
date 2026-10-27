@@ -9,7 +9,7 @@ from __future__ import annotations
 import dataclasses
 import io
 from collections.abc import Mapping
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, cast
 
 import pytest
@@ -31,7 +31,7 @@ from wsp_cli.wiring import (
     storage_probe,
 )
 from wsp_core.ids import make_doc_id
-from wsp_core.model import Generation, RemoteFile, SourceSpec, VerdictStatus
+from wsp_core.model import Artifact, Generation, GenerationStatus, RemoteFile, SourceSpec, VerdictStatus
 from wsp_core.ports import Ctx
 from wsp_index import TantivyIndex
 from wsp_index.refinery import part_dir
@@ -695,3 +695,18 @@ def test_the_cli_s_busy_exit_is_the_locks_one() -> None:
     from wsp_cli.locks import EXIT_BUSY
 
     assert main.EXIT_BUSY == EXIT_BUSY
+
+
+def test_a_big_zims_profile_gets_time_to_read_it(library: dict[str, Any]) -> None:
+    """2026-10-25: Spanish Wikipedia (204 GB), paced, ran out of a fixed 24 hours three times."""
+
+    def gen(size: int, name: str = "upstream/w.zim") -> Generation:
+        art = Artifact("s", "v", PurePosixPath(name), size, "0" * 64, "0" * 64)
+        return Generation("s", "g", GenerationStatus.SEALED, (art,))
+
+    runner = library["hooks"].runner
+    p = IsolatedProfiler(library["cfg"], runner, 24 * 3600.0)
+    assert p.timeout_for(gen(10 * 10**9)) == 24 * 3600.0  # small: the base budget
+    assert p.timeout_for(gen(204 * 10**9)) == pytest.approx(204e9 / 0.75e6)  # ~75 h
+    assert p.timeout_for(gen(204 * 10**9, "upstream/w.pdf")) == 24 * 3600.0  # only ZIMs are read whole
+    assert IsolatedProfiler(library["cfg"], runner, None).timeout_for(gen(10**12)) is None

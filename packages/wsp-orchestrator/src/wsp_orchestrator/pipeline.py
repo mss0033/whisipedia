@@ -1186,7 +1186,10 @@ class ReleasePipeline:
             return self._get(fresh.source_id, fresh.version)
         delay = self.retry.delay(count - self.crashes_to_fail + 1)
         until = self.clock.now() + delay
-        message = f"crashed in {state.value} {count} times, probably OOM (out of memory): {reason}"
+        # A step stopped at its time limit is not out of memory (2026-10-25: a 204 GB ZIM profile,
+        # reported as "probably OOM").
+        cause = "stopped at its time limit" if "timeout after" in reason else "probably OOM (out of memory)"
+        message = f"crashed in {state.value} {count} times, {cause}: {reason}"
         failed = self._transition(
             base,
             ReleaseState.FAILED,

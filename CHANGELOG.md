@@ -3,6 +3,10 @@
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Fixed: a big ZIM's content profile gets time to finish (2026-10-26)
+* A profile's time budget is at least its ZIMs' size at `[integrity] profile_min_rate` (0.75 MB/s):
+  Spanish Wikipedia (204 GB), paced, ran out of a fixed 24 hours three times and failed.
+* A step stopped at its time limit is reported as such, not as "probably OOM".
 ### Fixed: a download no longer stops when the share stores part of a write (2026-10-26)
 * The segmented downloader writes the rest of a piece after a partial write instead of failing: the
   SMB share stored part of one write 95 GB into a 101 GB terrain map ("short write").

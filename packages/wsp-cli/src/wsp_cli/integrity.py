@@ -37,6 +37,9 @@ from wsp_vault.scrub import Scrubber
 from wsp_vault.vault import FileVault, SignatureError
 
 DEFAULT_SAMPLE_RATE = 1 / 32
+PROFILE_MIN_RATE = 0.75e6
+"""Bytes per second a paced ZIM profile is allowed at the slowest (Arabic Wikipedia read ~0.9 MB/s with
+the NAS busy, 2026-10-26); ``[integrity] profile_min_rate``."""
 # Rows per batch when reading Refinery parts: the text column of 256 large documents (books) stays
 # in the tens of MB, where 8,192 rows of Gutenberg could reach gigabytes.
 PROFILE_BATCH_ROWS = 256
@@ -244,6 +247,16 @@ class IsolatedProfiler:
     cfg: Mapping[str, Any]
     runner: IsolatedRunner
     timeout: float | None = 24 * 3600.0
+    min_rate: float = PROFILE_MIN_RATE
+
+    def timeout_for(self, generation: Generation) -> float | None:
+        """The time budget, at least long enough to read the generation's ZIMs at ``min_rate``. A
+        profile visits every entry of a ZIM, paced to a share of the NAS link: Spanish Wikipedia
+        (204 GB) ran out of the fixed 24 hours three times and failed (2026-10-25)."""
+        if self.timeout is None:
+            return None
+        zim_bytes = sum(a.size for a in generation.artifacts if str(a.relpath).endswith(".zim"))
+        return max(self.timeout, zim_bytes / self.min_rate) if self.min_rate > 0 else self.timeout
 
     def __call__(self, spec: SourceSpec, generation: Generation, generation_dir: Path) -> ContentProfile:
         out = self.runner.workdir / "_profiles" / spec.id / f"{generation.generation_id}.json.gz"
@@ -259,7 +272,7 @@ class IsolatedProfiler:
                     "out": str(out),
                 },
                 key=f"{spec.id}/{generation.generation_id}",
-                timeout=self.timeout,
+                timeout=self.timeout_for(generation),
             )
             return ContentProfile.load(out)
         finally:
@@ -320,7 +333,9 @@ def integrity_hooks(
 
     profile: Callable[[SourceSpec, Generation, Path], ContentProfile]
     if runner is not None:
-        profile = IsolatedProfiler(cfg, runner, profile_timeout)
+        profile = IsolatedProfiler(
+            cfg, runner, profile_timeout, float(sec.get("profile_min_rate", PROFILE_MIN_RATE))
+        )
     else:
         profile = Profiler(
             refinery,

@@ -114,6 +114,7 @@ unverifiable = "alert"              # no digest from anywhere
 settle_days = 14                    # the older known-good generation stays until the new one is this old and scrubbed
 profile_sample_rate = 0.03125       # documents sampled for content comparison (same keys every generation)
 profile_busy_share = 0.25           # profiles read at most this share of the time (~28 MB/s on the NAS link; 1 = unpaced)
+profile_min_rate = 750000           # bytes/s: a ZIM profile's time budget is at least its ZIMs' size at this rate (PT24H otherwise)
 wikimedia_primary = "https://dumps.wikimedia.org/"
 kiwix_primary = "https://download.kiwix.org/"
 
