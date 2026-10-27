@@ -509,6 +509,9 @@ def _index_page(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]
     depth = int(cfg.get("depth", 1 if follow_rx else 0))
     max_pages = min(int(cfg.get("max_pages", 500)), env.pages() * 10)
     rewrite = cast(list[str], cfg.get("follow_rewrite") or [])  # [pattern, replacement] for follow links
+    # [pattern, replacement] turning a document link into its file: ECPA links "/works/<id>.shtml",
+    # whose TEI is "/works/<id>/<id>.xml".
+    doc_rewrite = cast(list[str], cfg.get("documents_rewrite") or [])
     upgrade = bool(cfg.get("upgrade_http", False))
     filter_follow = bool(cfg.get("filter_follow", False))
     pub_rx = _s(cfg.get("pub_number")) or None
@@ -551,6 +554,8 @@ def _index_page(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]
             if skip_rx and skip_rx.search(url):
                 continue
             if doc_rx.search(url):
+                if len(doc_rewrite) == 2:
+                    url = re.sub(doc_rewrite[0], doc_rewrite[1], url)
                 if url in seen_docs or not origin_ok(url, env.origins):
                     continue
                 if text_rx is not None and not text_rx.search(text):

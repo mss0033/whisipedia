@@ -18,6 +18,11 @@ A repository is fetched as a snapshot of its files (``git archive`` of the defau
   ``A00001.xml``): the book is one document, titled "<title> (<author>, <year>)" from its header,
   linked to the text's repository; front matter, body and back matter in order, notes left out.
 
+* ``tei-ecpa`` (the Eighteenth-Century Poetry Archive, Oxford: one TEI file per work,
+  ``<id>/<id>.xml``, every word and stop marked): the work is one document, titled "<title>
+  (<author>)", linked to its page on eighteenthcenturypoetry.org. Its spaces are its ``<c>``
+  elements; the indentation between word elements is not text.
+
 * ``rst-kernel`` (the Linux kernel's ``Documentation/``, reStructuredText): each page a document,
   native id its path below ``Documentation/`` without ``.rst``, linked to docs.kernel.org;
   translations (``Documentation/translations/``) left out.
@@ -241,6 +246,40 @@ def tcp_text(xml: bytes, stem: str) -> Iterator[TeiDoc]:
     )
 
 
+_ECPA_ID = re.compile(r"([a-z0-9]+-w\d{4})\.xml$")
+
+
+def ecpa_work(xml: bytes, stem: str) -> Iterator[TeiDoc]:
+    """One ECPA work (``<id>.xml``)."""
+    root = ET.fromstring(xml)  # noqa: S314 - the archive's own TEI; expat rejects external entities
+    text_el = root.find(f"{TEI}text")
+    if text_el is None:
+        return
+    for el in text_el.iter():
+        # Word-level markup: "<w>noblest</w>\n   <w>counsels</w>\n   <pc>,</pc>" is "noblest counsels,"
+        # with the spaces in <c> elements; the layout whitespace between elements is not text.
+        if el.tail is not None and not el.tail.strip():
+            el.tail = ""
+    text = blocks(text_el)
+    if not text:
+        return
+    stmt = root.find(f"{TEI}teiHeader/{TEI}fileDesc/{TEI}titleStmt")
+    title = _flat(stmt.find(f"{TEI}title")) if stmt is not None else ""
+    author = _flat(stmt.find(f"{TEI}author")) if stmt is not None else ""
+    title = title if len(title) <= 200 else title[:200].rsplit(" ", 1)[0] + "..."
+    yield TeiDoc(
+        key=stem,
+        title=f"{title or stem} ({author})" if author else title or stem,
+        text=text,
+        url=f"https://www.eighteenthcenturypoetry.org/works/{stem}.shtml",
+    )
+
+
+def _ecpa_member(name: str) -> str | None:
+    m = _ECPA_ID.search(name)
+    return m.group(1) if m else None
+
+
 def _tcp_member(name: str) -> str | None:
     m = _TCP_ID.search(name)
     return m.group(1) if m else None
@@ -255,6 +294,7 @@ READERS: dict[str, tuple[Callable[[str], str | None], Callable[[bytes, str], Ite
     "tei-frus": (_frus_member, frus_volume),
     "tei-cts": (_cts_member, cts_work),
     "tei-tcp": (_tcp_member, tcp_text),
+    "tei-ecpa": (_ecpa_member, ecpa_work),
     "rst-kernel": (_kernel_member, rst_page),
 }
 

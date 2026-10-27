@@ -155,3 +155,35 @@ def test_a_tcp_book_is_one_document_stored_under_its_key_or_published_name(tmp_p
             == "TO THE READER\n\nGentle reader, behold.\n\nKNOWLEDGE\n\nOf all the gifts\n\nthat heauen doth bestow,"
         )
         assert doc.url == "https://github.com/textcreationpartnership/A00002"
+
+
+# ECPA as published (2026-10-26): every word and stop marked, spaces in <c>, layout whitespace between.
+ECPA = """<TEI xmlns="http://www.tei-c.org/ns/1.0"><teiHeader><fileDesc><titleStmt>
+<title>ODE To the Earl of HUNTINGDON.</title><author>Mark Akenside</author></titleStmt></fileDesc></teiHeader>
+<text><body><lg>
+  <l>
+     <w>They</w>
+     <c> </c>
+     <w>noblest</w>
+     <c> </c>
+     <w>counsels</w>
+     <pc>,</pc>
+     <c> </c>
+     <w>boldest</w>
+     <c> </c>
+     <w>deeds</w>
+     <c> </c>
+     <w>inspire</w>
+     <pc>;</pc>
+  </l>
+</lg></body></text></TEI>"""
+
+
+def test_an_ecpa_work_reads_as_its_words_with_their_own_spaces(tmp_path: Path) -> None:
+    stored = tmp_path / "ecpa__o5157-w0020-1a2b3c4d.xml"
+    stored.write_text(ECPA)
+    (doc,) = list(read_snapshot(stored, "tei-ecpa", "o5157-w0020.xml"))
+    assert doc.key == "o5157-w0020"
+    assert doc.title == "ODE To the Earl of HUNTINGDON. (Mark Akenside)"
+    assert doc.text == "They noblest counsels, boldest deeds inspire;"
+    assert doc.url == "https://www.eighteenthcenturypoetry.org/works/o5157-w0020.shtml"

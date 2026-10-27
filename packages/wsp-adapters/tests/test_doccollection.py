@@ -1518,6 +1518,23 @@ def test_index_page_keeps_only_the_newest_file_of_each_dated_series() -> None:
     ]
 
 
+def test_index_page_rewrites_a_document_link_to_its_file() -> None:
+    """ECPA (2026-10-26): the works page links /works/<id>.shtml; the TEI is /works/<id>/<id>.xml."""
+    page = (
+        b'<a href="/works/o5157-w0020.shtml">Ode</a><a href="/works/o5157-w0020.shtml">again</a>'
+        b'<a href="/about/">x</a>'
+    )
+    env = env_for({"https://e.org/works/": page}, origins=("e.org",))
+    cfg = {
+        "kind": "index-page",
+        "url": "https://e.org/works/",
+        "documents": r"/works/[a-z0-9]+-w\d{4}\.shtml$",
+        "documents_rewrite": [r"/works/([a-z0-9]+-w\d{4})\.shtml$", r"/works/\1/\1.xml"],
+    }
+    (c,) = discover_all([cfg], env)
+    assert c.url == "https://e.org/works/o5157-w0020/o5157-w0020.xml"
+
+
 def test_govinfo_collections_are_partitions_and_serial_set_volumes_are_taken_once() -> None:
     def listing(*pids: str) -> bytes:
         return json.dumps({"count": len(pids), "packages": [{"packageId": p} for p in pids]}).encode()

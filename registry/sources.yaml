@@ -4377,6 +4377,35 @@ sources:
     size: {bytes: 1.5e10, measured: false, as_of: '2026-10-24'}
     notes: "61,315 texts (TCP.csv, 2026-10-24): A 48,941, B 4,889 (EEBO), K 2,473 (ECCO), N 5,012 (Evans, early America). The catalogue's 'Restricted' status (28,462 rows) predates the 2020 release of EEBO-TCP phase II: sampled 'Restricted' files are public and carry the CC0 waiver. The early modern spelling is kept as keyed (fiue, heauen). Owner approval D20 (2026-10-24)."
 
+  - id: ecpa-poetry
+    name: Eighteenth-Century Poetry Archive (3,714 works by 354 poets, edited TEI)
+    publisher: Eighteenth-Century Poetry Archive (Bodleian Libraries, University of Oxford)
+    domain: [literature, poetry, history]
+    tier: T1
+    status: candidate
+    license: CC-BY-SA-4.0
+    legal_basis: open-license
+    access:
+      adapter: doc-collection
+      rate: {requests_per_second: 1, concurrency: 1}
+      issuer: Eighteenth-Century Poetry Archive
+      key_prefix: ecpa
+      # The archive's works page links every work (/works/<id>.shtml); its TEI is /works/<id>/<id>.xml,
+      # every word and stop marked (read by tei-ecpa). Corrected texts built on ECCO-TCP, which the
+      # library also holds unedited. robots.txt disallows only /errors/. Owner approval 2026-10-26.
+      reader: tei-ecpa
+      origins: [www.eighteenthcenturypoetry.org]
+      discovery:
+        - kind: index-page
+          url: "https://www.eighteenthcenturypoetry.org/works/"
+          documents: "/works/[a-z0-9]+-w\\d{4}\\.shtml$"
+          documents_rewrite: ["/works/([a-z0-9]+-w\\d{4})\\.shtml$", "/works/\\1/\\1.xml"]
+      filter:
+        allow_all: true
+    update: {cadence: P1Y, strategy: snapshot-retention}
+    size: {bytes: 5e9, measured: false, as_of: '2026-10-26'}
+    notes: "Research doc docs/research/POETRY-2026-10-25.md. The archive's own texts and markup are CC BY-SA 4.0 (about page, v1.15, 2026)."
+
   - id: pubchem
     name: PubChem compounds - identifiers, names, safety summaries (LCSS) and full structure records
     publisher: US National Library of Medicine, National Center for Biotechnology Information
