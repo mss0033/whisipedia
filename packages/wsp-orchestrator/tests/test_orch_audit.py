@@ -578,3 +578,36 @@ def test_a_destination_locked_by_another_download_is_busy_not_a_failure() -> Non
     from wsp_orchestrator.errors import FailureKind, classify
 
     assert classify(FetchLockedError("another process is fetching x")) is FailureKind.BUSY
+
+
+def test_a_plan_sees_the_files_carried_from_earlier_generations(tmp_path: Path) -> None:
+    """2026-10-26 review: bundles keep only changed files in a new generation and read the rest from
+    earlier ones; a plan against the current generation alone downloaded the unchanged files again."""
+    from pathlib import PurePosixPath
+
+    from wsp_core.model import Artifact, Generation, GenerationStatus
+
+    def art(gen: str, name: str) -> Artifact:
+        return Artifact("src", gen, PurePosixPath("upstream") / name, 1, "0" * 64, "")
+
+    h = PipelineHarness(tmp_path)
+    spec = h.sources[0]
+    vault = h.vault
+    vault._gens[("src", "2026-08")] = Generation(  # pyright: ignore[reportPrivateUsage]
+        "src", "2026-08", GenerationStatus.SEALED, (art("2026-08", "a.zim"), art("2026-08", "b.zim"))
+    )
+    vault._gens[("src", "2026-09")] = Generation(  # pyright: ignore[reportPrivateUsage]
+        "src",
+        "2026-09",
+        GenerationStatus.SEALED,
+        (art("2026-09", "b.zim"),),  # b changed; a carried
+    )
+    vault._gens[("src", "2026-10")] = Generation("src", "2026-10", GenerationStatus.STAGING)  # pyright: ignore[reportPrivateUsage]
+    vault._current["src"] = "2026-09"  # pyright: ignore[reportPrivateUsage]
+    held = h.pipeline._held(spec)  # pyright: ignore[reportPrivateUsage]
+    assert held is not None
+    assert held.generation_id == "2026-09"
+    assert sorted((a.relpath.name, a.version) for a in held.artifacts) == [
+        ("a.zim", "2026-08"),
+        ("b.zim", "2026-09"),
+    ]

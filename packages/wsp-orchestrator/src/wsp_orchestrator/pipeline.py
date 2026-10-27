@@ -70,6 +70,7 @@ from pathlib import Path
 from typing import Any, Protocol, cast, runtime_checkable
 
 from wsp_core.model import (
+    Artifact,
     FetchPlan,
     FetchResult,
     Generation,
@@ -697,10 +698,30 @@ class ReleasePipeline:
 
     def _make_plan(self, spec: SourceSpec, rec: ReleaseRecord) -> dict[str, Any]:
         ref = release_from_json(rec.ref)
-        have = self.vault.current(spec.id)
-        plan = self.resolve_adapter(spec).plan(self.ctx(spec), have, ref)
+        plan = self.resolve_adapter(spec).plan(self.ctx(spec), self._held(spec), ref)
         self.checkpoint("adapter:planned")
         return plan_to_json(plan)
+
+    def _held(self, spec: SourceSpec) -> Generation | None:
+        """The current generation as a plan sees it: its own files, and those it carries from earlier
+        sealed generations. Kiwix bundles, PubMed, Gutenberg and arXiv keep only changed files in a
+        new generation and read the rest from earlier ones; a plan against the current generation's
+        files alone downloaded and stored every unchanged file again on every other release (2026-10-26
+        review: Stack Exchange's ~171 unchanged ZIMs, PubMed's 1,334 baseline files). A partitioned
+        source's other partitions hold other files: its current generation stands alone."""
+        have = self.vault.current(spec.id)
+        if have is None or spec.partitioned:
+            return have
+        names = {a.relpath.name for a in have.artifacts}
+        carried: list[Artifact] = []
+        for g in sorted(self.vault.generations(spec.id), key=lambda g: g.generation_id, reverse=True):
+            if g.generation_id == have.generation_id or g.status is not GenerationStatus.SEALED:
+                continue
+            for art in g.artifacts:
+                if art.relpath.name not in names:
+                    names.add(art.relpath.name)
+                    carried.append(art)
+        return replace(have, artifacts=(*have.artifacts, *carried)) if carried else have
 
     def _plan(self, rec: ReleaseRecord) -> FetchPlan:
         if rec.plan is None:
