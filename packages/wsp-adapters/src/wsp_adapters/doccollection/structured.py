@@ -19,6 +19,12 @@ document a reader can find and read.
   (``book``), its chapters in the reading order of ``src/epub/content.opf``, each under its heading
   ("Chapter I"); the title page, imprint, colophon and licence page left out.
 
+* ``ganjoor-sqlite`` (Ganjoor's database of classical Persian poetry, ``ganjoor-db-<date>.zip`` holding
+  ``ganjoor.s3db``, from its desktop release): each poem a document keyed by its ganjoor.net path
+  (``khayyam/robaee/sh1``), titled "<poem>, <section> (<poet>)", its couplets as pairs of lines
+  (the two hemistichs) a blank line apart, in Persian; each poet's biography a document
+  (``poet/<path>``). 281 poets, 140,497 poems in the 2026-09 release.
+
 The 2026-10-18 owner request listed them as sources to bring in; each was a registered candidate whose
 adapter (``git-mirror``, ``http-files``) was never written.
 """
@@ -28,6 +34,9 @@ from __future__ import annotations
 import io
 import json
 import re
+import shutil
+import sqlite3
+import tempfile
 import xml.etree.ElementTree as ET
 import zipfile
 from collections.abc import Iterator, Mapping, Sequence
@@ -695,11 +704,99 @@ def zipped_docx(archive: zipfile.ZipFile) -> Iterator[TeiDoc]:
         yield TeiDoc(key=name, title=title, text=text)
 
 
+GANJOOR_DB = "ganjoor.s3db"
+_GANJOOR = "https://ganjoor.net/"
+
+
+def ganjoor(archive: zipfile.ZipFile) -> Iterator[TeiDoc]:
+    """Ganjoor's poems and poets (see the module notes). The database is copied out of the zip to a
+    temporary file (SQLite reads a file), read, and removed."""
+    try:
+        info = archive.getinfo(GANJOOR_DB)
+    except KeyError:
+        return
+    with tempfile.TemporaryDirectory(prefix="wsp-ganjoor-") as tmp:
+        db = f"{tmp}/{GANJOOR_DB}"
+        with archive.open(info) as src, open(db, "wb") as dst:
+            shutil.copyfileobj(src, dst, 1024 * 1024)
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        try:
+            yield from _ganjoor_rows(con)
+        finally:
+            con.close()
+
+
+def _ganjoor_path(url: str) -> str:
+    return url.removeprefix(_GANJOOR).strip("/") if url.startswith(_GANJOOR) else ""
+
+
+def _ganjoor_rows(con: sqlite3.Connection) -> Iterator[TeiDoc]:
+    cats = {
+        cid: (str(text or ""), parent)
+        for cid, text, parent in con.execute("SELECT id, text, parent_id FROM cat")
+    }
+    poets = {cid: str(name or "") for name, cid in con.execute("SELECT name, cat_id FROM poet")}
+    for name, cid, about in con.execute("SELECT name, cat_id, description FROM poet"):
+        url = next((u for (u,) in con.execute("SELECT url FROM cat WHERE id = ?", (cid,))), "")
+        if (path := _ganjoor_path(str(url or ""))) and about:
+            yield TeiDoc(
+                key=f"poet/{path}", title=str(name), text=str(about).strip(), url=str(url), lang="fa"
+            )
+
+    def poet_and_section(cid: int) -> tuple[str, str]:
+        names: list[str] = []
+        seen: set[int] = set()
+        while cid in cats and cid not in seen:
+            seen.add(cid)
+            if cid in poets:
+                return poets[cid], "، ".join(reversed(names))
+            text, parent = cats[cid]
+            names.append(text)
+            cid = parent
+        return "", "، ".join(reversed(names))
+
+    verses = con.execute("SELECT poem_id, position, text FROM verse ORDER BY poem_id, vorder")
+    pending = next(verses, None)
+    for pid, cid, title, url in con.execute("SELECT id, cat_id, title, url FROM poem ORDER BY id"):
+        lines: list[tuple[int, str]] = []
+        while pending is not None and pending[0] < pid:
+            pending = next(verses, None)
+        while pending is not None and pending[0] == pid:
+            lines.append((int(pending[1] or 0), str(pending[2] or "").strip()))
+            pending = next(verses, None)
+        path = _ganjoor_path(str(url or ""))
+        if not path or not lines:
+            continue
+        poet, section = poet_and_section(int(cid))
+        yield TeiDoc(
+            key=path,
+            title=f"{title}، {section} ({poet})" if section else f"{title} ({poet})",
+            text=_couplets(lines),
+            url=str(url),
+            lang="fa",
+        )
+
+
+def _couplets(lines: Sequence[tuple[int, str]]) -> str:
+    """Hemistichs 0 (right) and 1 (left) of a couplet on two lines; couplets and every other verse
+    (a refrain, a centred line, prose) a blank line apart."""
+    blocks: list[str] = []
+    for pos, text in lines:
+        if not text:
+            continue
+        if pos == 1 and blocks and blocks[-1].count("\n") == 0 and not blocks[-1].startswith("\x00"):
+            blocks[-1] += "\n" + text
+        else:
+            blocks.append(text if pos == 0 else "\x00" + text)
+    return "\n\n".join(b.lstrip("\x00") for b in blocks)
+
+
 ARCHIVE_READERS = {
     "standard-ebooks": se_book,
     "markdown-docs": markdown_docs,
     "ocw-course": ocw_course,
     "zipped-docx": zipped_docx,
+    "ganjoor-sqlite": ganjoor,
 }
 
 READERS = {

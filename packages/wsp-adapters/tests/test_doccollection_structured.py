@@ -1,6 +1,8 @@
 """Catalogues published as data, read entry by entry (doccollection.structured): ATT&CK, CWE, CAPEC,
 the SP 800-53 OSCAL catalog and the MedlinePlus health topics (owner request 2026-10-18)."""
 
+# ruff: noqa: RUF001 - Ganjoor's poem titles carry Persian digits
+
 from __future__ import annotations
 
 import json
@@ -451,3 +453,41 @@ def test_a_3gpp_zip_is_its_specification_titled_from_the_cover(tmp_path: Path) -
         == "3GPP TS 38.300 V18.11.0 (2026-09): NR; NR and NG-RAN Overall Description; Stage 2 (Release 18)"
     )
     assert "overall architecture" in doc.text
+
+
+def test_ganjoor_poems_are_documents_with_their_couplets(tmp_path: Path) -> None:
+    """Ganjoor's desktop database (2026-10-26): poet, cat (sections), poem and verse tables."""
+    import sqlite3
+
+    from wsp_adapters.doccollection.structured import ganjoor
+
+    db = tmp_path / "ganjoor.s3db"
+    con = sqlite3.connect(db)
+    con.executescript(
+        """
+        CREATE TABLE cat (id INTEGER PRIMARY KEY, poet_id INTEGER, text TEXT, parent_id INTEGER, url TEXT);
+        CREATE TABLE poet (id INTEGER PRIMARY KEY, name TEXT, cat_id INTEGER, description TEXT);
+        CREATE TABLE poem (id INTEGER PRIMARY KEY, cat_id INTEGER, title TEXT, url TEXT);
+        CREATE TABLE verse (poem_id INTEGER, vorder INTEGER, position INTEGER, text TEXT);
+        INSERT INTO cat VALUES (30, 3, 'خیام', 0, 'https://ganjoor.net/khayyam'),
+                               (31, 3, 'رباعیات', 30, 'https://ganjoor.net/khayyam/robaee');
+        INSERT INTO poet VALUES (3, 'خیام', 30, 'حکیم ابوالفتح عمربن ابراهیم الخیامی');
+        INSERT INTO poem VALUES (1119, 31, 'رباعی شمارهٔ ۱', 'https://ganjoor.net/khayyam/robaee/sh1'),
+                                (1120, 31, 'empty', 'https://ganjoor.net/khayyam/robaee/sh2');
+        INSERT INTO verse VALUES (1119, 1, 0, 'برخیز بُتا'), (1119, 2, 1, 'حل کن'), (1119, 3, 0, 'یک کوزه'),
+                                 (1119, 4, 1, 'زآن پیش'), (1119, 5, 2, 'بند');
+        """
+    )
+    con.commit()
+    con.close()
+    zpath = tmp_path / "ganjoor-db.zip"
+    with zipfile.ZipFile(zpath, "w") as z:
+        z.write(db, "ganjoor.s3db")
+    with zipfile.ZipFile(zpath) as z:
+        docs = {d.key: d for d in ganjoor(z)}
+    assert set(docs) == {"poet/khayyam", "khayyam/robaee/sh1"}  # a poem without verses is left out
+    poem = docs["khayyam/robaee/sh1"]
+    assert poem.title == "رباعی شمارهٔ ۱، رباعیات (خیام)"
+    assert poem.text == "برخیز بُتا\nحل کن\n\nیک کوزه\nزآن پیش\n\nبند"
+    assert (poem.url, poem.lang) == ("https://ganjoor.net/khayyam/robaee/sh1", "fa")
+    assert docs["poet/khayyam"].text.startswith("حکیم")

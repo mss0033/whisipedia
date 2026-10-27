@@ -4436,6 +4436,42 @@ sources:
     size: {bytes: 6.1e8, measured: true, as_of: '2026-10-26'}
     notes: "Research doc docs/research/POETRY-2026-10-25.md. dta_komplett_2026-02-10.zip, 607 MB. Poetry is not a separate download (Lyrik is a genre within whole books); the archive is taken whole. CC BY-SA 4.0 (download page)."
 
+  - id: ganjoor-persian-poetry
+    name: Ganjoor - classical Persian poetry (281 poets, 140,000 poems)
+    publisher: Ganjoor
+    domain: [literature, poetry]
+    tier: T1
+    status: paused  # by hand: github.com's robots.txt disallows release downloads to robots
+    license: LicenseRef-PD-classical-texts
+    legal_basis: public-domain
+    access:
+      adapter: doc-collection
+      issuer: Ganjoor
+      key_prefix: ganjoor
+      # The poems are centuries old. Ganjoor's desktop release publishes the whole collection as one
+      # SQLite database (ganjoor.s3db in ganjoor-db-<date>.zip); the reader makes each poem a document
+      # keyed by its ganjoor.net path. The owner downloads the release file (one link on the daily
+      # page). Owner approval 2026-10-26. Check the desktop releases page for a newer db when it is due.
+      reader: ganjoor-sqlite
+      origins: [github.com]
+      manual:
+        daily: 1
+        again_days: 365
+        list:
+          kind: list
+          items:
+            - title: "Ganjoor database, release v3.1 (2026-09-25)"
+              url: "https://github.com/ganjoor/desktop/releases/download/v3.1/ganjoor-db-14050703.zip"
+              save_as: ganjoor-db-14050703.zip
+              pub_number: ganjoor-db
+      discovery: []
+      filter:
+        allow_all: true
+        data_files: true  # one SQLite database: no prose for the screen to read
+    update: {cadence: P1Y, strategy: snapshot-retention}
+    size: {bytes: 1.2e8, measured: true, as_of: '2026-10-26'}
+    notes: "Research doc docs/research/POETRY-2026-10-25.md. Persian (fa): read in English with on-request translation."
+
   - id: pubchem
     name: PubChem compounds - identifiers, names, safety summaries (LCSS) and full structure records
     publisher: US National Library of Medicine, National Center for Biotechnology Information

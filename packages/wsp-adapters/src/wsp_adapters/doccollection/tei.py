@@ -294,6 +294,7 @@ def dta_book(xml: bytes, stem: str) -> Iterator[TeiDoc]:
         title=f"{title or stem} ({who})" if who else title or stem,
         text=text,
         url=f"https://www.deutschestextarchiv.de/book/show/{stem}",
+        lang="de",
     )
 
 
