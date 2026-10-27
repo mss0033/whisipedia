@@ -83,7 +83,7 @@ class Item:
     title: str = ""
     page: bool = False  # ``open`` is a landing page: save the document it offers
     cand: dict[str, Any] = field(default_factory=dict[str, Any])  # Candidate.to_json (collections)
-    status: str = "pending"  # pending | taken
+    status: str = "pending"  # pending | taken | denied (the content screen refused it: never offered again)
     offered: list[str] = field(default_factory=list[str])  # days it was on the daily page
     taken: str = ""
     problem: str = ""
@@ -132,11 +132,11 @@ class Queue:
                     old.problem,
                 )
             merged.append(item)
-        merged += [i for i in known.values() if i.status == "taken"]
+        merged += [i for i in known.values() if i.status in ("taken", "denied")]
         self.items = merged
 
     def pending(self) -> list[Item]:
-        return [i for i in self.items if i.status != "taken"]
+        return [i for i in self.items if i.status == "pending"]
 
     def renew(self, today: date, again_days: int) -> None:
         """Items taken ``again_days`` ago or more are wanted again (an issuer's periodic refresh)."""
@@ -569,8 +569,10 @@ def import_collection(
         rejected = dict(report.rejected) if report else {}
         day = datetime.now(UTC).strftime("%Y-%m-%d")
         for item in items:
-            if item.id in failed or item.id in rejected:
-                item.problem = (failed.get(item.id) or rejected.get(item.id) or "")[:200]
+            if item.id in rejected:  # refused by the screen: asking for it again would be refused again
+                item.status, item.problem = "denied", rejected[item.id][:200]
+            elif item.id in failed:
+                item.problem = failed[item.id][:200]
             elif not (folder / item.save_as).is_file():
                 item.status, item.taken, item.problem = "taken", day, ""
         if code not in (doccollections.EXIT_COMPLETE, doccollections.EXIT_ALERT, doccollections.EXIT_PARTIAL):

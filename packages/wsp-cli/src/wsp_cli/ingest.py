@@ -328,8 +328,10 @@ class Ingestor:
             spec = self.specs.get(t.source_id)
             key = (t.source_id, "*" if spec is not None and _is_bundle(spec) else t.version)
             groups.setdefault(key, []).append(t)
-        for (sid, version), group in sorted(groups.items()):
-            report.versions.append(self._plan_group(sid, version, group))
+        # Not ``version``: the loop variable shadowed the parameter, so the checks below (arXiv, the
+        # unplanned folders) ran for the last group's version (2026-10-26 review).
+        for (sid, group_version), group in sorted(groups.items()):
+            report.versions.append(self._plan_group(sid, group_version, group))
         planned_dirs = {(t.source_id, t.version) for t in targets}
         if self.incoming.is_dir():
             for src in sorted(p for p in self.incoming.iterdir() if p.is_dir() and p.name != PLANS_DIR):
