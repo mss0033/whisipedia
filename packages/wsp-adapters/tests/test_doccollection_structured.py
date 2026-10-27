@@ -491,3 +491,27 @@ def test_ganjoor_poems_are_documents_with_their_couplets(tmp_path: Path) -> None
     assert poem.text == "برخیز بُتا\nحل کن\n\nیک کوزه\nزآن پیش\n\nبند"
     assert (poem.url, poem.lang) == ("https://ganjoor.net/khayyam/robaee/sh1", "fa")
     assert docs["poet/khayyam"].text.startswith("حکیم")
+
+
+def test_ben_yehuda_works_come_from_the_catalogue_and_the_unpointed_texts(tmp_path: Path) -> None:
+    from wsp_adapters.doccollection.structured import benyehuda
+
+    cat = (
+        "ID,path,title,authors,translators,author_uris,translator_uris,original_language,genre,source_edition\n"
+        '10,/p23/m10,חצי-נחמה,אחד העם,"",,,"",Translation missing: he.article,""\n'
+        '11,/p31/m11,שירה,ביאליק,פלוני,,,"",Translation missing: he.poetry,""\n'
+        '12,/p31/m12,missing,x,"",,,"",,""\n'
+    )
+    zpath = tmp_path / "dump.zip"
+    with zipfile.ZipFile(zpath, "w") as z:
+        z.writestr("public_domain_dump-master/pseudocatalogue.csv", cat)
+        z.writestr("public_domain_dump-master/txt_stripped/p23/m10.txt", "חצי-נחמה\n\nבין כל הצרות")
+        z.writestr("public_domain_dump-master/txt/p23/m10.txt", "pointed")
+        z.writestr("public_domain_dump-master/txt_stripped/p31/m11.txt", "שיר")
+    with zipfile.ZipFile(zpath) as z:
+        docs = {d.key: d for d in benyehuda(z)}
+    assert set(docs) == {"m10", "m11"}  # a catalogue row without its text is left out
+    assert docs["m10"].title == "חצי-נחמה (אחד העם)"
+    assert docs["m10"].text == "חצי-נחמה\n\nבין כל הצרות"
+    assert docs["m11"].title == "שירה (ביאליק, tr. פלוני)"
+    assert (docs["m10"].url, docs["m10"].lang) == ("https://benyehuda.org/read/10", "he")

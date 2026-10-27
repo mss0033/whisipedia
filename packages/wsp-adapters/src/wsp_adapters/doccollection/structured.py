@@ -25,6 +25,11 @@ document a reader can find and read.
   (the two hemistichs) a blank line apart, in Persian; each poet's biography a document
   (``poet/<path>``). 281 poets, 140,497 poems in the 2026-09 release.
 
+* ``benyehuda`` (Project Ben-Yehuda's public-domain dump, the repository read whole): each work of its
+  ``pseudocatalogue.csv`` a document keyed by its id (``m10``), titled "<title> (<authors>[, tr.
+  <translators>])", its text the unpointed edition (``txt_stripped/``: Hebrew is searched without
+  vowel points), in Hebrew, linked to benyehuda.org. 26,455 works, half of them poetry (2026-10).
+
 The 2026-10-18 owner request listed them as sources to bring in; each was a registered candidate whose
 adapter (``git-mirror``, ``http-files``) was never written.
 """
@@ -791,12 +796,49 @@ def _couplets(lines: Sequence[tuple[int, str]]) -> str:
     return "\n\n".join(b.lstrip("\x00") for b in blocks)
 
 
+def benyehuda(archive: zipfile.ZipFile) -> Iterator[TeiDoc]:
+    """Project Ben-Yehuda's works (see the module notes)."""
+    import csv
+
+    names = archive.namelist()
+    catalogue = next(
+        (n for n in names if n.endswith("/pseudocatalogue.csv") or n == "pseudocatalogue.csv"), None
+    )
+    if catalogue is None:
+        return
+    root = catalogue.removesuffix("pseudocatalogue.csv")
+    present = set(names)
+    with archive.open(catalogue) as fh:
+        rows = list(csv.DictReader(io.TextIOWrapper(fh, encoding="utf-8-sig")))
+    for row in rows:
+        wid, path = (row.get("ID") or "").strip(), (row.get("path") or "").strip().strip("/")
+        member = f"{root}txt_stripped/{path}.txt"
+        if not wid.isdigit() or not path or member not in present:
+            continue
+        text = archive.read(member).decode("utf-8", "replace").strip()
+        if not text:
+            continue
+        who = (row.get("authors") or "").strip()
+        tr = (row.get("translators") or "").strip()
+        if tr:
+            who = f"{who}, tr. {tr}" if who else f"tr. {tr}"
+        title = (row.get("title") or "").strip() or f"m{wid}"
+        yield TeiDoc(
+            key=f"m{wid}",
+            title=f"{title} ({who})" if who else title,
+            text=text,
+            url=f"https://benyehuda.org/read/{wid}",
+            lang="he",
+        )
+
+
 ARCHIVE_READERS = {
     "standard-ebooks": se_book,
     "markdown-docs": markdown_docs,
     "ocw-course": ocw_course,
     "zipped-docx": zipped_docx,
     "ganjoor-sqlite": ganjoor,
+    "benyehuda": benyehuda,
 }
 
 READERS = {

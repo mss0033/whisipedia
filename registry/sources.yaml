@@ -4472,6 +4472,34 @@ sources:
     size: {bytes: 1.2e8, measured: true, as_of: '2026-10-26'}
     notes: "Research doc docs/research/POETRY-2026-10-25.md. Persian (fa): read in English with on-request translation."
 
+  - id: benyehuda-hebrew
+    name: Project Ben-Yehuda - Hebrew public-domain literature (26,455 works, half of them poetry)
+    publisher: Project Ben-Yehuda
+    domain: [literature, poetry, history, religion]
+    tier: T1
+    status: candidate
+    license: LicenseRef-PD-dump
+    legal_basis: public-domain
+    access:
+      adapter: doc-collection
+      issuer: Project Ben-Yehuda
+      key_prefix: benyehuda
+      # The project's public-domain dump repository (LICENSE: "the data files in this repository are in
+      # the public domain"), its default branch as one zip (codeload.github.com allows robots;
+      # github.com's archive links do not). Read whole by the benyehuda reader: the catalogue's works,
+      # their unpointed text. Credit: "Project Ben-Yehuda volunteers". Owner approval 2026-10-26.
+      reader: benyehuda
+      origins: [github.com, api.github.com, codeload.github.com]
+      discovery:
+        - kind: git
+          repos: [https://github.com/projectbenyehuda/public_domain_dump]
+          snapshot: true
+      filter:
+        allow_all: true
+    update: {cadence: P6M, strategy: snapshot-retention}
+    size: {bytes: 9e8, measured: false, as_of: '2026-10-26'}
+    notes: "Research doc docs/research/POETRY-2026-10-25.md. Hebrew (he): read in English with on-request translation."
+
   - id: pubchem
     name: PubChem compounds - identifiers, names, safety summaries (LCSS) and full structure records
     publisher: US National Library of Medicine, National Center for Biotechnology Information
