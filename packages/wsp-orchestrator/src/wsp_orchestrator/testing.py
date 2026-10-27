@@ -383,8 +383,10 @@ class FakeFetcher:
     documents: dict[str, bytes] = field(default_factory=dict[str, bytes])
     observations: dict[str, dict[str, Any]] = field(default_factory=dict[str, dict[str, Any]])
     cancelled: bool = False
+    requested: list[str] = field(default_factory=list[str])
 
     def get_bytes(self, url: str, *, max_bytes: int = 64 * 1024 * 1024) -> bytes:
+        self.requested.append(url)
         if url not in self.documents:
             raise NotFoundError(url, "HTTP 404")
         return self.documents[url][:max_bytes]

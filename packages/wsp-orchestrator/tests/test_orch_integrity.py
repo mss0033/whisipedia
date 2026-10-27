@@ -58,6 +58,9 @@ from wsp_orchestrator.testing import (
 )
 
 KIWIX = "https://lb.download.kiwix.org/zim/wikipedia/"
+# The channel machinery is tested through a Kiwix source with a configured primary; the installed default
+# fetches nothing from Kiwix (test_kiwix_digest_is_its_own_channel_without_a_fetch).
+LB = "https://lb.download.kiwix.org/"
 DATA_1 = b"<html><body>generation one</body></html>\n" * 40
 DATA_2 = b"<html><body>generation two</body></html>\n" * 40
 
@@ -130,7 +133,9 @@ def setup(
     tmp_path: Path, *, settings: IntegritySettings | None = None, profiles: Profiles | None = None
 ) -> tuple[PipelineHarness, Attestations]:
     attest = Attestations()
-    hooks = IntegrityHooks(settings=settings or IntegritySettings(), attest=attest, profile=profiles)
+    hooks = IntegrityHooks(
+        settings=settings or IntegritySettings(kiwix_primary=LB), attest=attest, profile=profiles
+    )
     h = PipelineHarness(tmp_path, sources=[make_spec("wp", adapter="kiwix-opds")], integrity=hooks)
     return h, attest
 
@@ -175,6 +180,20 @@ def run(h: PipelineHarness, ref: ReleaseRef) -> Outcome:
 
 
 # --- the happy path -------------------------------------------------------------------------------
+
+
+def test_kiwix_digest_is_its_own_channel_without_a_fetch(tmp_path: Path) -> None:
+    """Kiwix's hosts refuse robots (2026-10): the declared SHA-256 is Kiwix's own (saved by the owner or
+    recorded at the first download), the fetcher checked the bytes against it, and no Kiwix host is asked."""
+    h, _ = setup(tmp_path, settings=IntegritySettings())
+    ref = offer(h, "2026-10-01", DATA_1, origin="https://ftp.fau.de/kiwix/zim/wikipedia/")
+    assert run(h, ref) is Outcome.PROMOTED
+    stored = h.store.provenance("wp", "2026-10-01")
+    assert stored is not None
+    _, doc = stored
+    assert doc["channel_status"] == "independent"
+    assert "saved by the owner" in doc["files"][0]["channel"]["detail"]
+    assert not any("kiwix.org" in u for u in h.fetcher.requested)
 
 
 def test_clean_release_is_promoted_with_signed_provenance_and_report(tmp_path: Path) -> None:
@@ -356,7 +375,8 @@ def test_channel_locations() -> None:
         "https://dumps.wikimedia.org/enwiki/20261001/enwiki-20261001-md5sums.txt",
     ]
     kx = RemoteFile("https://mirror.example/zim/x.zim", "x.zim")
-    assert kiwix_refs(kx)[0].url == "https://lb.download.kiwix.org/zim/x.zim.sha256"
+    assert kiwix_refs(kx, LB)[0].url == "https://lb.download.kiwix.org/zim/x.zim.sha256"
+    assert kiwix_refs(kx) == []  # the default: no fetch from a Kiwix host (owner, 2026-10-26)
     osm = RemoteFile(
         "https://planet.osm.org/pbf/p.osm.pbf",
         "p.osm.pbf",
@@ -532,7 +552,7 @@ def test_a_busy_or_oom_killed_profiler_is_retried_not_held(tmp_path: Path) -> No
         return profiles(spec, generation, generation_dir)
 
     attest = Attestations()
-    hooks = IntegrityHooks(attest=attest, profile=flaky)
+    hooks = IntegrityHooks(settings=IntegritySettings(kiwix_primary=LB), attest=attest, profile=flaky)
     h = PipelineHarness(tmp_path, sources=[make_spec("wp", adapter="kiwix-opds")], integrity=hooks)
     result = run(h, offer(h, "2026-10-01", DATA_1))
     assert result is Outcome.DEFERRED

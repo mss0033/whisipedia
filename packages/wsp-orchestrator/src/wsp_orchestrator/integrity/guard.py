@@ -39,7 +39,9 @@ from wsp_orchestrator.integrity.anomaly import (
 from wsp_orchestrator.integrity.channels import (
     DEFAULT_KIWIX_PRIMARY,
     DEFAULT_WIKIMEDIA_PRIMARY,
+    KIWIX_SAVED,
     ChannelObservation,
+    ChannelVerdict,
     channel_refs,
     host_of,
     judge_channels,
@@ -212,6 +214,9 @@ class IntegrityGuard:
             if missing and local.is_file():
                 ours.update(_hash_file(local, missing))
             verdict = judge_channels(obs, ours=ours, declared=declared, byte_hosts=byte_hosts)
+            if not refs and spec.adapter == "kiwix-opds" and declared.get("sha256"):
+                # The fetcher checked the bytes against it; its source is not the mirror (channels notes).
+                verdict = ChannelVerdict("independent", KIWIX_SAVED, ())
             all_independent = all_independent and verdict.status == "independent"
             if verdict.status == "mismatch":
                 findings.append(

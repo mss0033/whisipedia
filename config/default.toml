@@ -116,7 +116,7 @@ profile_sample_rate = 0.03125       # documents sampled for content comparison (
 profile_busy_share = 0.25           # profiles read at most this share of the time (~28 MB/s on the NAS link; 1 = unpaced)
 profile_min_rate = 750000           # bytes/s: a ZIM profile's time budget is at least its ZIMs' size at this rate (PT24H otherwise)
 wikimedia_primary = "https://dumps.wikimedia.org/"
-kiwix_primary = "https://download.kiwix.org/"
+kiwix_primary = ""                  # none: Kiwix's hosts refuse robots; the declared SHA-256 is Kiwix's own (owner, 2026-10-26)
 
 [integrity.anomaly]                 # before promotion; out of range = held for `wsp approve` / `wsp reject`
 max_namespace_change = 0.10

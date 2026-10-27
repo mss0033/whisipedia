@@ -6,8 +6,11 @@ download, the guard fetches the digest again through a second channel and compar
 * **Wikimedia dumps** (``wikimedia-dumps``, ``wikidata``): ``<wiki>-<date>-sha1sums.txt`` and
   ``-md5sums.txt`` from the **primary** (``dumps.wikimedia.org``), while the bytes usually come
   from mirrors;
-* **Kiwix** (``kiwix-opds``): ``<file>.sha256`` from ``lb.download.kiwix.org`` (the bytes come from
-  the mirrors its Metalink lists; the Metalink's own hashes are cross-checked by the fetcher);
+* **Kiwix** (``kiwix-opds``): no fetch. Kiwix's hosts refuse robots (2026-10); the declared SHA-256
+  is Kiwix's own, saved by the owner from download.kiwix.org or recorded when the file was first
+  downloaded from Kiwix (wsp_adapters.kiwix), never from the mirror that serves the bytes, so it is
+  the independent channel (owner decision 2026-10-26: not lb.download.kiwix.org, a sibling host of
+  the ones that refuse us). A ``kiwix_primary`` set in the config fetches its sidecar again;
 * **everything else**: ``<url>.<algorithm>`` sidecars, preferring a mirror that did not serve the
   bytes, then the origin.
 
@@ -26,8 +29,10 @@ from urllib.parse import urlsplit, urlunsplit
 from wsp_core.model import RemoteFile
 
 DEFAULT_WIKIMEDIA_PRIMARY = "https://dumps.wikimedia.org/"
-# Not download.kiwix.org: its robots.txt disallows every agent (2026-10-23); lb serves the same sidecars.
-DEFAULT_KIWIX_PRIMARY = "https://lb.download.kiwix.org/"
+# None: Kiwix's hosts refuse robots, and lb.download.kiwix.org is not used to go round them (owner,
+# 2026-10-26). The declared digest is Kiwix's own (see the module notes).
+DEFAULT_KIWIX_PRIMARY = ""
+KIWIX_SAVED = "Kiwix's own SHA-256, saved by the owner or recorded at the first download from Kiwix"
 SIDECAR_ALGORITHMS = ("sha256", "sha1", "md5", "sha512")
 _HEX = re.compile(r"^[0-9a-fA-F]{32,128}$")
 _BSD = re.compile(r"^(?P<algo>[A-Za-z0-9-]+)\s*\((?P<name>.+)\)\s*=\s*(?P<hex>[0-9a-fA-F]+)$")
@@ -91,6 +96,8 @@ def wikimedia_refs(remote: RemoteFile, primary: str = DEFAULT_WIKIMEDIA_PRIMARY)
 
 
 def kiwix_refs(remote: RemoteFile, primary: str = DEFAULT_KIWIX_PRIMARY) -> list[ChannelRef]:
+    if not primary:
+        return []
     url = _swap_base(remote.url, primary)
     return [ChannelRef(url + ".sha256", "sha256", url.rpartition("/")[2], "primary-sidecar")]
 
