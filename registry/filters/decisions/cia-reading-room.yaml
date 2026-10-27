@@ -57,6 +57,8 @@ allow_documents:
 - cia-rr:cia-readingroom-document-5076de5a993247d4d82b5bb5
 - cia-rr:cia-readingroom-document-5076de5a993247d4d82b5bba
 - cia-rr:cia-readingroom-document-5076de5a993247d4d82b5bd8
+- cia-rr:cia-readingroom-document-5166d49299326091c6a603b8
+- cia-rr:cia-readingroom-document-51966ec2993294098d5096f6
 - cia-rr:cia-readingroom-document-cia-rdp05-01559r000400410063-1
 - cia-rr:cia-readingroom-document-cia-rdp33-02415a000400010033-9
 - cia-rr:cia-readingroom-document-cia-rdp33-02415a000400350095-4
@@ -283,6 +285,7 @@ allow_documents:
 - cia-rr:cia-readingroom-document-cia-rdp86-00513r000410520005-4
 - cia-rr:cia-readingroom-document-cia-rdp86-00513r000411110018-4
 - cia-rr:cia-readingroom-document-cia-rdp86-00800r000100130020-2
+- cia-rr:cia-readingroom-document-cia-rdp86m00017r001301050059-5
 - cia-rr:cia-readingroom-document-cia-rdp86m00886r000600100085-5
 - cia-rr:cia-readingroom-document-cia-rdp87-00868r000100060086-6
 - cia-rr:cia-readingroom-document-cia-rdp88-01314r000100230017-2
@@ -2006,3 +2009,18 @@ log:
   rule: review:text=no-text-layer
   at: '2026-10-20T00:45:26+00:00'
   proposal: 117
+- key: cia-rr:cia-readingroom-document-5166d49299326091c6a603b8
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:25+00:00'
+  proposal: 129
+- key: cia-rr:cia-readingroom-document-cia-rdp86m00017r001301050059-5
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:26+00:00'
+  proposal: 119
+- key: cia-rr:cia-readingroom-document-51966ec2993294098d5096f6
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:27+00:00'
+  proposal: 125

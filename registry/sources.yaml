@@ -1485,7 +1485,7 @@ sources:
             - "\"celestial navigation\" OR \"GPS navigation\""
             - "\"network defense\""
             - "\"power electronics\""
-      filter: {allow_all: true, distribution: {require: [public-release]}}
+      filter: {allow_all: true, distribution: {require: [public-release]}, rules: registry/filters/nps-calhoun.yaml}
     update: {cadence: P3M, strategy: base-plus-incremental}
     size: {records: 74327, bytes: 100e9, measured: false, as_of: 2026-10-10}
     notes: Score 3.9. Record count measured (OAI completeListSize). Only items stating "Approved for public release; distribution is unlimited", then the subject filter of research doc §3.3.
@@ -1507,7 +1507,7 @@ sources:
       discovery:
         - {kind: index-page, label: csi-books, url: "https://www.cia.gov/resources/csi/books-and-monographs/", documents: "www\\.cia\\.gov/resources/csi/static/.+\\.pdf$"}
         - {kind: index-page, label: csi-studies, url: "https://www.cia.gov/resources/csi/studies-in-intelligence/archives/title-index/", follow: "/resources/csi/studies-in-intelligence/(?!archives/)[^?#]+/$", depth: 1, max_pages: 3000, documents: "www\\.cia\\.gov/resources/csi/static/.+\\.pdf$"}
-      filter: {allow_all: true, declassified_ok: true, distribution: {require: [public-release, published]}}
+      filter: {allow_all: true, declassified_ok: true, distribution: {require: [public-release, published]}, rules: registry/filters/cia-csi.yaml}
     update: {cadence: P3M, strategy: snapshot-retention}
     size: {bytes: 3e9, measured: false, as_of: 2026-10-10}
     notes: Score 4.5. Unclassified journal issues 1992 onward; Heuer's Psychology of Intelligence Analysis PDF is on the site.
@@ -4158,7 +4158,7 @@ sources:
             - {pub_number: featureCodes, title: "Feature codes", url: "https://download.geonames.org/export/dump/featureCodes_en.txt"}
             - {pub_number: timeZones, title: "Time zones", url: "https://download.geonames.org/export/dump/timeZones.txt"}
             - {pub_number: readme, title: "Readme (file formats)", url: "https://download.geonames.org/export/dump/readme.txt"}
-      filter: {allow_all: true, public_issuer: true, data_files: true}
+      filter: {allow_all: true, public_issuer: true, data_files: true, rules: registry/filters/geonames.yaml}
     update: {cadence: P3M, strategy: snapshot-retention}
     size: {bytes: 1.0e9, measured: false, as_of: '2026-10-20'}
     notes: "12 million place names with coordinates, population, elevation and alternate names in many languages (owner request 2026-10-18, geography)."
@@ -5551,7 +5551,7 @@ sources:
           depth: 2
           max_pages: 400
           documents: "csb\\.gov/assets/.+\\.pdf(?:$|\\?)"
-      filter: {allow_all: true, public_issuer: true}
+      filter: {allow_all: true, public_issuer: true, rules: registry/filters/csb-investigations.yaml}
     update: {cadence: P3M, strategy: snapshot-retention}
     size: {bytes: 3.0e9, measured: false, as_of: '2026-10-21'}
     notes: "How chemical releases, fires and explosions at plants happened and how to prevent them: 134 completed investigations with final reports, case studies and recommendations. robots.txt asks only that print views and /friend/ be left alone."
@@ -5647,7 +5647,7 @@ sources:
         - {<<: *ntrs, filters: {subjectCategory: "Composite Materials"}}
         - {<<: *ntrs, filters: {subjectCategory: "Nonmetallic Materials"}}
         - {<<: *ntrs, filters: {subjectCategory: "Fluid Mechanics and Thermodynamics"}}
-      filter: {allow_all: true, public_issuer: true}
+      filter: {allow_all: true, public_issuer: true, rules: registry/filters/nasa-ntrs-materials-mechanical.yaml}
     update: {cadence: P6M, strategy: snapshot-retention}
     size: {bytes: 6.0e10, measured: false, as_of: '2026-10-21'}
     notes: "NASA's reports on machine elements, bearings and lubrication, fasteners, gears, metals and alloys, composites, ceramics and polymers, heat transfer and fluid flow (about 21,600 records in these categories; public ones with a PDF are kept). index: false at first given the size."
@@ -5743,7 +5743,7 @@ sources:
       origins: [www.energy.gov]
       discovery:
         - {kind: api, flavor: doe-technical-standards, url: "https://www.energy.gov/ehss/technical-standards-current"}
-      filter: {allow_all: true, public_issuer: true}
+      filter: {allow_all: true, public_issuer: true, rules: registry/filters/doe-technical-standards.yaml}
     update: {cadence: P1Y, strategy: snapshot-retention}
     size: {bytes: 1.0e9, measured: false, as_of: '2026-10-21'}
     notes: "The 160 DOE standards and handbooks in force: chemical management (DOE-HDBK-1139), emergency exposure limits for chemicals, electrical safety, fire protection, natural phenomena hazards design, human performance, hoisting and rigging, explosives safety in storage and handling (facility safety, not manufacture). Each article page on energy.gov links its PDF."

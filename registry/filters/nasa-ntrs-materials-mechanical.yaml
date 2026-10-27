@@ -1,0 +1,4 @@
+# Document-level rules for nasa-ntrs-materials-mechanical (NASA Technical Reports Server (materials and mechanical engineering)). None of its own yet: the registry filter and the
+# built-in safety lists apply, and cannot be switched off. Owner review decisions are recorded by
+# `wsp proposals accept|reject` in registry/filters/decisions/nasa-ntrs-materials-mechanical.yaml (added 2026-10-26).
+{}

@@ -1,0 +1,6136 @@
+# Owner review decisions for crs-reports (machine-owned; written by `wsp proposals accept|reject`).
+# One entry per document the owner decided, keyed by document key (one edition). The hand-written
+# rules, with their comments, are in registry/filters/crs-reports.yaml; this file is loaded next to it (policy.load_rules).
+# Remove an entry to undo a decision; anything else is rewritten by the next decision.
+allow_documents:
+- crs:71-240D
+- crs:72-224
+- crs:72-274E
+- crs:76-149
+- crs:76-19E
+- crs:78-12ED
+- crs:78-255
+- crs:79-19
+- crs:79-206
+- crs:79-219
+- crs:79-244
+- crs:79-244EPW
+- crs:79-254E
+- crs:79-72GOV
+- crs:80-105A
+- crs:80-130
+- crs:80-156
+- crs:80-157
+- crs:80-218
+- crs:80-223
+- crs:80-53
+- crs:81-106
+- crs:81-116
+- crs:81-121
+- crs:81-154E
+- crs:81-156
+- crs:81-169EPW
+- crs:81-172E
+- crs:81-2
+- crs:81-222
+- crs:81-233S
+- crs:81-257F
+- crs:81-260E
+- crs:81-266ENR
+- crs:81-37E
+- crs:81-5
+- crs:81-84
+- crs:81-94
+- crs:81-97F
+- crs:81-BU
+- crs:82-102E
+- crs:82-111ENR
+- crs:82-136S
+- crs:82-13E
+- crs:82-168EPW
+- crs:82-171
+- crs:82-176ENR
+- crs:82-177E
+- crs:82-183S
+- crs:82-18S
+- crs:82-206C
+- crs:82-210E
+- crs:82-212GOV
+- crs:82-22C
+- crs:82-40EPW
+- crs:82-51GOV
+- crs:82-52A
+- crs:82-67E
+- crs:82-ID
+- crs:83-103GOV
+- crs:83-115E
+- crs:83-144A
+- crs:83-150A
+- crs:83-156E
+- crs:83-194F
+- crs:83-221E
+- crs:83-27E
+- crs:83-49GOV
+- crs:83-526E
+- crs:83-541S
+- crs:83-547E
+- crs:84-143L
+- crs:84-148
+- crs:84-150A
+- crs:84-162E
+- crs:84-223ENR
+- crs:84-22F
+- crs:84-29S
+- crs:84-3SP
+- crs:84-44ENR
+- crs:84-518SPR
+- crs:84-53E
+- crs:84-545ENR
+- crs:84-561SPR
+- crs:84-58E
+- crs:84-591ENR
+- crs:84-622SPR
+- crs:84-649SPR
+- crs:84-693EPW
+- crs:84-766EPW
+- crs:84-784E
+- crs:84-78GOV
+- crs:84-803ENR
+- crs:84-82F
+- crs:84-99EPW
+- crs:84-9EPW
+- crs:85-102E
+- crs:85-106GOV
+- crs:85-1130GOV
+- crs:85-217A
+- crs:85-537E
+- crs:85-86F
+- crs:85-874F
+- crs:85-929A
+- crs:86-12GOV
+- crs:86-148GOV
+- crs:86-171S
+- crs:86-769F
+- crs:86-88F
+- crs:86-8SPR
+- crs:86-944A
+- crs:86-99F
+- crs:87-1GOV
+- crs:87-200F
+- crs:87-270E
+- crs:87-286
+- crs:87-291F
+- crs:87-339F
+- crs:87-418F
+- crs:87-457ENR
+- crs:87-479GOV
+- crs:87-585F
+- crs:87-637EPW
+- crs:87-674EPW
+- crs:87-691SPR
+- crs:87-695A
+- crs:87-746F
+- crs:87-765A
+- crs:87-769EPW
+- crs:87-888L
+- crs:87-978EPW
+- crs:88-115L
+- crs:88-171A
+- crs:88-184L
+- crs:88-190GOV
+- crs:88-214A
+- crs:88-332L
+- crs:88-352F
+- crs:88-65GOV
+- crs:88-72L
+- crs:88-83ENR
+- crs:88-95L
+- crs:89-172
+- crs:89-213
+- crs:89-413A
+- crs:89-434F
+- crs:89-679
+- crs:90-274F
+- crs:90-298F
+- crs:90-513F
+- crs:90-523F
+- crs:91-215SPR
+- crs:91-294
+- crs:91-361RCO
+- crs:91-395
+- crs:91-421F
+- crs:91-578
+- crs:91-578F
+- crs:91-893
+- crs:92-365
+- crs:92-557F
+- crs:92-821
+- crs:93-1067
+- crs:93-280
+- crs:93-398
+- crs:93-409
+- crs:93-478
+- crs:93-57
+- crs:93-656
+- crs:93-656F
+- crs:93-686
+- crs:93-708
+- crs:93-789
+- crs:93-808
+- crs:93-852F
+- crs:93-980
+- crs:94-12
+- crs:94-14
+- crs:94-176
+- crs:94-185
+- crs:94-192
+- crs:94-252
+- crs:94-279
+- crs:94-284
+- crs:94-288
+- crs:94-305
+- crs:94-310
+- crs:94-343
+- crs:94-375
+- crs:94-392
+- crs:94-423
+- crs:94-435
+- crs:94-464
+- crs:94-490
+- crs:94-540
+- crs:94-612
+- crs:94-612F
+- crs:94-666
+- crs:94-719
+- crs:94-738
+- crs:94-75
+- crs:94-87
+- crs:94-91
+- crs:94-954
+- crs:94-961
+- crs:95-1020F
+- crs:95-1076
+- crs:95-1077
+- crs:95-1095
+- crs:95-1129
+- crs:95-1175ENR
+- crs:95-142
+- crs:95-184
+- crs:95-205
+- crs:95-291
+- crs:95-351
+- crs:95-389
+- crs:95-58
+- crs:95-621
+- crs:95-624
+- crs:95-629
+- crs:95-645
+- crs:95-669
+- crs:95-669A
+- crs:95-744
+- crs:95-787F
+- crs:95-797A
+- crs:95-81
+- crs:95-822
+- crs:95-834
+- crs:95-854
+- crs:95-862
+- crs:95-862F
+- crs:96-109
+- crs:96-109GOV
+- crs:96-184
+- crs:96-221
+- crs:96-225
+- crs:96-271
+- crs:96-272
+- crs:96-272F
+- crs:96-373
+- crs:96-513
+- crs:96-53
+- crs:96-537
+- crs:96-567
+- crs:96-671
+- crs:96-677F
+- crs:96-727C
+- crs:96-767
+- crs:96-785
+- crs:96-82
+- crs:96-833
+- crs:96-94
+- crs:96-987
+- crs:97-1010ENR
+- crs:97-1012C
+- crs:97-1022
+- crs:97-1027
+- crs:97-1027F
+- crs:97-126
+- crs:97-139
+- crs:97-184
+- crs:97-217
+- crs:97-224
+- crs:97-231
+- crs:97-231F
+- crs:97-272
+- crs:97-336
+- crs:97-366
+- crs:97-403
+- crs:97-403ENR
+- crs:97-454
+- crs:97-474
+- crs:97-474F
+- crs:97-481
+- crs:97-484
+- crs:97-512
+- crs:97-589A
+- crs:97-633
+- crs:97-639
+- crs:97-665
+- crs:97-68
+- crs:97-682
+- crs:97-70
+- crs:97-756
+- crs:97-759
+- crs:97-773
+- crs:97-778F
+- crs:97-781
+- crs:97-820
+- crs:97-851
+- crs:97-916
+- crs:97-933
+- crs:97-933F
+- crs:97-948
+- crs:97-949
+- crs:97-949F
+- crs:98-116
+- crs:98-116F
+- crs:98-151GOV
+- crs:98-159
+- crs:98-159F
+- crs:98-175GOV
+- crs:98-197
+- crs:98-201
+- crs:98-201ENR
+- crs:98-207
+- crs:98-207ENR
+- crs:98-211
+- crs:98-211F
+- crs:98-222GOV
+- crs:98-272
+- crs:98-299
+- crs:98-299F
+- crs:98-352
+- crs:98-367GOV
+- crs:98-381GOV
+- crs:98-416
+- crs:98-436
+- crs:98-496
+- crs:98-496F
+- crs:98-537
+- crs:98-562
+- crs:98-575
+- crs:98-578
+- crs:98-597
+- crs:98-633
+- crs:98-647F
+- crs:98-690A
+- crs:98-706GOV
+- crs:98-728GOV
+- crs:98-763
+- crs:98-788
+- crs:98-843A
+- crs:98-907
+- crs:98-916F
+- crs:CP1982
+- crs:IB10061
+- crs:IB10091
+- crs:IB1010
+- crs:IB10119
+- crs:IB73022
+- crs:IB74011
+- crs:IB74014
+- crs:IB74019
+- crs:IB74057
+- crs:IB74122
+- crs:IB74129
+- crs:IB75034
+- crs:IB75039
+- crs:IB75085
+- crs:IB76006
+- crs:IB76053
+- crs:IB76061
+- crs:IB77021
+- crs:IB77032
+- crs:IB77046
+- crs:IB77048
+- crs:IB77080
+- crs:IB77117
+- crs:IB78015
+- crs:IB78029
+- crs:IB78033
+- crs:IB78040
+- crs:IB78091
+- crs:IB79045
+- crs:IB79047
+- crs:IB79102
+- crs:IB79115
+- crs:IB80006
+- crs:IB80030
+- crs:IB80040
+- crs:IB80062
+- crs:IB80070
+- crs:IB80086
+- crs:IB80090
+- crs:IB81010
+- crs:IB81011
+- crs:IB81020
+- crs:IB81025
+- crs:IB81030
+- crs:IB81035
+- crs:IB81046
+- crs:IB81056
+- crs:IB81062
+- crs:IB81075
+- crs:IB81077
+- crs:IB81088
+- crs:IB81107
+- crs:IB81112
+- crs:IB81117
+- crs:IB81118
+- crs:IB81123
+- crs:IB81125
+- crs:IB81128
+- crs:IB81138
+- crs:IB81139
+- crs:IB81141
+- crs:IB81150
+- crs:IB81159
+- crs:IB81160
+- crs:IB81163
+- crs:IB81165
+- crs:IB81172
+- crs:IB81175
+- crs:IB81181
+- crs:IB82001
+- crs:IB82005
+- crs:IB82020
+- crs:IB82025
+- crs:IB82046
+- crs:IB82050
+- crs:IB82051
+- crs:IB82056
+- crs:IB82057
+- crs:IB82059
+- crs:IB82072
+- crs:IB82074
+- crs:IB82075
+- crs:IB82076
+- crs:IB82078
+- crs:IB82081
+- crs:IB82101
+- crs:IB82107
+- crs:IB82114
+- crs:IB82117
+- crs:IB82126
+- crs:IB83015
+- crs:IB83021
+- crs:IB83027
+- crs:IB83051
+- crs:IB83060
+- crs:IB83077
+- crs:IB83079
+- crs:IB83087
+- crs:IB83095
+- crs:IB83103
+- crs:IB83105
+- crs:IB83106
+- crs:IB83120
+- crs:IB83157
+- crs:IB83168
+- crs:IB84005
+- crs:IB84013
+- crs:IB84016
+- crs:IB84036
+- crs:IB84081
+- crs:IB84142
+- crs:IB85007
+- crs:IB85035
+- crs:IB85061
+- crs:IB85066
+- crs:IB85067
+- crs:IB85072
+- crs:IB85075
+- crs:IB85080
+- crs:IB85097
+- crs:IB85100
+- crs:IB85102
+- crs:IB85103
+- crs:IB85104
+- crs:IB85119
+- crs:IB85152
+- crs:IB85170
+- crs:IB86115
+- crs:IB86132
+- crs:IB86148
+- crs:IB86153
+- crs:IB86154
+- crs:IB87010
+- crs:IB87013
+- crs:IB87015
+- crs:IB87018
+- crs:IB87022
+- crs:IB87028
+- crs:IB87055
+- crs:IB87059
+- crs:IB87061
+- crs:IB87096
+- crs:IB87106
+- crs:IB87108
+- crs:IB87110
+- crs:IB87112
+- crs:IB87123
+- crs:IB87126
+- crs:IB87128
+- crs:IB87145
+- crs:IB87150
+- crs:IB87151
+- crs:IB87168
+- crs:IB87182
+- crs:IB87191
+- crs:IB87201
+- crs:IB87202
+- crs:IB87207
+- crs:IB87214
+- crs:IB87222
+- crs:IB88005
+- crs:IB88006
+- crs:IB88007
+- crs:IB88012
+- crs:IB88028
+- crs:IB88033
+- crs:IB88036
+- crs:IB89140
+- crs:IB91141
+- crs:IB92059
+- crs:IB92075
+- crs:IB92130
+- crs:IB93062
+- crs:IB93097
+- crs:IB93108
+- crs:IB93109
+- crs:IB94041
+- crs:IB95044
+- crs:IB95112
+- crs:IB96019
+- crs:IB96039
+- crs:IB97056
+- crs:IB98034
+- crs:IF10045
+- crs:IF10392
+- crs:IF10472
+- crs:IF10575
+- crs:IF10715
+- crs:IF10798
+- crs:IF11069
+- crs:IF11107
+- crs:IF11154
+- crs:IF11197
+- crs:IF11240
+- crs:IF11292
+- crs:IF11311
+- crs:IF11415
+- crs:IF11437
+- crs:IF11441
+- crs:IF11466
+- crs:IF11533
+- crs:IF11537
+- crs:IF11647
+- crs:IF11810
+- crs:IF11872
+- crs:IF11894
+- crs:IF11913
+- crs:IF12172
+- crs:IF12276
+- crs:IF12356
+- crs:IF12357
+- crs:IF12425
+- crs:IF12438
+- crs:IF12483
+- crs:IF12885
+- crs:IF12894
+- crs:IF12958
+- crs:IF13042
+- crs:IF13085
+- crs:IF13247
+- crs:IF13269
+- crs:IN10160
+- crs:IN10240
+- crs:IN10489
+- crs:IN10557
+- crs:IN10595
+- crs:IN10635
+- crs:IN10866
+- crs:IN10953
+- crs:IN10983
+- crs:IN11014
+- crs:IN11120
+- crs:IN11127
+- crs:IN11531
+- crs:IN12022
+- crs:IN12111
+- crs:IN12174
+- crs:IN12300
+- crs:IN12359
+- crs:IN12444
+- crs:IN12610
+- crs:IN12710
+- crs:IN12712
+- crs:IN12724
+- crs:IP0086
+- crs:IP0092
+- crs:IP0135
+- crs:IP0157
+- crs:IP0166
+- crs:IP0173T
+- crs:IP0174C
+- crs:IP0177I
+- crs:IP0193M
+- crs:IP0195N
+- crs:IP0201J
+- crs:IP0202R
+- crs:IP0208M
+- crs:IP0209T
+- crs:IP0210S
+- crs:IP0212F
+- crs:IP0219S
+- crs:IP0240A
+- crs:IP0241G
+- crs:IP0257A
+- crs:IP0280E
+- crs:IP0281G
+- crs:IP0294S
+- crs:IP0314H
+- crs:IP0333A
+- crs:IP182
+- crs:IP186D
+- crs:IP226
+- crs:IP226F
+- crs:IP250
+- crs:IP257T
+- crs:IP267T
+- crs:IP281G
+- crs:IP283P
+- crs:IP31
+- crs:IP326L
+- crs:IP371S
+- crs:IP384S
+- crs:IP390S
+- crs:IP75
+- crs:IP94
+- crs:IPO190C
+- crs:IS40275
+- crs:LSB10195
+- crs:LSB10252
+- crs:LSB10253
+- crs:LSB10304
+- crs:LSB10592
+- crs:LSB10733
+- crs:LSB10848
+- crs:LSB11013
+- crs:LSB11034
+- crs:LSB11211
+- crs:LSB11325
+- crs:LSB11409
+- crs:MB79229
+- crs:MB80206
+- crs:MB81239
+- crs:MB81263
+- crs:MB81265
+- crs:MB82221
+- crs:MB82225
+- crs:MB82228
+- crs:MB82233
+- crs:MB82241
+- crs:MB82242
+- crs:MB82244
+- crs:MB83214
+- crs:MB83219
+- crs:MB83223
+- crs:MB83229
+- crs:MB83235
+- crs:MB83242
+- crs:MB84204
+- crs:R40054
+- crs:R40089
+- crs:R40095
+- crs:R40482
+- crs:R40507
+- crs:R40557
+- crs:R40564
+- crs:R40644
+- crs:R40733
+- crs:R41123
+- crs:R41161
+- crs:R41178
+- crs:R41199
+- crs:R41206
+- crs:R41250
+- crs:R41259
+- crs:R41263
+- crs:R41275
+- crs:R41347
+- crs:R41416
+- crs:R41419
+- crs:R41446
+- crs:R41550
+- crs:R41556
+- crs:R41589
+- crs:R41674
+- crs:R41721
+- crs:R41744
+- crs:R41817
+- crs:R41843
+- crs:R41868
+- crs:R41910
+- crs:R42116
+- crs:R42385
+- crs:R42440
+- crs:R42492
+- crs:R42501
+- crs:R42536
+- crs:R42606
+- crs:R42630
+- crs:R42699
+- crs:R42926
+- crs:R42938
+- crs:R42968
+- crs:R43070
+- crs:R43080
+- crs:R43118
+- crs:R43140
+- crs:R43251
+- crs:R43296
+- crs:R43311
+- crs:R43361
+- crs:R43422
+- crs:R43509
+- crs:R43566
+- crs:R43685
+- crs:R43767
+- crs:R43835
+- crs:R43848
+- crs:R43865
+- crs:R43926
+- crs:R43966
+- crs:R43989
+- crs:R44017
+- crs:R44060
+- crs:R44137
+- crs:R44142
+- crs:R44196
+- crs:R44226
+- crs:R44229
+- crs:R44246
+- crs:R44344
+- crs:R44408
+- crs:R44442
+- crs:R44444
+- crs:R44544
+- crs:R44570
+- crs:R44598
+- crs:R44673
+- crs:R44708
+- crs:R44731
+- crs:R44912
+- crs:R44921
+- crs:R44953
+- crs:R44984
+- crs:R45013
+- crs:R45016
+- crs:R45046
+- crs:R45091
+- crs:R45127
+- crs:R45142
+- crs:R45164
+- crs:R45172
+- crs:R45175
+- crs:R45191
+- crs:R45281
+- crs:R45415
+- crs:R45500
+- crs:R45757
+- crs:R45795
+- crs:R45852
+- crs:R45880
+- crs:R45970
+- crs:R46148
+- crs:R46337
+- crs:R46384
+- crs:R46458
+- crs:R46476
+- crs:R46580
+- crs:R46663
+- crs:R46678
+- crs:R46693
+- crs:R46695
+- crs:R46714
+- crs:R46748
+- crs:R46829
+- crs:R46857
+- crs:R46958
+- crs:R47094
+- crs:R47207
+- crs:R47242
+- crs:R47246
+- crs:R47270
+- crs:R47293
+- crs:R47311
+- crs:R47493
+- crs:R47508
+- crs:R47553
+- crs:R47597
+- crs:R47599
+- crs:R47603
+- crs:R47620
+- crs:R47657
+- crs:R47684
+- crs:R47828
+- crs:R47829
+- crs:R47843
+- crs:R48044
+- crs:R48052
+- crs:R48131
+- crs:R48160
+- crs:R48162
+- crs:R48266
+- crs:R48287
+- crs:R48289
+- crs:R48294
+- crs:R48364
+- crs:R48541
+- crs:R48543
+- crs:R48875
+- crs:R48939
+- crs:R48944
+- crs:R48946
+- crs:R48971
+- crs:R49031
+- crs:R49036
+- crs:RA-73-OMBRA-81
+- crs:RL30010
+- crs:RL30034
+- crs:RL30035
+- crs:RL30080
+- crs:RL30130
+- crs:RL30143
+- crs:RL30148
+- crs:RL30168
+- crs:RL30169
+- crs:RL30193
+- crs:RL30227
+- crs:RL30273
+- crs:RL30308
+- crs:RL30327
+- crs:RL30350
+- crs:RL30384
+- crs:RL30389
+- crs:RL30445
+- crs:RL30459
+- crs:RL3052
+- crs:RL30530
+- crs:RL30551
+- crs:RL30599
+- crs:RL30613
+- crs:RL30617
+- crs:RL30623
+- crs:RL30676
+- crs:RL30689
+- crs:RL30700
+- crs:RL30748
+- crs:RL30836
+- crs:RL30957
+- crs:RL30982
+- crs:RL31023
+- crs:RL31046
+- crs:RL31070
+- crs:RL3113
+- crs:RL31139
+- crs:RL31185
+- crs:RL31213
+- crs:RL31372
+- crs:RL31398
+- crs:RL31481
+- crs:RL31495
+- crs:RL31502
+- crs:RL3152
+- crs:RL31539
+- crs:RL31557
+- crs:RL31559
+- crs:RL31589
+- crs:RL31675
+- crs:RL31676
+- crs:RL31686
+- crs:RL31848
+- crs:RL31864
+- crs:RL31869
+- crs:RL31883
+- crs:RL31910
+- crs:RL3194
+- crs:RL31956
+- crs:RL31993
+- crs:RL32007
+- crs:RL32066
+- crs:RL3211
+- crs:RL32120
+- crs:RL32137
+- crs:RL3214
+- crs:RL32217
+- crs:RL32221
+- crs:RL32251
+- crs:RL32267
+- crs:RL32272
+- crs:RL32305
+- crs:RL32347
+- crs:RL32404
+- crs:RL32455
+- crs:RL32496
+- crs:RL32537
+- crs:RL32541
+- crs:RL32593
+- crs:RL32595
+- crs:RL32604
+- crs:RL32606
+- crs:RL32632
+- crs:RL32733
+- crs:RL32745
+- crs:RL32842
+- crs:RL32864
+- crs:RL32870
+- crs:RL32929
+- crs:RL33000
+- crs:RL33013
+- crs:RL33192
+- crs:RL33222
+- crs:RL33256
+- crs:RL33316
+- crs:RL33342
+- crs:RL33355
+- crs:RL33426
+- crs:RL33499
+- crs:RL33503
+- crs:RL33510
+- crs:RL33512
+- crs:RL33515
+- crs:RL33546
+- crs:RL33548
+- crs:RL33561
+- crs:RL33590
+- crs:RL33600
+- crs:RL33709
+- crs:RL33748
+- crs:RL33828
+- crs:RL33851
+- crs:RL33961
+- crs:RL34092
+- crs:RL34248
+- crs:RL34312
+- crs:RL34322
+- crs:RL34394
+- crs:RL34442
+- crs:RL34540
+- crs:RL34541
+- crs:RL34544
+- crs:RL34618
+- crs:RL34635
+- crs:RL34655
+- crs:RL34683
+- crs:RS20023
+- crs:RS2011
+- crs:RS2022
+- crs:RS20243
+- crs:RS20365
+- crs:RS20428
+- crs:RS20517
+- crs:RS20587
+- crs:RS20709
+- crs:RS20754
+- crs:RS20757
+- crs:RS20775
+- crs:RS20824
+- crs:RS20871
+- crs:RS20995
+- crs:RS21049
+- crs:RS21060
+- crs:RS21383
+- crs:RS21579
+- crs:RS21592
+- crs:RS21662
+- crs:RS21678
+- crs:RS21685
+- crs:RS21708
+- crs:RS2172
+- crs:RS21762
+- crs:RS21834
+- crs:RS21846
+- crs:RS21852
+- crs:RS22001
+- crs:RS22087
+- crs:RS22108
+- crs:RS22144
+- crs:RS22424
+- crs:RS22530
+- crs:RS22572
+- crs:RS22675
+- crs:RS22757
+- crs:RS22772
+- crs:RS22794
+- crs:RS22829
+- crs:RS22842
+- crs:RS22871
+- crs:RS22907
+- crs:SP-79
+- crs:SP-82
+- crs:SS-CSRS
+- crs:ZZZ176252A15D54FD22
+- crs:ZZZ240B90BDFFEBC632
+- crs:ZZZ37B522F87B4EAB5E
+- crs:ZZZ4635002D3D7B5F31
+- crs:ZZZ4CDF0A9CFD5F38B5
+- crs:ZZZ4F95A117E27A9CCB
+- crs:ZZZ5AFE9CCB73FF3C3A
+- crs:ZZZ6B31555942843ED3
+- crs:ZZZA00CA4C7AEA8FBFA
+- crs:ZZZA341AEE9980F296F
+- crs:ZZZDBD99CBAFCDBCA7B
+- crs:ZZZFAA7209430566699
+allow_content_review:
+- crs:97-1022
+- crs:97-1027
+- crs:97-1027F
+- crs:97-403
+- crs:97-403ENR
+- crs:97-474
+- crs:97-474F
+- crs:97-484
+- crs:98-207
+- crs:98-207ENR
+- crs:98-211
+- crs:98-211F
+- crs:IB91141
+- crs:IB92059
+- crs:IB93108
+- crs:IB93109
+- crs:IF10472
+- crs:IF11292
+- crs:IF11415
+- crs:IF11466
+- crs:IF11537
+- crs:IF11647
+- crs:IF11810
+- crs:IF11913
+- crs:IF12172
+- crs:IF12357
+- crs:IF12958
+- crs:IF13042
+- crs:IF13247
+- crs:IF13269
+- crs:IN10160
+- crs:IN10240
+- crs:IN10635
+- crs:IN12174
+- crs:IS40275
+- crs:LSB10592
+- crs:LSB10733
+- crs:LSB11325
+- crs:R41250
+- crs:R41259
+- crs:R41275
+- crs:R41347
+- crs:R41416
+- crs:R41446
+- crs:R41589
+- crs:R41674
+- crs:R41744
+- crs:R42116
+- crs:R42536
+- crs:R42630
+- crs:R42968
+- crs:R43070
+- crs:R43251
+- crs:R43685
+- crs:R43767
+- crs:R43848
+- crs:R43966
+- crs:R43989
+- crs:R44017
+- crs:R44196
+- crs:R44344
+- crs:R44408
+- crs:R44442
+- crs:R44544
+- crs:R44598
+- crs:R44912
+- crs:R44921
+- crs:R45013
+- crs:R45016
+- crs:R45127
+- crs:R45142
+- crs:R45175
+- crs:R45191
+- crs:R45281
+- crs:R45500
+- crs:R45852
+- crs:R45880
+- crs:R46384
+- crs:R46458
+- crs:R46476
+- crs:R46678
+- crs:R46714
+- crs:R46829
+- crs:R46857
+- crs:R47207
+- crs:R47270
+- crs:R47293
+- crs:R47553
+- crs:R47657
+- crs:R47843
+- crs:R48160
+- crs:R48364
+- crs:R48543
+- crs:R48944
+- crs:R48946
+- crs:R49031
+- crs:RL30143
+- crs:RL30445
+- crs:RL30676
+- crs:RL30748
+- crs:RL31883
+- crs:RL31956
+- crs:RL31993
+- crs:RL32137
+- crs:RL32217
+- crs:RL32305
+- crs:RL32347
+- crs:RL32404
+- crs:RL32537
+- crs:RL32541
+- crs:RL32595
+- crs:RL32929
+- crs:RL33192
+- crs:RL33256
+- crs:RL33342
+- crs:RL33355
+- crs:RL33426
+- crs:RL33503
+- crs:RL33512
+- crs:RL33590
+- crs:RL33748
+- crs:RL33851
+- crs:RL34248
+- crs:RL34394
+- crs:RL34544
+- crs:RL34618
+- crs:RS20243
+- crs:RS21060
+- crs:RS21383
+- crs:RS21579
+- crs:RS21592
+- crs:RS21762
+- crs:RS22001
+- crs:RS22108
+deny_documents: []
+log:
+- key: crs:IF10472
+  decision: allow
+  rule: review:safety=nuclear weapons production
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RS21852
+  decision: allow
+  rule: review:marking=export-mention:ear
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IF13269
+  decision: allow
+  rule: review:safety=offensive cyber operations
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IF12958
+  decision: allow
+  rule: review:safety=missile guidance
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R43311
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R45281
+  decision: allow
+  rule: review:safety=laying mines
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IN12724
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IF11441
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IF11437
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R49036
+  decision: allow
+  rule: review:marking=export-mention:ear
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R48946
+  decision: allow
+  rule: review:safety=explosive synthesis
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R49031
+  decision: allow
+  rule: review:safety=missile guidance
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IN12710
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IN12712
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R48944
+  decision: allow
+  rule: review:safety=nuclear weapons production
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IF13247
+  decision: allow
+  rule: review:safety=nuclear weapons production
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IF11311
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R48971
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R47207
+  decision: allow
+  rule: review:safety=nuclear weapons production
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL31675
+  decision: allow
+  rule: review:marking=export-mention:ear
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R48939
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R47597
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R48289
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:LSB11409
+  decision: allow
+  rule: review:marking=export-mention:ear
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IF12438
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R48875
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IF12483
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R45757
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IF10715
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IF13042
+  decision: allow
+  rule: review:safety=offensive cyber operations
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IN12610
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IF11069
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IF13085
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R40482
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IF11197
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R47603
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:LSB11325
+  decision: allow
+  rule: review:safety=gunsmiths
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R47657
+  decision: allow
+  rule: review:safety=nuclear weapon design
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R48287
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL33222
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R48543
+  decision: allow
+  rule: review:safety=assemble an improvised explosive device
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R48541
+  decision: allow
+  rule: review:marking=export-mention:export-controlled
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IF12894
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IF12885
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R48364
+  decision: allow
+  rule: review:safety=nuclear weapons production
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R48266
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R47620
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IF10045
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IF10575
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R47094
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RS22907
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R48294
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IF12172
+  decision: allow
+  rule: review:safety=exploit kits
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IF11466
+  decision: allow
+  rule: review:safety=missile guidance
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IN12444
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL32221
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R47828
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:LSB11013
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R48162
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R48160
+  decision: allow
+  rule: review:safety=homemade explosive
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:LSB11211
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R48131
+  decision: allow
+  rule: review:marking=export-mention:ear
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R47599
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R47553
+  decision: allow
+  rule: review:safety=nuclear weapons production
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IN12359
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R48044
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R48052
+  decision: allow
+  rule: review:marking=export-mention:ear
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R47843
+  decision: allow
+  rule: review:safety=offensive cyber capabilities
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R46458
+  decision: allow
+  rule: review:safety=weapon guidance
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IN12300
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R47829
+  decision: allow
+  rule: review:marking=export-mention:ear
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R43767
+  decision: allow
+  rule: review:safety=production of chemical weapons
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R47311
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R47684
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:LSB11034
+  decision: allow
+  rule: review:marking=export-mention:ear
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R47493
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IN12111
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R45191
+  decision: allow
+  rule: review:safety=offensive cyberspace operations
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IN12174
+  decision: allow
+  rule: review:safety=missile guidance
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IF12425
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R47508
+  decision: allow
+  rule: review:marking=export-mention:ear
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IF12357
+  decision: allow
+  rule: review:safety=nuclear weapon production
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IF12356
+  decision: allow
+  rule: review:marking=export-mention:ear
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R46337
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R47293
+  decision: allow
+  rule: review:safety=nuclear weapons production
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R47270
+  decision: allow
+  rule: review:safety=offensive cyberspace operations
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R43251
+  decision: allow
+  rule: review:safety=nuclear weapons production
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R40089
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:97-139
+  decision: allow
+  rule: review:marking=export-mention:ear
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IF12276
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R47246
+  decision: allow
+  rule: review:marking=export-mention:ear
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL31139
+  decision: allow
+  rule: review:marking=export-mention:ear
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R45175
+  decision: allow
+  rule: review:safety=offensive cyberspace operations
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IN12022
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:LSB10848
+  decision: allow
+  rule: review:marking=export-mention:ear
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R46748
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R47242
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IF11240
+  decision: allow
+  rule: review:marking=export-mention:ear
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R44137
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R46857
+  decision: allow
+  rule: review:safety=nuclear weapons production
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:LSB10733
+  decision: allow
+  rule: review:safety=gunsmiths
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R44442
+  decision: allow
+  rule: review:safety=nuclear weapons production
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R45046
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R46476
+  decision: allow
+  rule: review:safety=nuclear weapons production
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IF11415
+  decision: allow
+  rule: review:safety=nuclear weapons production
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RS20871
+  decision: allow
+  rule: review:marking=export-mention:ear
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R45415
+  decision: allow
+  rule: review:marking=export-mention:ear
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R46958
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IF11872
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IF11913
+  decision: allow
+  rule: review:safety=chemical weapons production
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IF11894
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R46829
+  decision: allow
+  rule: review:safety=manufacture of improvised explosive
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R43835
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:LSB10592
+  decision: allow
+  rule: review:safety=manufacture of firearms
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IF11810
+  decision: allow
+  rule: review:safety=gunsmith
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R46384
+  decision: allow
+  rule: review:safety=nuclear weapons production
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R46714
+  decision: allow
+  rule: review:safety=nuclear weapons production
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R46695
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R46693
+  decision: allow
+  rule: review:marking=export-mention:ear
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R45880
+  decision: allow
+  rule: review:safety=nuclear weapons production
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R46678
+  decision: allow
+  rule: review:safety=homemade explosives
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R46663
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IF11154
+  decision: allow
+  rule: review:marking=export-mention:ear
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R44570
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R44017
+  decision: allow
+  rule: review:safety=chemical weapons production
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R44984
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IN11531
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R46580
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IF11647
+  decision: allow
+  rule: review:safety=offensive cyber capabilities
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R45795
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IF11537
+  decision: allow
+  rule: review:safety=weaponize biological agents
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IF11533
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IF11107
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R46148
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL34544
+  decision: allow
+  rule: review:safety=production of explosives
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R44953
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R45970
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IF11292
+  decision: allow
+  rule: review:safety=offensive cyberspace operations
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R45852
+  decision: allow
+  rule: review:safety=manufacture of firearms
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IN11120
+  decision: allow
+  rule: review:marking=export-mention:ear
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:ZZZ37B522F87B4EAB5E
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IN11127
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:LSB10304
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R42699
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:LSB10252
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:LSB10253
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R45500
+  decision: allow
+  rule: review:safety=homemade explosives
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R44408
+  decision: allow
+  rule: review:safety=malware construction
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IN11014
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R45164
+  decision: allow
+  rule: review:marking=export-mention:export-controlled
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IN10983
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:LSB10195
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IN10953
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R41259
+  decision: allow
+  rule: review:safety=offensive cyber operations
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R45013
+  decision: allow
+  rule: review:safety=offensive cyber capabilities
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R45172
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IN10866
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IF10798
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R45127
+  decision: allow
+  rule: review:safety=offensive cyberspace operations
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R45142
+  decision: allow
+  rule: review:safety=offensive cyberspace operations
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R45091
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R45016
+  decision: allow
+  rule: review:safety=placing landmines
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL33961
+  decision: allow
+  rule: review:marking=export-mention:ear
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R44921
+  decision: allow
+  rule: review:safety=manufacture improvised explosive
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R44912
+  decision: allow
+  rule: review:safety=offensive cyber capabilities
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R43926
+  decision: allow
+  rule: review:marking=export-mention:ear
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IN10635
+  decision: allow
+  rule: review:safety=offensive cyberspace operations
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL33512
+  decision: allow
+  rule: review:safety=homemade explosives
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R44731
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RS21049
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R44708
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R44673
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IN10595
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IN10557
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL33548
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R44598
+  decision: allow
+  rule: review:safety=missile guidance
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL34248
+  decision: allow
+  rule: review:safety=nuclear weapons design
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R44544
+  decision: allow
+  rule: review:safety=firing tables
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R44444
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IN10489
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R41550
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R43140
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IF10392
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R44229
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R44196
+  decision: allow
+  rule: review:safety=offensive cyber operations
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R43966
+  decision: allow
+  rule: review:safety=nuclear weapons production
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R44344
+  decision: allow
+  rule: review:safety=offensive cyber capabilities
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R44246
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:ZZZA341AEE9980F296F
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R44226
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL30599
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL33192
+  decision: allow
+  rule: review:safety=nuclear weapons design
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R44142
+  decision: allow
+  rule: review:marking=export-mention:export-controlled
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL32593
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R43989
+  decision: allow
+  rule: review:safety=exploit kit
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R44060
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:ZZZ176252A15D54FD22
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IN10240
+  decision: allow
+  rule: review:safety=offensive cyber operations
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R43509
+  decision: allow
+  rule: review:marking=export-mention:ear
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R43296
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R43865
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RS21579
+  decision: allow
+  rule: review:safety=missile guidance
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL30957
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL32496
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R43848
+  decision: allow
+  rule: review:safety=offensive cyberspace operations
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R41910
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IN10160
+  decision: allow
+  rule: review:safety=chemical weapons production
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R43118
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R43685
+  decision: allow
+  rule: review:safety=nuclear weapon design
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R42968
+  decision: allow
+  rule: review:safety=chemical weapons production
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R43566
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R43080
+  decision: allow
+  rule: review:marking=export-mention:ear
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R40095
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R43422
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R41416
+  decision: allow
+  rule: review:safety=homemade explosive
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R42536
+  decision: allow
+  rule: review:safety=manufacture improvised explosive
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R43361
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R41744
+  decision: allow
+  rule: review:safety=missile guidance
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R41347
+  decision: allow
+  rule: review:safety=missile guidance
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R42630
+  decision: allow
+  rule: review:safety=nuclear weapons production
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R42116
+  decision: allow
+  rule: review:safety=manufacture improvised explosive
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R43070
+  decision: allow
+  rule: review:safety=manufacture explosives
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R42440
+  decision: allow
+  rule: review:marking=export-mention:ear
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RS21383
+  decision: allow
+  rule: review:safety=weaponize ricin
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R42606
+  decision: allow
+  rule: review:marking=export-mention:ear
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R42938
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R42926
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL34635
+  decision: allow
+  rule: review:marking=export-mention:export-controlled
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL32842
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL31559
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R42501
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R42492
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R42385
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R41721
+  decision: allow
+  rule: review:marking=export-mention:ear
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R41419
+  decision: allow
+  rule: review:marking=export-mention:export-controlled
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R40557
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R41161
+  decision: allow
+  rule: review:marking=export-mention:ear
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R41843
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R41868
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R41206
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R41817
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R41674
+  decision: allow
+  rule: review:safety=offensive cyber operations
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RS22871
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R41123
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R40054
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL34655
+  decision: allow
+  rule: review:marking=export-mention:ear
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R41589
+  decision: allow
+  rule: review:safety=gunsmiths
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R41446
+  decision: allow
+  rule: review:safety=shaped charge
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R41556
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL31502
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL30613
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R41275
+  decision: allow
+  rule: review:safety=manufacture of weapons
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R41178
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IS40275
+  decision: allow
+  rule: review:safety=nuclear weapons production
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R41263
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R41250
+  decision: allow
+  rule: review:safety=nuclear weapons production
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R41199
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R40644
+  decision: allow
+  rule: review:marking=export-mention:ear
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL33590
+  decision: allow
+  rule: review:safety=nuclear weapons production
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R40733
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RS22757
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL32929
+  decision: allow
+  rule: review:safety=weapons manufacture
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R40564
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:R40507
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RS20587
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL34540
+  decision: allow
+  rule: review:marking=export-mention:ear
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RS22829
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL34618
+  decision: allow
+  rule: review:safety=placing mines
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RS22842
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL33828
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL34683
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL33316
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL34541
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL34322
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL33510
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL32217
+  decision: allow
+  rule: review:safety=manufacturing explosive
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RS21834
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL34442
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:98-151GOV
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL34092
+  decision: allow
+  rule: review:marking=export-mention:ear
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL34394
+  decision: allow
+  rule: review:safety=nuclear weapons design
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL32267
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:98-367GOV
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RS20709
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RS22794
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL34312
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RS22772
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL33748
+  decision: allow
+  rule: review:safety=warhead design
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL33426
+  decision: allow
+  rule: review:safety=nuclear weapons production
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RS22675
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL33342
+  decision: allow
+  rule: review:safety=weaponization of a biological agent
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RS21846
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL33503
+  decision: allow
+  rule: review:safety=emplace landmines
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RS21592
+  decision: allow
+  rule: review:safety=nuclear weapon design
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL33851
+  decision: allow
+  rule: review:safety=planting of landmines
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RS22572
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RS20775
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL33600
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL33561
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL32733
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL33709
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RS22530
+  decision: allow
+  rule: review:marking=export-mention:ear
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL31686
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RS20517
+  decision: allow
+  rule: review:marking=export-mention:ear
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL31495
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL32251
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL33355
+  decision: allow
+  rule: review:safety=nuclear weapons production
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL33515
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL33499
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB98034
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB92075
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB93097
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB91141
+  decision: allow
+  rule: review:safety=nuclear weapons production
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RS22424
+  decision: allow
+  rule: review:marking=export-mention:ear
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB93108
+  decision: allow
+  rule: review:safety=anthrax production
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB94041
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB10119
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB10061
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL32272
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB93062
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:ZZZ5AFE9CCB73FF3C3A
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB92059
+  decision: allow
+  rule: review:safety=nuclear weapons production
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL32347
+  decision: allow
+  rule: review:safety=warhead design
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL32595
+  decision: allow
+  rule: review:safety=weapons grade plutonium production
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL33256
+  decision: allow
+  rule: review:safety=nuclear weapons production
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL31910
+  decision: allow
+  rule: review:marking=export-mention:ear
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL30143
+  decision: allow
+  rule: review:safety=nuclear weapon design
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL32870
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL32604
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB10091
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL31956
+  decision: allow
+  rule: review:safety=nuclear weapons production
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB89140
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB97056
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL32606
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL33000
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RS22144
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RS2172
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL33013
+  decision: allow
+  rule: review:marking=export-mention:ear
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB93109
+  decision: allow
+  rule: review:safety=manufacture of weapons
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL32745
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RS22087
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB85066
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL32864
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RS22108
+  decision: allow
+  rule: review:safety=manufacture of firearms
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL32541
+  decision: allow
+  rule: review:safety=assembled an improvised explosive device
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL30982
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:95-797A
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL31883
+  decision: allow
+  rule: review:safety=nuclear weapons production
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL31589
+  decision: allow
+  rule: review:marking=export-mention:ear
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RS22001
+  decision: allow
+  rule: review:safety=nuclear weapons production
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL32537
+  decision: allow
+  rule: review:safety=nuclear weapons production
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL32305
+  decision: allow
+  rule: review:safety=nuclear weapons production
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL32066
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL32455
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL32632
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RS21708
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL32404
+  decision: allow
+  rule: review:safety=weaponized biological
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:ZZZ4635002D3D7B5F31
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:ZZZ6B31555942843ED3
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RS21662
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL31993
+  decision: allow
+  rule: review:safety=nuclear weapons production
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RS21762
+  decision: allow
+  rule: review:safety=warhead design
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:96-727C
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RS21685
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RS21678
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:97-1027
+  decision: allow
+  rule: review:safety=chemical weapons production
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL3214
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL32137
+  decision: allow
+  rule: review:safety=production of biological and chemical weapons
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL3211
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL31864
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL32120
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB96019
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL30327
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:97-781
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL30035
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL32007
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL31869
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL3194
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL31676
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL30168
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RS2022
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB95112
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL31848
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB1010
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RS20995
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL3152
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL3113
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL30551
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL30689
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL30169
+  decision: allow
+  rule: review:marking=export-mention:ear
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL31046
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL31539
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL31213
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL31070
+  decision: allow
+  rule: review:marking=export-mention:ear
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL31557
+  decision: allow
+  rule: review:marking=export-mention:ear
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL31481
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL31398
+  decision: allow
+  rule: review:marking=export-mention:ear
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL31372
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:97-1027F
+  decision: allow
+  rule: review:safety=chemical weapons production
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL30148
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL31185
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RS20754
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL30700
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RS21060
+  decision: allow
+  rule: review:safety=production of biological and chemical weapons
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RS20757
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:97-589A
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL31023
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL30617
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RS20365
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:98-916F
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RS20023
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RS20824
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL30836
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:98-197
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:98-116
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:98-116F
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL30273
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL30445
+  decision: allow
+  rule: review:safety=nuclear weapons production
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL30384
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL30748
+  decision: allow
+  rule: review:safety=manufacturer of human anthrax
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL30530
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL30676
+  decision: allow
+  rule: review:safety=manufacture of chemical agents
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL30623
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:97-484
+  decision: allow
+  rule: review:safety=missile guidance
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:98-436
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL30389
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:98-496F
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:98-496
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL30459
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL3052
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:98-159F
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:98-159
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL30227
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:97-231F
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:97-231
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RS20428
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:97-949F
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:97-949
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL30350
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL30308
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RS20243
+  decision: allow
+  rule: review:safety=nuclear weapon production
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL30130
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL30193
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RS2011
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL30080
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:98-578
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:98-706GOV
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:98-381GOV
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL30034
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:98-728GOV
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:98-222GOV
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:98-175GOV
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL30010
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:98-562
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:98-201ENR
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:98-201
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:98-537
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:98-299F
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:98-299
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:98-788
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:98-211
+  decision: allow
+  rule: review:safety=nuclear weapons production
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:98-211F
+  decision: allow
+  rule: review:safety=nuclear weapons production
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:98-907
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:98-207
+  decision: allow
+  rule: review:safety=nuclear weapons production
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:98-207ENR
+  decision: allow
+  rule: review:safety=nuclear weapons production
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:98-763
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:98-843A
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:98-575
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:98-690A
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:98-647F
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:98-633
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB96039
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:98-597
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:97-1010ENR
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:97-474F
+  decision: allow
+  rule: review:safety=missile guidance
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:97-474
+  decision: allow
+  rule: review:safety=missile guidance
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:97-933
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:97-933F
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:MB83229
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:97-403ENR
+  decision: allow
+  rule: review:safety=shaped charge
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:97-403
+  decision: allow
+  rule: review:safety=shaped charge
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:98-416
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:98-352
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:98-272
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:97-1012C
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:97-948
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:97-916
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:97-1022
+  decision: allow
+  rule: review:safety=missile guidance
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:96-272
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:96-272F
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:97-851
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:95-834
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:97-820
+  decision: allow
+  rule: review:marking=export-mention:itar
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:97-778F
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:97-773
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:97-759
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:97-756
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:94-14
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:97-512
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:97-633
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:97-682
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:97-665
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:97-639
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:97-336
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:97-184
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:97-481
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:97-454
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:97-366
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:97-272
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:97-224
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:97-217
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:96-567
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:97-126
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:96-987
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:97-68
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:97-70
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:96-537
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:96-271
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:96-833
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:96-785
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:96-767
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:96-677F
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:96-94
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:96-671
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:95-629
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:96-513
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:96-373
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:96-225
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:96-221
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:96-184
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:96-109
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:96-109GOV
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:96-53
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:96-82
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB95044
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:95-1175ENR
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:95-1129
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:95-1077
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:95-624
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:95-1076
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:95-1095
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:95-621
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:95-1020F
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:95-862F
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:95-862
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:95-854
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:95-822
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:95-787F
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:95-744
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:95-669
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:95-669A
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:95-645
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:95-205
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:95-389
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:95-351
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:95-291
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:95-184
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:95-142
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:95-81
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:95-58
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:94-954
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:94-961
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:94-738
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:94-719
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:94-666
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:94-612F
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:94-612
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:94-540
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:94-490
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:94-464
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:94-435
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:94-423
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:94-392
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:94-343
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:94-375
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:94-305
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:94-310
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:94-288
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:94-284
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:94-252
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:94-279
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:94-185
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:94-192
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:94-176
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:94-87
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:94-91
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:94-75
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:94-12
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:93-1067
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:93-980
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:93-852F
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:93-808
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:93-789
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:93-708
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:93-686
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:93-656F
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:93-656
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB92130
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:93-478
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:93-409
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:93-398
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:93-280
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:93-57
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:92-821
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:92-557F
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:92-365
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:91-893
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB79045
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:91-395
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:91-578F
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:91-578
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:91-421F
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:91-361RCO
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:91-294
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:91-215SPR
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:90-523F
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:90-513F
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:90-298F
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:90-274F
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:89-679
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB87201
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:89-434F
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:89-413A
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:89-213
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:89-172
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:ZZZ4F95A117E27A9CCB
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB87168
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB87013
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB87182
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB87123
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB87055
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:88-352F
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB87108
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB87112
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:88-332L
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB88036
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB87151
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB87028
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB87128
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB88005
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB87150
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB88007
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:88-65GOV
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:88-214A
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB88006
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB88033
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB88028
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:88-171A
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:88-190GOV
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB87222
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB87202
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB88012
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:88-184L
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB87110
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:88-83ENR
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB87214
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:88-115L
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:88-72L
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:88-95L
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:87-978EPW
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IP384S
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:87-769EPW
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB87207
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB84016
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB83077
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB87191
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB86132
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:87-888L
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB87059
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:87-765A
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:87-746F
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB87106
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB87126
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB87096
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IP371S
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:87-695A
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:87-691SPR
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:87-674EPW
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB87145
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB85170
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB86148
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:87-637EPW
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IP390S
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:87-585F
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB87061
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB87018
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB85007
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB81141
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB77021
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:87-479GOV
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB87015
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:87-457ENR
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:87-418F
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB87010
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB86154
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB78033
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB86153
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB87022
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB85080
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB85102
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB85100
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:87-286
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:87-339F
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB85152
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:87-291F
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:87-200F
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB86115
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:87-1GOV
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IP257T
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:86-171S
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IP267T
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:86-944A
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:86-148GOV
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:86-769F
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:86-99F
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:86-88F
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:85-1130GOV
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:86-12GOV
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:86-8SPR
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:85-217A
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB84081
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB85035
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:85-929A
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB83157
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:MB79229
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB85097
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:85-874F
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB74129
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB84142
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB83106
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB84005
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB85104
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB85119
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB85067
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB82107
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB80062
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB85103
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB85061
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB85072
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB85075
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB84013
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:85-102E
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:85-106GOV
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:CP1982
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:85-86F
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:85-537E
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB83015
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IP326L
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IP0280E
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:MB84204
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:84-803ENR
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IP0314H
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:84-784E
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:84-223ENR
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:84-162E
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:84-766EPW
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB84036
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IP0257A
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:84-150A
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:84-148
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IP281G
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:84-693EPW
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:84-99EPW
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB82081
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB82101
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB82078
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB83105
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB80090
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB83103
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB83095
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB81088
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:84-82F
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:MB82241
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB82117
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:84-622SPR
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:MB83235
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:84-78GOV
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB74014
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:MB82244
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:84-58E
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:84-649SPR
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:84-545ENR
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:84-561SPR
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:84-29S
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IP0294S
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:84-44ENR
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB83027
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:84-518SPR
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:84-591ENR
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IP250
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:84-22F
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:84-9EPW
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:84-53E
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB76061
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB83120
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IP0241G
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IP0240A
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IP0281G
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:84-3SP
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:MB82221
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:MB83242
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:MB82228
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:MB82233
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:83-221E
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB83051
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB83087
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:MB83223
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB83168
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB83060
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:MB83219
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB78040
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB83021
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB82001
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB81163
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB83079
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB81172
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB81030
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IP0333A
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:83-194F
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB81159
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB82025
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB82074
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:83-541S
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:MB81239
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:83-156E
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:83-49GOV
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:83-547E
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:83-144A
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:83-150A
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IP0202R
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IP0177I
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IP0210S
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:83-115E
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IP186D
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:83-526E
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:83-103GOV
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB81025
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:MB83214
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IP0166
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IP0201J
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IP283P
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IPO190C
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IP0208M
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:ZZZ4CDF0A9CFD5F38B5
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB81175
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB81123
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:83-27E
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB81139
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB82051
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB82126
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB81128
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB81181
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB81020
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB80086
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB82072
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB82076
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IP75
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB82005
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:82-210E
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB81011
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB77048
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB81118
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:82-206C
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:82-212GOV
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB82114
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB81046
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB82059
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB80070
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB81138
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB81125
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB81035
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB81150
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:82-183S
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB81112
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB76006
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:82-177E
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IP0219S
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:MB81263
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB78091
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IP31
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB82020
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:82-171
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:82-168EPW
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:82-176ENR
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IP0173T
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB77117
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:84-143L
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:MB82242
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:MB80206
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:ZZZFAA7209430566699
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB74011
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB82050
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:SS-CSRS
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:MB81265
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB81117
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:82-136S
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB81075
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:82-ID
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB74122
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB82075
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB81010
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB82057
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB81062
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IP94
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IP0209T
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IP226
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB80040
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IP0212F
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IP226F
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:82-111ENR
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:SP-82
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IP0086
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:82-102E
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IP182
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB82056
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:82-52A
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IP0135
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB82046
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:MB82225
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:82-51GOV
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:82-67E
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IP0174C
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:82-40EPW
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IP0195N
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:82-13E
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IP0193M
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB81077
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:82-18S
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB78029
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:82-22C
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:81-266ENR
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:87-270E
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB77080
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:81-257F
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:81-260E
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB77046
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB79115
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB75085
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB81165
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB81160
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB74019
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB74057
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:81-233S
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:81-222
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB77032
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IP0157
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RA-73-OMBRA-81
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:81-169EPW
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:81-5
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:81-172E
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:81-156
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB81107
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:81-106
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:81-154E
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:81-121
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:81-2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:81-116
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IP0092
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:81-BU
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:81-97F
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB81056
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:81-84
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB75034
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:81-94
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:81-37E
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB79047
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:80-223
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:80-218
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:80-157
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:80-156
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:80-130
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:80-53
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:80-105A
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB80006
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB79102
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB80030
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:79-254E
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:79-244EPW
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:79-244
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:79-219
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:79-206
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB73022
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:79-72GOV
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:SP-79
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:79-19
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:78-255
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:ZZZA00CA4C7AEA8FBFA
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:ZZZ240B90BDFFEBC632
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB78015
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB75039
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:78-12ED
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:76-149
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:IB76053
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:76-19E
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:72-274E
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:72-224
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:71-240D
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:ZZZDBD99CBAFCDBCA7B
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:43:17+00:00'
+  proposal: 126
+- key: crs:RL33546
+  decision: allow
+  rule: review:marking=export-mention:arms-export-control-act
+  at: '2026-10-27T01:43:19+00:00'
+  proposal: 132

@@ -1,0 +1,4 @@
+# Document-level rules for geonames (GeoNames gazetteer data). None of its own yet: the registry filter and the
+# built-in safety lists apply, and cannot be switched off. Owner review decisions are recorded by
+# `wsp proposals accept|reject` in registry/filters/decisions/geonames.yaml (added 2026-10-26).
+{}
