@@ -80,7 +80,7 @@ from wsp_adapters.doccollection.policy import (
     decisions_path,
 )
 from wsp_cli import bootstrap
-from wsp_core.errors import FetchError
+from wsp_core.errors import FetchError, RobotsDisallowedError
 from wsp_core.model import FetchResult, RemoteFile, SourceSpec, SourceStatus
 from wsp_core.partitions import PartitionError, check_partition, partition_generation_id, partition_of
 from wsp_core.ports import Ctx, Fetcher, SupportsHead
@@ -771,7 +771,8 @@ class CollectionFetcher:
     def _git(self, *args: str, cwd: Path | None = None, capture: bool = False) -> str:
         """``git`` over HTTPS only, no redirects, no prompts, no hooks from the remote."""
         assert self.git is not None
-        cmd = [self.git, *GIT_SAFE_CONFIG]
+        # The library's User-Agent on git's requests too (2026-10-26 review: git sent its own).
+        cmd = [self.git, *GIT_SAFE_CONFIG, "-c", f"http.userAgent={self.user_agent}"]
         if cwd is not None:
             cmd += ["-C", str(cwd)]
         env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "", "GIT_CONFIG_NOSYSTEM": "1"}
@@ -795,6 +796,12 @@ class CollectionFetcher:
         repo = github_repo(cand.url)
         if repo is None or not (repo in repos or f"{repo.split('/')[0]}/*" in repos):
             raise ValueError(f"{cand.url} is not a repository the registry lists ({sorted(repos)})")
+        # github.com's robots.txt, for the smart-HTTP endpoint a clone and a fetch request (2026-10-26
+        # review: clones bypassed it). It allows these today; a change is honoured.
+        refs = f"https://github.com/{repo}.git/info/refs?service=git-upload-pack"
+        allows = getattr(self.fetcher, "robots_allows", None)
+        if callable(allows) and not allows(refs):
+            raise RobotsDisallowedError(f"{refs}: disallowed by github.com/robots.txt")
         dest_dir.mkdir(parents=True, exist_ok=True)
         if cand.extra.get("snapshot"):
             return self._git_snapshot(cand, repo, dest_dir, rules)

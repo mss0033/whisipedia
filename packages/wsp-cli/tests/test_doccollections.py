@@ -10,6 +10,7 @@ import zipfile
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, cast
+from unittest.mock import patch
 
 import pytest
 import yaml
@@ -333,6 +334,39 @@ def test_a_repository_a_git_discovery_names_is_allowed() -> None:
         },
     )
     assert registry_repos(spec_) == frozenset({"projectbenyehuda/public_domain_dump"})
+
+
+def test_a_git_clone_honours_github_robots_txt_and_sends_the_library_user_agent(tmp_path: Path) -> None:
+    """2026-10-26 review: clones went around robots.txt and sent git's own User-Agent."""
+    from wsp_core.errors import RobotsDisallowedError
+
+    class Refusing(FakeFetcher):
+        def robots_allows(self, url: str) -> bool:
+            self.requests.append(url)
+            return False
+
+    fetcher = Refusing()
+    cf = CollectionFetcher(
+        tmp_path / "vault",
+        fetcher,
+        keys={},
+        user_agent="Whisipedia/0.1 (test)",
+        workdir=tmp_path / "w",
+        git="/bin/false",
+    )
+    cand = Candidate(key="x:y", url="https://github.com/owner/repo.git", title="t", issuer="i", resolve="git")
+    with pytest.raises(RobotsDisallowedError):
+        cf._git_bundle(cand, tmp_path / "out", Rules(), frozenset({"owner/repo"}))  # pyright: ignore[reportPrivateUsage]
+    assert fetcher.requests == ["https://github.com/owner/repo.git/info/refs?service=git-upload-pack"]
+    seen: list[list[str]] = []
+
+    def run(cmd: list[str], **_: Any) -> Any:
+        seen.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, b"")
+
+    with patch.object(subprocess, "run", run):
+        cf._git("status")  # pyright: ignore[reportPrivateUsage]
+    assert "http.userAgent=Whisipedia/0.1 (test)" in seen[0]
 
 
 def test_an_organisation_discovery_allows_that_organisations_repositories(tmp_path: Path) -> None:
