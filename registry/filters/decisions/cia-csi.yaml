@@ -1,0 +1,20 @@
+# Owner review decisions for cia-csi (machine-owned; written by `wsp proposals accept|reject`).
+# One entry per document the owner decided, keyed by document key (one edition). The hand-written
+# rules, with their comments, are in registry/filters/cia-csi.yaml; this file is loaded next to it (policy.load_rules).
+# Remove an entry to undo a decision; anything else is rewritten by the next decision.
+allow_documents:
+- cia-csi:CIA-and-U2-Program
+- cia-csi:Intentions-and-Capabilities-1
+allow_content_review: []
+deny_documents: []
+log:
+- key: cia-csi:CIA-and-U2-Program
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:44:39+00:00'
+  proposal: 120
+- key: cia-csi:Intentions-and-Capabilities-1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:44:39+00:00'
+  proposal: 120

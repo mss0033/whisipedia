@@ -1,0 +1,44 @@
+# Owner review decisions for csb-investigations (machine-owned; written by `wsp proposals accept|reject`).
+# One entry per document the owner decided, keyed by document key (one edition). The hand-written
+# rules, with their comments, are in registry/filters/csb-investigations.yaml; this file is loaded next to it (policy.load_rules).
+# Remove an entry to undo a decision; anything else is rewritten by the next decision.
+allow_documents:
+- csb:18.0926-Urging-Chemical-Safety-Board-to-hold-public-hearing-on-Husky-Refinery-accident-002
+- csb:CSB-Management-Challenges-2011
+- csb:Click-to-Download-Appendix-E
+- csb:Didion-Appendix-B-Simplified-Cause-Map
+- csb:Letter-to-EPA-4.23.2019
+- csb:template
+allow_content_review: []
+deny_documents: []
+log:
+- key: csb:Click-to-Download-Appendix-E
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:44:40+00:00'
+  proposal: 128
+- key: csb:template
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:44:40+00:00'
+  proposal: 128
+- key: csb:CSB-Management-Challenges-2011
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:44:40+00:00'
+  proposal: 128
+- key: csb:Didion-Appendix-B-Simplified-Cause-Map
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:44:40+00:00'
+  proposal: 128
+- key: csb:18.0926-Urging-Chemical-Safety-Board-to-hold-public-hearing-on-Husky-Refinery-accident-002
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:44:40+00:00'
+  proposal: 128
+- key: csb:Letter-to-EPA-4.23.2019
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:44:40+00:00'
+  proposal: 128

@@ -1,0 +1,26 @@
+# Owner review decisions for geonames (machine-owned; written by `wsp proposals accept|reject`).
+# One entry per document the owner decided, keyed by document key (one edition). The hand-written
+# rules, with their comments, are in registry/filters/geonames.yaml; this file is loaded next to it (policy.load_rules).
+# Remove an entry to undo a decision; anything else is rewritten by the next decision.
+allow_documents:
+- geonames:ALLCOUNTRIES
+- geonames:ALTERNATENAMESV-2
+- geonames:HIERARCHY
+allow_content_review: []
+deny_documents: []
+log:
+- key: geonames:ALLCOUNTRIES
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:44:40+00:00'
+  proposal: 121
+- key: geonames:ALTERNATENAMESV-2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:44:40+00:00'
+  proposal: 121
+- key: geonames:HIERARCHY
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:44:40+00:00'
+  proposal: 121

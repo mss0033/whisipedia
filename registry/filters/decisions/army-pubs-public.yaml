@@ -1,0 +1,68 @@
+# Owner review decisions for army-pubs-public (machine-owned; written by `wsp proposals accept|reject`).
+# One entry per document the owner decided, keyed by document key (one edition). The hand-written
+# rules, with their comments, are in registry/filters/army-pubs-public.yaml; this file is loaded next to it (policy.load_rules).
+# Remove an entry to undo a decision; anything else is rewritten by the next decision.
+allow_documents:
+- army:ATP-3-04.19:2019-03-01
+- army:ATP-3-20.96:2016-05-12
+- army:ATP-3-21.21:2016-03-22
+- army:ATP-3-21.71:2024-10-15
+- army:ATP-3-21.91:2017-05-11
+- army:ATP-3-90.98:2020-09-24
+- army:ATP-4-02.82:2023-01-01
+- army:ATP-4-32.2:2024-03-01
+- army:FM-1:2025-05-01
+- army:TC-3-22.19:2017-05-10
+allow_content_review: []
+deny_documents: []
+log:
+- key: army:FM-1:2025-05-01
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-27T01:44:42+00:00'
+  proposal: 118
+- key: army:ATP-3-04.19:2019-03-01
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-27T01:44:42+00:00'
+  proposal: 118
+- key: army:ATP-3-20.96:2016-05-12
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-27T01:44:42+00:00'
+  proposal: 118
+- key: army:ATP-3-21.21:2016-03-22
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-27T01:44:42+00:00'
+  proposal: 118
+- key: army:ATP-3-21.71:2024-10-15
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-27T01:44:42+00:00'
+  proposal: 118
+- key: army:ATP-3-21.91:2017-05-11
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-27T01:44:42+00:00'
+  proposal: 118
+- key: army:ATP-3-90.98:2020-09-24
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-27T01:44:42+00:00'
+  proposal: 118
+- key: army:ATP-4-02.82:2023-01-01
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-27T01:44:42+00:00'
+  proposal: 118
+- key: army:ATP-4-32.2:2024-03-01
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-27T01:44:42+00:00'
+  proposal: 118
+- key: army:TC-3-22.19:2017-05-10
+  decision: allow
+  rule: review:marking=missing-A
+  at: '2026-10-27T01:44:42+00:00'
+  proposal: 118

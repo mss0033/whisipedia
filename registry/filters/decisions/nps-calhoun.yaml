@@ -1,0 +1,302 @@
+# Owner review decisions for nps-calhoun (machine-owned; written by `wsp proposals accept|reject`).
+# One entry per document the owner decided, keyed by document key (one edition). The hand-written
+# rules, with their comments, are in registry/filters/nps-calhoun.yaml; this file is loaded next to it (policy.load_rules).
+# Remove an entry to undo a decision; anything else is rewritten by the next decision.
+allow_documents:
+- nps:10945-13865
+- nps:10945-24383
+- nps:10945-25487
+- nps:10945-30837
+- nps:10945-37496
+- nps:10945-37707
+- nps:10945-41427
+- nps:10945-41622
+- nps:10945-43539
+- nps:10945-43557
+- nps:10945-44735
+- nps:10945-44741
+- nps:10945-44751
+- nps:10945-44757
+- nps:10945-44816
+- nps:10945-45290
+- nps:10945-46200
+- nps:10945-46227
+- nps:10945-4810
+- nps:10945-48925
+- nps:10945-48960-1
+- nps:10945-49796
+- nps:10945-52813
+- nps:10945-52851
+- nps:10945-52868
+- nps:10945-52999
+- nps:10945-53055
+- nps:10945-54835
+- nps:10945-56754
+- nps:10945-57321-2
+- nps:10945-59147
+- nps:10945-60158
+- nps:10945-60193
+- nps:10945-60193-1
+- nps:10945-60193-2
+- nps:10945-61439
+- nps:10945-61780
+- nps:10945-62338-2
+- nps:10945-63282
+- nps:10945-63928
+- nps:10945-64841
+- nps:10945-65105-2
+- nps:10945-67898
+- nps:10945-69437
+- nps:10945-72327
+- nps:10945-73360
+- nps:10945-74734
+- nps:10945-7579
+- nps:10945-76191
+allow_content_review: []
+deny_documents: []
+log:
+- key: nps:10945-69437
+  decision: allow
+  rule: review:safety-abstract=weapons guidance
+  at: '2026-10-27T01:44:41+00:00'
+  proposal: 122
+- key: nps:10945-4810
+  decision: allow
+  rule: review:safety-abstract=munitions effectiveness
+  at: '2026-10-27T01:44:41+00:00'
+  proposal: 122
+- key: nps:10945-73360
+  decision: allow
+  rule: review:safety-abstract=offensive cyber operations
+  at: '2026-10-27T01:44:41+00:00'
+  proposal: 122
+- key: nps:10945-64841
+  decision: allow
+  rule: review:safety-abstract=shaped charge
+  at: '2026-10-27T01:44:41+00:00'
+  proposal: 122
+- key: nps:10945-37707
+  decision: allow
+  rule: review:safety-abstract=weaponized chemical or biological
+  at: '2026-10-27T01:44:41+00:00'
+  proposal: 122
+- key: nps:10945-72327
+  decision: allow
+  rule: review:safety-abstract=weapon guidance
+  at: '2026-10-27T01:44:41+00:00'
+  proposal: 122
+- key: nps:10945-41427
+  decision: allow
+  rule: review:safety-abstract=missile guidance
+  at: '2026-10-27T01:44:41+00:00'
+  proposal: 122
+- key: nps:10945-52999
+  decision: allow
+  rule: review:safety-abstract=offensive cyber operations
+  at: '2026-10-27T01:44:41+00:00'
+  proposal: 122
+- key: nps:10945-59147
+  decision: allow
+  rule: review:safety-abstract=offensive cyber operations
+  at: '2026-10-27T01:44:41+00:00'
+  proposal: 122
+- key: nps:10945-74734
+  decision: allow
+  rule: review:safety-abstract=offensive cyber operations
+  at: '2026-10-27T01:44:41+00:00'
+  proposal: 122
+- key: nps:10945-56754
+  decision: allow
+  rule: review:safety-abstract=offensive cyber capabilities
+  at: '2026-10-27T01:44:41+00:00'
+  proposal: 122
+- key: nps:10945-63282
+  decision: allow
+  rule: review:marking=missing-public-release
+  at: '2026-10-27T01:44:41+00:00'
+  proposal: 122
+- key: nps:10945-60158
+  decision: allow
+  rule: review:marking=missing-public-release
+  at: '2026-10-27T01:44:41+00:00'
+  proposal: 122
+- key: nps:10945-45290
+  decision: allow
+  rule: review:marking=missing-public-release
+  at: '2026-10-27T01:44:41+00:00'
+  proposal: 122
+- key: nps:10945-57321-2
+  decision: allow
+  rule: review:marking=missing-public-release
+  at: '2026-10-27T01:44:41+00:00'
+  proposal: 122
+- key: nps:10945-52868
+  decision: allow
+  rule: review:marking=missing-public-release
+  at: '2026-10-27T01:44:41+00:00'
+  proposal: 122
+- key: nps:10945-52851
+  decision: allow
+  rule: review:marking=missing-public-release
+  at: '2026-10-27T01:44:41+00:00'
+  proposal: 122
+- key: nps:10945-52813
+  decision: allow
+  rule: review:marking=missing-public-release
+  at: '2026-10-27T01:44:41+00:00'
+  proposal: 122
+- key: nps:10945-44757
+  decision: allow
+  rule: review:marking=missing-public-release
+  at: '2026-10-27T01:44:41+00:00'
+  proposal: 122
+- key: nps:10945-63928
+  decision: allow
+  rule: review:marking=missing-public-release
+  at: '2026-10-27T01:44:41+00:00'
+  proposal: 122
+- key: nps:10945-48925
+  decision: allow
+  rule: review:marking=missing-public-release
+  at: '2026-10-27T01:44:41+00:00'
+  proposal: 122
+- key: nps:10945-13865
+  decision: allow
+  rule: review:marking=missing-public-release
+  at: '2026-10-27T01:44:41+00:00'
+  proposal: 122
+- key: nps:10945-41622
+  decision: allow
+  rule: review:marking=missing-public-release
+  at: '2026-10-27T01:44:41+00:00'
+  proposal: 122
+- key: nps:10945-37496
+  decision: allow
+  rule: review:marking=missing-public-release
+  at: '2026-10-27T01:44:41+00:00'
+  proposal: 122
+- key: nps:10945-25487
+  decision: allow
+  rule: review:marking=missing-public-release
+  at: '2026-10-27T01:44:41+00:00'
+  proposal: 122
+- key: nps:10945-43557
+  decision: allow
+  rule: review:marking=missing-public-release
+  at: '2026-10-27T01:44:41+00:00'
+  proposal: 122
+- key: nps:10945-62338-2
+  decision: allow
+  rule: review:marking=missing-public-release
+  at: '2026-10-27T01:44:41+00:00'
+  proposal: 122
+- key: nps:10945-65105-2
+  decision: allow
+  rule: review:marking=missing-public-release
+  at: '2026-10-27T01:44:41+00:00'
+  proposal: 122
+- key: nps:10945-43539
+  decision: allow
+  rule: review:marking=missing-public-release
+  at: '2026-10-27T01:44:41+00:00'
+  proposal: 122
+- key: nps:10945-7579
+  decision: allow
+  rule: review:marking=missing-public-release
+  at: '2026-10-27T01:44:41+00:00'
+  proposal: 122
+- key: nps:10945-30837
+  decision: allow
+  rule: review:marking=missing-public-release
+  at: '2026-10-27T01:44:41+00:00'
+  proposal: 122
+- key: nps:10945-49796
+  decision: allow
+  rule: review:marking=missing-public-release
+  at: '2026-10-27T01:44:41+00:00'
+  proposal: 122
+- key: nps:10945-76191
+  decision: allow
+  rule: review:marking=missing-public-release
+  at: '2026-10-27T01:44:41+00:00'
+  proposal: 122
+- key: nps:10945-46227
+  decision: allow
+  rule: review:marking=missing-public-release
+  at: '2026-10-27T01:44:41+00:00'
+  proposal: 122
+- key: nps:10945-60193
+  decision: allow
+  rule: review:marking=missing-public-release
+  at: '2026-10-27T01:44:41+00:00'
+  proposal: 122
+- key: nps:10945-60193-1
+  decision: allow
+  rule: review:marking=missing-public-release
+  at: '2026-10-27T01:44:41+00:00'
+  proposal: 122
+- key: nps:10945-60193-2
+  decision: allow
+  rule: review:marking=missing-public-release
+  at: '2026-10-27T01:44:41+00:00'
+  proposal: 122
+- key: nps:10945-67898
+  decision: allow
+  rule: review:marking=missing-public-release
+  at: '2026-10-27T01:44:41+00:00'
+  proposal: 122
+- key: nps:10945-53055
+  decision: allow
+  rule: review:marking=missing-public-release
+  at: '2026-10-27T01:44:41+00:00'
+  proposal: 122
+- key: nps:10945-44816
+  decision: allow
+  rule: review:marking=missing-public-release
+  at: '2026-10-27T01:44:41+00:00'
+  proposal: 122
+- key: nps:10945-54835
+  decision: allow
+  rule: review:marking=missing-public-release
+  at: '2026-10-27T01:44:41+00:00'
+  proposal: 122
+- key: nps:10945-24383
+  decision: allow
+  rule: review:marking=missing-public-release
+  at: '2026-10-27T01:44:41+00:00'
+  proposal: 122
+- key: nps:10945-46200
+  decision: allow
+  rule: review:marking=missing-public-release
+  at: '2026-10-27T01:44:41+00:00'
+  proposal: 122
+- key: nps:10945-48960-1
+  decision: allow
+  rule: review:marking=missing-public-release
+  at: '2026-10-27T01:44:41+00:00'
+  proposal: 122
+- key: nps:10945-44741
+  decision: allow
+  rule: review:marking=missing-public-release
+  at: '2026-10-27T01:44:41+00:00'
+  proposal: 122
+- key: nps:10945-61439
+  decision: allow
+  rule: review:marking=missing-public-release
+  at: '2026-10-27T01:44:41+00:00'
+  proposal: 122
+- key: nps:10945-44735
+  decision: allow
+  rule: review:marking=missing-public-release
+  at: '2026-10-27T01:44:41+00:00'
+  proposal: 122
+- key: nps:10945-44751
+  decision: allow
+  rule: review:marking=missing-public-release
+  at: '2026-10-27T01:44:41+00:00'
+  proposal: 122
+- key: nps:10945-61780
+  decision: allow
+  rule: review:marking=missing-public-release
+  at: '2026-10-27T01:44:41+00:00'
+  proposal: 122

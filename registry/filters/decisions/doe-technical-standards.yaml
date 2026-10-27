@@ -1,0 +1,26 @@
+# Owner review decisions for doe-technical-standards (machine-owned; written by `wsp proposals accept|reject`).
+# One entry per document the owner decided, keyed by document key (one edition). The hand-written
+# rules, with their comments, are in registry/filters/doe-technical-standards.yaml; this file is loaded next to it (policy.load_rules).
+# Remove an entry to undo a decision; anything else is rewritten by the next decision.
+allow_documents:
+- doe-std:Reaffirmation-Memo-DOE-HDBK-1216-2015-Chg-Notice-1
+- doe-std:Reaffirmation-Memo-DOE-STD-1128-2013
+- doe-std:Reaffirmation-Memo-DOE-STD-1167-2003
+allow_content_review: []
+deny_documents: []
+log:
+- key: doe-std:Reaffirmation-Memo-DOE-STD-1128-2013
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:44:39+00:00'
+  proposal: 123
+- key: doe-std:Reaffirmation-Memo-DOE-STD-1167-2003
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:44:39+00:00'
+  proposal: 123
+- key: doe-std:Reaffirmation-Memo-DOE-HDBK-1216-2015-Chg-Notice-1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:44:39+00:00'
+  proposal: 123
