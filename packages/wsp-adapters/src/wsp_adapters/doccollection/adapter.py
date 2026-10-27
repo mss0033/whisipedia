@@ -170,7 +170,10 @@ class CollectionConfig:
             prefix=str(acc.get("key_prefix") or spec.id),
             origins=tuple(str(o).lower() for o in cast(list[object], origins)),
             discovery=tuple(discovery),
-            rules=load_rules(cast(Mapping[str, Any], acc.get("filter") or {}), repo_root=repo_root),
+            rules=replace(
+                load_rules(cast(Mapping[str, Any], acc.get("filter") or {}), repo_root=repo_root),
+                documents_screened_at_index=bool(reader),
+            ),
             currency=CurrencyRules.from_access(acc),
             interval=max(1.0, 1.0 / rps),  # never faster than 1 request/s per host
             per_host={
@@ -1285,7 +1288,7 @@ ZIP_SCREEN_CHARS = 60_000
 # than ZIP_MAX_RATIO times is a zip bomb and the archive is held.
 ZIP_MEMBER_MAX_BYTES = 64 * 1024 * 1024
 ZIP_MAX_RATIO = 200
-ZIP_MEMBERS_SCREENED = 40
+ZIP_MEMBERS_SCREENED = 400  # 40 until 2026-10-26: the rest of a larger archive went unread
 ZIP_MEMBER_CHARS = 20_000
 ZIP_DOCUMENT_SUFFIXES = (".pdf", ".docx", ".txt", ".md", ".html", ".htm", ".xml")
 
@@ -1347,43 +1350,62 @@ def zip_screen_text(path: Path) -> str:
 
 def zip_member_texts(path: Path) -> list[tuple[str, Extracted]]:
     """Front matter of the first :data:`ZIP_MEMBERS_SCREENED` documents in an archive (PDF, Word,
-    text, HTML, XML), each read within the bounds above. Raises :class:`ArchiveError` for a bomb."""
+    text, HTML, XML), each read within the bounds above, and those of the zips it holds, one level
+    down (2026-10-26 review: nested archives were only named). Documents beyond the limit come back
+    as ``("<n> more ...", Extracted("", "too-many-members"))``. Raises :class:`ArchiveError` for a bomb."""
+    out: list[tuple[str, Extracted]] = []
+    with zipfile.ZipFile(path) as zf:
+        _member_texts(zf, path.name, out, nested=True)
+    return out
+
+
+def _member_texts(zf: zipfile.ZipFile, label: str, out: list[tuple[str, Extracted]], *, nested: bool) -> None:
+    """Add the documents of ``zf`` (and with ``nested``, of the zips in it) to ``out``, up to the limit."""
     import io
     import tempfile
 
-    out: list[tuple[str, Extracted]] = []
-    with zipfile.ZipFile(path) as zf:
-        members = [
-            i for i in zf.infolist() if not i.is_dir() and i.filename.lower().endswith(ZIP_DOCUMENT_SUFFIXES)
-        ]
-        for info in members[:ZIP_MEMBERS_SCREENED]:
-            name = info.filename
-            if not _readable_member(info):
-                out.append((name, Extracted("", "unsupported-format")))
+    infos = [i for i in zf.infolist() if not i.is_dir()]
+    members = [i for i in infos if i.filename.lower().endswith(ZIP_DOCUMENT_SUFFIXES)]
+    if nested:
+        for inner_info in (i for i in infos if i.filename.lower().endswith(".zip")):
+            if not _readable_member(inner_info):
+                out.append((inner_info.filename, Extracted("", "unsupported-format")))
                 continue
-            suffix = Path(name).suffix.lower()
             try:
-                if suffix == ".pdf":
-                    with tempfile.TemporaryDirectory(prefix="wsp-zip-") as tmp:
-                        member = Path(tmp) / "member.pdf"
-                        member.write_bytes(_read_member(zf, info, ZIP_MEMBER_MAX_BYTES))
-                        text = pdf_text(member, FRONT_MATTER_PAGES)
-                elif suffix == ".docx":
-                    data = _read_member(zf, info, ZIP_MEMBER_MAX_BYTES)
-                    with zipfile.ZipFile(io.BytesIO(data)) as inner:
-                        text = _docx_paragraphs(inner)
-                elif suffix in (".html", ".htm"):
-                    text = html_to_text(_read_member(zf, info, 4 * ZIP_MEMBER_CHARS))
-                else:
-                    text = _read_member(zf, info, ZIP_MEMBER_CHARS).decode("utf-8", "replace")
-            except ArchiveError:
-                raise
-            except Exception as exc:
-                log.warning("%s: cannot read member %s: %s", path.name, name, exc)
-                out.append((name, Extracted("", "extraction-error")))
-                continue
-            out.append((name, checked_front_matter(text[: 4 * ZIP_MEMBER_CHARS])))
-    return out
+                with zipfile.ZipFile(io.BytesIO(_read_member(zf, inner_info, ZIP_MEMBER_MAX_BYTES))) as inner:
+                    _member_texts(inner, f"{label}/{inner_info.filename}", out, nested=False)
+            except zipfile.BadZipFile:
+                out.append((inner_info.filename, Extracted("", "extraction-error")))
+    room = max(0, ZIP_MEMBERS_SCREENED - len(out))
+    if len(members) > room:
+        out.append((f"{len(members) - room} more documents in {label}", Extracted("", "too-many-members")))
+    for info in members[:room]:
+        name = info.filename
+        if not _readable_member(info):
+            out.append((name, Extracted("", "unsupported-format")))
+            continue
+        suffix = Path(name).suffix.lower()
+        try:
+            if suffix == ".pdf":
+                with tempfile.TemporaryDirectory(prefix="wsp-zip-") as tmp:
+                    member = Path(tmp) / "member.pdf"
+                    member.write_bytes(_read_member(zf, info, ZIP_MEMBER_MAX_BYTES))
+                    text = pdf_text(member, FRONT_MATTER_PAGES)
+            elif suffix == ".docx":
+                data = _read_member(zf, info, ZIP_MEMBER_MAX_BYTES)
+                with zipfile.ZipFile(io.BytesIO(data)) as inner:
+                    text = _docx_paragraphs(inner)
+            elif suffix in (".html", ".htm"):
+                text = html_to_text(_read_member(zf, info, 4 * ZIP_MEMBER_CHARS))
+            else:
+                text = _read_member(zf, info, ZIP_MEMBER_CHARS).decode("utf-8", "replace")
+        except ArchiveError:
+            raise
+        except Exception as exc:
+            log.warning("%s: cannot read member %s: %s", label, name, exc)
+            out.append((name, Extracted("", "extraction-error")))
+            continue
+        out.append((name, checked_front_matter(text[: 4 * ZIP_MEMBER_CHARS])))
 
 
 def long_pdf_sections(path: Path, max_pages: int) -> list[Section]:
@@ -1576,6 +1598,12 @@ def screen_zip(path: Path, rules: Rules, *, keys: Iterable[str] = ()) -> Screen:
             return archive
     review: Screen | None = None
     for name, got in members:
+        if got.problem == "too-many-members":
+            # Documents the fetch could not read: held, unless each is screened as it is indexed.
+            if not rules.documents_screened_at_index and review is None:
+                held = Decision(Verdict.REVIEW, f"zip=too-many-members:{name}", Stage.CONTENT)
+                review = Screen(held, archive.marking, archive.text_found)
+            continue
         member = screen_text(got, rules, keys=keys)
         named = replace(member.decision, rule=f"{member.decision.rule}@{name}")
         if member.decision.verdict is Verdict.DENY:

@@ -420,6 +420,33 @@ def test_a_zip_without_a_readme_is_screened_on_its_member_documents(tmp_path: Pa
     assert got.decision.rule == "text=no-text-layer"
 
 
+def test_a_zip_is_screened_into_its_nested_zips_and_held_when_too_large_to_read(tmp_path: Path) -> None:
+    """2026-10-26 review: nested zips were only named, and documents after the 40th never read."""
+    from wsp_adapters.doccollection import adapter as ad
+
+    readme = "README\nA collection of public reports on bridges and roads. " + "Bridges carry roads. " * 30
+    inner = tmp_path / "inner.zip"
+    with zipfile.ZipFile(inner, "w") as zf:
+        zf.writestr("chapter.txt", "Improvised explosive device construction\n" + "Steps. " * 50)
+    outer = tmp_path / "outer.zip"
+    with zipfile.ZipFile(outer, "w") as zf:
+        zf.writestr("README.txt", readme)
+        zf.writestr("parts/inner.zip", inner.read_bytes())
+    assert screen_file(outer, Rules(allow_all=True)).decision.verdict is Verdict.DENY
+
+    many = tmp_path / "many.zip"
+    with zipfile.ZipFile(many, "w") as zf:
+        zf.writestr("README.txt", readme)
+        for n in range(ad.ZIP_MEMBERS_SCREENED + 5):
+            zf.writestr(f"r{n:04d}.txt", f"Report {n} on bridges. " * 20)
+    got = screen_file(many, Rules(allow_all=True))
+    assert got.decision.verdict is Verdict.REVIEW
+    assert got.decision.rule.startswith("zip=too-many-members")
+    # A source whose reader screens each document as it is indexed is not held for that alone.
+    screened = Rules(allow_all=True, documents_screened_at_index=True)
+    assert screen_file(many, screened).decision.verdict is Verdict.ALLOW
+
+
 # --- CA-7 / CA-8 / CA-11 / CA-13: catalogs ---------------------------------------------------------------
 
 

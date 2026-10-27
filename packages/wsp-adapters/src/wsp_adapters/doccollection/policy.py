@@ -462,6 +462,10 @@ class Rules:
     # reason in the rules file (a reason is required, so the exception is never silent).
     override_safety: frozenset[str] = frozenset()
     allow_all: bool = False  # single-purpose collection: everything not denied or reviewed is in scope
+    # The source has a ``reader``: every document in its archives is screened again as it is indexed
+    # (DocCollectionAdapter._snapshot_documents), so an archive too large to screen whole at fetch is
+    # not held for that alone (set by CollectionConfig, not the registry).
+    documents_screened_at_index: bool = False
     default: Verdict = Verdict.REVIEW
     require: tuple[str, ...] = ()  # distribution requirement: "A", "public-release", "license:<SPDX>"
     declassified_ok: bool = False  # FOIA/declassified sets: classification banners with a release stamp
