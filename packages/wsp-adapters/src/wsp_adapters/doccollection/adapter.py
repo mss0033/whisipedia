@@ -649,10 +649,30 @@ class DocCollectionAdapter:
     def _snapshot_documents(
         self, spec: SourceSpec, cfg: CollectionConfig, meta: DocumentMeta, path: Path
     ) -> Iterator[DocRecord]:
-        """The documents ``cfg.reader`` finds in a repository snapshot (FRUS volumes, Perseus texts)."""
+        """The documents ``cfg.reader`` finds in a repository snapshot (FRUS volumes, Perseus texts),
+        each screened on its own: the fetch screened the archive as a whole (names, READMEs, the first
+        documents), so a deny-core work deep in a 26,000-work dump went unread (2026-10-26 review).
+        A deny (the deny core on the work's own title page, or three hits) is left out unless the
+        owner's ``override_safety`` names ``<archive key>/<work key>`` or the work's key; a review (one
+        or two hits: an 1864 letter that mentions gunsmiths) is indexed and logged, the archive having
+        passed the gate as a whole. Measured 2026-10-26: 1 deny and 1 review in 3,000 documents of the
+        held snapshot sources."""
         published = urlsplit(meta.origin_url).path.rsplit("/", 1)[-1] if meta.origin_url else None
+        rules = cfg.rules
         for d in tei.read_snapshot(path, cfg.reader, unquote(published) if published else None):
             native = f"{meta.doc_key}/{d.key}"
+            verdict = classify_content(
+                f"{d.title}\n\n{d.text[:SNAPSHOT_SCREEN_CHARS]}",
+                rules,
+                overridden=bool(
+                    {normalize_pub_number(native), normalize_pub_number(d.key)} & rules.override_safety
+                ),
+            )
+            if verdict.verdict is Verdict.DENY:
+                log.warning("%s: %s left out of the index (%s)", spec.id, native, verdict.rule)
+                continue
+            if verdict.verdict is Verdict.REVIEW:
+                log.info("%s: %s indexed under review (%s)", spec.id, native, verdict.rule)
             yield DocRecord(
                 doc_id=make_doc_id(spec.id, native),
                 source_id=spec.id,
@@ -670,6 +690,8 @@ class DocCollectionAdapter:
 
 # --- helpers ---------------------------------------------------------------------------------------
 
+SNAPSHOT_SCREEN_CHARS = 20_000
+"""Text of each snapshot document the content screen reads with its title (front matter, as for a PDF)."""
 DISCOVERY_CANDIDATES = "documents.jsonl"
 DISCOVERY_LISTING = "listing.json"
 

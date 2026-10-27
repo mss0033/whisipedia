@@ -213,3 +213,41 @@ def test_a_dta_book_is_made_searchable_from_its_diplomatic_transcription(tmp_pat
         == "Was vom Fleisch geboren wird/ das ist Fleisch. Er schreibt vnter andern: Abraham habe geglübet Auff- vnd Abnehmung."
     )
     assert doc.url == "https://www.deutschestextarchiv.de/book/show/weise_redner_1693"
+
+
+def test_each_snapshot_document_is_screened_as_it_is_indexed(tmp_path: Path) -> None:
+    """2026-10-26 review: the fetch screened an archive as a whole (names, READMEs, the first 40
+    documents); a deny-core work deep in a dump went into the index unread."""
+    from wsp_adapters.doccollection import DocCollectionAdapter
+    from wsp_adapters.doccollection.adapter import CollectionConfig
+    from wsp_adapters.doccollection.model import DocumentMeta
+
+    def tcp(title: str) -> str:
+        return TCP.replace("The brides ornaments viz. fiue meditations", title)
+
+    zpath = tmp_path / "tcp.zip"
+    with zipfile.ZipFile(zpath, "w") as z:
+        z.writestr("A00001.xml", tcp("Of the knowledge of God"))
+        z.writestr("A00002.xml", tcp("A treatise of improvised explosive device construction"))
+        z.writestr("A00003.xml", tcp("An exception the owner made: improvised explosive device construction"))
+    spec = SourceSpec(
+        id="tcp",
+        name="TCP",
+        tier=Tier.T1,
+        status=SourceStatus.ACTIVE,
+        adapter="doc-collection",
+        domain=("literature",),
+        license="CC0-1.0",
+        legal_basis="open-license",
+        raw={
+            "access": {
+                "adapter": "doc-collection",
+                "reader": "tei-tcp",
+                "filter": {"allow_all": True, "override_safety": {"A00003": "test"}},
+            }
+        },
+    )
+    cfg = CollectionConfig.from_spec(spec)
+    meta = DocumentMeta(doc_key="tcp:all", file="tcp.zip", issuer="TCP", title="TCP")
+    docs = list(DocCollectionAdapter()._snapshot_documents(spec, cfg, meta, zpath))  # pyright: ignore[reportPrivateUsage]
+    assert sorted(d.native_id for d in docs) == ["tcp:all/A00001", "tcp:all/A00003"]

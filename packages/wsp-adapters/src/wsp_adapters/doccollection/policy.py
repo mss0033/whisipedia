@@ -125,8 +125,8 @@ DENY_CORE: Mapping[str, tuple[str, ...]] = {
         r"mine emplacement",
     ),
     "weapons and munitions technical data": (
-        r"(?:weapons?|firearms?|munitions?) manufacture",
-        r"manufacture of (?:firearms|weapons|munitions|ammunition)",
+        r"(?:weapons?|firearms?|munitions?|ammunition) manufactur\w*",
+        r"manufactur\w* of (?:firearms|weapons|munitions|ammunition)",
         r"gunsmith\w*",
         r"ammunition (?:reloading|hand~loading)",
         r"(?:re|hand~)loading ammunition",
@@ -274,6 +274,18 @@ DASHES = (
 # Format characters that render as nothing: soft hyphen, zero-width space/joiners, word joiner, BOM.
 INVISIBLE = "\u00ad\u200b\u200c\u200d\u2060\ufeff"
 _TRANSLATE = {**dict.fromkeys(map(ord, INVISIBLE)), **{ord(d): "-" for d in DASHES}}
+# In prose, dashes that punctuate a sentence (em, en, figure dash, horizontal bar, the long dashes)
+# separate words: "IED fabrication—a guide" ended the phrase with a hyphen, which the word boundary
+# refused (2026-10-26 review). Publication numbers keep them as hyphens ("FM 3\u201322.9" is FM 3-22.9).
+PUNCTUATION_DASHES = "\u2012\u2013\u2014\u2015\u2e3a\u2e3b\ufe31\ufe32\ufe58"
+_PROSE = {ord(d): " " for d in PUNCTUATION_DASHES}
+
+
+def normalize_prose(text: str) -> str:
+    """:func:`normalize_text` for running text: a punctuating dash is a word gap."""
+    return normalize_text(text.translate(_PROSE))
+
+
 _HYPHEN_BREAK_RE = re.compile(r"(\w)-[ \t]*\r?\n\s*(\w)")
 # Three or more single letters/digits separated by runs of 1-3 spaces: a letter-spaced heading.
 _SPACED_RUN_RE = re.compile(r"(?<!\w)(?:\w[ \t]{1,3}){2,}\w(?!\w)")
@@ -348,7 +360,11 @@ def _compile(items: Sequence[tuple[str, str | None, str | None]]) -> PhraseList:
     if not items:
         return PhraseList(None, None, ())
     ordered = sorted(items, key=lambda it: len(it[0]), reverse=True)
-    words = re.compile(rf"(?<![\w-])(?:{'|'.join(w for w, _l, _n in ordered)})(?![\w-])", re.IGNORECASE)
+    # Not inside a word, nor inside a hyphenated compound ("anti-IED"); a hyphen that punctuates
+    # ("pipe bombs - and", "fabrication--a") ends the phrase.
+    words = re.compile(
+        rf"(?<!\w)(?<!\w-)(?:{'|'.join(w for w, _l, _n in ordered)})(?!\w)(?!-\w)", re.IGNORECASE
+    )
     loose_items = [(lo, name) for _w, lo, name in ordered if lo is not None]
     loose = (
         re.compile("|".join(f"(?P<p{i}>{lo})" for i, (lo, _n) in enumerate(loose_items)), re.IGNORECASE)
@@ -406,7 +422,7 @@ class Screened:
 
     @staticmethod
     def of(text: str, neutral: tuple[str, ...] = ()) -> Screened:
-        words, squeezed = screen_variants(normalize_text(text))
+        words, squeezed = screen_variants(normalize_prose(text))
         # Neutral phrases are blanked in the word copy only: a squeezed run has no word boundaries
         # left, so blanking there could hide a deny phrase that shares letters with a neutral one.
         return Screened(_neutralize(words, neutral), squeezed)
@@ -1032,7 +1048,7 @@ def classify_content(
     traps, a history of minelaying). ``overridden``: the owner's ``override_safety`` for this document.
     """
     st = Stage.CONTENT
-    normalized = normalize_text(front_matter)
+    normalized = normalize_prose(front_matter)
     title = Screened.of(normalized[:title_page_chars], rules.neutral_phrases)
     full = Screened.of(normalized, rules.neutral_phrases)
     if not overridden:

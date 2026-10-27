@@ -309,3 +309,22 @@ def test_legacy_office_files_linked_as_pdfs_are_renamed(tmp_path: Path) -> None:
     fake = tmp_path / "fake.xls"
     fake.write_bytes(b"<html>login</html>")
     assert well_formed(fake) == "not a .xls file (no OLE2 header)"
+
+
+@pytest.mark.parametrize(
+    ("title", "expected"),
+    [
+        # 2026-10-26 review: the -ing form, and a dash right after the phrase.
+        ("Firearms Manufacturing Handbook", Verdict.DENY),
+        ("Ammunition manufacturing processes", Verdict.DENY),
+        ("IED fabrication\N{EM DASH}a field guide", Verdict.DENY),
+        ("IED fabrication\N{EN DASH}a field guide", Verdict.DENY),
+        ("Improvised explosive device construction--a primer", Verdict.DENY),
+        ("Shaped charges - a short course", Verdict.DENY),
+        # still: a phrase inside a hyphenated compound is not that phrase
+        ("A history of anti-IED programs", Verdict.ALLOW),
+    ],
+)
+def test_the_deny_core_survives_word_forms_and_dashes(title: str, expected: Verdict) -> None:
+    rules = load_rules({"allow_all": True}, repo_root=REPO)
+    assert classify_content(title, rules).verdict is expected

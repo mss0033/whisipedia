@@ -3,3 +3,8 @@
 # filter in registry/sources.yaml is unchanged otherwise.
 allow_documents: []
 deny_documents: []
+# Each catalogue entry is screened as it is indexed (2026-10-26). ATT&CK's entry for the Ursnif banking
+# trojan names the exploit kits that spread it; a defender's description, not exploit tooling. The owner
+# may veto (decision D18 precedent).
+override_safety:
+  "attack/S0386": "ATT&CK software entry S0386 Ursnif: defender's description of a banking trojan (2026-10-26, owner may veto)"
