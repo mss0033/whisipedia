@@ -5723,7 +5723,7 @@ sources:
       # nvlpubs.nist.gov (whose directory listings answer 403). SP 800 and FIPS are nist-csrc's.
       discovery:
         - {kind: api, flavor: crossref, prefix: "10.6028", exclude: "^10\\.6028/nist\\.(?:sp\\.800|fips)"}
-      filter: {allow_all: true, public_issuer: true}
+      filter: {allow_all: true, public_issuer: true, allow_image_only: true, rules: registry/filters/nist-technical-series.yaml}  # 1900s NBS scans have no text layer
     update: {cadence: P1Y, strategy: snapshot-retention}
     size: {bytes: 1.5e11, measured: false, as_of: '2026-10-24'}
     notes: "32,661 DOIs under 10.6028 (Crossref, 2026-10-23): 21,530 reports, 7,874 Journal of Research articles, 3,146 components (skipped: parts of other deposits). The national metrology lab's reference output: weights and measures (HB 44), critical data compilations (NSRDS-NBS), building science, fire research. Owner approval D20 (2026-10-24)."

@@ -1,0 +1,7 @@
+# Document-level rules for nist-technical-series (NIST and NBS technical publications: Journal of
+# Research, Technical Notes, Special Publications, Interagency Reports). Public research of a public
+# issuer. Old NBS papers are page scans without a text layer: they are kept (owner, 2026-10-26: "I
+# assume I want them") and found by their catalogue titles; the built-in safety lists still apply to
+# every document that has text, and cannot be switched off. Owner review decisions are recorded below
+# by `wsp proposals accept`.
+{}
