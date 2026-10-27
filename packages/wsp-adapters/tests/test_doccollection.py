@@ -403,6 +403,42 @@ def test_throttle_keeps_each_hosts_robots_txt() -> None:
     assert "https://shut.mil/doc.pdf" not in inner.requests
 
 
+def test_throttle_reads_an_unreachable_robots_txt_as_disallow_all() -> None:
+    """RFC 9309 2.3.1 (2026-10-26 review): 5xx/429/timeout disallow everything, for 10 minutes; a 4xx
+    other than 429 means no rules."""
+    from wsp_core.errors import FetchError, RobotsDisallowedError
+
+    now = [0.0]
+
+    class Answers(FakeFetcher):
+        def get_bytes(self, url: str, *, max_bytes: int = 64 * 1024 * 1024) -> bytes:
+            if url == "https://down.gov/robots.txt" and now[0] < 700:
+                self.requests.append(url)
+                raise FetchError("GET https://down.gov/robots.txt failed after 3 attempt(s): HTTP 503")
+            if url == "https://closed.gov/robots.txt":
+                self.requests.append(url)
+                raise FetchError("GET https://closed.gov/robots.txt failed after 1 attempt(s): HTTP 403")
+            return super().get_bytes(url, max_bytes=max_bytes)
+
+    inner = Answers(
+        {
+            "https://down.gov/robots.txt": b"User-agent: *\nDisallow:\n",
+            "https://down.gov/x": b"x",
+            "https://closed.gov/y": b"y",
+        }
+    )
+    t = Throttle(inner, interval=0.0, clock=lambda: now[0], sleep=lambda s: None, robots="Whisipedia/0.1")
+    with pytest.raises(RobotsDisallowedError):
+        t.get_bytes("https://down.gov/x")
+    assert t.get_bytes("https://closed.gov/y") == b"y"
+    now[0] = 650.0  # read again after 10 minutes (still down: still disallowed)
+    with pytest.raises(RobotsDisallowedError):
+        t.get_bytes("https://down.gov/x")
+    now[0] = 1300.0  # recovered
+    assert t.get_bytes("https://down.gov/x") == b"x"
+    assert "https://down.gov/x" in inner.requests
+
+
 def test_index_page_follow_never_opens_denied_series() -> None:
     index = b"""<html><body>
       <a href="/pubs/fm5-0.html">FM 5-0</a>

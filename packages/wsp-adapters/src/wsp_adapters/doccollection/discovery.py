@@ -98,6 +98,11 @@ class NoDocuments(Exception):  # noqa: N818 - an answer, not a failure
 # --- politeness ----------------------------------------------------------------------------------
 
 
+_ROBOTS_TTL = 24 * 3600.0
+_ROBOTS_UNREACHABLE_TTL = 600.0
+_DISALLOW_ALL = parse_robots("User-agent: *\nDisallow: /\n")
+
+
 class Throttle:
     """A ``Fetcher`` wrapper: at most one request per host every ``interval`` seconds.
 
@@ -128,29 +133,38 @@ class Throttle:
         self.clock = clock
         self.sleep = sleep
         self.robots = robots
-        self._rules: dict[str, Robots | None] = {}  # "scheme://host" -> its robots.txt
+        self._rules: dict[str, tuple[Robots | None, float]] = {}  # "scheme://host" -> (rules, expiry)
         self._last: dict[str, float] = {}  # host -> start time of its latest (reserved) request
         self.requests: dict[str, int] = {}
         self._lock = threading.Lock()
 
     def _robots(self, url: str) -> Robots | None:
+        """The host's rules as RFC 9309 reads them (2.3.1): none at all for a 4xx other than 429;
+        disallow-all, retried after 10 minutes, for an unreachable one (5xx, 429, timeout); 24 hours
+        otherwise. 2026-10-26 review: an unreachable robots.txt counted as allow-all for the run."""
         parts = urlsplit(url)
         site = f"{parts.scheme}://{parts.netloc.lower()}"
+        now = self.clock()
         with self._lock:
-            if site in self._rules:
-                return self._rules[site]
+            hit = self._rules.get(site)
+            if hit is not None and now < hit[1]:
+                return hit[0]
         rules: Robots | None = None
+        ttl = _ROBOTS_TTL
         try:
             with unguarded():  # robots.txt itself may be redirected; it is not a page we crawl
                 body = self.inner.get_bytes(f"{site}/robots.txt", max_bytes=512 * 1024)
-        except (FetchError, OSError, ValueError):
-            body = None
-        if body is not None:
             # RFC 9309 (wildcards, longest match); a byte-order mark no longer hides the first rule
             # (armypubs.army.mil). An HTML page answered for /robots.txt sets no rules.
             rules = parse_robots(body)
+        except NotFoundError:
+            pass  # no robots.txt: no rules
+        except (FetchError, OSError, ValueError) as exc:
+            status = re.search(r"HTTP (\d{3})", str(exc))
+            if not (status and 400 <= int(status.group(1)) < 500 and status.group(1) != "429"):
+                rules, ttl = _DISALLOW_ALL, _ROBOTS_UNREACHABLE_TTL
         with self._lock:
-            self._rules[site] = rules
+            self._rules[site] = (rules, now + ttl)
             self.requests[parts.netloc.lower()] = self.requests.get(parts.netloc.lower(), 0) + 1
         return rules
 
@@ -191,7 +205,8 @@ class Throttle:
             return
         host = urlsplit(url).netloc.lower()
         gap = max(self.interval, self.per_host.get(host, 0.0))
-        rules = self._rules.get(f"{urlsplit(url).scheme}://{host}")
+        hit = self._rules.get(f"{urlsplit(url).scheme}://{host}")
+        rules = hit[0] if hit is not None else None
         if rules is not None and self.robots is not None and (delay := rules.crawl_delay(self.robots)):
             gap = max(gap, float(delay))
         with self._lock:

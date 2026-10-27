@@ -265,7 +265,7 @@ class HttpFetcher:
             transport=transport,
             event_hooks={"response": [_refuse_downgrade, _guard_redirect, self._robots_hop]},
         )
-        self._robots: dict[str, Robots | None] = {}  # "scheme://host" -> its rules
+        self._robots: dict[str, tuple[Robots | None, float]] = {}  # "scheme://host" -> (rules, expiry)
         self._robots_lock = threading.Lock()
         self._bucket = TokenBucket(c.bandwidth_limit) if c.bandwidth_limit else None
         self._hosts: dict[str, threading.BoundedSemaphore] = {}
@@ -350,51 +350,66 @@ class HttpFetcher:
     # --- robots.txt ------------------------------------------------------------------------------
 
     def robots_allows(self, url: str) -> bool:
-        """Whether ``url``'s host lets us fetch it (its robots.txt, read once; unreadable: yes). An FTP
-        service's rules are its ``ftp://HOST/robots.txt`` (RFC 9309 covers FTP: NCBI's disallows every
-        agent, 2026-10-24)."""
+        """Whether ``url``'s host lets us fetch it, by its robots.txt as RFC 9309 reads it (2.3.1):
+        a file is obeyed; none at all (a 4xx other than 429) allows everything; an unreachable one (a
+        5xx, a 429, a timeout, a refused connection) disallows everything until it is read again.
+        Rules are kept 24 hours (the RFC's limit), an unreachable answer 10 minutes. An FTP service's
+        rules are its ``ftp://HOST/robots.txt`` (RFC 9309 covers FTP: NCBI's disallows every agent,
+        2026-10-24). 2026-10-26 review: an unreachable robots.txt counted as allow-all, for good."""
         if not self.config.robots or _IN_ROBOTS.get():
             return True
         parts = urlsplit(url)
         site = f"{parts.scheme}://{parts.netloc.lower()}"
+        now = time.monotonic()
         with self._robots_lock:
-            known = site in self._robots
-            rules = self._robots.get(site)
-        if not known:
-            rules = self._read_robots(site)
+            hit = self._robots.get(site)
+        if hit is None or now >= hit[1]:
+            rules, ttl = self._read_robots(site)
+            hit = (rules, now + ttl)
             with self._robots_lock:
-                self._robots[site] = rules
+                self._robots[site] = hit
+        rules = hit[0]
         return rules is None or rules.can_fetch(self.config.user_agent, url)
 
     def check_robots(self, url: str) -> None:
         if not self.robots_allows(url):
             raise RobotsDisallowedError(f"{url}: disallowed by {urlsplit(url).netloc}/robots.txt")
 
-    def _read_robots(self, site: str) -> Robots | None:
+    def _read_robots(self, site: str) -> tuple[Robots | None, float]:
+        """``(rules, seconds to keep them)``; ``None`` rules allow everything (see robots_allows)."""
         token = _IN_ROBOTS.set(True)
         try:
             if site.startswith("ftp://"):
-                return _parse_robots(self._ftp_robots(site))
-            with unguarded():
-                r = self._client.get(f"{site}/robots.txt")
-            if r.status_code != 200:
-                return None
-            return _parse_robots(r.content)
+                return self._ftp_robots(site)
+            with unguarded(), self._client.stream("GET", f"{site}/robots.txt") as r:
+                if r.status_code == 200:
+                    body = bytearray()
+                    for chunk in r.iter_bytes():
+                        body += chunk
+                        if len(body) >= ROBOTS_MAX_BYTES:  # RFC 9309 2.5: at least 500 KiB parsed
+                            break
+                    return _parse_robots(bytes(body[:ROBOTS_MAX_BYTES])), ROBOTS_TTL
+                if 400 <= r.status_code < 500 and r.status_code != 429:
+                    return None, ROBOTS_TTL  # "unavailable": no rules
+                return DISALLOW_ALL, ROBOTS_UNREACHABLE_TTL  # 5xx, 429: "unreachable"
         except (httpx.HTTPError, OSError):
-            return None
+            return DISALLOW_ALL, ROBOTS_UNREACHABLE_TTL
         finally:
             _IN_ROBOTS.reset(token)
 
-    def _ftp_robots(self, site: str) -> bytes | None:
+    def _ftp_robots(self, site: str) -> tuple[Robots | None, float]:
         try:
-            return ftp.get(
+            raw = ftp.get(
                 f"{site}/robots.txt",
-                max_bytes=512 * 1024,
+                max_bytes=ROBOTS_MAX_BYTES,
                 timeout=self.config.read_timeout,
                 on_chunk=self.throttle,
             )
-        except (ftp.FtpNotFoundError, ftp.FtpTooLargeError, *ftp.TRANSIENT):
-            return None
+        except ftp.FtpNotFoundError:
+            return None, ROBOTS_TTL
+        except (ftp.FtpTooLargeError, *ftp.TRANSIENT):
+            return DISALLOW_ALL, ROBOTS_UNREACHABLE_TTL
+        return _parse_robots(raw), ROBOTS_TTL
 
     def _robots_hop(self, response: httpx.Response) -> None:
         """Response hook: a redirect to a host whose robots.txt disallows the target is not followed."""
@@ -1062,6 +1077,12 @@ def _file_provenance(
 
 def _parse_robots(raw: bytes | None) -> Robots | None:
     return parse_robots(raw)
+
+
+ROBOTS_MAX_BYTES = 512 * 1024
+ROBOTS_TTL = 24 * 3600.0  # RFC 9309 2.4: a cached robots.txt is not used for more than 24 hours
+ROBOTS_UNREACHABLE_TTL = 600.0  # an unreachable robots.txt disallows everything until it is tried again
+DISALLOW_ALL = parse_robots("User-agent: *\nDisallow: /\n")
 
 
 def _raise_for_status(r: httpx.Response) -> None:

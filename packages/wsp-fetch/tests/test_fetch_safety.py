@@ -476,3 +476,44 @@ def test_robots_txt_can_be_turned_off_for_tests() -> None:
     with HttpFetcher(CFG, transport=transport) as f:  # CFG: robots=False
         assert f.get_bytes("https://bad.example/x.bin") == data
     assert not [a for a in asked if a.endswith("/robots.txt")]
+
+
+def test_an_unreachable_robots_txt_disallows_until_it_is_read_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    """RFC 9309 2.3.1 (2026-10-26 review): a 5xx or 429 robots.txt is "unreachable", so everything is
+    disallowed, tried again after 10 minutes; a 4xx (403, 404) is "unavailable", so there are no rules.
+    A file is kept 24 hours."""
+    import time
+
+    from wsp_core.errors import RobotsDisallowedError
+
+    data = payload(PIECE)
+    answers = {"down.example": 503, "busy.example": 429, "closed.example": 403}
+    asked: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        asked.append(f"{request.url.host}{request.url.path}")
+        if request.url.path == "/robots.txt":
+            code = answers.get(request.url.host, 200)
+            return httpx.Response(code, stream=httpx.ByteStream(b"User-agent: *\nDisallow:\n"))
+        return _ranged(data, request)
+
+    clock = [1000.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+    with HttpFetcher(replace(CFG, robots=True), transport=httpx.MockTransport(handler)) as f:
+        for host in ("down.example", "busy.example"):
+            with pytest.raises(RobotsDisallowedError):
+                f.get_bytes(f"https://{host}/x.bin")
+        assert f.get_bytes("https://closed.example/x.bin") == data  # 403: no rules
+        assert "down.example/x.bin" not in asked
+        answers["down.example"] = 200  # the site recovers
+        with pytest.raises(RobotsDisallowedError):
+            f.get_bytes("https://down.example/x.bin")  # still the cached answer
+        clock[0] += 601
+        assert f.get_bytes("https://down.example/x.bin") == data
+        n = asked.count("down.example/robots.txt")
+        clock[0] += 3600
+        f.get_bytes("https://down.example/x.bin")
+        assert asked.count("down.example/robots.txt") == n  # a file is kept 24 hours
+        clock[0] += 24 * 3600
+        f.get_bytes("https://down.example/x.bin")
+        assert asked.count("down.example/robots.txt") == n + 1
