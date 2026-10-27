@@ -636,7 +636,8 @@ sources:
       # kiwix), checked against Kiwix's own .sha256, which the owner saves by hand (decision 2026-10-26).
       # The list is every newer ZIM a Kiwix source would take, one checksum link each.
       selector: {tag: none}
-      manual: {daily: 10, list: {kind: kiwix-checksums}}
+      # Encyclopedias and medicine first; Stack Exchange's 160 sites (all rebuilt each month) last.
+      manual: {daily: 10, list: {kind: kiwix-checksums}, first: ["^kiwix-multilingual", "^(mdwiki|kiwix-wikem|wikipedia)", "^(?!stackexchange:)"]}
     update: {strategy: snapshot-retention}
     size: {bytes: 1e6, measured: false, as_of: 2026-10-26}
 
