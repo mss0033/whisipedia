@@ -621,6 +621,25 @@ sources:
     update: {strategy: snapshot-retention}
     size: {bytes: 470e9, measured: false, as_of: 2026-10-09}
 
+  - id: kiwix-checksums
+    name: "Kiwix's own SHA-256 checksums of new ZIM files (saved by the owner)"
+    publisher: Kiwix
+    domain: [reference-data]
+    tier: T1
+    status: paused  # never fetched: it is the owner's daily list, read by the Kiwix adapter
+    license: CC0-1.0
+    legal_basis: public-domain
+    access:
+      adapter: kiwix-opds
+      # Kiwix's hosts refuse robots since 2026-10 (download.kiwix.org, opds.library.kiwix.org:
+      # Disallow: /). The ZIMs come from the official mirrors (ftp.fau.de/kiwix, dumps.wikimedia.org/
+      # kiwix), checked against Kiwix's own .sha256, which the owner saves by hand (decision 2026-10-26).
+      # The list is every newer ZIM a Kiwix source would take, one checksum link each.
+      selector: {tag: none}
+      manual: {daily: 10, list: {kind: kiwix-checksums}}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 1e6, measured: false, as_of: 2026-10-26}
+
   - id: chronicling-america
     name: Chronicling America OCR text
     publisher: Library of Congress

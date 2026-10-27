@@ -3,6 +3,14 @@
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Changed: Kiwix comes from the official mirrors, checked against Kiwix's own checksums (2026-10-26)
+* Kiwix's hosts refuse robots since October 2026. The `kiwix-opds` adapter (`KiwixMirrorAdapter`)
+  lists ZIMs from `ftp.fau.de/kiwix` and downloads from it and `dumps.wikimedia.org/kiwix`; a file is
+  taken only with Kiwix's SHA-256: recorded in the vault manifest when it was first downloaded, or
+  saved by the owner from the daily manual page (`kiwix-checksums`). A newer file waits until then.
+### Fixed
+* `open_translator` without a local state directory returns no translator instead of failing.
+* `wsp ingest` called with hand-built arguments (bulk, manual imports) no longer needs `--wait`.
 ### Fixed: a big ZIM's content profile gets time to finish (2026-10-26)
 * A profile's time budget is at least its ZIMs' size at `[integrity] profile_min_rate` (0.75 MB/s):
   Spanish Wikipedia (204 GB), paced, ran out of a fixed 24 hours three times and failed.

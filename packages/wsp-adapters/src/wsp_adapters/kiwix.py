@@ -11,6 +11,17 @@ Without ``flavour`` one file per book is kept, preferring ``maxi``, then the unf
 then ``nopic``, ``mini`` and ``nodet``. ``ReleaseRef.version`` is the newest ZIM date in the
 selection (``YYYY-MM``).
 
+**Kiwix's own hosts refuse robots since October 2026** (``library.kiwix.org``'s catalog moved to
+``opds.library.kiwix.org`` and ``download.kiwix.org``: ``Disallow: /``). The installed adapter
+(:class:`KiwixMirrorAdapter`, the ``kiwix-opds`` entry point) therefore lists the ZIMs from an
+official mirror (``ftp.fau.de/kiwix``, which carries every directory) and downloads from the mirrors;
+the SHA-256 of a file comes only from a ``<file>.sha256`` that is Kiwix's own: one the owner saved by
+hand from ``download.kiwix.org`` (owner decision 2026-10-26), or one recorded in the vault manifest
+when the file was first downloaded from Kiwix. A newer ZIM whose checksum nobody has saved yet is not
+taken: the newest verifiable one is, and the newer one's ``.sha256`` link is offered on the owner's
+daily manual page (``wsp_cli.manual``, ``kind: kiwix-checksums``). The catalog path below stays for
+the day Kiwix lets robots read it again.
+
 Checksums come from the ``<file>.sha256`` published next to each ZIM. ``plan`` additionally
 resolves the ``.meta4`` metalink of every file that will actually be downloaded: it gives the
 exact size (the catalog rounds up to KiB), MD5/SHA-1, and the mirror list. The metalink URL is
@@ -23,8 +34,11 @@ from __future__ import annotations
 import hashlib
 import itertools
 import logging
+import os
 import re
 import tempfile
+import threading
+import time
 import xml.etree.ElementTree as ET
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -71,7 +85,7 @@ from wsp_core.model import (
     SourceSpec,
     Verdict,
 )
-from wsp_core.ports import Ctx
+from wsp_core.ports import Ctx, Fetcher
 
 log = logging.getLogger(__name__)
 
@@ -114,10 +128,11 @@ class OpdsEntry:
     meta4_url: str
     length: int | None
     tags: tuple[str, ...] = ()
+    url: str = ""  # the file itself, when it was listed without a metalink (a mirror's directory)
 
     @property
     def file_url(self) -> str:
-        return self.meta4_url.removesuffix(".meta4")
+        return self.url or self.meta4_url.removesuffix(".meta4")
 
     @property
     def file_name(self) -> str:
@@ -569,6 +584,207 @@ class KiwixOpdsAdapter:
             for _, zim in sorted(zims.items()):
                 params = zim_params(zim, spec.id, spec.license, prefix, skip_pattern(spec))
                 yield from read_zim(zim, params, workdir=ctx.workdir, pool=pool)
+
+
+# --- the official mirrors (Kiwix's own hosts refuse robots, 2026-10) ---------------------------------
+
+LISTING_BASE = "https://ftp.fau.de/kiwix/"
+"""An official Kiwix mirror that carries every directory (robots.txt disallows only ``/cgi-bin/``)."""
+MIRROR_BASES = ("https://ftp.fau.de/kiwix/", "https://dumps.wikimedia.org/kiwix/")
+WIKIMEDIA_DIRS = frozenset(
+    {
+        "wikibooks",
+        "wikinews",
+        "wikipedia",
+        "wikiquote",
+        "wikisource",
+        "wikiversity",
+        "wikivoyage",
+        "wiktionary",
+    }
+)
+"""The directories ``dumps.wikimedia.org/kiwix`` mirrors (Wikimedia projects only)."""
+OFFICIAL_BASE = "https://download.kiwix.org/"
+"""Where a browser fetches Kiwix's own ``.sha256`` (robots may not: the owner does, by hand)."""
+CHECKSUMS_ENV = "WSP_KIWIX_CHECKSUMS"
+"""Folders (``os.pathsep``-separated) of ``<file>.sha256`` files: the owner's and the seeded ones."""
+LISTING_TTL = 3600.0
+_FILE_RE = re.compile(
+    r"^(?P<book>.+?)(?:_(?P<flavour>maxi|nopic|mini|nodet))?_(?P<date>\d{4}-\d{2}[a-z]?)\.zim$"
+)
+_HREF_RE = re.compile(r'href="(?P<href>[^"?/:][^"?:]*)"')
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_LANG1TO3 = {v: k for k, v in _LANG3TO1.items()}
+_listings: dict[str, tuple[float, list[OpdsEntry]]] = {}
+_listings_lock = threading.Lock()
+
+
+def parse_listing(html: str, base: str, directory: str) -> list[OpdsEntry]:
+    """The ZIMs of one mirror directory page (an Apache or nginx index)."""
+    out: list[OpdsEntry] = []
+    for m in _HREF_RE.finditer(html):
+        name = m.group("href")
+        f = _FILE_RE.match(name)
+        if f is None:
+            continue
+        book = f.group("book")
+        parts = book.split("_")
+        lang = parts[1] if len(parts) > 1 else ""
+        out.append(
+            OpdsEntry(
+                name=book,
+                flavour=f.group("flavour") or "",
+                category=directory,
+                languages=(_LANG1TO3.get(lang, lang),),
+                title=book,
+                issued=None,
+                meta4_url="",
+                length=None,
+                tags=(directory,),
+                url=f"{base}zim/{directory}/{name}",
+            )
+        )
+    return out
+
+
+def mirror_listing(fetcher: Fetcher, base: str = LISTING_BASE) -> list[OpdsEntry]:
+    """Every ZIM the mirror lists, one directory page each; kept an hour (a daemon discovers ~130
+    Kiwix sources from the same listing)."""
+    now = time.monotonic()
+    with _listings_lock:
+        hit = _listings.get(base)
+        if hit is not None and now - hit[0] < LISTING_TTL:
+            return hit[1]
+    top = fetcher.get_bytes(f"{base}zim/", max_bytes=4 * 1024 * 1024).decode("utf-8", "replace")
+    hrefs = (m.group("href") for m in _HREF_RE.finditer(top))
+    dirs = sorted({h.rstrip("/") for h in hrefs if h.endswith("/") and not h.startswith(".")})  # not "../"
+    entries: list[OpdsEntry] = []
+    for d in dirs:
+        page = fetcher.get_bytes(f"{base}zim/{d}/", max_bytes=64 * 1024 * 1024).decode("utf-8", "replace")
+        entries.extend(parse_listing(page, base, d))
+    with _listings_lock:
+        _listings[base] = (now, entries)
+    return entries
+
+
+def checksum_dirs(environ: Mapping[str, str] | None = None) -> list[Path]:
+    raw = (os.environ if environ is None else environ).get(CHECKSUMS_ENV, "")
+    return [Path(p) for p in raw.split(os.pathsep) if p.strip()]
+
+
+def saved_checksum(file_name: str, dirs: Sequence[Path]) -> str | None:
+    """Kiwix's SHA-256 of ``file_name`` from a saved ``<file>.sha256``, or ``None``. A file that does
+    not name ``file_name`` with a 64-digit hex digest is not trusted (a saved error page, another file)."""
+    for d in dirs:
+        try:
+            text = (d / f"{file_name}.sha256").read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        digest = parse_checksum_file(text, file_name).get(file_name, "")
+        if _SHA256_RE.fullmatch(digest):
+            return digest
+    return None
+
+
+def official_checksum_url(entry: OpdsEntry) -> str:
+    return f"{OFFICIAL_BASE}zim/{entry.category}/{entry.file_name}.sha256"
+
+
+@dataclass(frozen=True, slots=True)
+class MirrorChoice:
+    """A source's books as the mirror lists them: the newest verifiable file of each, and the newer
+    files waiting for the owner's checksum."""
+
+    chosen: tuple[OpdsEntry, ...]
+    waiting: tuple[OpdsEntry, ...]
+    unverifiable: tuple[str, ...]  # books with no file whose checksum is known
+
+
+def choose_verifiable(entries: Iterable[OpdsEntry], selector: Selector, dirs: Sequence[Path]) -> MirrorChoice:
+    listed = [e for e in entries if selector.matches(e)]
+    best_all = select_entries(listed, selector)
+    want = {e.name: e for e in best_all}
+    # Only an older build of the same flavour stands in for the newest: never maxi swapped for nopic
+    # because only the nopic file's checksum happens to be known.
+    known = [
+        e
+        for e in listed
+        if e.flavour == want[e.name].flavour and saved_checksum(e.file_name, dirs) is not None
+    ]
+    best_known = {e.name: e for e in select_entries(known, selector)}
+    waiting = tuple(e for e in best_all if best_known.get(e.name) is not e)
+    missing = tuple(e.name for e in best_all if e.name not in best_known)
+    return MirrorChoice(tuple(best_known.values()), waiting, missing)
+
+
+class KiwixMirrorAdapter(KiwixOpdsAdapter):
+    """``kiwix-opds`` as installed: the mirror listing for discovery, the owner's saved or the vault's
+    recorded Kiwix checksums for verification (see the module notes)."""
+
+    def __init__(self, listing_base: str = LISTING_BASE, dirs: Sequence[Path] | None = None) -> None:
+        super().__init__()
+        self.listing_base = listing_base
+        self.dirs = list(dirs) if dirs is not None else None
+
+    def _dirs(self) -> list[Path]:
+        return self.dirs if self.dirs is not None else checksum_dirs()
+
+    def choice(self, ctx: Ctx) -> MirrorChoice:
+        selector = Selector.from_spec(ctx.source)
+        return choose_verifiable(mirror_listing(ctx.fetcher, self.listing_base), selector, self._dirs())
+
+    def discover(self, ctx: Ctx) -> Iterable[ReleaseRef]:
+        spec = ctx.source
+        selector = Selector.from_spec(spec)
+        pick = self.choice(ctx)
+        for e in pick.waiting:
+            log.info(
+                "%s: %s waits for its Kiwix checksum (%s)", spec.id, e.file_name, official_checksum_url(e)
+            )
+        if pick.unverifiable:
+            # Never a release without a book it had: the owner's checksum is needed first.
+            raise FetchError(
+                f"{spec.id}: no Kiwix checksum saved for any listed file of {', '.join(pick.unverifiable)};"
+                " it is on the owner's daily manual page"
+            )
+        if not pick.chosen:
+            return []
+        dirs = self._dirs()
+        files: list[RemoteFile] = []
+        for entry in pick.chosen:
+            digest = saved_checksum(entry.file_name, dirs)
+            assert digest is not None  # chosen only when known
+            mirrors = tuple(
+                f"{b}zim/{entry.category}/{entry.file_name}"
+                for b in MIRROR_BASES
+                if b != self.listing_base
+                and (b != "https://dumps.wikimedia.org/kiwix/" or entry.category in WIKIMEDIA_DIRS)
+            )
+            files.append(
+                RemoteFile(
+                    url=entry.file_url,
+                    name=entry.file_name,
+                    size=None,
+                    checksums=(Checksum("sha256", digest),),
+                    mirrors=mirrors,
+                    metalink=None,
+                )
+            )
+        return [
+            ReleaseRef(
+                source_id=spec.id,
+                version=release_version([e.file_name for e in pick.chosen], bundle=not selector.single_book),
+                published=None,
+                files=tuple(files),
+                meta={"books": ",".join(e.name for e in pick.chosen), "listed_by": self.listing_base},
+                format=ZIM_FORMAT,
+            )
+        ]
+
+    def upstream_checksums(self, ctx: Ctx, file_url: str) -> tuple[Checksum, ...]:
+        """The saved Kiwix SHA-256 of a ZIM (never fetched: Kiwix's hosts refuse robots)."""
+        digest = saved_checksum(file_url.rsplit("/", 1)[-1], self._dirs())
+        return (Checksum("sha256", digest),) if digest else ()
 
 
 @dataclass(frozen=True, slots=True)

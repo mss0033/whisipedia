@@ -34,6 +34,7 @@ again now; `--sync --rebuild` remakes the lists.
 | `saved` | the source's own discovery, reading listing pages the owner saved into `_listing/` | `pubchem`, `army-pubs-public` |
 | `discovery` | the source's own discovery, on hosts that allow us | `wbdg-criteria` (wbdg.org), `geonames`, `gebco-grid` |
 | `list` | a curated list in the registry | curated sources |
+| `kiwix-checksums` | every newer ZIM the official mirrors list for a Kiwix source: Kiwix's own `.sha256` of it | `kiwix-checksums` |
 
 `first` puts the most valuable items first, for example PubChem's chemical safety summaries
 (`CID-LCSS.xml.gz`) and WBDG's Unified Facilities Criteria. `again_days` offers a file again when its
@@ -43,6 +44,22 @@ A document collection's received files go through `wsp collections fetch` with t
 listing (`kind: candidates`, a sample, so nothing held is inferred withdrawn). PubMed's become a
 generation of the new update files, `pubmedYY-uNNNN`, in an unbroken run of numbers. A gap waits for
 the missing file.
+
+## Kiwix checksums
+
+Kiwix's own hosts refuse robots since October 2026 (`download.kiwix.org` and the catalog's
+`opds.library.kiwix.org`: `Disallow: /`). The library lists and downloads ZIMs from the official
+mirrors (`ftp.fau.de/kiwix`, which has every directory, and `dumps.wikimedia.org/kiwix` for the
+Wikimedia projects), and takes a file only when Kiwix's own SHA-256 of it is known (owner decision
+2026-10-26):
+
+* for the files the library already holds, from the vault manifests, recorded when each was downloaded
+  from Kiwix (copied to `<state>/kiwix-checksums/` by the sync);
+* for a newer file, from the `.sha256` the owner saves into `_manual/kiwix-checksums/`: the daily page
+  links `https://download.kiwix.org/zim/<dir>/<file>.zim.sha256` and names the file to save.
+
+Until its checksum is saved, a newer ZIM waits and the source keeps the version it can verify. A
+saved file that is not that ZIM's checksum (an error page, another file's) is set aside as `*.bad`.
 
 ## Limits
 

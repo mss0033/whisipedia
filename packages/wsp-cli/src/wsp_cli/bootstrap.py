@@ -92,8 +92,20 @@ def layout(config_dir: Path | None = None, *, environ: Mapping[str, str] | None 
     )
 
 
+KIWIX_CHECKSUMS_ENV = "WSP_KIWIX_CHECKSUMS"  # wsp_adapters.kiwix.CHECKSUMS_ENV (not imported: libzim)
+KIWIX_CHECKSUMS = (
+    "kiwix-checksums"  # <state>/kiwix-checksums (seeded) and <vault>/_incoming/_manual/kiwix-checksums
+)
+
+
 def load(lay: Layout, *, environ: Mapping[str, str] | None = None) -> dict[str, Any]:
-    return load_config(lay.config_dir, environ=environ)
+    cfg = load_config(lay.config_dir, environ=environ)
+    if environ is None and KIWIX_CHECKSUMS_ENV not in os.environ:
+        # The Kiwix adapter (and the child units this process starts) find Kiwix's checksums here.
+        dirs = paths(cfg).kiwix_checksum_dirs
+        if dirs:
+            os.environ[KIWIX_CHECKSUMS_ENV] = os.pathsep.join(str(d) for d in dirs)
+    return cfg
 
 
 def section(cfg: Mapping[str, Any], name: str) -> Mapping[str, Any]:
@@ -265,6 +277,17 @@ class Paths:
     @property
     def index_work(self) -> Path:
         return self.require_index() / "work"
+
+    @property
+    def kiwix_checksum_dirs(self) -> list[Path]:
+        """Kiwix's own ``<file>.sha256`` files: those the library recorded when it downloaded from Kiwix
+        (local disk) and those the owner saves by hand (``_incoming/_manual/kiwix-checksums``)."""
+        out: list[Path] = []
+        if self.state_dir is not None:
+            out.append(self.state_dir / KIWIX_CHECKSUMS)
+        if self.vault_root is not None:
+            out.append(self.vault_root / "_incoming" / "_manual" / KIWIX_CHECKSUMS)
+        return out
 
     def require_vault(self) -> Path:
         if self.vault_root is None:
@@ -752,9 +775,10 @@ def open_translator(cfg: Mapping[str, Any]) -> Translator | None:
     from wsp_oracle.config import OracleConfig
     from wsp_oracle.translation import build_translator
 
-    return build_translator(
-        OracleConfig.from_mapping(section(cfg, "oracle")).translation, paths(cfg).require_state()
-    )
+    state = paths(cfg).state_dir
+    if state is None:  # no local state directory (a read-only or test setup): no cache, no translator
+        return None
+    return build_translator(OracleConfig.from_mapping(section(cfg, "oracle")).translation, state)
 
 
 def open_speller(cfg: Mapping[str, Any]) -> ReloadingSpeller | None:

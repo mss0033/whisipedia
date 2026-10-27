@@ -299,3 +299,75 @@ def test_what_the_library_holds_is_never_asked_for_and_a_url_without_a_name_gets
     )
     assert manual.mark_held(q, {"geo:ALL": "2026-10-23r2"}) == 1
     assert [(i.status, i.taken) for i in q.items] == [("taken", "2026-10-23"), ("pending", "")]
+
+
+# --- Kiwix checksums (owner decision 2026-10-26: mirrors, checked against Kiwix's own .sha256) -----
+
+
+def _kiwix(sid: str, selector: dict[str, Any]) -> SourceSpec:
+    return _spec(sid, {"adapter": "kiwix-opds", "selector": selector})
+
+
+def test_kiwix_checksums_held_files_are_recorded_and_only_new_files_are_asked_for(tmp_path: Path) -> None:
+    from wsp_adapters import kiwix
+    from wsp_core.testing.adapter_contract import FakeFetcher
+
+    kiwix._listings.clear()  # pyright: ignore[reportPrivateUsage]
+    vault, seeded, saved = tmp_path / "vault", tmp_path / "state" / "kiwix-checksums", tmp_path / "manual"
+    held = "wikipedia_ab_all_maxi_2026-07.zim"
+    digest = "ab" * 32
+    gen = vault / "library" / "encyclopedia" / "kiwix-ab" / "2026-07"
+    gen.mkdir(parents=True)
+    (gen / "MANIFEST.json").write_text(
+        json.dumps(
+            {
+                "files": [
+                    {
+                        "path": f"upstream/{held}",
+                        "sha256": digest,
+                        "upstream": [{"algorithm": "sha256", "hexdigest": digest}],
+                    },
+                    {"path": "upstream/other.zim", "sha256": "cd" * 32, "upstream": []},  # no Kiwix digest
+                ]
+            }
+        )
+    )
+    specs = [_kiwix("kiwix-ab", {"name": "wikipedia_ab_all", "flavour": "maxi"})]
+    assert manual.seed_kiwix_checksums(vault, specs, seeded) == 1
+    assert (seeded / f"{held}.sha256").read_text() == f"{digest}  {held}\n"
+    assert manual.seed_kiwix_checksums(vault, specs, seeded) == 0  # once
+
+    base = "https://ftp.fau.de/kiwix/"
+    listing = (
+        '<a href="wikipedia_ab_all_maxi_2026-07.zim">x</a> <a href="wikipedia_ab_all_maxi_2026-10.zim">y</a>'
+    )
+    fetcher = FakeFetcher(
+        {f"{base}zim/": b'<a href="wikipedia/">w</a>', f"{base}zim/wikipedia/": listing.encode()}
+    )
+    page = _spec(
+        "kiwix-checksums", {"adapter": "kiwix-opds", "manual": {"list": {"kind": "kiwix-checksums"}}}
+    )
+    items, _, _ = manual.build_queue(
+        page, saved, fetcher=fetcher, held=None, user_agent="t", workdir=tmp_path / "w", specs=specs,
+        checksum_dirs=[seeded, saved],
+    )  # fmt: skip
+    (item,) = items
+    assert item.id == "wikipedia_ab_all_maxi_2026-10.zim"
+    assert item.open == "https://download.kiwix.org/zim/wikipedia/wikipedia_ab_all_maxi_2026-10.zim.sha256"
+    assert item.save_as == "wikipedia_ab_all_maxi_2026-10.zim.sha256"
+
+    # What the owner saves is taken only when it is that file's checksum.
+    queue = Queue("kiwix-checksums", items=[item])
+    saved.mkdir()
+    (saved / item.save_as).write_text("<html>blocked</html>")
+    manual.import_kiwix_checksums(page, queue, saved, io.StringIO())
+    assert queue.items[0].status == "pending"
+    assert (saved / f"{item.save_as}.bad").exists()
+    (saved / item.save_as).write_text(f"{'ef' * 32}  {item.id}\n")
+    manual.import_kiwix_checksums(page, queue, saved, io.StringIO())
+    assert queue.items[0].status == "taken"
+    items, _, _ = manual.build_queue(
+        page, saved, fetcher=fetcher, held=None, user_agent="t", workdir=tmp_path / "w", specs=specs,
+        checksum_dirs=[seeded, saved],
+    )  # fmt: skip
+    assert items == []  # nothing left to ask for

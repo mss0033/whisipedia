@@ -15,7 +15,7 @@ dependencies = [
 ]
 
 [project.entry-points."whisipedia.adapters"]
-kiwix-opds = "wsp_adapters.kiwix:KiwixOpdsAdapter"
+kiwix-opds = "wsp_adapters.kiwix:KiwixMirrorAdapter"  # Kiwix's hosts refuse robots (2026-10)
 wikimedia-dumps = "wsp_adapters.wikimedia:WikimediaDumpsAdapter"
 wikidata = "wsp_adapters.wikidata:WikidataAdapter"
 arxiv = "wsp_adapters.arxiv:ArxivAdapter"

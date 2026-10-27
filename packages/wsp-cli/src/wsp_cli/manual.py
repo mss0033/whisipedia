@@ -16,7 +16,12 @@ A source takes part through ``access.manual`` in the registry:
     saved once into ``_manual/<source>/_listing/`` (PubChem's FTP folders, the Army's product maps);
     a page not saved yet is offered first;
   - ``{kind: pubmed}``: PubMed's numbered update files after the newest the library holds;
-  - ``{kind: list, items: [{title, url, landing, save_as, pub_number}]}``: a curated list.
+  - ``{kind: list, items: [{title, url, landing, save_as, pub_number}]}``: a curated list;
+  - ``{kind: kiwix-checksums}``: Kiwix's own ``<file>.sha256`` of every newer ZIM the mirrors list
+    for a Kiwix source (owner decision 2026-10-26: mirrors only with Kiwix's checksums). Saved files
+    stay in the folder, where the Kiwix adapter reads them; nothing is ingested. The checksums Kiwix
+    published for the files the library already holds are copied from the vault manifests into
+    ``<state>/kiwix-checksums`` first, so only new files are asked for.
 
 * ``browse``: ``[pattern, replacement]`` turning a listed URL into one a browser opens
   (``ftp://`` into NCBI's ``https://`` names of the same files);
@@ -230,6 +235,8 @@ def build_queue(
     held: str | None,
     user_agent: str,
     workdir: Path,
+    specs: Sequence[SourceSpec] = (),
+    checksum_dirs: Sequence[Path] = (),
 ) -> tuple[list[Item], list[tuple[str, str]], list[str]]:
     """The source's list: ``(items, pages the owner should save first, notes)``."""
     mc = manual_config(spec) or {}
@@ -237,6 +244,12 @@ def build_queue(
     kind = str(how.get("kind") or "")
     rule = [str(x) for x in cast(list[object], mc.get("browse") or [])]
     page_ext = str(mc.get("page_ext") or ".pdf")
+    if kind == "kiwix-checksums":
+        if fetcher is None:
+            raise bootstrap.ConfigError(
+                f"{spec.id}: the Kiwix checksum list needs a fetcher (the mirror listing)"
+            )
+        return _kiwix_checksum_items(specs, fetcher, user_agent, workdir, checksum_dirs)
     if kind == "pubmed":
         return _pubmed_items(held, int(mc.get("daily") or DEFAULT_DAILY)), [], []
     if kind == "list":
@@ -281,6 +294,95 @@ def build_queue(
     to_save = [(_browse(u, rule), pages[u]) for u in (saved.missing if saved else [])]
     notes = list(survey.incomplete[:5]) if not to_save else []
     return items, to_save, notes
+
+
+def _kiwix_checksum_items(
+    specs: Sequence[SourceSpec], fetcher: Fetcher, user_agent: str, workdir: Path, dirs: Sequence[Path]
+) -> tuple[list[Item], list[tuple[str, str]], list[str]]:
+    from wsp_adapters.kiwix import KiwixMirrorAdapter, official_checksum_url
+
+    adapter = KiwixMirrorAdapter(dirs=list(dirs))
+    items: dict[str, Item] = {}
+    notes: list[str] = []
+    for spec in specs:
+        if str(cast(Mapping[str, Any], spec.raw.get("access") or {}).get("adapter")) != "kiwix-opds":
+            continue
+        if spec.status in (SourceStatus.RETIRED, SourceStatus.EXCLUDED):
+            continue
+        ctx = Ctx(source=spec, fetcher=fetcher, workdir=workdir, user_agent=user_agent)
+        try:
+            pick = adapter.choice(ctx)
+        except (ValueError, FetchError) as exc:
+            notes.append(f"{spec.id}: {exc}"[:200])
+            continue
+        for e in pick.waiting:
+            items.setdefault(
+                e.file_name,
+                Item(
+                    e.file_name,
+                    official_checksum_url(e),
+                    f"{e.file_name}.sha256",
+                    f"{spec.id}: {e.name} ({e.release_date})",
+                ),
+            )
+    return sorted(items.values(), key=lambda i: i.id), [], notes[:5]
+
+
+def seed_kiwix_checksums(vault_root: Path, specs: Sequence[SourceSpec], dest: Path) -> int:
+    """Copy the SHA-256 Kiwix published for each ZIM the library holds (recorded in the generation's
+    MANIFEST.json when it was downloaded from Kiwix) into ``dest/<file>.sha256``. Returns how many
+    were written."""
+    dest.mkdir(parents=True, exist_ok=True)
+    written = 0
+    for spec in specs:
+        if str(cast(Mapping[str, Any], spec.raw.get("access") or {}).get("adapter")) != "kiwix-opds":
+            continue
+        for manifest in vault_root.glob(f"library/*/{spec.id}/*/MANIFEST.json"):
+            try:
+                files = cast(
+                    list[Mapping[str, Any]],
+                    json.loads(manifest.read_text(encoding="utf-8")).get("files") or [],
+                )
+            except (OSError, ValueError):
+                continue
+            for f in files:
+                name = str(f.get("path") or "").rsplit("/", 1)[-1]
+                if not name.endswith(".zim"):
+                    continue
+                ups = cast(list[Mapping[str, Any]], f.get("upstream") or [])
+                digest = next(
+                    (str(u.get("hexdigest") or "").lower() for u in ups if u.get("algorithm") == "sha256"), ""
+                )
+                # The upstream digest is Kiwix's own (.sha256 and metalink); the file's sha256 matched it.
+                if not re.fullmatch(r"[0-9a-f]{64}", digest) or digest != str(f.get("sha256") or "").lower():
+                    continue
+                target = dest / f"{name}.sha256"
+                if target.exists():
+                    continue
+                tmp = target.with_name(target.name + ".partial")
+                tmp.write_text(f"{digest}  {name}\n", encoding="utf-8")
+                tmp.replace(target)
+                written += 1
+    return written
+
+
+def import_kiwix_checksums(spec: SourceSpec, queue: Queue, folder: Path, out: TextIO) -> int:
+    """A saved ``.sha256`` is taken when it names its ZIM with a SHA-256; anything else (a saved error
+    page, another file's checksum) is set aside."""
+    from wsp_adapters.kiwix import saved_checksum
+
+    day = datetime.now(UTC).strftime("%Y-%m-%d")
+    for item in queue.pending():
+        path = folder / item.save_as
+        if not path.is_file():
+            continue
+        if saved_checksum(item.id, [folder]) is None:
+            why = f"not Kiwix's checksum of {item.id}"
+            out.write(f"{spec.id}: {item.save_as}: {why}; set aside as {path.name}.bad\n")
+            _set_aside(path, why, item)
+            continue
+        item.status, item.taken, item.problem = "taken", day, ""
+    return 0
 
 
 def _pubmed_items(held: str | None, ahead: int) -> list[Item]:
@@ -627,6 +729,8 @@ def cmd_sync(args: argparse.Namespace, out: TextIO) -> int:
                 if kind == "pubmed":
                     worst = max(worst, import_pubmed(args, spec, queue, folder, held, vault_root, out))
                     held = held_generation(cfg, spec)
+                elif kind == "kiwix-checksums":
+                    worst = max(worst, import_kiwix_checksums(spec, queue, folder, out))
                 else:
                     worst = max(worst, import_collection(args, spec, queue, folder, out))
             finally:
@@ -635,8 +739,13 @@ def cmd_sync(args: argparse.Namespace, out: TextIO) -> int:
         # A saved listing is read again while pages are missing (the owner may have saved them since);
         # PubMed's list follows what is held, so it is remade every run.
         if args.rebuild or stale or queue.save_pages or kind == "pubmed":
-            if kind == "discovery" and fetcher is None:
+            if kind in ("discovery", "kiwix-checksums") and fetcher is None:
                 fetcher = bootstrap.build_fetcher(cfg)
+            kiwix_dirs = bootstrap.paths(cfg).kiwix_checksum_dirs
+            if kind == "kiwix-checksums" and kiwix_dirs:
+                seeded = seed_kiwix_checksums(vault_root, specs, kiwix_dirs[0])
+                if seeded:
+                    out.write(f"{spec.id}: {seeded} checksum(s) recorded from the vault manifests\n")
             try:
                 items, to_save, notes = build_queue(
                     spec,
@@ -645,6 +754,8 @@ def cmd_sync(args: argparse.Namespace, out: TextIO) -> int:
                     held=held,
                     user_agent=user_agent,
                     workdir=state / "work" / spec.id,
+                    specs=specs,
+                    checksum_dirs=kiwix_dirs,
                 )
             except (FetchError, bootstrap.ConfigError, OSError) as exc:
                 out.write(f"{spec.id}: list not rebuilt: {exc}\n")
@@ -656,7 +767,7 @@ def cmd_sync(args: argparse.Namespace, out: TextIO) -> int:
                 elif items or not queue.items:
                     queue.merge(items)
                 queue.prioritise([str(x) for x in cast(list[object], mc.get("first") or [])])
-                if kind != "pubmed":
+                if kind not in ("pubmed", "kiwix-checksums"):
                     mark_held(queue, held_documents(vault_root, spec, queue))
                 queue.save_pages, queue.notes, queue.built = to_save, notes, today
                 queue.save(qpath)
