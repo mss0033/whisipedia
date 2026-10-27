@@ -1,0 +1,4768 @@
+# Owner review decisions for nist-technical-series (machine-owned; written by `wsp proposals accept|reject`).
+# One entry per document the owner decided, keyed by document key (one edition). The hand-written
+# rules, with their comments, are in registry/filters/nist-technical-series.yaml; this file is loaded next to it (policy.load_rules).
+# Remove an entry to undo a decision; anything else is rewritten by the next decision.
+allow_documents:
+- nist:jres.007.014
+- nist:jres.012.001
+- nist:jres.101.026
+- nist:jres.104.035
+- nist:nbs.bh.14
+- nist:nbs.bh.3a
+- nist:nbs.bms.105
+- nist:nbs.bms.119
+- nist:nbs.bms.133
+- nist:nbs.bms.134
+- nist:nbs.bms.141
+- nist:nbs.bms.17supp2
+- nist:nbs.bms.19
+- nist:nbs.bms.30
+- nist:nbs.bms.37
+- nist:nbs.bms.52
+- nist:nbs.bms.68
+- nist:nbs.bms.81
+- nist:nbs.bss.2
+- nist:nbs.bss.32
+- nist:nbs.bss.40
+- nist:nbs.bss.7
+- nist:nbs.bss.8
+- nist:nbs.bss.96
+- nist:nbs.circ.31
+- nist:nbs.circ.447
+- nist:nbs.circ.461
+- nist:nbs.circ.501
+- nist:nbs.circ.510
+- nist:nbs.circ.510sup1
+- nist:nbs.circ.510sup2
+- nist:nbs.circ.524
+- nist:nbs.circ.525
+- nist:nbs.circ.526
+- nist:nbs.circ.527
+- nist:nbs.circ.551
+- nist:nbs.circ.553
+- nist:nbs.circ.566
+- nist:nbs.circ.74-1937
+- nist:nbs.circ.9e6
+- nist:nbs.csm.1
+- nist:nbs.csm.v6n1
+- nist:nbs.csm.v7n1
+- nist:nbs.csm.v8n1
+- nist:nbs.csm.v9n1
+- nist:nbs.gcr.80-287
+- nist:nbs.hb.1
+- nist:nbs.hb.119
+- nist:nbs.hb.19
+- nist:nbs.hb.2
+- nist:nbs.hb.22
+- nist:nbs.hb.27
+- nist:nbs.hb.28-1942
+- nist:nbs.hb.28-1944
+- nist:nbs.hb.28supp1950
+- nist:nbs.hb.28supp1963
+- nist:nbs.hb.31
+- nist:nbs.hb.38
+- nist:nbs.hb.40
+- nist:nbs.hb.44-1983
+- nist:nbs.hb.44e2-1955
+- nist:nbs.hb.5
+- nist:nbs.hb.6
+- nist:nbs.hb.7
+- nist:nbs.hb.77v2
+- nist:nbs.hb.77v3
+- nist:nbs.hb.8
+- nist:nbs.hb.9
+- nist:nbs.hb.94
+- nist:nbs.ir.73-101
+- nist:nbs.ir.73-112
+- nist:nbs.ir.73-118
+- nist:nbs.ir.73-124
+- nist:nbs.ir.73-131
+- nist:nbs.ir.73-144
+- nist:nbs.ir.73-174
+- nist:nbs.ir.73-187
+- nist:nbs.ir.73-199
+- nist:nbs.ir.73-210
+- nist:nbs.ir.73-216
+- nist:nbs.ir.73-225
+- nist:nbs.ir.73-236
+- nist:nbs.ir.73-249
+- nist:nbs.ir.73-259
+- nist:nbs.ir.73-274
+- nist:nbs.ir.73-299
+- nist:nbs.ir.73-308
+- nist:nbs.ir.73-318
+- nist:nbs.ir.73-332
+- nist:nbs.ir.73-340
+- nist:nbs.ir.73-346
+- nist:nbs.ir.73-400
+- nist:nbs.ir.73-411
+- nist:nbs.ir.73-424
+- nist:nbs.ir.74-359
+- nist:nbs.ir.74-375
+- nist:nbs.ir.74-393
+- nist:nbs.ir.74-432
+- nist:nbs.ir.74-449
+- nist:nbs.ir.74-457
+- nist:nbs.ir.74-466
+- nist:nbs.ir.74-470
+- nist:nbs.ir.74-480
+- nist:nbs.ir.74-488
+- nist:nbs.ir.74-503
+- nist:nbs.ir.74-516
+- nist:nbs.ir.74-526
+- nist:nbs.ir.74-559
+- nist:nbs.ir.74-569
+- nist:nbs.ir.74-599
+- nist:nbs.ir.74-611
+- nist:nbs.ir.74-620
+- nist:nbs.ir.74-632
+- nist:nbs.ir.75-643
+- nist:nbs.ir.75-666
+- nist:nbs.ir.75-676
+- nist:nbs.ir.75-688
+- nist:nbs.ir.75-698
+- nist:nbs.ir.75-710
+- nist:nbs.ir.75-722
+- nist:nbs.ir.75-733
+- nist:nbs.ir.75-746
+- nist:nbs.ir.75-759
+- nist:nbs.ir.75-767
+- nist:nbs.ir.75-778
+- nist:nbs.ir.75-790
+- nist:nbs.ir.75-805
+- nist:nbs.ir.75-820
+- nist:nbs.ir.75-900
+- nist:nbs.ir.75-913
+- nist:nbs.ir.75-950
+- nist:nbs.ir.75-962
+- nist:nbs.ir.75-977
+- nist:nbs.ir.76-1001
+- nist:nbs.ir.76-1013
+- nist:nbs.ir.76-1021
+- nist:nbs.ir.76-1037
+- nist:nbs.ir.76-1050
+- nist:nbs.ir.76-1062
+- nist:nbs.ir.76-1129
+- nist:nbs.ir.76-1150
+- nist:nbs.ir.76-1174
+- nist:nbs.ir.76-1183
+- nist:nbs.ir.76-1195
+- nist:nbs.ir.76-831
+- nist:nbs.ir.76-843
+- nist:nbs.ir.76-982
+- nist:nbs.ir.76-989
+- nist:nbs.ir.77-1205
+- nist:nbs.ir.77-1226
+- nist:nbs.ir.77-1238
+- nist:nbs.ir.77-1244
+- nist:nbs.ir.77-1262
+- nist:nbs.ir.77-1276
+- nist:nbs.ir.77-1286
+- nist:nbs.ir.77-1295
+- nist:nbs.ir.77-1314
+- nist:nbs.ir.77-1320
+- nist:nbs.ir.77-852
+- nist:nbs.ir.77-863
+- nist:nbs.ir.78-879
+- nist:nbs.ir.78-885
+- nist:nbs.ir.79-1617
+- nist:nbs.ir.79-1624
+- nist:nbs.ir.79-1733
+- nist:nbs.ir.79-1817
+- nist:nbs.ir.82-2589
+- nist:nbs.ir.83-2742v11
+- nist:nbs.ir.83-2742v6
+- nist:nbs.ir.83-2758
+- nist:nbs.ir.85-3133
+- nist:nbs.ir.85-3289
+- nist:nbs.ir.86-3322
+- nist:nbs.ir.87-3590
+- nist:nbs.ir.88-3706
+- nist:nbs.ir.88-3730
+- nist:nbs.ir.88-3793-1
+- nist:nbs.lcirc.698
+- nist:nbs.mono.100
+- nist:nbs.mono.101
+- nist:nbs.mono.102
+- nist:nbs.mono.105
+- nist:nbs.mono.112
+- nist:nbs.mono.113v1
+- nist:nbs.mono.119
+- nist:nbs.mono.123
+- nist:nbs.mono.129
+- nist:nbs.mono.131
+- nist:nbs.mono.132
+- nist:nbs.mono.134
+- nist:nbs.mono.14
+- nist:nbs.mono.140
+- nist:nbs.mono.141
+- nist:nbs.mono.144
+- nist:nbs.mono.145p1
+- nist:nbs.mono.151
+- nist:nbs.mono.156
+- nist:nbs.mono.162
+- nist:nbs.mono.168
+- nist:nbs.mono.169
+- nist:nbs.mono.22
+- nist:nbs.mono.32-1
+- nist:nbs.mono.32-2
+- nist:nbs.mono.34v1
+- nist:nbs.mono.35
+- nist:nbs.mono.3v1
+- nist:nbs.mono.3v2
+- nist:nbs.mono.43v1
+- nist:nbs.mono.43v2
+- nist:nbs.mono.50
+- nist:nbs.mono.53
+- nist:nbs.mono.60
+- nist:nbs.mono.61
+- nist:nbs.mono.70v1
+- nist:nbs.mono.70v2
+- nist:nbs.mono.70v3
+- nist:nbs.mono.70v4
+- nist:nbs.mono.70v5
+- nist:nbs.mono.71
+- nist:nbs.mono.72
+- nist:nbs.mono.81
+- nist:nbs.mono.92
+- nist:nbs.mp.1
+- nist:nbs.mp.100
+- nist:nbs.mp.101
+- nist:nbs.mp.102
+- nist:nbs.mp.103
+- nist:nbs.mp.104
+- nist:nbs.mp.105
+- nist:nbs.mp.107
+- nist:nbs.mp.108
+- nist:nbs.mp.109
+- nist:nbs.mp.110
+- nist:nbs.mp.112
+- nist:nbs.mp.115
+- nist:nbs.mp.12
+- nist:nbs.mp.120
+- nist:nbs.mp.128
+- nist:nbs.mp.130
+- nist:nbs.mp.140
+- nist:nbs.mp.159
+- nist:nbs.mp.16
+- nist:nbs.mp.168
+- nist:nbs.mp.176
+- nist:nbs.mp.178
+- nist:nbs.mp.189
+- nist:nbs.mp.190
+- nist:nbs.mp.20-2
+- nist:nbs.mp.20-3
+- nist:nbs.mp.202
+- nist:nbs.mp.21
+- nist:nbs.mp.227
+- nist:nbs.mp.236
+- nist:nbs.mp.241
+- nist:nbs.mp.242
+- nist:nbs.mp.243
+- nist:nbs.mp.245
+- nist:nbs.mp.246
+- nist:nbs.mp.247
+- nist:nbs.mp.248
+- nist:nbs.mp.256
+- nist:nbs.mp.262-2
+- nist:nbs.mp.265
+- nist:nbs.mp.267
+- nist:nbs.mp.268
+- nist:nbs.mp.271
+- nist:nbs.mp.277supp1
+- nist:nbs.mp.278
+- nist:nbs.mp.279
+- nist:nbs.mp.280
+- nist:nbs.mp.281
+- nist:nbs.mp.286
+- nist:nbs.mp.288
+- nist:nbs.mp.289
+- nist:nbs.mp.291
+- nist:nbs.mp.292
+- nist:nbs.mp.293
+- nist:nbs.mp.294
+- nist:nbs.mp.3
+- nist:nbs.mp.40
+- nist:nbs.mp.46
+- nist:nbs.mp.52
+- nist:nbs.mp.56
+- nist:nbs.mp.57
+- nist:nbs.mp.66
+- nist:nbs.mp.67
+- nist:nbs.mp.71
+- nist:nbs.mp.72
+- nist:nbs.mp.76
+- nist:nbs.mp.78
+- nist:nbs.mp.79
+- nist:nbs.mp.8
+- nist:nbs.mp.82
+- nist:nbs.mp.84
+- nist:nbs.mp.91
+- nist:nbs.mp.92
+- nist:nbs.mp.93
+- nist:nbs.mp.94
+- nist:nbs.mp.95
+- nist:nbs.mp.96
+- nist:nbs.mp.97
+- nist:nbs.mp.98
+- nist:nbs.mp.99
+- nist:nbs.nsrds.16
+- nist:nbs.nsrds.21
+- nist:nbs.nsrds.24
+- nist:nbs.nsrds.36
+- nist:nbs.nsrds.37
+- nist:nbs.nsrds.39
+- nist:nbs.nsrds.4
+- nist:nbs.nsrds.60
+- nist:nbs.nsrds.63supp2
+- nist:nbs.nsrds.63v1
+- nist:nbs.nsrds.63v3
+- nist:nbs.nsrds.63v4
+- nist:nbs.rpt.2474
+- nist:nbs.rpt.2602
+- nist:nbs.rpt.2917
+- nist:nbs.rpt.3274
+- nist:nbs.rpt.5987
+- nist:nbs.sibs.1
+- nist:nbs.sp.260-1
+- nist:nbs.sp.260-22
+- nist:nbs.sp.260-37
+- nist:nbs.sp.260-52
+- nist:nbs.sp.260-64
+- nist:nbs.sp.295
+- nist:nbs.sp.296
+- nist:nbs.sp.300v1
+- nist:nbs.sp.300v2
+- nist:nbs.sp.300v3
+- nist:nbs.sp.300v4
+- nist:nbs.sp.300v6
+- nist:nbs.sp.301
+- nist:nbs.sp.302
+- nist:nbs.sp.303
+- nist:nbs.sp.305
+- nist:nbs.sp.305supp10
+- nist:nbs.sp.305supp11
+- nist:nbs.sp.305supp2
+- nist:nbs.sp.305supp4
+- nist:nbs.sp.305supp6
+- nist:nbs.sp.305supp8
+- nist:nbs.sp.305supp9
+- nist:nbs.sp.310
+- nist:nbs.sp.312v1
+- nist:nbs.sp.312v2
+- nist:nbs.sp.314
+- nist:nbs.sp.315
+- nist:nbs.sp.317v1
+- nist:nbs.sp.317v2
+- nist:nbs.sp.318
+- nist:nbs.sp.321
+- nist:nbs.sp.323
+- nist:nbs.sp.324
+- nist:nbs.sp.326
+- nist:nbs.sp.329
+- nist:nbs.sp.329supp1
+- nist:nbs.sp.329supp2
+- nist:nbs.sp.331
+- nist:nbs.sp.336
+- nist:nbs.sp.337
+- nist:nbs.sp.339
+- nist:nbs.sp.340
+- nist:nbs.sp.343
+- nist:nbs.sp.345
+- nist:nbs.sp.345-4
+- nist:nbs.sp.345-9
+- nist:nbs.sp.346
+- nist:nbs.sp.348
+- nist:nbs.sp.352
+- nist:nbs.sp.357
+- nist:nbs.sp.359
+- nist:nbs.sp.361v1
+- nist:nbs.sp.362
+- nist:nbs.sp.364
+- nist:nbs.sp.366
+- nist:nbs.sp.369
+- nist:nbs.sp.371
+- nist:nbs.sp.372
+- nist:nbs.sp.378
+- nist:nbs.sp.381
+- nist:nbs.sp.385
+- nist:nbs.sp.386
+- nist:nbs.sp.388
+- nist:nbs.sp.390
+- nist:nbs.sp.391
+- nist:nbs.sp.392
+- nist:nbs.sp.396-1
+- nist:nbs.sp.399v1
+- nist:nbs.sp.400-1
+- nist:nbs.sp.400-13
+- nist:nbs.sp.400-24
+- nist:nbs.sp.400-37
+- nist:nbs.sp.400-57
+- nist:nbs.sp.401
+- nist:nbs.sp.408
+- nist:nbs.sp.409
+- nist:nbs.sp.415
+- nist:nbs.sp.422v1
+- nist:nbs.sp.423
+- nist:nbs.sp.425v1
+- nist:nbs.sp.428p1
+- nist:nbs.sp.428p2
+- nist:nbs.sp.428p3
+- nist:nbs.sp.431
+- nist:nbs.sp.433
+- nist:nbs.sp.436
+- nist:nbs.sp.443
+- nist:nbs.sp.451
+- nist:nbs.sp.455
+- nist:nbs.sp.457-1
+- nist:nbs.sp.458
+- nist:nbs.sp.462
+- nist:nbs.sp.466
+- nist:nbs.sp.468
+- nist:nbs.sp.471
+- nist:nbs.sp.477
+- nist:nbs.sp.480-1
+- nist:nbs.sp.480-12
+- nist:nbs.sp.480-21
+- nist:nbs.sp.484v1
+- nist:nbs.sp.485
+- nist:nbs.sp.493
+- nist:nbs.sp.496v1
+- nist:nbs.sp.496v2
+- nist:nbs.sp.500-1
+- nist:nbs.sp.500-18
+- nist:nbs.sp.500-22
+- nist:nbs.sp.500-30
+- nist:nbs.sp.500-40
+- nist:nbs.sp.500-46
+- nist:nbs.sp.500-51
+- nist:nbs.sp.500-59
+- nist:nbs.sp.500-70v1
+- nist:nbs.sp.500-71
+- nist:nbs.sp.500-9
+- nist:nbs.sp.501
+- nist:nbs.sp.504
+- nist:nbs.sp.507
+- nist:nbs.sp.513
+- nist:nbs.sp.522
+- nist:nbs.sp.525
+- nist:nbs.sp.527
+- nist:nbs.sp.531
+- nist:nbs.sp.535v1p1
+- nist:nbs.sp.535v1p2
+- nist:nbs.sp.535v2a-l
+- nist:nbs.sp.535v2m-z
+- nist:nbs.sp.540
+- nist:nbs.sp.545
+- nist:nbs.sp.546
+- nist:nbs.sp.552
+- nist:nbs.sp.556
+- nist:nbs.sp.560
+- nist:nbs.sp.561v1
+- nist:nbs.sp.562
+- nist:nbs.sp.565
+- nist:nbs.sp.568
+- nist:nbs.sp.569
+- nist:nbs.sp.571
+- nist:nbs.sp.580
+- nist:nbs.sp.583
+- nist:nbs.sp.586
+- nist:nbs.sp.591
+- nist:nbs.sp.594
+- nist:nbs.sp.595
+- nist:nbs.sp.601
+- nist:nbs.sp.606
+- nist:nbs.sp.617
+- nist:nbs.sp.645
+- nist:nbs.sp.663
+- nist:nbs.tibm.1
+- nist:nbs.tn.1
+- nist:nbs.tn.1008
+- nist:nbs.tn.1015
+- nist:nbs.tn.1030
+- nist:nbs.tn.1100
+- nist:nbs.tn.1104
+- nist:nbs.tn.1105
+- nist:nbs.tn.1112
+- nist:nbs.tn.1116
+- nist:nbs.tn.1125
+- nist:nbs.tn.114
+- nist:nbs.tn.1140
+- nist:nbs.tn.123
+- nist:nbs.tn.13
+- nist:nbs.tn.140
+- nist:nbs.tn.155
+- nist:nbs.tn.166
+- nist:nbs.tn.18
+- nist:nbs.tn.18-17
+- nist:nbs.tn.2
+- nist:nbs.tn.21
+- nist:nbs.tn.211
+- nist:nbs.tn.220
+- nist:nbs.tn.251
+- nist:nbs.tn.260
+- nist:nbs.tn.276
+- nist:nbs.tn.28
+- nist:nbs.tn.289
+- nist:nbs.tn.300
+- nist:nbs.tn.305
+- nist:nbs.tn.311
+- nist:nbs.tn.326
+- nist:nbs.tn.341
+- nist:nbs.tn.356
+- nist:nbs.tn.36
+- nist:nbs.tn.366
+- nist:nbs.tn.40
+- nist:nbs.tn.40-2
+- nist:nbs.tn.406
+- nist:nbs.tn.41
+- nist:nbs.tn.420
+- nist:nbs.tn.446
+- nist:nbs.tn.456
+- nist:nbs.tn.467
+- nist:nbs.tn.467p1
+- nist:nbs.tn.469
+- nist:nbs.tn.509
+- nist:nbs.tn.51
+- nist:nbs.tn.551
+- nist:nbs.tn.552
+- nist:nbs.tn.562
+- nist:nbs.tn.591
+- nist:nbs.tn.594-1
+- nist:nbs.tn.602
+- nist:nbs.tn.613
+- nist:nbs.tn.620
+- nist:nbs.tn.631
+- nist:nbs.tn.641
+- nist:nbs.tn.651
+- nist:nbs.tn.658
+- nist:nbs.tn.664
+- nist:nbs.tn.677
+- nist:nbs.tn.700
+- nist:nbs.tn.712
+- nist:nbs.tn.732
+- nist:nbs.tn.742
+- nist:nbs.tn.754
+- nist:nbs.tn.785
+- nist:nbs.tn.811
+- nist:nbs.tn.83
+- nist:nbs.tn.859
+- nist:nbs.tn.860
+- nist:nbs.tn.867
+- nist:nbs.tn.877
+- nist:nbs.tn.890
+- nist:nbs.tn.917
+- nist:nbs.tn.952
+- nist:nbs.tn.963
+- nist:nbs.tn.968
+- nist:nbs.tn.976
+- nist:nbs.tn.985
+- nist:nbs.tn.995
+- nist:nbst.2467
+- nist:nbst.2568
+- nist:nbst.4424
+- nist:nbst.6256
+- nist:nbst.6511
+- nist:nist.gcr.01-808
+- nist:nist.gcr.01-820
+- nist:nist.gcr.80-287
+- nist:nist.gcr.90-571
+- nist:nist.gcr.91-592
+- nist:nist.gcr.96-868
+- nist:nist.gcr.97-738
+- nist:nist.gcr.98-734
+- nist:nist.gcr.99-768
+- nist:nist.ir.3999
+- nist:nist.ir.5652
+- nist:nist.ir.5675
+- nist:nist.ir.5690
+- nist:nist.ir.5704
+- nist:nist.ir.5756
+- nist:nist.ir.5765
+- nist:nist.ir.5767
+- nist:nist.ir.5776
+- nist:nist.ir.5779
+- nist:nist.ir.5780
+- nist:nist.ir.5782
+- nist:nist.ir.5783
+- nist:nist.ir.5784
+- nist:nist.ir.5787
+- nist:nist.ir.5795
+- nist:nist.ir.5796
+- nist:nist.ir.5798
+- nist:nist.ir.5800
+- nist:nist.ir.5801
+- nist:nist.ir.5804
+- nist:nist.ir.5806
+- nist:nist.ir.5809
+- nist:nist.ir.5838
+- nist:nist.ir.5840
+- nist:nist.ir.5842
+- nist:nist.ir.5847
+- nist:nist.ir.5856
+- nist:nist.ir.5857
+- nist:nist.ir.5863
+- nist:nist.ir.5864
+- nist:nist.ir.5865
+- nist:nist.ir.5869
+- nist:nist.ir.5870
+- nist:nist.ir.5873
+- nist:nist.ir.5875
+- nist:nist.ir.5877
+- nist:nist.ir.5878
+- nist:nist.ir.5880
+- nist:nist.ir.5888
+- nist:nist.ir.5900
+- nist:nist.ir.5901
+- nist:nist.ir.5905
+- nist:nist.ir.5906
+- nist:nist.ir.5907
+- nist:nist.ir.5908
+- nist:nist.ir.5909
+- nist:nist.ir.5919
+- nist:nist.ir.5920
+- nist:nist.ir.5923
+- nist:nist.ir.5925
+- nist:nist.ir.5927
+- nist:nist.ir.5933
+- nist:nist.ir.5934
+- nist:nist.ir.5940
+- nist:nist.ir.5944
+- nist:nist.ir.5947
+- nist:nist.ir.5950
+- nist:nist.ir.5952
+- nist:nist.ir.5958
+- nist:nist.ir.5972
+- nist:nist.ir.5977
+- nist:nist.ir.5987
+- nist:nist.ir.5988
+- nist:nist.ir.5997
+- nist:nist.ir.6003
+- nist:nist.ir.6004
+- nist:nist.ir.6027
+- nist:nist.ir.6033
+- nist:nist.ir.6034
+- nist:nist.ir.6041
+- nist:nist.ir.6045
+- nist:nist.ir.6050
+- nist:nist.ir.6052
+- nist:nist.ir.6056
+- nist:nist.ir.6071
+- nist:nist.ir.6075
+- nist:nist.ir.6085
+- nist:nist.ir.6087
+- nist:nist.ir.6094
+- nist:nist.ir.6096
+- nist:nist.ir.6110
+- nist:nist.ir.6121
+- nist:nist.ir.6143
+- nist:nist.ir.6144
+- nist:nist.ir.6147
+- nist:nist.ir.6152
+- nist:nist.ir.6157
+- nist:nist.ir.6162
+- nist:nist.ir.6163
+- nist:nist.ir.6170
+- nist:nist.ir.6181
+- nist:nist.ir.6190
+- nist:nist.ir.6193
+- nist:nist.ir.6197
+- nist:nist.ir.6198
+- nist:nist.ir.6199
+- nist:nist.ir.6203
+- nist:nist.ir.6210
+- nist:nist.ir.6215
+- nist:nist.ir.6224
+- nist:nist.ir.6226
+- nist:nist.ir.6227
+- nist:nist.ir.6228
+- nist:nist.ir.6229
+- nist:nist.ir.6230
+- nist:nist.ir.6242
+- nist:nist.ir.6253
+- nist:nist.ir.6257
+- nist:nist.ir.6258
+- nist:nist.ir.6265
+- nist:nist.ir.6269
+- nist:nist.ir.6275
+- nist:nist.ir.6277
+- nist:nist.ir.6310
+- nist:nist.ir.6315
+- nist:nist.ir.6319
+- nist:nist.ir.6323
+- nist:nist.ir.6324
+- nist:nist.ir.6329
+- nist:nist.ir.6330
+- nist:nist.ir.6331
+- nist:nist.ir.6341
+- nist:nist.ir.6356
+- nist:nist.ir.6357
+- nist:nist.ir.6361
+- nist:nist.ir.6366
+- nist:nist.ir.6371
+- nist:nist.ir.6379
+- nist:nist.ir.6381
+- nist:nist.ir.6393
+- nist:nist.ir.6394
+- nist:nist.ir.6395
+- nist:nist.ir.6400
+- nist:nist.ir.6414
+- nist:nist.ir.6417
+- nist:nist.ir.6427
+- nist:nist.ir.6439
+- nist:nist.ir.6448
+- nist:nist.ir.6449
+- nist:nist.ir.6450
+- nist:nist.ir.6455
+- nist:nist.ir.6457
+- nist:nist.ir.6458
+- nist:nist.ir.6479
+- nist:nist.ir.6482
+- nist:nist.ir.6495
+- nist:nist.ir.6497
+- nist:nist.ir.6502
+- nist:nist.ir.6512
+- nist:nist.ir.6519
+- nist:nist.ir.6527
+- nist:nist.ir.6532
+- nist:nist.ir.6541
+- nist:nist.ir.6545
+- nist:nist.ir.6551
+- nist:nist.ir.6560
+- nist:nist.ir.6571
+- nist:nist.ir.6606
+- nist:nist.ir.6616
+- nist:nist.ir.6654
+- nist:nist.ir.6726
+- nist:nist.ir.6727
+- nist:nist.ir.6762
+- nist:nist.ir.6827
+- nist:nist.ir.6910
+- nist:nist.ir.6942
+- nist:nist.ir.6969
+- nist:nist.ir.6986
+- nist:nist.ir.7003
+- nist:nist.ir.7006
+- nist:nist.ir.7012
+- nist:nist.ir.7036
+- nist:nist.ir.7051
+- nist:nist.ir.7060
+- nist:nist.ir.7066
+- nist:nist.ir.7077
+- nist:nist.ir.7081
+- nist:nist.ir.7085
+- nist:nist.ir.7092
+- nist:nist.ir.7092a
+- nist:nist.ir.7094
+- nist:nist.ir.7095
+- nist:nist.ir.7098
+- nist:nist.ir.7099
+- nist:nist.ir.7101
+- nist:nist.ir.7113
+- nist:nist.ir.7114
+- nist:nist.ir.7115
+- nist:nist.ir.7121
+- nist:nist.ir.7132
+- nist:nist.ir.7134
+- nist:nist.ir.7136
+- nist:nist.ir.7139
+- nist:nist.ir.7140
+- nist:nist.ir.7142
+- nist:nist.ir.7143
+- nist:nist.ir.7144
+- nist:nist.ir.7146
+- nist:nist.ir.7148
+- nist:nist.ir.7150
+- nist:nist.ir.7194
+- nist:nist.ir.7214
+- nist:nist.ir.7278
+- nist:nist.ir.7371
+- nist:nist.ir.7413
+- nist:nist.ir.7424
+- nist:nist.ir.7494
+- nist:nist.ir.7557
+- nist:nist.ir.85-3273-40sup1
+- nist:nist.ir.89-4144
+- nist:nist.sp.260-100e1993
+- nist:nist.sp.766
+- nist:nist.sp.777-1993
+- nist:nist.sp.777-1994
+- nist:nist.sp.777-1995
+- nist:nist.sp.955supp2002
+- nist:nist.sp.995
+- nist:nist.surf.001
+- nist:nist.surf.002
+- nist:nist.surf.003
+- nist:nist.tn.1429
+- nist:nist.tn.1612
+- nist:nist.vts.100-2sup1
+allow_content_review:
+- nist:jres.104.035
+- nist:nbs.lcirc.698
+deny_documents: []
+log:
+- key: nist:jres.104.035
+  decision: allow
+  rule: review:safety=missile guidance
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:jres.101.026
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:jres.007.014
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:jres.012.001
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbst.2467
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbst.2568
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbst.4424
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbst.6256
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbst.6511
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.1008
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.1015
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.1030
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.1100
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.1105
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.1112
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.1116
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.1125
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.114
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.1140
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.123
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.13
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.140
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.155
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.21
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.211
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.220
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.251
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.260
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.276
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.28
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.289
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.300
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.305
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.311
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.326
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.341
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.356
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.36
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.366
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.40
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.40-2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.406
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.41
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.420
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.446
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.456
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.467
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.469
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.509
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.51
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.551
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.552
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.562
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.591
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.602
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.613
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.620
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.631
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.641
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.651
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.658
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.664
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.677
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.700
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.712
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.732
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.742
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.785
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.811
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.83
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.859
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.860
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.867
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.877
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.890
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.917
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.952
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.963
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.968
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.976
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.985
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.18-17
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.594-1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.754
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.995
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.100
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.101
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.102
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.103
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.104
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.105
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.107
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.108
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.109
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.110
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.112
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.115
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.12
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.120
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.128
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.130
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.140
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.159
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.16
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.168
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.176
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.178
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.189
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.190
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.20-2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.20-3
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.202
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.21
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.227
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.236
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.241
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.242
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.243
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.245
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.246
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.247
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.248
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.256
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.262-2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.265
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.267
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.268
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.271
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.277supp1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.278
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.279
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.280
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.281
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.286
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.288
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.289
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.291
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.292
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.293
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.294
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.3
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.40
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.46
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.52
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.56
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.57
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.66
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.67
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.71
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.72
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.76
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.78
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.79
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.8
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.82
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.84
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.91
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.92
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.93
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.94
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.95
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.96
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.97
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.98
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mp.99
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.260-1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.260-22
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.260-37
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.260-52
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.260-64
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.sp.766
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.sp.777-1993
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.sp.777-1994
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.sp.777-1995
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.295
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.296
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.300v1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.300v2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.300v3
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.300v4
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.300v6
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.301
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.302
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.303
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.305
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.305supp10
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.305supp11
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.305supp2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.305supp4
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.305supp6
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.305supp8
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.305supp9
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.310
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.312v1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.312v2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.314
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.315
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.317v1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.317v2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.318
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.321
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.323
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.324
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.326
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.329
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.329supp1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.329supp2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.331
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.336
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.337
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.339
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.340
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.343
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.345
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.345-4
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.345-9
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.346
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.348
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.352
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.357
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.359
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.361v1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.362
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.364
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.366
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.369
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.371
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.372
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.378
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.381
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.385
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.386
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.388
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.390
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.391
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.392
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.396-1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.399v1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.401
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.408
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.409
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.415
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.422v1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.423
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.425v1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.428p1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.428p2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.428p3
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.431
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.433
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.436
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.443
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.451
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.455
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.457-1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.458
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.462
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.466
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.468
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.471
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.477
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.484v1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.485
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.493
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.496v1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.496v2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.501
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.504
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.507
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.513
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.522
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.525
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.527
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.531
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.535v1p1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.535v1p2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.535v2a-l
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.535v2m-z
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.540
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.545
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.546
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.552
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.556
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.560
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.561v1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.562
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.565
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.568
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.569
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.571
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.580
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.583
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.586
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.591
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.594
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.595
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.601
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.606
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.617
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.645
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.663
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mono.101
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.bms.119
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.bms.133
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.bms.17supp2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.bms.19
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.bms.37
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.bms.52
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.bms.68
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.bms.81
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.bss.2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.bss.32
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.bss.40
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.bss.7
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.bss.8
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.bss.96
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mono.100
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mono.102
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mono.105
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mono.112
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mono.113v1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mono.119
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mono.123
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mono.129
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mono.131
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mono.132
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mono.134
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mono.14
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mono.140
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mono.141
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mono.144
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mono.145p1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mono.151
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mono.156
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mono.162
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mono.168
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mono.169
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mono.22
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mono.32-1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mono.32-2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mono.34v1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mono.35
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mono.3v1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mono.3v2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mono.43v1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mono.43v2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mono.50
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mono.53
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mono.60
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mono.61
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mono.70v1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mono.70v2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mono.70v3
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mono.70v4
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mono.70v5
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mono.71
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mono.72
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mono.81
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.mono.92
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.bms.105
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.bms.134
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.bms.141
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.bms.30
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.400-1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.400-13
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.400-24
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.400-37
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.400-57
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.480-1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.480-12
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.480-21
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.500-1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.500-18
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.500-22
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.500-30
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.500-40
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.500-46
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.500-51
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.500-59
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.500-70v1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.500-71
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sp.500-9
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.bh.14
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.bh.3a
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.sp.955supp2002
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.73-101
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.73-112
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.73-118
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.73-124
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.73-131
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.73-144
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.73-174
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.73-187
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.73-199
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.73-210
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.73-216
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.73-225
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.73-236
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.73-249
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.73-259
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.73-274
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.73-299
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.73-308
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.73-318
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.73-332
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.73-340
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.73-346
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.73-400
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.73-411
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.73-424
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.74-359
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.74-375
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.74-393
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.74-432
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.74-449
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.74-457
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.74-466
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.74-470
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.74-480
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.74-488
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.74-503
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.74-516
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.74-526
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.74-559
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.74-569
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.74-599
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.74-611
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.74-620
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.74-632
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.75-643
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.75-666
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.75-676
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.75-688
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.75-698
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.75-710
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.75-722
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.75-733
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.75-746
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.75-759
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.75-767
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.75-778
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.75-790
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.75-805
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.75-820
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.75-900
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.75-913
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.75-950
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.75-962
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.75-977
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.76-1001
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.76-1013
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.76-1021
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.76-1037
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.76-1050
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.76-1062
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.76-1129
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.76-1150
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.76-1174
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.76-1183
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.76-1195
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.76-831
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.76-843
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.76-982
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.76-989
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.77-1205
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.77-1226
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.77-1238
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.77-1244
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.77-1262
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.77-1276
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.77-1286
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.77-1295
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.77-1314
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.77-1320
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.77-852
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.77-863
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.78-879
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.78-885
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.79-1617
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.79-1624
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tibm.1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.467p1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.1104
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.166
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.tn.18
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.79-1733
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.79-1817
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.tn.1429
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.82-2589
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.83-2742v11
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.83-2742v6
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.83-2758
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.7003
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.7006
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.7012
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.7036
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.7051
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.7060
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.7066
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.7077
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.7081
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.7085
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.7092
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.7092a
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.7094
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.7095
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.7098
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.7099
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.7101
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.7113
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.7114
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.7115
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.7121
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.7132
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.7134
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.7136
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.7139
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.7140
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.7142
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.7143
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.7144
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.7146
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.7148
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.7150
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.7194
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.7214
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.7278
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.7371
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.7413
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.7424
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.7494
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.7557
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.85-3289
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.nsrds.36
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.nsrds.16
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.nsrds.21
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.nsrds.24
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.nsrds.37
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.nsrds.39
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.nsrds.4
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.nsrds.60
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.nsrds.63supp2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.nsrds.63v1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.nsrds.63v3
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.nsrds.63v4
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.87-3590
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.88-3706
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.86-3322
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.88-3730
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.88-3793-1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.89-4144
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.tn.1612
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.rpt.2474
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.rpt.2917
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.rpt.3274
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.rpt.5987
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.csm.v6n1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.csm.v7n1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.csm.v8n1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.csm.v9n1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.csm.1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6654
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6762
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6910
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6942
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6969
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.sibs.1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.ir.85-3133
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6162
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6170
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6427
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6277
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5652
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5675
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5690
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5704
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5756
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5765
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5767
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5776
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5779
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5780
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5782
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5783
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5784
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5787
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5795
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5796
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5798
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5800
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5801
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5804
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5806
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5809
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5838
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5840
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5842
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5847
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5856
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5857
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5863
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5864
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5865
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5869
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5870
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5873
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5875
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5877
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5878
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5880
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5888
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5900
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5901
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5905
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5906
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5907
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5908
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5909
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5919
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5920
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5923
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5925
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5927
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5933
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5934
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5940
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5944
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5947
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5950
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5952
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5958
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5972
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5977
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5987
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5988
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.5997
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6003
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6004
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6027
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6033
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6034
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6041
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6045
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6050
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6052
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6056
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6071
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6075
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6085
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6087
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6094
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6096
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6110
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6121
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6143
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6144
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6147
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6152
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6157
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6163
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6181
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6190
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6197
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6198
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6199
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6203
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6210
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6215
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6224
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6227
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6228
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6229
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6230
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6242
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6253
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6257
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6258
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6265
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6269
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6275
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.3999
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6310
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6315
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6319
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6323
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6324
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6329
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6330
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6331
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6341
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6356
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6357
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6361
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6366
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6371
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6379
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6381
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6393
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6394
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6395
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6400
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6414
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6417
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6439
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6448
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6449
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6450
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6455
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6457
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6458
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6479
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6482
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6495
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6497
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6502
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6512
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6519
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6527
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6532
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6541
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6545
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6551
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6560
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6571
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6726
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6727
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6827
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.gcr.01-808
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.gcr.01-820
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.hb.1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.hb.119
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.hb.19
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.hb.2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.hb.22
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.hb.27
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.hb.28-1942
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.hb.28-1944
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.hb.28supp1950
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.hb.28supp1963
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.hb.31
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.hb.38
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.hb.40
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.hb.44-1983
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.hb.44e2-1955
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.hb.5
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.hb.6
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.hb.7
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.hb.77v2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.hb.77v3
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.hb.8
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.hb.9
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.hb.94
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.circ.31
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.circ.447
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.circ.461
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.circ.501
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.circ.510
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.circ.510sup1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.circ.510sup2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.circ.524
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.circ.525
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.circ.526
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.circ.527
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.circ.551
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.circ.553
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.circ.566
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.circ.74-1937
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.circ.9e6
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.lcirc.698
+  decision: allow
+  rule: review:safety=explosive manufacturing
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.gcr.97-738
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.gcr.98-734
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.gcr.99-768
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.gcr.90-571
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.gcr.91-592
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.gcr.96-868
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.gcr.80-287
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.sp.260-100e1993
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6193
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6986
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6226
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nbs.rpt.2602
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.surf.001
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.surf.002
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.surf.003
+  decision: allow
+  rule: review:text=unsupported-format
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.vts.100-2sup1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.gcr.80-287
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6616
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.6606
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.ir.85-3273-40sup1
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
+- key: nist:nist.sp.995
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-27T01:34:40+00:00'
+  proposal: 135
