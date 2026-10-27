@@ -318,6 +318,23 @@ def test_git_allow_list_is_the_registry_endpoints() -> None:
     assert github_repo("https://github.com.evil.example/a/b") is None
 
 
+def test_a_repository_a_git_discovery_names_is_allowed() -> None:
+    """2026-10-26 review: Ben-Yehuda's dump, named in its git discovery's repos, was refused."""
+    spec_ = replace(
+        _git_spec([]),
+        raw={
+            "id": "by",
+            "access": {
+                "adapter": "doc-collection",
+                "discovery": [
+                    {"kind": "git", "repos": ["https://github.com/projectbenyehuda/public_domain_dump"]}
+                ],
+            },
+        },
+    )
+    assert registry_repos(spec_) == frozenset({"projectbenyehuda/public_domain_dump"})
+
+
 def test_an_organisation_discovery_allows_that_organisations_repositories(tmp_path: Path) -> None:
     """Standard Ebooks names no repository one by one: discovering its organisation allows them, and
     only them (all 1,533 books were refused, 2026-10-19)."""

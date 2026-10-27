@@ -1051,15 +1051,16 @@ def registry_repos(spec: SourceSpec) -> frozenset[str]:
     """The repositories a git-mirror source's registry ``endpoints`` name: its git allow-list. A git
     discovery of an organisation (``{kind: git, org: standardebooks}``) allows that organisation's
     repositories (``owner/*``): Standard Ebooks lists 1,533 books there, none named one by one, and
-    every one was refused (2026-10-19)."""
+    every one was refused (2026-10-19). A repository a git discovery names in its ``repos`` is listed
+    by the registry just as plainly (Ben-Yehuda's dump was refused, 2026-10-26 review)."""
     acc = cast(Mapping[str, Any], spec.raw.get("access") or {})
-    named = (github_repo(str(u)) for u in cast(list[object], acc.get("endpoints") or []))
-    orgs = (
-        f"{str(d.get('org')).lower()}/*"
-        for d in cast(list[Mapping[str, Any]], acc.get("discovery") or [])
-        if d.get("kind") == "git" and d.get("org")
-    )
-    return frozenset([*(r for r in named if r), *orgs])
+    gits = [d for d in cast(list[Mapping[str, Any]], acc.get("discovery") or []) if d.get("kind") == "git"]
+    named = [
+        *(str(u) for u in cast(list[object], acc.get("endpoints") or [])),
+        *(str(u) for d in gits for u in cast(list[object], d.get("repos") or [])),
+    ]
+    orgs = (f"{str(d.get('org')).lower()}/*" for d in gits if d.get("org"))
+    return frozenset([*(r for r in map(github_repo, named) if r), *orgs])
 
 
 def _pointer(path: Path) -> str | None:
