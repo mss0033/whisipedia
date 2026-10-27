@@ -40,12 +40,15 @@ GROUP_OVER = 3  # more alerts of one kind than this are one digest line
 
 
 def toast_script(title: str, body: str) -> str:
-    """The PowerShell that shows one notification (text escaped for XML, then for a '…' string)."""
+    """The PowerShell that shows one notification. The text, escaped for XML, travels base64-encoded:
+    PowerShell ends a '...' string at a curly quote as well (2026-10-26 review: an alert quoting
+    a curly apostrophe broke the script), and base64 has no quote of any kind."""
     xml = (
         '<toast><visual><binding template="ToastGeneric">'
         f"<text>{escape(title[:120])}</text><text>{escape(body[:600])}</text>"
         "</binding></visual></toast>"
-    ).replace("'", "''")
+    )
+    packed = base64.b64encode(xml.encode("utf-8")).decode("ascii")
     return (
         "$ErrorActionPreference = 'Stop'\n"
         "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, "
@@ -53,7 +56,7 @@ def toast_script(title: str, body: str) -> str:
         "[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, "
         "ContentType = WindowsRuntime] > $null\n"
         "$xml = New-Object Windows.Data.Xml.Dom.XmlDocument\n"
-        f"$xml.LoadXml('{xml}')\n"
+        f"$xml.LoadXml([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{packed}')))\n"
         f"[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('{APP_ID}')"
         ".Show([Windows.UI.Notifications.ToastNotification]::new($xml))\n"
     )
