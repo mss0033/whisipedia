@@ -48,6 +48,7 @@ import re
 import sqlite3
 import threading
 import time
+import zipfile
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field, replace
@@ -2566,16 +2567,41 @@ def csv_list(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
     paths are relative to; columns named by ``key``, ``file`` (tried in order: ``[latestHTML,
     latestPDF]``), ``title``, ``date``. ``url_template`` builds the URL from the row's columns where
     the CSV names no file (``.../{TCP}/master/{TCP}.xml``); ``partition`` likewise names each row's
-    partition (``"{TCP[0]}"``, lower-cased): only that partition's rows are listed when it is fetched."""
-    text = env.get_text(_s(cfg.get("url")))
+    partition (``"{TCP[0]}"``, lower-cased): only that partition's rows are listed when it is fetched.
+
+    A ``.zip`` URL is a zipped CSV (its first ``.csv`` member: Aozora Bunko's catalogue). ``where``
+    (``{column: value}``) keeps the rows that match (Aozora's ``作品著作権フラグ: なし``, the works out
+    of copyright); a key listed again (one row per author or translator) is listed once;
+    ``title_template`` builds the title from the row's columns; ``language`` is the documents'."""
+    url = _s(cfg.get("url"))
+    if url.lower().endswith(".zip"):
+        raw = env.fetcher.get_bytes(url, max_bytes=256 * 1024 * 1024)
+        with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+            member = next((n for n in zf.namelist() if n.lower().endswith(".csv")), None)
+            if member is None:
+                raise DiscoveryError(f"{url}: no CSV in the zip")
+            text = zf.read(member).decode("utf-8-sig", "replace")
+    else:
+        text = env.get_text(url)
     base = _s(cfg.get("base"))
     files = _strs(cfg.get("file"))
     template = _s(cfg.get("url_template"))
     part_template = _s(cfg.get("partition"))
-    rows = list(csv.DictReader(io.StringIO(text)))
+    title_template = _s(cfg.get("title_template"))
+    where = {str(k): str(v) for k, v in cast(Mapping[str, Any], cfg.get("where") or {}).items()}
+    lang = _s(cfg.get("language"))
+    rows = [
+        r
+        for r in csv.DictReader(io.StringIO(text))
+        if all((r.get(k) or "").strip() == v for k, v in where.items())
+    ]
     env.totals["csv"] = len(rows)
+    seen: set[str] = set()
     for row in rows:
         key = (row.get(_s(cfg.get("key"))) or "").strip()
+        if not key or key in seen:
+            continue
+        seen.add(key)
         try:
             path = template.format_map(row) if template else next((row[c] for c in files if row.get(c)), "")
             part = part_template.format_map(row).lower() if part_template else ""
@@ -2584,16 +2610,21 @@ def csv_list(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
         if not path or not key or (env.partition and part != env.partition):
             continue
         url = path if path.startswith("https://") else base.rstrip("/") + "/" + path.lstrip("/")
-        yield Candidate(
+        try:
+            title = title_template.format_map(row) if title_template else ""
+        except (KeyError, IndexError):
+            title = ""
+        cand = Candidate(
             key=make_key(env.prefix, key),
             url=url,
-            title=" ".join((row.get(_s(cfg.get("title"))) or key).split()),
+            title=" ".join((title or row.get(_s(cfg.get("title"))) or key).split()),
             issuer=env.issuer,
             pub_number=key,
             edition_date=_csv_date(row.get(_s(cfg.get("date"))) or ""),
             discovered_by="csv",
             partition=part,
         )
+        yield replace(cand, language=lang) if lang else cand
 
 
 _MONTHS = (

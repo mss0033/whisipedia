@@ -4500,6 +4500,40 @@ sources:
     size: {bytes: 9e8, measured: false, as_of: '2026-10-26'}
     notes: "Research doc docs/research/POETRY-2026-10-25.md. Hebrew (he): read in English with on-request translation."
 
+  - id: aozora-bunko
+    name: Aozora Bunko - Japanese literature out of copyright (17,352 works incl. tanka, haiku and verse)
+    publisher: Aozora Bunko
+    domain: [literature, poetry, history]
+    tier: T1
+    status: candidate
+    license: LicenseRef-PD-JP
+    legal_basis: public-domain
+    access:
+      adapter: doc-collection
+      rate: {requests_per_second: 0.5, concurrency: 1}
+      issuer: Aozora Bunko
+      key_prefix: aozora
+      # The library's own catalogue (list_person_all_extended_utf8.zip: one row per work and person)
+      # flags each work's copyright; the works marked なし (none) are taken, one text zip each from
+      # www.aozora.gr.jp (robots.txt slows three named search crawlers only). The GitHub mirror the
+      # research named (aozorabunko/aozorabunko) is gone (404, 2026-10-26). Owner approval 2026-10-26.
+      reader: aozora-text
+      origins: [www.aozora.gr.jp]
+      discovery:
+        - kind: csv
+          url: "https://www.aozora.gr.jp/index_pages/list_person_all_extended_utf8.zip"
+          where: {作品著作権フラグ: なし}
+          key: 作品ID
+          file: [テキストファイルURL]
+          title_template: "{作品名} ({姓}{名})"
+          date: 公開日
+          language: ja
+      filter:
+        allow_all: true
+    update: {cadence: P6M, strategy: snapshot-retention}
+    size: {bytes: 2e9, measured: false, as_of: '2026-10-26'}
+    notes: "Research doc docs/research/POETRY-2026-10-25.md. 19,502 works catalogued, 18,574 rows out of copyright (17,352 works). Japanese (ja): read in English with on-request translation."
+
   - id: pubchem
     name: PubChem compounds - identifiers, names, safety summaries (LCSS) and full structure records
     publisher: US National Library of Medicine, National Center for Biotechnology Information

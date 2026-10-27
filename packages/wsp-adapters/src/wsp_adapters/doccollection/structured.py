@@ -30,9 +30,16 @@ document a reader can find and read.
   <translators>])", its text the unpointed edition (``txt_stripped/``: Hebrew is searched without
   vowel points), in Hebrew, linked to benyehuda.org. 26,455 works, half of them poetry (2026-10).
 
+* ``aozora-text`` (Aozora Bunko, one work's ``<name>.txt`` in its zip, Shift_JIS): the work as one
+  document, titled "<title> (<author>)" from its first lines, in Japanese; the notation key at the top,
+  ruby readings (``天鵞絨《ビロウド》`` is ``天鵞絨``), the ruby start mark ``｜``, the editors' notes
+  ``［＃...］`` and the colophon from ``底本：`` on are left out.
+
 The 2026-10-18 owner request listed them as sources to bring in; each was a registered candidate whose
 adapter (``git-mirror``, ``http-files``) was never written.
 """
+
+# ruff: noqa: RUF001, RUF002 - Aozora Bunko's notation marks are full-width characters
 
 from __future__ import annotations
 
@@ -841,7 +848,40 @@ ARCHIVE_READERS = {
     "benyehuda": benyehuda,
 }
 
+_AOZORA_RULE = re.compile(r"^-{20,}\s*$", re.MULTILINE)
+_AOZORA_NOTE = re.compile(r"※?［＃[^］]*］")
+_AOZORA_RUBY = re.compile(r"《[^》]*》")
+
+
+def aozora_text(data: bytes, stem: str) -> Iterator[TeiDoc]:
+    """One Aozora Bunko work (see the module notes)."""
+    try:
+        text = data.decode("cp932")
+    except UnicodeDecodeError:
+        text = data.decode("utf-8", "replace")
+    text = text.replace("\r\n", "\n")
+    head, _, rest = text.partition("\n\n")
+    lines = [x.strip() for x in head.split("\n") if x.strip()]
+    rules = list(_AOZORA_RULE.finditer(rest))
+    if len(rules) >= 2 and "記号" in rest[rules[0].end() : rules[1].start()]:
+        rest = rest[rules[1].end() :]
+    rest = rest.split("\n底本：", 1)[0]
+    body = _AOZORA_RUBY.sub("", _AOZORA_NOTE.sub("", rest)).replace("｜", "")
+    body = "\n\n".join(b.strip() for b in re.split(r"\n\s*\n", body) if b.strip())
+    if not body:
+        return
+    title = lines[0] if lines else stem
+    author = lines[-1] if len(lines) > 1 else ""
+    yield TeiDoc(key=stem, title=f"{title} ({author})" if author else title, text=body, lang="ja")
+
+
+def _aozora_member(name: str) -> str | None:
+    m = re.search(r"([^/]+)\.txt$", name)
+    return m.group(1) if m else None
+
+
 READERS = {
+    "aozora-text": (_aozora_member, aozora_text),
     "mitre": (_mitre_member, mitre),
     "oscal-catalog": (_oscal_member, oscal_catalog),
     "medlineplus-topics": (_medlineplus_member, medlineplus_topics),

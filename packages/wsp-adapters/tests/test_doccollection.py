@@ -1535,6 +1535,36 @@ def test_index_page_rewrites_a_document_link_to_its_file() -> None:
     assert c.url == "https://e.org/works/o5157-w0020/o5157-w0020.xml"
 
 
+def test_a_zipped_csv_catalogue_is_filtered_listed_once_per_key_and_titled() -> None:
+    """Aozora Bunko (2026-10-26): one row per work and person; the works out of copyright are taken."""
+    import io as _io
+    import zipfile as _zipfile
+
+    rows = (
+        "作品ID,作品名,作品著作権フラグ,姓,名,テキストファイルURL,公開日\n"
+        "000178,芥川竜之介歌集,なし,芥川,竜之介,https://a.jp/cards/000879/files/178_ruby_2210.zip,1999-07-18\n"
+        "000178,芥川竜之介歌集,なし,別,人,https://a.jp/cards/000879/files/178_ruby_2210.zip,1999-07-18\n"
+        "000999,新しい本,あり,現代,作家,https://a.jp/cards/1/files/999.zip,2020-01-01\n"
+    )
+    buf = _io.BytesIO()
+    with _zipfile.ZipFile(buf, "w") as z:
+        z.writestr("list_person_all_extended_utf8.csv", "\ufeff" + rows)
+    env = env_for({"https://a.jp/index.zip": buf.getvalue()}, origins=("a.jp",))
+    cfg = {
+        "kind": "csv",
+        "url": "https://a.jp/index.zip",
+        "where": {"作品著作権フラグ": "なし"},
+        "key": "作品ID",
+        "file": ["テキストファイルURL"],
+        "title_template": "{作品名} ({姓}{名})",
+        "date": "公開日",
+        "language": "ja",
+    }
+    (c,) = discover_all([cfg], env)
+    assert c.url == "https://a.jp/cards/000879/files/178_ruby_2210.zip"
+    assert (c.title, c.language, c.edition_date) == ("芥川竜之介歌集 (芥川竜之介)", "ja", "1999-07-18")
+
+
 def test_govinfo_collections_are_partitions_and_serial_set_volumes_are_taken_once() -> None:
     def listing(*pids: str) -> bytes:
         return json.dumps({"count": len(pids), "packages": [{"packageId": p} for p in pids]}).encode()

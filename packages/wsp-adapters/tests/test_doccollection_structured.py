@@ -515,3 +515,25 @@ def test_ben_yehuda_works_come_from_the_catalogue_and_the_unpointed_texts(tmp_pa
     assert docs["m10"].text == "חצי-נחמה\n\nבין כל הצרות"
     assert docs["m11"].title == "שירה (ביאליק, tr. פלוני)"
     assert (docs["m10"].url, docs["m10"].lang) == ("https://benyehuda.org/read/10", "he")
+
+
+AOZORA = (
+    "芥川龍之介歌集\r\n芥川龍之介\r\n\r\n"
+    "-------------------------------------------------------\r\n【テキスト中に現れる記号について】\r\n\r\n"
+    "《》：ルビ\r\n-------------------------------------------------------\r\n\r\n"
+    "やはらかく深紫の天鵞絨《ビロウド》をなづる心地か春の暮れゆく\r\n\r\n"
+    "麦畑の萌黄天鵞絨｜芥子《けし》の花［＃改ページ］\r\n\r\n\r\n"
+    "底本：「芥川龍之介全集　第一巻」岩波書店\r\nこのファイルは、インターネットの図書館で作られました。\r\n"
+)
+
+
+def test_an_aozora_work_is_read_without_its_notation_key_ruby_notes_or_colophon(tmp_path: Path) -> None:
+    from wsp_adapters.doccollection.tei import read_snapshot
+
+    zpath = tmp_path / "aozora__000178-1a2b3c4d.zip"
+    with zipfile.ZipFile(zpath, "w") as z:
+        z.writestr("akutagawa_ryunosuke_kashu.txt", AOZORA.encode("cp932"))
+    (doc,) = list(read_snapshot(zpath, "aozora-text"))
+    assert doc.title == "芥川龍之介歌集 (芥川龍之介)"
+    assert doc.text == "やはらかく深紫の天鵞絨をなづる心地か春の暮れゆく\n\n麦畑の萌黄天鵞絨芥子の花"
+    assert doc.lang == "ja"
