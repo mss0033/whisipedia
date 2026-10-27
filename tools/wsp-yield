@@ -41,6 +41,9 @@ CALM_AVAIL_MB="${WSP_YIELD_CALM_AVAIL_MB:-3072}"
 CALM_PSI=5
 STOP_TICKS="${WSP_YIELD_STOP_TICKS:-6}"
 RESUME_TICKS="${WSP_YIELD_RESUME_TICKS:-120}"
+# Frozen this many checks with memory neither short nor calm: thawed (2026-10-26 review: memory that
+# settled between the two thresholds kept every download frozen for the rest of the day).
+MAX_FROZEN_TICKS="${WSP_YIELD_MAX_FROZEN_TICKS:-360}"
 RESUME_UNITS="${WSP_YIELD_RESUME_UNITS:-whisipedia-trawler.service whisipedia-resume.service}"
 MEMINFO="${WSP_YIELD_MEMINFO:-/proc/meminfo}"
 PRESSURE="${WSP_YIELD_PRESSURE:-/proc/pressure/memory}"
@@ -98,6 +101,7 @@ stop_jobs() {
 # Never leave the slice frozen behind: not when this stops, and not after a restart that lost the state.
 trap 'thaw; exit 0' TERM INT
 thaw
+held="" shorts=0
 # Jobs stopped for memory and not started again yet are still owed their start: on 2026-10-22 this
 # was restarted two minutes after stopping every lane, forgot it, and nothing ran for 10 hours.
 if [ -s "$JOBS/yield-stopped" ]; then
@@ -143,14 +147,40 @@ while :; do
         state=calm
       elif [ -n "$short" ] && [ "$since" -ge "$STOP_TICKS" ]; then
         stop_jobs
-        state=stopped since=0
+        state=stopped since=0 held="" shorts=0
+      elif [ -z "$short" ] && [ "$since" -ge "$MAX_FROZEN_TICKS" ]; then
+        thaw
+        echo "<4>frozen ${since} checks with memory not short (${avail_mb} MB) but not calm: thawed $SLICE"
+        state=calm
       fi ;;
     stopped)
+      # What starts while the stopped jobs wait (the nightly index build, a timer's job) is held too
+      # (2026-10-26 review: it ran unchecked into a second shortage): frozen while memory is short or
+      # the owner reads, stopped if the shortage lasts.
+      if [ -n "$short" ]; then
+        if [ -z "$held" ]; then
+          systemctl --user freeze "$SLICE" 2>/dev/null || true
+          echo "<4>short of memory again (available ${avail_mb} MB) while jobs wait: froze $SLICE"
+          held=1
+        fi
+        shorts=$((shorts + 1))
+        if [ "$shorts" -ge "$STOP_TICKS" ]; then
+          stop_jobs
+          held="" shorts=0
+        fi
+      elif [ -n "$reader" ]; then
+        [ -n "$held" ] || { systemctl --user freeze "$SLICE" 2>/dev/null || true; held=1; }
+        shorts=0
+      else
+        [ -z "$held" ] || { thaw; held=""; }
+        shorts=0
+      fi
       if [ -n "$calm" ]; then since=$((since + 1)); else since=0; fi
       if [ "$since" -ge "$RESUME_TICKS" ]; then
         # shellcheck disable=SC2086
         systemctl --user start --no-block $RESUME_UNITS
         echo "memory calm for $RESUME_TICKS checks (${avail_mb} MB available): started" $RESUME_UNITS
+        [ -z "$held" ] || { thaw; held=""; }
         state=calm
       fi ;;
   esac

@@ -1,13 +1,20 @@
 #!/bin/sh
-# Stop the library cleanly before `wsl --shutdown` (which stops the WSL VM at once): the background jobs
-# first (a lane notes the item it stopped at, an ingest or index build resumes where it was), then the
-# trawler, the index build and the orchestrator (its own shutdown grace), the API, and the memory guard
-# last (it thaws the background slice on its way out). Then it says whether anything of the library is
+# Stop the library cleanly before `wsl --shutdown` (which stops the WSL VM at once): the memory guard
+# first, and the background slice thawed (a frozen job cannot handle SIGTERM: it sat out its stop timeout
+# and was killed, 2026-10-26 review), then the background jobs (a lane notes the item it stopped at, an
+# ingest or index build resumes where it was), the trawler, the index build and the orchestrator (its
+# own shutdown grace), and the API. Then it says whether anything of the library is
 # still running. After the restart, whisipedia-resume.service starts the jobs in
 # ~/.local/state/whisipedia/jobs.conf again (docs/runbooks/install-services.md).
 set -u
 say() { echo "$(date +%H:%M:%S) $*"; }
 units() { systemctl --user list-units --plain --no-legend --state=active,activating "$@" | awk '{print $1}'; }
+
+if systemctl --user is-active -q whisipedia-yield.service; then
+  say "stopping whisipedia-yield.service"
+  systemctl --user stop whisipedia-yield.service
+fi
+systemctl --user thaw whisipedia-background.slice 2>/dev/null || true
 
 jobs=$(units 'whisipedia-job-*')
 if [ -n "$jobs" ]; then
@@ -16,7 +23,7 @@ if [ -n "$jobs" ]; then
   systemctl --user stop $jobs
 fi
 for u in whisipedia-trawler.service whisipedia-index.service whisipedia-quality.service \
-  whisipedia-weather.service whisipedia-orchestrator.service whisipedia-api.service whisipedia-yield.service; do
+  whisipedia-weather.service whisipedia-orchestrator.service whisipedia-api.service; do
   if systemctl --user is-active -q "$u" || [ "$(systemctl --user show "$u" -p ActiveState --value)" = activating ]; then
     say "stopping $u"
     systemctl --user stop "$u"

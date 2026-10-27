@@ -98,6 +98,13 @@ print(lock_dir_for(bootstrap.paths(bootstrap.load(bootstrap.layout())).require_i
 else
   inherited=""
 fi
+# A second start of a running job is refused before its saved command is touched (2026-10-26 review:
+# the refused command replaced the running job's, and the next resume started the wrong one).
+case $(systemctl --user show "whisipedia-job-$name" -p ActiveState --value 2>/dev/null) in
+  active | activating | reloading | deactivating)
+    echo "wsp-bg: whisipedia-job-$name is already running; stop it first" >&2
+    exit 1 ;;
+esac
 # Remember how this job was started: tools/wsp-yield stops the jobs when the whole machine runs short
 # of memory, and whisipedia-resume.service starts the ones it stopped again with these words (on
 # 2026-10-20 nothing did, twice, and every lane stood still until restarted by hand).

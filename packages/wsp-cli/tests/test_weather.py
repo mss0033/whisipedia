@@ -481,23 +481,20 @@ def test_ghcn_files_come_from_the_newest_generation_holding_each() -> None:
     assert wp.ghcn_files([first]) is None
 
 
-def test_an_archive_ingest_queues_for_the_lock_then_runs_under_it(tmp_path: Path) -> None:
-    import fcntl
+def test_an_archive_ingest_waits_its_turn_in_the_ingest_queue(monkeypatch: pytest.MonkeyPatch) -> None:
+    """2026-10-26 review: a raw flock(1) wrapper jumped the ingest lock's first-come queue."""
     import subprocess
 
-    lock = tmp_path / "ingest.lock"
-    probe = ["/bin/sh", "-c", 'echo "$WSP_INHERITED_LOCKS"']
-    got = subprocess.run(
-        ["/bin/sh", "-c", w.QUEUED_INGEST, str(lock), "5", *probe], capture_output=True, text=True
-    )
-    assert got.returncode == 0
-    assert got.stdout.strip() == "ingest:9"  # wsp_cli.locks takes the lock it was handed
-    with lock.open("a") as held:
-        fcntl.flock(held, fcntl.LOCK_EX)  # another ingest holds it
-        busy = subprocess.run(
-            ["/bin/sh", "-c", w.QUEUED_INGEST, str(lock), "1", *probe], capture_output=True, text=True
-        )
-    assert busy.returncode == 3  # as a busy lock reads: retried by the next pull
+    seen: list[list[str]] = []
+
+    def run(argv: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        seen.append(argv)
+        return subprocess.CompletedProcess(argv, 0, "sealed\n", "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    assert w.run_ingest(None, "weather-gfs", "2026-10-26.r1", wait=1200) == (0, "sealed")
+    assert seen[0][-2:] == ["--wait", "1200"]
+    assert "/bin/sh" not in seen[0]
 
 
 def test_a_copy_the_nas_refuses_for_a_moment_is_started_again(

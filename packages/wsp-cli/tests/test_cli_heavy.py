@@ -315,8 +315,9 @@ def test_uninstall_leaves_the_owners_own_units_alone(tmp_path: Path) -> None:
     assert own.exists()
 
 
-def _run_wsp_bg(tmp_path: Path, *args: str) -> tuple[int, list[str], str]:
-    """Run tools/wsp-bg with a fake systemd-run that prints its argv (no unit is started)."""
+def _run_wsp_bg(tmp_path: Path, *args: str, state: str = "inactive") -> tuple[int, list[str], str]:
+    """Run tools/wsp-bg with a fake systemd-run that prints its argv (no unit is started) and a fake
+    systemctl that reports the job ``state``."""
     import subprocess
 
     from test_cli_autonomy import ROOT
@@ -326,6 +327,9 @@ def _run_wsp_bg(tmp_path: Path, *args: str) -> tuple[int, list[str], str]:
     fake = fakebin / "systemd-run"
     fake.write_text('#!/bin/sh\nfor a in "$@"; do printf "%s\\n" "$a"; done\n')
     fake.chmod(0o755)
+    ctl = fakebin / "systemctl"
+    ctl.write_text(f'#!/bin/sh\ncase "$*" in *ActiveState*) echo {state} ;; *) echo 7G ;; esac\n')
+    ctl.chmod(0o755)
     env = {
         "PATH": f"{fakebin}:/usr/bin:/bin",
         "WSP_LOCK_DIR": str(tmp_path / "locks"),
@@ -530,6 +534,7 @@ def _yield(
     active: str = "",
     reader: list[bool] | None = None,
     state: Path | None = None,
+    extra: dict[str, str] | None = None,
 ) -> tuple[str, list[str]]:
     """Run tools/wsp-yield for one check per reading of (MemAvailable MB, "full avg10" percent[, the
     background slice's own "full avg10", 0 if left out]), with a fake systemctl (``active``: its list
@@ -591,6 +596,7 @@ def _yield(
         "WSP_YIELD_STOP_TICKS": "2",
         "WSP_YIELD_RESUME_TICKS": "3",
         "WSP_STATE": str(state or tmp_path / "state"),
+        **(extra or {}),
     }
     done = subprocess.run(
         [str(ROOT / "tools" / "wsp-yield")], capture_output=True, text=True, env=env, check=True
@@ -710,3 +716,82 @@ def test_a_big_zims_profile_gets_time_to_read_it(library: dict[str, Any]) -> Non
     assert p.timeout_for(gen(204 * 10**9)) == pytest.approx(204e9 / 0.75e6)  # ~75 h
     assert p.timeout_for(gen(204 * 10**9, "upstream/w.pdf")) == 24 * 3600.0  # only ZIMs are read whole
     assert IsolatedProfiler(library["cfg"], runner, None).timeout_for(gen(10**12)) is None
+
+
+def test_yield_does_not_keep_the_background_frozen_while_memory_is_merely_middling(tmp_path: Path) -> None:
+    """2026-10-26 review: memory that settled between short and calm kept every download frozen."""
+    out, calls = _yield(tmp_path, [CALM, SHORT, *[MIDDLING] * 4], extra={"WSP_YIELD_MAX_FROZEN_TICKS": "3"})
+    assert calls == ["--user freeze whisipedia-background.slice", "--user thaw whisipedia-background.slice"]
+    assert "not calm: thawed" in out
+
+
+def test_yield_holds_what_starts_while_stopped_jobs_wait(tmp_path: Path) -> None:
+    """2026-10-26 review: after the stop, the nightly index build started and ran unchecked into a
+    second shortage."""
+    jobs = tmp_path / "state" / "jobs"
+    jobs.mkdir(parents=True)
+    (jobs / "yield-stopped").write_text("whisipedia-job-collections-cia.service\n")
+    active = "whisipedia-index.service loaded active running index\n"
+    out, calls = _yield(tmp_path, [MIDDLING, SHORT, SHORT, MIDDLING], active)
+    assert calls[0] == "--user freeze whisipedia-background.slice"
+    assert calls[1].startswith("--user list-units ")
+    assert calls[2:4] == [
+        "--user thaw whisipedia-background.slice",
+        "--user stop --no-block whisipedia-index.service",
+    ]
+    assert "while jobs wait" in out
+
+
+def test_shutdown_thaws_the_background_before_it_stops_the_jobs(tmp_path: Path) -> None:
+    """2026-10-26 review: run within 5 minutes of reading, the jobs were stopped while frozen, sat out
+    their stop timeout and were killed."""
+    import subprocess
+
+    from test_cli_autonomy import ROOT
+
+    calls = tmp_path / "calls"
+    fakebin = tmp_path / "bin"
+    fakebin.mkdir()
+    (fakebin / "systemctl").write_text(
+        f'#!/bin/sh\necho "$*" >> {calls}\n'
+        'case "$*" in\n'
+        '  *"list-units"*"whisipedia-job-*"*) echo "whisipedia-job-lane.service loaded active running x" ;;\n'
+        '  *"is-active -q whisipedia-yield.service"*) exit 0 ;;\n'
+        "  *is-active*) exit 3 ;;\n"
+        "esac\n"
+    )
+    (fakebin / "systemctl").chmod(0o755)
+    subprocess.run(
+        [str(ROOT / "tools" / "wsp-shutdown")],
+        env={"PATH": f"{fakebin}:/usr/bin:/bin"},
+        capture_output=True,
+        check=False,
+    )
+    lines = calls.read_text().splitlines()
+    order = [
+        i
+        for i, line in enumerate(lines)
+        if line
+        in (
+            "--user stop whisipedia-yield.service",
+            "--user thaw whisipedia-background.slice",
+            "--user stop whisipedia-job-lane.service",
+        )
+    ]
+    assert [lines[i] for i in order] == [
+        "--user stop whisipedia-yield.service",
+        "--user thaw whisipedia-background.slice",
+        "--user stop whisipedia-job-lane.service",
+    ]
+
+
+def test_wsp_bg_refuses_a_second_start_without_touching_the_saved_command(tmp_path: Path) -> None:
+    """2026-10-26 review: a refused second start overwrote jobs/NAME.cmd, and the next resume started
+    that command instead of the running job's."""
+    saved = tmp_path / ".local" / "state" / "whisipedia" / "jobs" / "lane.cmd"
+    saved.parent.mkdir(parents=True)
+    saved.write_text("the running job's command\n")
+    code, _argv, err = _run_wsp_bg(tmp_path, "lane", "1G", "--", "echo", "other", state="active")
+    assert code == 1
+    assert "already running" in err
+    assert saved.read_text() == "the running job's command\n"
