@@ -187,3 +187,29 @@ def test_an_ecpa_work_reads_as_its_words_with_their_own_spaces(tmp_path: Path) -
     assert doc.title == "ODE To the Earl of HUNTINGDON. (Mark Akenside)"
     assert doc.text == "They noblest counsels, boldest deeds inspire;"
     assert doc.url == "https://www.eighteenthcenturypoetry.org/works/o5157-w0020.shtml"
+
+
+DTA = """<TEI xmlns="http://www.tei-c.org/ns/1.0"><teiHeader><fileDesc><titleStmt>
+<title type="main">Der freymüthige Redner</title><title type="sub">Gedancken</title>
+<author><persName><surname>Weise</surname><forename>Christian</forename></persName></author>
+</titleStmt></fileDesc></teiHeader>
+<text><body><fw type="header" place="top">Vorrede.</fw><p>Was vom Fleiſch geboren wird/ das iſt<lb/>
+Fleiſch. Er ſchreibt vnter an-<lb/>
+dern: Abraham habe gegluͤbet<lb/>
+Auff- vnd Abnehmung.</p><fw type="catch" place="bottom">Der</fw></body></text></TEI>"""
+
+
+def test_a_dta_book_is_made_searchable_from_its_diplomatic_transcription(tmp_path: Path) -> None:
+    zpath = tmp_path / "dta.zip"
+    with zipfile.ZipFile(zpath, "w") as z:
+        z.writestr("dta_komplett_2026-02-10/weise_redner_1693.TEI-P5.xml", DTA)
+        z.writestr("dta_komplett_2026-02-10/README.txt", "x")
+    (doc,) = list(read_snapshot(zpath, "tei-dta"))
+    assert doc.key == "weise_redner_1693"
+    assert doc.title == "Der freymüthige Redner (Christian Weise, 1693)"
+    # long s, superscript-e umlaut, a word split at a line end; a real hyphen and the running head
+    assert (
+        doc.text
+        == "Was vom Fleisch geboren wird/ das ist Fleisch. Er schreibt vnter andern: Abraham habe geglübet Auff- vnd Abnehmung."
+    )
+    assert doc.url == "https://www.deutschestextarchiv.de/book/show/weise_redner_1693"

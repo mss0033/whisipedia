@@ -23,6 +23,13 @@ A repository is fetched as a snapshot of its files (``git archive`` of the defau
   (<author>)", linked to its page on eighteenthcenturypoetry.org. Its spaces are its ``<c>``
   elements; the indentation between word elements is not text.
 
+* ``tei-dta`` (the Deutsches Textarchiv, BBAW: German 1600-1900, one TEI file per book in its
+  download zip, ``<id>.TEI-P5.xml``): the book is one document, titled "<main title> (<author>,
+  <year>)", linked to its page on deutschestextarchiv.de. The transcription is diplomatic; the text
+  is made searchable: long s is s, a superscript e over a, o, u is the umlaut (``uͤ`` is ``ü``), a
+  word hyphenated at a line end is joined (``an-``/``dern`` is ``andern``); running heads and
+  catchwords (``<fw>``) are left out.
+
 * ``rst-kernel`` (the Linux kernel's ``Documentation/``, reStructuredText): each page a document,
   native id its path below ``Documentation/`` without ``.rst``, linked to docs.kernel.org;
   translations (``Documentation/translations/``) left out.
@@ -246,6 +253,55 @@ def tcp_text(xml: bytes, stem: str) -> Iterator[TeiDoc]:
     )
 
 
+_DTA_ID = re.compile(r"([^/]+)\.TEI-P5\.xml$")
+_LB = "\x01"  # a line break of the print, kept through blocks() so a hyphenated word can be joined
+_UMLAUT = {"a": "ä", "o": "ö", "u": "ü", "A": "Ä", "O": "Ö", "U": "Ü"}
+
+
+def dta_text(text: str) -> str:
+    """The diplomatic transcription made searchable (see the module notes)."""
+    text = re.sub(f"[-¬]\\s*{_LB}\\s*", "", text)  # "an-" + line break + "dern"
+    text = re.sub(f"\\s*{_LB}\\s*", " ", text)
+    text = re.sub("([aouAOU])\u0364", lambda m: _UMLAUT[m.group(1)], text.replace("ſ", "s"))
+    return "\n\n".join(b.strip() for b in text.split("\n\n") if b.strip())
+
+
+def dta_book(xml: bytes, stem: str) -> Iterator[TeiDoc]:
+    """One DTA book (``<stem>.TEI-P5.xml``)."""
+    root = ET.fromstring(xml)  # noqa: S314 - the archive's own TEI; expat rejects external entities
+    text_el = root.find(f"{TEI}text")
+    if text_el is None:
+        return
+    for lb in text_el.iter(f"{TEI}lb"):
+        lb.tail = _LB + (lb.tail or "")
+    text = dta_text(blocks(text_el))
+    if not text:
+        return
+    stmt = root.find(f"{TEI}teiHeader/{TEI}fileDesc/{TEI}titleStmt")
+    main = stmt.find(f"{TEI}title[@type='main']") if stmt is not None else None
+    title = _flat(main if main is not None else (stmt.find(f"{TEI}title") if stmt is not None else None))
+    person = stmt.find(f"{TEI}author/{TEI}persName") if stmt is not None else None
+    author = (
+        " ".join(_flat(person.find(f"{TEI}{part}")) for part in ("forename", "surname")).strip()
+        if person is not None
+        else ""
+    )
+    year = re.search(r"_(1[5-9]\d\d)$", stem)
+    title = dta_text(title if len(title) <= 200 else title[:200].rsplit(" ", 1)[0] + "...")
+    who = ", ".join(x for x in (author, year.group(1) if year else "") if x)
+    yield TeiDoc(
+        key=stem,
+        title=f"{title or stem} ({who})" if who else title or stem,
+        text=text,
+        url=f"https://www.deutschestextarchiv.de/book/show/{stem}",
+    )
+
+
+def _dta_member(name: str) -> str | None:
+    m = _DTA_ID.search(name)
+    return m.group(1) if m else None
+
+
 _ECPA_ID = re.compile(r"([a-z0-9]+-w\d{4})\.xml$")
 
 
@@ -295,6 +351,7 @@ READERS: dict[str, tuple[Callable[[str], str | None], Callable[[bytes, str], Ite
     "tei-cts": (_cts_member, cts_work),
     "tei-tcp": (_tcp_member, tcp_text),
     "tei-ecpa": (_ecpa_member, ecpa_work),
+    "tei-dta": (_dta_member, dta_book),
     "rst-kernel": (_kernel_member, rst_page),
 }
 
