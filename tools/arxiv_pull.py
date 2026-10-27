@@ -59,6 +59,29 @@ def _list(prefix: str, *, delimiter: str | None = None) -> Iterator[dict[str, An
             return
 
 
+def robots_allows(url: str) -> bool:
+    """The host's robots.txt for ``url``, as RFC 9309 2.3.1 reads it: a 4xx other than 429 means no
+    rules; 5xx, 429 or no answer means everything is disallowed. This job runs without the library's
+    packages, so it cannot use the fetcher's check (2026-10-26 review: it read none)."""
+    import urllib.error
+    import urllib.robotparser
+
+    parts = urllib.parse.urlsplit(url)
+    req = urllib.request.Request(  # noqa: S310
+        f"{parts.scheme}://{parts.netloc}/robots.txt", headers={"User-Agent": USER_AGENT}
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:  # noqa: S310 (fixed https endpoint)
+            body = resp.read(512 * 1024).decode("utf-8", "replace")
+    except urllib.error.HTTPError as exc:
+        return 400 <= exc.code < 500 and exc.code != 429
+    except (urllib.error.URLError, OSError):
+        return False
+    rules = urllib.robotparser.RobotFileParser()
+    rules.parse(body.splitlines())
+    return rules.can_fetch(USER_AGENT, url)
+
+
 def chunk_prefixes() -> list[str]:
     """``arxiv/arxiv/pdf/<yymm>/`` for the modern scheme, ``arxiv/<archive>/pdf/<yymm>/`` for old archives."""
     archives = [p for page in _list("arxiv/", delimiter="/") for p in page.get("prefixes", [])]
@@ -148,6 +171,9 @@ def main() -> None:
     done_file = STATE_DIR / f"done-{args.snapshot}.txt"
     done = set(done_file.read_text().split()) if done_file.exists() else set()
 
+    for url in (API, MEDIA):
+        if not robots_allows(url):
+            sys.exit(f"{url}: robots.txt disallows us (or could not be read); not pulling")
     chunks = chunk_prefixes()
     print(f"{len(chunks)} chunks, {len(done)} already done", flush=True)
     for i, prefix in enumerate(chunks, 1):

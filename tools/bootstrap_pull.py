@@ -454,7 +454,16 @@ def run(root: Path, lanes: list[str]) -> None:
         print(f"{lane}: started pid {proc.pid} ({source.name})")
 
 
+RETIRED = (
+    "bootstrap_pull.py is retired (2026-10-26 review): it fetched without reading robots.txt, and several "
+    "of its hosts now refuse robots (download.kiwix.org, library.kiwix.org's catalog, the OSM planet, NCBI's "
+    "FTP). Each source's adapter acquires it now, through the fetcher that honours robots.txt: "
+    "the orchestrator, `wsp bulk fetch`, `wsp collections fetch`."
+)
+
+
 def main() -> None:
+    sys.exit(RETIRED)
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("command", choices=("plan", "run"))
     ap.add_argument("--root", type=Path, required=True)
