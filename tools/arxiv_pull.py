@@ -24,11 +24,13 @@ import json
 import shutil
 import subprocess
 import sys
+import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 API = "https://storage.googleapis.com/storage/v1/b/arxiv-dataset/o"
 MEDIA = "https://storage.googleapis.com/arxiv-dataset/"
@@ -51,12 +53,31 @@ def _list(prefix: str, *, delimiter: str | None = None) -> Iterator[dict[str, An
         req = urllib.request.Request(  # noqa: S310
             f"{API}?{urllib.parse.urlencode(query)}", headers={"User-Agent": USER_AGENT}
         )
-        with urllib.request.urlopen(req, timeout=120) as resp:  # noqa: S310 (fixed https endpoint)
-            page = json.load(resp)
+        page = _get_json(req)
         yield page
         token = page.get("nextPageToken")
         if not token:
             return
+
+
+LIST_TRIES = 6  # a listing page is asked for again after 10, 20, 40, 80, 160 s
+
+
+def _get_json(req: urllib.request.Request) -> dict[str, Any]:
+    """One listing page, asked for again on a transient failure: one 503 on page 7 of a chunk ended
+    the whole multi-day pull (2026-10-26 review)."""
+    for attempt in range(1, LIST_TRIES + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=120) as resp:  # noqa: S310 (fixed https endpoint)
+                return cast(dict[str, Any], json.load(resp))
+        except urllib.error.HTTPError as exc:
+            if (exc.code < 500 and exc.code != 429) or attempt == LIST_TRIES:
+                raise
+        except (urllib.error.URLError, OSError, ValueError):
+            if attempt == LIST_TRIES:
+                raise
+        time.sleep(10 * 2 ** (attempt - 1))
+    raise AssertionError("unreachable")
 
 
 def robots_allows(url: str) -> bool:
@@ -183,7 +204,11 @@ def main() -> None:
         name = chunk_name(prefix)
         if name in done:
             continue
-        ok = run_chunk(prefix, dest, manifests, args.parallel, aria2, args.rate)
+        try:
+            ok = run_chunk(prefix, dest, manifests, args.parallel, aria2, args.rate)
+        except Exception as exc:  # one chunk's listing failing for good must not end the whole pull
+            print(f"[{i}/{len(chunks)}] {name}: listing failed ({exc}); next run tries it again", flush=True)
+            continue
         print(f"[{i}/{len(chunks)}] {name}: {'ok' if ok else 'INCOMPLETE (will retry next run)'}", flush=True)
         if ok:
             with done_file.open("a", encoding="utf-8") as fh:

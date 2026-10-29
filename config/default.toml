@@ -21,7 +21,7 @@ parity_memory_mb = 256           # par2 -m (MB of memory par2 may use); 0 = par2
 yield_to_interactive_seconds = 300  # scrub/parity pause while the library was used this recently; 0 = never
 
 [acquirer]
-user_agent = "Whisipedia/0.0 (personal offline archive)"
+user_agent = "Whisipedia/0.1 (personal offline archive)"
 fetcher = "http"                 # "http" (HttpFetcher) | "aria2" (Aria2Fetcher, needs aria2c)
 max_connections_per_host = 2
 cycle = "monthly"               # "monthly" | "quarterly" (PLAN §6.7)

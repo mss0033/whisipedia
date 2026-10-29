@@ -70,7 +70,7 @@ DEFAULT_JOB_LIMITS: Mapping[JobKind, int] = {
     JobKind.PARITY: 1,
 }
 DEFAULT_RETENTION_WINDOWS: Mapping[str, str] = {"wikimedia-dumps": "P60D", "wikidata": "P60D"}
-DEFAULT_USER_AGENT = "Whisipedia/0.0 (personal offline archive)"
+DEFAULT_USER_AGENT = "Whisipedia/0.1 (personal offline archive)"
 
 
 class SettingsError(ValueError):

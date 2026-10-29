@@ -30,6 +30,7 @@ log) or the owner sees it at once:
                               it, and everything in it crawls (the lanes, 81% on 2026-10-20, unnoticed:
                               each still used enough CPU not to look idle)
 * ``disk-low:<mount>``        under WSP_STALL_MIN_FREE_GB free locally (50) or on the NAS (2000)
+* ``nas-missing:<mount>``     the NAS share is not mounted (its free space is not checked then)
 * ``log``                     a new problem line in a lane log (HTTP 429, Traceback, FAILED, a fetch
                               that failed (exits 7 and 8 are complete), partitions left for later,
                               no space); one note per problem and log a day, never the backlog
@@ -161,9 +162,12 @@ def systemctl(*args: str) -> str:
     exe = shutil.which("systemctl")
     if exe is None:
         return ""
-    done = subprocess.run(  # noqa: S603 - fixed argv
-        [exe, "--user", *args], capture_output=True, text=True, check=False, timeout=60
-    )
+    try:
+        done = subprocess.run(  # noqa: S603 - fixed argv
+            [exe, "--user", *args], capture_output=True, text=True, check=False, timeout=60
+        )
+    except subprocess.TimeoutExpired:  # systemd slow under memory pressure: unknown, not a crash
+        return ""
     return done.stdout
 
 
@@ -247,7 +251,7 @@ def lock_waiters() -> dict[str, str]:
         if len(f) < 7 or f[1] != "->" or f[2] != "FLOCK":
             continue
         try:
-            name = by_inode.get(int(f[6].rsplit(":", 1)[1]))
+            name = by_inode.get(_lock_file_key(f[6]))
         except (IndexError, ValueError):
             continue
         if name is not None:
@@ -274,14 +278,23 @@ def queued(now: float) -> dict[str, tuple[str, int, float]]:
     return out
 
 
-def _lock_inodes() -> dict[int, str]:
-    by_inode: dict[int, str] = {}
+def _lock_inodes() -> dict[str, str]:
+    """``"MAJ:MIN:INODE" -> lock name`` as /proc/locks names files: the device too, since a file on the
+    NAS can have the same inode number as a local lock file (2026-10-26 review)."""
+    by_inode: dict[str, str] = {}
     for p in LOCKS.glob("*.lock"):
         try:
-            by_inode[p.stat().st_ino] = p.stem
+            st = p.stat()
         except OSError:
             continue
+        by_inode[f"{os.major(st.st_dev):02x}:{os.minor(st.st_dev):02x}:{st.st_ino}"] = p.stem
     return by_inode
+
+
+def _lock_file_key(field: str) -> str:
+    """/proc/locks' ``MAJ:MIN:INODE`` (major and minor in hex), normalised to two hex digits each."""
+    major, minor, inode = field.split(":")
+    return f"{int(major, 16):02x}:{int(minor, 16):02x}:{int(inode)}"
 
 
 def cgroup_pids(cgroup: str) -> set[str]:
@@ -293,12 +306,7 @@ def cgroup_pids(cgroup: str) -> set[str]:
 
 def lock_holders() -> dict[str, tuple[str, str, float]]:
     """``lock name -> (pid, command, age seconds)`` of every lock file in LOCKS that is held."""
-    by_inode: dict[int, str] = {}
-    for p in LOCKS.glob("*.lock"):
-        try:
-            by_inode[p.stat().st_ino] = p.stem
-        except OSError:
-            continue
+    by_inode = _lock_inodes()
     held: dict[str, tuple[str, str, float]] = {}
     try:
         lines = (PROC / "locks").read_text().splitlines()
@@ -309,10 +317,9 @@ def lock_holders() -> dict[str, tuple[str, str, float]]:
         if len(f) < 6 or f[1] != "FLOCK" or f[3] == "->":
             continue
         try:
-            inode = int(f[5].rsplit(":", 1)[1])
-        except (IndexError, ValueError):
+            name = by_inode.get(_lock_file_key(f[5]))
+        except ValueError:
             continue
-        name = by_inode.get(inode)
         if name is None:
             continue
         cmd, age = process(f[4])
@@ -339,7 +346,7 @@ def health_ok() -> bool:
             with urllib.request.urlopen(HEALTH_URL, timeout=30) as r:  # noqa: S310 - local API
                 if r.status == 200:
                     return True
-        except OSError:
+        except Exception:  # noqa: BLE001 - any failure is "did not answer"; the run must go on
             pass
     return False
 
@@ -490,6 +497,9 @@ def check(state: State, t: float) -> tuple[dict[str, str], list[str]]:
     if not health_ok():
         cond["api-down"] = f"{HEALTH_URL} did not answer 200 twice"
     for mount, min_gb in MOUNTS.items():
+        if mount != "/" and not os.path.ismount(mount):  # its free space would be the root disk's
+            cond[f"nas-missing:{mount}"] = f"{mount} is not mounted: the vault is unreachable; remount the share"
+            continue
         try:
             free = shutil.disk_usage(mount).free / 1e9
         except OSError:

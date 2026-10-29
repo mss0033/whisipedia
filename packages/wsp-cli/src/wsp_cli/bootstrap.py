@@ -412,7 +412,7 @@ def load_signer(
 
 
 def user_agent(cfg: Mapping[str, Any]) -> str:
-    return str(section(cfg, "acquirer").get("user_agent", "Whisipedia/0.0 (personal offline archive)"))
+    return str(section(cfg, "acquirer").get("user_agent", "Whisipedia/0.1 (personal offline archive)"))
 
 
 def build_vault(
