@@ -27,7 +27,7 @@ import os
 import shutil
 import threading
 import zipfile
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
@@ -268,10 +268,13 @@ def hot_runs(hot: Path, model: str) -> list[Path]:
     return sorted(runs, key=lambda p: p.name, reverse=True)
 
 
-def prune_hot(hot: Path, model: str, keep: int) -> list[str]:
-    """Delete all but the newest ``keep`` runs (and unfinished ones); the runs deleted."""
+def prune_hot(hot: Path, model: str, keep: int, spare: Collection[str] = ()) -> list[str]:
+    """Delete all but the newest ``keep`` runs (and unfinished ones); the runs deleted. Runs named in
+    ``spare`` (queued for the archive, not staged yet) stay whatever their age."""
     gone: list[str] = []
     for p in hot_runs(hot, model)[keep:]:
+        if p.name in spare:
+            continue
         shutil.rmtree(p, ignore_errors=True)
         gone.append(p.name)
     base = hot / model

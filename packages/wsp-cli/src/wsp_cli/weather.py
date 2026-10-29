@@ -525,7 +525,10 @@ def run_ingest(config_dir: Path | None, source: str, version: str, *, wait: floa
     argv += ["ingest", "--source", source, "--version", version]
     if wait > 0:
         argv += ["--wait", str(int(wait))]
-    done = subprocess.run(argv, capture_output=True, text=True, check=False, timeout=6 * 3600 + wait)  # noqa: S603
+    try:
+        done = subprocess.run(argv, capture_output=True, text=True, check=False, timeout=6 * 3600 + wait)  # noqa: S603
+    except subprocess.TimeoutExpired:
+        return 1, "ingest did not finish in its time"
     lines = (done.stdout + done.stderr).strip().splitlines()
     return done.returncode, lines[-1] if lines else ""
 
@@ -608,7 +611,10 @@ def _pull(
             feed["last_error_at"] = now_iso()
             say(f"{model.id}: failed: {exc}")
         wd.atomic_json(ws.root / STATE_FILE, state)
-        for gone in wd.prune_hot(ws.hot, model.id, ws.keep_runs):
+        # A run queued for the archive and not staged yet stays: a NAS outage of half a day used to
+        # let the hot copy drop it before _archive could stage it (2026-10-26 review).
+        spare = {p["run"] for p in pending if p.get("model") == model.id and not p.get("staged")}
+        for gone in wd.prune_hot(ws.hot, model.id, ws.keep_runs, spare):
             say(f"{model.id}: {gone} pruned from the hot copy")
     if not args.no_archive:
         _archive(cfg, ws, state, args, say)
@@ -646,7 +652,12 @@ def _archive(
                 continue
             run = datetime.strptime(item["run"], "%Y%m%d%H").replace(tzinfo=UTC)
             urls = {f"{model.id}-{item['run']}-f{s:03d}.grib2": model.url(run, s) for s in model.steps(run)}
-            stage_files(incoming, model.source, version, [(f, urls.get(f.name, "")) for f in files], pace)
+            try:
+                stage_files(incoming, model.source, version, [(f, urls.get(f.name, "")) for f in files], pace)
+            except OSError as exc:  # the share refused: kept in the hot copy, staged by a later pull
+                say(f"{model.source}/{version}: not staged ({exc}); left for the next pull")
+                left.append(item)
+                continue
             item["staged"] = now_iso()
             say(f"{model.source}/{version}: {len(files)} GRIB files staged")
         if queue_busy:  # staged above, before the hot copy prunes it; sealed by a later pull

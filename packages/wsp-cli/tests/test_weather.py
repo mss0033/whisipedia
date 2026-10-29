@@ -564,3 +564,48 @@ def test_a_pull_waits_once_for_a_busy_ingest_queue(tmp_path: Path, monkeypatch: 
     assert len(calls) == 1
     assert [p["run"] for p in state["pending"]] == runs  # all kept for the next pull
     assert any("queue busy" in s for s in said)
+
+
+def test_a_run_waiting_for_the_archive_outlives_the_hot_copys_pruning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-10-26 review: a NAS outage of half a day let prune_hot delete a queued run before it was
+    staged, and _archive then dropped it for good."""
+    import argparse
+
+    hot = tmp_path / "weather" / "hot" / "gfs"
+    for rid in ("2026102600", "2026102606", "2026102612"):
+        grib = hot / rid / "grib"
+        grib.mkdir(parents=True)
+        (grib / "f000.grib2").write_bytes(b"GRIB")
+        (hot / rid / wd.META).write_text("{}")
+    held = [p.name for p in wd.hot_runs(tmp_path / "weather" / "hot", "gfs")]
+    assert held, "hot_runs must see the fixture runs"
+    gone = wd.prune_hot(tmp_path / "weather" / "hot", "gfs", 1, spare={"2026102600"})
+    assert "2026102600" not in gone
+    assert (hot / "2026102600").is_dir()
+
+    class Paths:
+        def require_vault(self) -> Path:
+            return tmp_path / "vault"
+
+    def paths(_cfg: object) -> Paths:
+        return Paths()
+
+    def pace(_cfg: object) -> None:
+        return None
+
+    def refuse(*_a: object, **_k: object) -> None:
+        raise BlockingIOError(11, "Resource temporarily unavailable")
+
+    monkeypatch.setattr(bootstrap, "paths", paths)
+    monkeypatch.setattr(bootstrap, "ingest_pace", pace)
+    monkeypatch.setattr(w, "stage_files", refuse)
+    state: dict[str, Any] = {"pending": [{"model": "gfs", "run": "2026102600", "staged": ""}]}
+    said: list[str] = []
+    archive = w._archive  # pyright: ignore[reportPrivateUsage]
+    archive(
+        {}, w.WeatherSettings(tmp_path / "weather"), state, argparse.Namespace(config_dir=None), said.append
+    )
+    assert state["pending"] == [{"model": "gfs", "run": "2026102600", "staged": ""}]
+    assert any("not staged" in s for s in said)
