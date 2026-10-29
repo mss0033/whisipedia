@@ -514,6 +514,11 @@ def stage_files(
 # A pull waits this long for the lock, then leaves the seal to the next pull: with its priority ticket
 # it is next after the holder, whose slice is at most an hour (lane --max-seconds 3600) and a file.
 INGEST_WAIT_S = 3900
+# All of a pull's seals start within this much of its start, with time left for the seal itself: the
+# unit's TimeoutStartSec is 90 minutes, and a second run's 65-minute wait ran past it (2026-10-29).
+PULL_BUDGET_S = 80 * 60
+SEAL_RESERVE_S = 15 * 60
+MIN_INGEST_WAIT_S = 60
 
 
 def run_ingest(config_dir: Path | None, source: str, version: str, *, wait: float = 0) -> tuple[int, str]:
@@ -573,6 +578,7 @@ def _pull(
     args: argparse.Namespace,
     say: Callable[[str], None],
 ) -> int:
+    started = time.monotonic()
     state = load_state(ws.root)
     feeds = cast(dict[str, dict[str, Any]], state.setdefault("feeds", {}))
     pending = cast(list[dict[str, str]], state.setdefault("pending", []))
@@ -619,7 +625,7 @@ def _pull(
         for gone in wd.prune_hot(ws.hot, model.id, ws.keep_runs, spare):
             say(f"{model.id}: {gone} pruned from the hot copy")
     if not args.no_archive:
-        _archive(cfg, ws, state, args, say)
+        _archive(cfg, ws, state, args, say, deadline=started + PULL_BUDGET_S)
     wd.atomic_json(ws.root / STATE_FILE, state)
     return EXIT_FAILED if failed else EXIT_OK
 
@@ -630,8 +636,13 @@ def _archive(
     state: dict[str, Any],
     args: argparse.Namespace,
     say: Callable[[str], None],
+    *,
+    deadline: float | None = None,
 ) -> None:
-    """Stage each archived run's GRIB into the vault's ``_incoming`` and ingest what is staged."""
+    """Stage each archived run's GRIB into the vault's ``_incoming`` and ingest what is staged, each
+    seal starting before ``deadline`` (``time.monotonic()``; default: the pull budget from now)."""
+    if deadline is None:
+        deadline = time.monotonic() + PULL_BUDGET_S
     pending = cast(list[dict[str, str]], state.get("pending", []))
     if not pending:
         return
@@ -640,7 +651,7 @@ def _archive(
     pace = bootstrap.ingest_pace(cfg)
     known = models()
     left: list[dict[str, str]] = []
-    queue_busy = False
+    queue_busy = out_of_time = False
     for item in pending:
         model = known.get(item["model"])
         version = archive_version(item["run"])
@@ -662,10 +673,12 @@ def _archive(
                 continue
             item["staged"] = now_iso()
             say(f"{model.source}/{version}: {len(files)} GRIB files staged")
-        if queue_busy:  # staged above, before the hot copy prunes it; sealed by a later pull
+        wait = min(INGEST_WAIT_S, deadline - time.monotonic() - SEAL_RESERVE_S)
+        out_of_time = out_of_time or wait < MIN_INGEST_WAIT_S
+        if queue_busy or out_of_time:  # staged above, before the hot copy prunes it; sealed by a later pull
             left.append(item)
             continue
-        code, last = run_ingest(args.config_dir, model.source, version, wait=INGEST_WAIT_S)
+        code, last = run_ingest(args.config_dir, model.source, version, wait=wait)
         if code == 0:
             say(f"{model.source}/{version}: sealed")
             continue
@@ -676,6 +689,8 @@ def _archive(
         queue_busy = code == locks.EXIT_BUSY
     if queue_busy and len(left) > 1:
         say(f"ingest queue busy: {len(left)} run(s) staged, left for the next pull")
+    elif out_of_time:
+        say(f"out of time for this pull: {len(left)} run(s) staged, left for the next pull")
     state["pending"] = left
 
 

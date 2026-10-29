@@ -566,6 +566,65 @@ def test_a_pull_waits_once_for_a_busy_ingest_queue(tmp_path: Path, monkeypatch: 
     assert any("queue busy" in s for s in said)
 
 
+def test_a_pull_starts_no_seal_it_cannot_finish_before_its_unit_times_out(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-10-29: a seal waited 44 minutes for its priority turn, the next run's wait began after it,
+    and systemd killed the pull at its 90-minute limit. Each wait fits what is left of the budget."""
+    import argparse
+    import time
+
+    waits: list[float] = []
+
+    def ingest(_cfg: object, source: str, version: str, *, wait: float = 0) -> tuple[int, str]:
+        waits.append(wait)
+        return 0, "sealed"
+
+    monkeypatch.setattr(w, "run_ingest", ingest)
+
+    class Paths:
+        def require_vault(self) -> Path:
+            return tmp_path
+
+    def paths(_cfg: object) -> Paths:
+        return Paths()
+
+    def pace(_cfg: object) -> None:
+        return None
+
+    monkeypatch.setattr(bootstrap, "paths", paths)
+    monkeypatch.setattr(bootstrap, "ingest_pace", pace)
+    runs = ["2026102600", "2026102700"]
+    state: dict[str, Any] = {"pending": [{"model": "gfs", "run": r, "staged": "x"} for r in runs]}
+    said: list[str] = []
+    archive = w._archive  # pyright: ignore[reportPrivateUsage]
+    deadline = time.monotonic() + w.SEAL_RESERVE_S + 600  # ten minutes of waiting left
+    archive(
+        {},
+        w.WeatherSettings(tmp_path / "weather"),
+        state,
+        argparse.Namespace(config_dir=None),
+        said.append,
+        deadline=deadline,
+    )
+    assert len(waits) == 2
+    assert all(0 < x <= 600 for x in waits)
+    assert state["pending"] == []
+    waits.clear()
+    state = {"pending": [{"model": "gfs", "run": r, "staged": "x"} for r in runs]}
+    archive(
+        {},
+        w.WeatherSettings(tmp_path / "weather"),
+        state,
+        argparse.Namespace(config_dir=None),
+        said.append,
+        deadline=time.monotonic() + w.SEAL_RESERVE_S,  # no time left to wait
+    )
+    assert waits == []
+    assert [p["run"] for p in state["pending"]] == runs
+    assert any("out of time" in s for s in said)
+
+
 def test_a_run_waiting_for_the_archive_outlives_the_hot_copys_pruning(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
