@@ -145,6 +145,9 @@ def run_chunk(prefix: str, dest: Path, manifests: Path, parallel: int, aria2: st
         f"--user-agent={USER_AGENT}",
         "--console-log-level=error",
         "--summary-interval=0",
+        # Its progress line and per-chunk results table went to the journal: thousands of lines a chunk.
+        "--show-console-readout=false",
+        "--download-result=hide",
         f"--log={STATE_DIR / 'aria2.log'}",
         "--log-level=warn",
     ]
