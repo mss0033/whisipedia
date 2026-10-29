@@ -371,3 +371,128 @@ def test_kiwix_checksums_held_files_are_recorded_and_only_new_files_are_asked_fo
         checksum_dirs=[seeded, saved],
     )  # fmt: skip
     assert items == []  # nothing left to ask for
+
+
+def _doc_item(key: str) -> Item:
+    from wsp_adapters.doccollection.model import Candidate
+
+    cand = Candidate(key=key, url=f"https://x.example/{key}.pdf", title=key.upper(), issuer="X")
+    return Item(key, cand.url, f"{key.split(':')[1]}.pdf", cand=cand.to_json())
+
+
+def test_held_and_denied_documents_leave_the_offer_and_a_held_one_returns_once_decided(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-10-26 review: a document held for review was marked taken and never came back after the
+    owner allowed it; a denied one headed the daily page forever."""
+    from wsp_adapters.doccollection.model import Candidate
+    from wsp_adapters.doccollection.policy import Rules
+    from wsp_cli import doccollections
+
+    incoming = tmp_path / "vault" / "_incoming"
+    folder = incoming / "_manual" / "s"
+    quarantine = incoming / "_quarantine" / "s"
+    folder.mkdir(parents=True)
+    quarantine.mkdir(parents=True)
+    q = Queue("s", items=[_doc_item(k) for k in ("s:a", "s:b", "s:c")])
+    for item in q.items:
+        (folder / item.save_as).write_bytes(b"%PDF-1.4\n%%EOF\n")
+    rules = Rules()
+    listed: list[list[str]] = []
+
+    def fetch(args: argparse.Namespace, out: Any) -> int:
+        cands = [Candidate.from_json(c) for c in args.discovery[0]["items"]]
+        listed.append([c.key for c in cands])
+        report = doccollections.FetchReport("s", "2026-10-29")
+        for c in cands:
+            (folder / f"{c.key[2:]}.pdf").unlink(missing_ok=True)
+            if c.key == "s:a" and not rules.allow_documents:  # the screen holds it until allowed
+                (quarantine / c.file_name).write_bytes(b"%PDF")
+                report.held.append({"key": c.key, "rule": "review:safety=x"})
+            elif c.key == "s:b":
+                report.rejected.append((c.key, "deny:marking=distribution-C"))
+        args.report_sink.append(report)
+        return doccollections.EXIT_COMPLETE
+
+    class FakeAdapter:
+        def config(self, _spec: SourceSpec) -> Any:
+            return type("Cfg", (), {"rules": rules})()
+
+    class FakeOps:
+        @staticmethod
+        def cmd_ingest(args: argparse.Namespace, out: Any) -> int:
+            return 0
+
+    monkeypatch.setattr(doccollections, "cmd_fetch", fetch)
+    monkeypatch.setattr(manual, "DocCollectionAdapter", FakeAdapter)
+    monkeypatch.setitem(__import__("sys").modules, "wsp_cli.ops", FakeOps)
+    spec = _spec("s", {"adapter": "doc-collection"})
+    args = argparse.Namespace(config_dir=None)
+
+    assert manual.import_collection(args, spec, q, folder, io.StringIO()) == 0
+    assert {i.id: i.status for i in q.items} == {"s:a": "held", "s:b": "denied", "s:c": "taken"}
+    assert q.pending() == []  # neither is offered again
+    q.merge([_doc_item(k) for k in ("s:a", "s:b", "s:c")])
+    assert {i.id: i.status for i in q.items} == {"s:a": "held", "s:b": "denied", "s:c": "taken"}
+
+    assert manual.import_collection(args, spec, q, folder, io.StringIO()) == 0
+    assert len(listed) == 1  # undecided: left alone
+
+    rules = Rules(allow_documents=frozenset({"S:A"}))  # `wsp proposals accept` (keys normalized)
+    assert manual.import_collection(args, spec, q, folder, io.StringIO()) == 0
+    assert listed[-1] == ["s:a"]  # taken from the quarantine and screened again
+    assert next(i for i in q.items if i.id == "s:a").status == "taken"
+
+
+def test_an_unfinished_ingest_is_retried_before_new_files_are_taken(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-10-26 review: after a busy ingest the plan sat unsealed, every later fetch was refused
+    (exit 5) and nothing retried the ingest; on the same day a second import rewrote its plan."""
+    from wsp_adapters.doccollection.policy import Rules
+    from wsp_cli import doccollections
+
+    vault = tmp_path / "vault"
+    incoming = vault / "_incoming"
+    folder = incoming / "_manual" / "s"
+    folder.mkdir(parents=True)
+    plans = incoming / "_plans" / "targets.d"
+    plans.mkdir(parents=True)
+    (plans / "s-2026-10-28.json").write_text(json.dumps([{"source_id": "s", "version": "2026-10-28"}]))
+    q = Queue("s", items=[_doc_item("s:new")])
+    (folder / "new.pdf").write_bytes(b"%PDF-1.4\n%%EOF\n")
+    spec = _spec("s", {"adapter": "doc-collection"})
+    codes = [3]
+    fetched: list[int] = []
+
+    class FakeOps:
+        @staticmethod
+        def cmd_ingest(args: argparse.Namespace, out: Any) -> int:
+            code = codes.pop(0) if codes else 0
+            if code == 0:
+                gen = vault / "library" / spec.vault_domain / "s" / "2026-10-28"
+                gen.mkdir(parents=True, exist_ok=True)
+                (gen / "MANIFEST.json").write_text("{}")
+            return code
+
+    def fetch(args: argparse.Namespace, out: Any) -> int:
+        fetched.append(1)
+        args.report_sink.append(doccollections.FetchReport("s", "2026-10-29"))
+        (folder / "new.pdf").unlink()
+        return doccollections.EXIT_COMPLETE
+
+    class FakeAdapter:
+        def config(self, _spec: SourceSpec) -> Any:
+            return type("Cfg", (), {"rules": Rules()})()
+
+    monkeypatch.setattr(doccollections, "cmd_fetch", fetch)
+    monkeypatch.setattr(manual, "DocCollectionAdapter", FakeAdapter)
+    monkeypatch.setitem(__import__("sys").modules, "wsp_cli.ops", FakeOps)
+    args = argparse.Namespace(config_dir=None)
+
+    assert manual.import_collection(args, spec, q, folder, io.StringIO()) == 3  # still busy
+    assert fetched == []
+    assert (folder / "new.pdf").is_file()  # waits for the next run
+    assert manual.import_collection(args, spec, q, folder, io.StringIO()) == 0
+    assert fetched == [1]
+    assert q.items[0].status == "taken"

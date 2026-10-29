@@ -61,7 +61,7 @@ from typing import Any, TextIO, cast
 from wsp_adapters.doccollection import DocCollectionAdapter
 from wsp_adapters.doccollection.adapter import Survey
 from wsp_adapters.doccollection.model import Candidate, key_part
-from wsp_adapters.doccollection.policy import Verdict
+from wsp_adapters.doccollection.policy import Rules, Verdict, normalize_pub_number
 from wsp_cli import bootstrap
 from wsp_core.errors import FetchError, NotFoundError
 from wsp_core.model import FetchResult, RemoteFile, SourceSpec, SourceStatus
@@ -83,7 +83,9 @@ class Item:
     title: str = ""
     page: bool = False  # ``open`` is a landing page: save the document it offers
     cand: dict[str, Any] = field(default_factory=dict[str, Any])  # Candidate.to_json (collections)
-    status: str = "pending"  # pending | taken | denied (the content screen refused it: never offered again)
+    status: str = (
+        "pending"  # pending | taken | denied (refused by the screen) | held (for the owner's review)
+    )
     offered: list[str] = field(default_factory=list[str])  # days it was on the daily page
     taken: str = ""
     problem: str = ""
@@ -132,7 +134,7 @@ class Queue:
                     old.problem,
                 )
             merged.append(item)
-        merged += [i for i in known.values() if i.status in ("taken", "denied")]
+        merged += [i for i in known.values() if i.status in ("taken", "denied", "held")]
         self.items = merged
 
     def pending(self) -> list[Item]:
@@ -524,6 +526,31 @@ def _set_aside(path: Path, why: str, item: Item) -> None:
     path.replace(path.with_name(path.name + ".bad"))
 
 
+def _decided(item: Item, rules: Rules) -> bool:
+    """The owner has decided on this held document (``wsp proposals accept``/``reject``)."""
+    raw = {item.id, str(item.cand.get("pub_number") or "")} - {""}
+    keys = raw | {normalize_pub_number(k) for k in raw}
+    decided = (
+        rules.allow_documents | rules.allow_content_review | rules.override_safety | rules.deny_documents
+    )
+    return bool(keys & decided)
+
+
+def unsealed_plans(incoming: Path, spec: SourceSpec) -> list[str]:
+    """Versions of ``spec`` planned in ``incoming/_plans/targets.d`` but not sealed in the library."""
+    from wsp_cli.doccollections import PLANS_SUBDIR
+
+    library = incoming.parent / "library" / spec.vault_domain / spec.id
+    versions: set[str] = set()
+    for path in sorted((incoming / "_plans" / PLANS_SUBDIR).glob(f"{spec.id}-*.json")):
+        try:
+            targets = cast(list[Mapping[str, Any]], json.loads(path.read_text(encoding="utf-8")))
+        except (OSError, ValueError):
+            continue
+        versions |= {str(t.get("version")) for t in targets if t.get("source_id") == spec.id}
+    return sorted(v for v in versions if not (library / v / "MANIFEST.json").is_file())
+
+
 def import_collection(
     args: argparse.Namespace, spec: SourceSpec, queue: Queue, folder: Path, out: TextIO
 ) -> int:
@@ -532,6 +559,16 @@ def import_collection(
     from wsp_cli import doccollections, ops
 
     present: list[Item] = []
+    # A copy held for review comes back once the owner has decided on it (allowed, or denied): the
+    # fetch takes it from the quarantine and screens it again under the new decision.
+    quarantine = folder.parent.parent / "_quarantine" / spec.id
+    rules = DocCollectionAdapter().config(spec).rules
+    for item in queue.items:
+        if item.status == "held" and _decided(item, rules):
+            if (quarantine / Candidate.from_json(item.cand).file_name).is_file():
+                present.append(item)
+            else:  # the copy is gone (moved by hand): ask for the file again
+                item.status, item.offered, item.problem = "pending", [], "held copy gone; download it again"
     for item in queue.pending():
         path = folder / item.save_as
         if not path.is_file():
@@ -543,6 +580,13 @@ def import_collection(
         present.append(item)
     if not present:
         return 0
+    if unsealed_plans(folder.parent.parent, spec):
+        # An ingest that did not finish (busy queue, failure, a kill) goes first: a fetch now would be
+        # refused (exit 5), or on the same day rewrite that version's plan without its documents.
+        code = _ingest(args, spec.id, None, out, ops)
+        if code != 0 or unsealed_plans(folder.parent.parent, spec):
+            out.write(f"{spec.id}: an earlier import is not ingested yet; new files wait for the next run\n")
+            return code or doccollections.EXIT_INGEST_PENDING
     groups: dict[str, list[Item]] = {}
     for item in present:
         groups.setdefault(str(item.cand.get("partition") or ""), []).append(item)
@@ -567,9 +611,12 @@ def import_collection(
         report = reports[0] if reports else None
         failed = dict(report.failed) if report else {}
         rejected = dict(report.rejected) if report else {}
+        held = {str(row.get("key")): str(row.get("rule") or "") for row in report.held} if report else {}
         day = datetime.now(UTC).strftime("%Y-%m-%d")
         for item in items:
-            if item.id in rejected:  # refused by the screen: asking for it again would be refused again
+            if item.id in held:  # in the quarantine, with a review proposal; back once decided
+                item.status, item.problem = "held", f"held for review: {held[item.id]}"[:200]
+            elif item.id in rejected:  # refused by the screen: asking for it again would be refused again
                 item.status, item.problem = "denied", rejected[item.id][:200]
             elif item.id in failed:
                 item.problem = failed[item.id][:200]
@@ -598,6 +645,14 @@ def import_pubmed(
     from wsp_cli import ops
     from wsp_cli.bulk import PLANS_SUBDIR
 
+    if unsealed_plans(vault_root / "_incoming", spec):
+        # An update generation whose ingest did not finish: its files already left the folder, so
+        # only this retries it; nothing new is taken until it is sealed.
+        code = _ingest(args, spec.id, None, out, ops)
+        if code != 0 or unsealed_plans(vault_root / "_incoming", spec):
+            out.write(f"{spec.id}: an earlier update generation is not ingested yet\n")
+            return code or EXIT_INGEST_PENDING
+        return 0  # the held generation moved on: the next run continues after it
     m = PUBMED_GEN.match(held or "")
     if m is None or m.group("upto") is None:
         out.write(f"{spec.id}: no update generation held to continue from ({held!r})\n")
@@ -676,6 +731,7 @@ def _ingest(args: argparse.Namespace, source: str, version: str | None, out: Tex
     return int(ops.cmd_ingest(ingest_args, out))
 
 
+EXIT_INGEST_PENDING = 5  # = doccollections.EXIT_INGEST_PENDING
 INGEST_WAIT = 3 * 3600  # a manual import waits up to three hours in the ingest lock's queue
 
 
@@ -698,7 +754,22 @@ def held_generation(cfg: Mapping[str, Any], spec: SourceSpec) -> str | None:
 
 def cmd_sync(args: argparse.Namespace, out: TextIO) -> int:
     """``wsp collections manual --sync``: take in whatever the owner saved, rebuild stale lists, and
-    write today's page once a day (``--today``: write it again now)."""
+    write today's page once a day (``--today``: write it again now).
+
+    One run at a time: a run by hand during the timer's would take the same files into the same day's
+    version and rewrite its plan without the other run's documents (2026-10-26 review)."""
+    from wsp_cli import locks
+
+    cfg = bootstrap.load(bootstrap.layout(args.config_dir))
+    try:
+        with locks.exclusive(bootstrap.paths(cfg).require_state() / "manual", "sync"):
+            return _sync(args, out)
+    except locks.LockHeldError as exc:
+        out.write(f"another manual sync is running: {exc}\n")
+        return locks.EXIT_BUSY
+
+
+def _sync(args: argparse.Namespace, out: TextIO) -> int:
     from wsp_cli.doccollections import MANUAL_DIR, windows_path
 
     lay = bootstrap.layout(args.config_dir)
