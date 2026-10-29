@@ -69,6 +69,13 @@ def test_suggest_entries_join_redirect_aliases(wiki: IndexedSource) -> None:
     assert entries[make_doc_id("wiki", "Bern")].aliases == ()
 
 
+def test_redirect_aliases_stay_inside_the_suggest_budget(wiki: IndexedSource) -> None:
+    """2026-10-26 review #28: aliases were added after the budget was counted (8.1M keys against 3M)."""
+    for budget in (3, 4, 5, 6, 7):
+        entries = TitleSources([wiki]).suggest_entries(None, budget=budget)
+        assert sum(1 + len(e.aliases) for e in entries) <= budget, budget
+
+
 def test_full_suggest_rebuild_offers_redirects(wiki: IndexedSource, tmp_path: Path) -> None:
     cfg = replace(SMALL, suggest_open_rebuild_titles=0)
     with TantivyIndex(tmp_path / "ix", cfg, titles=TitleSources([wiki])) as idx:

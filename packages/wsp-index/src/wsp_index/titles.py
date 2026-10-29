@@ -32,6 +32,10 @@ from wsp_vault.ratelimit import RateLimiter
 
 SCAN_BATCH = 65_536
 SUGGEST_TURN = 1_000
+# Redirect aliases share the suggest budget: they were added after it was counted, and the live trie
+# held 8.1 million keys against 3 million (2026-10-26 review #28), its build peaking near 2.4 GB.
+SUGGEST_REDIRECT_SHARE = 0.4  # of the keys, kept for redirect aliases of the chosen titles
+SUGGEST_REDIRECTS_PER_ENTRY = 8  # aliases of one document at most (a city has hundreds of redirects)
 """Unranked titles a source adds to the suggest trie per turn."""
 
 
@@ -102,9 +106,13 @@ class TitleSources:
 
         Half the keys go to the best-ranked documents, best first; the rest is shared by the sources in
         turns of :data:`SUGGEST_TURN` titles, in Refinery order, so a library without ranks still offers
-        titles of every source. One scan of the Refinery's ``doc_id``/``title``/``aliases`` columns and
-        one of each redirect table.
+        titles of every source. Where redirect tables exist, :data:`SUGGEST_REDIRECT_SHARE` of the keys
+        is kept for the chosen titles' redirect aliases. One scan of the Refinery's
+        ``doc_id``/``title``/``aliases`` columns and one of each redirect table.
         """
+        total = budget
+        if any(p.is_file() for src in self.sources for p in src.redirects):
+            budget -= int(budget * SUGGEST_REDIRECT_SHARE)  # the titles' part; the rest for redirects
         if budget <= 0:
             return []
         top = rank.top_keys(budget // 2) if rank is not None else np.zeros(0, np.uint64)
@@ -172,23 +180,29 @@ class TitleSources:
                         break
                 if used >= budget:
                     break
-        return self._with_redirects(chosen)
+        return self._with_redirects(chosen, total - used)
 
-    def _with_redirects(self, entries: list[SuggestEntry]) -> list[SuggestEntry]:
-        """``entries`` with each one's redirect aliases added (one scan of each redirect table)."""
+    def _with_redirects(self, entries: list[SuggestEntry], room: int) -> list[SuggestEntry]:
+        """``entries`` with their redirect aliases added, best entries first, ``room`` keys in all and
+        :data:`SUGGEST_REDIRECTS_PER_ENTRY` per entry (one scan of each redirect table)."""
+        if room <= 0:
+            return entries
         wanted = {e.doc_id for e in entries}
         extra: dict[str, list[str]] = {}
         for src in self.sources:
             for doc_id, alias in self._redirects(src, wanted):
-                extra.setdefault(doc_id, []).append(alias)
+                mine = extra.setdefault(doc_id, [])
+                if len(mine) < SUGGEST_REDIRECTS_PER_ENTRY:
+                    mine.append(alias)
         if not extra:
             return entries
         out: list[SuggestEntry] = []
         for e in entries:
             more = extra.get(e.doc_id)
-            if more:
-                merged = tuple(dict.fromkeys((*e.aliases, *more)))
-                e = SuggestEntry(e.doc_id, e.title, merged, e.prior)
+            if more and room > 0:
+                new = [a for a in dict.fromkeys(more) if a not in e.aliases][:room]
+                room -= len(new)
+                e = SuggestEntry(e.doc_id, e.title, (*e.aliases, *new), e.prior)
             out.append(e)
         return out
 
