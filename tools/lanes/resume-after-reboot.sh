@@ -48,8 +48,11 @@ sleep "$SETTLE"
 status=0
 if [ -f "$S/index/rebuild.conf" ] && [ ! -e "$S/index/rebuild.paused" ]; then
   # shellcheck disable=SC2046  # the words of rebuild.conf: [--enable-timer] SOURCE...
+  # The done list belongs to this rebuild.conf: a new one starts over (and so reruns rank and spell);
+  # a fixed path skipped the builds a new conf repeated (2026-10-26 review).
+  conf_id=$(sed 's/#.*//' "$S/index/rebuild.conf" | tr -s ' \t\n' ' ' | cksum | cut -d' ' -f1)
   tools/wsp-bg --wait index-rebuild "${REBUILD_MEMORY_MAX:-6G}" -- \
-    tools/lanes/rebuild-resume.sh "$S/index/rebuild.done" $(sed 's/#.*//' "$S/index/rebuild.conf") ||
+    tools/lanes/rebuild-resume.sh "$S/index/rebuild.done.$conf_id" $(sed 's/#.*//' "$S/index/rebuild.conf") ||
     { echo "<3>index-rebuild not started (already running, or refused)" >&2; status=1; }
 fi
 
@@ -76,10 +79,15 @@ start_saved() {
     return 0
   fi
   if [ -f "$S/jobs/$1.cmd" ]; then
-    sh "$S/jobs/$1.cmd" </dev/null && echo "restarted $unit" ||
+    if sh "$S/jobs/$1.cmd" </dev/null; then
+      echo "restarted $unit"
+    else
       echo "<4>$unit not restarted (sh $S/jobs/$1.cmd failed)" >&2
+      return 1
+    fi
   else
     echo "<4>$unit: how it was started is not known ($S/jobs/$1.cmd); start it by hand" >&2
+    return 1
   fi
 }
 if [ -f "$S/jobs.conf" ]; then
@@ -88,14 +96,17 @@ if [ -f "$S/jobs.conf" ]; then
   done
 fi
 # Jobs tools/wsp-yield stopped when the machine ran short of memory.
+# Those that could not be started stay listed for the next resume (removed with the rest, the list
+# lost them: 2026-10-26 review).
 if [ -f "$S/jobs/yield-stopped" ]; then
-  sort -u "$S/jobs/yield-stopped" | while read -r unit; do
+  mv "$S/jobs/yield-stopped" "$S/jobs/yield-stopped.resuming"
+  sort -u "$S/jobs/yield-stopped.resuming" | while read -r unit; do
     name=${unit#whisipedia-job-}
     name=${name%.service}
     [ "$name" != "$unit" ] || continue  # not a tools/wsp-bg job (the index waits for its timer)
-    start_saved "$name"
+    start_saved "$name" || echo "$unit" >>"$S/jobs/yield-stopped"
   done
-  rm -f "$S/jobs/yield-stopped"
+  rm -f "$S/jobs/yield-stopped.resuming"
 fi
 echo "resumed $(date -Is)"
 exit "$status"

@@ -11,10 +11,11 @@ Description=Whisipedia orchestrator (discovery, downloads, scrub, parity, curato
 Documentation=file://@REPO@/docs/components/orchestrator.md
 After=network-online.target
 Wants=network-online.target
-# A crash loop stops after 4 starts in 2 hours (the unit stays failed; the orchestrator also raises a
+# A crash loop stops after 8 starts in 2 hours (the unit stays failed; the orchestrator also raises a
 # "crash-loop" alert on its next start). Audit 2026-10-11 C1: six OOM kills restarted it all night.
+# With the growing RestartSec below, 8 starts span about 1.5 hours: a NAS outage that long is waited out.
 StartLimitIntervalSec=2h
-StartLimitBurst=4
+StartLimitBurst=8
 
 [Service]
 Type=simple
@@ -34,6 +35,10 @@ KillMode=mixed
 TimeoutStopSec=120
 Restart=on-failure
 RestartSec=60
+# Slower each time, up to 30 min (systemd 254+): a NAS outage of a few minutes used up the start
+# burst in 4 minutes and left the orchestrator down until someone started it (2026-10-26 review).
+RestartSteps=6
+RestartMaxDelaySec=30min
 # The kernel OOM-killing a child (aria2, par2) must not take the whole service down with it.
 OOMPolicy=continue
 # Logs are JSON lines on stderr -> journald (`journalctl --user -u whisipedia-orchestrator -o cat`).
