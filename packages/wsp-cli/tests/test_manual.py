@@ -443,6 +443,19 @@ def test_held_and_denied_documents_leave_the_offer_and_a_held_one_returns_once_d
     assert listed[-1] == ["s:a"]  # taken from the quarantine and screened again
     assert next(i for i in q.items if i.id == "s:a").status == "taken"
 
+    # A copy the library already holds byte for byte: "nothing new" (8) is not a failure.
+    q.items.append(_doc_item("s:d"))
+    (folder / "d.pdf").write_bytes(b"%PDF")
+
+    def same(args: argparse.Namespace, out: Any) -> int:
+        (folder / "d.pdf").unlink()
+        args.report_sink.append(doccollections.FetchReport("s", "2026-10-29"))
+        return doccollections.EXIT_NOTHING_NEW
+
+    monkeypatch.setattr(doccollections, "cmd_fetch", same)
+    assert manual.import_collection(args, spec, q, folder, io.StringIO()) == 0
+    assert q.items[-1].status == "taken"
+
 
 def test_an_unfinished_ingest_is_retried_before_new_files_are_taken(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

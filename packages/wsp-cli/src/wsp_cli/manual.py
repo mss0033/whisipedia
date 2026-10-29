@@ -622,6 +622,8 @@ def import_collection(
                 item.problem = failed[item.id][:200]
             elif not (folder / item.save_as).is_file():
                 item.status, item.taken, item.problem = "taken", day, ""
+        if code == doccollections.EXIT_NOTHING_NEW:  # the library holds these bytes already: taken
+            continue
         if code not in (doccollections.EXIT_COMPLETE, doccollections.EXIT_ALERT, doccollections.EXIT_PARTIAL):
             worst = max(worst, code)
             continue
