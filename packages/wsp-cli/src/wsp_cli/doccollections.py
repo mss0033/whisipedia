@@ -84,6 +84,7 @@ from wsp_core.errors import FetchError, RobotsDisallowedError
 from wsp_core.model import FetchResult, RemoteFile, SourceSpec, SourceStatus
 from wsp_core.partitions import PartitionError, check_partition, partition_generation_id, partition_of
 from wsp_core.ports import Ctx, Fetcher, SupportsHead
+from wsp_core.versions import is_newer, newest
 
 # Research doc §6, in order. Git-hosted and file-set sources are surveyed through the same path.
 TOP_PICKS: tuple[str, ...] = (
@@ -1009,6 +1010,12 @@ class CollectionFetcher:
         """``version``, or the next ``-rN`` cycle when that generation is already sealed: a second fetch
         on the same day must not overwrite the plan of a sealed generation, whose ingest would then
         report "already sealed" and drop the new documents silently."""
+        # Never a label that sorts before a generation already sealed (this partition): it would never
+        # be current, and its documents would stay invisible. A lane's own cycle record can lag one a
+        # second lane or a hand run sealed since (2026-10-26 review #30).
+        latest = self._newest_sealed(spec, partition)
+        if latest is not None and is_newer(latest, version):
+            version = latest
         cycle = version[: -len(partition) - 1] if partition and version.endswith(f".{partition}") else version
         # "<cycle>rN", as the lanes name a retry: "-rN" sorts *before* the cycle once a partition suffix
         # follows ("2026-10-12-r2.ak" < "2026-10-12.ak"), so a newer re-fetch would never be promoted.
@@ -1020,6 +1027,19 @@ class CollectionFetcher:
             nxt = f"{root}r{n}"
             current = partition_generation_id(nxt, partition) if partition else nxt
         return current
+
+    def _newest_sealed(self, spec: SourceSpec, partition: str | None) -> str | None:
+        root = self.vault_root / "library" / spec.vault_domain / spec.id
+        try:
+            gens = [
+                p.name
+                for p in root.iterdir()
+                if (p / "MANIFEST.json").is_file()
+                and (partition_of(p.name) == partition if partition else partition_of(p.name) is None)
+            ]
+        except OSError:
+            return None
+        return newest(gens)
 
     def pending_plans(self, spec: SourceSpec, partition: str | None) -> list[str]:
         """Versions of this source (this partition) fetched but not yet sealed. A new fetch builds its

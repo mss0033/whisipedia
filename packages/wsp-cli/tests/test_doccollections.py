@@ -1038,3 +1038,22 @@ def test_a_listing_that_drops_most_held_documents_is_not_believed() -> None:
     assert _mass_withdrawal(held, {f"k{i}" for i in range(12)}, ()) is None  # 8 withdrawn: believed
     assert _mass_withdrawal(held[:5], set(), ()) is None  # too few to judge
     assert _mass_withdrawal(held, {f"k{i}" for i in range(9)}, {f"k{i}" for i in range(9, 20)}) is None
+
+
+def test_a_lagging_cycle_label_is_moved_past_the_newest_sealed_generation(
+    vault: FileVault, tmp_path: Path
+) -> None:
+    """2026-10-26 review #30: a lane's own cycle record (2026-10-12r6) sorted before a generation a
+    second lane had sealed (2026-10-20r3), so its new documents were never current."""
+    s = spec(OBJECTS)
+    fetcher = runner(vault, OBJECTS, tmp_path)
+    lib = vault.root / "library" / s.vault_domain / s.id
+    for gen in ("2026-10-20r3.b0001", "2026-10-25.b0002", "2026-10-20r3"):
+        (lib / gen).mkdir(parents=True)
+        (lib / gen / "MANIFEST.json").write_text("{}")
+    assert fetcher.free_version(s, "2026-10-12r6.b0001", "b0001") == "2026-10-20r4.b0001"
+    assert fetcher.free_version(s, "2026-10-12r6", None) == "2026-10-20r4"
+    assert fetcher.free_version(s, "2026-10-28.b0001", "b0001") == "2026-10-28.b0001"  # newer: as asked
+    assert (
+        fetcher.free_version(s, "2026-10-12.b0003", "b0003") == "2026-10-12.b0003"
+    )  # its own partition only
