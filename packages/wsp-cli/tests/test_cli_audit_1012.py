@@ -25,7 +25,7 @@ from wsp_cli.doccollections import (
 )
 from wsp_cli.ingest import Ingestor, VersionStatus
 from wsp_cli.locks import HEAVY, LockHeldError, exclusive, lock_dir_for
-from wsp_core.model import SourceSpec
+from wsp_core.model import FetchResult, RemoteFile, SourceSpec
 from wsp_core.testing.adapter_contract import FakeFetcher
 from wsp_vault.ledger import JsonlLedger
 from wsp_vault.signing import Ed25519Signer
@@ -83,10 +83,26 @@ def test_each_fetch_outcome_has_its_own_exit_code() -> None:
 
 def test_a_fetch_whose_downloads_failed_is_partial_not_complete(vault: FileVault, tmp_path: Path) -> None:
     """lane-refetch2 r4 had "failed 5" and exit 0, and the lane marked it done for good."""
+    from wsp_core.errors import FetchError
+
     objects = [("FM-5-0_2022.pdf", GOOD), ("FM-6-0_2022.pdf", GOOD)]
-    served = routes(objects)
-    del served[next(u for u in served if u.endswith("FM-6-0_2022.pdf"))]  # this download fails
-    report = fetch(vault, tmp_path, objects, "2026-10-12", routes=served)
+
+    class Flaky(FakeFetcher):  # this download fails the way a busy server fails (a 404 is "gone")
+        def download(self, remote: RemoteFile, dest: Path) -> FetchResult:
+            if remote.url.endswith("FM-6-0_2022.pdf"):
+                raise FetchError(f"{remote.url}: HTTP 503")
+            return super().download(remote, dest)
+
+    runner = CollectionFetcher(
+        vault.root,
+        Flaky(routes(objects)),
+        keys={},
+        user_agent="t",
+        workdir=tmp_path / "work",
+        out=io.StringIO(),
+        throttle=False,
+    )
+    report = runner.run(spec(objects), version="2026-10-12")
     assert [d.cand.key for d in report.fetched] == ["test:FM-5-0_2022.pdf"]
     assert report.failed
     assert fetch_exit_code(report) == EXIT_PARTIAL
