@@ -156,3 +156,39 @@ def test_real_par2_round_trip(tmp_path: Path, signer: object) -> None:
     f.write_bytes(bytes(raw))
     assert parity.repair([f], gen / "parity")
     assert f.read_bytes() == bytes(range(256)) * 400
+
+
+def test_a_rollback_never_makes_a_held_generation_current(
+    vault: FileVault, seal: SealFn, ledger: JsonlLedger, clock: Clock
+) -> None:
+    """2026-10-26 review #46: g2 was sealed but held (never promoted); g3's repair rolled CURRENT to it."""
+    seal("2026-08-01")
+    clock.advance(hours=1)
+    seal("2026-09-01", promote=False)  # held by the owner
+    clock.advance(hours=1)
+    lib = seal(GEN)
+    corrupt(lib / TARGET)
+    result = RepairLadder(vault, ledger).repair(SOURCE, GEN, [TARGET])
+    assert result.degraded
+    assert result.rolled_back_to == "2026-08-01"
+    current = vault.current(SOURCE)
+    assert current is not None
+    assert current.generation_id == "2026-08-01"
+
+
+def test_damaged_parity_alone_never_degrades_an_intact_generation(
+    vault: FileVault, seal: SealFn, ledger: JsonlLedger
+) -> None:
+    """2026-10-26 review #48: a bit flip in seal-time parity degraded an intact generation and rolled
+    CURRENT back."""
+    lib = seal()
+    parity = vault.manifest(SOURCE, GEN).parity[0].path
+    corrupt(lib / parity)
+    result = RepairLadder(vault, ledger).repair(SOURCE, GEN, [parity])
+    assert not result.degraded
+    assert result.unrepaired == (parity,)
+    assert not (lib / "DEGRADED.txt").exists()
+    current = vault.current(SOURCE)
+    assert current is not None
+    assert current.generation_id == GEN
+    assert "repair.parity_damaged" in kinds(ledger)

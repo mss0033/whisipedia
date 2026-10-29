@@ -45,6 +45,7 @@ from wsp_vault.manifest import (
     DEGRADED_NAME,
     MANIFEST_NAME,
     PARITY_DIR,
+    ROLE_PARITY,
     SIGNATURE_NAME,
     Manifest,
     ManifestEntry,
@@ -250,6 +251,12 @@ class RepairLadder:
             repaired.update(dict.fromkeys(fixed, rung))
             bad = [e for e in bad if e.path not in fixed]
 
+        if bad and all(e.role == ROLE_PARITY for e in bad):
+            # Only parity is damaged: every data file verifies, so the generation is intact; degrading
+            # it rolled CURRENT back over a bit flip in recovery data (2026-10-26 review #48). It is
+            # reported (the scrub alerts on unrepaired files) and protected again by a sidecar set.
+            self._ledger.append("repair.parity_damaged", subject, {"files": sorted(e.path for e in bad)})
+            return RepairResult(source_id, generation_id, repaired, tuple(sorted(e.path for e in bad))), ""
         if bad:
             reason = "files could not be repaired"
             return self._degrade(source_id, generation_id, reason, [e.path for e in bad], repaired), reason
@@ -416,13 +423,20 @@ class RepairLadder:
         partitioned = self._vault.is_partitioned(source_id)
         mine = next((g for g in gens if g.generation_id == generation_id), None)
         cutoff = mine.sealed_at if mine is not None else None
+        if cutoff is None:  # a damaged manifest: "older" is unknown, and a newer one is not a rollback
+            self._ledger.append("repair.rollback_skipped", subject, {"reason": "seal time unknown"})
+            return None
+        # Only a generation that was current before: a sealed one the owner held (or never promoted)
+        # is not made current by a repair (2026-10-26 review #46, #47).
+        was_current = self._vault.promoted_before(source_id)
         candidates = [
             g
             for g in gens
             if g.generation_id != generation_id
             and g.status is GenerationStatus.SEALED
             and g.sealed_at is not None
-            and (cutoff is None or g.sealed_at < cutoff)
+            and g.sealed_at < cutoff
+            and g.generation_id in was_current
             and (not partitioned or partition_of(g.generation_id) == partition_of(generation_id))
         ]
         candidates.sort(key=lambda g: (g.sealed_at, g.generation_id), reverse=True)

@@ -121,6 +121,9 @@ QUARANTINE_DIR = "quarantine"
 PRUNED_DIR = "pruned"
 KEYS_DIR = "keys"
 CURRENT_NAME = "CURRENT.txt"
+# Every generation ever promoted, one id a line, appended by promote(): the generations a repair may
+# roll back to (a sealed one the owner held never became current, 2026-10-26 review #46).
+PROMOTED_NAME = "PROMOTED.txt"
 PARTITIONS_DIR = "CURRENT.d"  # partitioned sources: <partition>.txt per partition (ADR-0010)
 ADOPTING_SUFFIX = ".adopting"  # a file moved out of _incoming, being hashed before it is published
 READ_ONLY = stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH
@@ -935,8 +938,26 @@ class FileVault:
                 overwrite=True,
                 retry=self._retry,
             )
+            with (self.source_dir(source_id) / PROMOTED_NAME).open("a", encoding="utf-8") as fh:
+                fh.write(f"{generation_id}\n")
             self._log("vault.promote", f"{source_id}/{generation_id}", data)
         return True
+
+    def promoted_before(self, source_id: str) -> set[str]:
+        """Generations of ``source_id`` that were current at some time: :data:`PROMOTED_NAME`, the
+        current pointers, and the ledger's ``vault.promote`` events (promotions before that file
+        existed). Reads the whole ledger: for a repair's rollback, which is rare."""
+        out = set(self.current_set_ids(source_id))
+        with contextlib.suppress(FileNotFoundError):
+            text = (self.source_dir(source_id) / PROMOTED_NAME).read_text(encoding="utf-8")
+            out |= {line.strip() for line in text.splitlines() if line.strip()}
+        events = getattr(self._ledger, "events", None)
+        if callable(events):
+            prefix = f"{source_id}/"
+            for ev in cast(Iterable[Any], events()):
+                if ev.kind == "vault.promote" and str(ev.subject).startswith(prefix):
+                    out.add(str(ev.subject)[len(prefix) :])
+        return out
 
     def is_partitioned(self, source_id: str) -> bool:
         """Configured as partitioned, or already has per-partition pointers on disk."""
