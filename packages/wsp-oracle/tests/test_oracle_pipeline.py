@@ -345,3 +345,25 @@ def test_a_reranker_failure_keeps_the_fused_order(lexical: TantivyIndex, store: 
     assert res.hits  # answered, in the fused order
     assert res.confidence is None
     assert "rerank" not in res.timings_ms
+
+
+def test_a_result_computed_across_an_index_change_is_not_cached(
+    lexical: TantivyIndex, store: ChunkVectorStore
+) -> None:
+    """2026-10-26 review #106: a query that ran while a release deleted documents cached its stale hits."""
+    rr = OverlapReranker()
+    searcher = make_searcher(lexical, store)
+    searcher.reranker = rr
+    index = OracleIndex(searcher, cache_size=4)
+    real = searcher.run
+
+    def run_while_the_index_changes(*args: object, **kw: object) -> object:
+        res = real(*args, **kw)  # type: ignore[arg-type]
+        index._invalidate()  # pyright: ignore[reportPrivateUsage]  # a release committed meanwhile
+        return res
+
+    searcher.run = run_while_the_index_changes  # type: ignore[method-assign]
+    index.search("immune system", limit=2)
+    searcher.run = real  # type: ignore[method-assign]
+    index.search("immune system", limit=2)
+    assert rr.calls == 2  # the first result was not kept: the second search ran again

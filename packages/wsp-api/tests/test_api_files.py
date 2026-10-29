@@ -107,6 +107,10 @@ def test_pdf_is_served_inline_frameable_and_ranged(setup: tuple[httpx.Client, Pa
     part = c.get(url("cp1"), headers={"Range": "bytes=0-7"})
     assert part.status_code == 206
     assert part.content == PDF[:8]
+    # Sent as stored, not gzipped on the fly (2026-10-26 review #117: a 400 MB original went through zlib)
+    whole = c.get(url("cp1"), headers={"Accept-Encoding": "gzip"})
+    assert "content-encoding" not in whole.headers
+    assert whole.headers["content-length"] == str(len(PDF))
 
 
 def test_other_files_download_sandboxed(setup: tuple[httpx.Client, Path]) -> None:

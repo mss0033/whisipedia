@@ -30,7 +30,7 @@ from urllib.parse import unquote
 from fastapi import APIRouter, FastAPI, Header, Path, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.telemetry import TelemetryConfig
-from starlette.middleware.gzip import GZipMiddleware
+from starlette.middleware.gzip import DEFAULT_EXCLUDED_CONTENT_TYPES, GZipMiddleware
 
 from wsp_api import convert, memory, sites
 from wsp_api.addresses import resolve
@@ -178,7 +178,26 @@ def create_app(services: Services, settings: ApiSettings | None = None) -> FastA
     app.add_exception_handler(ZimUnavailable, zim_unavailable)
     # 0.84-2.2 MB pages -> ~5x smaller. Level 6, not Starlette's 9: half the CPU (13.7 -> 7.4 ms on a
     # 448 KB page), 1% more bytes, and the browser is on loopback (2026-10-14 research).
-    app.add_middleware(GZipMiddleware, minimum_size=GZIP_MIN_BYTES, compresslevel=6)
+    # Already-compressed and large binary originals are sent as they are: a 400 MB GeoTIFF or PDF
+    # went through zlib in the API process and its download showed no size (2026-10-26 review #117).
+    app.add_middleware(
+        GZipMiddleware,
+        minimum_size=GZIP_MIN_BYTES,
+        compresslevel=6,
+        exclude_content_types=(
+            *DEFAULT_EXCLUDED_CONTENT_TYPES,
+            "application/pdf",
+            "image/tiff",
+            "application/epub+zip",
+            "application/octet-stream",
+            "application/x-bzip2",
+            "application/x-xz",
+            "application/zstd",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        ),
+    )
     app.add_middleware(RawSegmentRouting)
     app.add_middleware(SecurityMiddleware, settings=settings)
     app.add_middleware(ActivityMiddleware, path=settings.activity_marker)  # Warden yields (ADR-0009)

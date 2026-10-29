@@ -676,6 +676,7 @@ class OracleIndex:
             OrderedDict()
         )
         self._cache_size = cache_size
+        self._generation = 0  # bumped by every invalidation: a result computed across one is not kept
         self._lock = threading.Lock()
         self._refresh = refresh
         self._refresh_seconds = refresh_seconds
@@ -726,14 +727,18 @@ class OracleIndex:
                     self._cache.move_to_end(key)
                     return hit
                 shown = hit if fresh else None
+            began = self._generation
         res = self.searcher.run(query, sources=sources, depth=depth or None)
         if shown is not None:
             kept = {h.doc_id for h in shown.hits}
             res = replace(res, hits=(*shown.hits, *(h for h in res.hits if h.doc_id not in kept)))
         with self._lock:
-            self._cache[key] = (res, searched, now)
-            while len(self._cache) > self._cache_size:
-                self._cache.popitem(last=False)
+            # The index changed while this ran (a release removed documents): served once, not cached,
+            # or readers paging it would see deleted hits for ten minutes (2026-10-26 review #106).
+            if self._generation == began:
+                self._cache[key] = (res, searched, now)
+                while len(self._cache) > self._cache_size:
+                    self._cache.popitem(last=False)
         return res
 
     def search(
@@ -788,6 +793,7 @@ class OracleIndex:
     def _invalidate(self) -> None:
         with self._lock:
             self._cache.clear()
+            self._generation += 1
 
     def upsert(self, docs: Iterable[DocRecord]) -> int:
         self._invalidate()
