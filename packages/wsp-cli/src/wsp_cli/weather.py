@@ -652,7 +652,7 @@ def _archive(
     known = models()
     left: list[dict[str, str]] = []
     queue_busy = out_of_time = False
-    for item in pending:
+    for at, item in enumerate(pending):
         model = known.get(item["model"])
         version = archive_version(item["run"])
         if model is None:
@@ -681,6 +681,10 @@ def _archive(
         code, last = run_ingest(args.config_dir, model.source, version, wait=wait)
         if code == 0:
             say(f"{model.source}/{version}: sealed")
+            # Kept at once: a pull killed after a seal left it pending, and the next pull waited 48
+            # minutes for its turn to find nothing new (2026-10-29).
+            state["pending"] = left + pending[at + 1 :]
+            wd.atomic_json(ws.root / STATE_FILE, state)
             continue
         say(f"{model.source}/{version}: ingest exit {code} ({last}); retried by the next pull")
         left.append(item)

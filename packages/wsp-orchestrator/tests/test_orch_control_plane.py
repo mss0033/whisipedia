@@ -96,7 +96,11 @@ def test_main_loop_sleeps_while_a_due_job_waits_for_capacity(tmp_path: Path) -> 
             orch.waker.wait(min(orch.sleep_seconds(), max(stop - time.monotonic(), 0)))
         return n
 
-    loop(1.0)  # discovery, probes, bots and drills finish; one refine holds the only slot
+    # Discovery, probes, bots and drills finish; one refine holds the only slot. Under load (gate at
+    # load 10, 2026-10-29) they finished after a fixed second and woke the measured loop.
+    settle = time.monotonic() + 15
+    while loop(1.0) > 1 and time.monotonic() < settle:
+        pass
     seq, claims["n"] = _jobs_seq(orch.store), 0
     loops = loop(2.0)
     seq_after = _jobs_seq(orch.store)

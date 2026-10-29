@@ -598,6 +598,7 @@ def test_a_pull_starts_no_seal_it_cannot_finish_before_its_unit_times_out(
     state: dict[str, Any] = {"pending": [{"model": "gfs", "run": r, "staged": "x"} for r in runs]}
     said: list[str] = []
     archive = w._archive  # pyright: ignore[reportPrivateUsage]
+    (tmp_path / "weather").mkdir()  # as cmd_pull makes it
     deadline = time.monotonic() + w.SEAL_RESERVE_S + 600  # ten minutes of waiting left
     archive(
         {},
@@ -610,6 +611,8 @@ def test_a_pull_starts_no_seal_it_cannot_finish_before_its_unit_times_out(
     assert len(waits) == 2
     assert all(0 < x <= 600 for x in waits)
     assert state["pending"] == []
+    # each seal is kept as it happens, not only when the pull ends (a killed pull sealed it again)
+    assert json.loads((tmp_path / "weather" / w.STATE_FILE).read_text())["pending"] == []
     waits.clear()
     state = {"pending": [{"model": "gfs", "run": r, "staged": "x"} for r in runs]}
     archive(
