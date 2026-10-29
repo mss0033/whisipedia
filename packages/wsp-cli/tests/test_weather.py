@@ -527,3 +527,40 @@ def test_a_copy_the_nas_refuses_for_a_moment_is_started_again(
     refusals[0] = 99  # refused every time: the error stands
     with pytest.raises(BlockingIOError):
         weather.copy_hashed(src, tmp_path / "again.npz", None, sleep=pauses.append)
+
+
+def test_a_pull_waits_once_for_a_busy_ingest_queue(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """2026-10-28: nine lane ingests queued; a pull waited 20 minutes for each of four staged runs and
+    ran past its unit's 90-minute limit. After one busy wait the rest stay staged for the next pull."""
+    import argparse
+
+    calls: list[str] = []
+
+    def ingest(_cfg: object, source: str, version: str, *, wait: float = 0) -> tuple[int, str]:
+        calls.append(version)
+        return 3, "error: another 'ingest' is running"
+
+    monkeypatch.setattr(w, "run_ingest", ingest)
+
+    class Paths:
+        def require_vault(self) -> Path:
+            return tmp_path
+
+    def paths(_cfg: object) -> Paths:
+        return Paths()
+
+    def pace(_cfg: object) -> None:
+        return None
+
+    monkeypatch.setattr(bootstrap, "paths", paths)
+    monkeypatch.setattr(bootstrap, "ingest_pace", pace)
+    runs = ["2026102600", "2026102700", "2026102800"]
+    state: dict[str, Any] = {"pending": [{"model": "gfs", "run": r, "staged": "x"} for r in runs]}
+    said: list[str] = []
+    archive = w._archive  # pyright: ignore[reportPrivateUsage]
+    archive(
+        {}, w.WeatherSettings(tmp_path / "weather"), state, argparse.Namespace(config_dir=None), said.append
+    )
+    assert len(calls) == 1
+    assert [p["run"] for p in state["pending"]] == runs  # all kept for the next pull
+    assert any("queue busy" in s for s in said)

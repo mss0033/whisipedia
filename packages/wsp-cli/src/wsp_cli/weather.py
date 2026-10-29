@@ -632,6 +632,7 @@ def _archive(
     pace = bootstrap.ingest_pace(cfg)
     known = models()
     left: list[dict[str, str]] = []
+    queue_busy = False
     for item in pending:
         model = known.get(item["model"])
         version = archive_version(item["run"])
@@ -648,12 +649,20 @@ def _archive(
             stage_files(incoming, model.source, version, [(f, urls.get(f.name, "")) for f in files], pace)
             item["staged"] = now_iso()
             say(f"{model.source}/{version}: {len(files)} GRIB files staged")
+        if queue_busy:  # staged above, before the hot copy prunes it; sealed by a later pull
+            left.append(item)
+            continue
         code, last = run_ingest(args.config_dir, model.source, version, wait=INGEST_WAIT_S)
         if code == 0:
             say(f"{model.source}/{version}: sealed")
             continue
         say(f"{model.source}/{version}: ingest exit {code} ({last}); retried by the next pull")
         left.append(item)
+        # The queue was still busy after a full wait: waiting again for each later run only stacked
+        # 20-minute waits past the unit's 90-minute limit (2026-10-28, nine lane ingests queued).
+        queue_busy = code == locks.EXIT_BUSY
+    if queue_busy and len(left) > 1:
+        say(f"ingest queue busy: {len(left)} run(s) staged, left for the next pull")
     state["pending"] = left
 
 
