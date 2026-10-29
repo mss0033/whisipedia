@@ -4269,6 +4269,7 @@ sources:
     legal_basis: public-domain
     access:
       adapter: doc-collection
+      reader: govman-xml  # only .zip/.xml/.json files: the 2015 Government Manual package zip; PDFs are read as PDFs
       rate: {requests_per_second: 1, concurrency: 3}
       issuer: US Government Publishing Office
       key_prefix: govinfo
@@ -4289,7 +4290,7 @@ sources:
         - {kind: api, flavor: govinfo, collection: ECONI, partition: true, api_key: govinfo, package_skip: ["SERIALSET-"]}  # Economic Indicators
         - {kind: api, flavor: govinfo, collection: BUDGET, partition: true, api_key: govinfo, package_skip: ["SERIALSET-"]}  # US Budget
         - {kind: api, flavor: govinfo, collection: GAOREPORTS, partition: true, api_key: govinfo, package_skip: ["SERIALSET-"], format: htm}  # GAO reports and Comptroller General decisions, 1994-2008 (text only)
-        - {kind: api, flavor: govinfo, collection: GOVMAN, partition: true, api_key: govinfo, package_skip: ["SERIALSET-"]}  # US Government Manual
+        - {kind: api, flavor: govinfo, collection: GOVMAN, partition: true, api_key: govinfo, package_skip: ["SERIALSET-"], package_zip: ["GOVMAN-2015-"]}  # US Government Manual (2015: no PDF of the whole, the package zip of XML records; owner 2026-10-26)
         - {kind: api, flavor: govinfo, collection: CDIR, partition: true, api_key: govinfo, package_skip: ["SERIALSET-"]}  # Congressional Directory
         - {kind: api, flavor: govinfo, collection: CHRG, partition: true, api_key: govinfo, package_skip: ["SERIALSET-"]}  # Congressional hearings
         - {kind: api, flavor: govinfo, collection: CRPT, partition: true, api_key: govinfo, package_skip: ["SERIALSET-"]}  # Congressional committee reports

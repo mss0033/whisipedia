@@ -850,7 +850,51 @@ def benyehuda(archive: zipfile.ZipFile) -> Iterator[TeiDoc]:
         )
 
 
+_GOVMAN_ENTITY = re.compile(r"/xml/(GOVMAN-\d{4}-\d{2}-\d{2}-\d+)\.xml$")
+_GOVMAN_PDF = re.compile(r"/pdf/(GOVMAN-\d{4}-\d{2}-\d{2})-(.+)-(\d+)\.pdf$")
+_GOVMAN_SKIP = frozenset({"accessId", "EntityType", "Category", "Email", "Phone", "Phone2", "Fax", "TTY"})
+GOVMAN_PDF_PAGES = 200
+
+
+def govman(archive: zipfile.ZipFile) -> Iterator[TeiDoc]:
+    """A United States Government Manual package as GovInfo zips it when it publishes no PDF of the
+    whole (2015: GOVMAN-2015-07-01, owner request 2026-10-26): each agency's XML record a document
+    (its name, mission, legal authority, organisation and programs), and the front-matter PDFs (the
+    Declaration, the Constitution, the acronyms) a document each."""
+    for name in archive.namelist():
+        if m := _GOVMAN_ENTITY.search(name):
+            try:
+                root = ET.fromstring(archive.read(name))  # noqa: S314 - GPO's own XML
+            except ET.ParseError as exc:
+                log.warning("%s skipped: %s", name, exc)
+                continue
+            agency = " ".join((root.findtext(".//AgencyName") or "").split())
+            blocks: list[str] = []
+            for el in root.iter():
+                tag = _local(el.tag)
+                text = " ".join((el.text or "").split())
+                if text and tag not in _GOVMAN_SKIP and text not in ("Yes", "No") and text not in blocks[-1:]:
+                    blocks.append(text)
+            if agency and len(blocks) > 1:
+                year = m.group(1)[7:11]
+                yield TeiDoc(
+                    key=m.group(1),
+                    title=f"{agency} (United States Government Manual {year})",
+                    text="\n\n".join(blocks),
+                )
+        elif m := _GOVMAN_PDF.search(name):
+            body = _pdf_bytes_text(archive.read(name), GOVMAN_PDF_PAGES)
+            if body:
+                part = m.group(2).replace("-", " ")
+                yield TeiDoc(
+                    key=f"{m.group(1)}-{m.group(3)}",
+                    title=f"{part} (United States Government Manual {m.group(1)[7:11]})",
+                    text=body,
+                )
+
+
 ARCHIVE_READERS = {
+    "govman-xml": govman,
     "standard-ebooks": se_book,
     "markdown-docs": markdown_docs,
     "ocw-course": ocw_course,

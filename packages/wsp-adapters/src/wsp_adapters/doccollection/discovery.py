@@ -1310,7 +1310,9 @@ def govinfo(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
     """GovInfo collection listing (official GPO API). ``collection``, ``since``, ``package_prefix``;
     ``package_skip``: prefixes left out (Serial Set volumes, which GPO also files under BUDGET, CRPT and
     the House and Senate Journals); ``format``: ``pdf`` or ``htm`` (GAO reports have no PDF);
-    ``partition: true``: each collection is a partition of its own, listed only when it is fetched."""
+    ``partition: true``: each collection is a partition of its own, listed only when it is fetched;
+    ``package_zip``: package id prefixes taken as GovInfo's package zip (``/content/pkg/<id>.zip``),
+    for packages with no PDF of the whole (the 2015 Government Manual is XML per agency)."""
     collection = _s(cfg.get("collection")) or "GOVPUB"
     part = collection.lower() if cfg.get("partition") else ""
     if part and env.partition and env.partition != part:
@@ -1318,6 +1320,7 @@ def govinfo(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
     since = _s(cfg.get("since")) or "1990-01-01T00:00:00Z"
     prefixes = _strs(cfg.get("package_prefix"))
     skip = _strs(cfg.get("package_skip"))
+    zipped = _strs(cfg.get("package_zip"))
     fmt = _s(cfg.get("format")) or "pdf"
     if fmt not in ("pdf", "htm"):
         raise DiscoveryError(f"govinfo: unknown format {fmt!r}")
@@ -1342,7 +1345,11 @@ def govinfo(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
                 continue
             yield Candidate(
                 key=make_key(env.prefix, pid),
-                url=f"https://www.govinfo.gov/content/pkg/{pid}/{folder}/{pid}.{fmt}",
+                url=(
+                    f"https://www.govinfo.gov/content/pkg/{pid}.zip"
+                    if zipped and pid.startswith(zipped)
+                    else f"https://www.govinfo.gov/content/pkg/{pid}/{folder}/{pid}.{fmt}"
+                ),
                 title=_s(pkg.get("title")) or pid,
                 issuer=env.issuer,
                 pub_number=pid,

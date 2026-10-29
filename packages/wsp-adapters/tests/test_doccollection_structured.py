@@ -573,3 +573,25 @@ def test_a_malformed_chapter_does_not_lose_the_book(tmp_path: Path, caplog: pyte
     path.write_bytes(b"PK\x03\x04 not really a zip")
     assert list(read_snapshot(path, "ganjoor-sqlite")) == []
     assert "reading stopped" in caplog.text
+
+
+def test_the_2015_government_manual_package_zip_is_an_agency_a_document(tmp_path: Path) -> None:
+    """Owner request 2026-10-26: GovInfo publishes no PDF of GOVMAN-2015-07-01, only its zip of XML."""
+    from wsp_adapters.doccollection.structured import govman
+
+    entity = (
+        "<GovernmentManual><accessId>GOVMAN-2015-07-01-074</accessId><Entity><EntityType>Parent</EntityType>"
+        "<AgencyName>United States Botanic Garden</AgencyName><MissionStatement>The United States Botanic "
+        "Garden informs visitors about the importance of plants.</MissionStatement><Email>x@y</Email>"
+        "</Entity></GovernmentManual>"
+    )
+    path = tmp_path / "GOVMAN-2015-07-01.zip"
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("GOVMAN-2015-07-01/mods.xml", "<mods/>")
+        zf.writestr("GOVMAN-2015-07-01/xml/GOVMAN-2015-07-01-074.xml", entity)
+    with zipfile.ZipFile(path) as archive:
+        (doc,) = list(govman(archive))
+    assert doc.key == "GOVMAN-2015-07-01-074"
+    assert doc.title == "United States Botanic Garden (United States Government Manual 2015)"
+    assert "importance of plants" in doc.text
+    assert "x@y" not in doc.text
