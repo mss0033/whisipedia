@@ -283,7 +283,9 @@ def _unit(name: str) -> dict[str, list[str]]:
 def test_orchestrator_unit_hygiene() -> None:
     u = _unit("whisipedia-orchestrator.service")
     assert u["StartLimitIntervalSec"] == ["2h"]
-    assert u["StartLimitBurst"] == ["4"]
+    assert u["StartLimitBurst"] == ["8"]  # with the back-off below: about 1.5 h of tries (2026-10-26 review)
+    assert u["RestartSteps"] == ["6"]
+    assert u["RestartMaxDelaySec"] == ["30min"]
     assert u["KillMode"] == ["mixed"]
     assert u["OOMPolicy"] == ["continue"]
     assert u["Slice"] == ["whisipedia-background.slice"]

@@ -101,9 +101,12 @@ fi
 if [ -f "$S/jobs/yield-stopped" ]; then
   mv "$S/jobs/yield-stopped" "$S/jobs/yield-stopped.resuming"
   sort -u "$S/jobs/yield-stopped.resuming" | while read -r unit; do
+    case $unit in
+      whisipedia-job-*.service) ;;
+      *) continue ;;  # not a tools/wsp-bg job (the index waits for its timer)
+    esac
     name=${unit#whisipedia-job-}
     name=${name%.service}
-    [ "$name" != "$unit" ] || continue  # not a tools/wsp-bg job (the index waits for its timer)
     start_saved "$name" || echo "$unit" >>"$S/jobs/yield-stopped"
   done
   rm -f "$S/jobs/yield-stopped.resuming"
