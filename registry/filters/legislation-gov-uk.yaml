@@ -1,0 +1,4 @@
+# Document-level rules for legislation-gov-uk (the UK statute book). None of its own yet: the registry filter and the
+# built-in safety lists apply, and cannot be switched off. Owner review decisions are recorded by
+# `wsp proposals accept|reject` in registry/filters/decisions/legislation-gov-uk.yaml (added 2026-10-28).
+{}

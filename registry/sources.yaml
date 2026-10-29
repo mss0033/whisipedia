@@ -4336,7 +4336,7 @@ sources:
         - {kind: sitemap, match: "/contents/(?:enacted|made|adopted|created)$", rewrite: ["/contents/[a-z]+$", "/data.html"], key_pattern: "legislation\\.gov\\.uk/([a-z]+)/(.+)/data\\.html$", expand: true, upgrade_http: true, partition: eudn, url: "https://www.legislation.gov.uk/sitemap-eudn.xml", expand_match: "/sitemap-eudn-final-"}  # Retained EU decisions
         - {kind: sitemap, match: "/contents/(?:enacted|made|adopted|created)$", rewrite: ["/contents/[a-z]+$", "/data.html"], key_pattern: "legislation\\.gov\\.uk/([a-z]+)/(.+)/data\\.html$", expand: true, upgrade_http: true, partition: eudr, url: "https://www.legislation.gov.uk/sitemap-eudr.xml", expand_match: "/sitemap-eudr-final-"}  # Retained EU directives
         - {kind: sitemap, match: "/contents/(?:enacted|made|adopted|created)$", rewrite: ["/contents/[a-z]+$", "/data.html"], key_pattern: "legislation\\.gov\\.uk/([a-z]+)/(.+)/data\\.html$", expand: true, upgrade_http: true, partition: eut, url: "https://www.legislation.gov.uk/sitemap-eut.xml", expand_match: "/sitemap-eut-final-"}  # Retained EU treaties
-      filter: {allow_all: true, public_issuer: true}
+      filter: {allow_all: true, public_issuer: true, rules: registry/filters/legislation-gov-uk.yaml}
     update: {cadence: P6M, strategy: snapshot-retention}
     size: {bytes: 3.0e10, measured: false, as_of: '2026-10-24'}
     notes: "All UK legislation from 1267, with point-in-time revised versions maintained by The National Archives' editors. About 100,000-150,000 items; at the 5 s crawl delay a full pass takes 1-3 weeks, partition by partition (the uksi sitemap index alone names 18,214 final sitemaps). Open Government Licence v3.0. Owner approval D20 (2026-10-24)."

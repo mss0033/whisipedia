@@ -1,0 +1,38 @@
+# Owner review decisions for legislation-gov-uk (machine-owned; written by `wsp proposals accept|reject`).
+# One entry per document the owner decided, keyed by document key (one edition). The hand-written
+# rules, with their comments, are in registry/filters/legislation-gov-uk.yaml; this file is loaded next to it (policy.load_rules).
+# Remove an entry to undo a decision; anything else is rewritten by the next decision.
+allow_documents:
+- uk-leg:ukcm-1999-2
+- uk-leg:ukcm-2003-2
+- uk-leg:ukcm-2009-2
+- uk-leg:ukcm-2015-3
+- uk-leg:ukcm-2018-2
+allow_content_review: []
+deny_documents: []
+log:
+- key: uk-leg:ukcm-1999-2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-29T03:27:13+00:00'
+  proposal: 142
+- key: uk-leg:ukcm-2003-2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-29T03:27:13+00:00'
+  proposal: 142
+- key: uk-leg:ukcm-2009-2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-29T03:27:13+00:00'
+  proposal: 142
+- key: uk-leg:ukcm-2015-3
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-29T03:27:13+00:00'
+  proposal: 142
+- key: uk-leg:ukcm-2018-2
+  decision: allow
+  rule: review:text=no-text-layer
+  at: '2026-10-29T03:27:13+00:00'
+  proposal: 142
