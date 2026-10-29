@@ -60,6 +60,7 @@ log = logging.getLogger(__name__)
 MANIFEST_NAME = "MANIFEST.json"  # same name as wsp_vault.manifest.MANIFEST_NAME
 ZIM_ADAPTER = "kiwix-opds"
 BOOK_INDEX_FILE = "zim-books.json"
+SITE_INDEX_FILE = "zim-sites.json"  # the websites the archives copy (wsp_api.outside), kept across starts
 _MAX_LINK_LOOKUPS = 1000
 _MAX_ZIM_LINK_CHECKS = 32  # each opens an archive entry (no content read)
 _HISTORY_CACHE = 2048
@@ -137,6 +138,7 @@ class Library:
                 _zim_reader(settings, services),
                 book_index=index,
                 sync_books=not settings.background,
+                site_index=BookIndex(settings.cache_dir / SITE_INDEX_FILE if settings.cache_dir else None),
             )
             self.assets: AssetStore = self.zim
         else:

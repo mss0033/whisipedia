@@ -169,6 +169,11 @@ class BookIndex:
         with self._lock:
             return self._maps.get(self._key(source_id, generation_id))
 
+    def items(self) -> list[tuple[str, str, dict[str, str]]]:
+        """Every entry as ``(source, generation, map)``."""
+        with self._lock:
+            return [(*k.split("/", 1), dict(v)) for k, v in self._maps.items() if "/" in k]  # pyright: ignore[reportReturnType]
+
     def put(self, source_id: str, generation_id: str, books: Mapping[str, str]) -> None:
         with self._lock:
             self._maps[self._key(source_id, generation_id)] = dict(books)
@@ -192,6 +197,7 @@ class ZimAssetStore:
         *,
         book_index: BookIndex | None = None,
         sync_books: bool = True,
+        site_index: BookIndex | None = None,
     ) -> None:
         """``vault`` answers ``generations``/``generation_path`` (the server passes its snapshot view).
         ``sync_books``: build a bundle's book index on the request that first needs it (tests, CLI);
@@ -215,6 +221,17 @@ class ZimAssetStore:
         # ``sites_version`` changes with every addition (rendered pages are cached by it).
         self._sites: dict[tuple[str, str], list[Site]] = {}
         self.sites_version = 0
+        # ... and remembered across restarts (``file name -> kind, host, book`` per generation): a site
+        # was unknown until its archive was warmed again, and links to English Wikipedia read as "not
+        # in the library" for the first hour after each start (2026-10-28, gap proposal 101).
+        self._site_index = site_index
+        for sid, gid, files in site_index.items() if site_index is not None else ():
+            for value in files.values():
+                kind, _, rest = value.partition("\t")
+                host, _, book = rest.partition("\t")
+                if kind and host:
+                    self._sites.setdefault((sid, gid), []).append(Site(kind, host, sid, book))
+                    self.sites_version += 1
         self._roots: dict[str, str | None] = {}  # MindTouch: file -> home page entry
         self._fronts: dict[str, str | None] = {}  # YouTube scraper: file -> generated front page
         self._lock = threading.Lock()
@@ -310,11 +327,17 @@ class ZimAssetStore:
             return
         if found is None:
             return
+        site = Site(found[0], found[1], source_id, book)
         with self._lock:
-            self._sites.setdefault((source_id, generation_id), []).append(
-                Site(found[0], found[1], source_id, book)
-            )
+            known = self._sites.setdefault((source_id, generation_id), [])
+            if site in known:
+                return
+            known.append(site)
             self.sites_version += 1
+        if self._site_index is not None:
+            files = self._site_index.get(source_id, generation_id) or {}
+            files[Path(file).name] = f"{site.kind}\t{site.host}\t{site.book}"
+            self._site_index.put(source_id, generation_id, files)
 
     def sites(self, current: Callable[[str], str | None]) -> list[Site]:
         """The sites of each source's current generation (``current``: source id -> generation id)."""

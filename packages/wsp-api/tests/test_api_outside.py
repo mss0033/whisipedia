@@ -157,3 +157,32 @@ def test_the_site_an_archive_copies(tmp_path: Path) -> None:
     assert reader.site(str(qa)) == ("qa", "askubuntu.com")
     assert reader.site(str(web)) == ("web", "docs.python.org")
     assert reader.site(str(other)) is None
+
+
+def test_the_sites_archives_copy_are_known_at_once_after_a_restart(tmp_path: Path) -> None:
+    """2026-10-28 (gap proposal 101): a site was learned only when its archive was warmed again after
+    a start, and links to English Wikipedia read as "not in the library" until then."""
+    from typing import Any, cast
+
+    from wsp_api.zim import BookIndex, ZimAssetStore, ZimLayout
+
+    class Reader:
+        def site(self, file: str) -> tuple[str, str] | None:
+            return ("wiki", "en.wikipedia.org")
+
+    path = tmp_path / "zim-sites.json"
+    first = ZimAssetStore(cast(Any, None), cast(Any, Reader()), site_index=BookIndex(path))
+    layout = ZimLayout(("/vault/wikipedia_en_all_maxi_2026-08.zim",))
+    first._note_site("wikipedia-en-zim", "2026-08", layout, layout.files[0])  # pyright: ignore[reportPrivateUsage]
+    first._note_site("wikipedia-en-zim", "2026-08", layout, layout.files[0])  # pyright: ignore[reportPrivateUsage]
+    assert len(first.sites(lambda sid: "2026-08")) == 1
+
+    again = ZimAssetStore(cast(Any, None), cast(Any, Reader()), site_index=BookIndex(path))  # a restart
+    (site,) = again.sites(lambda sid: "2026-08")
+    assert (site.kind, site.host, site.source_id, site.book) == (
+        "wiki",
+        "en.wikipedia.org",
+        "wikipedia-en-zim",
+        "",
+    )
+    assert again.sites(lambda sid: "2026-09") == []  # only the current generation's
