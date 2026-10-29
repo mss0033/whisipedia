@@ -29,6 +29,7 @@ import argparse
 import fnmatch
 import hashlib
 import json
+import os
 import shutil
 import sys
 import zipfile
@@ -154,11 +155,7 @@ def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
     out.write(
         f"{spec.id}/{release.version}: {len(release.files)} files, {_gb(total)}; fetching {len(wanted)}\n"
     )
-    todo = [
-        (i, r)
-        for i, r in enumerate(wanted, 1)
-        if not ((d := dest_dir / r.name).is_file() and (r.size is None or d.stat().st_size == r.size))
-    ]
+    todo = [(i, r) for i, r in enumerate(wanted, 1) if not _whole(dest_dir / r.name, r)]
     parallel = max(1, int(getattr(args, "parallel", 1) or 1))
     quiet = len(todo) > LOUD_FILES  # 60,000 small files: a line a thousand, not a line a file
 
@@ -271,7 +268,37 @@ def _fetch_packed(
 
 
 def _whole(path: Path, remote: RemoteFile) -> bool:
-    return path.is_file() and (remote.size is None or path.stat().st_size == remote.size)
+    """Whether the staged file is complete. A file with no published size or checksum (PMC's) must at
+    least read: not empty, a ``.json`` that parses, a ``.txt`` in UTF-8. Being there was enough, and a
+    copy cut short was packed and sealed under its own checksum (2026-10-26 review)."""
+    if not path.is_file():
+        return False
+    if remote.size is not None:
+        return path.stat().st_size == remote.size
+    if remote.checksums:
+        return True  # verified when it was fetched
+    return _reads(path)
+
+
+def _reads(path: Path) -> bool:
+    """Not empty; a ``.json`` or ``.txt`` (PMC's small article files) also parses. Other files are
+    never read whole here (a bulk file can be many gigabytes)."""
+    try:
+        if path.suffix not in (".json", ".txt"):
+            return path.stat().st_size > 0
+        data = path.read_bytes()
+    except OSError:
+        return False
+    if not data:
+        return False
+    try:
+        if path.suffix == ".json":
+            json.loads(data)
+        elif path.suffix == ".txt":
+            data.decode("utf-8")
+    except (ValueError, UnicodeDecodeError):
+        return False
+    return True
 
 
 def _adopt_loose(
@@ -288,10 +315,19 @@ def _adopt_loose(
             continue
         for path in folder.iterdir():
             if path.name in wanted and path.is_file() and not (staging / path.name).is_file():
+                # Under a temporary name first: a copy cut short (a kill, the share) left a truncated
+                # file under the final name, taken as whole on the next run (2026-10-26 review). Only
+                # a file that reads is adopted; the others are fetched again.
+                part = staging / (path.name + ".partial")
                 try:  # the bytes only: copying the NAS's extended attributes failed (EAGAIN, 2026-10-19)
-                    shutil.move(str(path), staging / path.name, copy_function=shutil.copyfile)
+                    shutil.copyfile(path, part)
+                    if not _whole(part, wanted[path.name]):
+                        part.unlink(missing_ok=True)
+                        continue
+                    os.replace(part, staging / path.name)
+                    path.unlink()
                 except OSError:
-                    (staging / path.name).unlink(missing_ok=True)  # fetched instead
+                    part.unlink(missing_ok=True)  # fetched instead
                     continue
                 moved += 1
         if folder.name != version and not any(folder.iterdir()):

@@ -240,7 +240,7 @@ def test_a_loose_file_that_cannot_be_moved_is_fetched_instead(
         raise BlockingIOError(11, "Resource temporarily unavailable")
 
     monkeypatch.setattr(bootstrap, "load_adapters", adapters)
-    monkeypatch.setattr(shutil, "move", refuse)
+    monkeypatch.setattr(shutil, "copyfile", refuse)
     loose = root / "_incoming" / "big" / "2026-10-17.p0001"
     loose.mkdir(parents=True)
     (loose / "a.tar.gz").write_bytes(A)
@@ -278,3 +278,25 @@ def test_an_ingest_run_log_times_each_version_and_its_seal(
     assert ends["seal"]["seconds"] <= ends["ingest-version"]["seconds"]
     # The progress lines are in the log too.
     assert any(r.get("logger") == "wsp.ingest.progress" and "adopting 2 file(s)" in r["msg"] for r in rows)
+
+
+def test_a_file_without_size_or_checksum_must_read_to_count_as_whole(tmp_path: Path) -> None:
+    """2026-10-26 review: a PMC article file cut short (no size or checksum published) counted as whole
+    because it was there, and was packed and sealed under its own checksum."""
+    from wsp_core.model import RemoteFile
+
+    def remote(name: str) -> RemoteFile:
+        return RemoteFile(f"https://x/{name}", name, None)
+
+    good, cut, empty, text, big = (tmp_path / n for n in ("a.json", "b.json", "c.txt", "d.txt", "e.tar"))
+    good.write_text('{"title": "An article"}')
+    cut.write_text('{"title": "An art')
+    empty.write_bytes(b"")
+    text.write_text("Body text.", encoding="utf-8")
+    big.write_bytes(b"x")
+    whole = bulk._whole  # pyright: ignore[reportPrivateUsage]
+    assert whole(good, remote("a.json"))
+    assert not whole(cut, remote("b.json"))
+    assert not whole(empty, remote("c.txt"))
+    assert whole(text, remote("d.txt"))
+    assert whole(big, remote("e.tar"))  # other kinds: not read whole, only not empty
