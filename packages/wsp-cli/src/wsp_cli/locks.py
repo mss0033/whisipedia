@@ -151,7 +151,7 @@ def _queue_for(fd: int, path: Path, name: str, wait: float, poll: float, *, prio
     """
     queue = path.with_name(f"{name}.queue")
     queue.mkdir(exist_ok=True)
-    # A priority ticket ("0" prefix: before every normal one, which starts with the time's own "1";
+    # A priority ticket ("0" prefix: "00…" sorts before every normal "01…", the zero-padded time;
     # first come among themselves) is for a short, time-bound ingest: weather forecasts waited 20
     # minutes behind six one-hour lane slices, lost their turn every pull, and none was sealed for
     # three days (2026-10-29).
