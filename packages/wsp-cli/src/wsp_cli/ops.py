@@ -434,8 +434,14 @@ def cmd_index_rebuild_lexical(args: argparse.Namespace, out: TextIO) -> int:
     out.write(
         f"rebuild-lexical: {report.sources} sources, {report.documents:,} documents loaded, "
         f"caught up: {', '.join(report.caught_up) or 'nothing'}\n"
-        f"Next: docs/runbooks/move-to-nas.md, 'Switch to the rebuilt search index'.\n"
     )
+    if report.behind:
+        out.write(
+            f"NOT ready to switch: {', '.join(report.behind)} still behind the live index (see the "
+            "lines above); run rebuild-lexical again (it resumes) once their generations are readable.\n"
+        )
+        return 1
+    out.write("Next: docs/runbooks/move-to-nas.md, 'Switch to the rebuilt search index'.\n")
     return 0
 
 

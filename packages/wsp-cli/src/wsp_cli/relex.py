@@ -47,6 +47,7 @@ class RelexReport:
     sources: int
     documents: int
     caught_up: tuple[str, ...]
+    behind: tuple[str, ...] = ()  # still not matching the live index: do not switch to this one
 
 
 class Relexer:
@@ -134,31 +135,42 @@ class Relexer:
                     batch_start, pending = part + 1, 0
         return total
 
-    def catch_up(self) -> list[str]:
+    def _stale(self) -> list[str]:
+        done = self._load()
+        live = dict(self.state())
+        return sorted(
+            sid
+            for sid in set(done) | set(live)
+            if sid not in live
+            or sid not in done
+            or done[sid].get("generation") != live[sid]
+            or not self._complete(sid, live[sid], done)
+        )
+
+    def catch_up(self) -> tuple[list[str], list[str]]:
         """Bring the new index to the live state: generations indexed live meanwhile (diffed, without
-        change records), sources added or no longer indexed. Run under the index lock."""
+        change records), sources added or no longer indexed. Run under the index lock.
+
+        Returns the sources caught up, and those still behind (their generation not readable in the
+        Refinery, or still changing after the last round): an index with any behind is not ready to
+        be switched to (2026-10-26 review: skipped sources were reported "caught up")."""
         changed: list[str] = []
         for _ in range(CATCH_UP_ROUNDS):
             done = self._load()
             live = dict(self.state())
-            stale = sorted(
-                sid
-                for sid in set(done) | set(live)
-                if sid not in live
-                or sid not in done
-                or done[sid].get("generation") != live[sid]
-                or not self._complete(sid, live[sid], done)
-            )
+            stale = self._stale()
             if not stale:
-                return changed
+                return changed, []
+            progress = False
             for sid in stale:
-                changed.append(sid)
                 if sid not in live:
                     self.index.delete_source(sid)
                     self.index.commit(rebuild_suggest=False)
                     del done[sid]
                     self._save(done)
                     self.say(f"relex: {sid}: no longer indexed; removed")
+                    changed.append(sid)
+                    progress = True
                     continue
                 new_dir = generation_dir(self.refinery, sid, live[sid])
                 if not is_sealed(new_dir):
@@ -177,7 +189,11 @@ class Relexer:
                 done[sid] = {"generation": live[sid], "parts": new.n_parts}
                 self._save(done)
                 self.say(f"relex: {sid}: caught up to {live[sid]} (+{stats.upserted:,} -{stats.deleted:,})")
-        return changed
+                changed.append(sid)
+                progress = True
+            if not progress:
+                break  # nothing more can be done now: the rest is behind
+        return list(dict.fromkeys(changed)), self._stale()
 
     def _complete(self, sid: str, gen: str, done: Mapping[str, Mapping[str, object]]) -> bool:
         mark = done.get(sid)
@@ -213,6 +229,6 @@ def relex(
     """The whole rebuild: load without the lock, then catch up and finish under it."""
     documents = relexer.load()
     with lock():
-        caught = relexer.catch_up()
+        caught, behind = relexer.catch_up()
         relexer.finish(live_lexical)
-    return RelexReport(len(relexer.state()), documents, tuple(caught))
+    return RelexReport(len(relexer.state()), documents, tuple(caught), tuple(behind))

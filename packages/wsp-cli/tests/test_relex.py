@@ -143,10 +143,17 @@ def test_catch_up_follows_what_the_live_index_did(
         refine(ref, "gamma", "g1", [rec("gamma", "c1", "Gamma one")])
         state.clear()
         state.update({"alpha": "g2", "gamma": "g1"})
-        assert sorted(relexer.catch_up()) == ["alpha", "beta", "gamma"]
+        caught, behind = relexer.catch_up()
+        assert (sorted(caught), behind) == (["alpha", "beta", "gamma"], [])
         expected = [make_doc_id("alpha", f"a{i:02d}") for i in range(2, 13)] + [make_doc_id("gamma", "c1")]
         assert ids(idx) == sorted(expected)
-        assert relexer.catch_up() == []  # nothing left to do
+        assert relexer.catch_up() == ([], [])  # nothing left to do
+
+        # A live generation the Refinery cannot show (a NAS hiccup, refined into _parts only) is
+        # behind, never reported caught up (2026-10-26 review).
+        state["delta"] = "g9"
+        caught, behind = relexer.catch_up()
+        assert (caught, behind) == ([], ["delta"])
 
 
 def test_relex_carries_over_rank_and_spelling_and_builds_suggest(
@@ -168,7 +175,7 @@ def test_relex_carries_over_rank_and_spelling_and_builds_suggest(
 
     with TantivyIndex(tmp_path / "new", SMALL) as idx:
         report = relex(Relexer(idx, ref, lambda: state), live, lock)
-        assert (report.sources, report.documents, report.caught_up) == (2, 19, ())
+        assert (report.sources, report.documents, report.caught_up, report.behind) == (2, 19, (), ())
         assert entered == ["in"]
         for name in (RANK_FILE, fence_path(Path(RANK_FILE)).name, SPELL_FILE):
             assert (tmp_path / "new" / name).is_file()
