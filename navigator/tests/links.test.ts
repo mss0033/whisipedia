@@ -89,8 +89,8 @@ describe('sanitizeDocumentHtml', () => {
     const broken = div.querySelector<HTMLAnchorElement>('a.broken-link');
     expect(broken?.dataset.missing).toBe('https://evil.example/');
     const anchor = div.querySelector<HTMLAnchorElement>('a[data-anchor]');
-    expect(anchor?.dataset.anchor).toBe('doc-Legacy');
-    expect(div.querySelector('#doc-Legacy')).not.toBeNull();
+    expect(anchor?.dataset.anchor).toBe('pg-Legacy');
+    expect(div.querySelector('#pg-Legacy')).not.toBeNull();
     expect(stats.broken).toBe(1);
   });
 
@@ -312,8 +312,8 @@ describe('links a reader cannot see or that lead nowhere (2026-10-16 crawl of 40
       '<a href="#maincontent">Skip to content</a><main id="maincontent"><p>Medicines A to Z</p></main>',
     );
     const a = div.querySelector('a')!;
-    expect(a.dataset.anchor).toBe('doc-maincontent');
-    expect(div.querySelector('#doc-maincontent')).not.toBeNull();
+    expect(a.dataset.anchor).toBe('pg-maincontent');
+    expect(div.querySelector('#pg-maincontent')).not.toBeNull();
   });
 
   it('makes a link to a place that is not in the page plain text', () => {
@@ -354,8 +354,8 @@ describe('a page heading with its own id', () => {
     const skip = [...root.querySelectorAll<HTMLAnchorElement>('main a')].find(
       (a) => a.textContent === 'Skip to content',
     )!;
-    expect(skip.dataset.anchor).toBe('doc-main');
-    expect(root.querySelector('#doc-main')).not.toBeNull();
+    expect(skip.dataset.anchor).toBe('pg-main');
+    expect(root.querySelector('#pg-main')).not.toBeNull();
   });
 });
 

@@ -1068,7 +1068,7 @@
 .comic-number {
   width: 6em;
 }
-.page-document #doc-comic img {
+.page-document #pg-comic img {
   max-width: 100%;
   height: auto;
 }

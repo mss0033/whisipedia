@@ -62,7 +62,7 @@ describe('comics', () => {
     expect(img.getAttribute('srcset')).toBe(
       '/v1/assets/kiwix-xkcd-com-en-all/2026-08/imgs.xkcd.com/comics/password_strength_2x.png 2x',
     );
-    expect(main().querySelector('.doc-body #doc-comic + p')?.textContent).toContain(
+    expect(main().querySelector('.doc-body #pg-comic + p')?.textContent).toContain(
       'sincerely apologize',
     );
     expect(main().querySelector('.doc-body details')).not.toBeNull();

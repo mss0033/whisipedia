@@ -33,7 +33,9 @@ export interface LinkContext {
 }
 
 const SCHEME_RE = /^([a-z][a-z0-9+.-]*):/i;
-const ANCHOR_PREFIX = 'doc-';
+// A page's own ids live under a prefix the Navigator never uses for its own: with "doc-", an
+// archived page's id="title" became "doc-title", the Navigator's heading (2026-10-26 review #116).
+const ANCHOR_PREFIX = 'pg-';
 
 function missing(original: string, ctx?: LinkContext): LinkTarget {
   const address = makeAddress('offline', '', { url: original, from: ctx?.docId });

@@ -178,6 +178,17 @@ describe('a long block in pieces (German Wikipedia\'s "Rhein" is one paragraph o
     expect(withPair).toContain('</x1>'); // the pair is in one piece
     expect(splitSegment('kurz')).toEqual({ pieces: ['kurz'], seps: [] });
   });
+
+  it('splits a block that is one wrapper from end to end inside it (2026-10-26 review #115)', () => {
+    const sentence = 'Der Rhein ist ein Strom in Europa. ';
+    const text = `<x1>${sentence.repeat(40).trim()}</x1>`;
+    const { pieces, seps, head, tail } = splitSegment(text, 300);
+    expect(pieces.length).toBeGreaterThan(3);
+    expect(pieces.every((p) => !p.includes('<x1>') && !p.includes('</x1>'))).toBe(true);
+    expect([head, tail]).toEqual(['<x1>', '</x1>']);
+    const joined = pieces.reduce((acc, p, n) => acc + (n ? seps[n - 1] : '') + p, '');
+    expect(`${head}${joined}${tail}`).toBe(text);
+  });
 });
 
 describe('a long block translated piece by piece', () => {

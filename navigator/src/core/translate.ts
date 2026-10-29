@@ -99,9 +99,24 @@ export function blockText(block: Element): BlockText {
 }
 
 /** A block's text in pieces of at most `max` characters, split at line breaks and then at sentence
- * ends, never inside a `<xN>…</xN>` pair; `seps[n]` is what joined piece n to piece n + 1. */
-export function splitSegment(text: string, max = PIECE): { pieces: string[]; seps: string[] } {
+ * ends, never inside a `<xN>…</xN>` pair; `seps[n]` is what joined piece n to piece n + 1. A block
+ * that is one pair from end to end (`<p><span>…</span></p>`) is split inside it: `head` and `tail`
+ * are the pair's tags, put back around the joined pieces (such a passage was left untranslated as
+ * "too long", 2026-10-26 review #115). */
+export function splitSegment(
+  text: string,
+  max = PIECE,
+): { pieces: string[]; seps: string[]; head?: string; tail?: string } {
   if (text.length <= max) return { pieces: [text], seps: [] };
+  const whole = /^<x(\d+)>([\s\S]*)<\/x\1>$/.exec(text);
+  if (whole && !new RegExp(`</?x${whole[1]}>`).test(whole[2] ?? '')) {
+    const inner = splitSegment(whole[2] ?? '', max);
+    return {
+      ...inner,
+      head: `<x${whole[1]}>${inner.head ?? ''}`,
+      tail: `${inner.tail ?? ''}</x${whole[1]}>`,
+    };
+  }
   const pieces: string[] = [];
   const seps: string[] = [];
   let current = '';
@@ -209,9 +224,19 @@ export function sourceLanguage(lang: string | null | undefined): string | null {
 }
 
 let statusPromise: Promise<TranslationStatus | null> | null = null;
+let statusAt = 0;
+const STATUS_SECONDS = 300; // an answer is asked again after five minutes (the server starts, stops)
 
+// A failed answer is not kept: an API restart while a page opened hid "Read in English" for the
+// whole session (2026-10-26 review #114).
 function status(api: WspClient): Promise<TranslationStatus | null> {
-  statusPromise ??= api.translationStatus().catch(() => null);
+  if (statusPromise === null || Date.now() - statusAt > STATUS_SECONDS * 1000) {
+    statusAt = Date.now();
+    statusPromise = api.translationStatus().catch(() => {
+      statusPromise = null;
+      return null;
+    });
+  }
   return statusPromise;
 }
 
@@ -328,9 +353,10 @@ function startTranslation(
       const split = pieces[i];
       const got = answers[i];
       if (!split || !got?.some((g) => g?.ok && g.text)) return null;
-      return split.pieces
+      const joined = split.pieces
         .map((orig, n) => (got[n]?.ok && got[n]?.text ? (got[n]?.text ?? orig) : orig))
         .reduce((acc, piece, n) => acc + (n ? (split.seps[n - 1] ?? ' ') : '') + piece, '');
+      return (split.head ?? '') + joined + (split.tail ?? '');
     };
     // The title first: it says at once whether the translation reads.
     for (let at = 0; at < segments.length; at += BATCH) {

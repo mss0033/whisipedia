@@ -44,11 +44,11 @@ describe('man pages', () => {
       () => !root.classList.contains('is-loading') && !!main().querySelector('.doc-body details'),
     );
     const box = main().querySelector<HTMLDetailsElement>('.doc-body details')!;
-    expect(box.id).toBe('doc-man-sections');
+    expect(box.id).toBe('pg-man-sections');
     expect(box.open).toBe(true);
     const back = main().querySelector<HTMLAnchorElement>('.doc-body p small a')!;
     expect(back.textContent).toBe('↑ Sections');
-    expect(back.dataset.anchor).toBe('doc-man-sections');
+    expect(back.dataset.anchor).toBe('pg-man-sections');
     expect(main().textContent).not.toContain('Blog');
   });
 });
