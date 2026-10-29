@@ -79,3 +79,14 @@ def test_an_unreachable_robots_txt_disallows_for_30_days_then_counts_as_absent(
     assert robots.unreachable_long(site, now=t0 + timedelta(days=30)) is True
     robots.reachable(site)  # read again: the count starts over
     assert robots.unreachable_long(site, now=t0 + timedelta(days=31)) is False
+
+
+def test_a_sitemap_line_does_not_split_a_group_and_a_versioned_agent_is_ours() -> None:
+    """2026-10-26 review #124 (RFC 9309 2.2.4)."""
+    ua = "Whisipedia/0.1 (personal offline archive)"
+    both = parse("User-agent: Whisipedia\nSitemap: https://x/s.xml\nUser-agent: *\nDisallow: /")
+    assert both is not None
+    assert not both.can_fetch(ua, "https://x/a")
+    versioned = parse("User-agent: Whisipedia/0.1\nDisallow: /")
+    assert versioned is not None
+    assert not versioned.can_fetch(ua, "https://x/a")

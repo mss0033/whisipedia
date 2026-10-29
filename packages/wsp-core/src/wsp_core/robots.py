@@ -83,9 +83,12 @@ class Robots:
                 if current is None or not in_agents:
                     current = _Group()
                     self._groups.append(current)
-                current.agents.append(value.lower())
+                # "Whisipedia/0.1 (...)" addresses us as surely as "Whisipedia" (review #124)
+                current.agents.append(value.lower() if value.strip() == "*" else product_token(value))
                 in_agents = True
                 continue
+            if key not in ("allow", "disallow", "crawl-delay"):
+                continue  # Sitemap and other records do not end a group's User-agent lines (RFC 9309 2.2.4)
             in_agents = False
             if current is None:
                 continue  # a rule before any User-agent line belongs to no group
