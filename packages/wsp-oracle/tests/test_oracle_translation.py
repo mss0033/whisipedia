@@ -23,6 +23,8 @@ from wsp_oracle.translation import LlamaServer, Segment, TranslationCache, Trans
         # The bake-off's failures, each caught.
         ("Elf Länder unterzeichneten 1999.", "Twelve countries signed in 1999.", "de", "numbers differ"),
         ("Elf Länder unterzeichneten 1999.", "Eleven countries signed in 2000.", "de", "numbers differ"),
+        ("Die Mauer fiel am 9.11.1989.", "The wall fell on 8 November 1989.", "de", "numbers differ"),
+        ("Geöffnet von 10.15 bis 11.45 Uhr.", "Open from 10:15 to 11:30.", "de", "numbers differ"),
         ("東京の人口は約1400万人である。", "Tokyo has a population of about 1.4 million.", "ja", "numbers differ"),
         ("<x1>Berlin</x1> ist die Hauptstadt ⟦1⟧.", "Berlin is the capital ⟦1⟧.", "de", "links or formatting"),
         ("<x1>Berlin</x1> ist groß.", "</x1>Berlin<x1> is big.", "de", "out of order"),
@@ -81,6 +83,11 @@ def test_a_translation_that_fails_a_check_is_not_shown(
             "Tokyo Television • October 2, 2006 – March 26, 2007 • Mondays 25:30–26:00",
             "zh",
         ),
+        # Dotted dates and times, and a year next to a count (2026-10-26 review #27).
+        ("Die Mauer fiel am 9.11.1989 in Berlin.", "The Berlin Wall fell on 9 November 1989.", "de"),
+        ("Geöffnet von 10.15 bis 11.45 Uhr.", "Open from 10:15 to 11:45.", "de"),
+        ("Im Jahr 1990 starben 300 Soldaten.", "In 1990, 300 soldiers died.", "de"),
+        ("Es kostet 12 345 678 Euro.", "It costs 12,345,678 euros.", "de"),
     ],
 )
 def test_a_faithful_translation_passes(source: str, target: str, lang: str) -> None:

@@ -28,7 +28,16 @@ CJK = frozenset({"ja", "zh", "ko"})
 PLACEHOLDER = re.compile(r"</?x\d+>|⟦\d+⟧")
 
 _AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
-_NUM = re.compile(r"(?<![\d⟦<x/])\d+(?:[.,  '’٫٬]\d+| \d{3}(?![\d.,]\d))*")
+# Digits grouped by spaces only from a group of one to three ("12 345 678"): "1990 300" is two numbers
+# (a year, then a count), not 1990300 (2026-10-26 review #27).
+_NUM = re.compile(
+    r"(?<![\d⟦<x/])(?:\d{1,3}(?: \d{3}(?![\d.,]\d))+(?:[.,٫]\d+)?(?!\d)|\d+(?:[.,\u00a0\u202f'’٫٬]\d+)*)"
+)
+# A dotted date (9.11.1989, 09.11.89): day and year are numbers; the month becomes a name in English.
+_DOT_DATE = re.compile(r"(?<![\d.,])(\d{1,2})\.(\d{1,2})\.(\d{4}|\d{2})(?!\d|[.,]\d)")
+# A dotted time (10.15 Uhr) where a decimal is written with a comma: two digits after a point are
+# neither a decimal nor a thousands group there.
+_DOT_TIME = re.compile(r"(?<![\d.,])([01]?\d|2[0-4])\.([0-5]\d)(?!\d|[.,]\d)")
 # Japanese and Chinese month numbers become month names in English; era years are optional glosses.
 _CJK_SKIP = re.compile(r"\d+(?=\s*月)|(?<=明治|大正|昭和|平成|令和)\s*\d+(?=\s*年)")
 
@@ -172,6 +181,17 @@ def _numbers(text: str, lang: str) -> list[set[str]]:
     if lang == "en":
         t = _EN_COMPOUND.sub(_en_compound, t)
     out: list[set[str]] = []
+
+    def date(m: re.Match[str]) -> str:
+        day, month = int(m.group(1)), int(m.group(2))
+        if not (1 <= day <= 31 and 1 <= month <= 12):
+            return m.group(0)
+        out.extend(({str(day)}, {m.group(3), str(int(m.group(3)))}))
+        return " "
+
+    t = _DOT_DATE.sub(date, t)
+    if lang in _DECIMAL_COMMA:
+        t = _DOT_TIME.sub(lambda m: out.extend(({str(int(m.group(1)))}, {str(int(m.group(2)))})) or " ", t)
     for m in _NUM.finditer(t):
         keys = {re.sub(r"[.,\u00a0\u202f'’٫٬ ]", "", m.group(0))}
         value = _value(m.group(0), lang)
