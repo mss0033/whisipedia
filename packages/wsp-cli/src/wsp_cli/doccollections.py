@@ -79,7 +79,7 @@ from wsp_adapters.doccollection.policy import (
     Verdict,
     decisions_path,
 )
-from wsp_cli import bootstrap
+from wsp_cli import bootstrap, nasretry
 from wsp_core.errors import FetchError, RobotsDisallowedError
 from wsp_core.model import FetchResult, RemoteFile, SourceSpec, SourceStatus
 from wsp_core.partitions import PartitionError, check_partition, partition_generation_id, partition_of
@@ -878,10 +878,20 @@ class CollectionFetcher:
                 # A name guessed ".pdf" gets its real office/zip/text suffix; an error or landing page
                 # in its place is a failed download, retried next run (CA-2).
                 path = true_suffix(path)
-                screen = screen_document(path, rules, keys=(cand.key, cand.pub_number))
+                checked = path
+                # A moment's trouble on the share (EAGAIN opening the file) is tried again; one that
+                # lasts fails this document, retried next run, not the whole fetch (2026-10-28: an
+                # Aozora fetch died on one file after 28 hours).
+                screen = nasretry.retrying(
+                    f"screen {checked.name}",
+                    lambda: screen_document(checked, rules, keys=(cand.key, cand.pub_number)),
+                )
             except WrongBodyError as exc:
                 report.failed.append((cand.key, str(exc)))
                 path.unlink(missing_ok=True)
+                return
+            except nasretry.TRANSIENT as exc:
+                report.failed.append((cand.key, f"the share did not answer: {exc}"))
                 return
         elif screen is None:  # a bundle is never kept unscreened
             screen = Screen(Decision(Verdict.REVIEW, "git=unscreened", Stage.CONTENT), Marking(), False)

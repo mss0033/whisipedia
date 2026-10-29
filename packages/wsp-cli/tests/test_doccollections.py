@@ -997,3 +997,30 @@ def test_files_received_from_the_daily_list_stand_for_the_listing_and_withdraw_n
     report = fetch.run(spec, version="2026-10-24")
     assert [d.cand.key for d in report.fetched] == ["gaz:CODES"]
     assert report.failed == []  # nothing else was offered as a document of this run
+
+
+def test_share_trouble_while_screening_fails_one_document_not_the_fetch(
+    vault: FileVault, tmp_path: Path
+) -> None:
+    """EAGAIN opening a downloaded file on the share (2026-10-28, an Aozora fetch died on one file after
+    28 hours): tried again; if it lasts, that document fails (retried next run) and the rest go on."""
+    import wsp_cli.doccollections as dc
+
+    real = dc.screen_document  # pyright: ignore[reportPrivateImportUsage]
+    calls: list[str] = []
+
+    def flaky(path: Path, rules: Rules, **kw: Any) -> Any:
+        calls.append(path.name)
+        if "restricted" in path.name:
+            raise BlockingIOError(11, "Resource temporarily unavailable", str(path))
+        if path.name.startswith("FM") and calls.count(path.name) == 1:
+            raise BlockingIOError(11, "Resource temporarily unavailable", str(path))  # once only
+        return real(path, rules, **kw)
+
+    with patch.object(dc, "screen_document", flaky), patch("wsp_cli.nasretry.time.sleep"):
+        report = runner(vault, OBJECTS, tmp_path).run(spec(OBJECTS), version="2026-10-10")
+    assert [d.cand.title for d in report.fetched] == ["FM 5 0 2022"]  # second try went through
+    (failed,) = report.failed
+    assert failed[0] == "test:restricted.pdf"
+    assert "the share did not answer" in failed[1]
+    assert len(report.held) == 1  # the third document was screened as usual
