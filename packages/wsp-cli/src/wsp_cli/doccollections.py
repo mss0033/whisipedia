@@ -1405,8 +1405,8 @@ def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
         # The owner's downloads stand for the listing (wsp_cli.manual): the issuer's is not read.
         access = cast(Mapping[str, Any], spec.raw.get("access") or {})
         spec = dataclasses.replace(spec, raw={**spec.raw, "access": {**access, "discovery": override}})
-    if spec.status is SourceStatus.EXCLUDED or spec.raw.get("legal_basis") == "none":
-        print(f"error: {spec.id} is excluded or has no legal basis", file=sys.stderr)
+    if spec.status in (SourceStatus.EXCLUDED, SourceStatus.RETIRED) or spec.raw.get("legal_basis") == "none":
+        print(f"error: {spec.id} is excluded, retired or has no legal basis", file=sys.stderr)
         return EXIT_REFUSED
     adopt = frozenset(getattr(args, "adopt_kept", None) or ())
     manual: Path | None = getattr(args, "manual", None)

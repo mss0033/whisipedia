@@ -891,7 +891,8 @@ sources:
     publisher: Federal Emergency Management Agency
     domain: [preparedness, engineering]
     tier: T1
-    status: candidate
+    status: retired  # owner decision 2026-10-28: duplicated fema-preparedness-doctrine (review #39)
+    index: false  # its documents are indexed through fema-preparedness-doctrine
     license: LicenseRef-US-Gov-PD
     legal_basis: public-domain
     access:
@@ -907,7 +908,7 @@ sources:
         - {channel: "www.fema.gov", status: blocked, verified: 2026-10-10, note: "403 (WAF); not evaded"}
     update: {cadence: P3M, strategy: snapshot-retention}
     size: {bytes: 5e9, measured: false, as_of: 2026-10-10}
-    notes: Score 4.2. Safe rooms (P-361, P-320), flood, wind and seismic retrofit. D11 (2026-10-10) — fema.gov WAF-blocked; official channel GovInfo GOVPUB (HS 5), partial. Default review, so every GOVPUB FEMA title is held for the owner until the series lists are written.
+    notes: "Retired 2026-10-28 (owner, review #39): its discovery was the same GovInfo GOVPUB-HS5 listing as fema-preparedness-doctrine, so every document was stored and indexed twice (786 files in two generations). Its sealed generations stay in the vault (never deleted); search reads them through fema-preparedness-doctrine. FEMA's building-science titles from www.fema.gov come through fema-publications-direct."
 
   - id: uk-resilience-guidance
     name: UK Cabinet Office resilience and civil contingencies guidance
