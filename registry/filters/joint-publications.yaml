@@ -1,4 +1,4 @@
-# Document-level rules for joint-publications (research doc §3.3, §4.8). Deny-first; default allow (owner decision 2026-10-11).
+# Document-level rules for joint-publications (research doc §3.3, §4.8). Deny-first; the registry block sets default: deny, so only the series below are taken.
 allow_series: ["JP 1", "JP 1-0", "JP 3-0", "JP 3-28", "JP 3-29", "JP 3-41", "JP 4-0", "JP 4-02", "JP 5-0"]
 allow_series_prefix: ["JP 1-", "JP 4-", "JP 5-"]
 # Narrow content core only (owner decision 2026-10-11, narrowed 2026-10-12): public joint doctrine is

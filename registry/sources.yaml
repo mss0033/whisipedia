@@ -857,7 +857,7 @@ sources:
         - {channel: "www.fema.gov", status: blocked, verified: 2026-10-10, note: "403 to a plain client (WAF); not evaded"}
     update: {cadence: P3M, strategy: snapshot-retention}
     size: {bytes: 1.2e9, measured: false, as_of: 2026-10-10}
-    notes: Score 4.5. D11 (2026-10-10) — fema.gov is WAF-blocked; the official channel is GPO's GovInfo GOVPUB collection (FEMA deposits under SuDoc HS 5). Coverage is partial, so FEMA documents not deposited with GPO stay a gap until FEMA lifts the block.
+    notes: Score 4.5. D11 (2026-10-10) — fema.gov is WAF-blocked; the official channel is GPO's GovInfo GOVPUB collection (FEMA deposits under SuDoc HS 5). Coverage is partial; FEMA documents not deposited with GPO are fetched from www.fema.gov by fema-publications-direct since 2026-10-24.
 
   - id: fema-independent-study
     name: FEMA Independent Study courses (EMI, now NDEMU)
@@ -1187,14 +1187,15 @@ sources:
           pub_prefix: "NEETS Module "
           provenance: "2026-10-18 owner decision (D11 exception): the issuer's site refuses this connection, so the Internet Archive's copy of the NETC modules (NAVEDTRA 14173-14196), Distribution Statement A on each"
       filter: {allow_all: true, distribution: {require: [A]}}
-      mirrors_required: 2
+      # Third-party copies (archive.org): kept unverified until the D17 cross-check can compare a second
+      # channel; "mirrors_required: 2" was read by nothing (review #123).
       mirrors:
         - {channel: "DTIC apps.dtic.mil/sti", status: blocked, verified: 2026-10-10, note: "403 to a plain client (citations and PDFs); www.dtic.mil needs the DoD PKI root CA"}
         - {channel: "netc.navy.mil", status: blocked, verified: 2026-10-10, note: "403"}
         - {channel: "archive.org NEETSModule01-24", status: verified, verified: 2026-10-18, note: "owner approved third-party copies (2026-10-18) while DTIC and NETC refuse this connection"}
     update: {cadence: P1Y, strategy: snapshot-retention}
     size: {bytes: 0.6e9, measured: false, as_of: 2026-10-10}
-    notes: Score 4.3. Distribution Statement A on every module. D11 (2026-10-10) — no official mirror found; discovery stays empty until DTIC is reachable (or the DoD PKI chain is installed for www.dtic.mil) or the owner places official copies in _incoming (research doc §5.6 option 3).
+    notes: Score 4.3. Distribution Statement A on every module. D11 (2026-10-10) — no official mirror found; the modules come from archive.org copies (archive-org discovery) until DTIC is reachable (or the DoD PKI chain is installed for www.dtic.mil) or the owner places official copies in _incoming (research doc §5.6 option 3).
 
   - id: nist-csrc
     name: NIST Computer Security Resource Center publications (SP 800, SP 1800, FIPS, IR, CSWP)
@@ -1405,7 +1406,7 @@ sources:
         - {channel: "archive.org JP copies (dticarchive, opensource)", status: verified, verified: 2026-10-18, note: "owner approved third-party copies (2026-10-18); older editions mostly, the current set is on jcs.mil only"}
     update: {cadence: P3M, strategy: snapshot-retention}
     size: {bytes: 2e9, measured: false, as_of: 2026-10-10}
-    notes: Score 4.4. D11 (2026-10-10) — no official mirror found yet (jcs.mil WAF-blocked); discovery stays empty. Since the owner decision of 2026-10-12 the rules file denies no series (JP 3-60 targeting and JP 3-09 fires are in scope); the built-in deny core and the marking screen apply whatever the channel.
+    notes: Score 4.4. D11 (2026-10-10) — no official mirror found (jcs.mil WAF-blocked); the publications come from archive.org copies (archive-org discovery). Since the owner decision of 2026-10-12 the rules file denies no series (JP 3-60 targeting and JP 3-09 fires are in scope); the built-in deny core and the marking screen apply whatever the channel.
 
   - id: usmc-mcpel
     name: USMC doctrinal publications (MCDP series, MCWP 5-10)
@@ -1435,7 +1436,7 @@ sources:
         - {channel: "GovInfo GOVPUB, SuDoc D 214 (Marine Corps)", status: rejected, verified: 2026-10-12, note: "166 packages: History Division and MCU Press titles, not MCDP doctrine"}
     update: {cadence: P3M, strategy: snapshot-retention}
     size: {bytes: 3e9, measured: false, as_of: 2026-10-10}
-    notes: Score 4.4. Start with MCDP 1-8; other series through review. D11 (2026-10-10) — no official mirror verified yet; discovery stays empty.
+    notes: Score 4.4. Start with MCDP 1-8; other series through review. D11 (2026-10-10) — no official mirror verified; the publications come from archive.org copies (archive-org discovery).
 
   - id: army-cmh-histories
     name: US Army Center of Military History official histories
@@ -1695,7 +1696,7 @@ sources:
         - {channel: "topomaps_all.zip catalogue (thor-f5.er.usgs.gov)", status: verified, verified: 2026-10-10, note: "96 MB CSV inventory of every map sheet (HEAD 200)"}
     update: {cadence: P1Y, strategy: mirror}
     size: {bytes: 15e12, measured: false, as_of: 2026-10-10}
-    notes: Every historical USGS topographic quadrangle (GeoPDF/GeoTIFF, ≈10-20 TB). Included by owner decision D14 (2026-10-10). Maps are historical by nature (the banner applies to old roads, mines and hazards). Acquisition plan in docs/research/PREPAREDNESS_AND_DEFENSE.md §8 (one part generation per state, GeoPDF first).
+    notes: Every historical USGS topographic quadrangle (GeoPDF only, formats [pdf]; the GeoTIFFs are not taken). Included by owner decision D14 (2026-10-10). Maps are historical by nature (the banner applies to old roads, mines and hazards). Acquisition plan in docs/research/PREPAREDNESS_AND_DEFENSE.md §8 (one part generation per state, GeoPDF first).
 
   - id: doe-fundamentals-handbooks
     name: DOE Fundamentals Handbooks (DOE-HDBK-1011 to 1019)
@@ -3175,8 +3176,8 @@ sources:
     domain: [education]
     tier: T2
     status: active
-    license: LicenseRef-per-item
-    legal_basis: open-license
+    license: LicenseRef-copyright  # 2026-10-29 (review #138): the site's own terms; Kiwix distributes the ZIM
+    legal_basis: bulk-access-terms
     access:
       adapter: kiwix-opds
       selector: {name: gotquestions.org_en_all}
@@ -3186,6 +3187,24 @@ sources:
       gfs: {last: 2, monthly: 6, yearly: forever}
     scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
     notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+
+  - id: kiwix-wikisource-en-all
+    name: Wikisource (Kiwix ZIM)
+    publisher: Kiwix
+    domain: [primary-sources]
+    tier: T2
+    status: active
+    license: CC-BY-SA-4.0
+    legal_basis: open-license
+    access:
+      adapter: kiwix-opds
+      selector: {name: wikisource_en_all, flavour: maxi}
+    update: {strategy: snapshot-retention}
+    size: {bytes: 8615937024, measured: true, as_of: '2026-10-11'}
+    retention:
+      gfs: {last: 2, monthly: 6, yearly: forever}
+    scores: {authority: 3, density: 3, uniqueness: 3, license: 5, bulk: 5, health: 4, longevity: 4, cost: 3}
+    notes: "Found by the kiwix-opds bot on 2026-10-11 in category 'wikisource'; moved from the git-ignored overlay into the registry 2026-10-29 (review #137: wikisource-en names it as its rendition)."
 
   - id: kiwix-wiktionary-en-all
     name: Wiktionary (Kiwix ZIM)
@@ -3211,7 +3230,7 @@ sources:
     domain: [education]
     tier: T2
     status: active
-    license: LicenseRef-per-item
+    license: CC-BY-NC-2.5  # 2026-10-29 (review #138): the site's own terms; Kiwix distributes the ZIM
     legal_basis: open-license
     access:
       adapter: kiwix-opds
@@ -3229,8 +3248,8 @@ sources:
     domain: [education]
     tier: T2
     status: active
-    license: LicenseRef-per-item
-    legal_basis: open-license
+    license: LicenseRef-copyright  # 2026-10-29 (review #138): the site's own terms; Kiwix distributes the ZIM
+    legal_basis: bulk-access-terms
     access:
       adapter: kiwix-opds
       selector: {name: smbc-comics.com_en_all}
@@ -3247,8 +3266,8 @@ sources:
     domain: [education]
     tier: T2
     status: active
-    license: LicenseRef-per-item
-    legal_basis: open-license
+    license: LicenseRef-copyright  # 2026-10-29 (review #138): the site's own terms; Kiwix distributes the ZIM
+    legal_basis: bulk-access-terms
     access:
       adapter: kiwix-opds
       selector: {name: footballdatabase.com_en_all}
@@ -3265,8 +3284,8 @@ sources:
     domain: [education]
     tier: T2
     status: active
-    license: LicenseRef-per-item
-    legal_basis: open-license
+    license: LicenseRef-copyright  # 2026-10-29 (review #138): the site's own terms; Kiwix distributes the ZIM
+    legal_basis: bulk-access-terms
     access:
       adapter: kiwix-opds
       selector: {name: alexandria.dk_en_all}
@@ -4562,7 +4581,7 @@ sources:
       rate: {requests_per_second: 1, concurrency: 2}
       issuer: National Center for Biotechnology Information
       key_prefix: pubchem
-      # NCBI's anonymous FTP service (D16, 2026-10-24). Two partitions: extras (CID to names, synonyms, IUPAC names, InChI, SMILES, masses,
+      # NCBI's FTP site, read over HTTPS (D16, 2026-10-24); paused since its robots.txt was found to disallow every agent (D16 reopened): its files are downloaded by hand. Two partitions: extras (CID to names, synonyms, IUPAC names, InChI, SMILES, masses,
       # parents, MeSH, PubMed and patent links, and CID-LCSS.xml.gz, the Laboratory Chemical Safety
       # Summary: GHS hazards and handling for each compound) and sdf (every compound's full record).
       partitioned: true
@@ -4867,13 +4886,12 @@ sources:
             - {title: "FEMA P-312 Homeowner's Guide to Retrofitting (3rd ed., 2023)", landing: "https://www.fema.gov/building-science-publications/homeowners-guide-retrofitting", save_as: "unknown"}
             - {title: "FEMA P-361 Safe Rooms for Tornadoes and Hurricanes (5th ed., 2024)", landing: "https://www.fema.gov/emergency-managers/risk-management/safe-rooms/resources", save_as: "unknown"}
             - {title: "FEMA E-74 Reducing the Risks of Nonstructural Earthquake Damage (4th ed., 2012)", landing: "https://www.fema.gov/emergency-managers/risk-management/earthquake/training/fema-e-74", save_as: "unknown"}
-            - {title: "FEMA P-2064 Are You Ready? An In-Depth Guide to Citizen Preparedness (current edition on ready.gov)", landing: "https://www.ready.gov/", save_as: "unknown"}
             - {title: "FEMA B-526 Earthquake Safety Checklist (Oct 2023)", url: "https://www.fema.gov/sites/default/files/documents/fema_b-526-eq-safety-checklist.pdf"}
             - {title: "Food and Water in an Emergency (FEMA/American Red Cross, older brochure)", url: "https://www.fema.gov/pdf/library/f&web.pdf"}
       filter: {allow_all: true, public_issuer: true}
     update: {cadence: P1Y, strategy: snapshot-retention}
     size: {bytes: 3.0e8, measured: false, as_of: '2026-10-24'}
-    notes: "Curated 2026-10-24; www.fema.gov answered the library's fetcher (it refused the research's client). Complements fema-building-science, which takes FEMA's GovInfo deposits. Owner request 2026-10-24."
+    notes: "Curated 2026-10-24; www.fema.gov answered the library's fetcher (it refused the research's client). Complements fema-preparedness-doctrine, which takes FEMA's GovInfo deposits (fema-building-science, its duplicate, was retired 2026-10-28). Are You Ready? (P-2064) is in kiwix-www-ready-gov-en. Owner request 2026-10-24."
 
   - id: icrc-publications
     name: "ICRC publications (War Surgery, First Aid in Armed Conflicts, water and habitat engineering manuals)"
@@ -5898,9 +5916,9 @@ sources:
       key_prefix: nist
       origins: [nvlpubs.nist.gov]
       # NIST deposits every report and article under DOI prefix 10.6028 with the PDF's address on
-      # nvlpubs.nist.gov (whose directory listings answer 403). SP 800 and FIPS are nist-csrc's.
+      # nvlpubs.nist.gov (whose directory listings answer 403). SP 800, SP 1800, FIPS and CSWP are nist-csrc's (review #133).
       discovery:
-        - {kind: api, flavor: crossref, prefix: "10.6028", exclude: "^10\\.6028/nist\\.(?:sp\\.800|fips)"}
+        - {kind: api, flavor: crossref, prefix: "10.6028", exclude: "^10\\.6028/nist\\.(?:sp\\.800|sp\\.1800|fips|cswp)"}
       filter: {allow_all: true, public_issuer: true, allow_image_only: true, rules: registry/filters/nist-technical-series.yaml}  # 1900s NBS scans have no text layer
     update: {cadence: P1Y, strategy: snapshot-retention}
     size: {bytes: 1.5e11, measured: false, as_of: '2026-10-24'}

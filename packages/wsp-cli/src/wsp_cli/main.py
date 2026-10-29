@@ -247,12 +247,30 @@ def cmd_registry_validate(args: argparse.Namespace, out: TextIO) -> int:
     except (RegistryError, FileNotFoundError) as exc:
         print(f"invalid: {exc}", file=sys.stderr)
         return 1
+    ids = {s.id for s in specs}
+    dangling = sorted(
+        f"{s.id} -> {ref}" for s in specs for ref in _source_refs(s.raw.get("access")) if ref not in ids
+    )
+    if dangling:  # wikisource-en named a source only the git-ignored overlay defined (review #137)
+        print(f"invalid: references to sources the registry does not define: {dangling}", file=sys.stderr)
+        return 1
     by_status: dict[str, int] = {}
     for s in specs:
         by_status[s.status.value] = by_status.get(s.status.value, 0) + 1
     summary = ", ".join(f"{n} {k}" for k, n in sorted(by_status.items()))
     out.write(f"ok: {len(specs)} sources ({summary})\n")
     return 0
+
+
+def _source_refs(node: object) -> list[str]:
+    """Source ids an entry's access block names (rendition, copies, reading copies: ``{source: ID}``)."""
+    if isinstance(node, dict):
+        d = cast(dict[str, object], node)
+        own = [str(d["source"])] if isinstance(d.get("source"), str) else []
+        return own + [r for k, v in d.items() if k != "source" for r in _source_refs(v)]
+    if isinstance(node, list):
+        return [r for v in cast(list[object], node) for r in _source_refs(v)]
+    return []
 
 
 def cmd_config_show(args: argparse.Namespace, out: TextIO) -> int:

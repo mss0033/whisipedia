@@ -1,5 +1,5 @@
 # Document-level rules for cia-reading-room (D14). Officially declassified releases: old classification
-# banners with a release stamp are expected (declassified_ok in the registry). Intelligence *analysis* of
+# banners with a release stamp are expected (the registry sets public_issuer: true, owner Option A, which skips the marking gate). Intelligence *analysis* of
 # foreign programmes is historical-analytical material (research doc §3.2, in scope), so the built-in
 # noun-level review list is off for this collection (a million titles mention weapons); the built-in deny
 # list (explosives, weapons technical data, CBRN production and weaponisation, offensive tooling) and the
