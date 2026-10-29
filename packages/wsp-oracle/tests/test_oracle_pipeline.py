@@ -330,3 +330,18 @@ def test_first_results_do_not_depend_on_the_page_size() -> None:
     ten = searcher.run("anything", depth=10).hits[0]
     assert one.doc_id == ten.doc_id
     assert searcher.depth_for(1) == searcher.depth_for(10) == searcher.depth_for(None)
+
+
+def test_a_reranker_failure_keeps_the_fused_order(lexical: TantivyIndex, store: ChunkVectorStore) -> None:
+    """2026-10-26 review #25: a reranker error (a question too long for its pairs) made the search 500."""
+
+    class Broken(OverlapReranker):
+        def rerank(self, query: str, hits: object) -> list[SearchHit]:
+            raise RuntimeError("Sequence too long for truncation='only_second'")
+
+    searcher = make_searcher(lexical, store)
+    searcher.reranker = Broken()
+    res = searcher.run("how do vaccines train the immune system")
+    assert res.hits  # answered, in the fused order
+    assert res.confidence is None
+    assert "rerank" not in res.timings_ms

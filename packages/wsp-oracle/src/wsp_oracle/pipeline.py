@@ -594,10 +594,16 @@ class OracleSearcher:
         t = lap("snippets", t)
         passages = self._passages([*pins, *head], best_chunk)
         confidence: float | None = None
+        reranked: list[SearchHit] | None = None
+        display = {h.doc_id: h.snippet for h in head}
         if self.reranker is not None and head:
-            display = {h.doc_id: h.snippet for h in head}
             probe = [replace(h, snippet=passages[h.doc_id]) for h in [*pins, *head]]
-            ranked = self._weigh(query, list(self.reranker.rerank(route.dense or query, probe)))
+            try:
+                reranked = list(self.reranker.rerank(route.dense or query, probe))
+            except Exception:  # a reranker failure costs the order, never the answer
+                log.exception("rerank failed; the fused order stands")
+        if reranked is not None:
+            ranked = self._weigh(query, reranked)
             confidence = max((h.score for h in ranked), default=None)
             scores = {h.doc_id: h.score for h in ranked}
             pins = [replace(p, score=scores.get(p.doc_id, p.score)) for p in pins]

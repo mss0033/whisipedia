@@ -77,6 +77,12 @@ class CrossEncoderReranker:
             return []
         torch = self._torch
         out: list[float] = []
+        # A long question (a pasted paragraph, Japanese of 1,000 characters) alone filled max_length,
+        # and "only_second" truncation raised: the search answered 500 (2026-10-26 review #25). The
+        # question keeps at most half the pair; the passage the rest.
+        ids = self._tok(query, add_special_tokens=False)["input_ids"]
+        if len(ids) > self.max_tokens // 2:
+            query = self._tok.decode(ids[: self.max_tokens // 2])
         with self._lock, torch.inference_mode():
             for start in range(0, len(passages), self.batch_size):
                 part = list(passages[start : start + self.batch_size])
