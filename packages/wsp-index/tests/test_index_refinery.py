@@ -208,3 +208,36 @@ def test_concurrent_lookups_on_one_reader_are_safe(tmp_path: Path) -> None:
     for t in threads:
         t.join()
     assert not errors
+
+
+def test_a_part_the_share_refuses_for_a_moment_is_opened_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-10-28: EAGAIN opening one Refinery part on the NAS ended the nightly build."""
+    import time
+
+    import pyarrow as pa
+
+    path = tmp_path / "part.parquet"
+    pq.write_table(pa.table({"x": [1, 2]}), path)  # pyright: ignore[reportUnknownMemberType]
+    real = pq.ParquetFile
+    tries: list[int] = []
+
+    def flaky(p: object) -> pq.ParquetFile:
+        tries.append(1)
+        if len(tries) < 3:
+            raise BlockingIOError(11, "Resource temporarily unavailable")
+        return real(p)  # type: ignore[arg-type]
+
+    def no_wait(_s: float) -> None:
+        return None
+
+    monkeypatch.setattr(pq, "ParquetFile", flaky)
+    monkeypatch.setattr(time, "sleep", no_wait)
+    assert refinery.open_parquet(path).metadata.num_rows == 2
+    assert len(tries) == 3
+
+    tries.clear()
+    monkeypatch.setattr(refinery, "OPEN_TRIES", 2)
+    with pytest.raises(BlockingIOError):
+        refinery.open_parquet(path)

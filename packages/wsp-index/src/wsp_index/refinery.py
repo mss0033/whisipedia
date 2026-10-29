@@ -37,6 +37,7 @@ import logging
 import os
 import re
 import threading
+import time
 from collections import Counter, OrderedDict
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -55,6 +56,25 @@ from wsp_core.model import ChangeRecord, DocRecord
 from wsp_index.localfs import REMOTE_FS_TYPES, filesystem_type
 
 log = logging.getLogger(__name__)
+
+# The Refinery sits on the NAS, which refuses an open for a moment when it is saturated (EAGAIN):
+# the nightly build died on one part of 1,300 (2026-10-28). Opening again a few times costs nothing.
+OPEN_TRIES = 5
+_SHARE_TRANSIENT: tuple[type[OSError], ...] = (BlockingIOError, ConnectionError, TimeoutError)
+
+
+def open_parquet(path: Path | str) -> pq.ParquetFile:
+    """``pq.ParquetFile(path)``, opened again after 2, 4, 8, 16 s when the share refuses for a moment."""
+    for attempt in range(1, OPEN_TRIES + 1):
+        try:
+            return pq.ParquetFile(path)
+        except _SHARE_TRANSIENT as exc:
+            if attempt == OPEN_TRIES:
+                raise
+            log.warning("%s: %s; opening again (%d of %d)", path, exc, attempt + 1, OPEN_TRIES)
+            time.sleep(2.0**attempt)
+    raise AssertionError("unreachable")
+
 
 FORMAT_VERSION = 2  # 2: ``aliases`` column (port revision v0.2); older generations are rebuilt
 SUCCESS_FILE = "_SUCCESS.json"
@@ -358,7 +378,7 @@ class RefineryWriter:
             use_dictionary=["source_id", "lang", "license"],  # pyright: ignore[reportArgumentType]
             write_statistics=["doc_id"],
         )
-        meta = pq.ParquetFile(partial).metadata
+        meta = open_parquet(partial).metadata
         if meta.num_rows != len(self._buf):
             raise RefineryError(f"read-back mismatch in {partial}")
         # Row -> (row group, offset) from the actual row-group sizes written.
@@ -460,7 +480,7 @@ def _duplicates_mask(
     for i in rows_needed.tolist():
         by_part.setdefault(int(loc[i, 0]), {}).setdefault(int(loc[i, 1]), []).append(i)
     for part, groups_of_part in sorted(by_part.items()):
-        pf = pq.ParquetFile(directory / f"part-{part:05d}.parquet")
+        pf = open_parquet(directory / f"part-{part:05d}.parquet")
         for rg, members in sorted(groups_of_part.items()):
             column = pf.read_row_group(rg, columns=["doc_id"]).column(0)  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
             for i in members:
@@ -622,7 +642,7 @@ def _write_id_map(gen_dir: Path, n: int, out_dir: Path) -> None:
         h = np.lib.format.open_memmap(hp, mode="w+", dtype=np.uint64, shape=(n,))
         loc = np.lib.format.open_memmap(lp, mode="w+", dtype=np.uint32, shape=(n, 3))
         i = 0
-        source = pq.ParquetFile(gen_dir / IDS_FILE)
+        source = open_parquet(gen_dir / IDS_FILE)
         batches = source.iter_batches(batch_size=1 << 20, columns=["h", "part", "rg", "row"])  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
         for batch in batches:
             k = batch.num_rows
@@ -653,7 +673,7 @@ def ensure_id_map(gen_dir: Path, map_dir: Path) -> bool:
     first lookup, streaming the whole ``_ids.parquet`` over the NAS inside a request (ADR-0011).
     Returns True when a map was written."""
     reader = RefineryReader(gen_dir, map_ids=True, map_dir=map_dir)
-    n = int(pq.ParquetFile(gen_dir / IDS_FILE).metadata.num_rows)  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
+    n = int(open_parquet(gen_dir / IDS_FILE).metadata.num_rows)  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
     if reader._mapped_ids(n) is not None:  # pyright: ignore[reportPrivateUsage]
         return False
     _write_id_map(gen_dir, n, map_dir)
@@ -767,7 +787,7 @@ class RefineryReader:
         sorted by hash); ``None`` when it has no statistics."""
         with self._id_groups_lock:
             if self._id_groups is None:
-                pf = pq.ParquetFile(self.dir / IDS_FILE)
+                pf = open_parquet(self.dir / IDS_FILE)
                 bounds: list[tuple[int, int]] = []
                 for i in range(pf.metadata.num_row_groups):  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
                     stats = pf.metadata.row_group(i).column(0).statistics  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
@@ -820,7 +840,7 @@ class RefineryReader:
         npt.NDArray[np.uint64], npt.NDArray[np.uint32], npt.NDArray[np.uint32], npt.NDArray[np.uint32]
     ]:
         """The id index, memory-mapped from its sidecar (written on first use); in memory if it cannot be."""
-        n = int(pq.ParquetFile(self.dir / IDS_FILE).metadata.num_rows)  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
+        n = int(open_parquet(self.dir / IDS_FILE).metadata.num_rows)  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
         try:
             mapped = self._mapped_ids(n)
             if mapped is None and self._map_ids and self._map_dir is not None:
@@ -893,7 +913,7 @@ class RefineryReader:
         # Opened outside the lock: the footer read is a network round trip on the NAS, and the lock
         # also guards the row-group cache every other reader of this generation needs.
         # No memory_map: a page fault on a soft SMB mount would be a SIGBUS, not an OSError.
-        opened = (pq.ParquetFile(self.dir / f"part-{part:05d}.parquet"), threading.Lock())
+        opened = (open_parquet(self.dir / f"part-{part:05d}.parquet"), threading.Lock())
         with self._lock:
             entry = self._files.get(part)
             if entry is None:
@@ -983,7 +1003,7 @@ class RefineryReader:
 
     def part_table(self, part: int, columns: Sequence[str]) -> tuple[pa.Table, npt.NDArray[np.int64]]:
         """Live rows of one part (``columns`` only) and each row's position within the part file."""
-        pf = pq.ParquetFile(self.dir / f"part-{part:05d}.parquet")
+        pf = open_parquet(self.dir / f"part-{part:05d}.parquet")
         table = pf.read(columns=self._present(pf, columns))  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
         live = self._live(part, pf)
         if live is None:
@@ -994,7 +1014,7 @@ class RefineryReader:
         self, part: int, positions: npt.NDArray[np.int64], columns: Sequence[str] = COLUMNS
     ) -> pa.Table:
         """Rows at ``positions`` (sorted positions within the part file), reading only their row groups."""
-        pf = pq.ParquetFile(self.dir / f"part-{part:05d}.parquet")
+        pf = open_parquet(self.dir / f"part-{part:05d}.parquet")
         meta = pf.metadata
         sizes = np.array([meta.row_group(i).num_rows for i in range(meta.num_row_groups)], dtype=np.int64)
         ends = np.cumsum(sizes)
@@ -1022,7 +1042,7 @@ class RefineryReader:
     def _scan_part(
         self, part: int, path: Path, columns: Sequence[str], batch_size: int
     ) -> Iterator[pa.RecordBatch]:
-        pf = pq.ParquetFile(path)
+        pf = open_parquet(path)
         present = self._present(pf, columns)
         live = self._live(part, pf)
         if live is None:
@@ -1047,7 +1067,7 @@ class RefineryReader:
                 return SCHEMA.empty_table().select(list(columns))
             return pa.Table.from_batches(batches)
         parts = [
-            pq.read_table(p, columns=self._present(pq.ParquetFile(p), columns))  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
+            pq.read_table(p, columns=self._present(open_parquet(p), columns))  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
             for p in self.parts
         ]
         if not parts:
