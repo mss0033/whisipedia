@@ -216,12 +216,23 @@ class LlamaServer:
         with self._lock:
             self._last_used = self._clock()
             if self._state == "ready":
-                return
+                if self._proc is not None and self._proc.poll() is None:
+                    return
+                # The server died after it was ready (a CUDA error, its memory ceiling): every request
+                # failed as "did not answer" and kept it looking busy (2026-10-26 review #26).
+                code = None if self._proc is None else self._proc.returncode
+                log.warning("translation server exited (%s) while ready: starting it again", code)
+                self._state, self._proc = "stopped", None
             if self._state == "starting":
                 raise TranslationUnavailable("the translator is starting", retry_after=10)
             if (why := self.missing()) is not None:
                 raise TranslationUnavailable(why)
             free = self._vram()
+            if free is not None and free < self.cfg.min_free_vram_mb:
+                # Not ours while stopped: a server an API that crashed left behind holds the card.
+                # Stopped before anything else is asked to give memory back (2026-10-26 review #24).
+                self._run(["systemctl", "--user", "stop", f"{UNIT}.scope"])
+                free = self._vram()
             if free is not None and free < self.cfg.min_free_vram_mb:
                 self._release()
                 free = self._vram()

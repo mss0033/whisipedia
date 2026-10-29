@@ -230,3 +230,47 @@ def test_a_cached_answer_is_judged_again_by_todays_checks(tmp_path: Path) -> Non
         assert len(calls) == 1
     finally:
         t.close()
+
+
+def test_an_orphaned_server_is_stopped_and_a_dead_one_is_started_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-10-26 review #24: after an API crash, the old llama-server held the GPU and every request
+    was refused as 'GPU busy'. #26: a server that died while ready was never started again."""
+    started: list[int] = []
+
+    def no_start(_self: LlamaServer) -> None:  # never a real server in a test
+        started.append(1)
+
+    monkeypatch.setattr(LlamaServer, "_start", no_start)
+    model, binary = tmp_path / "m.gguf", tmp_path / "llama-server"
+    model.write_bytes(b"gguf")
+    binary.write_bytes(b"")
+    cfg = TranslationConfig(model=str(model), server=str(binary), min_free_vram_mb=15500)
+    free = [1000]
+    ran: list[list[str]] = []
+
+    def run(argv: Sequence[str]) -> int:
+        ran.append(list(argv))
+        if argv[:3] == ["systemctl", "--user", "stop"]:
+            free[0] = 23000  # the orphan's memory comes back
+        return 0
+
+    server = LlamaServer(cfg, log_path=tmp_path / "log", run=run, vram=lambda: free[0])
+    with pytest.raises(TranslationUnavailableError) as starting:
+        server.ensure()
+    assert "starting" in str(starting.value)  # not "GPU busy"
+    assert ran[0] == ["systemctl", "--user", "stop", "whisipedia-translate.scope"]
+
+    class Dead:
+        returncode = -11
+
+        def poll(self) -> int:
+            return -11
+
+    restarted = LlamaServer(cfg, log_path=tmp_path / "log", run=lambda argv: 0, vram=lambda: 23000)
+    restarted._state, restarted._proc = "ready", Dead()  # pyright: ignore[reportPrivateUsage, reportAttributeAccessIssue]
+    with pytest.raises(TranslationUnavailableError) as again:
+        restarted.ensure()
+    assert "starting" in str(again.value)
+    assert len(started) == 2
