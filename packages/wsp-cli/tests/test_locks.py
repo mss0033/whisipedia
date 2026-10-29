@@ -114,3 +114,27 @@ def test_a_dead_waiters_ticket_does_not_hold_up_the_queue(tmp_path: Path) -> Non
     with exclusive(tmp_path, "ingest", wait=10, queue=True):
         assert time.monotonic() - t0 < 1
     assert list(queue.iterdir()) == []
+
+
+def test_an_endless_wait_takes_the_lock_without_a_timer(tmp_path: Path) -> None:
+    """2026-10-26 review #37: `wsp ingest --wait inf` crashed with OverflowError in setitimer."""
+    import threading
+    import time
+
+    from wsp_cli.locks import exclusive
+
+    got: list[str] = []
+    with exclusive(tmp_path, "ingest"):
+        t = threading.Thread(target=lambda: _take(tmp_path, got))
+        t.start()
+        time.sleep(0.3)
+        assert got == []  # waiting in the queue, not crashed
+    t.join(timeout=10)
+    assert got == ["took it"]
+
+
+def _take(lock_dir: Path, got: list[str]) -> None:
+    from wsp_cli.locks import exclusive
+
+    with exclusive(lock_dir, "ingest", wait=float("inf"), queue=True, poll=0.05):
+        got.append("took it")

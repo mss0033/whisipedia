@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import contextlib
 import fcntl
+import math
 import os
 import signal
 import time
@@ -82,6 +83,9 @@ class _QueueTimeoutError(Exception):
     pass
 
 
+MAX_TIMED_WAIT = 365 * 86400.0  # longer is "forever" (setitimer overflows on huge values)
+
+
 def _block_for(fd: int, path: Path, name: str, wait: float) -> None:
     """Block in ``flock`` for at most ``wait`` seconds (a real-time timer interrupts it)."""
     try:
@@ -89,6 +93,10 @@ def _block_for(fd: int, path: Path, name: str, wait: float) -> None:
         return
     except BlockingIOError:
         pass
+
+    if not math.isfinite(wait) or wait > MAX_TIMED_WAIT:  # no timer holds that: block outright
+        fcntl.flock(fd, fcntl.LOCK_EX)  # (`--wait inf` crashed with OverflowError: review #37)
+        return
 
     def expire(_signum: int, _frame: object) -> None:
         raise _QueueTimeoutError

@@ -66,10 +66,12 @@ _WORD_TEXT: dict[str, tuple[str, tuple[int, ...]]] = {
         (*range(2, 21), *_TENS),
     ),
     "it": (
-        "due tre quattro cinque sei sette otto nove dieci undici dodici tredici quattordici quindici "
-        "sedici diciassette diciotto diciannove venti trenta quaranta cinquanta sessanta settanta "
+        # "sei" (you are), "otto" (the name Otto) and "venti" (winds) are left out: as words they are
+        # far more often not numbers (2026-10-26 review #102)
+        "due tre quattro cinque sette nove dieci undici dodici tredici quattordici quindici "
+        "sedici diciassette diciotto diciannove trenta quaranta cinquanta sessanta settanta "
         "ottanta novanta",
-        (*range(2, 21), *_TENS),
+        (2, 3, 4, 5, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, *_TENS),
     ),
     "pt": (
         "dois duas três quatro cinco seis sete oito nove dez onze doze treze catorze quinze dezesseis "
@@ -122,8 +124,10 @@ _STOP = {
     "it": r"\b(il|lo|gli|della|che|è|per|con|una|sono|nel|alla)\b",
     "pt": r"\b(os|das|dos|que|uma|para|com|não|por|mais|como|são)\b",
 }
+# "The translation of the Bible ..." is a sentence, not a frame: a frame is followed by a colon or a
+# line break ("Here is the translation:", "English translation:\n") (2026-10-26 review #107).
 _FRAMING = re.compile(
-    r"^(here is|here's|sure[,!]|the translation|translation:|english translation)|"
+    r"^(here is|here's|sure[,!]|the translation|english translation)[^.\n]{0,40}(:|\n)|^translation:|"
     r"\n\s*(note|notes|translator'?s note|explanation)\s*:|\(note:|\[note",
     re.IGNORECASE,
 )
@@ -260,7 +264,8 @@ _BOTH = re.compile(
 def numbers_differ(source: str, target: str, lang: str) -> str | None:
     """Why the numbers do not match, or None. A number may change script (digits, words) or how it
     is written ("1400万", "14 million"), not its value."""
-    src, tgt = _numbers(source, lang), _numbers(target, "en")
+    # "les deux pays" is "both countries": a "both" phrase is not the number two (review #102).
+    src, tgt = _numbers(_BOTH.sub(" ", source), lang), _numbers(target, "en")
     unmatched_tgt = list(range(len(tgt)))
     missing: list[str] = []
     for keys in src:

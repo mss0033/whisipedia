@@ -207,7 +207,11 @@ def _items_from_survey(survey: Survey, rule: Sequence[str], page_ext: str) -> li
     unresolved = set(survey.unresolved_keys)
     for cand in survey.allowed:
         name = cand.extra.get("save_as") or _url_name(cand.url)
-        if "." not in name:  # GEBCO's ".../gebco_2024/zip/": the number and the stored extension
+        if not _plain_file_name(name):  # a note in the registry's save_as, or a path: not a name
+            name = _url_name(cand.url)
+        if "." not in name or not _plain_file_name(
+            name
+        ):  # GEBCO's ".../gebco_2024/zip/": the number and the stored extension
             stem = key_part(cand.pub_number or cand.key.partition(":")[2])
             name = stem + (cand.extra.get("suffix") or Path(cand.file_name).suffix)
         # The name travels with the candidate: the import takes exactly the file the page asked for.
@@ -223,6 +227,16 @@ def _items_from_survey(survey: Survey, rule: Sequence[str], page_ext: str) -> li
         doc = cand.with_url(cand.url, extra={**cand.extra, "save_as": name})
         out.append(Item(cand.key, _browse(cand.url, rule), name, cand.title, page=True, cand=doc.to_json()))
     return out
+
+
+_PLAIN_NAME = re.compile(r"^[^\s/\\:*?\"<>|]{1,150}\.[A-Za-z0-9]{1,8}(?:\.[A-Za-z0-9]{1,4})?$")
+
+
+def _plain_file_name(name: str) -> bool:
+    """A name a person can save a file under on Windows: no spaces, separators or reserved characters,
+    and an extension ("ChEBI_complete.sdf.gz"). A registry save_as held the sentence "unknown after the
+    ChEBI 2.0 relaunch ..." and the daily page asked for it (2026-10-26 review #36)."""
+    return bool(_PLAIN_NAME.match(name))
 
 
 def _url_name(url: str) -> str:

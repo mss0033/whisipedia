@@ -88,6 +88,15 @@ def test_a_translation_that_fails_a_check_is_not_shown(
         ("Geöffnet von 10.15 bis 11.45 Uhr.", "Open from 10:15 to 11:45.", "de"),
         ("Im Jahr 1990 starben 300 Soldaten.", "In 1990, 300 soldiers died.", "de"),
         ("Es kostet 12 345 678 Euro.", "It costs 12,345,678 euros.", "de"),
+        # Words that are numbers only sometimes, and a framing phrase that is a sentence (review #102, #107).
+        ("Tu sei il mio migliore amico.", "You are my best friend.", "it"),
+        ("Otto von Bismarck fu un politico prussiano.", "Otto von Bismarck was a Prussian politician.", "it"),
+        ("Les deux pays ont signé le traité.", "Both countries signed the treaty.", "fr"),
+        (
+            "Die Übersetzung der Bibel ins Deutsche durch Luther war wichtig.",
+            "The translation of the Bible into German by Luther was important.",
+            "de",
+        ),
     ],
 )
 def test_a_faithful_translation_passes(source: str, target: str, lang: str) -> None:
