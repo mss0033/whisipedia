@@ -45,6 +45,18 @@ def test_order_is_date_then_seal_time_never_the_digest(tmp_path: Path) -> None:
     assert earlier_generations(newer) == [older, early, late]
 
 
+def test_a_bundle_release_whose_newest_book_left_still_sorts_after_the_earlier_one(tmp_path: Path) -> None:
+    """2026-10-26 review: a bundle's id date is its newest book's; when that book left the selection the
+    later release's id date went back to September and it sorted first."""
+    lib = tmp_path / "src"
+    first = _gen(lib, "2026-10-aaaaaaaa", "2026-10-05T00:00:00")
+    later = _gen(lib, "2026-09-bbbbbbbb", "2026-10-25T00:00:00")
+    staging = _gen(lib, "2026-09-cccccccc")  # not sealed yet: the newest
+    order = sorted([later, staging, first], key=generation_order_key)
+    assert [p.name for p in order] == [first.name, later.name, staging.name]
+    assert earlier_generations(later) == [first]
+
+
 def test_files_across_generations_prefers_the_newest_copy(tmp_path: Path) -> None:
     lib = tmp_path / "src"
     _gen(lib, "2026-09-01+aaaaaaaa", "2026-09-01T00:00:00", a_txt=b"a1", b_txt=b"b1")

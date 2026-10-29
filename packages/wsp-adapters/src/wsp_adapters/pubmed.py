@@ -52,6 +52,7 @@ from wsp_adapters._common import (
     workers_for,
 )
 from wsp_adapters._streams import Bitset, Throttle, listing_links, listing_rows, open_any
+from wsp_core.errors import FetchError
 from wsp_core.ids import content_hash, make_doc_id
 from wsp_core.model import (
     Checksum,
@@ -246,6 +247,7 @@ class PubmedAdapter:
         cache.save()
         baseline = [n for n in names if found[n][0] == 0]
         updates = [n for n in names if found[n][0] > 0]
+        _check_baseline(ctx.workdir / BASELINE_SIZES, int(year), len(baseline))
         version = f"pubmed{year}"
         if updates:
             version += f"-u{keys[updates[-1]][1]:04d}"
@@ -292,6 +294,29 @@ class PubmedAdapter:
                 if pmid not in seen:
                     seen.add(pmid)
                     yield doc_from_row(row)
+
+
+BASELINE_SIZES = "pubmed-baseline-files.json"  # year -> the most baseline files seen listed
+BASELINE_SHARE = 0.9  # a new year's baseline smaller than this share of the last one is still uploading
+
+
+def _check_baseline(path: Path, year: int, count: int) -> None:
+    """Refuse a new year's baseline listed while NCBI is still uploading it: files 1..600 of about 1,334
+    would have become release ``pubmed<yy>`` and dropped half of PubMed (2026-10-26 review). A year's
+    baseline must reach :data:`BASELINE_SHARE` of the previous year's (as seen in earlier listings)."""
+    try:
+        seen = {int(k): int(v) for k, v in json.loads(path.read_text(encoding="utf-8")).items()}
+    except (OSError, ValueError, AttributeError):
+        seen = {}
+    before = seen.get(year - 1)
+    seen[year] = max(seen.get(year, 0), count)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({str(k): v for k, v in sorted(seen.items())}), encoding="utf-8")
+    if before and count < BASELINE_SHARE * before:
+        raise FetchError(
+            f"PubMed's {2000 + year} baseline lists {count} files, the previous year's {before}: "
+            "still being uploaded; the release waits"
+        )
 
 
 @dataclass(frozen=True, slots=True)

@@ -510,8 +510,10 @@ def index_page(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
         if fmt:
             try:
                 stamp = datetime.strptime(stamp, fmt).strftime("%Y-%m-%d")
-            except ValueError:
-                continue  # not a date of this series: not a candidate for the newest
+            except ValueError:  # not a date of this series: listed as it is, like a URL that does
+                env.notes.append(f"newest: {cand.url}: {stamp!r} is not a {fmt} date; listed as it is")
+                yield cand  # not match (it was dropped without a word: 2026-10-26 review)
+                continue
         if series not in best or stamp > best[series][0]:
             best[series] = (stamp, cand)
     for _stamp, cand in best.values():

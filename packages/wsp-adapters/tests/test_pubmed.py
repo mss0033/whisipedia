@@ -282,3 +282,15 @@ def test_a_pmid_repeated_within_one_file_keeps_its_last_copy(tmp_path: Path) -> 
     gen = _gen(tmp_path / "pubmed", "pubmed26", {"pubmed26n0001.xml.gz": data})
     docs = list(PubmedAdapter().documents(make_ctx(SPEC, FakeFetcher(), tmp_path / "w"), gen))
     assert [(d.native_id, d.title.split(" in vitro")[0]) for d in docs] == [("7", "Corrected title.")]
+
+
+def test_a_new_baseline_still_being_uploaded_is_not_a_release(tmp_path: Path) -> None:
+    """2026-10-26 review: files 1..600 of about 1,334 would have become the new year's release."""
+    from wsp_adapters.pubmed import _check_baseline  # pyright: ignore[reportPrivateUsage]
+    from wsp_core.errors import FetchError
+
+    sizes = tmp_path / "sizes.json"
+    _check_baseline(sizes, 26, 1334)
+    with pytest.raises(FetchError, match="still being uploaded"):
+        _check_baseline(sizes, 27, 600)
+    _check_baseline(sizes, 27, 1340)  # complete: a release

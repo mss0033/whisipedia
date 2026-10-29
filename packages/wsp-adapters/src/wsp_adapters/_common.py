@@ -163,7 +163,8 @@ def generation_order_key(gen: Path) -> tuple[str, str, str]:
     the vault sealed them (``MANIFEST.json`` ``sealed_at``), then by id.
 
     Ids that share a date (two bundle releases of one month, ``2026-08-<digest>``) differ only in a
-    digest, which says nothing about order; the seal time does.
+    digest, which says nothing about order; the seal time does. A sealed bundle release is ordered by
+    its seal time first: its id's date is its newest book's, which can go back between releases.
     """
     d = _DIGEST_SUFFIX_RE.match(gen.name)
     head = d.group("head") if d else gen.name
@@ -175,6 +176,11 @@ def generation_order_key(gen: Path) -> tuple[str, str, str]:
             sealed = str(cast(dict[str, object], doc).get("sealed_at") or "")
     except (OSError, ValueError):
         pass
+    if d is not None:
+        # A bundle's id date is its newest book's, which goes back when that book leaves the selection:
+        # a later release then sorted first. Its seal time is its release order; one not sealed yet is
+        # the newest (2026-10-26 review).
+        return (sealed or "\uffff", date, gen.name)
     return (date, sealed, gen.name)
 
 
