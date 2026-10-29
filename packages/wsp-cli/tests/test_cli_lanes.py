@@ -457,3 +457,19 @@ def test_jobs_listed_by_name_are_started_after_a_reboot_as_they_last_were(tmp_pa
     assert "restarted whisipedia-job-era5.service" in done.stdout
     assert started.read_text() == first
     assert "whisipedia-job-never-started.service: how it was started is not known" in done.stderr
+
+
+def test_an_ingest_that_yields_its_slice_goes_on_and_is_not_counted_busy(lane: Lane) -> None:
+    """2026-10-26 review #31: four one-hour slices of a 5-hour version counted as busy tries, and the
+    lane dropped it halfway with a false 'waiting for another ingest' alert."""
+    yielded = "3:ingest yielded (--max-seconds) so other ingests can run; run it again to continue"
+    lane.script(fetch=[0], ingest=[yielded] * 5 + [0])
+    assert lane.run("rg-21", source="nara") == 0
+    assert lane.done() == ["rg-21"]
+    assert sum(c.startswith("ingest") for c in lane.calls()) == 6
+    assert not [a for a in lane.alerts() if "waiting for another ingest" in a]
+
+    lane.script(fetch=[0], ingest=[yielded] * 3)
+    assert lane.run("rg-22", source="nara", LANE_MAX_SLICES="3") == 1  # a bound all the same
+    assert "rg-22" not in lane.done()
+    assert any("not finished after 3" in a for a in lane.alerts())

@@ -57,9 +57,10 @@ PARTIAL_WAIT=${LANE_PARTIAL_WAIT:-900}
 BUSY_TRIES=${LANE_BUSY_TRIES:-4}
 QUEUE_WAIT=${LANE_QUEUE_WAIT:-21600}
 BUSY_WAIT=${LANE_BUSY_WAIT:-5}
-# An ingest gives the lock up after this long (exit 3, like a held lock) and is asked again after
-# BUSY_WAIT, so one large version does not keep every other lane's ingest waiting for hours.
+# An ingest gives the lock up after this long (exit 3, "yielded") and queues again at once, so one
+# large version does not keep every other lane's ingest waiting for hours.
 INGEST_SLICE=${LANE_INGEST_SLICE:-3600}
+MAX_SLICES=${LANE_MAX_SLICES:-48}  # one-hour ingest slices of one version in a row, at most
 mkdir -p "$STATE/locks"
 DONE=$STATE/$NAME.done CYCLES=$STATE/$NAME.cycles FETCHED=$STATE/$NAME.fetched LOG=$STATE/$NAME.log
 touch "$DONE" "$CYCLES" "$FETCHED"
@@ -134,13 +135,22 @@ next_cycle() {
 # ingest_cycle: `wsp ingest --source $src --version $cyc` (partition too), waiting while another ingest
 # runs (exit 3). Sets irc.
 ingest_cycle() {
-  tries=0
+  tries=0 slices=0
   ingest_from=$(wc -c < "$out" 2>/dev/null || echo 0)
   while :; do
+    slice_from=$(wc -c < "$out" 2>/dev/null || echo 0)
     # shellcheck disable=SC2086  # $part is "--partition X" or empty, split on purpose
     run "$out" "$WSP" ingest --max-seconds "$INGEST_SLICE" --wait "$QUEUE_WAIT" --source "$src" $part --version "$cyc"
     irc=$?
     [ "$irc" -ne 3 ] && break
+    # Exit 3 is also "yielded after --max-seconds": progress, not a busy lock. It goes on at once (to
+    # the back of the queue) and is not a try; a 5-hour version used to be dropped halfway after four
+    # slices (2026-10-26 review #31). MAX_SLICES only stops a loop that never ends.
+    if tail -c +"$((slice_from + 1))" "$out" | grep -q 'ingest yielded (--max-seconds)'; then
+      slices=$((slices + 1))
+      [ "$slices" -lt "$MAX_SLICES" ] && { say "ingest $src $part --version $cyc: slice $slices done; going on"; continue; }
+      break
+    fi
     tries=$((tries + 1))
     [ "$tries" -ge "$BUSY_TRIES" ] && break
     pause "$BUSY_WAIT"
@@ -148,7 +158,13 @@ ingest_cycle() {
   say "ingest $src $part --version $cyc: exit $irc"
   case $irc in
     0 | 8) ;;
-    3) alert warning "ingest of cycle $cyc still waiting for another ingest after $tries tries" ;;
+    3)
+      if [ "$slices" -ge "$MAX_SLICES" ]; then
+        alert warning "ingest of cycle $cyc not finished after $slices one-hour slices; it goes on next run"
+      else
+        alert warning "ingest of cycle $cyc still waiting for another ingest after $tries tries"
+      fi
+      ;;
     *) alert critical "ingest of cycle $cyc failed (exit $irc): $(last_error "$ingest_from"). See $out; it is fetched again on the next run." ;;
   esac
 }
