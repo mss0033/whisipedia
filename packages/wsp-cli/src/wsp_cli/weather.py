@@ -511,20 +511,22 @@ def stage_files(
     return dest_dir
 
 
-INGEST_WAIT_S = 1200  # a pull waits this long for the lock, then leaves the seal to the next pull
+# A pull waits this long for the lock, then leaves the seal to the next pull: with its priority ticket
+# it is next after the holder, whose slice is at most an hour (lane --max-seconds 3600) and a file.
+INGEST_WAIT_S = 3900
 
 
 def run_ingest(config_dir: Path | None, source: str, version: str, *, wait: float = 0) -> tuple[int, str]:
     """``wsp ingest --source S --version V`` in a child process: its exit code and last line. With
     ``wait``, it first waits up to that many seconds for its turn in the ingest lock's queue (``--wait``:
-    first come, first served; exit 3 when the wait runs out). A raw flock(1) wrapper jumped that queue
-    (2026-10-26 review)."""
+    a priority place, ahead of the lanes' waiting slices; exit 3 when the wait runs out). A raw flock(1)
+    wrapper jumped that queue (2026-10-26 review)."""
     argv = [sys.executable, "-m", "wsp_cli"]
     if config_dir is not None:
         argv += ["--config-dir", str(config_dir)]
     argv += ["ingest", "--source", source, "--version", version]
     if wait > 0:
-        argv += ["--wait", str(int(wait))]
+        argv += ["--wait", str(int(wait)), "--priority"]
     try:
         done = subprocess.run(argv, capture_output=True, text=True, check=False, timeout=6 * 3600 + wait)  # noqa: S603
     except subprocess.TimeoutExpired:

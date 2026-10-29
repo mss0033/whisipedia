@@ -102,6 +102,34 @@ def test_queued_waiters_take_the_lock_in_the_order_they_came(tmp_path: Path) -> 
     assert not list((tmp_path / "ingest.queue").glob("*"))  # every ticket removed
 
 
+_PRIORITY_WAITER = _WAITER.replace("queue=True,", "queue=True,priority=sys.argv[3]=='urgent',")
+
+
+def test_a_priority_waiter_goes_before_those_already_waiting(tmp_path: Path) -> None:
+    # 2026-10-29: weather forecasts waited behind six one-hour lane slices and none was sealed for
+    # three days.
+    import subprocess
+    import sys
+    import time
+
+    from wsp_cli.locks import exclusive
+
+    order = tmp_path / "order"
+    with exclusive(tmp_path, "ingest"):
+        waiters: list[subprocess.Popen[bytes]] = []
+        for name in ("lane1", "lane2", "urgent"):
+            waiters.append(
+                subprocess.Popen(
+                    [sys.executable, "-c", _PRIORITY_WAITER, str(tmp_path), str(order), name, *sys.path]
+                )
+            )
+            time.sleep(0.5)
+        time.sleep(2.5)  # lane1 is at the front, blocked in flock, when urgent comes
+    for w in waiters:
+        assert w.wait(30) == 0
+    assert order.read_text().split() == ["urgent", "lane1", "lane2"]
+
+
 def test_a_dead_waiters_ticket_does_not_hold_up_the_queue(tmp_path: Path) -> None:
     import time
 

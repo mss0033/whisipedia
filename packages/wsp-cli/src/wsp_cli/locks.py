@@ -28,6 +28,7 @@ import fcntl
 import math
 import os
 import signal
+import threading
 import time
 from collections.abc import Callable, Generator
 from pathlib import Path
@@ -134,7 +135,10 @@ def _alive(ticket: Path) -> bool:
     return False
 
 
-def _queue_for(fd: int, path: Path, name: str, wait: float, poll: float) -> None:
+_RECHECK_S = 1.0  # how often the front waiter, blocked in flock, looks for a priority ticket
+
+
+def _queue_for(fd: int, path: Path, name: str, wait: float, poll: float, *, priority: bool = False) -> None:
     """Take the lock in turn: first come, first served among queued waiters.
 
     A blocked ``flock`` is not a queue: the kernel wakes every waiter and whichever runs first takes
@@ -147,18 +151,34 @@ def _queue_for(fd: int, path: Path, name: str, wait: float, poll: float) -> None
     """
     queue = path.with_name(f"{name}.queue")
     queue.mkdir(exist_ok=True)
-    mine = queue / f"{time.time_ns():020d}-{os.getpid()}"
+    # A priority ticket ("0" prefix: before every normal one, which starts with the time's own "1";
+    # first come among themselves) is for a short, time-bound ingest: weather forecasts waited 20
+    # minutes behind six one-hour lane slices, lost their turn every pull, and none was sealed for
+    # three days (2026-10-29).
+    mine = queue / f"{'0' if priority else ''}{time.time_ns():020d}-{os.getpid()}"
     draft = queue / f".{mine.name}"
     tfd = os.open(draft, os.O_RDWR | os.O_CREAT, 0o644)
     deadline = time.monotonic() + wait
     try:
         fcntl.flock(tfd, fcntl.LOCK_EX)
         os.rename(draft, mine)
-        while any(t.name < mine.name and _alive(t) for t in queue.iterdir() if not t.name.startswith(".")):
-            if time.monotonic() >= deadline:
-                raise LockHeldError(_held_message(path, name))
-            time.sleep(min(poll, max(0.0, deadline - time.monotonic())))
-        _block_for(fd, path, name, deadline - time.monotonic())
+        while True:
+            while any(
+                t.name < mine.name and _alive(t) for t in queue.iterdir() if not t.name.startswith(".")
+            ):
+                if time.monotonic() >= deadline:
+                    raise LockHeldError(_held_message(path, name))
+                time.sleep(min(poll, max(0.0, deadline - time.monotonic())))
+            # Blocked in slices, so a priority ticket that comes while the front waiter is blocked
+            # still goes before it; a blocked flock still takes the lock the moment it is released.
+            try:
+                remaining = deadline - time.monotonic()
+                main = threading.current_thread() is threading.main_thread()  # a timer is the main thread's
+                _block_for(fd, path, name, min(remaining, _RECHECK_S) if main else remaining)
+                return
+            except LockHeldError:
+                if time.monotonic() >= deadline:
+                    raise
     finally:
         for ticket in (mine, draft):
             with contextlib.suppress(OSError):
@@ -175,6 +195,7 @@ def exclusive(
     poll: float = 5.0,
     cancel: Callable[[], bool] | None = None,
     queue: bool = False,
+    priority: bool = False,
 ) -> Generator[Path]:
     """Hold ``<lock_dir>/<name>.lock`` for the duration.
 
@@ -203,7 +224,7 @@ def exclusive(
     try:
         deadline = None if wait is None else time.monotonic() + wait
         if queue and wait is not None:
-            _queue_for(fd, path, name, wait, min(poll, 2.0))
+            _queue_for(fd, path, name, wait, min(poll, 2.0), priority=priority)
         while not queue or wait is None:
             try:
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)

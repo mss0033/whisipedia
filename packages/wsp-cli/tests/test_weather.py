@@ -493,7 +493,7 @@ def test_an_archive_ingest_waits_its_turn_in_the_ingest_queue(monkeypatch: pytes
 
     monkeypatch.setattr(subprocess, "run", run)
     assert w.run_ingest(None, "weather-gfs", "2026-10-26.r1", wait=1200) == (0, "sealed")
-    assert seen[0][-2:] == ["--wait", "1200"]
+    assert seen[0][-3:] == ["--wait", "1200", "--priority"]  # ahead of the lanes (2026-10-29)
     assert "/bin/sh" not in seen[0]
 
 
