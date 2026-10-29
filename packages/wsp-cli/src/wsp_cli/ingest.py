@@ -67,6 +67,7 @@ from pathlib import Path
 from typing import Any, TextIO, cast
 
 from wsp_adapters.kiwix import KiwixOpdsAdapter, Selector
+from wsp_cli import nasretry
 from wsp_core import diag
 from wsp_core.model import Checksum, Generation, SourceSpec, SourceStatus
 from wsp_core.ports import Ctx, Fetcher
@@ -508,8 +509,14 @@ class Ingestor:
                 started = time.monotonic()
                 # A verified file replaces a different one staged by an interrupted ingest of the same
                 # version (re-fetched since: the plan is the newer truth, H2); unverifiable ones never.
-                self.vault.adopt(
-                    sid, gid, f.path, f.target.relpath, upstream=f.checksums, replace_staged=f.verifiable
+                # The share refused for a moment (ECONNABORTED, EAGAIN) mid-adoption: tried again
+                # (adopt resumes from any step); a NARA partition of 401 files failed on one, and its
+                # lane fetched it all again (2026-10-28).
+                nasretry.retrying(
+                    f"adopt {f.target.name}",
+                    lambda f=f: self.vault.adopt(
+                        sid, gid, f.path, f.target.relpath, upstream=f.checksums, replace_staged=f.verifiable
+                    ),
                 )
                 f.state = FileState.STAGED
                 how = "verified" if f.verifiable else "unverifiable"
