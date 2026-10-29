@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import pytest
+
 from wsp_core.robots import Robots, parse, product_token
 
 UA = "Whisipedia/0.1 (personal offline archive)"
@@ -56,3 +60,22 @@ def test_robots_txt_itself_percent_encoding_and_non_files() -> None:
     bom = parse("﻿User-agent: *\nDisallow: /x\n".encode())
     assert bom is not None
     assert not bom.can_fetch(UA, "https://e.org/x")  # a byte-order mark does not hide the first rule
+
+
+def test_an_unreachable_robots_txt_disallows_for_30_days_then_counts_as_absent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """RFC 9309 2.3.1.4; api.govinfo.gov answers its robots.txt with a 500 (2026-10-28)."""
+    from datetime import UTC, datetime, timedelta
+
+    from wsp_core import robots
+
+    site = "https://api.govinfo.gov"
+    t0 = datetime(2026, 10, 28, tzinfo=UTC)
+    assert robots.unreachable_long(site, now=t0) is False  # no record kept: always disallowed
+    monkeypatch.setenv(robots.UNREACHABLE_ENV, str(tmp_path / "unreachable.json"))
+    assert robots.unreachable_long(site, now=t0) is False
+    assert robots.unreachable_long(site, now=t0 + timedelta(days=29)) is False  # counted from the first
+    assert robots.unreachable_long(site, now=t0 + timedelta(days=30)) is True
+    robots.reachable(site)  # read again: the count starts over
+    assert robots.unreachable_long(site, now=t0 + timedelta(days=31)) is False

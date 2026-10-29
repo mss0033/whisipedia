@@ -4,7 +4,9 @@
     {
       "id": "stanford-encyclopedia-philosophy",
       "kind": "copyright",
-      "sources": ["stanford-encyclopedia-philosophy"],
+      "sources": [
+        "stanford-encyclopedia-philosophy"
+      ],
       "publisher": "Stanford Encyclopedia of Philosophy (Metaphysics Research Lab, Stanford University)",
       "to": "editors@plato.stanford.edu",
       "contact_url": "https://plato.stanford.edu/contact.html",
@@ -15,7 +17,9 @@
     {
       "id": "hesperian-health-guides",
       "kind": "copyright",
-      "sources": ["hesperian-health-guides"],
+      "sources": [
+        "hesperian-health-guides"
+      ],
       "publisher": "Hesperian Health Guides",
       "to": "permissions@hesperian.org",
       "contact_url": "https://hesperian.org/open-copyright-policy/",
@@ -26,7 +30,9 @@
     {
       "id": "sphere-handbook",
       "kind": "copyright",
-      "sources": ["sphere-handbook"],
+      "sources": [
+        "sphere-handbook"
+      ],
       "publisher": "Sphere Association",
       "to": "info@spherestandards.org",
       "contact_url": "https://spherestandards.org/intellectual-property",
@@ -37,7 +43,9 @@
     {
       "id": "uk-mod-doctrine",
       "kind": "copyright",
-      "sources": ["uk-mod-doctrine"],
+      "sources": [
+        "uk-mod-doctrine"
+      ],
       "publisher": "UK Ministry of Defence, Development, Concepts and Doctrine Centre (DCDC)",
       "to": "DCDC-DocEds@mod.gov.uk",
       "contact_url": "https://www.gov.uk/government/organisations/development-concepts-and-doctrine-centre",
@@ -48,7 +56,9 @@
     {
       "id": "nchfp-uga",
       "kind": "copyright",
-      "sources": ["usda-home-canning"],
+      "sources": [
+        "usda-home-canning"
+      ],
       "publisher": "National Center for Home Food Preservation, University of Georgia",
       "to": "",
       "contact_url": "https://nchfp.uga.edu/contact_us",
@@ -59,7 +69,10 @@
     {
       "id": "kiwix",
       "kind": "crawl",
-      "sources": ["all Kiwix sources (about 150 ZIM files)", "kiwix-checksums"],
+      "sources": [
+        "all Kiwix sources (about 150 ZIM files)",
+        "kiwix-checksums"
+      ],
       "publisher": "Kiwix",
       "to": "contact+mirror@kiwix.org",
       "cc_note": "hello@kiwix.org is Kiwix's general address",
@@ -73,7 +86,11 @@
     {
       "id": "ncbi",
       "kind": "crawl",
-      "sources": ["pubmed", "pubchem", "ncbi-bookshelf"],
+      "sources": [
+        "pubmed",
+        "pubchem",
+        "ncbi-bookshelf"
+      ],
       "publisher": "US National Library of Medicine, National Center for Biotechnology Information",
       "to": "",
       "contact_url": "https://support.nlm.nih.gov/",
@@ -86,7 +103,9 @@
     {
       "id": "wbdg",
       "kind": "crawl",
-      "sources": ["wbdg-criteria"],
+      "sources": [
+        "wbdg-criteria"
+      ],
       "publisher": "National Institute of Building Sciences (Whole Building Design Guide)",
       "to": "wbdg@nibs.org",
       "contact_url": "https://www.wbdg.org/",
@@ -99,7 +118,9 @@
     {
       "id": "uniprot",
       "kind": "crawl",
-      "sources": ["ebi-uniprot-bulk"],
+      "sources": [
+        "ebi-uniprot-bulk"
+      ],
       "publisher": "UniProt Consortium (EMBL-EBI, SIB, PIR)",
       "to": "help@uniprot.org",
       "contact_url": "https://www.uniprot.org/contact",
@@ -112,7 +133,9 @@
     {
       "id": "cod",
       "kind": "crawl",
-      "sources": ["cod-full-archive"],
+      "sources": [
+        "cod-full-archive"
+      ],
       "publisher": "Crystallography Open Database",
       "to": "grazulis@ibt.lt",
       "contact_url": "https://www.crystallography.net/cod/",
@@ -125,7 +148,9 @@
     {
       "id": "icrc-library",
       "kind": "crawl",
-      "sources": ["icrc-library"],
+      "sources": [
+        "icrc-library"
+      ],
       "publisher": "International Committee of the Red Cross, Library",
       "to": "library@icrc.org",
       "contact_url": "https://www.icrc.org/en/icrc-library",
@@ -138,7 +163,9 @@
     {
       "id": "lovdata",
       "kind": "crawl",
-      "sources": ["lovdata-public"],
+      "sources": [
+        "lovdata-public"
+      ],
       "publisher": "Lovdata",
       "to": "api@lovdata.no",
       "contact_url": "https://lovdata.no/info/api",
@@ -151,7 +178,9 @@
     {
       "id": "nrc",
       "kind": "crawl",
-      "sources": ["nrc-reference"],
+      "sources": [
+        "nrc-reference"
+      ],
       "publisher": "US Nuclear Regulatory Commission",
       "to": "",
       "contact_url": "https://www.nrc.gov/about-nrc/contactus.html",
@@ -164,7 +193,9 @@
     {
       "id": "osha",
       "kind": "crawl",
-      "sources": ["osha-publications"],
+      "sources": [
+        "osha-publications"
+      ],
       "publisher": "US Occupational Safety and Health Administration",
       "to": "",
       "contact_url": "https://www.osha.gov/contactus",
@@ -173,6 +204,24 @@
       "paths": "the publications at www.osha.gov/publications",
       "pace": "one request every few seconds",
       "alternative": "its bot protection refuses the library's fetcher; an allowance for its user agent would be enough"
+    },
+    {
+      "id": "govinfo",
+      "kind": "crawl",
+      "sources": [
+        "govinfo-collections",
+        "ecfr-federal-register",
+        "fema-preparedness-doctrine"
+      ],
+      "publisher": "US Government Publishing Office (govinfo)",
+      "to": "",
+      "contact_url": "https://www.govinfo.gov/contact",
+      "verified": "govinfo's contact page (2026-10-28); the API's own issues are also tracked at github.com/usgpo/api",
+      "hosts": "api.govinfo.gov",
+      "situation": "since late October its requests to api.govinfo.gov stop at robots.txt: https://api.govinfo.gov/robots.txt answers with a server error (HTTP 500, \"Oops, Something went wrong\"), and the robots rules (RFC 9309) require a crawler to read an unreachable robots.txt as \"disallow everything\"",
+      "paths": "the collections and packages your API serves to registered api.data.gov keys (my key is registered)",
+      "pace": "within your published API rate limits, one request at a time",
+      "alternative": "serving a robots.txt at api.govinfo.gov (even an empty one, or a 404) would be enough; so would a short reply saying the API may be used as documented"
     }
   ]
 }

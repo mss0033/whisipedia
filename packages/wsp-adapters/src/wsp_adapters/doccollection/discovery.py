@@ -76,8 +76,9 @@ from wsp_core.errors import FetchError, NotFoundError, RedirectRefusedError, Rob
 from wsp_core.model import FetchResult, RemoteFile, RemoteHead
 from wsp_core.ports import Fetcher, SupportsHead
 from wsp_core.redirects import redirect_guard, unguarded
-from wsp_core.robots import Robots
+from wsp_core.robots import Robots, unreachable_long
 from wsp_core.robots import parse as parse_robots
+from wsp_core.robots import reachable as robots_reachable
 
 log = logging.getLogger(__name__)
 
@@ -157,12 +158,16 @@ class Throttle:
             # RFC 9309 (wildcards, longest match); a byte-order mark no longer hides the first rule
             # (armypubs.army.mil). An HTML page answered for /robots.txt sets no rules.
             rules = parse_robots(body)
+            robots_reachable(site)
         except NotFoundError:
-            pass  # no robots.txt: no rules
+            robots_reachable(site)  # no robots.txt: no rules
         except (FetchError, OSError, ValueError) as exc:
             status = re.search(r"HTTP (\d{3})", str(exc))
-            if not (status and 400 <= int(status.group(1)) < 500 and status.group(1) != "429"):
-                rules, ttl = _DISALLOW_ALL, _ROBOTS_UNREACHABLE_TTL
+            if status and 400 <= int(status.group(1)) < 500 and status.group(1) != "429":
+                robots_reachable(site)
+            else:  # unreachable: disallow-all, or no rules after 30 days of it (RFC 9309 2.3.1.4)
+                rules = None if unreachable_long(site) else _DISALLOW_ALL
+                ttl = _ROBOTS_UNREACHABLE_TTL
         with self._lock:
             self._rules[site] = (rules, now + ttl)
             self.requests[parts.netloc.lower()] = self.requests.get(parts.netloc.lower(), 0) + 1

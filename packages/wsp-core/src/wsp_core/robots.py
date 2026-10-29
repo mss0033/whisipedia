@@ -16,8 +16,15 @@ looked allowed. Here:
 from __future__ import annotations
 
 import contextlib
+import fcntl
+import json
+import os
 import re
+from collections.abc import Generator
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import cast
 from urllib.parse import quote, unquote, urlsplit
 
 _SAFE = "/:@!$&'()*+,;=-._~%"  # reserved and unreserved characters kept as they are when re-encoding
@@ -134,3 +141,58 @@ def parse(raw: bytes | str | None) -> Robots | None:
     if text.lstrip()[:20].lower().startswith(("<!doctype", "<html")):
         return None
     return Robots(text)
+
+
+# --- an unreachable robots.txt over time (RFC 9309 2.3.1.4) -------------------------------------------
+
+UNREACHABLE_ENV = "WSP_ROBOTS_UNREACHABLE"  # a JSON file: "scheme://host" -> when its robots.txt first failed
+UNREACHABLE_DAYS = 30
+
+
+def _unreachable_file() -> Path | None:
+    value = os.environ.get(UNREACHABLE_ENV)
+    return Path(value) if value else None
+
+
+@contextlib.contextmanager
+def _locked(path: Path) -> Generator[dict[str, str]]:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with (path.with_name(path.name + ".lock")).open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            data = cast(dict[str, str], json.loads(path.read_text(encoding="utf-8")))
+        except (OSError, ValueError):
+            data = {}
+        before = dict(data)
+        yield data
+        if data != before:
+            tmp = path.with_name(path.name + ".partial")
+            tmp.write_text(json.dumps(data, indent=1, sort_keys=True), encoding="utf-8")
+            tmp.replace(path)
+
+
+def unreachable_long(site: str, *, now: datetime | None = None) -> bool:
+    """Note that ``site``'s robots.txt could not be read (a 5xx, a 429, a timeout) and say whether it
+    has been so for :data:`UNREACHABLE_DAYS` days. Until then the site is disallowed whole; after, RFC
+    9309 2.3.1.4 lets a crawler take robots.txt as unavailable (no rules). api.govinfo.gov answers its
+    robots.txt with a 500 (2026-10-28). The first failure is kept in ``$WSP_ROBOTS_UNREACHABLE``
+    (shared by every process); without it, an unreachable robots.txt always disallows."""
+    path = _unreachable_file()
+    if path is None:
+        return False
+    now = now or datetime.now(UTC)
+    try:
+        with _locked(path) as data:
+            first = data.setdefault(site, now.isoformat())
+    except OSError:
+        return False
+    return now - datetime.fromisoformat(first) >= timedelta(days=UNREACHABLE_DAYS)
+
+
+def reachable(site: str) -> None:
+    """``site``'s robots.txt was read (or is absent): forget an earlier failure."""
+    path = _unreachable_file()
+    if path is None or not path.is_file():
+        return
+    with contextlib.suppress(OSError), _locked(path) as data:
+        data.pop(site, None)

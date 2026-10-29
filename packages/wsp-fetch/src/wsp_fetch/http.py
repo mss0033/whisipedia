@@ -71,7 +71,7 @@ import httpx
 from wsp_core.errors import RedirectRefusedError, RobotsDisallowedError
 from wsp_core.model import RemoteFile, RemoteHead
 from wsp_core.redirects import current_guard, unguarded
-from wsp_core.robots import Robots
+from wsp_core.robots import Robots, reachable, unreachable_long
 from wsp_core.robots import parse as parse_robots
 from wsp_fetch import ftp
 from wsp_fetch import provenance as prov
@@ -395,12 +395,14 @@ class HttpFetcher:
                         body += chunk
                         if len(body) >= ROBOTS_MAX_BYTES:  # RFC 9309 2.5: at least 500 KiB parsed
                             break
+                    reachable(site)
                     return _parse_robots(bytes(body[:ROBOTS_MAX_BYTES])), ROBOTS_TTL
                 if 400 <= r.status_code < 500 and r.status_code != 429:
+                    reachable(site)
                     return None, ROBOTS_TTL  # "unavailable": no rules
-                return DISALLOW_ALL, ROBOTS_UNREACHABLE_TTL  # 5xx, 429: "unreachable"
+                return _unreachable(site)  # 5xx, 429: "unreachable"
         except (httpx.HTTPError, OSError):
-            return DISALLOW_ALL, ROBOTS_UNREACHABLE_TTL
+            return _unreachable(site)
         finally:
             _IN_ROBOTS.reset(token)
 
@@ -413,9 +415,11 @@ class HttpFetcher:
                 on_chunk=self.throttle,
             )
         except ftp.FtpNotFoundError:
+            reachable(site)
             return None, ROBOTS_TTL
         except (ftp.FtpTooLargeError, *ftp.TRANSIENT):
-            return DISALLOW_ALL, ROBOTS_UNREACHABLE_TTL
+            return _unreachable(site)
+        reachable(site)
         return _parse_robots(raw), ROBOTS_TTL
 
     def _robots_hop(self, response: httpx.Response) -> None:
@@ -1095,6 +1099,12 @@ ROBOTS_MAX_BYTES = 512 * 1024
 ROBOTS_TTL = 24 * 3600.0  # RFC 9309 2.4: a cached robots.txt is not used for more than 24 hours
 ROBOTS_UNREACHABLE_TTL = 600.0  # an unreachable robots.txt disallows everything until it is tried again
 DISALLOW_ALL = parse_robots("User-agent: *\nDisallow: /\n")
+
+
+def _unreachable(site: str) -> tuple[Robots | None, float]:
+    """Disallow-all, read again in 10 minutes; no rules once it has been unreachable for 30 days
+    (RFC 9309 2.3.1.4; :func:`wsp_core.robots.unreachable_long`)."""
+    return (None if unreachable_long(site) else DISALLOW_ALL), ROBOTS_UNREACHABLE_TTL
 
 
 def _raise_for_status(r: httpx.Response) -> None:

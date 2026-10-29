@@ -92,6 +92,7 @@ def layout(config_dir: Path | None = None, *, environ: Mapping[str, str] | None 
     )
 
 
+ROBOTS_UNREACHABLE_ENV = "WSP_ROBOTS_UNREACHABLE"  # = wsp_core.robots.UNREACHABLE_ENV
 KIWIX_CHECKSUMS_ENV = "WSP_KIWIX_CHECKSUMS"  # wsp_adapters.kiwix.CHECKSUMS_ENV (not imported: libzim)
 KIWIX_CHECKSUMS = (
     "kiwix-checksums"  # <state>/kiwix-checksums (seeded) and <vault>/_incoming/_manual/kiwix-checksums
@@ -105,6 +106,12 @@ def load(lay: Layout, *, environ: Mapping[str, str] | None = None) -> dict[str, 
         dirs = paths(cfg).kiwix_checksum_dirs
         if dirs:
             os.environ[KIWIX_CHECKSUMS_ENV] = os.pathsep.join(str(d) for d in dirs)
+    if environ is None and ROBOTS_UNREACHABLE_ENV not in os.environ:
+        # When each host's robots.txt first could not be read (wsp_core.robots.unreachable_long),
+        # shared by this process and the units it starts.
+        state = paths(cfg).state_dir
+        if state is not None:
+            os.environ[ROBOTS_UNREACHABLE_ENV] = str(state / "robots-unreachable.json")
     return cfg
 
 

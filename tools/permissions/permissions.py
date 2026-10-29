@@ -74,13 +74,15 @@ Kind regards,
 
 
 def crawl_letter(r: dict[str, str]) -> tuple[str, str]:
+    default = f"at present it does not fetch from {r['hosts']}; I download a few files a day by hand instead"
+    situation = r.get("situation") or default
     subject = f"Request: allow a personal archive's downloader on {r['hosts'].split(' ')[0]}"
     alt = f"\n\n{r['alternative'][0].upper()}{r['alternative'][1:]}." if r.get("alternative") else ""
     body = f"""Hello,
 
 I am writing about my personal offline library, Whisipedia. {ABOUT}
 
-Its downloader identifies itself as "{USER_AGENT}" and follows robots.txt strictly, so at present it does not fetch from {r["hosts"]}; I download a few files a day by hand instead. I would like to ask whether you would allow it to fetch {r["paths"]}.
+Its downloader identifies itself as "{USER_AGENT}" and follows robots.txt strictly, so {situation}. I would like to ask whether you would allow it to fetch {r["paths"]}.
 
 It would fetch politely: {r["pace"]}, retrying slowly on errors, never in parallel, and only files you publish for download. If you agree, either of these would do:
 - an Allow line in robots.txt for the user agent "Whisipedia", or
