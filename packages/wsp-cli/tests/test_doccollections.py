@@ -1057,3 +1057,28 @@ def test_a_lagging_cycle_label_is_moved_past_the_newest_sealed_generation(
     assert (
         fetcher.free_version(s, "2026-10-12.b0003", "b0003") == "2026-10-12.b0003"
     )  # its own partition only
+
+
+def test_a_listed_file_the_issuer_no_longer_has_does_not_make_the_fetch_partial(
+    vault: FileVault, tmp_path: Path
+) -> None:
+    """2026-10-26 review #29: documents that 404 for good kept a CIA partition 'partial' forever; each
+    pass sealed another cycle and the lane behind it never ran."""
+    from wsp_cli.doccollections import EXIT_COMPLETE, fetch_exit_code
+
+    s = spec(OBJECTS)
+    routes_ = routes(OBJECTS)
+    del routes_[f"{BUCKET}/{PREFIX}restricted.pdf"]  # listed, but 404
+    fetcher = CollectionFetcher(
+        vault.root,
+        FakeFetcher(routes_),
+        keys={},
+        user_agent="test",
+        workdir=tmp_path / "work",
+        out=io.StringIO(),
+        throttle=False,
+    )
+    report = fetcher.run(s, version="2026-10-10")
+    assert report.failed == []
+    assert [k for k, _ in report.gone] == ["test:restricted.pdf"]
+    assert fetch_exit_code(report) == EXIT_COMPLETE

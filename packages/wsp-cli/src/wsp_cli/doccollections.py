@@ -80,7 +80,7 @@ from wsp_adapters.doccollection.policy import (
     decisions_path,
 )
 from wsp_cli import bootstrap, nasretry
-from wsp_core.errors import FetchError, RobotsDisallowedError
+from wsp_core.errors import FetchError, NotFoundError, RobotsDisallowedError
 from wsp_core.model import FetchResult, RemoteFile, SourceSpec, SourceStatus
 from wsp_core.partitions import PartitionError, check_partition, partition_generation_id, partition_of
 from wsp_core.ports import Ctx, Fetcher, SupportsHead
@@ -406,6 +406,9 @@ class FetchReport:
     skipped: int = 0
     alerts: list[str] = field(default_factory=list[str])
     pending: list[str] = field(default_factory=list[str])  # earlier versions not yet ingested: refused
+    # Listed, but the issuer answers 404/410 for the file: not a failure of this run. A source with
+    # such documents was never finished: every pass sealed another cycle (2026-10-26 review #29).
+    gone: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
     planned: bool = False  # an ingest plan was written (new documents, or a changed catalog)
 
 
@@ -650,6 +653,10 @@ class CollectionFetcher:
 
         def failed(cand: Candidate, exc: BaseException) -> None:
             why = f"{type(exc).__name__}: {exc}"
+            if isinstance(exc, NotFoundError):  # the host answered: it is up, the file is not there
+                hosts.answered(cand.url)
+                report.gone.append((cand.key, why))
+                return
             hosts.failed(cand.url, why)
             report.failed.append((cand.key, why))
 
@@ -1484,7 +1491,7 @@ def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
     out.write(
         f"{spec.id}/{version}: fetched {len(report.fetched)}, skipped {report.skipped}, "
         f"rejected {len(report.rejected)}, held {len(report.held)}, review {len(report.review)}, "
-        f"failed {len(report.failed)}\n"
+        f"failed {len(report.failed)}, gone {len(report.gone)}\n"
     )
     for alert in report.alerts:
         out.write(f"ALERT restricted document listed by the issuer: {alert}\n")
@@ -1492,6 +1499,8 @@ def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
         out.write(f"rejected: {key}: {why}\n")
     for key, why in report.failed[:20]:
         out.write(f"failed: {key}: {why}\n")
+    for key, why in report.gone[:20]:
+        out.write(f"gone (listed, but the issuer has no file): {key}: {why}\n")
     if proposal is not None:
         out.write(f"review proposal: {proposal} (wsp proposals list)\n")
     elif rows and not args.dry_run:

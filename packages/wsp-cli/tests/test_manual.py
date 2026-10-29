@@ -425,6 +425,9 @@ def test_held_and_denied_documents_leave_the_offer_and_a_held_one_returns_once_d
 
     monkeypatch.setattr(doccollections, "cmd_fetch", fetch)
     monkeypatch.setattr(manual, "DocCollectionAdapter", FakeAdapter)
+    import wsp_cli
+
+    monkeypatch.setattr(wsp_cli, "ops", FakeOps, raising=False)
     monkeypatch.setitem(__import__("sys").modules, "wsp_cli.ops", FakeOps)
     spec = _spec("s", {"adapter": "doc-collection"})
     args = argparse.Namespace(config_dir=None)
@@ -500,6 +503,9 @@ def test_an_unfinished_ingest_is_retried_before_new_files_are_taken(
 
     monkeypatch.setattr(doccollections, "cmd_fetch", fetch)
     monkeypatch.setattr(manual, "DocCollectionAdapter", FakeAdapter)
+    import wsp_cli
+
+    monkeypatch.setattr(wsp_cli, "ops", FakeOps, raising=False)
     monkeypatch.setitem(__import__("sys").modules, "wsp_cli.ops", FakeOps)
     args = argparse.Namespace(config_dir=None)
 
