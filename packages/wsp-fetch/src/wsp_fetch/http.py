@@ -95,6 +95,13 @@ from wsp_fetch.target import Target, resolve_target
 
 log = logging.getLogger(__name__)
 
+
+def _stream_path(partial: Path) -> Path:
+    """Where a single-stream download is written before it replaces ``partial`` (``X.stream.partial``:
+    still a ``*.partial`` to every sweep and seal check)."""
+    return partial.with_name(partial.name.removesuffix(".partial") + ".stream.partial")
+
+
 _CONTENT_RANGE = re.compile(r"bytes\s+(\d+)-(\d+)/(\d+|\*)")
 _CONTENT_RANGE_EMPTY = re.compile(r"bytes\s+\*/(\d+)")
 _RETRY_STATUSES = {408, 425, 429, 500, 502, 503, 504}
@@ -806,7 +813,7 @@ class HttpFetcher:
                         raise FetchCancelledError(f"{target.url}: cancelled (shutdown)") from exc
                     continue
                 return self._single_report(target, probes, p, dest, partial, got, digests, t0, rejected)
-        partial.unlink(missing_ok=True)
+        _stream_path(partial).unlink(missing_ok=True)  # a resumable .partial of a ranged run is kept
         raise MirrorsExhaustedError(f"all sources failed for {target.url}: {'; '.join(errors)}")
 
     def _stream_once(
@@ -814,11 +821,15 @@ class HttpFetcher:
     ) -> tuple[int, dict[str, str]]:
         hasher = MultiHasher(c.algorithm for c in target.checksums)
         got = 0
+        # Into a file of its own, moved over ``.partial`` only when whole: a mirror that ignores Range
+        # must not erase a ranged run's resumable .partial (150 GB of a ZIM) with its first byte
+        # (2026-10-26 review #23).
+        stream = _stream_path(partial)
         try:
             with (
                 self.host_slot(url),
                 self._client.stream("GET", url) as r,
-                partial.open("wb") as fh,
+                stream.open("wb") as fh,
             ):
                 _raise_for_status(r)
                 for chunk in r.iter_raw():
@@ -833,6 +844,7 @@ class HttpFetcher:
                 os.fsync(fh.fileno())
             if expected is not None and got != expected:
                 raise _RetryableError(f"body ended after {got} of {expected} bytes")
+            os.replace(stream, partial)
             return got, hasher.hexdigests()
         finally:
             hasher.close()
@@ -1321,9 +1333,13 @@ class _SegmentedDownload:
         """Open ``.partial``; returns pieces a previous run recorded (still to be re-verified)."""
         old = load_state(self.state_file)
         hashed_pieces = self.plan.target.pieces is not None  # resumed pieces are checked upstream
+        # A whole-file checksum pins the bytes as firmly: a splice of two editions fails it when the
+        # file is finished, so a probe that saw no ETag (a mirror answering for a busy first one)
+        # need not throw away days of download (2026-10-26 review #23).
+        pinned = bool(self.plan.target.checksums)
         resumable = (
             old is not None
-            and old.same_target(self.state, require_validator=not hashed_pieces)
+            and old.same_target(self.state, require_validator=not (hashed_pieces or pinned))
             and self.partial.exists()
             and self.partial.stat().st_size == self.size
         )

@@ -360,3 +360,29 @@ def test_a_write_that_stores_part_of_a_piece_is_finished_not_fatal(
         f.download(remote_for(data, s.url("f.bin")), tmp_path / "f.bin")
     assert (tmp_path / "f.bin").read_bytes() == data
     assert calls["n"] > 1
+
+
+def test_a_mirror_ignoring_range_never_erases_a_resumable_partial(servers: Servers, tmp_path: Path) -> None:
+    """2026-10-26 review #23: a server answering a Range request with 200 made the single-stream
+    fallback open .partial with "wb", erasing a ranged run's progress before its first byte."""
+    data = payload(150_000, seed=31)
+    s = servers()
+    url = s.add("f.bin", data)
+    dest = tmp_path / "f.bin"
+    earlier = b"\x07" * len(data)  # what a killed ranged run left behind
+    partial_path(dest).write_bytes(earlier)
+    s.faults.ignore_range = True
+    s.faults.drop_after = 40_000  # and every full-body answer breaks off
+    from wsp_core.errors import FetchError
+
+    with (
+        HttpFetcher(replace(CFG, max_attempts=2, backoff_base=0.0, backoff_max=0.0)) as f,
+        pytest.raises(FetchError),
+    ):
+        f.download(remote_for(data, url), dest)
+    assert partial_path(dest).read_bytes() == earlier  # kept for the next ranged run
+    assert not list(tmp_path.glob("*.stream.partial"))
+    s.faults.drop_after = None
+    with HttpFetcher(CFG) as f:
+        f.download(remote_for(data, url), dest)
+    assert dest.read_bytes() == data
