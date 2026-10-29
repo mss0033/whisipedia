@@ -591,12 +591,35 @@ def write_vocabularies(
     cfg: SpellConfig = SpellConfig(),  # noqa: B008 - immutable
     floors: Mapping[str, int] | None = None,
 ) -> int:
-    """Write the vocabularies and their delete indexes atomically; returns the number of delete keys."""
-    data, n_del = encode_vocabularies(vocabs, cfg, floors)
+    """Write the vocabularies and their delete indexes atomically; returns the number of delete keys.
+
+    Section by section, the table of sections filled in last: :func:`encode_vocabularies` held every
+    section and then a joined copy, about twice the 1.5 GB file, and more languages would have pushed
+    the spell job past its memory limit (2026-10-26 review #105). The bytes are the same."""
+    langs = sorted(vocabs)
+    table_size = 8 + 8 + 32 * len(langs)
     tmp = path.with_name(path.name + ".partial")
     path.parent.mkdir(parents=True, exist_ok=True)
-    with tmp.open("wb") as fh:
-        fh.write(data)
+    n_del = 0
+    with tmp.open("w+b") as fh:
+        fh.write(MAGIC + np.uint64(len(langs)).tobytes() + b"\0" * (32 * len(langs) + _pad(table_size)))
+        offset = table_size + _pad(table_size)
+        entries: list[bytes] = []
+        for lang in langs:
+            floor = (floors or {}).get(lang, cfg.min_count)
+            body, m = _section(vocabs[lang], cfg, max(1, floor))
+            entries.append(
+                lang.encode("ascii", "replace")[:8].ljust(8, b"\0")
+                + _vocab_script(vocabs[lang]).encode("ascii", "replace")[:8].ljust(8, b"\0")
+                + np.array([offset, len(body)], dtype=np.uint64).tobytes()
+            )
+            fh.write(body)
+            fh.write(b"\0" * _pad(len(body)))
+            offset += len(body) + _pad(len(body))
+            n_del += m
+            del body
+        fh.seek(len(MAGIC) + 8)
+        fh.write(b"".join(entries))
         fh.flush()
         os.fsync(fh.fileno())
     os.replace(tmp, path)

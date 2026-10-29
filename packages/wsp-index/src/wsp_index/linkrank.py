@@ -1190,8 +1190,10 @@ def _write_sidecar(
             del column
         fh.flush()
         os.fsync(fh.fileno())
+    # The fence first, read from the finished .partial: an API that reloads the new sidecar the moment
+    # it appears then finds its fence too (it kept running unfenced until restarted: review #104).
+    write_fence(path, source=tmp)
     os.replace(tmp, path)
-    write_fence(path)
 
 
 def write_rank_file(path: Path, keys: U64, nodes: I32, feature: F32, per_group: F32, global_: F32) -> int:
@@ -1213,16 +1215,18 @@ def fence_path(path: Path) -> Path:
 _FENCE_MTIME_SLACK_NS = 1_000_000_000
 
 
-def write_fence(path: Path, *, chunk: int = 1 << 22) -> Path:
+def write_fence(path: Path, *, chunk: int = 1 << 22, source: Path | None = None) -> Path:
     """Every :data:`FENCE_STRIDE`-th key of the sidecar at ``path``, as a small ``.npy`` beside it.
 
     A lookup then binary-searches the fence in RAM and reads one page of the key array, where a
     binary search over the memory-mapped 2 GB key array (256M documents) faults in about 28 pages
-    (measured 2026-10-12: 1.6 s of a cold query's 4.7 s)."""
-    with path.open("rb") as fh:
+    (measured 2026-10-12: 1.6 s of a cold query's 4.7 s). ``source``: the sidecar's bytes to read when
+    they are not at ``path`` yet (its ``.partial``, before it is renamed into place)."""
+    src = source or path
+    with src.open("rb") as fh:
         head = fh.read(_HEADER)
     n = int(np.frombuffer(head[len(MAGIC) :], dtype=np.uint64)[0])
-    keys = _mmap_array(path, np.dtype(np.uint64), n, offset=_HEADER, random=False)
+    keys = _mmap_array(src, np.dtype(np.uint64), n, offset=_HEADER, random=False)
     parts = [
         np.array(keys[lo:hi:FENCE_STRIDE])
         for lo, hi in _steps(n, chunk - chunk % FENCE_STRIDE or FENCE_STRIDE)

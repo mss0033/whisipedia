@@ -495,3 +495,20 @@ def test_a_damaged_kept_vocabulary_is_counted_again(tmp_path: Path) -> None:
     build_vocabulary(readers, again, cfg, cache=cache)
     assert cache.kept == 0
     assert again.read_bytes() == first.read_bytes()
+
+
+def test_the_streamed_file_is_byte_for_byte_the_encoded_one(tmp_path: Path) -> None:
+    """2026-10-26 review #105: written section by section, not joined in memory, with the same bytes."""
+    from wsp_index.spelling import SpellConfig, encode_vocabularies, write_vocabularies
+
+    vocabs = {
+        "en": {"house": 40, "horse": 30, "mouse": 20},
+        "de": {"haus": 40, "maus": 25},
+        "fr": {"maison": 30},
+    }
+    cfg = SpellConfig(min_count=1)
+    path = tmp_path / "spell.bin"
+    n = write_vocabularies(path, vocabs, cfg)
+    data, m = encode_vocabularies(vocabs, cfg)
+    assert path.read_bytes() == data
+    assert n == m

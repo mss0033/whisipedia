@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import os
 import re
 from collections.abc import Sequence
 from pathlib import Path
@@ -632,3 +633,29 @@ def test_the_fence_finds_exactly_what_a_full_binary_search_finds(tmp_path: Path)
     assert StaticRank(out)._fence is None  # pyright: ignore[reportPrivateUsage]
     write_fence(out)
     assert StaticRank(out)._fence is not None  # pyright: ignore[reportPrivateUsage]
+
+
+def test_the_fence_is_in_place_before_the_new_sidecar_appears(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-10-26 review #104: an API reloading the sidecar the moment it appeared found no fence yet
+    and ran unfenced until restarted."""
+    from wsp_index import linkrank
+
+    path = tmp_path / "static_rank.bin"
+    real = os.replace
+    seen: list[bool] = []
+
+    def replace(src: str | Path, dst: str | Path) -> None:
+        if Path(dst) == path:
+            seen.append(linkrank.fence_path(path).is_file())
+        real(src, dst)
+
+    monkeypatch.setattr(os, "replace", replace)
+    keys = np.arange(2000, dtype=np.uint64)
+    one = np.ones(2000, dtype=np.float32)
+    linkrank.write_rank_file(path, keys, np.arange(2000, dtype=np.int32), one, one, one)
+    assert seen == [True]
+    rank = linkrank.StaticRank.open(path)
+    assert rank is not None
+    assert rank._fence is not None  # pyright: ignore[reportPrivateUsage]
