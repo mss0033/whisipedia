@@ -1082,3 +1082,35 @@ def test_a_listed_file_the_issuer_no_longer_has_does_not_make_the_fetch_partial(
     assert report.failed == []
     assert [k for k, _ in report.gone] == ["test:restricted.pdf"]
     assert fetch_exit_code(report) == EXIT_COMPLETE
+
+
+def test_a_document_that_is_always_a_web_page_is_gone_after_a_week_of_tries(tmp_path: Path) -> None:
+    """2026-10-29: one CIA document was an HTML page on 19 tries over 8 days and kept its partition
+    from ever finishing. Five tries over seven days in a row make it gone; anything else starts over."""
+    from datetime import UTC, datetime, timedelta
+
+    from wsp_cli import doccollections as dc
+
+    ledger = tmp_path / "wrong-body-b0003.json"
+    start = datetime(2026, 10, 21, tzinfo=UTC)
+
+    def run(day: int, wrong: bool, *, other: bool = False) -> dc.FetchReport:
+        report = dc.FetchReport("cia", "v")
+        if wrong:
+            report.failed.append(("doc", "expected a PDF, got html"))
+            report.wrong_body.add("doc")
+        if other:
+            report.failed.append(("other", "ConnectTimeout"))
+        dc.settle_wrong_bodies(report, ledger, start + timedelta(days=day))
+        return report
+
+    for day in range(4):
+        assert run(day, wrong=True).gone == []  # four tries: not yet
+    assert run(5, wrong=True).gone == []  # five tries, but only five days
+    report = run(7, wrong=True, other=True)
+    assert [k for k, _ in report.gone] == ["doc"]
+    assert "6 tries since 2026-10-21" in report.gone[0][1]
+    assert report.failed == [("other", "ConnectTimeout")]  # other failures stay failures
+    assert dc.fetch_exit_code(report) == dc.EXIT_PARTIAL
+    run(8, wrong=False)  # it downloaded (or failed otherwise): the count starts over
+    assert run(20, wrong=True).gone == []

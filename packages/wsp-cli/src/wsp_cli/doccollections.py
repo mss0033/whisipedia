@@ -409,6 +409,7 @@ class FetchReport:
     # Listed, but the issuer answers 404/410 for the file: not a failure of this run. A source with
     # such documents was never finished: every pass sealed another cycle (2026-10-26 review #29).
     gone: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
+    wrong_body: set[str] = field(default_factory=set[str])  # keys whose download was a page, not the file
     planned: bool = False  # an ingest plan was written (new documents, or a changed catalog)
 
 
@@ -421,6 +422,46 @@ def fetch_exit_code(report: FetchReport) -> int:
     if report.alerts:
         return EXIT_ALERT
     return EXIT_COMPLETE if report.fetched or report.planned else EXIT_NOTHING_NEW
+
+
+# A document whose every download, on this many tries over this many days in a row, was a web page or
+# error body in place of the file is gone, as a 404 is: one CIA reading-room document did so on 19
+# tries over 8 days and kept its partition (10,021 documents held) from ever finishing (2026-10-29).
+WRONG_BODY_GONE_TRIES = 5
+WRONG_BODY_GONE_DAYS = 7
+
+
+def settle_wrong_bodies(report: FetchReport, ledger: Path, now: datetime) -> None:
+    """Count each document's consecutive wrong-body tries in ``ledger`` (any other outcome starts it
+    over) and move one past both limits from ``report.failed`` to ``report.gone``."""
+    try:
+        seen = cast(dict[str, dict[str, Any]], json.loads(ledger.read_text(encoding="utf-8")))
+    except (OSError, ValueError):
+        seen = {}
+    kept: dict[str, dict[str, Any]] = {}
+    for key in sorted(report.wrong_body):
+        entry = seen.get(key) or {"first": now.isoformat(timespec="seconds"), "tries": 0}
+        entry["tries"] = int(entry["tries"]) + 1
+        kept[key] = entry
+    gone = {
+        key: e
+        for key, e in kept.items()
+        if e["tries"] >= WRONG_BODY_GONE_TRIES
+        and now - datetime.fromisoformat(e["first"]) >= timedelta(days=WRONG_BODY_GONE_DAYS)
+    }
+    still: list[tuple[str, str]] = []
+    for key, why in report.failed:
+        if key in gone:
+            e = gone[key]
+            report.gone.append((key, f"{why}, on every one of {e['tries']} tries since {e['first']}"))
+        else:
+            still.append((key, why))
+    report.failed = still
+    if kept or seen:
+        ledger.parent.mkdir(parents=True, exist_ok=True)
+        tmp = ledger.with_name(f".{ledger.name}.{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(kept, indent=1, sort_keys=True), encoding="utf-8")
+        tmp.replace(ledger)
 
 
 _NO_CONNECTION = re.compile(r"\bConnect(?:Timeout|Error)\b")
@@ -700,6 +741,8 @@ class CollectionFetcher:
         finally:
             if pool is not None:
                 pool.shutdown(wait=True, cancel_futures=True)
+        part = f"-{own_partition}" if own_partition else ""
+        settle_wrong_bodies(report, self.workdir / spec.id / f"wrong-body{part}.json", datetime.now(UTC))
         self._finish(spec, coll, report, prev_gen, prev_catalog, survey, dest_dir)
         return report
 
@@ -896,6 +939,7 @@ class CollectionFetcher:
                 )
             except WrongBodyError as exc:
                 report.failed.append((cand.key, str(exc)))
+                report.wrong_body.add(cand.key)
                 path.unlink(missing_ok=True)
                 return
             except nasretry.TRANSIENT as exc:
