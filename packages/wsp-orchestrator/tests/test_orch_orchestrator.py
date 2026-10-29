@@ -324,3 +324,23 @@ def test_unknown_source_jobs_are_cancelled(tmp_path: Path) -> None:
     for j in orch.claim_ready():
         orch.execute(j)
     assert len(orch.queue.jobs(status=JobStatus.CANCELLED)) == 3
+
+
+def test_resuming_a_source_requeues_its_releases_still_in_flight(tmp_path: Path) -> None:
+    """2026-10-26 review #57: a release whose fetch job the pause cancelled sat without a job after
+    `wsp resume` until the next restart."""
+    from wsp_orchestrator.pipeline import pause_source
+
+    spec = make_spec("src")
+    orch, world, clock = build(tmp_path, [spec])
+    world.adapters["src"].add_release("2026-10-01", FILES)
+    orch.start()
+    orch.run_pending()
+    orch.pipeline.register(world.adapters["src"].add_release("2026-11-01", FILES))
+    pause_source(orch.store, orch.pipeline.ledger_outbox_writer, "src", "owner: check the dump")
+    for job in orch.queue.jobs():  # the pause cancelled its jobs
+        if job.key == "src/2026-11-01":
+            orch.queue.cancel(job, clock.now(), "paused")
+    assert orch.queue.active(JobKind.FETCH_RELEASE, "src/2026-11-01") is None
+    orch.resume_source("src")
+    assert orch.queue.active(JobKind.FETCH_RELEASE, "src/2026-11-01") is not None

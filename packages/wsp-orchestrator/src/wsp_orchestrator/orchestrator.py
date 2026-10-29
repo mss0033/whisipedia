@@ -579,9 +579,13 @@ class Orchestrator:
             if str(row["key"]).startswith(f"integrity:{source_id}/"):
                 self.alerter.resolve(str(row["key"]))
         self.pipeline.flush_ledger()
-        self.queue.enqueue(
-            JobKind.DISCOVER, source_id, now=self.clock.now(), payload={"source_id": source_id}
-        )
+        now = self.clock.now()
+        self.queue.enqueue(JobKind.DISCOVER, source_id, now=now, payload={"source_id": source_id})
+        # Its releases still in flight, whose fetch jobs the pause cancelled, go on as at a start
+        # (they sat without a job until the next restart: 2026-10-26 review #57).
+        for rec in self.store.releases(source_id=source_id):
+            if rec.state not in (ReleaseState.PROMOTED, ReleaseState.QUARANTINED):
+                self._enqueue_fetch(source_id, rec.version, now)
 
     # --- handlers ------------------------------------------------------------------------------
 

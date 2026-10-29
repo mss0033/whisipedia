@@ -320,6 +320,10 @@ def test_registry_text_edit_and_overlay(tmp_path: Path) -> None:
     replaced = apply_to_registry_text(text, {"id": "a", "name": "A2", "domain": ["x"]})
     assert yaml.safe_load(replaced)["sources"][0] == {"id": "a", "name": "A2", "domain": ["x"]}
     assert replaced.endswith("  - id: b\n    name: B\n")
+    # 2026-10-26 review #58: the next section's comment and the blank line before it stay.
+    sectioned = "sources:\n  - id: a\n    name: A\n\n  # --- Section B ---\n  - id: b\n    name: B\n"
+    edited = apply_to_registry_text(sectioned, {"id": "a", "name": "A2"})
+    assert edited.endswith("\n\n  # --- Section B ---\n  - id: b\n    name: B\n")
     appended = apply_to_registry_text(text, {"id": "c", "name": "C"})
     assert [s["id"] for s in yaml.safe_load(appended)["sources"]] == ["a", "b", "c"]
     overlay = tmp_path / "registry.local.yaml"

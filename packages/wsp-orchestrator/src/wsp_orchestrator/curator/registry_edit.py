@@ -58,7 +58,10 @@ def apply_to_registry_text(text: str, entry: Mapping[str, object]) -> str:
         body = text if text.endswith("\n") else text + "\n"
         return body + "\n" + block
     end = start + 1
-    while end < len(lines) and not _ENTRY.match(lines[end]) and not re.match(r"^\S", lines[end]):
+    # The entry's own lines are indented four spaces or more; the next entry, a section comment
+    # ("  # --- Section ---") or a top-level key is not (a comment of the next section was deleted
+    # with the entry: 2026-10-26 review #58).
+    while end < len(lines) and not re.match(r"^ {0,3}\S", lines[end]):
         end += 1
     while end > start + 1 and not lines[end - 1].strip():  # keep the blank separator lines
         end -= 1

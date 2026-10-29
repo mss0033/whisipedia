@@ -135,6 +135,20 @@ _TERMINAL = (ReleaseState.PROMOTED, ReleaseState.QUARANTINED)
 _SEALED_STATES = (ReleaseState.SEALED, ReleaseState.REFINED, ReleaseState.INDEXED, ReleaseState.PROMOTED)
 
 
+CRASHES_TO_HOLD = 4  # crashes after the first FAILED one before the release waits for the owner
+HELD_FOR = timedelta(days=3650)  # "until `wsp retry`": retry_release clears next_attempt_at
+
+
+def crash_cause(reason: str) -> str:
+    """What most likely stopped a step, from its crash reason."""
+    low = reason.lower()
+    if "timeout after" in low:
+        return "stopped at its time limit"
+    if "no space left" in low or "enospc" in low or "errno 28" in low:
+        return "the disk is full"
+    return "probably OOM (out of memory)"
+
+
 class IllegalTransitionError(RuntimeError):
     pass
 
@@ -1247,10 +1261,14 @@ class ReleasePipeline:
             )
             return self._get(fresh.source_id, fresh.version)
         delay = self.retry.delay(count - self.crashes_to_fail + 1)
-        until = self.clock.now() + delay
-        # A step stopped at its time limit is not out of memory (2026-10-25: a 204 GB ZIM profile,
-        # reported as "probably OOM").
-        cause = "stopped at its time limit" if "timeout after" in reason else "probably OOM (out of memory)"
+        # A step that keeps crashing the same way would take its slot every day for good (a refine
+        # that always times out): after CRASHES_TO_HOLD more, it waits for the owner (wsp retry)
+        # (2026-10-26 review #55).
+        held = count >= self.crashes_to_fail + CRASHES_TO_HOLD
+        until = self.clock.now() + (HELD_FOR if held else delay)
+        # Say what stopped it: a step stopped at its time limit is not out of memory (2026-10-25: a
+        # 204 GB ZIM profile, reported as "probably OOM"), nor is a full disk (review #56).
+        cause = crash_cause(reason)
         message = f"crashed in {state.value} {count} times, {cause}: {reason}"
         failed = self._transition(
             base,
@@ -1265,8 +1283,13 @@ class ReleasePipeline:
                     key=f"crashed:{fresh.subject}",
                     severity=Severity.CRITICAL,
                     message=(
-                        f"{fresh.subject} crashed in {state.value} {count} times, probably OOM; "
-                        f"backing off until {until:%Y-%m-%d %H:%M} UTC ({reason})"
+                        f"{fresh.subject} crashed in {state.value} {count} times, {cause}; "
+                        + (
+                            f"held: `wsp retry {fresh.source_id} {fresh.version}` once the cause is fixed"
+                            if held
+                            else f"backing off until {until:%Y-%m-%d %H:%M} UTC"
+                        )
+                        + f" ({reason})"
                     ),
                     data={"source_id": fresh.source_id, "version": fresh.version, **data},
                 )
@@ -1299,6 +1322,28 @@ class ReleasePipeline:
                 )
         if not quarantine:
             return failed
+        if state in (ReleaseState.REFINED, ReleaseState.INDEXED) and self._is_current(failed):
+            # Its generation is the vault's CURRENT already (promoted before the index step): a
+            # quarantined release would still be served, unindexed and out of every trend. It waits
+            # for the owner instead (2026-10-26 review #54).
+            self._persist(
+                replace(self._get(failed.source_id, failed.version), next_attempt_at=now + HELD_FOR),
+                event=None,
+            )
+            if self.alerter is not None:
+                self.alerter.raise_(
+                    Alert(
+                        key=f"unindexed:{fresh.subject}",
+                        severity=Severity.CRITICAL,
+                        message=(
+                            f"{fresh.subject} is CURRENT but its {state.value} step failed {attempts} times "
+                            f"({exc}); it is served unindexed. Fix the cause, then `wsp retry "
+                            f"{fresh.source_id} {fresh.version}`"
+                        ),
+                        data={"source_id": fresh.source_id, "version": fresh.version, "attempts": attempts},
+                    )
+                )
+            return self._get(failed.source_id, failed.version)
         quarantined = self._transition(failed, ReleaseState.QUARANTINED, extra={"reason": "max attempts"})
         self._cleanup_workdir(quarantined)
         if self.alerter is not None:

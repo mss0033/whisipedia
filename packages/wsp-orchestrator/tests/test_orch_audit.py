@@ -160,20 +160,22 @@ def test_crashes_are_counted_and_back_off_without_quarantine(tmp_path: Path) -> 
     alert = next(a for a in h.sink.delivered if a.key == "crashed:src/2026-10-01")
     assert "crashed in sealed 2 times, probably OOM" in alert.message
 
-    for _ in range(10):  # a crash loop never quarantines; backoff grows
+    for _ in range(10):  # a crash loop never quarantines; backoff grows, then it waits for the owner
         h.clock.advance(timedelta(days=2))
         _crash_loop(h, killer)
     rec = h.store.get_release("src", "2026-10-01")
     assert rec is not None
     assert rec.state is not S.QUARANTINED
     assert rec.attempts == 0
-    assert rec.crash_count >= 10
+    assert rec.crash_count == 6  # 2026-10-26 review #55: held after 4 more, not retried every day for good
+    assert rec.next_attempt_at is not None
+    assert rec.next_attempt_at > h.clock.now() + timedelta(days=365)
     crash_events = h.ledger.of_kind("release.crash", "src/2026-10-01")
     assert crash_events
     assert crash_events[0].data["state"] == "sealed"
 
-    killer.times = 0  # memory was raised: the step succeeds, the crash record is cleared
-    h.clock.advance(timedelta(days=2))
+    killer.times = 0  # memory was raised and the owner retries: the step succeeds, the record is cleared
+    h.pipeline.retry_release("src", "2026-10-01")
     assert h.pipeline.run("src", "2026-10-01").outcome is Outcome.PROMOTED
     rec = h.store.get_release("src", "2026-10-01")
     assert rec is not None
@@ -681,3 +683,38 @@ def test_a_reject_is_refused_while_the_promote_and_index_step_runs(tmp_path: Pat
     assert h.pipeline.run("src", "2026-10-01").outcome is Outcome.PROMOTED
     assert refused
     assert "its step is running" in refused[0]
+
+
+def test_a_crash_says_what_most_likely_stopped_it() -> None:
+    """2026-10-26 review #56: every crash read "probably OOM", timeouts and a full disk included."""
+    from wsp_orchestrator.pipeline import crash_cause
+
+    assert crash_cause("refine (x) stopped: timeout after 86400s") == "stopped at its time limit"
+    assert crash_cause("OSError: [Errno 28] No space left on device") == "the disk is full"
+    assert crash_cause("killed by SIGKILL") == "probably OOM (out of memory)"
+
+
+def test_an_index_step_failing_after_promotion_holds_the_release_instead_of_quarantining(
+    tmp_path: Path,
+) -> None:
+    """2026-10-26 review #54: quarantined after five failed index attempts, the release's generation
+    was still CURRENT: served unindexed, and out of every trend."""
+    h = PipelineHarness(tmp_path, retry=RetryPolicy(max_attempts=2, base_delay=timedelta(minutes=10)))
+    h.pipeline.register(h.adapter.add_release("2026-10-01", FILES))
+
+    def index(source: SourceSpec, generation: Generation) -> None:
+        raise ValueError("a document the indexer cannot read")
+
+    h.pipeline.index = index
+    for _ in range(4):
+        h.pipeline.run("src", "2026-10-01")
+        h.clock.advance(timedelta(hours=1))
+    rec = h.store.get_release("src", "2026-10-01")
+    assert rec is not None
+    assert rec.state is S.FAILED  # not QUARANTINED
+    assert rec.next_attempt_at is not None
+    assert rec.next_attempt_at > h.clock.now() + timedelta(days=365)  # until `wsp retry`
+    current = h.vault.current("src")
+    assert current is not None
+    assert current.generation_id == rec.generation_id
+    assert "unindexed:src/2026-10-01" in h.alerter.open_keys()
