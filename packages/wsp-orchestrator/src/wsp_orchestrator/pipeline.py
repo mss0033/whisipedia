@@ -124,6 +124,10 @@ LEDGER_KIND_HOLD = "release.hold"
 LEDGER_KIND_WITHHELD = "release.withheld"
 LEDGER_KIND_CRASH = "release.crash"
 LEDGER_KIND_RETRY = "release.retry"
+# JSON list of step tokens a clean shutdown left running (a seal to the NAS cannot be cancelled): the
+# next start ends those steps without counting a crash (2026-10-26 review #35: two restarts to deploy
+# fixes sent a 100 GB seal to FAILED with a CRITICAL "probably OOM").
+ABANDONED_STEPS_META = "abandoned_steps"
 OWNER_ACTION_META = "last_owner_action"  # JSON {at, what}: the newest retry, approve or reject
 QUARANTINE_DIR = "_quarantine"
 _UNSAFE_GEN_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
@@ -425,6 +429,7 @@ class ReleasePipeline:
         Must only be called while no step can be running (the daemon holds the state DB lock).
         """
         out: list[ReleaseRecord] = []
+        abandoned = set(json.loads(self.store.get_meta(ABANDONED_STEPS_META) or "[]"))
         for rec in self.store.releases():
             if rec.step_token is None:
                 continue
@@ -432,12 +437,27 @@ class ReleasePipeline:
             if rec.state in _TERMINAL or rec.step_state is not rec.state:
                 self._end_step(step)
                 continue
+            if rec.step_token in abandoned:
+                log.info(
+                    "release step was interrupted by a shutdown; it starts again",
+                    extra={"fields": {"release": rec.subject, "state": rec.state.value}},
+                )
+                self._end_step(step)
+                continue
             log.warning(
                 "release step did not finish: the daemon crashed or was killed",
                 extra={"fields": {"release": rec.subject, "state": rec.state.value}},
             )
             out.append(self._crashed(step, "the daemon stopped during this step (crash or kill)"))
+        if abandoned:
+            self.store.set_meta(ABANDONED_STEPS_META, "[]")
         return out
+
+    def note_abandoned_steps(self) -> int:
+        """At a clean shutdown whose grace ran out: the steps left running were stopped on purpose."""
+        tokens = [r.step_token for r in self.store.releases() if r.step_token is not None]
+        self.store.set_meta(ABANDONED_STEPS_META, json.dumps(tokens))
+        return len(tokens)
 
     def sweep_workdir(self) -> int:
         """Remove local download copies that are no longer needed (sealed or finished releases).
@@ -515,6 +535,14 @@ class ReleasePipeline:
         self._owner_acted("reject", rec.subject)
         if rec.state in _TERMINAL:
             raise IllegalTransitionError(f"{rec.subject} is already {rec.state.value}")
+        if rec.step_token is not None and rec.state in (ReleaseState.REFINED, ReleaseState.INDEXED):
+            # Its promote-and-index step is running: rejected now, the step's result would be dropped
+            # but the generation it made current would stay current and searchable (2026-10-26 review
+            # #34). Earlier steps never touch CURRENT, so a reject there wins as before.
+            raise IllegalTransitionError(
+                f"{rec.subject} is {rec.state.value} and its step is running; reject it when the step "
+                "ends (or after restarting the orchestrator, which stops the step)"
+            )
         if rec.state is not ReleaseState.FAILED:
             rec = self._transition(
                 rec, ReleaseState.FAILED, attempts=rec.attempts + 1, last_error=f"rejected: {reason}"
@@ -1120,9 +1148,22 @@ class ReleasePipeline:
     def _cleanup_workdir(self, rec: ReleaseRecord) -> int:
         """Delete the release's local download copies under ``<workdir>/<source>/``. Returns how many."""
         root = (self.workdir / rec.source_id).resolve()
+        # A later release of the source may have downloaded the same name (cwec_latest.xml.zip): its
+        # file is not this release's to delete (2026-10-26 review #33).
+        live = {
+            Path(p).resolve()
+            for other in self.store.releases()
+            if other.source_id == rec.source_id
+            and other.version != rec.version
+            and other.state not in _SEALED_STATES
+            and other.state is not ReleaseState.QUARANTINED
+            for p in other.local_files
+        }
         n = 0
         for p in rec.local_files:
             path = Path(p).resolve()
+            if path in live:
+                continue
             if root in path.parents and path.is_file():
                 path.unlink(missing_ok=True)
                 n += 1

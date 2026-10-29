@@ -5,7 +5,9 @@ Each test started as the auditor's repro of a finding and now asserts the fixed 
 
 from __future__ import annotations
 
+import contextlib
 import sqlite3
+from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
 
@@ -611,3 +613,71 @@ def test_a_plan_sees_the_files_carried_from_earlier_generations(tmp_path: Path) 
         ("a.zim", "2026-08"),
         ("b.zim", "2026-09"),
     ]
+
+
+def test_steps_a_clean_shutdown_left_running_are_not_crashes(tmp_path: Path) -> None:
+    """2026-10-26 review #35: two restarts to deploy fixes during a long seal sent the release to
+    FAILED with a CRITICAL 'probably OOM'."""
+    h = PipelineHarness(tmp_path, retry=RetryPolicy(max_attempts=3, base_delay=timedelta(minutes=10)))
+    killer = _Killer(h, times=2)
+    h.pipeline.refine = killer
+    h.pipeline.register(h.adapter.add_release("2026-10-01", FILES))
+    for _ in range(2):  # the daemon is stopped (grace ran out) in the step, twice
+        with contextlib.suppress(SimulatedCrash):
+            h.pipeline.run("src", "2026-10-01")
+        assert h.pipeline.note_abandoned_steps() == 1
+        h.restart()  # runs recover_crashes
+        h.pipeline.refine = killer
+    rec = h.store.get_release("src", "2026-10-01")
+    assert rec is not None
+    assert (rec.state, rec.crash_count, rec.step_token) == (S.SEALED, 0, None)
+    assert "crashed:src/2026-10-01" not in h.alerter.open_keys()
+    assert h.pipeline.run("src", "2026-10-01").outcome is Outcome.PROMOTED
+
+
+def test_the_sweep_keeps_a_file_a_later_release_of_the_source_downloaded_again(tmp_path: Path) -> None:
+    """2026-10-26 review #33: a constant upstream name (cwec_latest.xml.zip) is the same local path
+    for every release; the sweep for a promoted one deleted the next one's download."""
+    h = PipelineHarness(tmp_path)
+    h.pipeline.register(h.adapter.add_release("2026-10-01", FILES))
+    for _ in range(5):
+        h.pipeline.step("src", "2026-10-01")  # ... SEALED
+    rec = h.store.get_release("src", "2026-10-01")
+    assert rec is not None
+    shared = Path(rec.local_files[0])
+    shared.write_bytes(b"the next release's download")
+    with h.store.tx() as c:  # inserted bare, then given its state and files
+        h.store.insert_release(replace(rec, version="2026-10-02"), h.clock.now(), c)
+    later = h.store.get_release("src", "2026-10-02")
+    assert later is not None
+    with h.store.tx() as c:
+        h.store.update_release(replace(later, state=S.FETCHED, local_files=rec.local_files), h.clock.now(), c)
+    others = [Path(p) for p in rec.local_files[1:]]
+    for other in others:
+        other.write_bytes(b"this release's own")
+    h.pipeline.sweep_workdir()
+    assert shared.exists()  # the later release's
+    assert not any(o.exists() for o in others)  # this release's own are still cleaned
+
+
+def test_a_reject_is_refused_while_the_promote_and_index_step_runs(tmp_path: Path) -> None:
+    """2026-10-26 review #34: a reject during REFINED's index step quarantined the release while its
+    generation stayed CURRENT and became searchable."""
+    from wsp_orchestrator.pipeline import IllegalTransitionError
+
+    h = PipelineHarness(tmp_path)
+    h.pipeline.register(h.adapter.add_release("2026-10-01", FILES))
+    refused: list[str] = []
+    real = h.pipeline.index
+
+    def index(source: SourceSpec, generation: Generation) -> None:
+        try:
+            h.pipeline.reject("src", "2026-10-01", reason="bad dump")
+        except IllegalTransitionError as exc:
+            refused.append(str(exc))
+        real(source, generation)
+
+    h.pipeline.index = index
+    assert h.pipeline.run("src", "2026-10-01").outcome is Outcome.PROMOTED
+    assert refused
+    assert "its step is running" in refused[0]

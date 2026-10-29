@@ -492,6 +492,10 @@ class Orchestrator:
                 "shutdown grace expired; unfinished jobs resume on next start",
                 extra={"fields": {"running": self.running_jobs()}},
             )
+            try:
+                self.pipeline.note_abandoned_steps()
+            except Exception:  # the next start then counts them as crashes, as before
+                log.exception("could not record the steps left running")
         try:
             self.refresh_metrics()
         except Exception:  # a job abandoned mid-write must not turn a clean stop into a crash
