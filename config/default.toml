@@ -131,7 +131,10 @@ mime_allowlist = []
 
 [curator]
 # Discovery bots (PLAN §5.3, §5.5). Network bots run in the orchestrator (the only networked service).
-bots = ["kiwix-opds", "wikimedia-ranking", "registry-health", "adapter-contract", "gap-miner"]
+# No "kiwix-opds": its catalog (opds.library.kiwix.org) disallows robots since 2026-10; Kiwix sources
+# update from the mirrors (KiwixMirrorAdapter), but new books are not discovered until the catalog
+# opens again or a bot lists the mirrors (2026-10-26 review #40).
+bots = ["wikimedia-ranking", "registry-health", "adapter-contract", "gap-miner"]
 proposals_dir = ""              # "" = <index.root>/../proposals (local disk; one YAML file per proposal)
 overlay = ""                    # "" = config/registry.local.yaml (git-ignored auto-promotions)
 license_allowlist = ["CC0-1.0", "CC-BY-4.0", "CC-BY-SA-3.0", "CC-BY-SA-4.0", "ODbL-1.0", "LicenseRef-PD", "LicenseRef-US-Gov-PD"]

@@ -168,7 +168,7 @@ def drill_once(
     }
 
 
-DEFAULT_BOTS = ("kiwix-opds", "wikimedia-ranking", "registry-health", "adapter-contract", "gap-miner")
+DEFAULT_BOTS = ("wikimedia-ranking", "registry-health", "adapter-contract", "gap-miner")  # see default.toml
 DEFAULT_KIWIX_CATEGORIES = (
     "wikipedia",
     "wiktionary",
