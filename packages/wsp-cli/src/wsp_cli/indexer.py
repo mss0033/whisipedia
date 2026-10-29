@@ -450,12 +450,33 @@ class Indexer:
         self._changed = True
         state[spec.id] = generation_id
         self._save_state(state)
+        live_map = id_map_dir(self.map_root, new_dir).name if self.map_root is not None else ""
+        if (freed := self._prune_maps(spec.id, {previous or ""}, live_map)) > 0:
+            self._say(f"  {spec.id}: {freed / 1e6:,.0f} MB of id maps of older generations removed")
         self.build_catalog(spec, generation_id)
         self._say(
             f"  indexed {spec.id}/{generation_id}: +{stats.upserted:,} upserted, -{stats.deleted:,} removed; "
             + memory_line()
         )
         return SourceReport(spec.id, indexed=generation_id, upserted=stats.upserted, deleted=stats.deleted)
+
+    def _prune_maps(self, source_id: str, keep: set[str], live_map: str) -> int:
+        """Remove the local id maps of ``source_id`` other than ``live_map`` (the generation just
+        indexed, as refined now) and those of the generations in ``keep`` (the one before it); returns
+        the bytes freed. Every indexed PubMed update left a 787 MB map behind on the local disk
+        (2026-10-26 review #10)."""
+        if self.map_root is None:
+            return 0
+        root = self.map_root / source_id
+        freed = 0
+        for d in sorted(root.iterdir()) if root.is_dir() else ():
+            gen, _, stamp = d.name.rpartition("-")
+            if not d.is_dir() or not gen or len(stamp) != 16 or gen in keep or d.name == live_map:
+                continue
+            size = sum(f.stat().st_size for f in d.rglob("*") if f.is_file())
+            shutil.rmtree(d, ignore_errors=True)
+            freed += size
+        return freed
 
     def _documents_in(self, source_id: str, generation_id: str) -> bool:
         """Whether a refined generation holds documents (unknown, e.g. deleted since: assumed so)."""

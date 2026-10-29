@@ -280,3 +280,32 @@ def test_indexing_writes_the_id_map_as_the_generation_goes_live(vault: FileVault
     finally:
         ix.close()
     assert sorted(p.name for p in maps.rglob("_ids.*.npy")) == ["_ids.h.npy", "_ids.loc.npy"]
+
+
+def test_maps_of_generations_two_behind_are_removed(vault: FileVault, tmp_path: Path) -> None:
+    """2026-10-26 review #10: every indexed generation left its id map on the local disk (787 MB per
+    PubMed update). The one indexed and the one before it stay."""
+    root = tmp_path / "index"
+    maps = tmp_path / "maps"
+    stale = maps / SID / "2026-09-01.ri-0123456789abcdef"
+    stale.mkdir(parents=True)
+    (stale / "_ids.h.npy").write_bytes(b"x" * 1000)
+    other = maps / "another-source" / "2026-09-01-0123456789abcdef"
+    other.mkdir(parents=True)
+    fetch(vault, tmp_path, "ri", "2026-10-03.ri", {"RI_Providence_1950.pdf": sheet("Providence")})
+    ix = Indexer(
+        vault,
+        [spec()],
+        {"doc-collection": DocCollectionAdapter(throttle=False)},
+        root,
+        TantivyIndex(root / "lexical"),
+        SqliteChangeFeed(root / "changes.sqlite"),
+        map_root=maps,
+    )
+    try:
+        ix.build([SID])
+    finally:
+        ix.close()
+    assert not stale.exists()
+    assert other.exists()  # another source's maps are not this run's to judge
+    assert [p.name for p in (maps / SID).iterdir()]  # the indexed generation's map stays
