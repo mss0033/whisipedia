@@ -481,3 +481,15 @@ def test_random_skips_a_crawls_captures_of_site_machinery(monkeypatch: pytest.Mo
     monkeypatch.setattr(lib, "title", title)
     with local_client(app) as c:
         assert c.get("/v1/random", params={"source": "rfc"}).json()["doc_id"] == "wsp:rfc/9110"
+
+
+def test_pages_of_a_navigational_query_slice_one_list(browse: httpx.Client) -> None:
+    """2026-10-26 review #112: the pin was placed on page 1 only, so a hit was skipped (or shown twice)."""
+    q = "wikipedia Alan Turing"
+    first = SearchResults.model_validate(browse.get("/v1/search", params={"q": q, "limit": 1}).json())
+    second = SearchResults.model_validate(
+        browse.get("/v1/search", params={"q": q, "limit": 1, "offset": 1}).json()
+    )
+    both = SearchResults.model_validate(browse.get("/v1/search", params={"q": q, "limit": 2}).json())
+    assert [h.doc_id for h in [*first.hits, *second.hits]] == [h.doc_id for h in both.hits]
+    assert second.navigate_to is None  # only page 1 says "go straight there"

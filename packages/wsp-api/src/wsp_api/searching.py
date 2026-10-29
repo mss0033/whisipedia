@@ -254,8 +254,11 @@ class Searcher:
                 shown = [h for h in found.hits if not self.is_listing(h) and self.kind_of(h) is kind]
             else:
                 shown = []
-        nav = search.navigate_to(s, q, exists=lib.exists) if offset == 0 else None
-        pin = nav or search.cited(s, q, exists=lib.exists)
+        # The pin is placed the same way on every page, so pages slice one list; only page 1 also
+        # says "go straight there" (a hit was skipped or shown twice past page 1: review #112).
+        target = search.navigate_to(s, q, exists=lib.exists)
+        nav = target if offset == 0 else None
+        pin = target or search.cited(s, q, exists=lib.exists)
         if pin is not None and (kind is None or self.kind_of(SearchHit(pin, 0.0, "")) is kind):
             held = next((h for h in shown if h.doc_id == pin), None)
             first = held or SearchHit(pin, 0.0, lib.title(pin) or pin, source_id=pin[4:].partition("/")[0])

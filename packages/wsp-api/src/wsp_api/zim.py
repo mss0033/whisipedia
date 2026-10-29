@@ -95,6 +95,9 @@ _REFRESH = re.compile(
 )
 
 
+NAUTILUS_TEXT_SECONDS = 10.0  # all of one item page's PDF text, below the 20 s NAS deadline
+
+
 @dataclass(frozen=True, slots=True)
 class ZimLayout:
     """The ZIM files of one generation: one book, or a bundle keyed by file-derived book name."""
@@ -629,10 +632,16 @@ class ZimAssetStore:
         if item is None:
             return None
         texts: dict[str, str] = {}
+        # One budget for all the item's files, well inside the request's NAS deadline: five scanned
+        # PDFs at 60 s each held NAS slots for minutes and other pages answered "busy" (review #113).
+        deadline = time.monotonic() + NAUTILUS_TEXT_SECONDS
         for name in item.files:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                break
             data = self._read(file, nautilus.FILES + name, Want.ANY)
             if data is not None and data.content is not None and data.mimetype.startswith("application/pdf"):
-                texts[name] = pdf_text(data.content)
+                texts[name] = pdf_text(data.content, seconds=left)
         return ZimPage(root + item.path, nautilus.item_html(item, texts), root)
 
     def _mindtouch(self, file: str, path: str, stub: str) -> str | None:
