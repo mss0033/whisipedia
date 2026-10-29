@@ -936,6 +936,9 @@ class CollectionFetcher:
             if survey.listing_complete
             else None
         )
+        if listed is not None and (why := _mass_withdrawal(prev_catalog, listed, survey.protected_keys())):
+            self._say(f"{spec.id}: {why}; no withdrawal inferred this run (check the issuer's listing)")
+            listed = None
         catalog = build_catalog(
             prev_catalog,
             prev_gen,
@@ -1122,6 +1125,25 @@ def unchanged(cand: Candidate, held: DocumentMeta | None, *, now: datetime | Non
     if fetched.tzinfo is None:
         fetched = fetched.replace(tzinfo=UTC)
     return (now or datetime.now(UTC)) - fetched < REFETCH_AFTER
+
+
+WITHDRAW_SHARE_MAX = 0.5  # a listing that would withdraw more than this share of the held documents ...
+WITHDRAW_MIN_HELD = 10  # ... of a source holding at least this many is not believed
+
+
+def _mass_withdrawal(
+    previous: Sequence[DocumentMeta], listed: Collection[str], protected: Collection[str]
+) -> str | None:
+    """Why a "complete" listing that leaves out most held documents is not taken at its word: a moved
+    or broken index page reads as an empty one, and every document would get the withdrawn banner
+    (2026-10-26 review #21). An issuer withdrawing half its publications at once is rarer than that."""
+    live = [
+        m.doc_key for m in previous if m.currency in ("current", "historical") and m.doc_key not in protected
+    ]
+    gone = sum(k not in listed for k in live)
+    if len(live) >= WITHDRAW_MIN_HELD and gone > WITHDRAW_SHARE_MAX * len(live):
+        return f"the listing leaves out {gone:,} of {len(live):,} held documents"
+    return None
 
 
 def _review_row(cand: Candidate, rule: str) -> dict[str, str]:

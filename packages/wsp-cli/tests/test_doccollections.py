@@ -598,7 +598,9 @@ def test_a_gone_index_page_is_not_an_incomplete_listing() -> None:
     cfg = {"kind": "index-page", "urls": ["https://a.gov/gone"], "documents": r"a\.gov/.+\.pdf$"}
     assert list(discover_all([cfg], env)) == []
     assert env.notes  # noted
-    assert env.incomplete == []  # but a 404 hides nothing
+    assert env.incomplete == []  # but a 404 hides nothing: an incomplete listing would stop the fetch,
+    # and one dead page among many roots would block the source for good. A moved site that empties the
+    # listing is caught when the catalog is built instead (_mass_withdrawal, 2026-10-26 review #21).
 
 
 def test_an_unresolved_item_withdraws_nothing_but_does_not_stop_the_fetch(
@@ -1024,3 +1026,15 @@ def test_share_trouble_while_screening_fails_one_document_not_the_fetch(
     assert failed[0] == "test:restricted.pdf"
     assert "the share did not answer" in failed[1]
     assert len(report.held) == 1  # the third document was screened as usual
+
+
+def test_a_listing_that_drops_most_held_documents_is_not_believed() -> None:
+    """2026-10-26 review #21: one broken listing must not label a whole source withdrawn."""
+    from wsp_adapters.doccollection.model import DocumentMeta
+    from wsp_cli.doccollections import _mass_withdrawal  # pyright: ignore[reportPrivateUsage]
+
+    held = [DocumentMeta(f"k{i}", f"upstream/k{i}.pdf", "X", f"T{i}") for i in range(20)]
+    assert _mass_withdrawal(held, set(), ()) == "the listing leaves out 20 of 20 held documents"
+    assert _mass_withdrawal(held, {f"k{i}" for i in range(12)}, ()) is None  # 8 withdrawn: believed
+    assert _mass_withdrawal(held[:5], set(), ()) is None  # too few to judge
+    assert _mass_withdrawal(held, {f"k{i}" for i in range(9)}, {f"k{i}" for i in range(9, 20)}) is None
