@@ -39,6 +39,7 @@ set -u
 usage() { echo "usage: $0 NAME SOURCE|- ITEM..." >&2; exit 2; }
 [ $# -ge 3 ] || usage
 NAME=$1 SRC=$2
+LANE_ARGS="$*"  # for another round (below); item names hold no spaces
 shift 2
 REPO=$(cd "$(dirname "$0")/../.." && pwd)
 WSP=${WSP:-$REPO/.venv/bin/wsp}
@@ -60,6 +61,8 @@ BUSY_WAIT=${LANE_BUSY_WAIT:-5}
 # An ingest gives the lock up after this long (exit 3, "yielded") and queues again at once, so one
 # large version does not keep every other lane's ingest waiting for hours.
 INGEST_SLICE=${LANE_INGEST_SLICE:-3600}
+ROUNDS=${LANE_ROUNDS:-3}  # passes over the items left for later, an hour apart
+ROUND_WAIT=${LANE_ROUND_WAIT:-3600}
 MAX_SLICES=${LANE_MAX_SLICES:-48}  # one-hour ingest slices of one version in a row, at most
 mkdir -p "$STATE/locks"
 DONE=$STATE/$NAME.done CYCLES=$STATE/$NAME.cycles FETCHED=$STATE/$NAME.fetched LOG=$STATE/$NAME.log
@@ -272,4 +275,12 @@ for item in "$@"; do
   fi
 done
 say "=== lane $NAME: $( [ "$left" = 0 ] && echo "every item done" || echo "items left for a later run" )"
+# Items left for a later run are tried again after ROUND_WAIT, up to ROUNDS times in all: a lane that
+# simply ended left a failed partition untouched until someone restarted it (2026-10-28, NARA rg-23).
+round=${LANE_ROUND:-1}
+if [ "$left" = 1 ] && [ "$round" -lt "$ROUNDS" ]; then
+  say "=== lane $NAME: round $((round + 1)) of $ROUNDS in $ROUND_WAIT s"
+  pause "$ROUND_WAIT"
+  LANE_ROUND=$((round + 1)) exec "$0" $LANE_ARGS  # shellcheck disable=SC2086
+fi
 exit "$left"

@@ -63,6 +63,8 @@ class Lane:
             "LANE_LISTING_WAIT": "0",
             "LANE_PARTIAL_WAIT": "0",
             "LANE_BUSY_WAIT": "0",
+            "LANE_ROUNDS": "1",  # one pass, unless a test asks for more
+            "LANE_ROUND_WAIT": "0",
         }
 
     def script(self, fetch: list[int | str], ingest: list[int | str]) -> None:
@@ -473,3 +475,16 @@ def test_an_ingest_that_yields_its_slice_goes_on_and_is_not_counted_busy(lane: L
     assert lane.run("rg-22", source="nara", LANE_MAX_SLICES="3") == 1  # a bound all the same
     assert "rg-22" not in lane.done()
     assert any("not finished after 3" in a for a in lane.alerts())
+
+
+def test_items_left_for_later_are_tried_again_in_a_later_round(lane: Lane) -> None:
+    """2026-10-28: a lane that left a failed partition (NARA rg-23) simply ended; nothing tried it again
+    until someone restarted the lane."""
+    lane.script(fetch=[0, 0, 0], ingest=[1, 0, 0])  # rg-23's first ingest fails; rg-24's succeeds
+    assert lane.run("rg-23", "rg-24", source="nara", LANE_ROUNDS="3") == 0
+    assert sorted(lane.done()) == ["rg-23", "rg-24"]
+    assert sum(c.startswith("collections") for c in lane.calls()) == 3  # rg-23 fetched again in round 2
+
+    lane.script(fetch=[1, 1, 1], ingest=[])
+    assert lane.run("rg-25", source="nara", LANE_ROUNDS="2") == 1  # still failing after its rounds
+    assert sum("rg-25" in c for c in lane.calls()) == 2
