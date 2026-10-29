@@ -277,6 +277,7 @@ class HttpFetcher:
         self._bucket = TokenBucket(c.bandwidth_limit) if c.bandwidth_limit else None
         self._hosts: dict[str, threading.BoundedSemaphore] = {}
         self._hosts_lock = threading.Lock()
+        self._next_start: dict[str, float] = {}  # host -> earliest start of its next request (Crawl-delay)
         self._cancel = threading.Event()
         self._observed: dict[str, dict[str, Any]] = {}
         self._observed_lock = threading.Lock()
@@ -339,7 +340,27 @@ class HttpFetcher:
             if sem is None:
                 sem = self._hosts[key] = threading.BoundedSemaphore(self.config.connections_for(key))
         with sem:
+            self._crawl_delay(url, key)
             yield
+
+    def _crawl_delay(self, url: str, key: str) -> None:
+        """Keep the host's robots.txt ``Crawl-delay`` between the starts of our requests to it; it was
+        read but only the collection throttle kept it (2026-10-26 review #85)."""
+        if not self.config.robots:
+            return
+        parts = urlsplit(url)
+        with self._robots_lock:
+            hit = self._robots.get(f"{parts.scheme}://{parts.netloc.lower()}")
+        rules = hit[0] if hit is not None else None
+        delay = rules.crawl_delay(self.config.user_agent) if rules is not None else None
+        if not delay:
+            return
+        with self._hosts_lock:
+            now = time.monotonic()
+            start = max(now, self._next_start.get(key, now))
+            self._next_start[key] = start + float(delay)
+        if start > now and self._cancel.wait(start - now):
+            raise FetchCancelledError(f"{url}: cancelled (shutdown)")
 
     def throttle(self, nbytes: int) -> None:
         if self._bucket is not None:
@@ -657,6 +678,8 @@ class HttpFetcher:
                 if existing is not None:
                     return existing
             report = self._download(target, dest, t0, single_source=not upstream_verified)
+            if not target.checksums and target.pieces is not None:
+                return dataclasses.replace(report, pieces_verified=f"pieces:{target.pieces.algorithm}")
             if upstream_verified:
                 return report
             if self.config.unverified_policy == "allow":
@@ -839,6 +862,10 @@ class HttpFetcher:
                 for chunk in r.iter_raw():
                     if self._cancel.is_set():
                         raise FetchCancelledError(f"{target.url}: cancelled (shutdown)")
+                    if expected is not None and got + len(chunk) > expected:
+                        # A server that sends more than the file's size, or never stops, is not
+                        # written to the share without end (2026-10-26 review #87).
+                        raise _RetryableError(f"more than the {expected} bytes expected")
                     fh.write(chunk)
                     hasher.update(chunk)
                     self.throttle(len(chunk))
@@ -982,7 +1009,9 @@ class HttpFetcher:
         for url in order:
             try:
                 size, digests = self._retrying(
-                    f"corroborate {url}", lambda u=url: self._hash_remote(u), self.config.max_attempts
+                    f"corroborate {url}",
+                    lambda u=url: self._hash_remote(u, report.size or None),
+                    self.config.max_attempts,
                 )
             except FetchCancelledError:
                 raise
@@ -1016,10 +1045,30 @@ class HttpFetcher:
             f"({'; '.join(errors)}); first copy kept as {kept.name}"
         )
 
-    def _hash_remote(self, url: str) -> tuple[int, dict[str, str]]:
-        """Stream ``url`` completely, hashing only (nothing written); size and digests."""
+    def _hash_remote(self, url: str, expected: int | None = None) -> tuple[int, dict[str, str]]:
+        """Stream ``url`` completely, hashing only (nothing written); size and digests. An ``ftp://``
+        URL goes over FTP: httpx has none, and every FTP file failed corroboration (review #81)."""
         hasher = MultiHasher(())
         got = 0
+        if url.startswith("ftp://"):
+
+            def sink(chunk: bytes) -> None:
+                nonlocal got
+                self.check_cancelled()
+                hasher.update(chunk)
+                self.throttle(len(chunk))
+                got += len(chunk)
+                if expected is not None and got > expected:
+                    raise _RetryableError(f"more than the {expected} bytes expected")
+
+            try:
+                with self.host_slot(url):
+                    ftp.retrieve(url, offset=0, timeout=self.config.read_timeout, sink=sink)
+                return got, hasher.hexdigests()
+            except ftp.TRANSIENT as exc:
+                raise _RetryableError(f"{type(exc).__name__}: {exc}") from exc
+            finally:
+                hasher.close()
         try:
             with self.host_slot(url):
                 try:
@@ -1031,6 +1080,8 @@ class HttpFetcher:
                             hasher.update(chunk)
                             self.throttle(len(chunk))
                             got += len(chunk)
+                            if expected is not None and got > expected:  # review #87: never unbounded
+                                raise _RetryableError(f"more than the {expected} bytes expected")
                 except httpx.TransportError as exc:
                     raise _RetryableError(f"{type(exc).__name__}: {exc}") from exc
             if declared is not None and declared.isdigit() and int(declared) != got:
@@ -1151,6 +1202,7 @@ class _SegmentedDownload:
         self.done: set[int] = set()
         self.error: BaseException | None = None
         self.finished = False
+        self.writers = 0  # piece writes in progress (the descriptor is closed only at zero)
         self.live_workers = 0
         self.bytes_downloaded = 0
         self.bytes_resumed = 0
@@ -1241,6 +1293,12 @@ class _SegmentedDownload:
             self.inorder.abort()
             for t in threads:  # workers notice ``finished`` between reads; a cancel need not wait long
                 t.join(timeout=2.0 if self.f.cancelled else self.cfg.read_timeout + 5)
+            # A straggling worker may be inside a write still (a stalled pwrite on the share): the
+            # descriptor is not closed under it, where a new download could get the same number and
+            # take its bytes (2026-10-26 review #82). No new write starts once ``finished`` is set.
+            with self.cond:
+                while self.writers:
+                    self.cond.wait()
         if self.error is not None:
             hasher.close()
             self._checkpoint(force=True)
@@ -1581,9 +1639,17 @@ class _SegmentedDownload:
             if i in self.claimed:  # an endgame duplicate won the race
                 self.cond.notify_all()
                 return
+            if self.finished:  # the download is over (or failed): the descriptor may close any moment
+                return
             self.claimed.add(i)
+            self.writers += 1
         offset, _ = self.span(i)
-        written = _pwrite_all(self.fd, data, offset)
+        try:
+            written = _pwrite_all(self.fd, data, offset)
+        finally:
+            with self.cond:
+                self.writers -= 1
+                self.cond.notify_all()
         self.f.wrote(written)
         with self.cond:
             self.done.add(i)

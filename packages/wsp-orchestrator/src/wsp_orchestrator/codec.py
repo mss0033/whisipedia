@@ -93,6 +93,10 @@ def fetch_result_to_json(r: FetchResult) -> JsonObj:
         "blake3": r.blake3,
         "verified": [checksum_to_json(c) for c in r.verified],
     }
+    if r.corroborated:
+        out["corroborated"] = True
+    if r.pieces_verified:
+        out["pieces_verified"] = r.pieces_verified
     provenance = getattr(r, "provenance", None)  # wsp_fetch.FetchReport (ADR-0009); JSON-safe
     if isinstance(provenance, Mapping) and provenance:
         out["provenance"] = dict(cast(Mapping[str, Any], provenance))
@@ -106,4 +110,6 @@ def fetch_result_from_json(d: Mapping[str, Any]) -> FetchResult:
         sha256=str(d["sha256"]),
         blake3=str(d["blake3"]),
         verified=tuple(checksum_from_json(c) for c in cast(list[Mapping[str, Any]], d.get("verified", []))),
+        corroborated=bool(d.get("corroborated", False)),
+        pieces_verified=str(d.get("pieces_verified") or ""),
     )

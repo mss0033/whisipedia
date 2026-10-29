@@ -185,9 +185,14 @@ class FetchResult:
     # authenticity, but a truncated or spliced download cannot pass it. Keyword-only, so subclasses
     # that add fields positionally (``wsp_fetch.FetchReport``, test doubles) are unaffected.
     corroborated: bool = field(default=False, kw_only=True)
+    # Upstream published no digest of the whole file, but every piece matched a Metalink piece hash
+    # ("pieces:sha-1"): verified, not merely corroborated (2026-10-26 review #86).
+    pieces_verified: str = field(default="", kw_only=True)
 
     @property
     def verdict(self) -> Verdict:
+        if not self.verified and self.pieces_verified:
+            return Verdict(VerdictStatus.OK, self.pieces_verified)
         if not self.verified:
             if self.corroborated:
                 return Verdict(VerdictStatus.UNVERIFIABLE, "no upstream checksum; two full downloads agree")

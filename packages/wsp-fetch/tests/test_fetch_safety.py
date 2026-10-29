@@ -517,3 +517,32 @@ def test_an_unreachable_robots_txt_disallows_until_it_is_read_again(monkeypatch:
         clock[0] += 24 * 3600
         f.get_bytes("https://down.example/x.bin")
         assert asked.count("down.example/robots.txt") == n + 1
+
+
+def test_a_hosts_crawl_delay_spaces_the_starts_of_our_requests() -> None:
+    """2026-10-26 review #85: Crawl-delay was read but only the collection throttle kept it."""
+    from wsp_core.robots import parse
+
+    with HttpFetcher(replace(CFG, robots=True)) as f:
+        rules = parse("User-agent: *\nCrawl-delay: 0.3\n")
+        f._robots["https://slow.example"] = (rules, time.monotonic() + 3600)  # pyright: ignore[reportPrivateUsage]
+        t0 = time.monotonic()
+        for _ in range(3):
+            with f.host_slot("https://slow.example/a"):
+                pass
+        assert time.monotonic() - t0 >= 0.55  # three starts, two gaps of 0.3 s
+        t1 = time.monotonic()
+        with f.host_slot("https://fast.example/a"), f.host_slot("https://fast.example/b"):
+            pass  # no Crawl-delay known: no wait
+        assert time.monotonic() - t1 < 0.2
+
+
+def test_a_download_checked_piece_by_piece_is_verified_not_unverifiable() -> None:
+    """2026-10-26 review #86: Metalink piece hashes matched, yet the verdict said 'no checksum'."""
+    from wsp_core.model import FetchResult
+
+    plain = FetchResult(Path("x"), 1, "a" * 64, "b" * 64)
+    assert plain.verdict.status is VerdictStatus.UNVERIFIABLE
+    pieces = FetchResult(Path("x"), 1, "a" * 64, "b" * 64, pieces_verified="pieces:sha-1")
+    assert pieces.verdict.status is VerdictStatus.OK
+    assert pieces.verdict.detail == "pieces:sha-1"

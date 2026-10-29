@@ -576,6 +576,13 @@ def build_fetcher(
     if str(acq.get("fetcher", "http")) == "aria2":
         if find_aria2c() is None:
             raise ConfigError("acquirer.fetcher = 'aria2' but aria2c is not on PATH")
+        if fc.robots:
+            # aria2c follows a mirror's redirects itself, past the robots.txt check of each hop that
+            # HttpFetcher makes (BODC's GEBCO link led to CEDA, whose robots.txt disallows every
+            # agent): not used while robots.txt is honoured (2026-10-26 review #84).
+            raise ConfigError(
+                "acquirer.fetcher = 'aria2' does not check robots.txt at redirects; use 'http' (the default)"
+            )
         return Aria2Fetcher(fc)
     return HttpFetcher(fc, pace=pace)
 
