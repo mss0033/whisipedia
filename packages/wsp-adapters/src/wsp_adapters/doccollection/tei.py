@@ -262,7 +262,7 @@ def dta_text(text: str) -> str:
     """The diplomatic transcription made searchable (see the module notes)."""
     text = re.sub(f"[-¬]\\s*{_LB}\\s*", "", text)  # "an-" + line break + "dern"
     text = re.sub(f"\\s*{_LB}\\s*", " ", text)
-    text = re.sub("([aouAOU])\u0364", lambda m: _UMLAUT[m.group(1)], text.replace("ſ", "s"))
+    text = re.sub("([aouAOU])\u0364", lambda m: _UMLAUT[m.group(1)], text.replace("\u017f", "s"))
     return "\n\n".join(b.strip() for b in text.split("\n\n") if b.strip())
 
 

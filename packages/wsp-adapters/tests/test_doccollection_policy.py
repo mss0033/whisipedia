@@ -323,8 +323,22 @@ def test_legacy_office_files_linked_as_pdfs_are_renamed(tmp_path: Path) -> None:
         ("Shaped charges - a short course", Verdict.DENY),
         # still: a phrase inside a hyphenated compound is not that phrase
         ("A history of anti-IED programs", Verdict.ALLOW),
+        # 2026-10-26 review #18: bracketed abbreviations, "&" or "/" for "and", articles.
+        ("Improvised Explosive Device (IED) Construction Techniques", Verdict.DENY),
+        ("IED (Improvised Explosive Device) Fabrication", Verdict.DENY),
+        ("Explosives & Demolitions", Verdict.DENY),
+        ("Explosives/Demolitions", Verdict.DENY),
+        ("Demolition Materials & Charges", Verdict.DENY),
+        ("Construction of a Pipe Bomb", Verdict.DENY),
+        ("Pipe-bomb construction", Verdict.DENY),
+        ("Making the pipe bomb", Verdict.DENY),
+        # and the new copy does not invent hits from ordinary prose
+        ("Research & Development (R&D) Program Report", Verdict.ALLOW),
+        ("Input/Output Systems (I/O) Manual", Verdict.ALLOW),
     ],
 )
 def test_the_deny_core_survives_word_forms_and_dashes(title: str, expected: Verdict) -> None:
     rules = load_rules({"allow_all": True}, repo_root=REPO)
     assert classify_content(title, rules).verdict is expected
+    if expected is Verdict.DENY:  # the metadata stage denies the same title
+        assert classify_metadata(DocFacts(key="t:1", title=title), rules).verdict is Verdict.DENY

@@ -104,9 +104,9 @@ DENY_CORE: Mapping[str, tuple[str, ...]] = {
         r"home~made explosives?",
         r"improvised explosives? (?:devices? )?(?:construction|fabrication|assembly|manufactur\w*|making|"
         r"design)",
-        r"(?:construct\w*|fabricat\w*|assembl\w*|building|making) (?:an? |of )?"
+        r"(?:construct\w*|fabricat\w*|assembl\w*|building|making) (?:of )?(?:an? |the )?"
         r"(?:improvised explosive devices?|ieds?|pipe bombs?|car bombs?)",
-        r"ieds? (?:construction|fabrication|assembly|making)",
+        r"(?:ieds?|pipe bombs?|car bombs?) (?:construction|fabrication|assembly|making|design)",
         r"improvised munitions?",
         r"shaped charges?",
         r"(?:detonators?|blasting caps?) (?:assembly|construction|fabrication|manufactur\w*|making)",
@@ -290,6 +290,8 @@ _HYPHEN_BREAK_RE = re.compile(r"(\w)-[ \t]*\r?\n\s*(\w)")
 # Three or more single letters/digits separated by runs of 1-3 spaces: a letter-spaced heading.
 _SPACED_RUN_RE = re.compile(r"(?<!\w)(?:\w[ \t]{1,3}){2,}\w(?!\w)")
 _WIDE_GAP_RE = re.compile(r"[ \t]{2,}")
+_ASIDE_RE = re.compile(r"[ \t]*\([^()\n]{1,40}\)")  # a short bracketed aside, on one line
+_AND_RE = re.compile(r"[ \t]*&[ \t]*|(?<=[^\W\d])[ \t]*/[ \t]*(?=[^\W\d])")  # "&", or "/" between words
 
 
 def normalize_text(text: str) -> str:
@@ -318,6 +320,12 @@ def screen_variants(text: str) -> tuple[str, str]:
                 " ".join(w.replace(" ", "").replace("\t", "") for w in _WIDE_GAP_RE.split(r)) for r in runs
             )
         )
+    # Title shapes that put words between a core phrase's words: an abbreviation in brackets
+    # ("Improvised Explosive Device (IED) Construction") and "&" or "/" for "and" ("Explosives &
+    # Demolitions"). Added as a further copy, so the original wording still matches too.
+    plain = _AND_RE.sub(" and ", _ASIDE_RE.sub("", text))
+    if plain != text:
+        parts.append(plain)
     squeezed = "\n".join(re.sub(r"\s+", "", r) for r in runs)
     return "\n\n".join(parts), squeezed
 
