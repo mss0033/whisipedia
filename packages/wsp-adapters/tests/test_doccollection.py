@@ -1911,3 +1911,14 @@ def test_a_listed_landing_page_is_resolved_to_its_document_where_the_host_allows
     assert got.url == "https://www.nrc.gov/docs/ML2400/ML24001.pdf"
     (manual_item,) = list(discover_all([{"kind": "list", "items": [item]}], env_for({})))
     assert manual_item.extra == {"page": "1"}  # without the option: a page for the owner (wsp_cli.manual)
+
+
+def test_an_origin_with_a_path_admits_that_bucket_only() -> None:
+    """2026-10-26 review: s3.amazonaws.com and storage.googleapis.com serve every bucket path-style."""
+    from wsp_adapters.doccollection.discovery import origin_ok
+
+    origins = ["storage.googleapis.com/dm_graphcast/", "planet.openhistoricalmap.org"]
+    assert origin_ok("https://storage.googleapis.com/dm_graphcast/params/x.npz", origins)
+    assert not origin_ok("https://storage.googleapis.com/someone-else/x.npz", origins)
+    assert not origin_ok("https://storage.googleapis.com/dm_graphcast_evil/x.npz", origins)
+    assert origin_ok("https://planet.openhistoricalmap.org/planet/x.osm.pbf", origins)

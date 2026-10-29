@@ -5361,7 +5361,7 @@ sources:
       adapter: doc-collection
       issuer: OpenHistoricalMap
       key_prefix: ohm
-      origins: [s3.amazonaws.com, planet.openhistoricalmap.org]
+      origins: [s3.amazonaws.com/planet.openhistoricalmap.org/, planet.openhistoricalmap.org]  # the bucket, not every bucket
       discovery:
         # The bucket lists but answers 403 to reads since 2026-10-21: files come from the CDN host.
         - {kind: s3-listing, bucket_url: "https://s3.amazonaws.com/planet.openhistoricalmap.org", download_url: "https://planet.openhistoricalmap.org", prefix: "planet/", key_pattern: "\\.osm\\.pbf$", newest: 1}
@@ -5427,7 +5427,7 @@ sources:
       issuer: Google DeepMind
       key_prefix: graphcast
       endpoints: ["https://github.com/google-deepmind/graphcast"]
-      origins: [github.com, api.github.com, storage.googleapis.com]
+      origins: [github.com, api.github.com, storage.googleapis.com/dm_graphcast/]  # the bucket, not every bucket
       reader: markdown-docs
       discovery:
         - {kind: git, repos: ["https://github.com/google-deepmind/graphcast"], snapshot: true}

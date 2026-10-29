@@ -372,7 +372,9 @@ def test_prune_does_nothing_without_promotion_history(tmp_path: Path) -> None:
     orch.close()
 
 
-def test_partitioned_candidates_are_pruned_but_not_discovered(tmp_path: Path) -> None:
+def test_candidates_are_pruned_but_not_discovered(tmp_path: Path) -> None:
+    """Candidates are fetched by the collection lanes, not discovered here; their generations still
+    need retention (partitioned ones since audit M7, every one since the 2026-10-26 review)."""
     spec = make_spec(
         "cia", status=SourceStatus.CANDIDATE, raw={"access": {"adapter": "cia", "partitioned": True}}
     )
@@ -382,7 +384,7 @@ def test_partitioned_candidates_are_pruned_but_not_discovered(tmp_path: Path) ->
     kinds = {(e.kind, e.key) for e in orch.scheduler.entries()}
     assert (JobKind.PRUNE, "cia") in kinds
     assert (JobKind.DISCOVER, "cia") not in kinds
-    assert not {k for k in kinds if k[1] == "later"}
+    assert {k for k in kinds if k[1] == "later"} == {(JobKind.PRUNE, "later")}
     orch.close()
 
 

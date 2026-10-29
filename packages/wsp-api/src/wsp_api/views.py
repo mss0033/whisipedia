@@ -188,7 +188,10 @@ class Library:
 
         def held(source_id: str) -> bool:
             spec = self.s.source(source_id)
-            if spec is None or spec.status is not SourceStatus.ACTIVE or current(source_id) is None:
+            # Any source the library holds data of (a lane's candidate, a paused one), not only active
+            # ones: links to about 70 lane-fetched sources were "not in the library" (2026-10-26 review).
+            gone = (SourceStatus.EXCLUDED, SourceStatus.RETIRED)
+            if spec is None or spec.status in gone or current(source_id) is None:
                 return False
             return spec.adapter == ZIM_ADAPTER or searchable(spec)
 

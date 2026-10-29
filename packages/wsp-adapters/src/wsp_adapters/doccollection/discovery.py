@@ -346,7 +346,8 @@ def origin_ok(url: str, origins: Sequence[str]) -> bool:
 
     FTP only where an origin names it as ``ftp://HOST`` (exactly that host, port 21): an issuer's FTP
     service the owner allowed (D16, 2026-10-24). A bare host never admits FTP, and an origin list
-    with no HTTPS host admits no other HTTPS host.
+    with no HTTPS host admits no other HTTPS host. An origin ``host/prefix/`` admits that host's
+    paths under the prefix only (a bucket on a shared storage host).
     """
     try:
         parts = urlsplit(url)
@@ -363,8 +364,17 @@ def origin_ok(url: str, origins: Sequence[str]) -> bool:
         return port in (None, 21) and f"ftp://{host}" in origins
     if scheme != "https" or port not in (None, 443):
         return False
-    hosts = [o for o in origins if "://" not in o]
-    return not origins or any(host == o or host.endswith("." + o) for o in hosts)
+    hosts = [o for o in origins if "://" not in o and "/" not in o]
+    # "host/prefix/": that host, paths under that prefix only. A shared host serves every bucket in
+    # the world path-style (s3.amazonaws.com/<bucket>/, storage.googleapis.com/<bucket>/), so a bare
+    # host there admitted any bucket (2026-10-26 review).
+    prefixed = [o.partition("/") for o in origins if "://" not in o and "/" in o]
+    path = parts.path or "/"
+    return (
+        not origins
+        or any(host == o or host.endswith("." + o) for o in hosts)
+        or any(host == h and path.startswith("/" + p) for h, _, p in prefixed)
+    )
 
 
 def off_origin_hops(result: object, origins: Sequence[str]) -> list[str] | None:

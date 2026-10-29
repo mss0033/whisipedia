@@ -101,14 +101,11 @@ class Scheduler:
         return [s for s in self.sources if s.status is SourceStatus.ACTIVE]
 
     def pruned_sources(self) -> list[SourceSpec]:
-        """Active sources, plus partitioned ones still in ``candidate`` status: those are acquired
-        partition by partition with ``wsp collections fetch`` before they are active, and their
-        generations need retention too (audit M7)."""
-        return [
-            s
-            for s in self.sources
-            if s.status is SourceStatus.ACTIVE or (s.partitioned and s.status is SourceStatus.CANDIDATE)
-        ]
+        """Active sources, plus those still in ``candidate`` status: the collection lanes fetch and seal
+        about 70 of them before they are active, and their generations need retention too (audit M7;
+        only partitioned ones were pruned until the 2026-10-26 review). Pruning moves a generation
+        under ``pruned/``; it never deletes, nor touches the current or newest one."""
+        return [s for s in self.sources if s.status in (SourceStatus.ACTIVE, SourceStatus.CANDIDATE)]
 
     def entries(self) -> list[ScheduleEntry]:
         out: list[ScheduleEntry] = []

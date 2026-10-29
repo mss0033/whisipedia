@@ -424,8 +424,11 @@ def test_outside_route_names_the_library_copy_or_says_none(browse: httpx.Client)
         "address": "wsp://rfc/rfc:RFC-9110",  # the document collection's key (rfc:RFC-<n>)
         "source_id": "rfc",
     }
-    # the sample's Gutenberg source has no current generation: not held
-    assert browse.get("/v1/outside", params={"url": "https://www.gutenberg.org/ebooks/84"}).status_code == 404
+    # the sample's Gutenberg source is a candidate that holds data: held (2026-10-26 review; links to
+    # about 70 lane-fetched candidate sources were "not in the library")
+    gut = browse.get("/v1/outside", params={"url": "https://www.gutenberg.org/ebooks/84"})
+    assert gut.status_code == 200
+    assert gut.json()["source_id"] == "gutenberg"
     miss = browse.get("/v1/outside", params={"url": "https://example.org/nothing"})
     assert miss.status_code == 404
     assert miss.json()["error"]["code"] == "not_held"
