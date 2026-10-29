@@ -56,6 +56,9 @@ _TABLE_CELL_RE = re.compile(r"^\s*[|!]\s?", re.MULTILINE)
 _CELL_SEP_RE = re.compile(r"\s*(?:\|\||!!)\s*")
 # Atomic group + possessive repeat: the plain ``(...)+`` backtracks exponentially on a long attribute-like
 # line with no closing ``|`` (one English Wikipedia page stalled a refine for over 10 minutes).
+_INLINE_CELL_ATTR_RE = re.compile(
+    r"(\|\||!!)\s*(?>[a-z-]+\s*=\s*(?:\"[^\"]*\"|'[^']*'|[^\s|]+)\s*)++\|(?!\|)", re.IGNORECASE
+)
 _CELL_ATTR_RE = re.compile(r"^(?>[a-z-]+\s*=\s*(?:\"[^\"]*\"|'[^']*'|[^\s|]+)\s*)++\|(?!\|)", re.MULTILINE)
 _SPACES_RE = re.compile("[ \t\u00a0]+")
 _BLANKS_RE = re.compile(r"\n{2,}")
@@ -354,7 +357,12 @@ def _render_tables(text: str) -> str:
     text = _CAPTION_RE.sub("", text)  # a caption line keeps its text
     text = _TABLE_LINE_RE.sub("", text)
     text = _CELL_ATTR_RE.sub("", _TABLE_CELL_RE.sub("", text))
-    return _CELL_SEP_RE.sub(" • ", text) if "||" in text or "!!" in text else text
+    if "||" not in text and "!!" not in text:
+        return text
+    # A cell after "||" or "!!" carries its attributes too ("|| style=\"...\" | Bears"): they were left
+    # in the text (rowspan="3"| in wikipedia-text-extra, 2026-10-25).
+    text = _INLINE_CELL_ATTR_RE.sub(r"\1", text)
+    return _CELL_SEP_RE.sub(" • ", text)
 
 
 def wikitext_to_text(wikitext: str, *, capitalize_links: bool = True) -> tuple[str, tuple[str, ...]]:
