@@ -245,3 +245,37 @@ def test_the_spelling_vocabulary_leaves_out_catalogues(tmp_path: Path) -> None:
         assert ix.spell() is None
     finally:
         ix.close()
+
+
+def test_the_nightly_build_finishes_an_interrupted_refine_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-10-26 review #8: a refine-again killed after its new copy was in place left the index on the
+    old copy; the nightly build saw the generation 'already indexed' and the new documents were never
+    found. #9: the live copy is no longer moved aside before the new one is ready."""
+    adapter = Adapter()
+    ix = indexer(tmp_path, adapter)
+    try:
+        ix.build([SID])
+        adapter.full = True
+        real = ix.index_generation
+        calls: list[int] = []
+
+        def dies_once(*args: Any, **kw: Any) -> Any:
+            calls.append(1)
+            if len(calls) == 1:
+                raise KeyboardInterrupt  # the unit was killed
+            return real(*args, **kw)
+
+        monkeypatch.setattr(ix, "index_generation", dies_once)
+        with pytest.raises(KeyboardInterrupt):
+            ix.refine_again(SID)
+        source_dir = tmp_path / "index" / "refinery" / SID
+        assert is_sealed(source_dir / "2026-01")  # the new copy is live, never missing
+        assert (source_dir / REPLACED_DIR / PENDING_FILE).is_file()
+        (report,) = ix.build([SID])  # the nightly build
+        assert report.upserted == 1
+        assert [h.doc_id for h in ix.index.search("moon")] == [make_doc_id(SID, "tides")]
+        assert not (source_dir / REPLACED_DIR / PENDING_FILE).exists()
+    finally:
+        ix.close()

@@ -710,16 +710,21 @@ class Indexer:
             old_dir = replaced / pending.read_text(encoding="utf-8").strip()
             self._say(f"{source_id}: resuming the refine-again from {old_dir.name}")
         elif is_sealed(out_dir):
+            # Into _staging first, then a quick swap: moving the live copy aside before refining left
+            # the source's documents unreadable for the whole refine (2026-10-26 review #9).
+            result = self.refine(spec, current, self.vault.generation_path(source_id, gid), directory=staged)
             try:
                 old_dir = self._move_aside(out_dir, replaced, gid)
             except PermissionError:
-                self._say(f"{source_id}: {gid} is in use and cannot be moved; refining into {STAGING_DIR}")
-                self.refine(spec, current, self.vault.generation_path(source_id, gid), directory=staged)
+                self._say(
+                    f"{source_id}: {gid} is in use and cannot be moved; the new copy is in {STAGING_DIR}"
+                )
                 return SourceReport(
                     source_id, skipped="staged; stop the API, run --refine-again --swap, start it again"
                 )
-            self._say(f"{source_id}: {gid} moved to {REPLACED_DIR}/{old_dir.name}; refining again")
-        result = self.refine(spec, current, self.vault.generation_path(source_id, gid))
+            staged.rename(out_dir)
+            self._say(f"{source_id}: {gid} refined again; the old copy is {REPLACED_DIR}/{old_dir.name}")
+        result = self.refine(spec, current, self.vault.generation_path(source_id, gid))  # sealed: as is
         base = old_dir if old_dir is not None and is_sealed(old_dir) else None
         rep = self.index_generation(spec, gid, since=base)
         pending.unlink(missing_ok=True)
@@ -782,7 +787,18 @@ class Indexer:
             if current is None:
                 reports.append(SourceReport(sid, tuple(refined), skipped="no current generation"))
                 continue
-            rep = self.index_generation(spec, current.generation_id)
+            # A refine-again that was interrupted after its new copy was in place: the index still holds
+            # the old one, and the generation id did not change. It diffs from the replaced copy named
+            # in PENDING, not "already indexed" (2026-10-26 review #8).
+            gid = current.generation_id
+            pending = self.refined_dir(spec, gid).parent / REPLACED_DIR / PENDING_FILE
+            base = None
+            if pending.is_file():
+                named = pending.parent / pending.read_text(encoding="utf-8").strip()
+                base = named if named.name.startswith(f"{gid}-") and is_sealed(named) else None
+            rep = self.index_generation(spec, gid, since=base)
+            if base is not None and rep.indexed == gid:
+                pending.unlink(missing_ok=True)
             reports.append(
                 SourceReport(sid, tuple(refined), rep.indexed, rep.upserted, rep.deleted, rep.skipped)
             )
