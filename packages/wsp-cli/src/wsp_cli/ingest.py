@@ -66,7 +66,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, TextIO, cast
 
-from wsp_adapters.kiwix import KiwixOpdsAdapter, Selector
+from wsp_adapters.kiwix import KiwixOpdsAdapter, Selector, checksum_dirs, saved_checksum
 from wsp_cli import nasretry
 from wsp_core import diag
 from wsp_core.model import Checksum, Generation, SourceSpec, SourceStatus
@@ -454,6 +454,17 @@ class Ingestor:
             f for f in vp.files if not f.checksums and f.target.is_kiwix_metalink and f.state in DONE_STATES
         ]
         if spec is None or not todo:
+            return
+        # Kiwix's .sha256 files saved by the owner (or recorded from the vault) first: Kiwix's own host
+        # refuses robots since 2026-10, so a fetched .sha256 is no longer the way (review split item).
+        dirs = checksum_dirs()
+        for f in todo:
+            url = f.target.kiwix_file_url
+            digest = saved_checksum(url.rsplit("/", 1)[-1], dirs) if url else None
+            if digest is not None:
+                f.checksums = (Checksum("sha256", digest),)
+        todo = [f for f in todo if not f.checksums]
+        if not todo:
             return
         if self.fetcher is None:
             for f in todo:
