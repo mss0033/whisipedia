@@ -286,6 +286,14 @@ def _era5_year(
     if days <= 0 or era5_sealed(vault, domain, year, last):
         out.write(f"era5 {year}: sealed to {last}; nothing new\n")
         return 7
+    # The store's stated end ran ahead of a variable (precipitation), so the year stopped short of it:
+    # a version staged to that same day, still waiting for its seal, is the one to ingest, not a
+    # second copy (2026-10-26 review #47).
+    reached = first + timedelta(days=days - 1)
+    if (staged := era5_staged(vault, domain, year, reached)) is not None:
+        out.write(f"era5 {year}: {ERA5_SOURCE}/{staged} is staged to {reached}, waiting to be sealed\n")
+        out.write(f"next: wsp ingest --source {ERA5_SOURCE} --version {staged}\n")
+        return EXIT_OK
     pack = work / "pack"
     if pack.exists():
         shutil.rmtree(pack)

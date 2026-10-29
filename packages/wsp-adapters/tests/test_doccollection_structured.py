@@ -9,6 +9,8 @@ import json
 import zipfile
 from pathlib import Path
 
+import pytest
+
 from wsp_adapters.doccollection.tei import read_snapshot
 
 
@@ -537,3 +539,37 @@ def test_an_aozora_work_is_read_without_its_notation_key_ruby_notes_or_colophon(
     assert doc.title == "芥川龍之介歌集 (芥川龍之介)"
     assert doc.text == "やはらかく深紫の天鵞絨をなづる心地か春の暮れゆく\n\n麦畑の萌黄天鵞絨芥子の花"
     assert doc.lang == "ja"
+
+
+def test_two_sections_pdfs_of_the_same_name_keep_their_own_text(tmp_path: Path) -> None:
+    """2026-10-26 review #69: matched without its hash, two sections' lec1.pdf both got one file's text."""
+    from adapters_testkit import pages_pdf
+
+    from wsp_adapters.doccollection.structured import ocw_course
+
+    path = tmp_path / "course.zip"
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("data.json", json.dumps({"course_title": "Course", "site_url_path": "courses/c"}))
+        for h, words in (
+            ("a" * 32, "Section A covers thermodynamics"),
+            ("b" * 32, "Section B covers optics"),
+        ):
+            zf.writestr(
+                f"resources/{h[:4]}/data.json",
+                json.dumps({"title": f"Lec {h[0]}", "file": f"/c/{h}_lec1.pdf"}),
+            )
+            zf.writestr(f"static_resources/{h}_lec1.pdf", pages_pdf([f"{words} in great detail today."]))
+    with zipfile.ZipFile(path) as archive:
+        docs = {d.title: d.text for d in ocw_course(archive)}
+    assert "thermodynamics" in docs["Course: Lec a"]
+    assert "optics" in docs["Course: Lec b"]
+
+
+def test_a_malformed_chapter_does_not_lose_the_book(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """2026-10-26 review #68: one chapter that does not parse ended the whole book without a word."""
+    from wsp_adapters.doccollection.tei import read_snapshot
+
+    path = tmp_path / "broken.zip"
+    path.write_bytes(b"PK\x03\x04 not really a zip")
+    assert list(read_snapshot(path, "ganjoor-sqlite")) == []
+    assert "reading stopped" in caplog.text

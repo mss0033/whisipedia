@@ -40,7 +40,10 @@ registry held as a git mirror no refiner read (2026-10-12 audit, CA-12).
 
 from __future__ import annotations
 
+import csv
+import logging
 import re
+import sqlite3
 import xml.etree.ElementTree as ET
 import zipfile
 from collections.abc import Callable, Iterator
@@ -52,6 +55,8 @@ FRUS_NS = "{http://history.state.gov/frus/ns/1.0}"
 _WS = re.compile(r"\s+")
 _BLOCKS = frozenset({"p", "head", "item", "l", "ab", "closer", "dateline", "salute", "signed", "opener"})
 _SKIP = frozenset({"note", "teiHeader", "fw", "pb", "lb"})  # footnotes and page furniture
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -371,8 +376,10 @@ def read_snapshot(path: Path, reader: str, name: str | None = None) -> Iterator[
         try:
             with zipfile.ZipFile(path) as archive:
                 yield from whole(archive)
-        except (zipfile.BadZipFile, ET.ParseError, KeyError):
-            return
+        except (zipfile.BadZipFile, ET.ParseError, KeyError, sqlite3.Error, csv.Error, ValueError) as exc:
+            # Said, not swallowed: a truncated Ganjoor database or a malformed book page ended the
+            # snapshot without a word (2026-10-26 review #68).
+            log.warning("%s (%s): reading stopped: %s: %s", path.name, reader, type(exc).__name__, exc)
         return
     member, parse = {**READERS, **structured.READERS}[reader]
     if not zipfile.is_zipfile(path):
@@ -391,5 +398,6 @@ def read_snapshot(path: Path, reader: str, name: str | None = None) -> Iterator[
                 continue
             try:
                 yield from parse(archive.read(info), stem)
-            except (ET.ParseError, ValueError):
+            except (ET.ParseError, ValueError, csv.Error) as exc:
+                log.warning("%s: %s skipped: %s", path.name, info.filename, exc)
                 continue  # one malformed file does not stop the collection

@@ -286,7 +286,9 @@ class PubmedAdapter:
             rejects.add(result.rejects, len(result.docs))
             for pmid in result.deleted:
                 seen.add(pmid)
-            for pmid, row in result.docs:
+            # Newest file first, and within a file its last copy of a PMID (a same-day correction
+            # follows the record it corrects; 2026-10-26 review #74).
+            for pmid, row in reversed(result.docs):
                 if pmid not in seen:
                     seen.add(pmid)
                     yield doc_from_row(row)

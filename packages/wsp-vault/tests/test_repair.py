@@ -1,4 +1,5 @@
 import shutil
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -192,3 +193,19 @@ def test_damaged_parity_alone_never_degrades_an_intact_generation(
     assert current is not None
     assert current.generation_id == GEN
     assert "repair.parity_damaged" in kinds(ledger)
+
+
+def test_a_seal_killed_inside_par2_does_not_block_the_next_one(
+    vault: FileVault, make_local: Callable[[str, bytes], Path]
+) -> None:
+    """2026-10-26 review #95: par2's work directory left in staging made every later seal fail."""
+    vault.stage(SOURCE, GEN)
+    for rel, data in FILES.items():
+        vault.ingest(SOURCE, GEN, make_local(f"{GEN}/{rel}", data), rel)
+    stg = vault.stage(SOURCE, GEN)
+    leftover = stg / ".parity.0a1b2c3d4e5f.par2-tmp"
+    leftover.mkdir()
+    (leftover / "recovery.par2").write_bytes(b"half")
+    vault.seal(SOURCE, GEN, parity_percent=10)
+    assert not leftover.exists()
+    assert vault.verify_manifest(SOURCE, GEN).ok

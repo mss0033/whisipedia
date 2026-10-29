@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 import re
 import shutil
 import sqlite3
@@ -61,6 +62,8 @@ _WS = re.compile(r"[ \t]+")
 _CITATION = re.compile(r"\(Citation: [^)]*\)")
 _LINK = re.compile(r"\[([^\]]+)\]\(https?://[^)]+\)")
 Json = Mapping[str, Any]
+
+log = logging.getLogger(__name__)
 
 
 def _clean(text: str) -> str:
@@ -517,7 +520,11 @@ def se_book(archive: zipfile.ZipFile) -> Iterator[TeiDoc]:
         href = hrefs.get(idref, "")
         if not href or idref.removesuffix(".xhtml") in SE_SKIP or f"{base}/{href}" not in names:
             continue
-        page = ET.fromstring(archive.read(f"{base}/{href}"))  # noqa: S314 - Standard Ebooks' own XHTML
+        try:
+            page = ET.fromstring(archive.read(f"{base}/{href}"))  # noqa: S314 - Standard Ebooks' own XHTML
+        except ET.ParseError as exc:  # one malformed chapter does not lose the book (review #68)
+            log.warning("%s: %s skipped: %s", title or base, href, exc)
+            continue
         head = " ".join((page.findtext(f"{_XHTML}head/{_XHTML}title") or "").split())
         body = page.find(f"{_XHTML}body")
         kinds = " ".join(e.get(_EPUB_TYPE, "") for e in (body.iter() if body is not None else ()))
@@ -645,11 +652,14 @@ def ocw_course(archive: zipfile.ZipFile) -> Iterator[TeiDoc]:
     if about:
         yield TeiDoc(key="course", title=label, text=about, url=url)
     # static_resources/<32 hex>_<name> or static_resources/<name>
-    by_base = {
-        re.sub(r"^[0-9a-f]{32}_", "", n.rsplit("/", 1)[-1]).lower(): n
-        for n in names
-        if n.startswith("static_resources/")
-    }
+    # The exact (hashed) name first; the name without its hash only when one file has it: two
+    # sections' "lec1.pdf" both got the text of whichever sorted last (2026-10-26 review #69).
+    statics = [n for n in names if n.startswith("static_resources/")]
+    by_exact = {n.rsplit("/", 1)[-1].lower(): n for n in statics}
+    stripped: dict[str, list[str]] = {}
+    for n in statics:
+        stripped.setdefault(re.sub(r"^[0-9a-f]{32}_", "", n.rsplit("/", 1)[-1]).lower(), []).append(n)
+    by_base = {k: v[0] for k, v in stripped.items() if len(v) == 1}
     for name in sorted(n for n in names if n.endswith("/data.json") and n.count("/") >= 2):
         folder = name.rsplit("/", 1)[0]
         data = _ocw_json(archive, name)
@@ -659,7 +669,8 @@ def ocw_course(archive: zipfile.ZipFile) -> Iterator[TeiDoc]:
         text = html_to_text(str(data.get("content") or ""))
         file = str(data.get("file") or "")
         if file.lower().endswith(".pdf"):
-            member = by_base.get(re.sub(r"^[0-9a-f]{32}_", "", file.rsplit("/", 1)[-1]).lower())
+            leaf = file.rsplit("/", 1)[-1].lower()
+            member = by_exact.get(leaf) or by_base.get(re.sub(r"^[0-9a-f]{32}_", "", leaf))
             if member is not None:
                 body = _pdf_bytes_text(archive.read(member), OCW_PDF_PAGES)
                 text = f"{text}\n\n{body}".strip() if text else body

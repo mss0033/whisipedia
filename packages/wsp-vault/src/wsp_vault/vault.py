@@ -797,6 +797,11 @@ class FileVault:
         self, source_id: str, generation_id: str, stg: Path, parity_percent: int | None
     ) -> None:
         records = _read_staging(stg)
+        # par2's work directory of a seal that was killed (OOM, a stop) blocked every later seal as
+        # "unrecorded" files; it is our own temporary, and the exclusive generation lock rules out a
+        # live par2 (2026-10-26 review #95).
+        for work in stg.glob(f".{PARITY_DIR}.*.par2-tmp"):
+            shutil.rmtree(work, ignore_errors=True)
         on_disk: set[str] = set()
         for path in stg.rglob("*"):
             rel = path.relative_to(stg).as_posix()
@@ -852,7 +857,7 @@ class FileVault:
             return []
         verified: dict[Path, tuple[str, int]] = {}
         for e in entries:
-            got = readback(stg / e.path, extra=("md5",))
+            got = readback(stg / e.path, extra=("md5",), on_chunk=self._pace)  # paced like ingest (#96)
             if got != e.digests:
                 raise IntegrityError(f"{subject} {e.path}: staged bytes no longer match the ingest record")
             verified[stg / e.path] = (got.extra["md5"], got.size)
@@ -870,7 +875,9 @@ class FileVault:
         parity_entries: list[ManifestEntry] = []
         for path in created:
             rel = path.relative_to(stg).as_posix()
-            parity_entries.append(ManifestEntry.from_digests(rel, readback(path), role=ROLE_PARITY))
+            parity_entries.append(
+                ManifestEntry.from_digests(rel, readback(path, on_chunk=self._pace), role=ROLE_PARITY)
+            )
         return parity_entries
 
     def promote(self, source_id: str, generation_id: str) -> None:

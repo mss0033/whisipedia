@@ -273,3 +273,12 @@ def test_doi_comes_from_the_article_not_its_references(tmp_path: Path) -> None:
     assert docs["7"].links[0] == "https://doi.org/10.1000/own"
     assert "https://pmc.ncbi.nlm.nih.gov/articles/PMC7/" in docs["7"].links
     assert not any("10.9999" in link or "PMC1/" in link for d in docs.values() for link in d.links)
+
+
+def test_a_pmid_repeated_within_one_file_keeps_its_last_copy(tmp_path: Path) -> None:
+    """2026-10-26 review #74: a same-day correction follows the record it corrects; the first, older
+    copy was kept."""
+    data = xml_file(article(7, "Old title."), article(7, "Corrected title."))
+    gen = _gen(tmp_path / "pubmed", "pubmed26", {"pubmed26n0001.xml.gz": data})
+    docs = list(PubmedAdapter().documents(make_ctx(SPEC, FakeFetcher(), tmp_path / "w"), gen))
+    assert [(d.native_id, d.title.split(" in vitro")[0]) for d in docs] == [("7", "Corrected title.")]
