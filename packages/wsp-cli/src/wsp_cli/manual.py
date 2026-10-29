@@ -52,6 +52,8 @@ import html
 import json
 import re
 import shutil
+import subprocess
+import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, date, datetime
@@ -850,6 +852,8 @@ def _sync(args: argparse.Namespace, out: TextIO) -> int:
             picked = todays_offer(queue, int(mc.get("daily") or DEFAULT_DAILY), today)
             queue.save(qpath)
             offers.append((spec, queue, picked, windows_path(folder) or str(folder), len(queue.pending())))
+    if not args.source:
+        worst = max(worst, sync_permissions(lay, cfg, root, out))
     if page_due:
         page, text = render_today(today, offers, windows_path(root))
         for name, body in (("TODAY.html", page), ("TODAY.txt", text)):
@@ -859,6 +863,76 @@ def _sync(args: argparse.Namespace, out: TextIO) -> int:
         (root / ".today").write_text(today, encoding="utf-8")
         out.write(f"today's page: {windows_path(root / 'TODAY.html') or root / 'TODAY.html'}\n")
     return worst
+
+
+PERMISSIONS_DIR = "_permissions"  # <manual root>/_permissions/: the owner's permission requests
+PERMISSION_FILES = ("permissions.py", "requests.json")
+
+
+def sync_permissions(lay: bootstrap.Layout, cfg: Mapping[str, Any], root: Path, out: TextIO) -> int:
+    """Copy ``tools/permissions/`` into ``<manual root>/_permissions/`` and run it there (owner request
+    2026-10-28): the letters, drafts and ``PERMISSIONS.html``, and each request's state from the files
+    the owner saves. An answer (or a request due a follow-up) raises an alert, so it is acted on."""
+    from wsp_cli.doccollections import windows_path
+    from wsp_cli.notify import _alerter  # pyright: ignore[reportPrivateUsage]
+
+    if lay.root is None:
+        return 0
+    src, dest = lay.root / "tools" / "permissions", root / PERMISSIONS_DIR
+    if not all((src / n).is_file() for n in PERMISSION_FILES):
+        return 0
+    dest.mkdir(parents=True, exist_ok=True)
+    for name in PERMISSION_FILES:  # the library's copy wins: requests are edited in the repo
+        body = (src / name).read_bytes()
+        if not (dest / name).is_file() or (dest / name).read_bytes() != body:
+            tmp = dest / (name + ".partial")
+            tmp.write_bytes(body)
+            tmp.replace(dest / name)
+    argv = [sys.executable, "-I", str(dest / "permissions.py"), "--dir", str(dest)]
+    argv += ["--windows-path", windows_path(dest) or str(dest)]
+    done = subprocess.run(argv, capture_output=True, text=True, check=False, timeout=300)  # noqa: S603
+    if done.returncode != 0:
+        out.write(f"permissions: the script failed: {(done.stderr or done.stdout).strip()[-300:]}\n")
+        return 1
+    try:
+        status = cast(
+            dict[str, dict[str, Any]], json.loads((dest / "status.json").read_text(encoding="utf-8"))
+        )
+    except (OSError, ValueError):
+        return 1
+    pair = _alerter(cfg)
+    if pair is None:
+        return 0
+    from wsp_orchestrator.alerts import Alert, Severity
+
+    alerter, store = pair
+    try:
+        for rid, st in status.items():
+            state = str(st.get("state"))
+            key = f"permission:{rid}"
+            if state == "answered":
+                alerter.raise_(
+                    Alert(
+                        key,
+                        Severity.WARNING,
+                        f"permission request {rid}: an answer is saved "
+                        f"({st.get('file')}); record it in the registry ({st.get('sources')})",
+                    )
+                )
+            elif state == "follow up":
+                alerter.raise_(
+                    Alert(
+                        key,
+                        Severity.INFO,
+                        f"permission request {rid}: no answer after "
+                        f"{st.get('waited')} days; PERMISSIONS.html offers a follow-up",
+                    )
+                )
+            else:
+                alerter.resolve(key)
+    finally:
+        store.close()
+    return 0
 
 
 def _page_due(root: Path, today: str) -> bool:

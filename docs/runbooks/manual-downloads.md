@@ -78,3 +78,25 @@ It is kept for GeoNames and GEBCO, which also take part in the daily page.
 A file the library did download but could not verify (no checksum upstream and no second download,
 kept as `<file>.uncorroborated`) can be taken as it is on the owner's word:
 `wsp collections fetch --source SOURCE --version CYCLE --adopt-kept KEY` (a zip must read whole).
+
+## Permission requests (owner request 2026-10-28)
+
+Some sources need the publisher's written permission (copyright: the Stanford Encyclopedia of
+Philosophy, Hesperian, Sphere, UK MOD doctrine, the NCHFP's own pages), and some hosts keep the
+library out with robots.txt (crawl: Kiwix, NCBI, WBDG, UniProt, COD, ICRC, Lovdata, NRC, OSHA). An
+allowance from a crawl host also ends the manual downloads for its sources.
+
+The requests are listed in `tools/permissions/requests.json`. The hourly sync copies it and
+`tools/permissions/permissions.py` into `Z:\whisipedia\_incoming\_manual\_permissions\` and runs the
+script there. It writes `PERMISSIONS.html`, and in each request's folder a `letter.txt`, a `draft.eml`
+(double-click: an unsent draft, To and Subject filled in) and `mark-sent.cmd`.
+
+1. Open `PERMISSIONS.html`, press **Write the e-mail** (or open `draft.eml`; or, where there is no
+   address, **Contact page** and paste the letter), put your name where it says `[your name]`, send.
+2. Double-click `mark-sent.cmd` in that request's folder.
+3. When the answer comes, save it into the same folder as `reply.eml` (or paste it into `reply.txt`).
+   The library raises an alert; Claude reads it, records the permission (or refusal) in the registry,
+   and writes `granted.txt` or `refused.txt` there.
+
+After 21 days without an answer the page offers a short follow-up letter and an alert reminds you.
+The library never sends mail and never writes your name or address into a letter.

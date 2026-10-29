@@ -515,3 +515,43 @@ def test_an_unfinished_ingest_is_retried_before_new_files_are_taken(
     assert manual.import_collection(args, spec, q, folder, io.StringIO()) == 0
     assert fetched == [1]
     assert q.items[0].status == "taken"
+
+
+def test_permission_requests_are_written_and_an_answer_is_reported(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Owner request 2026-10-28: letters, drafts and a page for each permission request, in the manual
+    folder; an answer saved there raises an alert."""
+    from wsp_cli import bootstrap, notify
+
+    raised: list[str] = []
+
+    class Alerter:
+        def raise_(self, alert: Any) -> bool:
+            raised.append(alert.key)
+            return True
+
+        def resolve(self, key: str) -> None: ...
+
+    class Store:
+        def close(self) -> None: ...
+
+    def alerter(_cfg: object) -> tuple[Alerter, Store]:
+        return Alerter(), Store()
+
+    monkeypatch.setattr(notify, "_alerter", alerter)
+    lay = bootstrap.layout()
+    root = tmp_path / "_manual"
+    assert manual.sync_permissions(lay, {}, root, io.StringIO()) == 0
+    perm = root / "_permissions"
+    assert (perm / "PERMISSIONS.html").is_file()
+    draft = (perm / "sphere-handbook" / "draft.eml").read_text()
+    assert "To: info@spherestandards.org" in draft
+    assert "X-Unsent: 1" in draft
+    assert "@gmail" not in (perm / "PERMISSIONS.html").read_text()  # never the owner's address
+    (perm / "sphere-handbook" / "reply.txt").write_text("Granted, with attribution.")
+    assert manual.sync_permissions(lay, {}, root, io.StringIO()) == 0
+    assert raised == ["permission:sphere-handbook"]
+    status = json.loads((perm / "status.json").read_text())
+    assert status["sphere-handbook"]["state"] == "answered"
+    assert status["kiwix"]["state"] == "to send"
