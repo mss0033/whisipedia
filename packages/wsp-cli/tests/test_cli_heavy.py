@@ -713,7 +713,7 @@ def test_a_big_zims_profile_gets_time_to_read_it(library: dict[str, Any]) -> Non
     runner = library["hooks"].runner
     p = IsolatedProfiler(library["cfg"], runner, 24 * 3600.0)
     assert p.timeout_for(gen(10 * 10**9)) == 24 * 3600.0  # small: the base budget
-    assert p.timeout_for(gen(204 * 10**9)) == pytest.approx(204e9 / 0.75e6)  # ~75 h
+    assert p.timeout_for(gen(204 * 10**9)) == pytest.approx(204e9 / 0.25e6)  # ~227 h
     assert p.timeout_for(gen(204 * 10**9, "upstream/w.pdf")) == 24 * 3600.0  # only ZIMs are read whole
     assert IsolatedProfiler(library["cfg"], runner, None).timeout_for(gen(10**12)) is None
 

@@ -37,9 +37,10 @@ from wsp_vault.scrub import Scrubber
 from wsp_vault.vault import FileVault, SignatureError
 
 DEFAULT_SAMPLE_RATE = 1 / 32
-PROFILE_MIN_RATE = 0.75e6
+PROFILE_MIN_RATE = 0.25e6
 """Bytes per second a paced ZIM profile is allowed at the slowest (Arabic Wikipedia read ~0.9 MB/s with
-the NAS busy, 2026-10-26); ``[integrity] profile_min_rate``."""
+the NAS busy, 2026-10-26; German, 63 GB, was not done after 44 h, 2026-10-28); ``[integrity]
+profile_min_rate``. A profile takes the PROFILE lock, not HEAVY: a long one holds no other job up."""
 # Rows per batch when reading Refinery parts: the text column of 256 large documents (books) stays
 # in the tens of MB, where 8,192 rows of Gutenberg could reach gigabytes.
 PROFILE_BATCH_ROWS = 256
