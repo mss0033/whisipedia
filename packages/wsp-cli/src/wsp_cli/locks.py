@@ -136,6 +136,21 @@ def _alive(ticket: Path) -> bool:
 
 
 _RECHECK_S = 1.0  # how often the front waiter, blocked in flock, looks for a priority ticket
+_WALL_CLOCK_NS = 10**17  # a stamp above this is a wall-clock one (2001+); uptime stays below (3 years)
+
+
+def _ticket_key(name: str) -> tuple[int, int, int]:
+    """Service order of a ticket: a priority one first; then one named on the wall clock (every ticket
+    before 2026-10-29) before one named on the steady clock, since the two clocks do not compare and the
+    wall-clock ticket is the older; then by stamp."""
+    stamp = name.partition("-")[0]
+    value = int(stamp) if stamp.isdigit() else 0
+    priority = len(stamp) == 21  # the "0" prefix on the 20-digit stamp
+    return (0 if priority else 1, 0 if value > _WALL_CLOCK_NS else 1, value)
+
+
+def _ahead(other: str, mine: str) -> bool:
+    return _ticket_key(other) < _ticket_key(mine)
 
 
 def _queue_for(fd: int, path: Path, name: str, wait: float, poll: float, *, priority: bool = False) -> None:
@@ -167,7 +182,7 @@ def _queue_for(fd: int, path: Path, name: str, wait: float, poll: float, *, prio
         os.rename(draft, mine)
         while True:
             while any(
-                t.name < mine.name and _alive(t) for t in queue.iterdir() if not t.name.startswith(".")
+                _ahead(t.name, mine.name) and _alive(t) for t in queue.iterdir() if not t.name.startswith(".")
             ):
                 if time.monotonic() >= deadline:
                     raise LockHeldError(_held_message(path, name))

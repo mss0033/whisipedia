@@ -166,3 +166,17 @@ def _take(lock_dir: Path, got: list[str]) -> None:
 
     with exclusive(lock_dir, "ingest", wait=float("inf"), queue=True, poll=0.05):
         got.append("took it")
+
+
+def test_tickets_of_the_wall_clock_naming_are_served_before_steady_clock_ones() -> None:
+    """2026-10-29: the live queue held six wall-clock-named waiters when the naming changed; a steady-clock
+    newcomer (uptime, far smaller) must not jump them. Priority still comes first."""
+    from wsp_cli.locks import _ahead  # pyright: ignore[reportPrivateUsage]
+
+    wall = f"{1793290158399940153:020d}-1"
+    steady, steady_later = f"{86400 * 10**9:020d}-2", f"{90000 * 10**9:020d}-3"
+    assert _ahead(wall, steady)
+    assert not _ahead(steady, wall)
+    assert _ahead(steady, steady_later)
+    assert _ahead("0" + steady_later, wall)  # a priority ticket, even a later one, goes first
+    assert not _ahead(wall, "0" + steady_later)
