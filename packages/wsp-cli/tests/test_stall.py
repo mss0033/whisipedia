@@ -230,6 +230,19 @@ def test_a_job_waiting_its_turn_in_the_ingest_queue_is_not_idle(tmp_path: Path) 
     assert "number 1 in the ingest lock's queue, waiting 12.5 h" in raised[0]
 
 
+def test_a_lane_sleeping_between_rounds_is_not_idle(tmp_path: Path) -> None:
+    """2026-10-29: most job-idle alerts were lanes in their hour's pause between rounds (a shell and
+    its `sleep`). A process of another kind, idle as long, is still raised."""
+    env = _world(tmp_path, usage=5_000_000)
+    for pid, comm in (("76", "sh"), ("77", "sleep")):
+        (tmp_path / "proc" / pid).mkdir(parents=True, exist_ok=True)
+        (tmp_path / "proc" / pid / "comm").write_text(comm + "\n")
+    _run(env, 0)
+    assert not [e for e in _run(env, 3.5) if "job-idle" in e]
+    (tmp_path / "proc" / "77" / "comm").write_text("python3\n")  # a worker, not a pause
+    assert [e for e in _run(env, 3.6) if "RAISED job-idle" in e]
+
+
 def test_a_job_that_just_took_the_lock_after_its_wait_is_not_idle(tmp_path: Path) -> None:
     """2026-10-26: NARA waited 3 hours in the queue, took the ingest lock, and was raised as idle in
     that minute: its ticket was gone and the waiting hours counted as idle."""

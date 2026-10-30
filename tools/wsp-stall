@@ -304,6 +304,22 @@ def cgroup_pids(cgroup: str) -> set[str]:
         return set()
 
 
+# A job between rounds: every process in it is a shell or its `sleep` (tools/lanes/lane-run.sh's
+# pause, a job script's `sleep 7200` between passes). Idle by design, not stalled: 27 "job-idle" alerts
+# in 10 days, most of them lanes waiting an hour for their next round (2026-10-29 spot check).
+PAUSE_COMMS = frozenset({"sh", "bash", "dash", "sleep", "timeout"})
+
+
+def pausing(pids: set[str]) -> bool:
+    comms: set[str] = set()
+    for pid in pids:
+        try:
+            comms.add((PROC / pid / "comm").read_text().strip())
+        except OSError:
+            return False  # gone, or unreadable: not known to be a pause
+    return bool(comms) and comms <= PAUSE_COMMS and "sleep" in comms
+
+
 def lock_holders() -> dict[str, tuple[str, str, float]]:
     """``lock name -> (pid, command, age seconds)`` of every lock file in LOCKS that is held."""
     by_inode = _lock_inodes()
@@ -421,6 +437,8 @@ def check(state: State, t: float) -> tuple[dict[str, str], list[str]]:
             turn = next((in_queue[p] for p in pids if p in in_queue), None)
             if turn is not None and turn[2] < QUEUE_IDLE_H * 3600:
                 continue  # waiting its turn, not stalled
+            if pausing(pids):
+                continue  # a lane between rounds: a shell and its sleep
             if any(pid in pids and age < IDLE_H * 3600 for pid, _, age in held.values()):
                 continue  # its turn just came: it holds a lock it took after the quiet hours of waiting
             if turn is not None:
