@@ -274,7 +274,11 @@ def queued(now: float) -> dict[str, tuple[str, int, float]]:
             if not (stamp.isdigit() and pid.isdigit() and (PROC / pid).is_dir()):
                 continue
             place += 1
-            out[pid] = (q.name.removesuffix(".queue"), place, max(0.0, now - int(stamp) / 1e9))
+            try:  # its age is its mtime: the name is a steady-clock stamp (order only)
+                waited = max(0.0, now - (q / name).stat().st_mtime)
+            except OSError:
+                continue
+            out[pid] = (q.name.removesuffix(".queue"), place, waited)
     return out
 
 

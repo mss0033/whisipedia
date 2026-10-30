@@ -223,6 +223,7 @@ def test_a_job_waiting_its_turn_in_the_ingest_queue_is_not_idle(tmp_path: Path) 
     (tmp_path / "proc" / "76").mkdir(parents=True)  # the lane's ingest, alive
     (queue / f"{(T0 - 600) * 10**9:020d}-31337").touch()  # ahead of it: a dead waiter's ticket
     (queue / f"{T0 * 10**9:020d}-76").touch()
+    os.utime(queue / f"{T0 * 10**9:020d}-76", (T0, T0))  # aged by mtime, not by its name
     _run(env, 0)
     assert not [e for e in _run(env, 3.5) if "job-idle" in e]
     raised = [e for e in _run(env, 12.5) if "RAISED job-idle" in e]

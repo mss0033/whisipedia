@@ -155,7 +155,10 @@ def _queue_for(fd: int, path: Path, name: str, wait: float, poll: float, *, prio
     # first come among themselves) is for a short, time-bound ingest: weather forecasts waited 20
     # minutes behind six one-hour lane slices, lost their turn every pull, and none was sealed for
     # three days (2026-10-29).
-    mine = queue / f"{'0' if priority else ''}{time.time_ns():020d}-{os.getpid()}"
+    # A steady clock, one for every process on the host: with the wall clock, a step back (WSL
+    # does so now and then) named a newcomer before every waiter of the last seconds, and it
+    # took the lock ahead of them (2026-10-29 spot check). tools/wsp-stall ages a ticket by mtime.
+    mine = queue / f"{'0' if priority else ''}{time.monotonic_ns():020d}-{os.getpid()}"
     draft = queue / f".{mine.name}"
     tfd = os.open(draft, os.O_RDWR | os.O_CREAT, 0o644)
     deadline = time.monotonic() + wait
