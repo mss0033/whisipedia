@@ -12,11 +12,11 @@ from wsp_adapters.kiwix import (
     CATALOG_URL,
     KiwixOpdsAdapter,
     Selector,
-    parse_metalink,
     parse_opds,
     select_entries,
 )
 from wsp_core.ids import content_hash
+from wsp_core.metalink import parse_metalink
 from wsp_core.model import Artifact, Checksum, DocRecord, Generation, GenerationStatus
 from wsp_core.ports import Ctx, SourceAdapter
 from wsp_core.testing.adapter_contract import FakeFetcher, SourceAdapterContract
@@ -72,7 +72,7 @@ def _metalink(name: str, size: int, sha256: str, urls: list[str]) -> bytes:
     <hash type="md5">00112233445566778899aabbccddeeff</hash>
     <hash type="sha-1">0011223344556677889900112233445566778899</hash>
     <hash type="sha-256">{sha256}</hash>
-    <pieces length="4194304" type="sha-1"><hash>aa</hash><hash>bb</hash></pieces>
+    <pieces length="4194304" type="sha-1"><hash>aa</hash></pieces>
     {url_xml}
   </file>
 </metalink>
@@ -241,11 +241,11 @@ def test_plan_skips_files_already_held(fetcher: FakeFetcher, zim_file: Path, tmp
 
 
 def test_parse_metalink() -> None:
-    link = parse_metalink(_metalink("x.zim", 42, "cd" * 32, ["https://b/", "https://a/"]))
+    (link,) = parse_metalink(_metalink("x.zim", 42, "cd" * 32, ["https://b/", "https://a/"]))
     assert link.size == 42
-    assert link.urls == ("https://b/", "https://a/")
-    assert link.piece_length == 4194304
-    assert link.piece_hashes == ("aa", "bb")
+    assert link.mirror_urls() == ("https://b/", "https://a/")
+    assert link.pieces is not None
+    assert (link.pieces.length, link.pieces.hashes) == (4194304, ("aa",))
     assert Checksum("sha1", "0011223344556677889900112233445566778899") in link.checksums
 
 

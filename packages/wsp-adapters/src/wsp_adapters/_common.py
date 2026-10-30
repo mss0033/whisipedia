@@ -15,6 +15,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
+from wsp_core.checksums import normalize_algorithm as normalize_algorithm  # one rule everywhere
 from wsp_core.model import (
     Checksum,
     DocRecord,
@@ -31,7 +32,6 @@ from wsp_core.ports import Ctx, SupportsHead
 
 # Strongest first. Verification uses the strongest digest upstream published.
 HASH_PREFERENCE = ("sha512", "sha256", "sha1", "md5")
-_HASH_ALIASES = {"sha-1": "sha1", "sha-256": "sha256", "sha-512": "sha512"}
 _READ_CHUNK = 8 * 1024 * 1024
 
 
@@ -62,11 +62,6 @@ def int_option(spec: SourceSpec, key: str, default: int) -> int:
     if not isinstance(value, int) or value < 1:
         raise ValueError(f"{spec.id}: access.{key} must be a positive integer")
     return value
-
-
-def normalize_algorithm(name: str) -> str:
-    name = name.strip().lower()
-    return _HASH_ALIASES.get(name, name)
 
 
 def parse_checksum_file(text: str, name: str | None = None) -> dict[str, str]:

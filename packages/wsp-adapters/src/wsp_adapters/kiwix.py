@@ -59,7 +59,6 @@ from wsp_adapters._common import (
     earlier_generations,
     fetch_all,
     holder_of,
-    normalize_algorithm,
     parse_checksum_file,
     plan_missing,
     str_list,
@@ -74,6 +73,7 @@ from wsp_core import fcc, mindtouch, nautilus, youtubezim
 from wsp_core.errors import FetchError
 from wsp_core.ids import content_hash, make_doc_id
 from wsp_core.listing import skip_paths, skip_regex
+from wsp_core.metalink import parse_metalink
 from wsp_core.model import (
     Checksum,
     DocRecord,
@@ -99,8 +99,6 @@ _ATOM = "{http://www.w3.org/2005/Atom}"
 _DC = "{http://purl.org/dc/terms/}"
 _ACQUISITION = "http://opds-spec.org/acquisition/open-access"
 _ZIM_DATE_RE = re.compile(r"_(\d{4}-\d{2})([a-z]?)\.zim$")  # "_2026-07", "_2026-07a" (a re-release)
-_METALINK = "{urn:ietf:params:xml:ns:metalink}"
-
 # ISO 639-3 (ZIM metadata) to the ISO 639-1 codes used in DocRecord.lang, for common languages.
 _LANG3TO1 = {
     "ara": "ar", "ben": "bn", "ceb": "ceb", "ces": "cs", "dan": "da", "deu": "de", "ell": "el",
@@ -289,48 +287,6 @@ def _letter_rank(release_date: str) -> int:
     """Lower is newer: ``2026-07b`` before ``2026-07a`` before ``2026-07``."""
     letter = release_date[7:8]
     return -(ord(letter) - ord("a") + 1) if letter else 0
-
-
-@dataclass(frozen=True, slots=True)
-class Metalink:
-    """The parts of a Metalink 4 (RFC 5854) file a fetcher needs."""
-
-    name: str
-    size: int | None
-    checksums: tuple[Checksum, ...]
-    urls: tuple[str, ...]  # by ascending priority
-    piece_length: int | None
-    piece_hashes: tuple[str, ...]  # SHA-1 per piece
-
-
-def parse_metalink(data: bytes) -> Metalink:
-    root = ET.fromstring(data)  # noqa: S314 - HTTPS catalog; stdlib expat rejects external entities
-    file = root.find(f"{_METALINK}file")
-    if file is None:
-        raise ValueError("metalink has no <file>")
-    size_text = _text(file, f"{_METALINK}size")
-    checksums = tuple(
-        Checksum(normalize_algorithm(h.get("type", "")), (h.text or "").strip().lower())
-        for h in file.findall(f"{_METALINK}hash")
-    )
-    ranked = sorted(
-        ((int(u.get("priority", "999999")), (u.text or "").strip()) for u in file.findall(f"{_METALINK}url")),
-        key=lambda pu: pu[0],
-    )
-    pieces = file.find(f"{_METALINK}pieces")
-    piece_length: int | None = None
-    piece_hashes: tuple[str, ...] = ()
-    if pieces is not None:
-        piece_length = int(pieces.get("length", "0")) or None
-        piece_hashes = tuple((h.text or "").strip() for h in pieces.findall(f"{_METALINK}hash"))
-    return Metalink(
-        name=file.get("name", ""),
-        size=int(size_text) if size_text.isdigit() else None,
-        checksums=checksums,
-        urls=tuple(u for _, u in ranked if u),
-        piece_length=piece_length,
-        piece_hashes=piece_hashes,
-    )
 
 
 def _mirror_urls(file_url: str, bases: Sequence[str]) -> tuple[str, ...]:
@@ -534,14 +490,15 @@ class KiwixOpdsAdapter:
         meta4_url = remote.metalink
         if meta4_url is None:
             return remote
-        link = parse_metalink(ctx.fetcher.get_bytes(meta4_url))
+        files = parse_metalink(ctx.fetcher.get_bytes(meta4_url))  # MetalinkError (a FetchError) if unusable
+        link = next((f for f in files if f.name == remote.name), files[0])
         algs = {c.algorithm for c in remote.checksums}
         extra = tuple(c for c in link.checksums if c.algorithm not in algs and c.hexdigest)
         for c in link.checksums:
             for mine in remote.checksums:
                 if c.algorithm == mine.algorithm and c.hexdigest != mine.hexdigest.lower():
                     raise ValueError(f"{remote.name}: metalink {c.algorithm} disagrees with .sha256")
-        mirrors = tuple(dict.fromkeys((*link.urls, *remote.mirrors)))
+        mirrors = tuple(dict.fromkeys((*link.mirror_urls(), *remote.mirrors)))
         return RemoteFile(
             url=remote.url,
             name=remote.name,
