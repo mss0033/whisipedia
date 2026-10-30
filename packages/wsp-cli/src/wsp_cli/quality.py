@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -62,6 +63,11 @@ def regression(now_score: float, before: dict[str, Any] | None) -> float | None:
         return None
 
 
+# All of a run's queries start within this: the unit's TimeoutStartSec is 12 h, and a slow library (6 x 180 s
+# a query) used to be killed there with nothing saved.
+RUN_BUDGET_S = 11 * 3600
+
+
 def cmd_quality_run(args: argparse.Namespace, out: TextIO) -> int:
     from wsp_oracle.evaluation import DEFAULT_GOLD, api_searcher, evaluate, load_gold
 
@@ -71,7 +77,11 @@ def cmd_quality_run(args: argparse.Namespace, out: TextIO) -> int:
     directory.mkdir(parents=True, exist_ok=True)
     now = datetime.now(UTC)
     report = evaluate(
-        "api", api_searcher(args.api), load_gold(Path(args.gold) if args.gold else DEFAULT_GOLD), warmup=0
+        "api",
+        api_searcher(args.api),
+        load_gold(Path(args.gold) if args.gold else DEFAULT_GOLD),
+        warmup=0,
+        deadline=time.monotonic() + RUN_BUDGET_S,
     )
     name = now.strftime("%Y-%m-%dT%H%M%SZ") + ".json"
     saved = {
@@ -82,9 +92,12 @@ def cmd_quality_run(args: argparse.Namespace, out: TextIO) -> int:
         "p50_ms": report.p50_ms,
         "p95_ms": report.p95_ms,
         "by_domain": dict(report.by_domain),
+        "skipped": report.skipped,
         "report": asdict(report),
     }
-    (directory / name).write_text(json.dumps(saved, indent=1) + "\n", encoding="utf-8")
+    tmp = directory / (name + ".partial")
+    tmp.write_text(json.dumps(saved, indent=1) + "\n", encoding="utf-8")
+    tmp.replace(directory / name)
     out.write(report.summary() + "\n")
     drop = regression(report.ndcg10, previous_report(directory, name))
     if drop is not None:

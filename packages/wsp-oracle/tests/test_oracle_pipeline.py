@@ -367,3 +367,24 @@ def test_a_result_computed_across_an_index_change_is_not_cached(
     searcher.run = real  # type: ignore[method-assign]
     index.search("immune system", limit=2)
     assert rr.calls == 2  # the first result was not kept: the second search ran again
+
+
+def test_an_evaluation_out_of_time_reports_what_it_asked_and_counts_the_rest() -> None:
+    """2026-10-29 spot check: 145 queries at up to 6 x 180 s each ran past the quality unit's 12 hours
+    and nothing was saved. Past the deadline the remaining queries are skipped and counted."""
+    import time
+
+    from wsp_oracle.evaluation import GoldQuery, evaluate
+
+    gold = [GoldQuery(f"q{i}", f"query {i}", {"d1": 3}) for i in range(5)]
+    asked: list[str] = []
+
+    def search(query: str) -> list[str]:
+        asked.append(query)
+        return ["d1"]
+
+    report = evaluate("t", search, gold, warmup=0, deadline=time.monotonic() + 3600)
+    assert (report.queries, report.skipped) == (5, 0)
+    report = evaluate("t", search, gold, warmup=0, deadline=time.monotonic() - 1)
+    assert (report.queries, report.skipped) == (0, 5)
+    assert "5 not asked" in report.summary()

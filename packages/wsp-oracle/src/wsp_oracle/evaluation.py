@@ -166,22 +166,34 @@ class EvalReport:
     p99_ms: float
     by_domain: Mapping[str, float] = field(default_factory=dict[str, float])
     results: tuple[QueryResult, ...] = ()
+    skipped: int = 0  # gold queries not asked: the run's deadline came first
 
     def summary(self) -> str:
         return (
             f"{self.name:<10} n={self.queries:<4} nDCG@10={self.ndcg10:.3f} R@50={self.recall50:.3f} "
             f"MRR={self.mrr:.3f} p50={self.p50_ms:.1f}ms p95={self.p95_ms:.1f}ms p99={self.p99_ms:.1f}ms"
+            + (f" ({self.skipped} not asked: out of time)" if self.skipped else "")
         )
 
 
-def evaluate(name: str, search: Searcher, gold: Sequence[GoldQuery], *, warmup: int = 3) -> EvalReport:
-    """Run every gold query through ``search`` (which returns ranked doc ids, at least 50 if it can)."""
+def evaluate(
+    name: str, search: Searcher, gold: Sequence[GoldQuery], *, warmup: int = 3, deadline: float | None = None
+) -> EvalReport:
+    """Run every gold query through ``search`` (which returns ranked doc ids, at least 50 if it can).
+
+    ``deadline`` (``time.monotonic()``): queries not started by then are skipped and counted, so a slow
+    library yields a partial report instead of a run killed at its unit's limit with nothing saved
+    (145 queries at up to 6 x 180 s each; 2026-10-29 spot check)."""
     for q in gold[:warmup]:
         search(q.query)
     results: list[QueryResult] = []
     rr: list[float] = []
     domains: dict[str, list[float]] = defaultdict(list)
-    for q in gold:
+    skipped = 0
+    for i, q in enumerate(gold):
+        if deadline is not None and time.monotonic() >= deadline:
+            skipped = len(gold) - i
+            break
         t0 = time.perf_counter()
         raw = list(search(q.query))
         ms = (time.perf_counter() - t0) * 1000
@@ -203,6 +215,7 @@ def evaluate(name: str, search: Searcher, gold: Sequence[GoldQuery], *, warmup: 
         p99_ms=percentile(lat, 99),
         by_domain={d: round(statistics.fmean(v), 4) for d, v in sorted(domains.items())},
         results=tuple(results),
+        skipped=skipped,
     )
 
 
