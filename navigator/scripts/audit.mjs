@@ -410,7 +410,7 @@ async function getAsBrowser(context, url, headers = {}) {
 async function audit(context, phoneContext, id) {
   const issues = [];
   const address = addressOf(id);
-  const started = Date.now();
+  const started = performance.now(); // a steady clock: WSL steps the wall clock
   // --- reach: the API ------------------------------------------------------------------------------
   let doc = null;
   try {
@@ -467,7 +467,7 @@ async function audit(context, phoneContext, id) {
   };
   if (!seen) {
     await page.close().catch(() => undefined);
-    return { ...result, issues, ms: Date.now() - started };
+    return { ...result, issues, ms: Math.round(performance.now() - started) };
   }
   if (seen.error) add(issues, 'reach', 'error-page', seen.error);
   const original = doc?.original ?? null;
@@ -859,7 +859,7 @@ async function audit(context, phoneContext, id) {
   return {
     ...result,
     issues,
-    ms: Date.now() - started,
+    ms: Math.round(performance.now() - started),
     text_chars: seen.text.length,
     api_chars: apiText.length,
     images: seen.images.length,
