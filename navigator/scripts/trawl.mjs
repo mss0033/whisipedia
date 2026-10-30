@@ -186,7 +186,8 @@ async function check(context, address) {
       }
     }
   });
-  const started = Date.now();
+  // A steady clock: WSL steps the wall clock back now and then, and a page was "-1652 ms" (2026-10-29).
+  const started = performance.now();
   try {
     await page.goto(`${BASE}/#${address}`, { timeout: PAGE_TIMEOUT });
     await page.waitForFunction(
@@ -324,7 +325,7 @@ async function check(context, address) {
   return {
     problems,
     defects,
-    ms: Date.now() - started,
+    ms: Math.round(performance.now() - started),
     kind: doc?.kind ?? seen?.kind ?? null,
     images: seen?.images.length ?? 0,
     not_in_library: seen?.notInLibrary ?? 0,
