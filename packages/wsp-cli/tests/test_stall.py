@@ -235,7 +235,7 @@ def test_a_lane_sleeping_between_rounds_is_not_idle(tmp_path: Path) -> None:
     """2026-10-29: most job-idle alerts were lanes in their hour's pause between rounds (a shell and
     its `sleep`). A process of another kind, idle as long, is still raised."""
     env = _world(tmp_path, usage=5_000_000)
-    for pid, comm in (("76", "sh"), ("77", "sleep")):
+    for pid, comm in (("76", "lane-run.sh"), ("77", "sleep")):  # a script is named after itself
         (tmp_path / "proc" / pid).mkdir(parents=True, exist_ok=True)
         (tmp_path / "proc" / pid / "comm").write_text(comm + "\n")
     _run(env, 0)

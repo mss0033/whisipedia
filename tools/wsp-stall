@@ -318,9 +318,15 @@ def pausing(pids: set[str]) -> bool:
     comms: set[str] = set()
     for pid in pids:
         try:
-            comms.add((PROC / pid / "comm").read_text().strip())
+            # A script run by its shebang is named after the script (`lane-run.sh`): its executable,
+            # the shell, says what it is (2026-10-30: the first such alert after the rule).
+            try:
+                name = os.path.basename(os.readlink(PROC / pid / "exe"))
+            except OSError:
+                name = (PROC / pid / "comm").read_text().strip()
         except OSError:
             return False  # gone, or unreadable: not known to be a pause
+        comms.add("sh" if name.endswith(".sh") else name)
     return bool(comms) and comms <= PAUSE_COMMS and "sleep" in comms
 
 
