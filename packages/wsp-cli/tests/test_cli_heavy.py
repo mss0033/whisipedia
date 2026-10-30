@@ -461,6 +461,10 @@ def _api_health(
     if unit_memory is not None:
         (cgroot / "api.service").mkdir(parents=True)
         (cgroot / "api.service" / "memory.current").write_text(unit_memory[0] + "\n")
+        # memory.stat: the unit's own pages are what is judged; the clean cache (file) is not
+        (cgroot / "api.service" / "memory.stat").write_text(
+            f"anon {unit_memory[0]}\nfile {1 << 33}\nfile_dirty 0\n"
+        )
         (cgroot / "api.service" / "memory.high").write_text(unit_memory[1] + "\n")
     env = {
         "PATH": f"{fakebin}:/usr/bin:/bin",

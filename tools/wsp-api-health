@@ -44,11 +44,21 @@ full=$(awk '$1 == "full" { for (i = 2; i <= NF; i++) if ($i ~ /^avg60=/) { sub(/
 cg=$(systemctl --user show "$UNIT" -p ControlGroup --value)
 cgdir="${WSP_API_HEALTH_CGROUP_ROOT:-/sys/fs/cgroup}$cg"
 over=""
-if [ -n "$cg" ] && [ -r "$cgdir/memory.current" ] && [ -r "$cgdir/memory.high" ]; then
-  current=$(cat "$cgdir/memory.current") high=$(cat "$cgdir/memory.high")
+if [ -n "$cg" ] && [ -r "$cgdir/memory.high" ]; then
+  high=$(cat "$cgdir/memory.high")
+  # Its own pages (anon, dirty file pages), not the clean page cache of the ZIMs it maps: that is
+  # reclaimed at the ceiling, so a long-serving API sits at memory.high from cache alone, and
+  # memory.current made every slow answer a restart (2026-10-29 spot check).
+  if [ -r "$cgdir/memory.stat" ]; then
+    current=$(awk '$1 == "anon" || $1 == "file_dirty" { s += $2 } END { printf "%d", s }' "$cgdir/memory.stat")
+  elif [ -r "$cgdir/memory.current" ]; then
+    current=$(cat "$cgdir/memory.current")
+  else
+    current=""
+  fi
   case "$high" in
     ''|max) ;;
-    *) [ "$current" -ge "$high" ] 2>/dev/null && over="$current/$high" ;;
+    *) [ -n "$current" ] && [ "$current" -ge "$high" ] 2>/dev/null && over="$current/$high" ;;
   esac
 fi
 if [ -n "$over" ]; then
