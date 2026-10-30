@@ -37,6 +37,7 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
+from wsp_core.memory import drop_file_cache
 from wsp_vault.cancel import Interrupted, never
 
 INDEX_NAME = "recovery.par2"
@@ -227,6 +228,8 @@ class Par2Parity:
             self._check_argv(argv)
             if self._run(argv) != 0:
                 raise ParityError(f"par2 create failed for {out_dir}")
+            for f in files:  # read whole by par2 (twice): cache charged to the daemon's cgroup
+                drop_file_cache(f)
             if out_dir.exists():
                 out_dir.rmdir()  # empty (checked above): the finished set replaces it in one rename
             os.rename(work, out_dir)

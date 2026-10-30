@@ -698,6 +698,9 @@ class CollectionFetcher:
                 hosts.answered(cand.url)
                 report.gone.append((cand.key, why))
                 return
+            if isinstance(exc, RobotsDisallowedError):  # never asked, never retried: as good as gone
+                report.gone.append((cand.key, why))
+                return
             hosts.failed(cand.url, why)
             report.failed.append((cand.key, why))
 
@@ -947,28 +950,39 @@ class CollectionFetcher:
                 return
         elif screen is None:  # a bundle is never kept unscreened
             screen = Screen(Decision(Verdict.REVIEW, "git=unscreened", Stage.CONTENT), Marking(), False)
-        if screen.decision.verdict is Verdict.DENY:
-            path.unlink(missing_ok=True)  # restricted or out-of-scope bytes are not kept anywhere
-            report.rejected.append((cand.key, str(screen.decision)))
-            if screen.decision.alert:
-                report.alerts.append(f"{cand.key}: {screen.decision.rule} ({cand.url})")
-            return
-        if screen.decision.verdict is Verdict.REVIEW:
-            qdir = self.incoming / "_quarantine" / report.source_id
-            qdir.mkdir(parents=True, exist_ok=True)
-            target = qdir / path.name
-            path.replace(target)
-            row = _review_row(cand, str(screen.decision))
-            row["distribution_text"] = screen.marking.text
-            row["quarantined"] = str(target)
-            report.held.append(row)
-            return
-        doc = fetched_doc(cand, path, screen, file=f"upstream/{path.name}")
-        if held_sha.get(cand.key) == doc.sha256:
-            path.unlink()  # byte-identical to the stored edition: nothing new
-            report.skipped += 1
-            return
-        report.fetched.append(doc)
+        decided: Screen = screen
+
+        def keep() -> None:  # each step is safe to do again after a refusal (unlink, replace, hash)
+            if decided.decision.verdict is Verdict.DENY:
+                path.unlink(missing_ok=True)  # restricted or out-of-scope bytes are not kept anywhere
+                report.rejected.append((cand.key, str(decided.decision)))
+                if decided.decision.alert:
+                    report.alerts.append(f"{cand.key}: {decided.decision.rule} ({cand.url})")
+                return
+            if decided.decision.verdict is Verdict.REVIEW:
+                qdir = self.incoming / "_quarantine" / report.source_id
+                qdir.mkdir(parents=True, exist_ok=True)
+                target = qdir / path.name
+                path.replace(target)
+                row = _review_row(cand, str(decided.decision))
+                row["distribution_text"] = decided.marking.text
+                row["quarantined"] = str(target)
+                report.held.append(row)
+                return
+            doc = fetched_doc(cand, path, decided, file=f"upstream/{path.name}")
+            if held_sha.get(cand.key) == doc.sha256:
+                path.unlink()  # byte-identical to the stored edition: nothing new
+                report.skipped += 1
+                return
+            report.fetched.append(doc)
+
+        # Filing the document (its hash, a move to quarantine, an unlink) is on the share too: one
+        # refusal here fails this document, not the run (a 28-hour fetch died one line after the
+        # retried screen; 2026-10-29 spot check).
+        try:
+            nasretry.retrying(f"keep {path.name}", keep)
+        except nasretry.TRANSIENT as exc:
+            report.failed.append((cand.key, f"the share did not answer: {exc}"))
 
     def _finish(
         self,

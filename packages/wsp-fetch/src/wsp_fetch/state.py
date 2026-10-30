@@ -14,6 +14,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
+from wsp_core.nasretry import retrying
+
 STATE_VERSION = 1
 
 
@@ -95,10 +97,14 @@ class PartialState:
 
 
 def load_state(path: Path) -> PartialState | None:
+    """The state a previous run saved, or ``None`` when there is none. A read the share refuses
+    is tried again, then raised: taken for "none", it truncated a 95-of-101 GB partial to zero
+    (2026-10-29 spot check)."""
     try:
-        return PartialState.from_json(path.read_text(encoding="utf-8"))
-    except OSError:
+        text = retrying(f"read {path.name}", lambda: path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
         return None
+    return PartialState.from_json(text)
 
 
 def save_state(path: Path, state: PartialState) -> None:

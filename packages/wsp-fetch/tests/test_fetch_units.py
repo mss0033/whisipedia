@@ -183,3 +183,32 @@ def test_config_from_mapping() -> None:
     assert cfg.metalink_hosts == ("a.org",)
     assert cfg.connections_for("http://mirror.example:8080/x") == 6
     assert cfg.connections_for("https://other.example/x") == 3
+
+
+def test_a_refused_read_of_the_state_file_does_not_pass_for_no_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-10-29 spot check: taken for "no state", one EAGAIN truncated a 95-of-101 GB partial to 0."""
+    import time
+
+    def no_sleep(_s: float) -> None:
+        return None
+
+    monkeypatch.setattr(time, "sleep", no_sleep)  # retrying's 2, 4, 8 s pauses
+    assert load_state(tmp_path / "none.json") is None
+    path = tmp_path / "x.partial.state.json"
+    save_state(path, PartialState("u", 10, 4, "blake3", {"sha256": "ab"}, None, {0: "x"}))
+    real = Path.read_text
+    refusals = [2]
+
+    def flaky(self: Path, *a: object, **k: object) -> str:
+        if self == path and refusals[0] > 0:
+            refusals[0] -= 1
+            raise BlockingIOError(11, "Resource temporarily unavailable")
+        return real(self, *a, **k)  # pyright: ignore[reportArgumentType]
+
+    monkeypatch.setattr(Path, "read_text", flaky)
+    assert load_state(path) is not None  # read on the third try: whatever it holds, not "no state"
+    refusals[0] = 99
+    with pytest.raises(BlockingIOError):
+        load_state(path)

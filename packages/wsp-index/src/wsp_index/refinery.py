@@ -53,6 +53,7 @@ import pyarrow.parquet as pq
 from wsp_core.ids import DocId, content_hash
 from wsp_core.memory import drop_file_cache
 from wsp_core.model import ChangeRecord, DocRecord
+from wsp_core.nasretry import retrying
 from wsp_index.localfs import REMOTE_FS_TYPES, filesystem_type
 
 log = logging.getLogger(__name__)
@@ -368,17 +369,21 @@ class RefineryWriter:
         name = f"part-{self._parts:05d}.parquet"
         final = self.dir / name
         partial = self.dir / (name + ".partial")
-        pq.write_table(  # pyright: ignore[reportUnknownMemberType]  # stubs: partially unknown params
-            table,
-            partial,
-            row_group_size=rg_rows,
-            compression="zstd",
-            compression_level=self._zstd,
-            # A list of columns is valid (pyarrow docs); the stubs only allow bool.
-            use_dictionary=["source_id", "lang", "license"],  # pyright: ignore[reportArgumentType]
-            write_statistics=["doc_id"],
-        )
-        meta = open_parquet(partial).metadata
+
+        def write() -> Any:  # the share refused one part's write mid-refine: tried again (2026-10-29)
+            pq.write_table(  # pyright: ignore[reportUnknownMemberType]  # stubs: partially unknown params
+                table,
+                partial,
+                row_group_size=rg_rows,
+                compression="zstd",
+                compression_level=self._zstd,
+                # A list of columns is valid (pyarrow docs); the stubs only allow bool.
+                use_dictionary=["source_id", "lang", "license"],  # pyright: ignore[reportArgumentType]
+                write_statistics=["doc_id"],
+            )
+            return open_parquet(partial).metadata
+
+        meta = retrying(f"write {name}", write)
         if meta.num_rows != len(self._buf):
             raise RefineryError(f"read-back mismatch in {partial}")
         # Row -> (row group, offset) from the actual row-group sizes written.
@@ -392,7 +397,7 @@ class RefineryWriter:
         loc[:, 2] = row_in_rg
         self._idx_h.append(np.fromiter((id_hash(r.doc_id) for r in self._buf), np.uint64, len(self._buf)))
         self._idx_loc.append(loc)
-        _atomic_replace(partial, final)
+        retrying(f"publish {name}", lambda: _atomic_replace(partial, final))
         drop_file_cache(final)  # written once, read later: its pages are cache charged to the job
         self._bytes += final.stat().st_size
         self._docs += len(self._buf)

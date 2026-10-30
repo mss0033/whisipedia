@@ -42,7 +42,7 @@ import numpy as np
 
 from wsp_api import weatherdata as wd
 from wsp_cli import bootstrap, locks
-from wsp_cli.nasretry import copy_hashed
+from wsp_cli.nasretry import copy_hashed, retrying
 from wsp_core.errors import FetchError, NotFoundError
 
 EXIT_OK, EXIT_REFUSED, EXIT_FAILED = 0, 2, 6
@@ -475,7 +475,7 @@ def stage_files(
                 "uris": [url],
                 "lane": "collections",
                 "checksum": ["sha-256", sha],
-                "size": dest.stat().st_size,
+                "size": path.stat().st_size,  # the local file (a refused stat used to mean copying again)
                 "meta": {},
             }
         )
@@ -483,14 +483,19 @@ def stage_files(
     plans.mkdir(parents=True, exist_ok=True)
     plan = plans / f"{source}-{version}.json"
     tmp = plan.with_name(plan.name + ".partial")
-    tmp.write_text(json.dumps(targets, indent=1), encoding="utf-8")
-    tmp.replace(plan)
+
+    def write() -> None:
+        tmp.write_text(json.dumps(targets, indent=1), encoding="utf-8")
+        tmp.replace(plan)
+
+    retrying(f"plan {plan.name}", write)
     return dest_dir
 
 
 # A pull waits this long for the lock, then leaves the seal to the next pull: with its priority ticket
 # it is next after the holder, whose slice is at most an hour (lane --max-seconds 3600) and a file.
 INGEST_WAIT_S = 3900
+EXIT_NOT_PLANNED = 8  # = ops.EXIT_NOT_PLANNED: `wsp ingest --version V` found no plan naming V
 # All of a pull's seals start within this much of its start, with time left for the seal itself: the
 # unit's TimeoutStartSec is 90 minutes, and a second run's 65-minute wait ran past it (2026-10-29).
 PULL_BUDGET_S = 80 * 60
@@ -656,6 +661,13 @@ def _archive(
             left.append(item)
             continue
         code, last = run_ingest(args.config_dir, model.source, version, wait=wait)
+        if code == EXIT_NOT_PLANNED:
+            # No plan names it: sealed by a pull killed before it saved its state, or by hand. Taken,
+            # not retried every pull for an ingest that can only say so again (2026-10-29).
+            say(f"{model.source}/{version}: already ingested (no plan names it); taken")
+            state["pending"] = left + pending[at + 1 :]
+            wd.atomic_json(ws.root / STATE_FILE, state)
+            continue
         if code == 0:
             say(f"{model.source}/{version}: sealed")
             # Kept at once: a pull killed after a seal left it pending, and the next pull waited 48

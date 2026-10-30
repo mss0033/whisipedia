@@ -209,14 +209,19 @@ class JsonlLedger:
         return self._dir
 
     def day_files(self) -> list[tuple[date, Path]]:
-        if not self._dir.is_dir():
-            return []
-        found: list[tuple[date, Path]] = []
-        for path in self._dir.iterdir():
-            m = _DAY_FILE.match(path.name)
-            if m and path.is_file():
-                found.append((date.fromisoformat(m.group(1)), path))
-        return sorted(found)
+        # Read under the same policy as the appends: every vault event lists the day files, and one
+        # refusal after a seal left a generation sealed but never promoted (2026-10-29 spot check).
+        def scan() -> list[tuple[date, Path]]:
+            if not self._dir.is_dir():
+                return []
+            found: list[tuple[date, Path]] = []
+            for path in self._dir.iterdir():
+                m = _DAY_FILE.match(path.name)
+                if m and path.is_file():
+                    found.append((date.fromisoformat(m.group(1)), path))
+            return sorted(found)
+
+        return self._retry.run(scan)
 
     # --- writing ---------------------------------------------------------------------------------
 
@@ -241,7 +246,7 @@ class JsonlLedger:
 
     def _newest_size(self) -> int:
         files = self.day_files()
-        return files[-1][1].stat().st_size if files else 0
+        return self._retry.run(lambda: files[-1][1].stat().st_size) if files else 0
 
     def append(
         self, kind: str, subject: str, data: Mapping[str, object], *, idempotency_key: str | None = None
@@ -363,7 +368,7 @@ class JsonlLedger:
 
     def _write_checkpoint(self, day: date, seq: int, last_hash: str) -> None:
         path = self._path(day)
-        count = sum(1 for line in path.read_bytes().splitlines() if line.strip())
+        count = sum(1 for line in self._retry.run(path.read_bytes).splitlines() if line.strip())
         body = {"date": day.isoformat(), "events": count, "last_hash": last_hash, "last_seq": seq}
         sig = base64.b64encode(self._signer.sign(canonical_json(body))).decode()
         self._append_line(path, canonical_json({"checkpoint": body, "sig": sig}) + b"\n")
@@ -461,7 +466,7 @@ class JsonlLedger:
             self._tail = (0, GENESIS_HASH, None, False)
             return self._tail
         day, path = files[-1]
-        data = path.read_bytes()
+        data = self._retry.run(path.read_bytes)
         if data and not data.endswith(b"\n"):  # a crash mid-append: cut and record it
             self._recover(path, "torn last line (crash during an append)")
             return self._load_tail()

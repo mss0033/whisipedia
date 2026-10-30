@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
-import hashlib
 import json
 import os
 import shutil
@@ -40,6 +39,7 @@ from pathlib import Path
 from typing import Any, TextIO
 
 from wsp_cli import bootstrap
+from wsp_cli.nasretry import copy_hashed
 from wsp_core.errors import FetchError
 from wsp_core.model import Checksum, ReleaseRef, RemoteFile, SourceSpec
 from wsp_core.ports import Ctx
@@ -165,9 +165,10 @@ def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
         dest = dest_dir / remote.name
         try:
             fetcher.download(remote, dest)
+            size = dest.stat().st_size  # a refused stat is this file's failure, not the run's
         except (FetchError, OSError) as exc:  # OSError: the NAS refused a write (EFAULT, 2026-10-18)
             return True, f"  {remote.name}: FAILED {exc}"
-        return False, None if quiet else f"  [{i}/{len(wanted)}] {remote.name} {_gb(dest.stat().st_size)}"
+        return False, None if quiet else f"  [{i}/{len(wanted)}] {remote.name} {_gb(size)}"
 
     failed = done = 0
     with ThreadPoolExecutor(max_workers=parallel) as pool:
@@ -251,14 +252,15 @@ def _fetch_packed(
         for f in sorted(release.files, key=lambda f: f.name):
             z.write(staging / f.name, f.name)
     tmp.replace(local_zip)
-    digest, size = _sha256(local_zip), local_zip.stat().st_size
+    size = local_zip.stat().st_size
+    # Hashed as it is copied, synced as it goes, continued after a refusal or a kill; a copy already
+    # whole is read back, not written again (2026-10-29 spot check).
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    digest = copy_hashed(local_zip, final, pace)
     packed = replace(
         release,
         files=(RemoteFile(f"packed:{spec.id}/{release.version}", name, size, (Checksum("sha256", digest),)),),
     )
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    if not (final.is_file() and final.stat().st_size == size):
-        _paced_copy(local_zip, final, pace)
     write_plan(incoming, packed)
     shutil.rmtree(staging, ignore_errors=True)
     local_zip.unlink(missing_ok=True)
@@ -335,25 +337,6 @@ def _adopt_loose(
             plan = source_dir.parent / "_plans" / PLANS_SUBDIR / f"{source_dir.name}-{folder.name}.json"
             plan.unlink(missing_ok=True)
     return moved
-
-
-def _sha256(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as fh:
-        while chunk := fh.read(PACK_CHUNK):
-            h.update(chunk)
-    return h.hexdigest()
-
-
-def _paced_copy(src: Path, dest: Path, pace: Callable[[int], None] | None) -> None:
-    """Copy into the vault at the library's write budget, renamed into place when whole."""
-    tmp = dest.with_name(dest.name + ".partial")
-    with src.open("rb") as fin, tmp.open("wb") as fout:
-        while chunk := fin.read(PACK_CHUNK):
-            if pace is not None:
-                pace(len(chunk))
-            fout.write(chunk)
-    tmp.replace(dest)
 
 
 def register(sub: Any, add: Any) -> None:

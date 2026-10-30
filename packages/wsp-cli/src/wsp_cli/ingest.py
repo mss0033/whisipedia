@@ -490,6 +490,14 @@ class Ingestor:
         for vp in report.versions:
             if any(v.status is VersionStatus.YIELDED for v in report.versions):
                 break  # out of time: the rest waits for the next run
+            if vp.status is VersionStatus.SEALED and not dry_run and not isinstance(vp, ArxivSnapshotPlan):
+                # Sealed by a run that failed after the seal (a ledger write the share refused): its
+                # promotion never came, and a rerun saw only "sealed" (2026-10-29 spot check).
+                never = vp.generation_id not in self.vault.promoted_before(vp.source_id)  # a rollback stands
+                if never and self.vault.promote_if_newer(vp.source_id, vp.generation_id):
+                    vp.promoted = changed = True
+                    self._say(f"{vp.source_id}/{vp.generation_id}: sealed earlier; promoted now")
+                continue
             if vp.status is VersionStatus.READY:
                 if isinstance(vp, ArxivSnapshotPlan):
                     if not dry_run:

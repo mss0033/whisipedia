@@ -70,6 +70,7 @@ import httpx
 
 from wsp_core.errors import RedirectRefusedError, RobotsDisallowedError
 from wsp_core.model import RemoteFile, RemoteHead
+from wsp_core.nasretry import retrying
 from wsp_core.redirects import current_guard, unguarded
 from wsp_core.robots import Robots, reachable, unreachable_long
 from wsp_core.robots import parse as parse_robots
@@ -1304,7 +1305,9 @@ class _SegmentedDownload:
             self._checkpoint(force=True)
             os.close(self.fd)
             raise self.error
-        os.fsync(self.fd)
+        retrying(
+            f"fsync {self.partial.name}", lambda: os.fsync(self.fd)
+        )  # the share refused one (idempotent)
         try:
             self._spot_check()  # before publishing, from the fsynced partial, at random offsets
         finally:

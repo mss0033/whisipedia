@@ -559,6 +559,70 @@ def test_a_copy_the_share_refuses_goes_on_from_its_last_synced_byte(
     assert sum(written) == 600 + (1024 - 300)  # the retry began at the synced 300, not at 0
 
 
+def test_a_copy_another_run_left_goes_on_from_its_last_whole_sync(tmp_path: Path) -> None:
+    """2026-10-29 spot check: a killed 76 GB copy started again at byte 0 in the next run."""
+    import hashlib
+
+    from wsp_cli import nasretry
+
+    src = tmp_path / "part.pmtiles"
+    src.write_bytes(bytes(range(256)) * 4)  # 1,024 bytes
+    (tmp_path / "out.pmtiles.partial").write_bytes(src.read_bytes()[:700] + b"\xff" * 50)  # a wrong tail
+    written: list[int] = []
+    sha = nasretry.copy_hashed(src, tmp_path / "out.pmtiles", written.append, chunk=100, sync_every=300)
+    assert sha == hashlib.sha256(src.read_bytes()).hexdigest()
+    assert (tmp_path / "out.pmtiles").read_bytes() == src.read_bytes()
+    assert sum(written) == 1024 - 600  # from the last whole sync (600) that matches, not from 0
+    # a destination already whole and identical is read, not written again
+    written.clear()
+    assert nasretry.copy_hashed(src, tmp_path / "out.pmtiles", written.append, chunk=100) == sha
+    assert written == []
+    # a different file of the same size is copied again
+    other = tmp_path / "other.pmtiles"
+    other.write_bytes(b"\x01" * 1024)
+    assert nasretry.copy_hashed(other, tmp_path / "out.pmtiles", written.append, chunk=100) != sha
+    assert sum(written) == 1024
+
+
+def test_a_version_no_plan_names_is_taken_not_retried_every_pull(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-10-29: a pull killed after its seal left the run pending; `wsp ingest` then found no plan for
+    it (exit 8) and the next pulls waited their turn for that answer again and again."""
+    import argparse
+
+    calls: list[str] = []
+
+    def ingest(_cfg: object, source: str, version: str, *, wait: float = 0) -> tuple[int, str]:
+        calls.append(version)
+        return (w.EXIT_NOT_PLANNED, "no plan") if version.endswith("2026102600") else (0, "sealed")
+
+    monkeypatch.setattr(w, "run_ingest", ingest)
+
+    class Paths:
+        def require_vault(self) -> Path:
+            return tmp_path
+
+    def paths(_cfg: object) -> Paths:
+        return Paths()
+
+    def pace(_cfg: object) -> None:
+        return None
+
+    monkeypatch.setattr(bootstrap, "paths", paths)
+    monkeypatch.setattr(bootstrap, "ingest_pace", pace)
+    (tmp_path / "weather").mkdir()
+    runs = ["2026102600", "2026102700"]
+    state: dict[str, Any] = {"pending": [{"model": "gfs", "run": r, "staged": "x"} for r in runs]}
+    said: list[str] = []
+    w._archive(  # pyright: ignore[reportPrivateUsage]
+        {}, w.WeatherSettings(tmp_path / "weather"), state, argparse.Namespace(config_dir=None), said.append
+    )
+    assert len(calls) == 2
+    assert state["pending"] == []
+    assert any("already ingested" in s for s in said)
+
+
 def test_a_pull_waits_once_for_a_busy_ingest_queue(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """2026-10-28: nine lane ingests queued; a pull waited 20 minutes for each of four staged runs and
     ran past its unit's 90-minute limit. After one busy wait the rest stay staged for the next pull."""

@@ -36,7 +36,7 @@ from typing import Any, TextIO, cast
 
 from wsp_adapters.maptiles import Cut, MapConfigError, MapPart, check_cut, map_parts, map_source
 from wsp_cli import bootstrap
-from wsp_cli.nasretry import copy_hashed
+from wsp_cli.nasretry import copy_hashed, retrying
 from wsp_core.errors import FetchError
 from wsp_core.gazetteer import Place, place_rank, write_gazetteer
 from wsp_core.model import Checksum, RemoteFile, SourceSpec
@@ -225,8 +225,11 @@ def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
             return EXIT_FAILED
         size = local.stat().st_size
         sha = copy_hashed(local, dest, pace)
+        # The plan first: a plan write the share refused after the cut was dropped left the part in
+        # _incoming with nothing to ingest it, and no rerun could make its plan (2026-10-29).
+        checksum = Checksum("sha256", sha)
+        retrying(f"plan {part.name}", lambda: write_plan(incoming, spec, version, part, checksum, size))
         local.unlink()
-        write_plan(incoming, spec, version, part, Checksum("sha256", sha), size)
         out.write(f"{spec.id}/{version}: {part.name} {_gb(size)} cut and copied (sha256 {sha[:16]}...)\n")
     out.write(f"next: wsp ingest --source {spec.id} --version {version}\n")
     return EXIT_OK
@@ -245,16 +248,27 @@ def gazetteer_path(cfg: Mapping[str, Any]) -> Path:
 # The pump runs in its own process: libosmium blocks in open() and while waiting for data without
 # releasing the GIL, so a pump thread in this process would never get to write (a deadlock).
 _PUMP = """
-import sys, time
+import os, sys, time
 src, dst, rate = sys.argv[1], sys.argv[2], float(sys.argv[3]) * 1e6
 t0, sent = time.monotonic(), 0
 with open(src, "rb") as fin, open(dst, "wb") as fout:
+    try:  # a 95 GB planet read once: its pages are cache charged to the job, dropped as it goes
+        os.posix_fadvise(fin.fileno(), 0, 0, os.POSIX_FADV_SEQUENTIAL)
+    except OSError:
+        pass
+    dropped = 0
     while chunk := fin.read(8 << 20):
         try:
             fout.write(chunk)
         except BrokenPipeError:
             break
         sent += len(chunk)
+        if sent - dropped >= 64 << 20:
+            try:
+                os.posix_fadvise(fin.fileno(), dropped, sent - dropped, os.POSIX_FADV_DONTNEED)
+            except OSError:
+                pass
+            dropped = sent
         if rate > 0:
             ahead = sent / rate - (time.monotonic() - t0)
             if ahead > 0:
