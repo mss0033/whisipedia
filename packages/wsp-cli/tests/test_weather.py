@@ -504,7 +504,7 @@ def test_a_copy_the_nas_refuses_for_a_moment_is_started_again(
     year at its last step; the copy is tried again after a pause."""
     import hashlib
 
-    from wsp_cli import weather
+    from wsp_cli import nasretry
 
     src = tmp_path / "tiles.npz"
     src.write_bytes(b"era5 tiles " * 100)
@@ -519,14 +519,44 @@ def test_a_copy_the_nas_refuses_for_a_moment_is_started_again(
 
     monkeypatch.setattr(Path, "open", flaky_open)
     pauses: list[float] = []
-    sha = weather.copy_hashed(src, tmp_path / "out.npz", None, sleep=pauses.append)
+    sha = nasretry.copy_hashed(src, tmp_path / "out.npz", None, sleep=pauses.append)
     assert sha == hashlib.sha256(src.read_bytes()).hexdigest()
     assert (tmp_path / "out.npz").read_bytes() == src.read_bytes()
     assert pauses == [2.0, 4.0]
 
     refusals[0] = 99  # refused every time: the error stands
     with pytest.raises(BlockingIOError):
-        weather.copy_hashed(src, tmp_path / "again.npz", None, sleep=pauses.append)
+        nasretry.copy_hashed(src, tmp_path / "again.npz", None, sleep=pauses.append)
+
+
+def test_a_copy_the_share_refuses_goes_on_from_its_last_synced_byte(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-10-30: a 76 GB map part, synced once at its end, failed there on all five tries."""
+    import hashlib
+    import os
+
+    from wsp_cli import nasretry
+
+    src = tmp_path / "part.pmtiles"
+    src.write_bytes(bytes(range(256)) * 4)  # 1,024 bytes
+    real_fsync = os.fsync
+    syncs = [0]
+
+    def flaky_fsync(fd: int) -> None:
+        syncs[0] += 1
+        if syncs[0] == 2:  # the second sync (at 600 bytes) is refused
+            raise BlockingIOError(11, "Resource temporarily unavailable")
+        real_fsync(fd)
+
+    monkeypatch.setattr(os, "fsync", flaky_fsync)
+    written: list[int] = []
+    sha = nasretry.copy_hashed(
+        src, tmp_path / "out.pmtiles", written.append, sleep=lambda _: None, chunk=100, sync_every=300
+    )
+    assert (tmp_path / "out.pmtiles").read_bytes() == src.read_bytes()
+    assert sha == hashlib.sha256(src.read_bytes()).hexdigest()
+    assert sum(written) == 600 + (1024 - 300)  # the retry began at the synced 300, not at 0
 
 
 def test_a_pull_waits_once_for_a_busy_ingest_queue(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

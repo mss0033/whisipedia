@@ -24,7 +24,6 @@ pulled), 2 refused (bad arguments or configuration).
 from __future__ import annotations
 
 import argparse
-import hashlib
 import itertools
 import json
 import subprocess
@@ -43,14 +42,13 @@ import numpy as np
 
 from wsp_api import weatherdata as wd
 from wsp_cli import bootstrap, locks
-from wsp_cli.nasretry import retrying
+from wsp_cli.nasretry import copy_hashed
 from wsp_core.errors import FetchError, NotFoundError
 
 EXIT_OK, EXIT_REFUSED, EXIT_FAILED = 0, 2, 6
 STATE_FILE = "state.json"
 PLANS_SUBDIR = "targets.d"
 LOOKBACK_HOURS = 36  # the runs a pull looks at: anything older is not worth fetching
-COPY_CHUNK = 8 << 20
 
 
 # --- configuration -----------------------------------------------------------------------------------
@@ -453,27 +451,6 @@ def load_state(root: Path) -> dict[str, Any]:
 def archive_version(run: str) -> str:
     """``<YYYY-MM-DD>.r<YYYYMMDDHH>``: the run's day and the run as its partition."""
     return f"{run[:4]}-{run[4:6]}-{run[6:8]}.r{run}"
-
-
-def copy_hashed(
-    src: Path, dest: Path, pace: Callable[[int], None] | None, *, sleep: Callable[[float], None] = time.sleep
-) -> str:
-    """Copy ``src`` to ``dest`` (through ``dest.partial``) and return its SHA-256, started again when the
-    NAS refuses it for a moment (:mod:`wsp_cli.nasretry`: an ERA5 year failed so on 2026-10-24)."""
-    return retrying(f"copy {src.name}", lambda: _copy_hashed_once(src, dest, pace), sleep=sleep)
-
-
-def _copy_hashed_once(src: Path, dest: Path, pace: Callable[[int], None] | None) -> str:
-    tmp = dest.with_name(dest.name + ".partial")
-    digest = hashlib.sha256()
-    with src.open("rb") as fin, tmp.open("wb") as fout:
-        while chunk := fin.read(COPY_CHUNK):
-            digest.update(chunk)
-            fout.write(chunk)
-            if pace is not None:
-                pace(len(chunk))
-    tmp.replace(dest)
-    return digest.hexdigest()
 
 
 def stage_files(

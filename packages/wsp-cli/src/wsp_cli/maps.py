@@ -22,7 +22,6 @@ searches time out), and the file is written on the local disk next to the search
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import re
@@ -37,7 +36,7 @@ from typing import Any, TextIO, cast
 
 from wsp_adapters.maptiles import Cut, MapConfigError, MapPart, check_cut, map_parts, map_source
 from wsp_cli import bootstrap
-from wsp_cli.nasretry import retrying
+from wsp_cli.nasretry import copy_hashed
 from wsp_core.errors import FetchError
 from wsp_core.gazetteer import Place, place_rank, write_gazetteer
 from wsp_core.model import Checksum, RemoteFile, SourceSpec
@@ -46,7 +45,6 @@ from wsp_core.partitions import PartitionError, check_partition, partition_gener
 PLANS_SUBDIR = "targets.d"
 LANE = "collections"  # renamed into place only when complete: ingest needs no settle wait
 EXIT_OK, EXIT_REFUSED, EXIT_FAILED, EXIT_NOTHING_NEW = 0, 2, 6, 7
-COPY_CHUNK = 8 << 20
 
 
 def _spec(cfg: Mapping[str, Any], lay: object, source: str) -> SourceSpec:
@@ -131,27 +129,6 @@ def reusable_cut(local: Path, cut: Cut) -> bool:
     """A finished cut in the work directory (renamed into place, so whole) that fits ``cut``."""
     building = local.with_name(local.name + ".building")
     return local.is_file() and not building.exists() and check_cut(local, cut, None) is None
-
-
-def copy_hashed(src: Path, dest: Path, pace: Callable[[int], None] | None) -> str:
-    """Copy ``src`` to ``dest`` (via ``dest.partial``, renamed when whole); its SHA-256. Started again
-    when the NAS drops the connection for a moment (a part's fsync, 2026-10-24: :mod:`wsp_cli.nasretry`)."""
-    return retrying(f"copy {src.name}", lambda: _copy_hashed_once(src, dest, pace))
-
-
-def _copy_hashed_once(src: Path, dest: Path, pace: Callable[[int], None] | None) -> str:
-    tmp = dest.with_name(dest.name + ".partial")
-    digest = hashlib.sha256()
-    with src.open("rb") as fin, tmp.open("wb") as fout:
-        while chunk := fin.read(COPY_CHUNK):
-            digest.update(chunk)
-            fout.write(chunk)
-            if pace is not None:
-                pace(len(chunk))
-        fout.flush()
-        os.fsync(fout.fileno())
-    tmp.replace(dest)
-    return digest.hexdigest()
 
 
 def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
