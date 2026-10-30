@@ -54,9 +54,11 @@ import re
 import shutil
 import subprocess
 import sys
-from collections.abc import Mapping, Sequence
+import time
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, date, datetime
+from functools import partial
 from pathlib import Path
 from typing import Any, TextIO, cast
 
@@ -64,7 +66,7 @@ from wsp_adapters.doccollection import DocCollectionAdapter
 from wsp_adapters.doccollection.adapter import Survey
 from wsp_adapters.doccollection.model import Candidate, key_part
 from wsp_adapters.doccollection.policy import Rules, Verdict, normalize_pub_number
-from wsp_cli import bootstrap
+from wsp_cli import bootstrap, locks, nasretry
 from wsp_core.errors import FetchError, NotFoundError
 from wsp_core.model import FetchResult, RemoteFile, SourceSpec, SourceStatus
 from wsp_core.ports import Ctx, Fetcher
@@ -568,7 +570,13 @@ def unsealed_plans(incoming: Path, spec: SourceSpec) -> list[str]:
 
 
 def import_collection(
-    args: argparse.Namespace, spec: SourceSpec, queue: Queue, folder: Path, out: TextIO
+    args: argparse.Namespace,
+    spec: SourceSpec,
+    queue: Queue,
+    folder: Path,
+    out: TextIO,
+    *,
+    save: Callable[[], None] | None = None,
 ) -> int:
     """Take the received files of a document collection: one ``wsp collections fetch`` per partition
     with them as the listing, then the ingest."""
@@ -599,6 +607,8 @@ def import_collection(
     if unsealed_plans(folder.parent.parent, spec):
         # An ingest that did not finish (busy queue, failure, a kill) goes first: a fetch now would be
         # refused (exit 5), or on the same day rewrite that version's plan without its documents.
+        if save is not None:
+            save()  # what was taken so far is on disk before the wait
         code = _ingest(args, spec.id, None, out, ops)
         if code != 0 or unsealed_plans(folder.parent.parent, spec):
             out.write(f"{spec.id}: an earlier import is not ingested yet; new files wait for the next run\n")
@@ -643,6 +653,8 @@ def import_collection(
         if code not in (doccollections.EXIT_COMPLETE, doccollections.EXIT_ALERT, doccollections.EXIT_PARTIAL):
             worst = max(worst, code)
             continue
+        if save is not None:
+            save()
         icode = _ingest(args, spec.id, None, out, ops)
         worst = max(worst, icode)
     return worst
@@ -656,6 +668,8 @@ def import_pubmed(
     held: str | None,
     vault_root: Path,
     out: TextIO,
+    *,
+    save: Callable[[], None] | None = None,
 ) -> int:
     """PubMed's update files after the newest held, in an unbroken run (a generation must hold
     every number up to its own: wsp_adapters.pubmed.content_members), as generation
@@ -666,6 +680,8 @@ def import_pubmed(
     if unsealed_plans(vault_root / "_incoming", spec):
         # An update generation whose ingest did not finish: its files already left the folder, so
         # only this retries it; nothing new is taken until it is sealed.
+        if save is not None:
+            save()  # what was taken so far is on disk before the wait
         code = _ingest(args, spec.id, None, out, ops)
         if code != 0 or unsealed_plans(vault_root / "_incoming", spec):
             out.write(f"{spec.id}: an earlier update generation is not ingested yet\n")
@@ -696,12 +712,17 @@ def import_pubmed(
     dest.mkdir(parents=True, exist_ok=True)
     targets: list[dict[str, Any]] = []
     for path in run:
-        digest = hashlib.sha256()
-        with path.open("rb") as fh:
-            while chunk := fh.read(8 << 20):
-                digest.update(chunk)
-        size = path.stat().st_size
-        shutil.move(path, dest / path.name)
+
+        def take(path: Path = path) -> tuple[str, int]:  # a refusal mid-loop left files moved, no plan
+            digest = hashlib.sha256()
+            with path.open("rb") as fh:
+                while chunk := fh.read(8 << 20):
+                    digest.update(chunk)
+            size = path.stat().st_size
+            shutil.move(path, dest / path.name)
+            return digest.hexdigest(), size
+
+        sha, size = nasretry.retrying(f"take {path.name}", take)
         targets.append(
             {
                 "source_id": spec.id,
@@ -711,7 +732,7 @@ def import_pubmed(
                 "lane": "collections",
                 # The owner's download, read whole (gzip CRC); NCBI's MD5 sidecars are not downloaded
                 # by hand, so this digest checks the copy into the vault, not the origin.
-                "checksum": ["sha-256", digest.hexdigest()],
+                "checksum": ["sha-256", sha],
                 "size": size,
                 "meta": {"manual": "downloaded by hand (robots.txt disallows crawlers)"},
             }
@@ -722,6 +743,8 @@ def import_pubmed(
     tmp.write_text(json.dumps(targets, indent=1), encoding="utf-8")
     tmp.replace(plan)
     out.write(f"{spec.id}: {len(run)} update file(s) as {version}\n")
+    if save is not None:
+        save()  # the moves are done: a kill in the wait must not lose them
     code = _ingest(args, spec.id, version, out, ops)
     if code == 0:
         day = datetime.now(UTC).strftime("%Y-%m-%d")
@@ -733,6 +756,13 @@ def import_pubmed(
 
 
 def _ingest(args: argparse.Namespace, source: str, version: str | None, out: TextIO, ops: Any) -> int:
+    # Each wait fits what is left of the run's budget: three-hour waits per source and partition
+    # stacked past the unit's six hours, and the kill lost which files were taken (2026-10-29).
+    deadline = cast(float | None, getattr(args, "sync_deadline", None))
+    wait = INGEST_WAIT if deadline is None else min(INGEST_WAIT, deadline - time.monotonic() - SYNC_RESERVE_S)
+    if wait < MIN_INGEST_WAIT:
+        out.write(f"{source}: out of time for this run; its ingest waits for the next\n")
+        return locks.EXIT_BUSY
     ingest_args = argparse.Namespace(
         config_dir=args.config_dir,
         source=source,
@@ -744,13 +774,17 @@ def _ingest(args: argparse.Namespace, source: str, version: str | None, out: Tex
         settle_seconds=0.0,
         allow_mirror=False,
         max_seconds=None,
-        wait=INGEST_WAIT,
+        wait=wait,
+        priority=True,  # the owner's own downloads: short, and ahead of the lanes' slices
     )
     return int(ops.cmd_ingest(ingest_args, out))
 
 
 EXIT_INGEST_PENDING = 5  # = doccollections.EXIT_INGEST_PENDING
 INGEST_WAIT = 3 * 3600  # a manual import waits up to three hours in the ingest lock's queue
+SYNC_BUDGET_S = 5 * 3600  # all of a run's waits start within this (the unit's TimeoutStartSec is 6 h)
+SYNC_RESERVE_S = 15 * 60  # left after a wait for the ingest itself
+MIN_INGEST_WAIT = 60
 
 
 # --- the command ----------------------------------------------------------------------------------------
@@ -776,8 +810,6 @@ def cmd_sync(args: argparse.Namespace, out: TextIO) -> int:
 
     One run at a time: a run by hand during the timer's would take the same files into the same day's
     version and rewrite its plan without the other run's documents (2026-10-26 review)."""
-    from wsp_cli import locks
-
     cfg = bootstrap.load(bootstrap.layout(args.config_dir))
     try:
         with locks.exclusive(bootstrap.paths(cfg).require_state() / "manual", "sync"):
@@ -790,6 +822,7 @@ def cmd_sync(args: argparse.Namespace, out: TextIO) -> int:
 def _sync(args: argparse.Namespace, out: TextIO) -> int:
     from wsp_cli.doccollections import MANUAL_DIR, windows_path
 
+    args.sync_deadline = time.monotonic() + SYNC_BUDGET_S
     lay = bootstrap.layout(args.config_dir)
     cfg = bootstrap.load(lay)
     specs = bootstrap.load_sources(cfg, lay)
@@ -810,6 +843,7 @@ def _sync(args: argparse.Namespace, out: TextIO) -> int:
         (folder / LISTING_DIR).mkdir(parents=True, exist_ok=True)
         qpath = state / f"{spec.id}.json"
         queue = Queue.load(qpath, spec.id)
+        save = partial(queue.save, qpath)
         mc = manual_config(spec) or {}
         kind = str(cast(Mapping[str, Any], mc.get("list") or {}).get("kind") or "")
         held = held_generation(cfg, spec) if kind == "pubmed" else None
@@ -818,12 +852,14 @@ def _sync(args: argparse.Namespace, out: TextIO) -> int:
         if not args.no_import and queue.items:
             try:
                 if kind == "pubmed":
-                    worst = max(worst, import_pubmed(args, spec, queue, folder, held, vault_root, out))
+                    worst = max(
+                        worst, import_pubmed(args, spec, queue, folder, held, vault_root, out, save=save)
+                    )
                     held = held_generation(cfg, spec)
                 elif kind == "kiwix-checksums":
                     worst = max(worst, import_kiwix_checksums(spec, queue, folder, out))
                 else:
-                    worst = max(worst, import_collection(args, spec, queue, folder, out))
+                    worst = max(worst, import_collection(args, spec, queue, folder, out, save=save))
             finally:
                 queue.save(qpath)
         stale = not queue.built or (date.today() - date.fromisoformat(queue.built)).days >= REBUILD_DAYS

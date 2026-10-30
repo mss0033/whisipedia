@@ -460,6 +460,67 @@ def test_held_and_denied_documents_leave_the_offer_and_a_held_one_returns_once_d
     assert q.items[-1].status == "taken"
 
 
+def test_a_run_out_of_time_leaves_its_ingest_to_the_next_and_saves_what_it_took(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-10-29 spot check: three-hour ingest waits per source stacked past the unit's six hours, and
+    the kill lost which files were taken. Each wait fits the run's budget; the queue is saved first."""
+    import time
+
+    from wsp_adapters.doccollection.policy import Rules
+    from wsp_cli import doccollections
+
+    vault = tmp_path / "vault"
+    incoming = vault / "_incoming"
+    folder = incoming / "_manual" / "s"
+    folder.mkdir(parents=True)
+    q = Queue("s", items=[_doc_item("s:new")])
+    (folder / "new.pdf").write_bytes(b"%PDF-1.4\n%%EOF\n")
+    spec = _spec("s", {"adapter": "doc-collection"})
+    waits: list[tuple[float, bool]] = []
+    saved: list[int] = []
+
+    class FakeOps:
+        @staticmethod
+        def cmd_ingest(args: argparse.Namespace, out: Any) -> int:
+            waits.append((args.wait, args.priority))
+            return 0
+
+    def fetch(args: argparse.Namespace, out: Any) -> int:
+        args.report_sink.append(doccollections.FetchReport("s", "2026-10-29"))
+        for taken in folder.glob("*.pdf"):
+            taken.unlink()
+        return doccollections.EXIT_COMPLETE
+
+    class FakeAdapter:
+        def config(self, _spec: SourceSpec) -> Any:
+            return type("Cfg", (), {"rules": Rules()})()
+
+    monkeypatch.setattr(doccollections, "cmd_fetch", fetch)
+    monkeypatch.setattr(manual, "DocCollectionAdapter", FakeAdapter)
+    import wsp_cli
+
+    monkeypatch.setattr(wsp_cli, "ops", FakeOps, raising=False)
+    monkeypatch.setitem(__import__("sys").modules, "wsp_cli.ops", FakeOps)
+    # ten minutes of waiting left: the wait is cut to fit, with the reserve for the ingest itself
+    args = argparse.Namespace(config_dir=None, sync_deadline=time.monotonic() + manual.SYNC_RESERVE_S + 600)
+    out = io.StringIO()
+    assert manual.import_collection(args, spec, q, folder, out, save=lambda: saved.append(1)) == 0
+    assert len(waits) == 1
+    assert 0 < waits[0][0] <= 600
+    assert waits[0][1] is True  # the owner's downloads go ahead of the lanes
+    assert saved == [1]  # saved before the wait: a kill there loses nothing
+    # no time left: the ingest waits for the next run, the item stays taken on disk
+    (folder / "new2.pdf").write_bytes(b"%PDF-1.4\n%%EOF\n")
+    q2 = Queue("s", items=[_doc_item("s:new2")])
+    args = argparse.Namespace(config_dir=None, sync_deadline=time.monotonic() + manual.SYNC_RESERVE_S)
+    out = io.StringIO()
+    assert manual.import_collection(args, spec, q2, folder, out, save=lambda: saved.append(2)) == 3
+    assert len(waits) == 1
+    assert "out of time" in out.getvalue()
+    assert saved == [1, 2]
+
+
 def test_an_unfinished_ingest_is_retried_before_new_files_are_taken(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
