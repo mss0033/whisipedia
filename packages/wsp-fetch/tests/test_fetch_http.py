@@ -190,6 +190,21 @@ def test_all_mirrors_failing_raises_and_keeps_resume_state(servers: Servers, tmp
     assert state_path(dest).exists()
 
 
+def test_a_file_every_source_answers_404_for_is_not_found(servers: Servers, tmp_path: Path) -> None:
+    """2026-10-30: wrapped as "no usable source", a withdrawn PMC article was retried on every pass
+    and held its 85,000-file partition back; a caller that sets gone files aside must see it."""
+    from wsp_core.errors import NotFoundError
+
+    data = payload(1000, seed=18)
+    s, m = servers(), servers()  # neither holds the file
+    with HttpFetcher(CFG) as f, pytest.raises(NotFoundError):
+        f.download(remote_for(data, s.url("gone.bin"), m.url("gone.bin")), tmp_path / "gone.bin")
+    m.add("gone.bin", data)  # one source has it: the download succeeds
+    with HttpFetcher(CFG) as f:
+        f.download(remote_for(data, s.url("gone.bin"), m.url("gone.bin")), tmp_path / "gone.bin")
+    assert (tmp_path / "gone.bin").read_bytes() == data
+
+
 def test_server_ignoring_range_falls_back_to_single_stream(servers: Servers, tmp_path: Path) -> None:
     data = payload(150_000, seed=17)
     s = servers()

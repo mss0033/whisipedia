@@ -40,7 +40,7 @@ from typing import Any, TextIO
 
 from wsp_cli import bootstrap
 from wsp_cli.nasretry import copy_hashed
-from wsp_core.errors import FetchError
+from wsp_core.errors import FetchError, NotFoundError
 from wsp_core.model import Checksum, ReleaseRef, RemoteFile, SourceSpec
 from wsp_core.ports import Ctx
 
@@ -74,6 +74,19 @@ def plan_targets(release: ReleaseRef) -> list[dict[str, Any]]:
             }
         )
     return targets
+
+
+# A listed file the issuer answers 404/410 for is gone (a withdrawn article): the partition is sealed
+# without it, the names kept with the release. More than this share gone is not withdrawals but
+# something wrong (a moved bucket, a changed path) and fails the run as before.
+GONE_MAX_SHARE = 0.001
+GONE_MAX_MIN = 10
+GONE_NAME = "GONE.txt"
+
+
+def _too_many_gone(gone: int, total: int) -> bool:
+    """More gone than withdrawals explain, or nothing left to seal."""
+    return gone >= total or gone > max(GONE_MAX_MIN, int(total * GONE_MAX_SHARE))
 
 
 def write_plan(incoming: Path, release: ReleaseRef) -> Path:
@@ -159,6 +172,8 @@ def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
     parallel = max(1, int(getattr(args, "parallel", 1) or 1))
     quiet = len(todo) > LOUD_FILES  # 60,000 small files: a line a thousand, not a line a file
 
+    gone: list[tuple[str, str]] = []
+
     def one(item: tuple[int, RemoteFile]) -> tuple[bool, str | None]:
         """Fetch one file: (it failed, the line to print)."""
         i, remote = item
@@ -166,6 +181,9 @@ def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
         try:
             fetcher.download(remote, dest)
             size = dest.stat().st_size  # a refused stat is this file's failure, not the run's
+        except NotFoundError as exc:
+            gone.append((remote.name, str(exc)))
+            return False, f"  {remote.name}: gone ({exc})"
         except (FetchError, OSError) as exc:  # OSError: the NAS refused a write (EFAULT, 2026-10-18)
             return True, f"  {remote.name}: FAILED {exc}"
         return False, None if quiet else f"  [{i}/{len(wanted)}] {remote.name} {_gb(size)}"
@@ -180,9 +198,19 @@ def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
             if quiet and done % 1000 == 0:
                 out.write(f"  {done:,}/{len(todo):,} fetched\n")
             out.flush()
+    if gone and _too_many_gone(len(gone), len(release.files)):
+        failed += len(gone)
+        out.write(f"{spec.id}/{release.version}: {len(gone)} file(s) not found: too many to be withdrawals\n")
     if failed:
         out.write(f"{spec.id}/{release.version}: {failed} file(s) failed; run again to continue\n")
         return EXIT_FAILED
+    if gone:
+        names = {n for n, _ in gone}
+        release = replace(release, files=tuple(f for f in release.files if f.name not in names))
+        write_plan(incoming, release)
+        out.write(
+            f"{spec.id}/{release.version}: {len(gone)} file(s) the issuer no longer has; sealed without\n"
+        )
     out.write(f"next: wsp ingest --source {spec.id} --version {release.version}\n")
     return EXIT_OK
 
@@ -226,9 +254,14 @@ def _fetch_packed(
         f"fetching {len(todo):,}\n"
     )
 
+    gone: list[tuple[str, str]] = []
+
     def one(remote: RemoteFile) -> str | None:
         try:
             fetcher.download(remote, staging / remote.name)
+        except NotFoundError as exc:
+            gone.append((remote.name, str(exc)))
+            return None
         except (FetchError, OSError) as exc:
             return f"  {remote.name}: FAILED {exc}"
         return None
@@ -243,14 +276,31 @@ def _fetch_packed(
             if done % 1000 == 0:
                 out.write(f"  {done:,}/{len(todo):,} fetched\n")
             out.flush()
+    if gone and _too_many_gone(len(gone), len(release.files)):
+        failed += len(gone)
+        out.write(f"{spec.id}/{release.version}: {len(gone)} file(s) not found: too many to be withdrawals\n")
     if failed:
         out.write(f"{spec.id}/{release.version}: {failed} file(s) failed; run again to continue\n")
         return EXIT_FAILED
+    if gone:
+        names = {n for n, _ in gone}
+        release = replace(release, files=tuple(f for f in release.files if f.name not in names))
+        # Kept with the release, in its zip: what was listed and could not be had, and why.
+        (staging / GONE_NAME).write_text(
+            "".join(f"{n}\t{why}\n" for n, why in sorted(gone)), encoding="utf-8"
+        )
+        for n, _ in gone:
+            (staging / n).unlink(missing_ok=True)
+        out.write(
+            f"{spec.id}/{release.version}: {len(gone)} file(s) the issuer no longer has; packed without\n"
+        )
     local_zip = staging.parent / f"{release.version}.zip"
     tmp = local_zip.with_suffix(".zip.partial")
     with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as z:
         for f in sorted(release.files, key=lambda f: f.name):
             z.write(staging / f.name, f.name)
+        if (staging / GONE_NAME).is_file():
+            z.write(staging / GONE_NAME, GONE_NAME)
     tmp.replace(local_zip)
     size = local_zip.stat().st_size
     # Hashed as it is copied, synced as it goes, continued after a refusal or a kill; a copy already

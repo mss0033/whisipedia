@@ -64,6 +64,7 @@ class Downloads(FakeFetcher):
         super().__init__(routes)
         self.fail = fail or set()
         self.write_fail: set[str] = set()
+        self.missing: set[str] = set()
         self.downloaded: list[str] = []
 
     def download(self, remote: RemoteFile, dest: Path) -> Any:
@@ -71,6 +72,10 @@ class Downloads(FakeFetcher):
             from wsp_core.errors import FetchError
 
             raise FetchError(f"{remote.url}: reset")
+        if remote.name in self.missing:
+            from wsp_core.errors import NotFoundError
+
+            raise NotFoundError(remote.url, "HTTP 404")
         if remote.name in self.write_fail:
             raise OSError(14, "Bad address")
         self.downloaded.append(remote.name)
@@ -223,6 +228,65 @@ def test_a_packed_partition_lands_in_incoming_as_one_zip(
     assert rc == bulk.EXIT_OK
     assert "already written" in text
     assert fetcher.downloaded == []
+
+
+class Two(Adapter):
+    """A partition of both files."""
+
+    def discover_partition(self, ctx: Ctx, partition: str) -> list[ReleaseRef]:
+        return [ReleaseRef("big", "2026-10-18.p0001", None, FILES, format="tar", license="CC-BY-4.0")]
+
+
+class PackedTwo(Two, Packed):
+    pass
+
+
+def test_a_file_the_issuer_no_longer_has_is_set_aside_and_the_partition_sealed(
+    vault: tuple[Path, Downloads], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-10-30: one withdrawn PMC article (HTTP 404) failed its 85,000-file partition on every pass;
+    the lane went back over the same seven partitions for days. Gone files are set aside and named."""
+    root, fetcher = vault
+
+    def adapters(*_: object, **__: object) -> dict[str, object]:
+        return {"big": Two()}
+
+    monkeypatch.setattr(bootstrap, "load_adapters", adapters)
+    fetcher.missing = {"b.tar.gz"}
+    monkeypatch.setattr(bulk, "GONE_MAX_MIN", 0)  # one gone of two is past the share: fails as before
+    rc, text = run(partition="p0001")
+    assert rc == bulk.EXIT_FAILED, text
+    assert "too many to be withdrawals" in text
+    monkeypatch.setattr(bulk, "GONE_MAX_MIN", 10)
+    rc, text = run(partition="p0001")
+    assert rc == bulk.EXIT_OK, text
+    assert "no longer has" in text
+    plan = json.loads((root / "_incoming/_plans/targets.d/big-2026-10-18.p0001.json").read_text())
+    assert [t["name"] for t in plan] == ["a.tar.gz"]  # the plan names only what was had
+    fetcher.missing = {"a.tar.gz", "b.tar.gz"}  # everything gone: nothing to seal, a failure
+    (root / "_incoming" / "big" / "2026-10-18.p0001" / "a.tar.gz").unlink()
+    rc, text = run(partition="p0001")
+    assert rc == bulk.EXIT_FAILED, text
+
+
+def test_a_packed_partition_without_a_gone_file_names_it_in_its_zip(
+    vault: tuple[Path, Downloads], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import zipfile
+
+    root, fetcher = vault
+
+    def adapters(*_: object, **__: object) -> dict[str, object]:
+        return {"big": PackedTwo()}
+
+    monkeypatch.setattr(bootstrap, "load_adapters", adapters)
+    fetcher.missing = {"b.tar.gz"}
+    rc, text = run(partition="p0001")
+    assert rc == bulk.EXIT_OK, text
+    zipped = root / "_incoming" / "big" / "2026-10-18.p0001" / "big-2026-10-18.p0001.zip"
+    with zipfile.ZipFile(zipped) as z:
+        assert sorted(z.namelist()) == ["GONE.txt", "a.tar.gz"]
+        assert z.read("GONE.txt").decode().startswith("b.tar.gz\t")
 
 
 def test_a_loose_file_that_cannot_be_moved_is_fetched_instead(

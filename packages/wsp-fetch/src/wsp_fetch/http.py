@@ -727,6 +727,7 @@ class HttpFetcher:
         """Usable probes, and the mirrors rejected with the reason (kept for provenance)."""
         results: list[_Probe | None] = [None] * len(target.urls)
         errors: list[str] = []
+        failures: list[BaseException] = []
         rejected: list[dict[str, Any]] = []
         # A lone source gets the full retry budget; with alternatives, don't stall on a dead mirror.
         attempts = self.config.max_attempts if len(target.urls) == 1 else min(2, self.config.max_attempts)
@@ -735,6 +736,7 @@ class HttpFetcher:
             try:
                 results[i] = self._probe(url, attempts)
             except (FetchError, httpx.HTTPError) as exc:
+                failures.append(exc)
                 errors.append(f"{url}: {exc}")
                 rejected.append({"url": url, "reason": f"unreachable: {exc}"})
                 log.info("mirror %s unusable: %s", url, exc)
@@ -781,6 +783,15 @@ class HttpFetcher:
             good.append(p)
         self.check_cancelled()
         if not good:
+            # Every source answered 404/410: the file is gone, and callers that set gone files aside
+            # must see it so. Wrapped as "no usable source", one withdrawn PMC article held an
+            # 85,000-file partition back on every pass for days (2026-10-30).
+            if (
+                failures
+                and len(failures) == len(target.urls)
+                and all(isinstance(e, NotFoundError) for e in failures)
+            ):
+                raise NotFoundError(target.url, "HTTP 404/410 from every source")
             raise MirrorsExhaustedError(f"no usable source for {target.url}: {'; '.join(errors)}")
         return good, rejected
 
