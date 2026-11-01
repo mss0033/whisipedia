@@ -492,10 +492,16 @@ class FileVault:
         plan's checksum; unverifiable bytes are still refused): the staging is unsealed and unsigned,
         so the newer plan's file wins. A per-run field in a catalog (``fetched_at``) used to block a
         re-fetched version forever (audit 2026-10-12, H2). Recorded as a ``vault.restaged`` event.
+
+        A file this generation adopted and recorded already, unchanged since, is not read again (see
+        :meth:`_adopted_before`).
         """
         with self._locks.generation(source_id, generation_id, exclusive=False):
             staging = self.stage(source_id, generation_id)
             self._check_case(source_id, generation_id, staging, relpath)
+            known = self._adopted_before(staging, path, relpath, upstream, expected)
+            if known is not None:
+                return known.to_artifact(source_id, generation_id)
             rel, digests, replaced = self._adopt_file(
                 staging, path, relpath, upstream, expected, replace_staged=replace_staged
             )
@@ -506,6 +512,42 @@ class FileVault:
                     {"path": rel, "old_sha256": replaced.sha256, "sha256": digests.sha256},
                 )
             return self._record(source_id, generation_id, staging, rel, digests, upstream, "adopt")
+
+    def _adopted_before(
+        self,
+        staging: Path,
+        path: Path,
+        relpath: str,
+        upstream: Sequence[Checksum],
+        expected: Digests | None,
+    ) -> ManifestEntry | None:
+        """The staging record's entry for ``relpath`` when an earlier run adopted and verified it and
+        nothing has happened since: no incoming copy, no adoption half done, the staged file still its
+        recorded size, and every checksum asked for now either verified against those bytes then or
+        the recorded SHA-256/BLAKE3. Anything else is ``None``, and the file is read back as before.
+
+        A resumed ingest read every file it had adopted back over the NAS before going on:
+        Chronicling America's 478 files (~200 s each) never got past the 17th in its hour, 21 times
+        (2026-11-01). The bytes were verified when they were adopted; the seal checks their size and
+        the scrub re-hashes them, as for every file in staging."""
+        dest = staging / check_relpath(relpath)
+        if path.exists() or dest.with_name(dest.name + ADOPTING_SUFFIX).exists():
+            return None
+        entry = _read_staging(staging).get(dest.relative_to(staging).as_posix())
+        try:
+            if entry is None or dest.stat().st_size != entry.size:
+                return None
+        except FileNotFoundError:
+            return None
+        if expected is not None and entry.digests != expected:
+            return None
+        ours = {"sha256": entry.sha256, "blake3": entry.blake3}
+        verified = {(c.algorithm, c.hexdigest) for c in entry.upstream}
+        for c in upstream:
+            algorithm, digest = normalize_algorithm(c.algorithm), c.hexdigest.strip().lower()
+            if (algorithm, digest) not in verified and ours.get(algorithm) != digest:
+                return None
+        return entry
 
     def _adopt_file(
         self,

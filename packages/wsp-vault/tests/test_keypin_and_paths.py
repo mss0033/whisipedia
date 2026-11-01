@@ -11,6 +11,7 @@ import shutil
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 from vaultkit import FILES, GEN, SOURCE, SealFn
@@ -143,6 +144,36 @@ def test_adopt_resumes_after_a_crash_mid_adoption(vault: FileVault, tmp_path: Pa
     assert art.sha256 == hashlib.sha256(data).hexdigest()
     assert not moving.exists()
     assert (staging / "upstream/r.bin").read_bytes() == data
+
+
+def test_a_file_adopted_before_is_not_read_again_unless_something_changed(
+    vault: FileVault, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-11-01: a resumed ingest read every adopted file back over the NAS; Chronicling America's
+    478 files never got past the 17th in an hour, 21 times."""
+    data = b"adopted once"
+    sha1 = hashlib.sha1(data).hexdigest()
+    src = _incoming(tmp_path, data)
+    first = vault.adopt(SOURCE, GEN, src, "upstream/a.bin", upstream=[Checksum("SHA-1", sha1.upper())])
+    reads: list[Path] = []
+
+    def counting(path: Path, **kwargs: Any) -> Digests:
+        reads.append(path)
+        return readback(path, **kwargs)
+
+    monkeypatch.setattr(vault_mod, "readback", counting)
+    again = vault.adopt(SOURCE, GEN, src, "upstream/a.bin", upstream=[Checksum("sha1", sha1)])
+    assert again == first
+    assert reads == []  # verified then: nothing read now
+    vault.adopt(SOURCE, GEN, src, "upstream/a.bin", upstream=[Checksum("md5", hashlib.md5(data).hexdigest())])
+    assert len(reads) == 1  # a checksum never checked against these bytes: read back
+    reads.clear()
+    with pytest.raises(IntegrityError):  # and a wrong one is still caught
+        vault.adopt(SOURCE, GEN, src, "upstream/a.bin", upstream=[Checksum("sha256", "0" * 64)])
+    staged = vault.stage(SOURCE, GEN) / "upstream" / "a.bin"
+    staged.write_bytes(data + b"!")  # no longer the recorded size: read back, and refused
+    with pytest.raises(IntegrityError):
+        vault.adopt(SOURCE, GEN, src, "upstream/a.bin", upstream=[Checksum("sha1", sha1)])
 
 
 def test_a_leftover_adoption_with_the_same_bytes_as_a_new_fetch_is_dropped(
