@@ -41,7 +41,8 @@ A source takes part through ``access.manual`` in the registry:
 
 The queue of each source is kept in ``<state>/manual/<source>.json`` and rebuilt weekly; an item's
 state is ``pending`` until its file is taken, with the days it was offered and the last problem found
-(a file that fails its check is left in the folder, renamed ``*.bad``, and offered again).
+(a file that fails its check is left in the folder, renamed ``*.bad``, and offered again). A file a
+browser is still writing (:func:`_downloading`) is left alone until it is done.
 """
 
 from __future__ import annotations
@@ -394,7 +395,7 @@ def import_kiwix_checksums(spec: SourceSpec, queue: Queue, folder: Path, out: Te
     day = datetime.now(UTC).strftime("%Y-%m-%d")
     for item in queue.pending():
         path = folder / item.save_as
-        if not path.is_file():
+        if not path.is_file() or _downloading(path):
             continue
         if saved_checksum(item.id, [folder]) is None:
             why = f"not Kiwix's checksum of {item.id}"
@@ -539,6 +540,27 @@ def _check(path: Path) -> str | None:
     return None
 
 
+# What browsers write while a download runs: Firefox keeps an empty file under the final name beside
+# ``<stem>.<random>.<rest>.part``; Chrome and Edge write ``<name>.crdownload``, Safari ``<name>.download``.
+PARTIAL_SUFFIXES = (".part", ".crdownload", ".download")
+
+
+def _downloading(path: Path) -> bool:
+    """Whether a browser is still writing ``path``: a partial file of it lies beside it. Firefox's
+    empty placeholder for a 3 GB ChEMBL archive was set aside as an error page while the archive was
+    still arriving (2026-11-01)."""
+    stem = path.name.split(".", 1)[0]
+    try:
+        return any(
+            p.name.endswith(PARTIAL_SUFFIXES)
+            and (p.name.startswith(stem + ".") or p.name.startswith(path.name))
+            for p in path.parent.iterdir()
+            if p != path
+        )
+    except OSError:
+        return False
+
+
 def _set_aside(path: Path, why: str, item: Item) -> None:
     item.problem = why
     path.replace(path.with_name(path.name + ".bad"))
@@ -595,7 +617,7 @@ def import_collection(
                 item.status, item.offered, item.problem = "pending", [], "held copy gone; download it again"
     for item in queue.pending():
         path = folder / item.save_as
-        if not path.is_file():
+        if not path.is_file() or _downloading(path):
             continue
         if (why := _check(path)) is not None:
             out.write(f"{spec.id}: {item.save_as}: {why}; set aside as {path.name}.bad\n")
@@ -694,6 +716,8 @@ def import_pubmed(
     yy, n = m.group("yy"), int(m.group("upto"))
     run: list[Path] = []
     while (path := folder / f"pubmed{yy}n{n + 1:04d}.xml.gz").is_file():
+        if _downloading(path):
+            break  # the run stops at a file still arriving; the next run takes it
         item = next((i for i in queue.items if i.id == path.name), None)
         if (why := _check(path)) is not None:
             out.write(f"{spec.id}: {path.name}: {why}; set aside as {path.name}.bad\n")

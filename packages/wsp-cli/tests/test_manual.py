@@ -204,6 +204,23 @@ def test_a_file_is_taken_only_when_it_reads_whole(tmp_path: Path) -> None:
     assert check(fake) is not None
 
 
+def test_a_file_a_browser_is_still_writing_is_left_alone(tmp_path: Path) -> None:
+    """2026-11-01: Firefox's empty placeholder for a 3 GB ChEMBL archive was set aside as an error
+    page while the archive was still arriving beside it."""
+    downloading = manual._downloading  # pyright: ignore[reportPrivateUsage]
+    firefox = tmp_path / "chembl_37_sqlite.tar.gz"
+    firefox.touch()
+    (tmp_path / "chembl_37_sqlite.eTFVBZei.tar.gz.part").write_bytes(b"x" * 10)
+    chrome = tmp_path / "rxnorm.zip"
+    chrome.touch()
+    (tmp_path / "rxnorm.zip.crdownload").write_bytes(b"x")
+    done = tmp_path / "chembl_37.sdf.gz"  # a name that only starts like the one arriving
+    done.write_bytes(_gz(b"done"))
+    assert downloading(firefox)
+    assert downloading(chrome)
+    assert not downloading(done)
+
+
 def test_pubmed_update_files_become_a_generation_of_the_unbroken_run(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
