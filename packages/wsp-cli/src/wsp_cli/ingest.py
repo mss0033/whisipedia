@@ -143,6 +143,17 @@ class Target:
         return meta4.removesuffix(".meta4") if meta4 else None
 
 
+def _plan_targets(path: Path) -> list[Target]:
+    """One plan's targets, read with the NAS's brief refusals tried again. A plan removed after the
+    folder was listed is no plan: a bulk lane removes an older version's plan with the folder it
+    emptied, and one gone between the listing and the read failed the daily manual sync, which plans
+    every source's files (2026-11-01)."""
+    try:
+        return nasretry.retrying(f"read {path.name}", lambda: load_targets(path))
+    except FileNotFoundError:
+        return []
+
+
 def load_targets(path: Path) -> list[Target]:
     raw = cast(list[Mapping[str, Any]], json.loads(path.read_text(encoding="utf-8")))
     out: list[Target] = []
@@ -317,7 +328,7 @@ class Ingestor:
         for path in ([targets_path] if targets_path.is_file() else []) + extra_plans:
             targets += [
                 t
-                for t in load_targets(path)
+                for t in _plan_targets(path)
                 if source_id in (None, t.source_id) and version in (None, t.version)
             ]
         if not targets_path.is_file() and not extra_plans:

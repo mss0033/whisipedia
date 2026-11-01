@@ -218,6 +218,26 @@ def test_ingest_of_one_version_ignores_a_stuck_one(vault: FileVault, tmp_path: P
     assert ingest(vault, "2026-10-30") == []  # nothing planned for that cycle
 
 
+def test_a_plan_removed_after_the_listing_is_no_plan(
+    vault: FileVault, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-11-01: the PMC lane removed an older version's plan between the manual sync's listing of
+    the plans and its read of that one; the whole sync failed."""
+    from wsp_cli import ingest as ingest_mod
+
+    fetch(vault, tmp_path, OBJECTS, "2026-10-12")
+    _plan_missing_file(vault, "2026-10-01")
+    real = ingest_mod.load_targets
+
+    def vanishing(path: Path) -> list[Any]:
+        if path.name == f"{SID}-2026-10-01.json":
+            path.unlink()  # removed by another lane after the folder was listed
+        return real(path)
+
+    monkeypatch.setattr(ingest_mod, "load_targets", vanishing)
+    assert ingest(vault) == [("2026-10-12", VersionStatus.INGESTED, True)]
+
+
 def _ingest_args(**kw: Any) -> argparse.Namespace:
     base: dict[str, Any] = {
         "config_dir": None,
