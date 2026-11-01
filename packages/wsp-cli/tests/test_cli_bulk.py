@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import io
 import json
+import zipfile
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
@@ -287,6 +288,39 @@ def test_a_packed_partition_without_a_gone_file_names_it_in_its_zip(
     with zipfile.ZipFile(zipped) as z:
         assert sorted(z.namelist()) == ["GONE.txt", "a.tar.gz"]
         assert z.read("GONE.txt").decode().startswith("b.tar.gz\t")
+
+
+def test_files_an_older_version_left_staged_are_kept_not_fetched_again(
+    vault: tuple[Path, Downloads], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-11-01: PMC's listing day changed every day or two, each change began an 85,000-file
+    partition again from nothing, and the old staging stayed (seven copies of p0272, 60 GB)."""
+    root, fetcher = vault
+
+    def adapters(*_: object, **__: object) -> dict[str, object]:
+        return {"big": PackedTwo()}
+
+    monkeypatch.setattr(bootstrap, "load_adapters", adapters)
+    pack = tmp_path / "state" / "bulk" / "big" / "pack"
+    older = pack / "2026-10-17.p0001"
+    older.mkdir(parents=True)
+    (older / "a.tar.gz").write_bytes(A)  # whole: kept
+    (older / "b.tar.gz").write_bytes(b"cut")  # short of its size: fetched again
+    (older / "dropped.txt").write_text("not in the newer listing")
+    newer, other = pack / "2026-10-19.p0001", pack / "2026-10-17.p0002"
+    for folder in (newer, other):
+        folder.mkdir()
+        (folder / "a.tar.gz").write_bytes(A)
+    rc, text = run(partition="p0001")
+    assert rc == bulk.EXIT_OK, text
+    assert "1 file(s) an older version left staged kept" in text
+    assert fetcher.downloaded == ["b.tar.gz"]
+    assert not older.exists()  # removed with what the newer listing dropped
+    assert (newer / "a.tar.gz").is_file()  # not this one's to touch
+    assert (other / "a.tar.gz").is_file()
+    with zipfile.ZipFile(root / "_incoming/big/2026-10-18.p0001/big-2026-10-18.p0001.zip") as z:
+        assert z.read("a.tar.gz") == A
+        assert z.read("b.tar.gz") == B
 
 
 def test_a_loose_file_that_cannot_be_moved_is_fetched_instead(

@@ -21,6 +21,9 @@ vault); the plan names the zip with its SHA-256. 45,000 files a partition writte
 NAS made a hundred file creations a second, and every page of the library waited behind them
 (2026-10-19: Wikipedia pages failed after 18 s until the lane stopped). Loose files an earlier run
 left in ``_incoming/<source>/*.<partition>`` are moved into the local staging first, not fetched again.
+So are the files an older version of the partition left staged: the partition's version is the day of
+PMC's listing, which changes more often than 85,000 files take to fetch, and each new day began the
+partition again from nothing (seven copies of p0272 staged, 60 GB, 2026-11-01).
 """
 
 from __future__ import annotations
@@ -248,6 +251,9 @@ def _fetch_packed(
     moved = _adopt_loose(incoming / spec.id, partition, release.version, wanted, staging)
     if moved:
         out.write(f"{spec.id}/{release.version}: {moved:,} file(s) an earlier run left in _incoming staged\n")
+    kept = _adopt_staged(work / "pack", partition, release.version, wanted, staging)
+    if kept:
+        out.write(f"{spec.id}/{release.version}: {kept:,} file(s) an older version left staged kept\n")
     todo = [f for f in release.files if not _whole(staging / f.name, f)]
     out.write(
         f"{spec.id}/{release.version}: {len(release.files):,} files packed as {name}; "
@@ -386,6 +392,28 @@ def _adopt_loose(
             folder.rmdir()  # and its plan: nothing of that version is left to ingest
             plan = source_dir.parent / "_plans" / PLANS_SUBDIR / f"{source_dir.name}-{folder.name}.json"
             plan.unlink(missing_ok=True)
+    return moved
+
+
+def _adopt_staged(
+    pack: Path, partition: str | None, version: str, wanted: Mapping[str, RemoteFile], staging: Path
+) -> int:
+    """Move into ``staging`` the release's files that an older version of the same partition left
+    staged on the local disk (a rename: same disk), then remove those folders: the rest is what the
+    newer listing dropped, and an older version is never packed once a newer one is listed. Only a
+    file that counts as whole is kept; a newer or another partition's folder is not touched."""
+    if partition is None:
+        return 0
+    moved = 0
+    for folder in sorted(pack.iterdir()):
+        if not (folder.is_dir() and folder.name.endswith(f".{partition}") and folder.name < version):
+            continue
+        for path in folder.iterdir():
+            name = path.name
+            if name in wanted and not (staging / name).is_file() and _whole(path, wanted[name]):
+                os.replace(path, staging / name)
+                moved += 1
+        shutil.rmtree(folder, ignore_errors=True)
     return moved
 
 
