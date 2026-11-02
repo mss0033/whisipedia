@@ -224,11 +224,15 @@ def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
             local.unlink(missing_ok=True)
             return EXIT_FAILED
         size = local.stat().st_size
-        sha = copy_hashed(local, dest, pace)
-        # The plan first: a plan write the share refused after the cut was dropped left the part in
-        # _incoming with nothing to ingest it, and no rerun could make its plan (2026-10-29).
-        checksum = Checksum("sha256", sha)
-        retrying(f"plan {part.name}", lambda: write_plan(incoming, spec, version, part, checksum, size))
+        try:
+            sha = copy_hashed(local, dest, pace)
+            # The plan first: a plan write the share refused after the cut was dropped left the part in
+            # _incoming with nothing to ingest it, and no rerun could make its plan (2026-10-29).
+            checksum = Checksum("sha256", sha)
+            retrying(f"plan {part.name}", lambda: write_plan(incoming, spec, version, part, checksum, size))
+        except OSError as exc:  # the share refused past the retries (2026-11-02): the cut is kept
+            out.write(f"failed: {part.name}: {exc} (a rerun continues the copy where this stopped)\n")
+            return EXIT_FAILED
         local.unlink()
         out.write(f"{spec.id}/{version}: {part.name} {_gb(size)} cut and copied (sha256 {sha[:16]}...)\n")
     out.write(f"next: wsp ingest --source {spec.id} --version {version}\n")

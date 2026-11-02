@@ -311,13 +311,19 @@ def _fetch_packed(
     size = local_zip.stat().st_size
     # Hashed as it is copied, synced as it goes, continued after a refusal or a kill; a copy already
     # whole is read back, not written again (2026-10-29 spot check).
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    digest = copy_hashed(local_zip, final, pace)
-    packed = replace(
-        release,
-        files=(RemoteFile(f"packed:{spec.id}/{release.version}", name, size, (Checksum("sha256", digest),)),),
-    )
-    write_plan(incoming, packed)
+    try:
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        digest = copy_hashed(local_zip, final, pace)
+        packed = replace(
+            release,
+            files=(
+                RemoteFile(f"packed:{spec.id}/{release.version}", name, size, (Checksum("sha256", digest),)),
+            ),
+        )
+        write_plan(incoming, packed)
+    except OSError as exc:  # the share refused past the retries: the zip and the staging are kept
+        out.write(f"{spec.id}/{release.version}: {name} not written ({exc}); run again to continue\n")
+        return EXIT_FAILED
     shutil.rmtree(staging, ignore_errors=True)
     local_zip.unlink(missing_ok=True)
     out.write(f"{spec.id}/{release.version}: {name} {_gb(size)} written\n")

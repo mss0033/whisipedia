@@ -323,6 +323,37 @@ def test_files_an_older_version_left_staged_are_kept_not_fetched_again(
         assert z.read("b.tar.gz") == B
 
 
+def test_a_zip_copy_the_share_refuses_fails_the_run_cleanly_and_a_rerun_writes_it(
+    vault: tuple[Path, Downloads], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-11-02: the NAS refused past the copy's retries and the fetch died with a traceback (exit 1)."""
+    root, fetcher = vault
+
+    def adapters(*_: object, **__: object) -> dict[str, object]:
+        return {"big": Packed()}
+
+    from wsp_cli import nasretry
+
+    refusing = [True]
+
+    def refuse(src: Path, dest: Path, pace: object) -> str:
+        if refusing[0]:
+            raise BlockingIOError(11, "Resource temporarily unavailable")
+        return nasretry.copy_hashed(src, dest, None)
+
+    monkeypatch.setattr(bootstrap, "load_adapters", adapters)
+    monkeypatch.setattr(bulk, "copy_hashed", refuse)
+    rc, text = run(partition="p0001")
+    assert rc == bulk.EXIT_FAILED, text
+    assert "not written" in text
+    assert (tmp_path / "state/bulk/big/pack/2026-10-18.p0001.zip").is_file()  # kept for the rerun
+    refusing[0] = False
+    rc, text = run(partition="p0001")
+    assert rc == bulk.EXIT_OK, text
+    assert fetcher.downloaded == ["a.tar.gz"]  # fetched once
+    assert (root / "_incoming/big/2026-10-18.p0001/big-2026-10-18.p0001.zip").is_file()
+
+
 def test_a_loose_file_that_cannot_be_moved_is_fetched_instead(
     vault: tuple[Path, Downloads], monkeypatch: pytest.MonkeyPatch
 ) -> None:
