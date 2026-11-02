@@ -42,7 +42,10 @@ A source takes part through ``access.manual`` in the registry:
 The queue of each source is kept in ``<state>/manual/<source>.json`` and rebuilt weekly; an item's
 state is ``pending`` until its file is taken, with the days it was offered and the last problem found
 (a file that fails its check is left in the folder, renamed ``*.bad``, and offered again). A file a
-browser is still writing (:func:`_downloading`) is left alone until it is done.
+browser is still writing (:func:`_downloading`) is left alone until it is done. A file saved under the
+name its browser gave it is recognised when it is plainly the one a waiting item asks for
+(:func:`recognise_saved`), and a listing page saved as ``.htm`` or beside ``_listing`` is put in place;
+what is left unrecognised is named on the day's page.
 """
 
 from __future__ import annotations
@@ -56,6 +59,7 @@ import shutil
 import subprocess
 import sys
 import time
+from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, date, datetime
@@ -464,10 +468,15 @@ def todays_offer(queue: Queue, daily: int, day: str) -> list[Item]:
 
 
 def render_today(
-    day: str, offers: Sequence[tuple[SourceSpec, Queue, list[Item], str, int]], root_win: str | None
+    day: str,
+    offers: Sequence[tuple[SourceSpec, Queue, list[Item], str, int]],
+    root_win: str | None,
+    unmatched: Mapping[str, Sequence[str]] | None = None,
 ) -> tuple[str, str]:
     """``TODAY.html`` and ``TODAY.txt``. ``offers``: (source, queue, today's items, its folder as
-    Windows names it, items left)."""
+    Windows names it, items left); ``unmatched``: per source, files in its folder that no item names
+    (:func:`unmatched_files`), so a file saved under another name is never left unnoticed."""
+    unmatched = unmatched or {}
     css = (
         "body{font:15px/1.45 system-ui,sans-serif;margin:24px;max-width:1100px;background:#fff;color:#111}"
         "h2{margin-top:28px}code{background:#eef;padding:1px 4px}li{margin:6px 0}.n{color:#666}"
@@ -482,7 +491,8 @@ def render_today(
     ]
     text = [f"Manual downloads for {day}", ""]
     for spec, queue, items, folder, left in offers:
-        if not items and not queue.save_pages:
+        stray = list(unmatched.get(spec.id) or [])
+        if not items and not queue.save_pages and not stray:
             continue
         parts.append(f"<h2>{html.escape(spec.name)}</h2>")
         parts.append(
@@ -509,6 +519,14 @@ def render_today(
                 + (f"  (last try: {item.problem})" if item.problem else "")
             )
         parts.append("</ol>")
+        if stray:
+            names = ", ".join(f"<code>{html.escape(n)}</code>" for n in stray[:20])
+            parts.append(
+                f"<p><b>Saved here but not recognised:</b> {names}. Rename each to the name its link "
+                "asks for (a link may have been offered on an earlier day).</p>"
+            )
+            text.append("   saved here but not recognised (rename each to the name its link asks for):")
+            text += [f"     {n}" for n in stray[:20]]
         text.append("")
     if root_win:
         parts.append(f"<p class=n>All folders are under <code>{html.escape(root_win)}</code>.</p>")
@@ -559,6 +577,117 @@ def _downloading(path: Path) -> bool:
         )
     except OSError:
         return False
+
+
+# --- files saved under another name ------------------------------------------------------------------
+
+_SKIP_SUFFIXES = (*PARTIAL_SUFFIXES, ".bad", ".partial")
+_NAME_WORDS = re.compile(r"[a-z]+|[0-9]+")
+_SAME_KIND = {".htm": ".html", ".jpeg": ".jpg", ".tif": ".tiff"}
+
+
+def _file_kind(name: str) -> str:
+    suffix = Path(name).suffix.lower()
+    return _SAME_KIND.get(suffix, suffix)
+
+
+def _name_words(name: str) -> list[str]:
+    return _NAME_WORDS.findall(Path(name).stem.lower())
+
+
+def _same_document(expected: str, saved: str) -> bool:
+    """Whether ``saved`` (the name the browser gave a file) is plainly the file ``expected`` names: the
+    same kind of file, and the same words; or the expected name's words, among them a number of three
+    or more digits, in a row within the saved name (``ISO-IEC-29500-1.pdf`` in
+    ``ISO_IEC_29500-1_2016(en).pdf``, ``DDI0487.pdf`` in ``DDI0487M_d_a-profile_….pdf``)."""
+    if _file_kind(expected) != _file_kind(saved):
+        return False
+    want, got = _name_words(expected), _name_words(saved)
+    if not want:
+        return False
+    if want == got:
+        return True
+    if not any(w.isdigit() and len(w) >= 3 for w in want):
+        return False
+    n = len(want)
+    return any(got[i : i + n] == want for i in range(len(got) - n + 1))
+
+
+def unmatched_files(folder: Path, queue: Queue) -> list[Path]:
+    """Files in the source's folder that no item names: saved under another name, or not asked for.
+    Hidden and ``_`` names, partial downloads and files set aside are not counted."""
+    names = {i.save_as for i in queue.items}
+    try:
+        entries = sorted(folder.iterdir())
+    except OSError:
+        return []
+    return [
+        p
+        for p in entries
+        if not p.name.startswith((".", "_"))
+        and p.name not in names
+        and not p.name.lower().endswith(_SKIP_SUFFIXES)
+        and p.is_file()
+        and not _downloading(p)
+    ]
+
+
+def recognise_saved(folder: Path, queue: Queue, out: TextIO) -> int:
+    """Give a file the owner saved under the browser's name the name its waiting item asks for, when
+    exactly one item and exactly one file match each other (:func:`_same_document`); anything less
+    certain is left for the owner and named on the day's page. Nine ISO standards, the Arm and Intel
+    manuals and two ChEBI files sat in their folders unrecognised under the names their sites gave
+    them (2026-11-02). Returns how many files were recognised."""
+    waiting = [i for i in queue.pending() if not (folder / i.save_as).exists()]
+    files = unmatched_files(folder, queue)
+    pairs = [(i, f) for i in waiting for f in files if _same_document(i.save_as, f.name)]
+    per_item = Counter(i.id for i, _ in pairs)
+    per_file = Counter(f.name for _, f in pairs)
+    done = 0
+    for item, path in pairs:
+        if per_item[item.id] != 1 or per_file[path.name] != 1:
+            continue
+        try:
+            path.rename(folder / item.save_as)
+        except OSError as exc:  # the share refused: the next run tries again
+            out.write(f"{queue.source}: {path.name}: not renamed to {item.save_as} ({exc})\n")
+            continue
+        out.write(f"{queue.source}: {path.name} recognised as {item.save_as}\n")
+        done += 1
+    return done
+
+
+def place_listing_pages(folder: Path, pages: Sequence[tuple[str, str]], out: TextIO) -> int:
+    """Put a listing page the owner saved as ``.htm`` (a browser's choice for "Webpage, HTML only") or
+    beside ``_listing`` rather than in it where the list reads it (2026-11-02: PubChem's and the
+    Army's pages sat in their source folders as ``.htm``)."""
+    moved = 0
+    for _url, name in pages:
+        dest = folder / LISTING_DIR / name
+        if dest.exists():
+            continue
+        stem, suffix = Path(name).stem, Path(name).suffix.lower()
+        alt = {".html": ".htm", ".htm": ".html"}.get(suffix)
+        names = [name, *([stem + alt] if alt else [])]
+        found = next(
+            (
+                p
+                for d in (folder / LISTING_DIR, folder)
+                for n in names
+                if (p := d / n).is_file() and p != dest
+            ),
+            None,
+        )
+        if found is None:
+            continue
+        try:
+            found.rename(dest)
+        except OSError as exc:
+            out.write(f"{folder.name}: {found.name}: not moved into {LISTING_DIR} ({exc})\n")
+            continue
+        out.write(f"{folder.name}: listing page {found.name} placed as {LISTING_DIR}/{name}\n")
+        moved += 1
+    return moved
 
 
 def _set_aside(path: Path, why: str, item: Item) -> None:
@@ -861,6 +990,7 @@ def _sync(args: argparse.Namespace, out: TextIO) -> int:
     user_agent = bootstrap.user_agent(cfg)
     fetcher: Fetcher | None = None
     offers: list[tuple[SourceSpec, Queue, list[Item], str, int]] = []
+    unmatched: dict[str, list[str]] = {}
     worst = 0
     for spec in sources:
         folder = root / spec.id
@@ -883,9 +1013,12 @@ def _sync(args: argparse.Namespace, out: TextIO) -> int:
                 elif kind == "kiwix-checksums":
                     worst = max(worst, import_kiwix_checksums(spec, queue, folder, out))
                 else:
+                    recognise_saved(folder, queue, out)
                     worst = max(worst, import_collection(args, spec, queue, folder, out, save=save))
             finally:
                 queue.save(qpath)
+        if queue.save_pages:
+            place_listing_pages(folder, queue.save_pages, out)
         stale = not queue.built or (date.today() - date.fromisoformat(queue.built)).days >= REBUILD_DAYS
         # A saved listing is read again while pages are missing (the owner may have saved them since);
         # PubMed's list follows what is held, so it is remade every run.
@@ -926,10 +1059,12 @@ def _sync(args: argparse.Namespace, out: TextIO) -> int:
             picked = todays_offer(queue, int(mc.get("daily") or DEFAULT_DAILY), today)
             queue.save(qpath)
             offers.append((spec, queue, picked, windows_path(folder) or str(folder), len(queue.pending())))
+            if kind not in ("kiwix-checksums", "pubmed"):  # their saved files stay or are named exactly
+                unmatched[spec.id] = [p.name for p in unmatched_files(folder, queue)]
     if not args.source:
         worst = max(worst, sync_permissions(lay, cfg, root, out))
     if page_due:
-        page, text = render_today(today, offers, windows_path(root))
+        page, text = render_today(today, offers, windows_path(root), unmatched)
         for name, body in (("TODAY.html", page), ("TODAY.txt", text)):
             tmp = root / (name + ".partial")
             tmp.write_text(body, encoding="utf-8")

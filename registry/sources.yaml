@@ -5042,9 +5042,9 @@ sources:
             - {title: "Intel Virtualization Technology for Directed I/O Architecture Specification (D51397-019)", url: "https://cdrdv2.intel.com/v1/dl/getContent/671081", save_as: "D51397-019-vt-directed-io-spec.pdf"}
             - {title: "Intel APX Architecture Specification (355828-009)", url: "https://cdrdv2.intel.com/v1/dl/getContent/784266", save_as: "355828-009-intel-apx-arch-spec.pdf"}
             - {title: "Intel AVX10.2 Architecture Specification (361050-007)", url: "https://cdrdv2.intel.com/v1/dl/getContent/828965", save_as: "361050-007-intel-avx10.2-arch-spec.pdf"}
-            - {title: "Intel 64 and IA-32 Architectures Optimization Reference Manual, Volume 1 (v050)", landing: "https://www.intel.com/content/www/us/en/content-details/821612/intel-64-and-ia-32-architectures-optimization-reference-manual-volume-1.html", save_as: "unknown"}
-            - {title: "Arm Architecture Reference Manual for A-profile architecture (DDI 0487, latest issue; ~100 MB PDF)", landing: "https://developer.arm.com/documentation/ddi0487/latest/", save_as: "Arm-Architecture-Reference-Manual-for-A-profile-ar.pdf"}
-            - {title: "Arm A-profile ARM Known Issues companion (102105), latest issue", landing: "https://developer.arm.com/documentation/102105/latest/", save_as: "unknown"}
+            - {title: "Intel 64 and IA-32 Architectures Optimization Reference Manual, Volume 1 (v050)", landing: "https://www.intel.com/content/www/us/en/content-details/821612/intel-64-and-ia-32-architectures-optimization-reference-manual-volume-1.html", save_as: "248966-Optimization-Reference-Manual-V1.pdf"}
+            - {title: "Arm Architecture Reference Manual for A-profile architecture (DDI 0487, latest issue; ~100 MB PDF)", landing: "https://developer.arm.com/documentation/ddi0487/latest/", save_as: "DDI0487.pdf"}
+            - {title: "Arm A-profile ARM Known Issues companion (102105), latest issue", landing: "https://developer.arm.com/documentation/102105/latest/", save_as: "102105.pdf"}
       filter: {allow_all: true, public_issuer: true}
     update: {cadence: P1Y, strategy: snapshot-retention}
     size: {bytes: 3.0e8, measured: false, as_of: '2026-10-24'}
@@ -5072,7 +5072,10 @@ sources:
             - {title: "UniProtKB/Swiss-Prot, XML (richest format, optional if .dat is taken)", url: "https://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/complete/uniprot_sprot.xml.gz"}
             - {title: "ChEBI ontology, OBO (full)", url: "https://ftp.ebi.ac.uk/pub/databases/chebi/ontology/chebi.obo.gz", landing: "https://www.ebi.ac.uk/chebi/downloads"}
             - {title: "ChEBI ontology, OWL (full)", url: "https://ftp.ebi.ac.uk/pub/databases/chebi/ontology/chebi.owl.gz"}
-            - {title: "ChEBI structures, SDF FULL (2-star + 3-star entries)", landing: "https://ftp.ebi.ac.uk/pub/databases/chebi/SDF/", save_as: "unknown after the ChEBI 2.0 relaunch (Oct 2025); the old ChEBI_complete.sdf.gz now returns 404"}
+            # ChEBI 2.0 (Oct 2025) names its SDF files chebi.sdf.gz and chebi_3_stars.sdf.gz (the folder the owner
+            # opened, 2026-11-01); the old ChEBI_complete.sdf.gz answers 404.
+            - {title: "ChEBI structures, SDF (all entries)", url: "https://ftp.ebi.ac.uk/pub/databases/chebi/SDF/chebi.sdf.gz", landing: "https://ftp.ebi.ac.uk/pub/databases/chebi/SDF/"}
+            - {title: "ChEBI structures, SDF (3-star entries only)", url: "https://ftp.ebi.ac.uk/pub/databases/chebi/SDF/chebi_3_stars.sdf.gz", landing: "https://ftp.ebi.ac.uk/pub/databases/chebi/SDF/"}
             - {title: "ChEMBL 37 (May 2026) SQLite database", url: "https://ftp.ebi.ac.uk/pub/databases/chembl/ChEMBLdb/latest/chembl_37_sqlite.tar.gz", landing: "https://ftp.ebi.ac.uk/pub/databases/chembl/ChEMBLdb/latest/"}
             - {title: "ChEMBL 37 PostgreSQL dump (alternative to SQLite)", url: "https://ftp.ebi.ac.uk/pub/databases/chembl/ChEMBLdb/latest/chembl_37_postgresql.tar.gz"}
             - {title: "ChEMBL 37 structures SDF", url: "https://ftp.ebi.ac.uk/pub/databases/chembl/ChEMBLdb/latest/chembl_37.sdf.gz"}

@@ -89,6 +89,63 @@ def test_todays_page_names_each_file_and_folder_and_escapes_titles() -> None:
     assert "https://b/x.pdf" in text
 
 
+def test_a_file_saved_under_its_sites_name_is_recognised_when_it_is_plainly_the_one(tmp_path: Path) -> None:
+    """2026-11-02: nine ISO standards and the Arm manual sat unrecognised under the names their sites
+    gave them; only the names the day's page asked for were taken."""
+    same = manual._same_document  # pyright: ignore[reportPrivateUsage]
+    assert same("ISO-IEC-29500-1.pdf", "ISO_IEC_29500-1_2016(en).pdf")
+    assert same("ISO-IEC-14977.pdf", "ISO_IEC_14977_1996(en).PDF")
+    assert same("DDI0487.pdf", "DDI0487M_d_a-profile_architecture_reference_manual.pdf")
+    assert same("ADP.aspx.html", "ADP.aspx.htm")
+    assert not same("ISO-IEC-26300-1.pdf", "ISO_IEC_26300-2_2015(en).pdf")  # another part
+    assert not same("ISO-IEC-2950.pdf", "ISO_IEC_29500-1_2016(en).pdf")  # a number is a whole word
+    assert not same("ISO-IEC-29500-1.pdf", "ISO_IEC_29500-1_2016(en).zip")  # another kind of file
+    assert not same("front-matter.pdf", "front_matter_v2.pdf")  # no number to be sure by
+
+    items = [
+        Item(f"iso:{n}", f"https://iso/{n}", f"ISO-IEC-{n}.pdf", n)
+        for n in ("29500-1", "26300-1", "26300-2", "7498-1")
+    ]
+    q = Queue("iso-iec-free-standards", items=items)
+    for name in (
+        "ISO_IEC_29500-1_2016(en).pdf",
+        "ISO_IEC_26300-1_2015(en).pdf",
+        "ISO_IEC_26300-1_2015(fr).pdf",  # a second file for the same item: neither is taken
+        "ISO_IEC_7498-1_1994(en).PDF",
+        "notes.pdf",
+    ):
+        (tmp_path / name).write_bytes(b"%PDF-1.4")
+    (tmp_path / "ISO_IEC_26300-2_2015(en).pdf").touch()
+    (tmp_path / "ISO_IEC_26300-2_2015(en).pdf.part").write_bytes(b"x")  # still arriving
+    out = io.StringIO()
+    assert manual.recognise_saved(tmp_path, q, out) == 2
+    assert (tmp_path / "ISO-IEC-29500-1.pdf").is_file()
+    assert (tmp_path / "ISO-IEC-7498-1.pdf").is_file()
+    assert not (tmp_path / "ISO-IEC-26300-1.pdf").exists()
+    assert not (tmp_path / "ISO-IEC-26300-2.pdf").exists()
+    assert "ISO_IEC_29500-1_2016(en).pdf recognised as ISO-IEC-29500-1.pdf" in out.getvalue()
+    left = [p.name for p in manual.unmatched_files(tmp_path, q)]
+    assert left == ["ISO_IEC_26300-1_2015(en).pdf", "ISO_IEC_26300-1_2015(fr).pdf", "notes.pdf"]
+    spec = _spec("iso-iec-free-standards", {"adapter": "doc-collection"})
+    page, text = render_today("2026-11-02", [(spec, q, [], "f", 2)], None, {spec.id: left})
+    assert "Saved here but not recognised" in page
+    assert "<code>notes.pdf</code>" in page
+    assert "     notes.pdf" in text
+
+
+def test_a_listing_page_saved_as_htm_or_beside_its_folder_is_put_in_place(tmp_path: Path) -> None:
+    (tmp_path / "_listing").mkdir()
+    (tmp_path / "ADP.aspx.htm").write_text("<html>ADP</html>")
+    (tmp_path / "_listing" / "pubchem-sdf.htm").write_text("<html>SDF</html>")
+    (tmp_path / "ATPs.htm").write_text("<html>ATP</html>")  # another name: left for the owner
+    pages = [("u1", "ADP.aspx.html"), ("u2", "pubchem-sdf.html"), ("u3", "ATP.aspx.html")]
+    assert manual.place_listing_pages(tmp_path, pages, io.StringIO()) == 2
+    assert (tmp_path / "_listing" / "ADP.aspx.html").read_text() == "<html>ADP</html>"
+    assert (tmp_path / "_listing" / "pubchem-sdf.html").is_file()
+    assert (tmp_path / "ATPs.htm").is_file()
+    assert not (tmp_path / "_listing" / "ATP.aspx.html").exists()
+
+
 def test_a_curated_list_becomes_items_with_their_save_names(tmp_path: Path) -> None:
     access = {
         "adapter": "doc-collection",
