@@ -61,6 +61,21 @@ Wikimedia projects), and takes a file only when Kiwix's own SHA-256 of it is kno
 Until its checksum is saved, a newer ZIM waits and the source keeps the version it can verify. A
 saved file that is not that ZIM's checksum (an error page, another file's) is set aside as `*.bad`.
 
+## A Kiwix ZIM downloaded by hand
+
+A book whose new build is on Kiwix's own host but on no mirror (WikEM's October 2026 build) never
+reaches the checksum list. Save both the ZIM and Kiwix's `.sha256` of it (the same address with
+`.sha256` added) into `kiwix-checksums\`. The next run moves the ZIM into `_incoming`, plans it with
+Kiwix's SHA-256 and ingests it as a generation of the one-book Kiwix source it belongs to (the
+adoption checks every byte). A ZIM without its `.sha256`, of no one-book source, or of a build the
+library holds is left in the folder and named in the run's output.
+
+## A large file the host keeps dropping
+
+`tools/manual-download URL FOLDER [--adopt PARTIAL]` downloads one file, continuing after every reset
+(see the tool's notes). Run it yourself, in a WSL terminal, for a host whose robots.txt keeps the
+library out (the Crystallography Open Database's 26.6 GB archive, 2026-11-02).
+
 ## Limits
 
 * NCBI's MD5 sidecars are not downloaded by hand: a PubMed or PubChem file is checked by its gzip

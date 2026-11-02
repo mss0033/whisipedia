@@ -410,6 +410,98 @@ def import_kiwix_checksums(spec: SourceSpec, queue: Queue, folder: Path, out: Te
     return 0
 
 
+def import_hand_saved_zims(
+    args: argparse.Namespace,
+    specs: Sequence[SourceSpec],
+    folder: Path,
+    vault_root: Path,
+    checksum_dirs: Sequence[Path],
+    out: TextIO,
+) -> int:
+    """A Kiwix ZIM the owner downloaded by hand, saved with Kiwix's ``<file>.sha256`` beside it in
+    ``folder``, becomes a generation of the one-book Kiwix source it belongs to (owner decision
+    2026-11-02: WikEM's October 2026 build is only on Kiwix's own host, which refuses robots, and on
+    no mirror). The ZIM is moved (a rename on the share) into ``_incoming/<source>/<version>/`` with
+    a plan naming Kiwix's SHA-256, and ingested: the adoption checks every byte against it. A ZIM
+    with no checksum, of no one-book source, or of a version already held is left and named."""
+    from wsp_adapters.kiwix import _FILE_RE as ZIM_NAME  # pyright: ignore[reportPrivateUsage]
+    from wsp_adapters.kiwix import ZIM_FORMAT, OpdsEntry, Selector, release_version, saved_checksum
+    from wsp_cli import ops
+    from wsp_cli.bulk import write_plan
+    from wsp_core.model import Checksum, ReleaseRef
+
+    worst = 0
+    incoming = vault_root / "_incoming"
+    zims = sorted(p for p in folder.glob("*.zim") if p.is_file() and not _downloading(p))
+    for zim in zims:
+        m = ZIM_NAME.match(zim.name)
+        digest = saved_checksum(zim.name, [folder, *checksum_dirs])
+        if m is None or digest is None:
+            out.write(f"kiwix: {zim.name}: no Kiwix checksum saved beside it ({zim.name}.sha256); left\n")
+            continue
+        entry = OpdsEntry(
+            name=m.group("book"),
+            flavour=m.group("flavour") or "",
+            category="",
+            languages=(),
+            title=m.group("book"),
+            issued=None,
+            meta4_url="",
+            length=None,
+            tags=(),
+            url="",
+        )
+        owners: list[SourceSpec] = []
+        for spec in specs:
+            raw = cast(Mapping[str, Any], spec.raw.get("access") or {})
+            if raw.get("adapter") != "kiwix-opds" or spec.status in (
+                SourceStatus.RETIRED,
+                SourceStatus.EXCLUDED,
+            ):
+                continue
+            try:
+                selector = Selector.from_spec(spec)
+            except ValueError:
+                continue
+            if selector.single_book and selector.matches(entry):
+                owners.append(spec)
+        if len(owners) != 1:
+            out.write(f"kiwix: {zim.name}: belongs to {len(owners)} one-book Kiwix sources, not one; left\n")
+            continue
+        spec = owners[0]
+        version = release_version([zim.name], bundle=False)
+        if (vault_root / "library" / spec.vault_domain / spec.id / version / "MANIFEST.json").is_file():
+            out.write(f"kiwix: {zim.name}: {spec.id}/{version} is held already; left\n")
+            continue
+        dest = incoming / spec.id / version / zim.name
+        size = zim.stat().st_size
+        try:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            if not dest.exists():
+                zim.rename(dest)
+            release = ReleaseRef(
+                source_id=spec.id,
+                version=version,
+                published=None,
+                files=(
+                    RemoteFile(
+                        url=f"manual:kiwix/{zim.name}",  # saved by the owner; Kiwix's folder is not known
+                        name=zim.name,
+                        size=size,
+                        checksums=(Checksum("sha256", digest),),
+                    ),
+                ),
+                format=ZIM_FORMAT,
+            )
+            nasretry.retrying(f"plan {zim.name}", lambda release=release: write_plan(incoming, release))
+        except OSError as exc:
+            out.write(f"kiwix: {zim.name}: not moved into _incoming ({exc}); the next run tries again\n")
+            continue
+        out.write(f"kiwix: {zim.name} saved by hand: {spec.id}/{version}, ingesting\n")
+        worst = max(worst, _ingest(args, spec.id, version, out, ops))
+    return worst
+
+
 def _pubmed_items(held: str | None, ahead: int) -> list[Item]:
     """The update files after the newest one held (``pubmed26-u1671``: 1672 onwards). NCBI adds about
     one a day, so ``ahead`` numbers are offered; a link that is not out yet answers Not Found."""
@@ -1012,6 +1104,12 @@ def _sync(args: argparse.Namespace, out: TextIO) -> int:
                     held = held_generation(cfg, spec)
                 elif kind == "kiwix-checksums":
                     worst = max(worst, import_kiwix_checksums(spec, queue, folder, out))
+                    worst = max(
+                        worst,
+                        import_hand_saved_zims(
+                            args, specs, folder, vault_root, bootstrap.paths(cfg).kiwix_checksum_dirs, out
+                        ),
+                    )
                 else:
                     recognise_saved(folder, queue, out)
                     worst = max(worst, import_collection(args, spec, queue, folder, out, save=save))

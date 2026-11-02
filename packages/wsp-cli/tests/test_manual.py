@@ -382,6 +382,54 @@ def _kiwix(sid: str, selector: dict[str, Any]) -> SourceSpec:
     return _spec(sid, {"adapter": "kiwix-opds", "selector": selector})
 
 
+def test_a_zim_saved_by_hand_with_its_checksum_is_planned_and_ingested(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-11-02: WikEM's October build is only on Kiwix's own host (robots refused) and on no mirror;
+    the owner downloads it and its .sha256, and the library takes it as its source's generation."""
+    import hashlib
+
+    vault, folder = tmp_path / "vault", tmp_path / "vault" / "_incoming" / "_manual" / "kiwix-checksums"
+    folder.mkdir(parents=True)
+    specs = [
+        _kiwix("kiwix-wikem-en-all", {"name": "wikem_en_all"}),
+        _kiwix("kiwix-bundle", {"category": "other"}),  # a bundle: never a hand-saved file's home
+    ]
+    body = b"ZIM\x04 wikem"
+    for name, data in (
+        ("wikem_en_all_maxi_2026-10.zim", body),
+        ("wikem_en_all_maxi_2026-07.zim", body),  # held already
+        ("unknown_en_all_maxi_2026-10.zim", body),  # no source takes it
+        ("nochecksum_en_all_2026-10.zim", body),
+    ):
+        (folder / name).write_bytes(data)
+        if not name.startswith("nochecksum"):
+            (folder / f"{name}.sha256").write_text(f"{hashlib.sha256(data).hexdigest()}  {name}\n")
+    held = vault / "library" / "reference" / "kiwix-wikem-en-all" / "2026-07"
+    held.mkdir(parents=True)
+    (held / "MANIFEST.json").write_text("{}")
+    calls: list[tuple[str, str | None]] = []
+
+    def ingest(args: object, source: str, version: str | None, out: object, ops: object) -> int:
+        calls.append((source, version))
+        return 0
+
+    monkeypatch.setattr(manual, "_ingest", ingest)
+    out = io.StringIO()
+    assert manual.import_hand_saved_zims(argparse.Namespace(), specs, folder, vault, [], out) == 0
+    assert calls == [("kiwix-wikem-en-all", "2026-10")]
+    moved = vault / "_incoming" / "kiwix-wikem-en-all" / "2026-10" / "wikem_en_all_maxi_2026-10.zim"
+    assert moved.read_bytes() == body
+    (plan,) = json.loads((vault / "_incoming/_plans/targets.d/kiwix-wikem-en-all-2026-10.json").read_text())
+    assert plan["checksum"] == ["sha-256", hashlib.sha256(body).hexdigest()]
+    assert plan["size"] == len(body)
+    text = out.getvalue()
+    assert "kiwix-wikem-en-all/2026-07 is held already" in text
+    assert "unknown_en_all_maxi_2026-10.zim: belongs to 0 one-book Kiwix sources" in text
+    assert "nochecksum_en_all_2026-10.zim: no Kiwix checksum" in text
+    assert (folder / "wikem_en_all_maxi_2026-07.zim").is_file()  # left where it was
+
+
 def test_kiwix_checksums_held_files_are_recorded_and_only_new_files_are_asked_for(tmp_path: Path) -> None:
     from wsp_adapters import kiwix
     from wsp_core.testing.adapter_contract import FakeFetcher
