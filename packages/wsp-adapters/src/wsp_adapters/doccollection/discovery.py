@@ -2034,7 +2034,11 @@ _ITU_ROW = re.compile(
 def itu_recommendations(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
     """ITU-T or ITU-R Recommendations in force (``sector``: ``T`` or ``R``; ``series``: the letters):
     each series page lists its Recommendations, each Recommendation's page its versions with their
-    status; every version (and amendment, appendix) "In force" is a document, in English."""
+    status; every version (and amendment, appendix) "In force" is a document, in English.
+
+    An ITU-R version is resolved on its own page (:func:`resolve_itu_r_version`): ~1,290 of them are
+    published in English only as a zipped PDF (``!!ZPF-E.zip``), and the ``!!PDF-E.pdf`` address
+    built from the version id answered 404 for them on every cycle (2026-11-02)."""
     sector = _s(cfg.get("sector")).upper() or "T"
     seen = 0
 
@@ -2062,9 +2066,9 @@ def itu_recommendations(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Ca
                 continue
             vid = row.group("id")
             if sector == "R":
-                url = f"https://www.itu.int/dms_pubrec/itu-r/rec/{letter.lower()}/{vid}!!PDF-E.pdf"
+                url, how = f"https://www.itu.int/rec/{vid}/en", "itu-r-version"
             else:
-                url = f"https://www.itu.int/rec/dologin_pub.asp?lang=e&id={vid}!!PDF-E&type=items"
+                url, how = f"https://www.itu.int/rec/dologin_pub.asp?lang=e&id={vid}!!PDF-E&type=items", ""
             label = " ".join(row.group("label").split())
             title = " ".join(re.sub(r"<[^>]+>", " ", row.group("title")).split()).split(" Note - ")[0]
             seen += 1
@@ -2077,9 +2081,29 @@ def itu_recommendations(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Ca
                 edition_date=_itu_date(vid),
                 landing_url=f"https://www.itu.int/rec/{rec}/en",
                 discovered_by=f"itu:{sector}-{letter}",
+                resolve=how,
                 extra={"suffix": ".pdf"},
             )
     env.listing_end(f"itu-{sector}", stopped=False, seen=seen)
+
+
+_ITU_R_FILE = re.compile(r"!!(PDF|ZPF)-E\.(?:pdf|zip)$", re.IGNORECASE)
+
+
+def resolve_itu_r_version(cand: Candidate, env: DiscoverEnv) -> list[Candidate]:
+    """An ITU-R version's English document from its page: the PDF (``!!PDF-E.pdf``), else the zipped
+    PDF (``!!ZPF-E.zip``, marked ``unzip: pdf``: the fetch keeps the PDF it holds). No English file on
+    the page: no document (unresolved, asked again next time)."""
+    found: dict[str, str] = {}
+    for url, _text, _node in _links(env.get_text(cand.url), cand.url):
+        m = _ITU_R_FILE.search(urlsplit(url).path)
+        if m and origin_ok(url, env.origins):
+            found.setdefault(m.group(1).upper(), url)
+    if "PDF" in found:
+        return [cand.with_url(found["PDF"])]
+    if "ZPF" in found:
+        return [cand.with_url(found["ZPF"], extra={**cand.extra, "unzip": "pdf"})]
+    return []
 
 
 def _itu_date(vid: str) -> str:
@@ -2729,6 +2753,7 @@ RESOLVERS: dict[str, Resolver] = {
     "dspace7": resolve_dspace7,
     "wbdg": resolve_wbdg,
     "archive-org": resolve_archive_org,
+    "itu-r-version": resolve_itu_r_version,
 }
 
 

@@ -1114,3 +1114,29 @@ def test_a_document_that_is_always_a_web_page_is_gone_after_a_week_of_tries(tmp_
     assert dc.fetch_exit_code(report) == dc.EXIT_PARTIAL
     run(8, wrong=False)  # it downloaded (or failed otherwise): the count starts over
     assert run(20, wrong=True).gone == []
+
+
+def test_a_zipped_pdf_download_keeps_the_pdf_it_holds(tmp_path: Path) -> None:
+    """ITU-R's !!ZPF-E.zip: the document is the one PDF inside (2026-11-02)."""
+    import zipfile
+
+    from wsp_cli.doccollections import unzip_pdf
+    from wsp_core.errors import FetchError
+
+    path = tmp_path / "itu__R-REC-BO.1724-1-200701-I-abcd1234.pdf"
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("R-REC-BO.1724-1-200701-I!!PDF-E.pdf", b"%PDF-1.4 body")
+        z.writestr("readme.txt", b"x")
+    unzip_pdf(path)
+    assert path.read_bytes() == b"%PDF-1.4 body"
+    unzip_pdf(path)  # already the PDF: left as it is
+    assert path.read_bytes() == b"%PDF-1.4 body"
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("a.pdf", b"%PDF-1")
+        z.writestr("b.pdf", b"%PDF-2")
+    with pytest.raises(FetchError, match="2 PDF files"):
+        unzip_pdf(path)
+    path.write_bytes(b"<html>error</html>")
+    with pytest.raises(FetchError, match="not a zip"):
+        unzip_pdf(path)
+    assert not list(tmp_path.glob("*.unzip"))

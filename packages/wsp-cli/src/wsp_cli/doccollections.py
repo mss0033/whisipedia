@@ -771,7 +771,10 @@ class CollectionFetcher:
             if digest.hexdigest() == cand.md5.lower():
                 return done
         remote = RemoteFile(url=cand.url, name=cand.file_name, size=cand.size, mirrors=cand.mirrors)
-        return Path(download_from_origins(fetcher, remote, dest_dir / cand.file_name, origins).path)
+        path = Path(download_from_origins(fetcher, remote, dest_dir / cand.file_name, origins).path)
+        if cand.extra.get("unzip") == "pdf":
+            unzip_pdf(path)
+        return path
 
     def _take_manual(self, cand: Candidate, done: Path, folder: Path) -> Path:
         """The owner's download of ``cand`` from ``folder`` (by the name a browser gives it, or ours),
@@ -1657,6 +1660,35 @@ def register(sub: Any, add: Any) -> None:
     s.add_argument("--rebuild", action="store_true", help="with --sync: rebuild the lists now")
     s.add_argument("--no-import", action="store_true", help="with --sync: take nothing in this run")
     s.add_argument("--status", action="store_true", help="each manual source's progress")
+
+
+UNZIP_MAX_BYTES = 2 * 1024**3  # the one PDF of a zipped-PDF download; larger is not a document
+
+
+def unzip_pdf(path: Path) -> None:
+    """Put the one PDF a downloaded zip holds in the zip's place (ITU-R publishes ~1,290 Recommendations
+    in English only as a zipped PDF, ``!!ZPF-E.zip``; 2026-11-02). A file that is already a PDF (an
+    earlier run unpacked it) is left as it is; a zip with no PDF, or several, is not the document."""
+    with path.open("rb") as fh:
+        if fh.read(5) == b"%PDF-":
+            return
+    tmp = path.with_name(path.name + ".unzip")
+    try:
+        with zipfile.ZipFile(path) as zf:
+            pdfs = [i for i in zf.infolist() if not i.is_dir() and i.filename.lower().endswith(".pdf")]
+            if len(pdfs) != 1:
+                raise FetchError(f"{path.name}: {len(pdfs)} PDF files in the zip, not one")
+            if pdfs[0].file_size > UNZIP_MAX_BYTES:
+                raise FetchError(f"{path.name}: its PDF is {pdfs[0].file_size:,} bytes, past the limit")
+            with zf.open(pdfs[0]) as src, tmp.open("wb") as out:
+                shutil.copyfileobj(src, out, 8 << 20)
+    except zipfile.BadZipFile as exc:
+        tmp.unlink(missing_ok=True)
+        raise FetchError(f"{path.name}: not a zip ({exc})") from exc
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+    os.replace(tmp, path)
 
 
 def windows_path(path: Path, mounts: Path = Path("/proc/mounts")) -> str | None:

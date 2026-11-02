@@ -934,9 +934,50 @@ def test_itu_recommendations_in_force_in_english() -> None:
     (cand,) = list(
         discover_all([{"kind": "api", "flavor": "itu-recommendations", "sector": "R", "series": ["P"]}], env)
     )
-    assert cand.url == "https://www.itu.int/dms_pubrec/itu-r/rec/p/R-REC-P.525-5-202411-I!!PDF-E.pdf"
+    assert cand.url == "https://www.itu.int/rec/R-REC-P.525-5-202411-I/en"  # resolved on its own page
+    assert cand.resolve == "itu-r-version"
     assert cand.title == "ITU-R P.525-5 (11/2024): Free-space attenuation \u2013 a note"  # cp1252 0x96
     assert cand.edition_date == "2024-11"
+
+
+def test_an_itu_r_version_takes_its_pdf_or_else_its_zipped_pdf() -> None:
+    """2026-11-02: ~1,290 ITU-R versions are published in English only as a zipped PDF; the PDF address
+    built from the version id answered 404 for them on every cycle."""
+    from wsp_adapters.doccollection.model import Candidate
+
+    base = "/dms_pubrec/itu-r/rec/bo/R-REC-BO.1724-1-200701-I"
+    zipped = (
+        f'<a href="{base}!!ZPF-A.zip">A</a><a href="{base}!!ZPF-E.zip">E</a>'
+        f'<a href="{base}!!TOC-HTM-E.htm">contents</a>'
+    ).encode()
+    pdf = b'<a href="/dms_pubrec/itu-r/rec/p/R-REC-P.525-5-202411-I!!PDF-E.pdf">PDF</a>' + zipped
+    env = env_for(
+        {
+            "https://www.itu.int/rec/R-REC-BO.1724-1-200701-I/en": zipped,
+            "https://www.itu.int/rec/R-REC-P.525-5-202411-I/en": pdf,
+            "https://www.itu.int/rec/R-REC-X.1-0-200001-I/en": b"<p>no English file</p>",
+        },
+        origins=("www.itu.int",),
+    )
+
+    def cand(vid: str) -> Candidate:
+        return Candidate(
+            key=f"itu:{vid}",
+            url=f"https://www.itu.int/rec/{vid}/en",
+            title=vid,
+            issuer="ITU",
+            resolve="itu-r-version",
+            extra={"suffix": ".pdf"},
+        )
+
+    (doc,) = resolve(cand("R-REC-BO.1724-1-200701-I"), env)
+    assert doc.url == f"https://www.itu.int{base}!!ZPF-E.zip"
+    assert doc.extra == {"suffix": ".pdf", "unzip": "pdf"}
+    assert doc.file_name.endswith(".pdf")
+    (doc,) = resolve(cand("R-REC-P.525-5-202411-I"), env)  # the same address the guess gave: held stay held
+    assert doc.url == "https://www.itu.int/dms_pubrec/itu-r/rec/p/R-REC-P.525-5-202411-I!!PDF-E.pdf"
+    assert "unzip" not in doc.extra
+    assert resolve(cand("R-REC-X.1-0-200001-I"), env) == []
 
 
 def test_an_itu_page_that_fails_once_is_asked_again_at_the_end() -> None:
