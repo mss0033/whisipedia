@@ -5151,7 +5151,6 @@ sources:
         - kind: list
           items:
             - {title: "Wood Handbook, FPL-GTR-282 (March 2021), full PDF, 543 pp", url: "https://research.fs.usda.gov/download/treesearch/62200.pdf", landing: "https://research.fs.usda.gov/treesearch/62200"}
-            - {title: "Wood Handbook FPL-GTR-282 front matter (to confirm chapter-file naming at FPL)", url: "https://www.fpl.fs.usda.gov/documnts/fplgtr/fplgtr282/front_matter_fpl_gtr282.pdf"}
       filter: {allow_all: true, public_issuer: true}
     update: {cadence: P1Y, strategy: snapshot-retention}
     size: {bytes: 1.1e8, measured: false, as_of: '2026-10-24'}
@@ -5176,7 +5175,12 @@ sources:
           items:
             - {title: "Current acts (gjeldende lover), XML archive", url: "https://api.lovdata.no/v1/publicData/get/gjeldende-lover.tar.bz2", landing: "https://api.lovdata.no/publicData"}
             - {title: "Current central regulations (gjeldende sentrale forskrifter), XML archive", url: "https://api.lovdata.no/v1/publicData/get/gjeldende-sentrale-forskrifter.tar.bz2", landing: "https://api.lovdata.no/publicData"}
-            - {title: "Dataset list (JSON): shows every public file name and its lastModified", url: "https://api.lovdata.no/v1/publicData/list", landing: "https://api.lovdata.no/publicData", save_as: "list (JSON)"}
+            # The dataset list (api.lovdata.no/v1/publicData/list, saved by the owner 2026-11-02) names six public
+            # archives; the list itself is no document.
+            - {title: "Norsk Lovtidend avd. I (acts and central regulations as announced), 2001-2025, XML archive", url: "https://api.lovdata.no/v1/publicData/get/lovtidend-avd1-2001-2025.tar.bz2", landing: "https://api.lovdata.no/publicData"}
+            - {title: "Norsk Lovtidend avd. I, 2026, XML archive", url: "https://api.lovdata.no/v1/publicData/get/lovtidend-avd1-2026.tar.bz2", landing: "https://api.lovdata.no/publicData"}
+            - {title: "Norsk Lovtidend avd. II (local regulations), 2001-2025, XML archive", url: "https://api.lovdata.no/v1/publicData/get/lovtidend-avd2-2001-2025.tar.bz2", landing: "https://api.lovdata.no/publicData"}
+            - {title: "Norsk Lovtidend avd. II, 2026, XML archive", url: "https://api.lovdata.no/v1/publicData/get/lovtidend-avd2-2026.tar.bz2", landing: "https://api.lovdata.no/publicData"}
       filter: {allow_all: true, public_issuer: true, data_files: true}
     update: {cadence: P1Y, strategy: snapshot-retention}
     size: {bytes: 2.0e8, measured: false, as_of: '2026-10-24'}
