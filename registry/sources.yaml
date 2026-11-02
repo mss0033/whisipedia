@@ -5085,7 +5085,7 @@ sources:
     notes: "ftp.uniprot.org and ftp.ebi.ac.uk: robots.txt 'Disallow: /' over HTTPS and FTP. Downloaded by hand: Swiss-Prot ~0.8 GB, ChEMBL ~5 GB. ChEMBL 37 file names inferred; ChEBI's 2025 relaunch renamed its files. CC BY 4.0 (ChEMBL CC BY-SA 3.0). Owner request 2026-10-24."
 
   - id: nrcs-gssurgo
-    name: "NRCS gSSURGO gridded soil survey, one file geodatabase per state"
+    name: "NRCS gNATSGO gridded national soil survey (national and state databases, with archived years)"
     publisher: "USDA Natural Resources Conservation Service"
     domain: [agriculture, geography, reference-data]
     tier: T1
@@ -5101,61 +5101,13 @@ sources:
       discovery:
         - kind: list
           items:
-            - {title: "gSSURGO state database, AL", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_AL.zip", pub_number: "gSSURGO_AL"}
-            - {title: "gSSURGO state database, AK", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_AK.zip", pub_number: "gSSURGO_AK"}
-            - {title: "gSSURGO state database, AZ", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_AZ.zip", pub_number: "gSSURGO_AZ"}
-            - {title: "gSSURGO state database, AR", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_AR.zip", pub_number: "gSSURGO_AR"}
-            - {title: "gSSURGO state database, CA", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_CA.zip", pub_number: "gSSURGO_CA"}
-            - {title: "gSSURGO state database, CO", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_CO.zip", pub_number: "gSSURGO_CO"}
-            - {title: "gSSURGO state database, CT", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_CT.zip", pub_number: "gSSURGO_CT"}
-            - {title: "gSSURGO state database, DE", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_DE.zip", pub_number: "gSSURGO_DE"}
-            - {title: "gSSURGO state database, DC", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_DC.zip", pub_number: "gSSURGO_DC"}
-            - {title: "gSSURGO state database, FL", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_FL.zip", pub_number: "gSSURGO_FL"}
-            - {title: "gSSURGO state database, GA", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_GA.zip", pub_number: "gSSURGO_GA"}
-            - {title: "gSSURGO state database, HI", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_HI.zip", pub_number: "gSSURGO_HI"}
-            - {title: "gSSURGO state database, ID", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_ID.zip", pub_number: "gSSURGO_ID"}
-            - {title: "gSSURGO state database, IL", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_IL.zip", pub_number: "gSSURGO_IL"}
-            - {title: "gSSURGO state database, IN", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_IN.zip", pub_number: "gSSURGO_IN"}
-            - {title: "gSSURGO state database, IA", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_IA.zip", pub_number: "gSSURGO_IA"}
-            - {title: "gSSURGO state database, KS", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_KS.zip", pub_number: "gSSURGO_KS"}
-            - {title: "gSSURGO state database, KY", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_KY.zip", pub_number: "gSSURGO_KY"}
-            - {title: "gSSURGO state database, LA", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_LA.zip", pub_number: "gSSURGO_LA"}
-            - {title: "gSSURGO state database, ME", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_ME.zip", pub_number: "gSSURGO_ME"}
-            - {title: "gSSURGO state database, MD", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_MD.zip", pub_number: "gSSURGO_MD"}
-            - {title: "gSSURGO state database, MA", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_MA.zip", pub_number: "gSSURGO_MA"}
-            - {title: "gSSURGO state database, MI", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_MI.zip", pub_number: "gSSURGO_MI"}
-            - {title: "gSSURGO state database, MN", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_MN.zip", pub_number: "gSSURGO_MN"}
-            - {title: "gSSURGO state database, MS", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_MS.zip", pub_number: "gSSURGO_MS"}
-            - {title: "gSSURGO state database, MO", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_MO.zip", pub_number: "gSSURGO_MO"}
-            - {title: "gSSURGO state database, MT", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_MT.zip", pub_number: "gSSURGO_MT"}
-            - {title: "gSSURGO state database, NE", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_NE.zip", pub_number: "gSSURGO_NE"}
-            - {title: "gSSURGO state database, NV", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_NV.zip", pub_number: "gSSURGO_NV"}
-            - {title: "gSSURGO state database, NH", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_NH.zip", pub_number: "gSSURGO_NH"}
-            - {title: "gSSURGO state database, NJ", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_NJ.zip", pub_number: "gSSURGO_NJ"}
-            - {title: "gSSURGO state database, NM", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_NM.zip", pub_number: "gSSURGO_NM"}
-            - {title: "gSSURGO state database, NY", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_NY.zip", pub_number: "gSSURGO_NY"}
-            - {title: "gSSURGO state database, NC", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_NC.zip", pub_number: "gSSURGO_NC"}
-            - {title: "gSSURGO state database, ND", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_ND.zip", pub_number: "gSSURGO_ND"}
-            - {title: "gSSURGO state database, OH", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_OH.zip", pub_number: "gSSURGO_OH"}
-            - {title: "gSSURGO state database, OK", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_OK.zip", pub_number: "gSSURGO_OK"}
-            - {title: "gSSURGO state database, OR", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_OR.zip", pub_number: "gSSURGO_OR"}
-            - {title: "gSSURGO state database, PA", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_PA.zip", pub_number: "gSSURGO_PA"}
-            - {title: "gSSURGO state database, PR", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_PR.zip", pub_number: "gSSURGO_PR"}
-            - {title: "gSSURGO state database, RI", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_RI.zip", pub_number: "gSSURGO_RI"}
-            - {title: "gSSURGO state database, SC", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_SC.zip", pub_number: "gSSURGO_SC"}
-            - {title: "gSSURGO state database, SD", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_SD.zip", pub_number: "gSSURGO_SD"}
-            - {title: "gSSURGO state database, TN", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_TN.zip", pub_number: "gSSURGO_TN"}
-            - {title: "gSSURGO state database, TX", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_TX.zip", pub_number: "gSSURGO_TX"}
-            - {title: "gSSURGO state database, UT", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_UT.zip", pub_number: "gSSURGO_UT"}
-            - {title: "gSSURGO state database, VT", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_VT.zip", pub_number: "gSSURGO_VT"}
-            - {title: "gSSURGO state database, VA", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_VA.zip", pub_number: "gSSURGO_VA"}
-            - {title: "gSSURGO state database, WA", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_WA.zip", pub_number: "gSSURGO_WA"}
-            - {title: "gSSURGO state database, WV", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_WV.zip", pub_number: "gSSURGO_WV"}
-            - {title: "gSSURGO state database, WI", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_WI.zip", pub_number: "gSSURGO_WI"}
-            - {title: "gSSURGO state database, WY", landing: "https://nrcs.app.box.com/v/soils", save_as: "gSSURGO_WY.zip", pub_number: "gSSURGO_WY"}
+            # Owner decision 2026-11-02: the whole gNATSGO folder of the Box share in place of the 52
+            # per-state gSSURGO files (current state and national databases, open-format national files,
+            # and the archived fiscal years; ~117 GB as one zip, Box's "download folder").
+            - {title: "gNATSGO: national and state gridded soil databases, current and archived fiscal years (the Box folder 'gNATSGO', downloaded whole)", landing: "https://nrcs.app.box.com/v/soils", save_as: "gNATSGO.zip", pub_number: "gNATSGO"}
       filter: {allow_all: true, public_issuer: true, data_files: true}
     update: {cadence: P1Y, strategy: snapshot-retention}
-    size: {bytes: 7.0e10, measured: false, as_of: '2026-10-24'}
+    size: {bytes: 1.17e11, measured: true, as_of: '2026-11-02'}
     notes: "A Box share (robots.txt disallows us): open the share, find the state's zip in the current fiscal year's folder and save it under the name shown. File naming from the older state readme. ~40-100 GB in all. Owner request 2026-10-24."
 
   - id: cod-full-archive
@@ -5274,7 +5226,7 @@ sources:
     notes: "The old free-standards page was retired (2025-2026): each zero-cost standard is a store page (CHF 0; an account and a licence click). One personal copy, no redistribution: never served beyond this private library. Only OOXML and ODF are known still free; the rest may now cost money (skip those). Owner request 2026-10-24."
 
   - id: rxnorm
-    name: "RxNorm monthly releases: the full release (UMLS licence login) and the current prescribable content"
+    name: "RxNorm monthly releases: the current prescribable content"
     publisher: "US National Library of Medicine"
     domain: [medicine, reference-data]
     tier: T1
@@ -5289,12 +5241,13 @@ sources:
       # NLM's files page (www.nlm.nih.gov allows us) names each month's files on download.nlm.nih.gov,
       # whose robots.txt disallows every agent: the owner downloads them (the full release after a
       # free UMLS licence login). The list follows the page, so a new month's file is offered by itself.
+      # Owner decision 2026-11-02: the prescribable content only (no UMLS licence for the full release).
       manual: {daily: 10, again_days: 28, list: {kind: discovery}}
       discovery:
         - kind: index-page
           url: "https://www.nlm.nih.gov/research/umls/rxnorm/docs/rxnormfiles.html"
-          documents: "download\\.nlm\\.nih\\.gov/.*RxNorm_full(?:_prescribe)?_\\d{8}\\.zip$"
-          newest: "/(?P<series>RxNorm_full(?:_prescribe)?)_(?P<date>\\d{8})\\.zip$"
+          documents: "download\\.nlm\\.nih\\.gov/.*RxNorm_full_prescribe_\\d{8}\\.zip$"
+          newest: "/(?P<series>RxNorm_full_prescribe)_(?P<date>\\d{8})\\.zip$"
           newest_date_format: "%m%d%Y"
       filter: {allow_all: true, public_issuer: true, data_files: true}
     update: {cadence: P1M, strategy: snapshot-retention}
