@@ -2068,7 +2068,11 @@ def itu_recommendations(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Ca
             if sector == "R":
                 url, how = f"https://www.itu.int/rec/{vid}/en", "itu-r-version"
             else:
-                url, how = f"https://www.itu.int/rec/dologin_pub.asp?lang=e&id={vid}!!PDF-E&type=items", ""
+                # A supplement, amendment, corrigendum, erratum or annex (``T-REC-D.140-200206-I!Sup1``)
+                # takes one "!" before the format, a Recommendation two: ``!!PDF-E`` answered 404 for
+                # every one of them (2026-11-03).
+                sep = "!" if "!" in vid else "!!"
+                url, how = f"https://www.itu.int/rec/dologin_pub.asp?lang=e&id={vid}{sep}PDF-E&type=items", ""
             label = " ".join(row.group("label").split())
             title = " ".join(re.sub(r"<[^>]+>", " ", row.group("title")).split()).split(" Note - ")[0]
             seen += 1
@@ -2102,7 +2106,11 @@ def resolve_itu_r_version(cand: Candidate, env: DiscoverEnv) -> list[Candidate]:
     if "PDF" in found:
         return [cand.with_url(found["PDF"])]
     if "ZPF" in found:
-        return [cand.with_url(found["ZPF"], extra={**cand.extra, "unzip": "pdf"})]
+        # The zip may hold a document the Recommendation cites beside it (BO.1724's holds ETSI EN 301
+        # 790): the one to keep is named after the Recommendation (BO1724-1E.pdf).
+        m = re.match(r"R-REC-([A-Z]+)\.([0-9]+)", cand.key.partition(":")[2])
+        match = f"{m.group(1)}{m.group(2)}" if m else ""
+        return [cand.with_url(found["ZPF"], extra={**cand.extra, "unzip": "pdf", "unzip_match": match})]
     return []
 
 

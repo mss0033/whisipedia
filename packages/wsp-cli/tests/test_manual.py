@@ -146,6 +146,50 @@ def test_a_listing_page_saved_as_htm_or_beside_its_folder_is_put_in_place(tmp_pa
     assert not (tmp_path / "_listing" / "ATP.aspx.html").exists()
 
 
+def test_parked_items_are_kept_but_not_offered_until_the_owner_says(tmp_path: Path) -> None:
+    """Owner request 2026-11-03: ISO standards that cost money, Army publications behind a CAC login and
+    a criterion not available online stay in the list, out of the day's ten, with the reason shown."""
+    items = [Item(f"k{n}", f"https://h/{n}", f"{n}.pdf", f"Doc {n}") for n in range(4)]
+    q = Queue("iso", items=items)
+    state = tmp_path / "manual"
+    state.mkdir()
+    manual.request_park(state, "iso", ["0.pdf", "k1"], "costs money at ISO", [])
+    out = io.StringIO()
+    manual.apply_requests(q, manual.park_requests_path(state, "iso"), out)
+    assert [i.status for i in q.items] == ["parked", "parked", "pending", "pending"]
+    assert q.items[0].problem == "costs money at ISO"
+    assert "0.pdf: parked (costs money at ISO)" in out.getvalue()
+    assert not manual.park_requests_path(state, "iso").exists()  # applied once
+    picked = todays_offer(q, 10, "2026-11-04")
+    assert [i.id for i in picked] == ["k2", "k3"]
+    q.merge([Item("k2", "u", "2.pdf", "Doc 2")])  # a rebuilt list without the parked ones keeps them
+    assert {i.id: i.status for i in q.items} == {"k2": "pending", "k0": "parked", "k1": "parked"}
+    spec = _spec("iso", {"adapter": "doc-collection"})
+    page, text = render_today("2026-11-04", [(spec, q, [], "f", 1)], None)
+    assert "Parked, not offered until you say" in page
+    assert "Doc 0 (costs money at ISO)" in page
+    assert "     0.pdf  (costs money at ISO)" in text
+    manual.request_park(state, "iso", [], "", ["*"])
+    manual.apply_requests(q, manual.park_requests_path(state, "iso"), io.StringIO())
+    assert {i.status for i in q.items} == {"pending"}
+
+
+def test_a_file_with_no_extension_upstream_is_asked_for_as_text() -> None:
+    """2026-11-03: PubChem's CID-MeSH (plain text, no extension) was asked for as CID-MeSH.pdf; the
+    owner's browser saved CID-MeSH.txt, which nothing matched."""
+    from wsp_adapters.doccollection.adapter import Survey
+    from wsp_adapters.doccollection.model import Candidate
+
+    base = "https://ftp.ncbi.nlm.nih.gov/pubchem/Compound/Extras/"
+    survey = Survey("pubchem")
+    survey.allowed = [
+        Candidate(key="pubchem:CID-MeSH", url=base + "CID-MeSH", title="CID MeSH", issuer="NCBI"),
+        Candidate(key="pubchem:CID-Title", url=base + "CID-Title.gz", title="CID Title", issuer="NCBI"),
+    ]
+    items = manual._items_from_survey(survey, [], ".pdf")  # pyright: ignore[reportPrivateUsage]
+    assert [i.save_as for i in items] == ["CID-MeSH.txt", "CID-Title.gz"]
+
+
 def test_a_curated_list_becomes_items_with_their_save_names(tmp_path: Path) -> None:
     access = {
         "adapter": "doc-collection",
@@ -225,6 +269,21 @@ def test_a_saved_listing_is_read_from_the_owners_file_and_a_missing_page_is_aske
     assert pages == [("https://ftp.ncbi.nlm.nih.gov/x/SDF/", "sdf.html")]
     with pytest.raises(NotFoundError):
         SavedPages(listing, {}).get_bytes("https://ftp.ncbi.nlm.nih.gov/robots.txt")
+
+
+def test_pubmed_offers_about_as_many_numbers_as_days_since_the_owner_caught_up() -> None:
+    """2026-11-03: ten a day were offered past the newest held file once the owner had caught up, and
+    1710-1712 answered 404 (not published yet; NCBI's robots.txt keeps the library from looking)."""
+    day = date(2026, 11, 3)
+    q = Queue("pubmed")
+    assert manual.pubmed_ahead(q, 10, day) == 10  # nothing taken yet: the daily count
+    q.items = [
+        Item("pubmed26n1701.xml.gz", "u", "pubmed26n1701.xml.gz", "t", status="taken", taken="2026-10-20"),
+        Item("pubmed26n1709.xml.gz", "u", "pubmed26n1709.xml.gz", "t", status="taken", taken="2026-11-03"),
+    ]
+    assert manual.pubmed_ahead(q, 10, day) == 2  # caught up today: tomorrow's one and a spare
+    assert manual.pubmed_ahead(q, 10, date(2026, 11, 6)) == 5
+    assert manual.pubmed_ahead(q, 10, date(2026, 12, 1)) == 10  # a long break: the daily count
 
 
 def test_pubmed_offers_the_numbers_after_the_newest_sealed_generation(tmp_path: Path) -> None:
@@ -641,6 +700,48 @@ def test_a_run_out_of_time_leaves_its_ingest_to_the_next_and_saves_what_it_took(
     assert len(waits) == 1
     assert "out of time" in out.getvalue()
     assert saved == [1, 2]
+
+
+def test_an_unfinished_ingest_is_retried_when_no_new_file_waits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-11-03: nine ISO standards fetched in a run that ran out of time waited for an ingest that no
+    later run started, because each returned on "nothing new" first."""
+    from wsp_adapters.doccollection.policy import Rules
+
+    vault = tmp_path / "vault"
+    incoming = vault / "_incoming"
+    folder = incoming / "_manual" / "s"
+    folder.mkdir(parents=True)
+    plans = incoming / "_plans" / "targets.d"
+    plans.mkdir(parents=True)
+    (plans / "s-2026-11-02.json").write_text(json.dumps([{"source_id": "s", "version": "2026-11-02"}]))
+    spec = _spec("s", {"adapter": "doc-collection"})
+    q = Queue("s", items=[_doc_item("s:later")])  # pending, its file not saved
+    ingested: list[str] = []
+
+    class FakeOps:
+        @staticmethod
+        def cmd_ingest(args: argparse.Namespace, out: Any) -> int:
+            ingested.append(args.source)
+            gen = vault / "library" / spec.vault_domain / "s" / "2026-11-02"
+            gen.mkdir(parents=True, exist_ok=True)
+            (gen / "MANIFEST.json").write_text("{}")
+            return 0
+
+    class FakeAdapter:
+        def config(self, _spec: SourceSpec) -> Any:
+            return type("Cfg", (), {"rules": Rules()})()
+
+    monkeypatch.setattr(manual, "DocCollectionAdapter", FakeAdapter)
+    import wsp_cli
+
+    monkeypatch.setattr(wsp_cli, "ops", FakeOps, raising=False)
+    monkeypatch.setitem(__import__("sys").modules, "wsp_cli.ops", FakeOps)
+    assert manual.import_collection(argparse.Namespace(config_dir=None), spec, q, folder, io.StringIO()) == 0
+    assert ingested == ["s"]
+    assert manual.import_collection(argparse.Namespace(config_dir=None), spec, q, folder, io.StringIO()) == 0
+    assert ingested == ["s"]  # sealed now: nothing to retry
 
 
 def test_an_unfinished_ingest_is_retried_before_new_files_are_taken(

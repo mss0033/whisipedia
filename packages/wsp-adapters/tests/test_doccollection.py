@@ -972,7 +972,7 @@ def test_an_itu_r_version_takes_its_pdf_or_else_its_zipped_pdf() -> None:
 
     (doc,) = resolve(cand("R-REC-BO.1724-1-200701-I"), env)
     assert doc.url == f"https://www.itu.int{base}!!ZPF-E.zip"
-    assert doc.extra == {"suffix": ".pdf", "unzip": "pdf"}
+    assert doc.extra == {"suffix": ".pdf", "unzip": "pdf", "unzip_match": "BO1724"}
     assert doc.file_name.endswith(".pdf")
     (doc,) = resolve(cand("R-REC-P.525-5-202411-I"), env)  # the same address the guess gave: held stay held
     assert doc.url == "https://www.itu.int/dms_pubrec/itu-r/rec/p/R-REC-P.525-5-202411-I!!PDF-E.pdf"
@@ -1011,6 +1011,30 @@ def test_an_itu_page_that_fails_once_is_asked_again_at_the_end() -> None:
     )
     assert cand.pub_number == "ITU-T K.12 (08/24)"
     assert not env.incomplete
+
+
+def test_an_itu_t_supplement_takes_one_bang_before_its_format() -> None:
+    """2026-11-03: supplements, amendments and corrigenda answered 404 at ``...!Sup1!!PDF-E``; their pages
+    link ``...!Sup1!PDF-E``."""
+    series = b'<a href="./recommendation.asp?lang=en&amp;parent=T-REC-D.140"><strong>D.140</strong></a>'
+    rec = (
+        b'<tr><td><a href="./recommendation.asp?lang=en&amp;parent=T-REC-D.140-200206-I!Sup1"><strong>D.140 '
+        b"Suppl. 1 (06/02)</strong></a></td><td>Charging</td><td>In force</td></tr>"
+        b'<tr><td><a href="./recommendation.asp?lang=en&amp;parent=T-REC-D.140-200206-I"><strong>'
+        b"D.140 (06/02)</strong></a></td><td>Charging</td><td>In force</td></tr>"
+    )
+    env = env_for(
+        {"https://www.itu.int/rec/T-REC-D/en": series, "https://www.itu.int/rec/T-REC-D.140/en": rec},
+        origins=("www.itu.int",),
+    )
+    urls = sorted(
+        c.url
+        for c in discover_all(
+            [{"kind": "api", "flavor": "itu-recommendations", "sector": "T", "series": ["D"]}], env
+        )
+    )
+    base = "https://www.itu.int/rec/dologin_pub.asp?lang=e&id=T-REC-D.140-200206-I"
+    assert urls == [f"{base}!!PDF-E&type=items", f"{base}!Sup1!PDF-E&type=items"]
 
 
 def test_openstax_lists_each_live_book_with_its_pdf() -> None:

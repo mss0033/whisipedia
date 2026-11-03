@@ -1136,6 +1136,11 @@ def test_a_zipped_pdf_download_keeps_the_pdf_it_holds(tmp_path: Path) -> None:
         z.writestr("b.pdf", b"%PDF-2")
     with pytest.raises(FetchError, match="2 PDF files"):
         unzip_pdf(path)
+    with zipfile.ZipFile(path, "w") as z:  # BO.1724's zip: the Recommendation and the ETSI standard it cites
+        z.writestr("En301790.V1.3.1.pdf", b"%PDF-etsi")
+        z.writestr("BO1724-1E.pdf", b"%PDF-rec")
+    unzip_pdf(path, match="BO1724")
+    assert path.read_bytes() == b"%PDF-rec"
     path.write_bytes(b"<html>error</html>")
     with pytest.raises(FetchError, match="not a zip"):
         unzip_pdf(path)

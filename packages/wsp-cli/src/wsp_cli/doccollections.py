@@ -773,7 +773,7 @@ class CollectionFetcher:
         remote = RemoteFile(url=cand.url, name=cand.file_name, size=cand.size, mirrors=cand.mirrors)
         path = Path(download_from_origins(fetcher, remote, dest_dir / cand.file_name, origins).path)
         if cand.extra.get("unzip") == "pdf":
-            unzip_pdf(path)
+            unzip_pdf(path, match=cand.extra.get("unzip_match") or "")
         return path
 
     def _take_manual(self, cand: Candidate, done: Path, folder: Path) -> Path:
@@ -1660,15 +1660,27 @@ def register(sub: Any, add: Any) -> None:
     s.add_argument("--rebuild", action="store_true", help="with --sync: rebuild the lists now")
     s.add_argument("--no-import", action="store_true", help="with --sync: take nothing in this run")
     s.add_argument("--status", action="store_true", help="each manual source's progress")
+    s.add_argument(
+        "--park",
+        nargs="+",
+        metavar="NAME",
+        help="with SOURCE: stop offering these items (id or save-as name)",
+    )
+    s.add_argument("--why", default="", help="with --park: the reason, shown on the day's page")
+    s.add_argument(
+        "--unpark", nargs="+", metavar="NAME", help="with SOURCE: offer these parked items again (*: all)"
+    )
 
 
 UNZIP_MAX_BYTES = 2 * 1024**3  # the one PDF of a zipped-PDF download; larger is not a document
 
 
-def unzip_pdf(path: Path) -> None:
-    """Put the one PDF a downloaded zip holds in the zip's place (ITU-R publishes ~1,290 Recommendations
-    in English only as a zipped PDF, ``!!ZPF-E.zip``; 2026-11-02). A file that is already a PDF (an
-    earlier run unpacked it) is left as it is; a zip with no PDF, or several, is not the document."""
+def unzip_pdf(path: Path, *, match: str = "") -> None:
+    """Put the PDF a downloaded zip holds in the zip's place (ITU-R publishes ~1,290 Recommendations in
+    English only as a zipped PDF, ``!!ZPF-E.zip``; 2026-11-02). With several PDFs, the one whose name
+    holds ``match`` (``BO1724`` in ``BO1724-1E.pdf``, beside the ETSI standard it cites), when exactly
+    one does. A file that is already a PDF (an earlier run unpacked it) is left as it is; a zip with no
+    PDF, or with several and no single match, is not the document."""
     with path.open("rb") as fh:
         if fh.read(5) == b"%PDF-":
             return
@@ -1676,6 +1688,9 @@ def unzip_pdf(path: Path) -> None:
     try:
         with zipfile.ZipFile(path) as zf:
             pdfs = [i for i in zf.infolist() if not i.is_dir() and i.filename.lower().endswith(".pdf")]
+            key = re.sub(r"[^0-9a-z]", "", match.lower())
+            if len(pdfs) > 1 and key:
+                pdfs = [i for i in pdfs if key in re.sub(r"[^0-9a-z]", "", i.filename.lower())] or pdfs
             if len(pdfs) != 1:
                 raise FetchError(f"{path.name}: {len(pdfs)} PDF files in the zip, not one")
             if pdfs[0].file_size > UNZIP_MAX_BYTES:
@@ -1718,6 +1733,10 @@ def cmd_manual(args: argparse.Namespace, out: TextIO) -> int:
     """``wsp collections manual SOURCE``: what to download by hand and where to save it; ``--import``
     then takes those files in (checked, screened, planned) and ingests them. For a source the library
     may not crawl (its robots.txt disallows us) but whose files a person may download: GeoNames, GEBCO."""
+    if getattr(args, "park", None) or getattr(args, "unpark", None):
+        from wsp_cli import manual
+
+        return manual.park_items(args, out)
     if getattr(args, "sync", False) or getattr(args, "status", False):
         from wsp_cli import manual
 

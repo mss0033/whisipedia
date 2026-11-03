@@ -143,7 +143,7 @@ class Queue:
                     old.problem,
                 )
             merged.append(item)
-        merged += [i for i in known.values() if i.status in ("taken", "denied", "held")]
+        merged += [i for i in known.values() if i.status in ("taken", "denied", "held", "parked")]
         self.items = merged
 
     def pending(self) -> list[Item]:
@@ -216,6 +216,11 @@ def _items_from_survey(survey: Survey, rule: Sequence[str], page_ext: str) -> li
         name = cand.extra.get("save_as") or _url_name(cand.url)
         if not _plain_file_name(name):  # a note in the registry's save_as, or a path: not a name
             name = _url_name(cand.url)
+        bare = _url_name(cand.url)
+        if "." not in name and bare and "." not in bare and not cand.url.endswith("/"):
+            # A file with no extension upstream (PubChem's CID-MeSH, plain text): a browser saves it as
+            # .txt, and the list asked for "CID-MeSH.pdf", which no saved file could match (2026-11-03).
+            name = f"{bare}.txt"
         if "." not in name or not _plain_file_name(
             name
         ):  # GEBCO's ".../gebco_2024/zip/": the number and the stored extension
@@ -262,8 +267,10 @@ def build_queue(
     workdir: Path,
     specs: Sequence[SourceSpec] = (),
     checksum_dirs: Sequence[Path] = (),
+    ahead: int | None = None,
 ) -> tuple[list[Item], list[tuple[str, str]], list[str]]:
-    """The source's list: ``(items, pages the owner should save first, notes)``."""
+    """The source's list: ``(items, pages the owner should save first, notes)``. ``ahead``: PubMed's
+    numbers to offer past the newest held (:func:`pubmed_ahead`; default the daily count)."""
     mc = manual_config(spec) or {}
     how = cast(Mapping[str, Any], mc.get("list") or {})
     kind = str(how.get("kind") or "")
@@ -276,7 +283,7 @@ def build_queue(
             )
         return _kiwix_checksum_items(specs, fetcher, user_agent, workdir, checksum_dirs)
     if kind == "pubmed":
-        return _pubmed_items(held, int(mc.get("daily") or DEFAULT_DAILY)), [], []
+        return _pubmed_items(held, ahead or int(mc.get("daily") or DEFAULT_DAILY)), [], []
     if kind == "list":
         items: list[Item] = []
         prefix = str(cast(Mapping[str, Any], spec.raw.get("access") or {}).get("key_prefix") or spec.id)
@@ -502,6 +509,20 @@ def import_hand_saved_zims(
     return worst
 
 
+def pubmed_ahead(queue: Queue, daily: int, today: date) -> int:
+    """How many update numbers past the newest held to offer. NCBI publishes about one a day, and its
+    robots.txt keeps the library from reading the folder, so the newest file the owner saved marks
+    where NCBI's numbers stood that day: offer as many as days since, plus two, at most ``daily``.
+    Ten a day offered numbers not yet out once the owner had caught up, and each answered 404
+    (2026-11-03: 1710-1712)."""
+    taken = [i for i in queue.items if i.status == "taken" and i.taken]
+    if not taken:
+        return daily
+    newest = max(taken, key=lambda i: i.id)  # pubmedYYnNNNN.xml.gz: the names sort by number
+    days = (today - date.fromisoformat(newest.taken)).days
+    return max(1, min(daily, days + 2))
+
+
 def _pubmed_items(held: str | None, ahead: int) -> list[Item]:
     """The update files after the newest one held (``pubmed26-u1671``: 1672 onwards). NCBI adds about
     one a day, so ``ahead`` numbers are offered; a link that is not out yet answers Not Found."""
@@ -559,6 +580,30 @@ def todays_offer(queue: Queue, daily: int, day: str) -> list[Item]:
     return picked
 
 
+def park(queue: Queue, names: Sequence[str], why: str) -> list[Item]:
+    """Park the waiting items ``names`` (an item's id or its save-as name): not offered again, and kept,
+    with ``why``, until :func:`unpark` (owner request 2026-11-03: ISO standards that cost money, Army
+    publications behind a CAC login, a criterion not available online). Returns the items parked."""
+    wanted = set(names)
+    done = [i for i in queue.items if i.status == "pending" and (i.id in wanted or i.save_as in wanted)]
+    for item in done:
+        item.status, item.problem = "parked", why
+    return done
+
+
+def unpark(queue: Queue, names: Sequence[str]) -> list[Item]:
+    """Offer parked items again (``names``: ids or save-as names; ``*`` for all of the source's)."""
+    wanted = set(names)
+    done = [
+        i
+        for i in queue.items
+        if i.status == "parked" and ("*" in wanted or i.id in wanted or i.save_as in wanted)
+    ]
+    for item in done:
+        item.status, item.problem, item.offered = "pending", "", []
+    return done
+
+
 def render_today(
     day: str,
     offers: Sequence[tuple[SourceSpec, Queue, list[Item], str, int]],
@@ -584,7 +629,8 @@ def render_today(
     text = [f"Manual downloads for {day}", ""]
     for spec, queue, items, folder, left in offers:
         stray = list(unmatched.get(spec.id) or [])
-        if not items and not queue.save_pages and not stray:
+        parked = [i for i in queue.items if i.status == "parked"]
+        if not items and not queue.save_pages and not stray and not parked:
             continue
         parts.append(f"<h2>{html.escape(spec.name)}</h2>")
         parts.append(
@@ -611,6 +657,14 @@ def render_today(
                 + (f"  (last try: {item.problem})" if item.problem else "")
             )
         parts.append("</ol>")
+        if parked:
+            listed = "; ".join(
+                f"{html.escape(i.title or i.save_as)} ({html.escape(i.problem)})" for i in parked[:30]
+            )
+            more = f" and {len(parked) - 30} more" if len(parked) > 30 else ""
+            parts.append(f"<p class=n>Parked, not offered until you say: {listed}{more}.</p>")
+            text.append(f"   parked, not offered until you say ({len(parked)}):")
+            text += [f"     {i.save_as}  ({i.problem})" for i in parked[:30]]
         if stray:
             names = ", ".join(f"<code>{html.escape(n)}</code>" for n in stray[:20])
             parts.append(
@@ -845,17 +899,19 @@ def import_collection(
             _set_aside(path, why, item)
             continue
         present.append(item)
-    if not present:
-        return 0
     if unsealed_plans(folder.parent.parent, spec):
         # An ingest that did not finish (busy queue, failure, a kill) goes first: a fetch now would be
-        # refused (exit 5), or on the same day rewrite that version's plan without its documents.
+        # refused (exit 5), or on the same day rewrite that version's plan without its documents. Also
+        # when no new file waits: nine ISO standards fetched in a run that ran out of time waited for
+        # an ingest no later run started, because each returned on "nothing new" first (2026-11-03).
         if save is not None:
             save()  # what was taken so far is on disk before the wait
         code = _ingest(args, spec.id, None, out, ops)
         if code != 0 or unsealed_plans(folder.parent.parent, spec):
             out.write(f"{spec.id}: an earlier import is not ingested yet; new files wait for the next run\n")
             return code or doccollections.EXIT_INGEST_PENDING
+    if not present:
+        return 0
     groups: dict[str, list[Item]] = {}
     for item in present:
         groups.setdefault(str(item.cand.get("partition") or ""), []).append(item)
@@ -1089,6 +1145,7 @@ def _sync(args: argparse.Namespace, out: TextIO) -> int:
         (folder / LISTING_DIR).mkdir(parents=True, exist_ok=True)
         qpath = state / f"{spec.id}.json"
         queue = Queue.load(qpath, spec.id)
+        apply_requests(queue, park_requests_path(state, spec.id), out)
         save = partial(queue.save, qpath)
         mc = manual_config(spec) or {}
         kind = str(cast(Mapping[str, Any], mc.get("list") or {}).get("kind") or "")
@@ -1138,6 +1195,9 @@ def _sync(args: argparse.Namespace, out: TextIO) -> int:
                     workdir=state / "work" / spec.id,
                     specs=specs,
                     checksum_dirs=kiwix_dirs,
+                    ahead=pubmed_ahead(queue, int(mc.get("daily") or DEFAULT_DAILY), date.today())
+                    if kind == "pubmed"
+                    else None,
                 )
             except (FetchError, bootstrap.ConfigError, OSError) as exc:
                 out.write(f"{spec.id}: list not rebuilt: {exc}\n")
@@ -1256,8 +1316,85 @@ def status(args: argparse.Namespace, out: TextIO) -> int:
     for spec in manual_sources(bootstrap.load_sources(cfg, lay)):
         q = Queue.load(state / f"{spec.id}.json", spec.id)
         taken = sum(i.status == "taken" for i in q.items)
-        out.write(f"{spec.id:32} {taken:6} taken {len(q.pending()):6} left  built {q.built or '-'}\n")
+        parked = sum(i.status == "parked" for i in q.items)
+        left = len(q.pending())
+        out.write(f"{spec.id:32} {taken:6} taken {left:6} left {parked:5} parked  built {q.built or '-'}\n")
     return 0
 
 
-__all__ = ["Item", "Queue", "build_queue", "cmd_sync", "render_today", "status", "todays_offer"]
+def park_requests_path(state: Path, source: str) -> Path:
+    return state / f"{source}.requests.json"
+
+
+def request_park(
+    state: Path, source: str, park_names: Sequence[str], why: str, unpark_names: Sequence[str]
+) -> Path:
+    """Record a park or unpark for the next sync to apply as it loads the queue: a sync holds the queue
+    in memory for hours and saves it, so a direct edit meanwhile would be lost."""
+    path = park_requests_path(state, source)
+    try:
+        raw = cast(list[dict[str, Any]], json.loads(path.read_text(encoding="utf-8")))
+    except (OSError, ValueError):
+        raw = []
+    raw.append({"park": list(park_names), "why": why, "unpark": list(unpark_names)})
+    tmp = path.with_name(path.name + ".partial")
+    tmp.write_text(json.dumps(raw, indent=1), encoding="utf-8")
+    tmp.replace(path)
+    return path
+
+
+def apply_requests(queue: Queue, path: Path, out: TextIO) -> None:
+    """Apply (in order) and remove the park/unpark requests :func:`request_park` recorded."""
+    try:
+        raw = cast(list[dict[str, Any]], json.loads(path.read_text(encoding="utf-8")))
+    except (OSError, ValueError):
+        return
+    for req in raw:
+        names = [str(n) for n in cast(list[object], req.get("park") or [])]
+        for item in park(queue, names, str(req.get("why") or "parked by the owner")):
+            out.write(f"{queue.source}: {item.save_as}: parked ({item.problem})\n")
+        for item in unpark(queue, [str(n) for n in cast(list[object], req.get("unpark") or [])]):
+            out.write(f"{queue.source}: {item.save_as}: offered again\n")
+    path.unlink(missing_ok=True)
+
+
+def park_items(args: argparse.Namespace, out: TextIO) -> int:
+    """``wsp collections manual SOURCE --park NAME... --why TEXT`` / ``--unpark NAME...`` (``*``: all).
+    Recorded for the next sync (within the hour), which applies it as it loads the source's queue."""
+    lay = bootstrap.layout(args.config_dir)
+    cfg = bootstrap.load(lay)
+    if not args.source:
+        out.write("error: name the source (wsp collections manual SOURCE --park ...)\n")
+        return 2
+    if args.park and not args.why:
+        out.write("error: --park needs --why (the reason is shown on the day's page)\n")
+        return 2
+    state = bootstrap.paths(cfg).require_state() / "manual"
+    queue = Queue.load(state / f"{args.source}.json", args.source)
+    names = list(args.park or args.unpark)
+    known = {i.id for i in queue.items} | {i.save_as for i in queue.items} | {"*"}
+    unknown = [n for n in names if n not in known]
+    for name in unknown:
+        out.write(f"{args.source}: {name}: no such item\n")
+    if unknown:
+        return 1
+    request_park(state, args.source, args.park or [], args.why or "", args.unpark or [])
+    out.write(
+        f"{args.source}: {len(names)} item(s) to {'park' if args.park else 'offer again'} at the next sync\n"
+    )
+    return 0
+
+
+__all__ = [
+    "Item",
+    "Queue",
+    "build_queue",
+    "cmd_sync",
+    "park",
+    "park_items",
+    "render_today",
+    "request_park",
+    "status",
+    "todays_offer",
+    "unpark",
+]
