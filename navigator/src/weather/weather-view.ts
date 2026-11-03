@@ -27,7 +27,7 @@ import type {
   Tilesets,
   WeatherStatus,
 } from '../api/types.ts';
-import { buildStyle, type Look } from '../atlas/style.ts';
+import { BASEMAP, buildStyle, type Look } from '../atlas/style.ts';
 import { h, s } from '../core/dom.ts';
 import type { SafeStorage } from '../core/storage.ts';
 import type { ThemeManager } from '../core/theme.ts';
@@ -83,6 +83,10 @@ const UNITS_KEY = 'weather.units';
 const FIELD_CACHE = 24;
 const PLAY_MS = 800;
 const SOURCE = 'wx-field';
+const COAST = 'wx-coast';
+/** Basemap lines drawn over the field: under it, at 72% opacity, a dry precipitation map hid every
+ * border and coast, and only temperature showed land (its own contrast); owner, 2026-11-03. */
+const OVER_FIELD = ['boundaries_country', 'boundaries'];
 const DAY = 86_400_000;
 
 // The worker as a bundled asset (same origin, as the CSP requires), like the Atlas's.
@@ -595,6 +599,23 @@ export class WeatherView {
         },
         labels?.id,
       );
+    for (const id of OVER_FIELD) if (this.map.getLayer(id)) this.map.moveLayer(id, labels?.id);
+    if (this.map.getSource(BASEMAP) && !this.map.getLayer(COAST)) {
+      // The coast is the land polygons' edge (Protomaps' "earth"); thin, so it frames the field.
+      this.map.addLayer(
+        {
+          id: COAST,
+          type: 'line',
+          source: BASEMAP,
+          'source-layer': 'earth',
+          paint: {
+            'line-color': this.look().dark ? 'rgba(220, 230, 240, 0.55)' : 'rgba(30, 40, 55, 0.55)',
+            'line-width': ['interpolate', ['linear'], ['zoom'], 1, 0.6, 6, 1.2],
+          },
+        },
+        labels?.id,
+      );
+    }
     this.redraw();
   }
 
