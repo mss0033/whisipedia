@@ -5215,13 +5215,18 @@ sources:
             - {title: "ISO/IEC 19757-2:2008 DSDL Part 2 RELAX NG", landing: "https://www.iso.org/standard/52348.html", save_as: "ISO-IEC-19757-2.pdf", pub_number: "ISO-IEC-19757-2"}
             - {title: "ISO/IEC 2382:2015 Information technology - Vocabulary", landing: "https://www.iso.org/standard/63598.html", save_as: "ISO-IEC-2382.pdf", pub_number: "ISO-IEC-2382"}
             - {title: "ISO/IEC 14662:2010 Open-edi reference model", landing: "https://www.iso.org/standard/55290.html", save_as: "ISO-IEC-14662.pdf", pub_number: "ISO-IEC-14662"}
-            - {title: "ISO/IEC 11179 Parts 1-6 Metadata registries (2003-2005 editions)", landing: "https://www.iso.org/search.html?q=11179", save_as: "ISO-IEC-11179.pdf", pub_number: "ISO-IEC-11179"}
+            # 11179 is a series: one item per free part (owner's downloads 2026-11-03: parts 1, 4, 5, 6).
+            - {title: "ISO/IEC 11179-1 Metadata registries, Part 1", landing: "https://www.iso.org/search.html?q=11179", save_as: "ISO-IEC-11179-1.pdf", pub_number: "ISO-IEC-11179-1"}
+            - {title: "ISO/IEC 11179-4 Metadata registries, Part 4", landing: "https://www.iso.org/search.html?q=11179", save_as: "ISO-IEC-11179-4.pdf", pub_number: "ISO-IEC-11179-4"}
+            - {title: "ISO/IEC 11179-5 Metadata registries, Part 5", landing: "https://www.iso.org/search.html?q=11179", save_as: "ISO-IEC-11179-5.pdf", pub_number: "ISO-IEC-11179-5"}
+            - {title: "ISO/IEC 11179-6 Metadata registries, Part 6", landing: "https://www.iso.org/search.html?q=11179", save_as: "ISO-IEC-11179-6.pdf", pub_number: "ISO-IEC-11179-6"}
             - {title: "ISO/IEC 5218:2004 Codes for the representation of human sexes", landing: "https://www.iso.org/standard/36266.html", save_as: "ISO-IEC-5218.pdf", pub_number: "ISO-IEC-5218"}
             - {title: "ISO/IEC TR 10032:2003 Reference Model of Data Management", landing: "https://www.iso.org/standard/38607.html", save_as: "ISO-IEC-TR-10032-2003-Reference-Model-of.pdf", pub_number: "ISO-IEC-TR-10032-2003-Reference-Model-of"}
             - {title: "ISO/IEC 15944 series (Business Operational View / Open-edi, incl. Part 7 vocabulary)", landing: "https://www.iso.org/search.html?q=15944", save_as: "ISO-IEC-15944.pdf", pub_number: "ISO-IEC-15944"}
             - {title: "ISO/IEC TR 20943-1:2003 and -3:2004 Metadata registry content consistency", landing: "https://www.iso.org/search.html?q=20943", save_as: "ISO-IEC-TR-20943-1-2003-and--3-2004-Meta.pdf", pub_number: "ISO-IEC-TR-20943-1-2003-and--3-2004-Meta"}
-            - {title: "ISO/IEC 17788:2014 Cloud computing - Overview and vocabulary (withdrawn; see 22123-1:2023)", landing: "https://www.iso.org/standard/60544.html", save_as: "ISO-IEC-17788.pdf", pub_number: "ISO-IEC-17788"}
-            - {title: "ISO/IEC 17789:2014 Cloud computing - Reference architecture (withdrawn; see 22123-3)", landing: "https://www.iso.org/standard/60545.html", save_as: "ISO-IEC-17789.pdf", pub_number: "ISO-IEC-17789"}
+            # 17788 and 17789 (2014) were withdrawn for the 22123 series (owner's downloads 2026-11-03: parts 2, 3).
+            - {title: "ISO/IEC 22123-2:2023 Cloud computing - Part 2: Concepts", landing: "https://www.iso.org/search.html?q=22123", save_as: "ISO-IEC-22123-2.pdf", pub_number: "ISO-IEC-22123-2"}
+            - {title: "ISO/IEC 22123-3:2023 Cloud computing - Part 3: Reference architecture", landing: "https://www.iso.org/search.html?q=22123", save_as: "ISO-IEC-22123-3.pdf", pub_number: "ISO-IEC-22123-3"}
             - {title: "ISO/IEC 24707:2007 Common Logic", landing: "https://www.iso.org/standard/39175.html", save_as: "ISO-IEC-24707.pdf", pub_number: "ISO-IEC-24707"}
             - {title: "ISO/IEC TR 24772:2013 Guidance to avoiding vulnerabilities in programming languages (defensive coding)", landing: "https://www.iso.org/standard/61457.html", save_as: "ISO-IEC-TR-24772-2013-Guidance-to-avoidi.pdf", pub_number: "ISO-IEC-TR-24772-2013-Guidance-to-avoidi"}
             - {title: "ISO/IEC 14496-12:2015 ISO base media file format (MP4) (withdrawn edition)", landing: "https://www.iso.org/standard/68960.html", save_as: "ISO-IEC-14496-12.pdf", pub_number: "ISO-IEC-14496-12"}
