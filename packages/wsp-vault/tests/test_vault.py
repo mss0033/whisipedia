@@ -1,9 +1,11 @@
+import errno
 import hashlib
 import json
 import os
 import stat
 from collections.abc import Callable, Sequence
 from pathlib import Path
+from typing import Any
 
 import pytest
 from vaultkit import FILES, GEN, SOURCE, SealFn, corrupt
@@ -11,11 +13,18 @@ from vaultkit import FILES, GEN, SOURCE, SealFn, corrupt
 from wsp_core.model import Checksum, GenerationStatus
 from wsp_core.ports import Vault
 from wsp_core.testing.vault_contract import VaultContract
-from wsp_vault.atomic import IntegrityError
+from wsp_vault.atomic import IntegrityError, RetryPolicy
 from wsp_vault.ledger import JsonlLedger
 from wsp_vault.manifest import Manifest, ManifestError, check_relpath
 from wsp_vault.signing import Ed25519Signer
-from wsp_vault.vault import CURRENT_NAME, FileVault, SignatureError, VaultError, domains_from_specs
+from wsp_vault.vault import (
+    CURRENT_NAME,
+    PROMOTED_NAME,
+    FileVault,
+    SignatureError,
+    VaultError,
+    domains_from_specs,
+)
 
 LocalFn = Callable[[str, bytes], Path]
 
@@ -222,6 +231,41 @@ def test_promote_refuses_bad_signature_and_degraded(vault: FileVault, seal: Seal
     assert not vault.verify_manifest(SOURCE, "2026-09-01").ok
     (lib / "MANIFEST.json").write_bytes(b"not json")
     assert vault.generations(SOURCE)[0].status is GenerationStatus.DEGRADED
+
+
+def test_a_refused_history_append_is_retried_and_never_lost(
+    vault: FileVault, seal: SealFn, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-11-04 trawl: PROMOTED.txt was appended with a bare open() after CURRENT had moved; one
+    refusal lost the line and the vault.promote event for good, so a later repair could not roll
+    back to that generation."""
+    monkeypatch.setattr(vault, "_retry", RetryPolicy(attempts=3, base_delay=0.0, sleep=lambda _s: None))
+    history = vault.source_dir(SOURCE) / PROMOTED_NAME
+    refusals = [0]
+    real_open = Path.open
+
+    def refusing(self: Path, mode: str = "r", *args: Any, **kwargs: Any) -> Any:
+        if self.name == PROMOTED_NAME and "a" in mode and refusals[0] > 0:
+            refusals[0] -= 1
+            raise OSError(errno.ECONNABORTED, "Software caused connection abort")
+        return real_open(self, mode, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", refusing)
+    refusals[0] = 1  # one refusal: tried again
+    seal("2026-08-01")
+    assert history.read_text() == "2026-08-01\n"
+    refusals[0] = 99  # the share stays away: the pointer moved, the line is lost for now
+    with pytest.raises(ConnectionAbortedError):
+        seal("2026-09-01")
+    assert vault.current_set_ids(SOURCE) == ["2026-09-01"]
+    assert history.read_text() == "2026-08-01\n"
+    refusals[0] = 0
+    history.write_text("2026-08-01")  # and a partial append: no final newline
+    seal(GEN)  # the generation that stops being current is recorded before the pointer moves
+    assert history.read_text() == "2026-08-01\n2026-09-01\n2026-10-01\n"
+    assert {"2026-08-01", "2026-09-01", GEN} <= vault.promoted_before(SOURCE)
+    vault.promote(SOURCE, GEN)  # re-promoting adds no second line
+    assert history.read_text().count(GEN) == 1
 
 
 def test_torn_pointer_write_does_not_affect_current(vault: FileVault, seal: SealFn) -> None:

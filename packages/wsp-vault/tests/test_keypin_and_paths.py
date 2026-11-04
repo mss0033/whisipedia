@@ -3,6 +3,7 @@ seal crash recovery (#24) and checksum normalization (#23)."""
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
@@ -18,7 +19,7 @@ from vaultkit import FILES, GEN, SOURCE, SealFn
 
 from wsp_core.model import Checksum, GenerationStatus
 from wsp_vault import vault as vault_mod
-from wsp_vault.atomic import IntegrityError, readback
+from wsp_vault.atomic import IntegrityError, RetryPolicy, readback
 from wsp_vault.hashing import Digests
 from wsp_vault.manifest import (
     MANIFEST_NAME,
@@ -174,6 +175,50 @@ def test_a_file_adopted_before_is_not_read_again_unless_something_changed(
     staged.write_bytes(data + b"!")  # no longer the recorded size: read back, and refused
     with pytest.raises(IntegrityError):
         vault.adopt(SOURCE, GEN, src, "upstream/a.bin", upstream=[Checksum("sha1", sha1)])
+
+
+def test_adopt_many_neither_reads_files_adopted_before_again_nor_fails_on_one_refusal(
+    tmp_path: Path, signer: Ed25519Signer, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-11-04 trawl: adopt()'s two fixes were never ported to adopt_many. A resumed arXiv chunk
+    read every PDF it had adopted back over the NAS, and one ECONNABORTED failed the chunk."""
+    vault = FileVault(
+        tmp_path / "vault",
+        signer,
+        domains={SOURCE: "reference"},
+        retry=RetryPolicy(attempts=3, base_delay=0.0, sleep=lambda _s: None, jitter=0.0),
+    )
+    items: list[tuple[Path, str, list[Checksum]]] = []
+    for i in range(6):
+        data = f"pdf {i}".encode()
+        md5 = [Checksum("md5", hashlib.md5(data).hexdigest())]
+        items.append((_incoming(tmp_path, data, f"f{i}.pdf"), f"upstream/f{i}.pdf", md5))
+    reads: list[Path] = []
+    refused: list[Path] = []
+
+    def flaky(path: Path, **kwargs: Any) -> Digests:
+        reads.append(path)
+        if path.name == "f4.pdf.adopting" and not refused:
+            refused.append(path)
+            raise OSError(errno.ECONNABORTED, "Software caused connection abort")
+        return readback(path, **kwargs)
+
+    monkeypatch.setattr(vault_mod, "readback", flaky)
+    assert vault.adopt_many(SOURCE, GEN, items[:2], workers=2, flush_every=1) == 2
+    reads.clear()
+    # the resumed run: the two recorded files are not read again, the refusal is tried again
+    assert vault.adopt_many(SOURCE, GEN, items, workers=3, flush_every=2) == 6
+    assert refused
+    assert sorted(p.name for p in reads) == sorted(f"f{i}.pdf.adopting" for i in (2, 3, 4, 4, 5))
+    # a staged file that no longer has its recorded size is read back, and refused
+    (vault.stage(SOURCE, GEN) / "upstream" / "f0.pdf").write_bytes(b"pdf 0 and more")
+    with pytest.raises(IntegrityError):
+        vault.adopt_many(SOURCE, GEN, items[:1], workers=1)
+    # an integrity failure is never retried
+    reads.clear()
+    with pytest.raises(IntegrityError):
+        vault.adopt_many(SOURCE, GEN, items[:1], workers=1)
+    assert len(reads) == 1
 
 
 def test_a_leftover_adoption_with_the_same_bytes_as_a_new_fetch_is_dropped(

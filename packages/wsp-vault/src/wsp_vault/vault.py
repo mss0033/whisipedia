@@ -134,6 +134,9 @@ _MANIFEST_CACHE_BYTES = 64 * 1024 * 1024  # of manifest JSON; the whole vault ho
 _GENERATION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _PIN_SAMPLES = 5  # manifests tried when keys/ is empty
 
+# One adopt_many file: (relpath, digests, upstream) to record, or None when it was recorded before.
+type _Adopted = tuple[str, Digests, Sequence[Checksum]] | None
+
 
 def _same_bytes(a: Path, b: Path, pace: Callable[[int], None] | None) -> bool:
     """Whether two files hold the same bytes (size, then SHA-256)."""
@@ -520,11 +523,15 @@ class FileVault:
         relpath: str,
         upstream: Sequence[Checksum],
         expected: Digests | None,
+        records: Mapping[str, ManifestEntry] | None = None,
     ) -> ManifestEntry | None:
         """The staging record's entry for ``relpath`` when an earlier run adopted and verified it and
         nothing has happened since: no incoming copy, no adoption half done, the staged file still its
         recorded size, and every checksum asked for now either verified against those bytes then or
         the recorded SHA-256/BLAKE3. Anything else is ``None``, and the file is read back as before.
+
+        ``records``: the staging record read once by the caller (:meth:`adopt_many`; re-reading
+        megabytes of it per file would be quadratic), else it is read here.
 
         A resumed ingest read every file it had adopted back over the NAS before going on:
         Chronicling America's 478 files (~200 s each) never got past the 17th in its hour, 21 times
@@ -533,7 +540,9 @@ class FileVault:
         dest = staging / check_relpath(relpath)
         if path.exists() or dest.with_name(dest.name + ADOPTING_SUFFIX).exists():
             return None
-        entry = _read_staging(staging).get(dest.relative_to(staging).as_posix())
+        if records is None:
+            records = _read_staging(staging)
+        entry = records.get(dest.relative_to(staging).as_posix())
         try:
             if entry is None or dest.stat().st_size != entry.size:
                 return None
@@ -664,11 +673,20 @@ class FileVault:
         file, which is quadratic), with one ``vault.adopt_batch`` ledger event per flush. Each flush
         re-reads the record under its lock and merges, so concurrent ingests are never lost. A crash
         between a publish and the next flush is recovered on re-run: the staged file is re-hashed.
-        Returns the number of files adopted. Stops at the first failing file (already adopted
-        files stay recorded).
+        A file recorded by an earlier run and unchanged since is not read again (as in :meth:`adopt`,
+        :meth:`_adopted_before`, checked against the record as it was when this call began), and a
+        moment's refusal by the share (EAGAIN, ECONNABORTED) is tried again per file under the
+        vault's retry policy (the adoption resumes from any step). Neither had been ported from
+        :meth:`adopt`: a resumed arXiv chunk read every PDF it had adopted back over the NAS before
+        adopting a new one, and one refusal among thousands of files failed the chunk (2026-11-04
+        trawl). Returns the number of files in ``items`` that are now staged and recorded, those
+        recorded before included. Stops at the first failing file (already adopted files stay
+        recorded).
         """
         with self._locks.generation(source_id, generation_id, exclusive=False):
             staging = self.stage(source_id, generation_id)
+            with self._locks.record(source_id, generation_id):
+                recorded = _read_staging(staging)
             pending: list[tuple[str, Digests, Sequence[Checksum]]] = []
             count = 0
 
@@ -687,29 +705,34 @@ class FileVault:
                 )
                 pending.clear()
 
-            def one(item: tuple[Path, str, Sequence[Checksum]]) -> tuple[str, Digests, Sequence[Checksum]]:
+            def one(item: tuple[Path, str, Sequence[Checksum]]) -> _Adopted:
                 path, relpath, upstream = item
-                rel, digests, _ = self._adopt_file(staging, path, relpath, upstream)
+                if self._adopted_before(staging, path, relpath, upstream, None, recorded) is not None:
+                    return None
+                rel, digests, _ = self._retry.run(lambda: self._adopt_file(staging, path, relpath, upstream))
                 return rel, digests, upstream
 
+            def take(done: _Adopted) -> None:
+                nonlocal count
+                count += 1
+                if done is not None:
+                    pending.append(done)
+
             with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
-                window: deque[Future[tuple[str, Digests, Sequence[Checksum]]]] = deque()
+                window: deque[Future[_Adopted]] = deque()
                 try:
                     for item in items:
                         window.append(pool.submit(one, item))
                         if len(window) >= 2 * max(1, workers):
-                            pending.append(window.popleft().result())
-                            count += 1
+                            take(window.popleft().result())
                             if len(pending) >= flush_every:
                                 flush()
                     while window:
-                        pending.append(window.popleft().result())
-                        count += 1
+                        take(window.popleft().result())
                 finally:
                     for fut in window:  # record whatever finished before a failure
                         if not fut.cancel() and fut.exception() is None:
-                            pending.append(fut.result())
-                            count += 1
+                            take(fut.result())
                     flush()
             return count
 
@@ -971,9 +994,16 @@ class FileVault:
             previous = self._read_current(source_id)
             data: dict[str, object] = {"previous": previous}
             partition = partition_of(generation_id) if self.is_partitioned(source_id) else None
+            leaving = [previous]
             if partition is not None:
                 pointers = self._read_pointers(source_id)
                 data.update(partition=partition, previous_in_partition=pointers.get(partition))
+                leaving.append(pointers.get(partition))
+            # What stops being current now is in the history first: its own line may have been lost
+            # to a refusal after its pointer moved (see below), and once it is no longer current
+            # nothing else would name it (2026-11-04 trawl).
+            self._record_promoted(source_id, [g for g in leaving if g is not None and g != generation_id])
+            if partition is not None:
                 (self.source_dir(source_id) / PARTITIONS_DIR).mkdir(exist_ok=True)
                 atomic_write_bytes(
                     self.source_dir(source_id) / PARTITIONS_DIR / f"{partition}.txt",
@@ -987,10 +1017,38 @@ class FileVault:
                 overwrite=True,
                 retry=self._retry,
             )
-            with (self.source_dir(source_id) / PROMOTED_NAME).open("a", encoding="utf-8") as fh:
-                fh.write(f"{generation_id}\n")
+            self._record_promoted(source_id, [generation_id])
             self._log("vault.promote", f"{source_id}/{generation_id}", data)
         return True
+
+    def _record_promoted(self, source_id: str, generation_ids: Sequence[str]) -> None:
+        """Append to :data:`PROMOTED_NAME` those of ``generation_ids`` it does not list yet, under the
+        vault's retry policy. Idempotent: a retry after a partial append neither repeats a line nor
+        runs two together (a missing final newline is written first). The caller holds the source lock.
+
+        The append after the pointer write was a bare ``open("a")``: one refusal by the share after
+        ``CURRENT`` had moved lost the line and the ``vault.promote`` event for good (the retried
+        step found the generation current and skipped the promotion), and once a newer generation
+        was promoted, :meth:`promoted_before` no longer named it, so a repair could not roll back to
+        it (2026-11-04 trawl)."""
+        if not generation_ids:
+            return
+        path = self.source_dir(source_id) / PROMOTED_NAME
+
+        def attempt() -> None:
+            try:
+                text = path.read_text(encoding="utf-8")
+            except FileNotFoundError:
+                text = ""
+            listed = {line.strip() for line in text.splitlines()}
+            missing = [g for g in dict.fromkeys(generation_ids) if g not in listed]
+            if not missing:
+                return
+            lead = "\n" if text and not text.endswith("\n") else ""
+            with path.open("a", encoding="utf-8") as fh:
+                fh.write(lead + "".join(f"{g}\n" for g in missing))
+
+        self._retry.run(attempt)
 
     def promoted_before(self, source_id: str) -> set[str]:
         """Generations of ``source_id`` that were current at some time: :data:`PROMOTED_NAME`, the
