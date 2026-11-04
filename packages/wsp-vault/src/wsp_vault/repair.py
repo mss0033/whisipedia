@@ -411,7 +411,8 @@ class RepairLadder:
         generations of the same partition, sealed before it, newest first (ordered by the manifest's
         ``sealed_at``, not by id: ``2026-10-11.ca`` sorts before ``2026-10.ca``). Each candidate is
         verified in full (fresh signature check, every data file re-hashed) before it is promoted; an
-        I/O error stops the rollback (nothing is promoted on unread bytes).
+        I/O error stops the rollback (nothing is promoted on unread bytes). So does one the promotion
+        meets, and the target is returned when the pointer had moved before it.
         """
         subject = f"{source_id}/{generation_id}"
         try:
@@ -460,6 +461,22 @@ class RepairLadder:
                     "repair.rollback_skipped", subject, {"candidate": gen.generation_id, "reason": str(exc)}
                 )
                 continue
+            except OSError as exc:
+                # The share refused past the retries: before the pointer moved (the history line of
+                # the generation leaving) or after (its own line). Escaping here skipped the
+                # repair.degraded event, so a rollback that happened went unrecorded (2026-11-04
+                # trawl). Where the pointer is now says which; a lost history line is backfilled
+                # at the next promotion.
+                try:
+                    moved = gen.generation_id in self._vault.current_set_ids(source_id)
+                except (OSError, VaultError):
+                    moved = False
+                if moved:
+                    return gen.generation_id
+                self._ledger.append(
+                    "repair.rollback_deferred", subject, {"candidate": gen.generation_id, "reason": str(exc)}
+                )
+                return None
             return gen.generation_id
         return None
 

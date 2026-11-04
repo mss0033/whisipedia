@@ -1,16 +1,19 @@
+import errno
 import shutil
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 from vaultkit import FILES, GEN, SOURCE, Clock, FakeParity, SealFn, corrupt
 
 from wsp_core.model import GenerationStatus
 from wsp_core.ports import ParityProvider
+from wsp_vault.atomic import RetryPolicy
 from wsp_vault.ledger import JsonlLedger
 from wsp_vault.repair import RefetchRequest, RepairLadder, Rung
 from wsp_vault.scrub import Scrubber
-from wsp_vault.vault import FileVault
+from wsp_vault.vault import PROMOTED_NAME, FileVault
 
 TARGET = "upstream/beta.txt"
 
@@ -105,6 +108,52 @@ def test_degraded_rolls_back_current(
     assert (lib / TARGET).exists()  # damaged bytes are kept, never deleted
     assert kinds(ledger)[-1] == "repair.degraded"
     assert ledger.verify()
+
+
+@pytest.mark.parametrize(
+    ("unlisted", "rolled_back_to", "current"),
+    [
+        (GEN, None, GEN),  # the leaving generation's line fails: the pointer never moved
+        ("2026-09-01", "2026-09-01", "2026-09-01"),  # the target's own line fails: it did
+    ],
+)
+def test_a_refused_history_append_in_a_rollback_still_logs_degraded(
+    vault: FileVault,
+    seal: SealFn,
+    ledger: JsonlLedger,
+    clock: Clock,
+    monkeypatch: pytest.MonkeyPatch,
+    unlisted: str,
+    rolled_back_to: str | None,
+    current: str,
+) -> None:
+    """2026-11-04 trawl: an OSError from the rollback's promotion (PROMOTED.txt refused past the
+    retries) escaped _roll_back, so the generation was DEGRADED on disk with no repair.degraded
+    event, and a rollback that had moved CURRENT went unrecorded."""
+    seal("2026-09-01")
+    clock.advance(hours=1)
+    lib = seal(GEN)
+    history = vault.source_dir(SOURCE) / PROMOTED_NAME
+    # A line lost earlier (still named by the ledger's vault.promote event): promote() appends it.
+    history.write_text("".join(f"{g}\n" for g in ("2026-09-01", GEN) if g != unlisted))
+    monkeypatch.setattr(vault, "_retry", RetryPolicy(attempts=3, base_delay=0.0, sleep=lambda _s: None))
+    real_open = Path.open
+
+    def refusing(self: Path, mode: str = "r", *args: Any, **kwargs: Any) -> Any:
+        if self.name == PROMOTED_NAME and "a" in mode:
+            raise OSError(errno.ECONNABORTED, "Software caused connection abort")
+        return real_open(self, mode, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", refusing)
+    corrupt(lib / TARGET)
+    result = RepairLadder(vault, ledger).repair(SOURCE, GEN, [TARGET])
+    assert result.degraded
+    assert result.rolled_back_to == rolled_back_to
+    assert vault.current_set_ids(SOURCE) == [current]
+    events = [e for e in ledger.events() if e.kind.startswith("repair.")]
+    assert events[-1].kind == "repair.degraded"
+    assert events[-1].data["rolled_back_to"] == rolled_back_to
+    assert ("repair.rollback_deferred" in kinds(ledger)) is (rolled_back_to is None)
 
 
 def test_bad_signature_restored_from_mirror_only(
