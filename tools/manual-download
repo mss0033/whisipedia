@@ -23,7 +23,8 @@ matches the host's Content-Length it is renamed to NAME and the next run of the 
 The validator is kept beside it as the hidden ``.NAME.validator``: a ``.part`` from a run before the
 host's file changed is begun again, never continued. ``--adopt`` continues from a partial file another
 program left (a browser's ``.part``): it is renamed to ``NAME.part`` first (stop that program's download
-first); its version cannot be known, so the size and the archive's own check at import are its guard.
+first); its version cannot be known, so the size and the archive's own check at import are its guard,
+and a ``.NAME.validator`` an earlier run left is dropped, never used to delete it.
 If the host answers its first request with the whole file, the adopted bytes are left as they are and
 the tool stops: the owner decides (delete ``NAME.part`` to begin again).
 Stop it with Ctrl+C; run it again to go on where it stopped.
@@ -179,6 +180,8 @@ def main(argv: list[str] | None = None) -> int:
         if part.exists():
             ap.error(f"{part} exists already; --adopt would replace it")
         args.adopt.rename(part)
+        # Its version is unknown: a validator an earlier run left is not its, and would delete it at HEAD.
+        kept.unlink(missing_ok=True)
         say(f"continuing from {args.adopt.name} ({gb(part.stat().st_size)})")
     wait, tries = WAIT_MIN_S, 0
     size: int | None = None
@@ -191,7 +194,9 @@ def main(argv: list[str] | None = None) -> int:
                 size, validator, if_range = head(args.url)
                 say(f"{name}: {gb(size)} at {args.url}")
                 old = kept.read_text().strip() if kept.exists() else None
-                if part.exists() and validator and old is not None and old != validator:
+                # Never an adopted partial (2026-11-04 trawl review): it is the owner's, and no earlier
+                # run's validator speaks for it; the host's own answer to the resume guards it instead.
+                if not adopted and part.exists() and validator and old is not None and old != validator:
                     say(f"the host's file changed since {part.name} was begun: starting over")
                     part.unlink()
                 if validator:

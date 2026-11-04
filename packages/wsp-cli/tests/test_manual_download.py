@@ -169,6 +169,20 @@ def test_an_adopted_partial_is_never_overwritten_by_a_whole_file(server: str, tm
     assert not (tmp_path / "cod-cifs-mysql.tgz").exists()
 
 
+def test_an_adopted_partial_survives_a_validator_an_earlier_run_left(server: str, tmp_path: Path) -> None:
+    """2026-11-04 trawl review: a stale ``.NAME.validator`` (the owner deleted only NAME.part, as told)
+    differed from HEAD's, and the adopted partial was deleted without a word."""
+    (tmp_path / ".cod-cifs-mysql.tgz.validator").write_text('"v0"\n')  # an older version of the file
+    firefox = tmp_path / "cod-cifs-mysql.Fgs3pWR3.tgz.part"
+    firefox.write_bytes(BODY[:500_000])
+    Flaky.cut = 10_000_000
+    done = run(server, str(tmp_path), "--adopt", str(firefox))
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert Flaky.gets == ["bytes=500000-"]  # continued from the adopted bytes, not begun again
+    assert (tmp_path / "cod-cifs-mysql.tgz").read_bytes() == BODY
+    assert not (tmp_path / ".cod-cifs-mysql.tgz.validator").exists()
+
+
 def test_a_refusal_stops_at_once(server: str, tmp_path: Path) -> None:
     """A 403 was retried for ever (WSP_DL_TRIES=0 by default); nothing a retry can change."""
     Flaky.refuse = 403
