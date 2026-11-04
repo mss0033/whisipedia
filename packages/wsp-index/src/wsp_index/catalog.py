@@ -56,7 +56,14 @@ from wsp_core.ids import DocId
 from wsp_core.model import Category, ChangeRecord, DayEvent, SourceSpec
 from wsp_core.ports import ChangeFeed
 from wsp_index.linkrank import StaticRank
-from wsp_index.refinery import RefineryReader, current_generation, generation_dir, id_map_dir, is_sealed
+from wsp_index.refinery import (
+    RefineryReader,
+    current_generation,
+    generation_dir,
+    id_map_dir,
+    is_sealed,
+    read_parquet,
+)
 from wsp_index.text import primary_lang
 
 pc = cast(Any, _pc)  # pyarrow-stubs type compute kernels too narrowly for column arrays
@@ -428,11 +435,18 @@ def _inlink_ranking(reader: RefineryReader, source_id: str, max_docs: int) -> li
             acc = agg.rename_columns(["v", "c"])
         pending, pending_rows = [], 0
 
-    open_part: tuple[int, pq.ParquetFile] | None = None
+    open_part: tuple[int, pq.ParquetFile | None] = (-1, None)
     for part, rg in _spread_row_groups(reader, max_docs):
-        if open_part is None or open_part[0] != part:
-            open_part = (part, pq.ParquetFile(reader.parts[part]))
-        col = open_part[1].read_row_group(rg, columns=["links"]).column(0)  # pyright: ignore[reportUnknownMemberType]
+        if open_part[0] != part:
+            open_part = (part, None)
+        # Opened and read again when the share refuses for a moment (2026-11-04 trawl).
+        pf, table = read_parquet(
+            reader.parts[part],
+            lambda f, rg=rg: f.read_row_group(rg, columns=["links"]),  # pyright: ignore[reportUnknownMemberType, reportUnknownLambdaType]
+            open_part[1],
+        )
+        open_part = (part, pf)
+        col = table.column(0)
         flat = pc.list_flatten(col)
         flat = flat.filter(pc.starts_with(flat, prefix))
         if len(flat):

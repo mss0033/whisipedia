@@ -80,6 +80,51 @@ def test_a_document_in_two_members_keeps_the_later_member(tmp_path: Path) -> Non
     assert sorted(r.text for r in reader.records()) == ["Y text", "new"], "the shadowed row is skipped"
 
 
+def test_a_copy_the_share_refuses_for_a_moment_is_made_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-11-04 trawl: on the NAS a set copies its members' parts with no retry, so one refused copy
+    left the set unsealed and the next compose copied every part again."""
+    import shutil
+    import time
+
+    from wsp_core import nasretry
+    from wsp_index import refinery
+
+    def no_wait(_s: float) -> None:
+        return None
+
+    monkeypatch.setattr(time, "sleep", no_wait)
+    monkeypatch.setattr(nasretry.retrying, "__kwdefaults__", {"sleep": no_wait})
+    ak = write_part(
+        tmp_path, "2026-10-01.ak", [doc("src", "a1", "A1"), doc("src", "a2", "A2")], docs_per_file=1
+    )
+    ca = write_part(tmp_path, "2026-10-02.ca", [doc("src", "c1", "C1")])
+
+    def on_nas(_path: Path) -> bool:
+        return True
+
+    real_copy = shutil.copyfile
+    refused: list[str] = []
+
+    def flaky_copy(src: Path, dst: Path) -> Path:
+        if dst.name not in refused:
+            refused.append(dst.name)
+            real_copy(src, dst)
+            with open(dst, "r+b") as fh:
+                fh.truncate(10)  # torn mid-write
+            raise BlockingIOError(11, "Resource temporarily unavailable")
+        return real_copy(src, dst)
+
+    monkeypatch.setattr(refinery, "_on_network_mount", on_nas)
+    monkeypatch.setattr(shutil, "copyfile", flaky_copy)
+    set_id = compose_set(tmp_path, "src", [ak, ca])
+    assert len(refused) == 3
+    reader = RefineryReader(generation_dir(tmp_path, "src", set_id))
+    assert {r.native_id for r in reader.records()} == {"a1", "a2", "c1"}
+    assert not list(reader.dir.glob("*.partial"))
+
+
 def test_members_must_be_sealed(tmp_path: Path) -> None:
     unsealed = part_dir(tmp_path, "src", "2026-10-01.ak")
     unsealed.mkdir(parents=True)

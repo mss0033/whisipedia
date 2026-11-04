@@ -70,7 +70,7 @@ import pyarrow as pa
 import pyarrow.compute as _pc
 import pyarrow.parquet as pq
 
-from wsp_index.refinery import RefineryReader
+from wsp_index.refinery import RefineryReader, read_parquet
 from wsp_index.text import language_row_groups, primary_lang
 
 SPELL_FILE = "spelling.bin"
@@ -299,13 +299,18 @@ def sample_language(
         return
     share = min(1.0, max_docs / total)
     chosen = [groups[i] for i in _even(len(groups), max(1, math.ceil(len(groups) * share)))]
-    files: dict[int, pq.ParquetFile] = {}
+    # chosen is in part order: one file open at a time
+    open_part: tuple[int, pq.ParquetFile | None] = (-1, None)
     for part, rg, _ in chosen:
-        pf = files.get(part)
-        if pf is None:
-            files.clear()  # chosen is in part order: one file open at a time
-            pf = files[part] = pq.ParquetFile(reader.dir / f"part-{part:05d}.parquet")
-        table = pf.read_row_group(rg, columns=[*columns, "lang"])  # pyright: ignore[reportUnknownMemberType]
+        if open_part[0] != part:
+            open_part = (part, None)
+        # Opened and read again when the share refuses for a moment (2026-11-04 trawl).
+        pf, table = read_parquet(
+            reader.dir / f"part-{part:05d}.parquet",
+            lambda f, rg=rg: f.read_row_group(rg, columns=[*columns, "lang"]),  # pyright: ignore[reportUnknownMemberType, reportUnknownLambdaType]
+            open_part[1],
+        )
+        open_part = (part, pf)
         yield table.filter(pc.equal(table.column("lang"), lang)).select(list(columns))
 
 

@@ -6,6 +6,9 @@ from __future__ import annotations
 import json
 from datetime import date
 from pathlib import Path
+from typing import Any
+
+import pytest
 
 from wsp_index import RefineryReader, RefineryWriter, SqliteChangeFeed
 from wsp_index.catalog import CatalogConfig, RefineryCatalog, build_source_catalog, initial_of
@@ -110,3 +113,36 @@ def test_inlinks_are_counted_across_all_parts(tmp_path: Path) -> None:
     cfg = CatalogConfig(featured=True, featured_candidates=1, min_featured_chars=100, max_link_docs=60)
     path = build_source_catalog(refinery, "w-x", "g1", tmp_path / "catalog", cfg)
     assert json.loads(path.read_text())["featured"] == ["wsp:w-x/Late"]
+
+
+def test_inlinks_are_counted_when_the_share_refuses_a_read_for_a_moment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-11-04 trawl: a refused read of one sampled row group on the NAS ended the catalog build."""
+    import time
+
+    import pyarrow.parquet as pq
+
+    from wsp_index.catalog import _inlink_ranking  # pyright: ignore[reportPrivateUsage]
+
+    pages = [doc("w-x", f"A{i:03d}", f"A{i}", "text", links=("wsp:w-x/Hub",)) for i in range(30)]
+    refinery = tmp_path / "refinery"
+    with RefineryWriter(refinery, "w-x", "g1", docs_per_file=10, row_group_rows=5) as w:
+        w.write(pages)
+    reader = RefineryReader(generation_dir(refinery, "w-x", "g1"))
+    real = pq.ParquetFile.read_row_group  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    calls: list[int] = []
+
+    def every_other_refused(self: pq.ParquetFile, i: int, *args: Any, **kwargs: Any) -> Any:
+        calls.append(i)
+        if len(calls) % 2:
+            raise BlockingIOError(11, "Resource temporarily unavailable")
+        return real(self, i, *args, **kwargs)
+
+    def no_wait(_s: float) -> None:
+        return None
+
+    monkeypatch.setattr(time, "sleep", no_wait)
+    monkeypatch.setattr(pq.ParquetFile, "read_row_group", every_other_refused)
+    assert _inlink_ranking(reader, "w-x", 1000) == [("wsp:w-x/Hub", 30)]
+    assert len(calls) == 12  # six row groups, each refused once

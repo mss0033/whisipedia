@@ -1055,11 +1055,32 @@ class TantivyIndex:
                     return first, len(first), False
                 # ``first`` holds every every-word match; the documents matching some words follow.
                 rest = self._top(searcher, anyq, n, sources, per_source=per_source)
-                lead = {(a.segment_ord, a.doc) for _, a in first}  # DocAddress is not hashable
-                tail = [(sc, a) for sc, a in rest if (a.segment_ord, a.doc) not in lead][: n - len(first)]
+                # Each document once, by its ``doc_key``: the two lists were folded to one passage per
+                # document each, so a long document could lead at the passage holding every word and
+                # follow again at another (a duplicate in the window, its fused score counted twice;
+                # 2026-11-04 trawl). Both lists are distinct documents, so at most ``len(first)`` of
+                # ``rest`` are dropped and the tail still fills the window.
+                lead = set(self._doc_marks(searcher, first))
+                tail = [
+                    hit
+                    for hit, mark in zip(rest, self._doc_marks(searcher, rest), strict=True)
+                    if mark not in lead
+                ][: n - len(first)]
                 return [*first, *tail], len(first), len(rest) < n
         hits = self._top(searcher, anyq, n, sources, per_source=per_source)
         return hits, 0, len(hits) < n
+
+    @staticmethod
+    def _doc_marks(
+        searcher: tantivy.Searcher, hits: Sequence[tuple[float, tantivy.DocAddress]]
+    ) -> list[int | tuple[int, int]]:
+        """Each hit's document: its ``doc_key`` (shared by its passages), or its address when it has none
+        (``DocAddress`` is not hashable)."""
+        keys = searcher.fast_field_values("doc_key", [a for _, a in hits]) if hits else []
+        return [
+            int(key) if key is not None else (a.segment_ord, a.doc)
+            for (_, a), key in zip(hits, keys, strict=True)
+        ]
 
     @staticmethod
     def _fold_passages(

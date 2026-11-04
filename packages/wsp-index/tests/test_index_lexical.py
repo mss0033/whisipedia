@@ -665,6 +665,29 @@ def test_a_long_document_is_found_by_a_passage_deep_inside_and_listed_once(tmp_p
     idx.close()
 
 
+def test_a_long_document_matching_both_tiers_through_different_passages_is_listed_once(
+    tmp_path: Path,
+) -> None:
+    """2026-11-04 trawl: every word in one passage, one word dense in another; the every-word lead and the
+    any-word tail each kept the document at its own passage, so it filled two places of the window."""
+    from wsp_index.lexical import MIN_TIER_HITS
+
+    idx = TantivyIndex(tmp_path / "lex", config=TantivyConfig(passage_min_chars=6_000, passage_chars=2_000))
+    filler = "The keeper walks the long path past the pens every morning.\n" * 60  # ~3.6k chars
+    long_text = "A quokka met a zebra once.\n" + filler + "zebra " * 40 + "\n" + filler
+    long = DocRecord(make_doc_id("zoo", "long"), "zoo", "long", "Keeper's Handbook", "en", "PD", long_text)
+    both = [doc("zoo", f"b{i}", f"Pen {i}", "a quokka and a zebra") for i in range(MIN_TIER_HITS + 5)]
+    some = [doc("zoo", f"q{i}", f"Note {i}", "a quokka alone") for i in range(30)]
+    idx.upsert([long, *both, *some])
+    idx.commit()
+    limit = 50
+    assert MIN_TIER_HITS <= len(both) + 1 < limit  # the every-word lead is followed by the any-word tail
+    got = [h.doc_id for h in idx.search_hits("quokka zebra", limit=limit)]
+    assert got.count(long.doc_id) == 1
+    assert len(got) == len(set(got)) == limit  # the place the copy took goes to the next document
+    idx.close()
+
+
 def test_words_standing_together_outrank_the_same_words_apart(tmp_path: Path) -> None:
     # 2026-10-16 field exam: "running fix" put "Fix: makecab.exe runs ..." above Bowditch's chapter.
     apart = doc("s", "apart", "Makecab notes", "The installer runs slowly at startup. A fix exists. " * 3)

@@ -39,7 +39,7 @@ import re
 import threading
 import time
 from collections import Counter, OrderedDict
-from collections.abc import Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -74,6 +74,31 @@ def open_parquet(path: Path | str) -> pq.ParquetFile:
                 raise
             log.warning("%s: %s; opening again (%d of %d)", path, exc, attempt + 1, OPEN_TRIES)
             time.sleep(2.0**attempt)
+    raise AssertionError("unreachable")
+
+
+def read_parquet[T](
+    path: Path | str, read: Callable[[pq.ParquetFile], T], pf: pq.ParquetFile | None = None
+) -> tuple[pq.ParquetFile, T]:
+    """``read(pf)`` on ``path`` (opened here unless ``pf`` is given), with the file opened again and the
+    same read started again after 2, 4, 8, 16 s when the share refuses it for a moment; returns the file
+    the read succeeded on, for the next read.
+
+    Only the open was retried, so a refused read mid-scan still ended a whole-Refinery phase (rank,
+    spell, suggest) hours in (2026-11-04 trawl). ``read`` must be one whole, repeatable read (a row
+    group, a part): nothing of a refused attempt is handed on, so no row is ever passed on twice. The
+    old handle is dropped after a refusal; the open and the read share one budget of tries."""
+    for attempt in range(1, OPEN_TRIES + 1):
+        try:
+            if pf is None:
+                pf = pq.ParquetFile(path)
+            return pf, read(pf)
+        except _SHARE_TRANSIENT as exc:
+            if attempt == OPEN_TRIES:
+                raise
+            log.warning("%s: %s; reading again (%d of %d)", path, exc, attempt + 1, OPEN_TRIES)
+            time.sleep(2.0**attempt)
+            pf = None
     raise AssertionError("unreachable")
 
 
@@ -399,7 +424,7 @@ class RefineryWriter:
         self._idx_loc.append(loc)
         retrying(f"publish {name}", lambda: _atomic_replace(partial, final))
         drop_file_cache(final)  # written once, read later: its pages are cache charged to the job
-        self._bytes += final.stat().st_size
+        self._bytes += retrying(f"size {name}", lambda: final.stat().st_size)
         self._docs += len(self._buf)
         self._parts += 1
         self._buf.clear()
@@ -437,19 +462,32 @@ def _write_ids(directory: Path, h: npt.NDArray[np.uint64], loc: npt.NDArray[np.u
         schema=_IDS_SCHEMA,
     )
     partial = directory / (IDS_FILE + ".partial")
-    pq.write_table(ids, partial, compression="zstd", row_group_size=1 << 20)  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
-    _atomic_replace(partial, directory / IDS_FILE)
+
+    def write() -> None:
+        pq.write_table(ids, partial, compression="zstd", row_group_size=1 << 20)  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
+        _atomic_replace(partial, directory / IDS_FILE)
+
+    retrying(f"write {IDS_FILE}", write)
 
 
 def _write_success(directory: Path, success: Mapping[str, object]) -> None:
     """Seal ``directory``. The seal names when it was written: a generation refined again with the same
     documents in the same number of parts wrote the very same seal, so :func:`id_map_dir` kept the old
     id map and lookups read row groups that no longer existed (LibreTexts, 2026-10-18: "row_group_indices
-    is 30 ... num_row_groups(23)", searches failed)."""
+    is 30 ... num_row_groups(23)", searches failed).
+
+    Like every write at the seal (the id index, the shadow list), written whole and published again when
+    the share refuses it for a moment: one refusal here left a whole refine unsealed, and the next run
+    deleted every part and refined from the first document (2026-11-04 trawl). A retry rewrites the
+    ``.partial`` too, which a refused write may have torn or a refused directory fsync already renamed."""
     partial = directory / (SUCCESS_FILE + ".partial")
     sealed = {**success, "written": datetime.now(UTC).isoformat(timespec="microseconds")}
-    partial.write_text(json.dumps(sealed, sort_keys=True) + "\n", encoding="utf-8")
-    _atomic_replace(partial, directory / SUCCESS_FILE)
+
+    def write() -> None:
+        partial.write_text(json.dumps(sealed, sort_keys=True) + "\n", encoding="utf-8")
+        _atomic_replace(partial, directory / SUCCESS_FILE)
+
+    retrying(f"write {SUCCESS_FILE}", write)
 
 
 def _write_shadow(directory: Path, shadow: npt.NDArray[np.uint32]) -> None:
@@ -458,8 +496,12 @@ def _write_shadow(directory: Path, shadow: npt.NDArray[np.uint32]) -> None:
         names=["part", "rg", "row"],
     )
     partial = directory / (SHADOW_FILE + ".partial")
-    pq.write_table(table, partial)  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
-    _atomic_replace(partial, directory / SHADOW_FILE)
+
+    def write() -> None:
+        pq.write_table(table, partial)  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
+        _atomic_replace(partial, directory / SHADOW_FILE)
+
+    retrying(f"write {SHADOW_FILE}", write)
 
 
 def _duplicates_mask(
@@ -485,9 +527,11 @@ def _duplicates_mask(
     for i in rows_needed.tolist():
         by_part.setdefault(int(loc[i, 0]), {}).setdefault(int(loc[i, 1]), []).append(i)
     for part, groups_of_part in sorted(by_part.items()):
-        pf = open_parquet(directory / f"part-{part:05d}.parquet")
+        path = directory / f"part-{part:05d}.parquet"
+        pf: pq.ParquetFile | None = None
         for rg, members in sorted(groups_of_part.items()):
-            column = pf.read_row_group(rg, columns=["doc_id"]).column(0)  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
+            pf, table = read_parquet(path, lambda f, rg=rg: f.read_row_group(rg, columns=["doc_id"]), pf)  # pyright: ignore[reportUnknownMemberType, reportUnknownLambdaType]  # pyarrow-stubs leave some parameter types unknown
+            column = table.column(0)
             for i in members:
                 ids[i] = cast(str, column[int(loc[i, 2])].as_py())
 
@@ -538,8 +582,12 @@ def _link_or_copy(src: Path, dst: Path) -> None:
     import shutil
 
     partial = dst.with_name(dst.name + ".partial")
-    shutil.copyfile(src, partial)
-    _atomic_replace(partial, dst)
+
+    def copy() -> None:  # the whole copy again: a refused write may have torn the .partial (2026-11-04 trawl)
+        shutil.copyfile(src, partial)
+        _atomic_replace(partial, dst)
+
+    retrying(f"copy {dst.name}", copy)
 
 
 def _on_network_mount(path: Path) -> bool:
@@ -596,7 +644,7 @@ def compose_set(root: Path, source_id: str, members: Sequence[Path]) -> str:
         n_parts = int(meta["parts"])
         for i in range(n_parts):
             _link_or_copy(m / f"part-{i:05d}.parquet", out / f"part-{offset + i:05d}.parquet")
-        ids = pq.read_table(m / IDS_FILE)  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
+        _, ids = read_parquet(m / IDS_FILE, lambda f: f.read())  # pyright: ignore[reportUnknownMemberType, reportUnknownLambdaType]  # pyarrow-stubs leave some parameter types unknown
         loc = np.empty((ids.num_rows, 3), dtype=np.uint32)
         loc[:, 0] = ids.column("part").to_numpy().astype(np.uint32) + offset
         loc[:, 1] = ids.column("rg").to_numpy()
@@ -604,7 +652,7 @@ def compose_set(root: Path, source_id: str, members: Sequence[Path]) -> str:
         hs.append(ids.column("h").to_numpy().astype(np.uint64))
         locs.append(loc)
         if (m / SHADOW_FILE).is_file():
-            sh = pq.read_table(m / SHADOW_FILE)  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
+            _, sh = read_parquet(m / SHADOW_FILE, lambda f: f.read())  # pyright: ignore[reportUnknownMemberType, reportUnknownLambdaType]  # pyarrow-stubs leave some parameter types unknown
             rows = np.empty((sh.num_rows, 3), dtype=np.uint32)
             rows[:, 0] = sh.column("part").to_numpy().astype(np.uint32) + offset
             rows[:, 1] = sh.column("rg").to_numpy()
@@ -685,6 +733,7 @@ def ensure_id_map(gen_dir: Path, map_dir: Path) -> bool:
     return True
 
 
+SCAN_RUN_BYTES = 64 << 20  # uncompressed bytes of the scanned columns read (and combined) at once
 ID_ROW_GROUPS_CACHED = 2
 
 
@@ -1008,8 +1057,10 @@ class RefineryReader:
 
     def part_table(self, part: int, columns: Sequence[str]) -> tuple[pa.Table, npt.NDArray[np.int64]]:
         """Live rows of one part (``columns`` only) and each row's position within the part file."""
-        pf = open_parquet(self.dir / f"part-{part:05d}.parquet")
-        table = pf.read(columns=self._present(pf, columns))  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
+        pf, table = read_parquet(
+            self.dir / f"part-{part:05d}.parquet",
+            lambda f: f.read(columns=self._present(f, columns)),  # pyright: ignore[reportUnknownMemberType, reportUnknownLambdaType]  # pyarrow-stubs leave some parameter types unknown
+        )
         live = self._live(part, pf)
         if live is None:
             return table, np.arange(table.num_rows, dtype=np.int64)
@@ -1024,7 +1075,11 @@ class RefineryReader:
         sizes = np.array([meta.row_group(i).num_rows for i in range(meta.num_row_groups)], dtype=np.int64)
         ends = np.cumsum(sizes)
         rgs = np.unique(np.searchsorted(ends, positions, side="right"))
-        table = pf.read_row_groups([int(r) for r in rgs], columns=self._present(pf, columns))  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
+        _, table = read_parquet(
+            self.dir / f"part-{part:05d}.parquet",
+            lambda f: f.read_row_groups([int(r) for r in rgs], columns=self._present(f, columns)),  # pyright: ignore[reportUnknownMemberType, reportUnknownLambdaType]  # pyarrow-stubs leave some parameter types unknown
+            pf,
+        )
         # Position in the concatenation of the chosen row groups.
         starts = ends - sizes
         local_start = np.concatenate(([0], np.cumsum(sizes[rgs])[:-1]))
@@ -1047,18 +1102,44 @@ class RefineryReader:
     def _scan_part(
         self, part: int, path: Path, columns: Sequence[str], batch_size: int
     ) -> Iterator[pa.RecordBatch]:
-        pf = open_parquet(path)
+        """The part's live rows, read a run of row groups (about ``batch_size`` rows) at a time.
+
+        Not ``iter_batches``: a read the share refused halfway through it could not be started again
+        without passing on rows already yielded, and one refused read ended a whole-Refinery scan
+        (rank, spell, suggest) hours in (2026-11-04 trawl). Each run is read whole, again on a refusal
+        (:func:`read_parquet`), and only then yielded. A run also stops at :data:`SCAN_RUN_BYTES` of the
+        columns read: 4,096 books are gigabytes of text, past a string column's 2 GB."""
+        pf: pq.ParquetFile | None = open_parquet(path)
         present = self._present(pf, columns)
         live = self._live(part, pf)
-        if live is None:
-            yield from pf.iter_batches(batch_size=batch_size, columns=present)  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
-            return
-        offset = 0
-        for rg in range(pf.num_row_groups):
-            table = pf.read_row_group(rg, columns=present)  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
-            mask = live[offset : offset + table.num_rows]
-            offset += table.num_rows
-            yield from table.filter(pa.array(mask)).to_batches(max_chunksize=batch_size)
+        meta = pf.metadata
+        wanted = set(present)
+        leaves = [j for j in range(meta.num_columns) if meta.schema.column(j).path.split(".")[0] in wanted]
+        sizes = [meta.row_group(i).num_rows for i in range(meta.num_row_groups)]
+        weights = [
+            sum(meta.row_group(i).column(j).total_uncompressed_size for j in leaves)
+            for i in range(meta.num_row_groups)
+        ]
+        offset = start = 0
+        while start < len(sizes):
+            stop, rows, size = start, 0, 0
+            while stop < len(sizes) and (
+                stop == start or (rows < batch_size and size + weights[stop] <= SCAN_RUN_BYTES)
+            ):
+                rows += sizes[stop]
+                size += weights[stop]
+                stop += 1
+            groups = list(range(start, stop))
+            pf, table = read_parquet(
+                path,
+                lambda f, groups=groups: f.read_row_groups(groups, columns=present),  # pyright: ignore[reportUnknownMemberType, reportUnknownLambdaType]  # pyarrow-stubs leave some parameter types unknown
+                pf,
+            )
+            if live is not None:
+                table = table.filter(pa.array(live[offset : offset + rows]))
+            offset += rows
+            start = stop
+            yield from table.combine_chunks().to_batches(max_chunksize=batch_size)
 
     def records(self, *, batch_size: int = 1024) -> Iterator[DocRecord]:
         for batch in self.scan(batch_size=batch_size):
@@ -1072,7 +1153,7 @@ class RefineryReader:
                 return SCHEMA.empty_table().select(list(columns))
             return pa.Table.from_batches(batches)
         parts = [
-            pq.read_table(p, columns=self._present(open_parquet(p), columns))  # pyright: ignore[reportUnknownMemberType]  # pyarrow-stubs leave some parameter types unknown
+            read_parquet(p, lambda f: f.read(columns=self._present(f, columns)))[1]  # pyright: ignore[reportUnknownMemberType, reportUnknownLambdaType]  # pyarrow-stubs leave some parameter types unknown
             for p in self.parts
         ]
         if not parts:

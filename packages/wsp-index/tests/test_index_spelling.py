@@ -290,6 +290,39 @@ def test_a_rare_language_reads_only_the_row_groups_holding_it(
     assert len(reads) == 1
 
 
+def test_a_sampled_row_group_the_share_refuses_for_a_moment_is_read_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 2026-11-04 trawl: a refused read of one sampled row group on the NAS ended the spell phase.
+    from wsp_index.spelling import sample_language
+    from wsp_index.text import language_row_groups
+
+    docs = [doc("w", f"e{i:03d}", f"English {i}", "plain english words") for i in range(60)]
+    with RefineryWriter(tmp_path / "ref", "w", "g1", row_group_rows=10, docs_per_file=20) as w:
+        w.write(docs)
+    reader = RefineryReader(generation_dir(tmp_path / "ref", "w", "g1"))
+    groups = language_row_groups(reader)
+    real = pq.ParquetFile.read_row_group  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    calls: list[int] = []
+
+    def every_other_refused(self: pq.ParquetFile, i: int, *args: Any, **kwargs: Any) -> Any:
+        calls.append(i)
+        if len(calls) % 2:
+            raise BlockingIOError(11, "Resource temporarily unavailable")
+        return real(self, i, *args, **kwargs)
+
+    def no_wait(_s: float) -> None:
+        return None
+
+    monkeypatch.setattr(time, "sleep", no_wait)
+    monkeypatch.setattr(pq.ParquetFile, "read_row_group", every_other_refused)
+    tables = list(sample_language(reader, groups["en"], "en", 1000, ("title",)))
+    assert sorted(str(t) for table in tables for t in table.column("title").to_pylist()) == sorted(
+        d.title for d in docs
+    )
+    assert len(calls) == 2 * len(groups["en"]) == 12
+
+
 def test_a_scattered_language_reads_a_bounded_number_of_row_groups(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
