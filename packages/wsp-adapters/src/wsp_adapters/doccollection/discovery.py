@@ -161,6 +161,12 @@ class Throttle:
             robots_reachable(site)
         except NotFoundError:
             robots_reachable(site)  # no robots.txt: no rules
+        except RedirectRefusedError:
+            # robots.txt answers with a redirect we refuse (https -> http, or a guard): disallow-all,
+            # tried again in 10 minutes, but never "unreachable", so 30 days of it never become no rules
+            # (RFC 9309 2.3.1.4 covers server and network errors only; 2026-11-04 trawl).
+            rules = _DISALLOW_ALL
+            ttl = _ROBOTS_UNREACHABLE_TTL
         except (FetchError, OSError, ValueError) as exc:
             status = re.search(r"HTTP (\d{3})", str(exc))
             if status and 400 <= int(status.group(1)) < 500 and status.group(1) != "429":

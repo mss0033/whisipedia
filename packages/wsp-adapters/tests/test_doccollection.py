@@ -403,6 +403,43 @@ def test_throttle_keeps_each_hosts_robots_txt() -> None:
     assert "https://shut.mil/doc.pdf" not in inner.requests
 
 
+def test_throttle_never_takes_a_refused_robots_txt_redirect_as_no_rules(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """2026-11-04 review: a refused robots.txt redirect (https -> http) went through the "unreachable"
+    path, so after 30 days of it the site was crawled with no rules (RFC 9309 2.3.1.4 covers server and
+    network errors only). It disallows everything, read again after 10 minutes, and is never counted."""
+    from datetime import UTC, datetime, timedelta
+
+    from wsp_core.errors import RedirectRefusedError, RobotsDisallowedError
+
+    store = tmp_path / "unreachable.json"
+    day = datetime.now(UTC)
+    outage = {"first": (day - timedelta(days=31)).isoformat(), "last": (day - timedelta(hours=1)).isoformat()}
+    store.write_text(json.dumps({"https://moved.gov": outage}))
+    monkeypatch.setenv("WSP_ROBOTS_UNREACHABLE", str(store))
+    now = [0.0]
+
+    class Answers(FakeFetcher):
+        def get_bytes(self, url: str, *, max_bytes: int = 64 * 1024 * 1024) -> bytes:
+            if url == "https://moved.gov/robots.txt":
+                self.requests.append(url)
+                raise RedirectRefusedError(
+                    f"GET {url}: refusing redirect to insecure http://moved.gov/robots.txt"
+                )
+            return super().get_bytes(url, max_bytes=max_bytes)
+
+    inner = Answers({"https://moved.gov/x": b"x"})
+    t = Throttle(inner, interval=0.0, clock=lambda: now[0], sleep=lambda s: None, robots="Whisipedia/0.1")
+    for _ in range(3):
+        with pytest.raises(RobotsDisallowedError):
+            t.get_bytes("https://moved.gov/x")
+        now[0] += 601
+    assert inner.requests.count("https://moved.gov/robots.txt") == 3
+    assert "https://moved.gov/x" not in inner.requests
+    assert json.loads(store.read_text())["https://moved.gov"] == outage
+
+
 def test_throttle_reads_an_unreachable_robots_txt_as_disallow_all() -> None:
     """RFC 9309 2.3.1 (2026-10-26 review): 5xx/429/timeout disallow everything, for 10 minutes; a 4xx
     other than 429 means no rules."""

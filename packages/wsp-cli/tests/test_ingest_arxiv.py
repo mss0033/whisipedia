@@ -184,6 +184,24 @@ def test_the_pull_reads_robots_txt_by_rfc_9309_again_each_day_and_checks_every_o
     assert not robots.allows(obj + "a.pdf")
     assert len(reads) == 3
     assert not pull.RobotsCache().allows(obj + "a.pdf")  # unreachable and never read: disallowed
+    assert len(reads) == 4
+
+    # 2026-11-04 review: a failed re-read is tried again after ROBOTS_RETRY, not at every object of a
+    # chunk (one robots.txt request per object, up to 60 s apiece, to a host already failing)
+    for _ in range(50):
+        assert not robots.allows(obj + "a.pdf")  # the old copy stays in force
+    assert len(reads) == 4
+    clock[0] += pull.ROBOTS_RETRY - 1
+    assert not robots.allows(obj + "a.pdf")
+    assert len(reads) == 4
+    clock[0] += 1
+    for _ in range(50):
+        assert not robots.allows(obj + "a.pdf")
+    assert len(reads) == 5
+    fresh = pull.RobotsCache(clock=lambda: clock[0])  # never read and unreachable: same pacing
+    for _ in range(50):
+        assert not fresh.allows(obj + "a.pdf")
+    assert len(reads) == 6
 
     # every object of a chunk is checked; one left out keeps the chunk from being marked done
     answers[0] = b"User-agent: *\nDisallow: /*b.pdf$\n"

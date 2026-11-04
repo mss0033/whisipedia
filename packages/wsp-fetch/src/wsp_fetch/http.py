@@ -133,7 +133,7 @@ def _refuse_downgrade(response: httpx.Response) -> None:
         return
     target = response.request.url.join(response.headers["Location"])
     if target.scheme != "https":
-        raise _RetryableError(
+        raise _DowngradeRefusedError(
             f"refusing redirect from {response.request.url} to insecure {target}", fatal_for_mirror=True
         )
 
@@ -183,6 +183,12 @@ class _RetryableError(FetchError):
         self.retry_after = retry_after
         self.fatal_for_mirror = fatal_for_mirror
         self.status = status
+
+
+class _DowngradeRefusedError(_RetryableError):
+    """An https request redirected to plain http (:func:`_refuse_downgrade`). Surfaces from
+    :meth:`HttpFetcher._retrying` as :class:`RedirectRefusedError`, so a robots.txt reader can tell a
+    redirect we refuse from an unreachable host (2026-11-04 trawl)."""
 
 
 class _CancelledError(Exception):
@@ -423,10 +429,14 @@ class HttpFetcher:
                     reachable(site)
                     return None, ROBOTS_TTL  # "unavailable": no rules
                 return _unreachable(site)  # 5xx, 429: "unreachable"
-        except (httpx.HTTPError, OSError, _RetryableError, RedirectRefusedError):
-            # A redirect we will not follow (https -> http, _refuse_downgrade) leaves robots.txt unread:
-            # unreachable too. It escaped uncached until 2026-11-04 (trawl): robots.txt was asked for
-            # again on every call and one such mirror failed a whole multi-mirror fetch.
+        except (_RetryableError, RedirectRefusedError):
+            # A redirect we will not follow (https -> http, _refuse_downgrade) leaves robots.txt unread.
+            # It escaped uncached until 2026-11-04 (trawl): robots.txt was asked for again on every call
+            # and one such mirror failed a whole multi-mirror fetch. Disallow-all, read again in 10
+            # minutes, but never "unreachable": the file answers, we only refuse its redirect, so 30 days
+            # of it must not end in no rules (RFC 9309 2.3.1.4 covers server and network errors only).
+            return DISALLOW_ALL, ROBOTS_UNREACHABLE_TTL
+        except (httpx.HTTPError, OSError):
             return _unreachable(site)
         finally:
             _IN_ROBOTS.reset(token)
@@ -487,6 +497,8 @@ class HttpFetcher:
             except _RetryableError as exc:
                 if exc.status in _NOT_FOUND:
                     raise NotFoundError(label.split(" ", 1)[-1], f"HTTP {exc.status}") from exc
+                if isinstance(exc, _DowngradeRefusedError):
+                    raise RedirectRefusedError(f"{label}: {exc}") from exc
                 if attempt >= attempts or exc.fatal_for_mirror:
                     raise FetchError(f"{label} failed after {attempt} attempt(s): {exc}") from exc
                 delay = backoff_delay(attempt, self.config.backoff_base, self.config.backoff_max)

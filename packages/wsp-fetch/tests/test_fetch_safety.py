@@ -549,6 +549,45 @@ def test_a_robots_txt_redirected_to_http_is_unreachable_and_cached(monkeypatch: 
         assert f.robots_filter(both).urls == ("https://up.example/x.bin",)  # that mirror is dropped
 
 
+def test_a_refused_robots_txt_redirect_never_becomes_no_rules(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """2026-11-04 review: a refused robots.txt redirect went through the "unreachable" path, so after
+    30 days of it the site was crawled with no rules. Its robots.txt answers; we only refuse the
+    redirect, and RFC 9309 2.3.1.4 drops the rules for server and network errors only."""
+    import json
+    from datetime import UTC, datetime, timedelta
+
+    from wsp_core.errors import RobotsDisallowedError
+
+    store = tmp_path / "unreachable.json"
+    now = datetime.now(UTC)
+    outage = {"first": (now - timedelta(days=31)).isoformat(), "last": (now - timedelta(hours=1)).isoformat()}
+    store.write_text(json.dumps({"https://down.example": outage}))
+    monkeypatch.setenv("WSP_ROBOTS_UNREACHABLE", str(store))
+    asked: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        asked.append(f"{request.url.scheme}://{request.url.host}{request.url.path}")
+        return httpx.Response(301, headers={"Location": "http://down.example/robots.txt"})
+
+    clock = [1000.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+    with HttpFetcher(replace(CFG, robots=True), transport=httpx.MockTransport(handler)) as f:
+        for _ in range(3):
+            with pytest.raises(RobotsDisallowedError):
+                f.get_bytes("https://down.example/x.bin")
+            clock[0] += 601  # read again each time: still refused, still disallowed
+        assert asked.count("https://down.example/robots.txt") == 3
+    assert json.loads(store.read_text())["https://down.example"] == outage  # not counted as an outage
+    # surfaced as a refused redirect, so the doccollection Throttle can tell it from an unreachable host
+    with (
+        HttpFetcher(CFG, transport=httpx.MockTransport(handler)) as f,
+        pytest.raises(RedirectRefusedError, match="insecure"),
+    ):
+        f.get_bytes("https://down.example/robots.txt")
+
+
 def test_a_hosts_crawl_delay_spaces_the_starts_of_our_requests() -> None:
     """2026-10-26 review #85: Crawl-delay was read but only the collection throttle kept it."""
     from wsp_core.robots import parse

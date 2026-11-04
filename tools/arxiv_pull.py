@@ -89,6 +89,8 @@ def _get_json(req: urllib.request.Request) -> dict[str, Any]:
 
 
 ROBOTS_TTL = 24 * 3600.0  # RFC 9309 2.4: a robots.txt is not used for more than 24 hours
+ROBOTS_RETRY = 600.0  # a failed re-read is tried again after 10 minutes, not on every object
+DISALLOW_ALL = parse_robots(b"User-agent: *\nDisallow: /\n")
 
 
 class RobotsDisallowedError(Exception):
@@ -99,16 +101,19 @@ class RobotsCache:
     """Each host's robots.txt as RFC 9309 reads it (2.3.1), by the library's reader: a file is obeyed;
     a 4xx other than 429 means no rules; a 5xx, a 429 or no answer disallows everything. A file is
     read again once it is 24 hours old (RFC 9309 2.4); if it cannot be read then, the copy we have
-    stays in force (2.4 allows it) and the read is tried again at the next check. 2026-10-26 review:
+    stays in force (2.4 allows it) and the read is tried again 10 minutes later. 2026-10-26 review:
     the job read no robots.txt at all.
 
     2026-11-04 trawl: robots.txt was then read once per multi-day run, for the bucket's root only, with
     ``urllib.robotparser`` (which reads ``*`` and ``$`` literally and takes the first matching rule,
-    not the longest; see :mod:`wsp_core.robots`); the objects aria2 fetched were never checked."""
+    not the longest; see :mod:`wsp_core.robots`); the objects aria2 fetched were never checked. A failed
+    re-read must be timed too: a chunk checks thousands of objects, and a re-read tried at each would
+    ask a failing host for robots.txt once per object, up to 60 s apiece (2026-11-04 review)."""
 
     def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
         self.clock = clock
-        self._held: dict[str, tuple[Robots | None, float]] = {}  # "scheme://host" -> (rules, read at)
+        # "scheme://host" -> (rules, read at); a failed read is dated so the next try is ROBOTS_RETRY on
+        self._held: dict[str, tuple[Robots | None, float]] = {}
 
     @staticmethod
     def _read(site: str) -> tuple[bool, Robots | None]:
@@ -131,8 +136,9 @@ class RobotsCache:
             read, rules = self._read(site)
             if read:
                 held = self._held[site] = (rules, now)
-            elif held is None:
-                return False  # unreachable, and never read: everything is disallowed
+            else:  # keep the old copy (never read: everything is disallowed); read again in ROBOTS_RETRY
+                kept = held[0] if held is not None else DISALLOW_ALL
+                held = self._held[site] = (kept, now - ROBOTS_TTL + ROBOTS_RETRY)
         rules = held[0]
         return rules is None or rules.can_fetch(USER_AGENT, url)
 
