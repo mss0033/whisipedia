@@ -80,7 +80,7 @@ from wsp_adapters.doccollection.policy import (
     decisions_path,
 )
 from wsp_cli import bootstrap, nasretry
-from wsp_core.errors import FetchError, NotFoundError, RobotsDisallowedError
+from wsp_core.errors import ChecksumMismatchError, FetchError, NotFoundError, RobotsDisallowedError
 from wsp_core.model import FetchResult, RemoteFile, SourceSpec, SourceStatus
 from wsp_core.partitions import PartitionError, check_partition, partition_generation_id, partition_of
 from wsp_core.ports import Ctx, Fetcher, SupportsHead
@@ -410,6 +410,8 @@ class FetchReport:
     # such documents was never finished: every pass sealed another cycle (2026-10-26 review #29).
     gone: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
     wrong_body: set[str] = field(default_factory=set[str])  # keys whose download was a page, not the file
+    # Keys whose bytes did not match the listing's checksum: "md5 <expected> -> <actual>".
+    mismatched: dict[str, str] = field(default_factory=dict[str, str])
     planned: bool = False  # an ingest plan was written (new documents, or a changed catalog)
 
 
@@ -434,20 +436,68 @@ WRONG_BODY_GONE_DAYS = 7
 def settle_wrong_bodies(report: FetchReport, ledger: Path, now: datetime) -> None:
     """Count each document's consecutive wrong-body tries in ``ledger`` (any other outcome starts it
     over) and move one past both limits from ``report.failed`` to ``report.gone``."""
+    _settle_repeats(
+        report,
+        dict.fromkeys(report.wrong_body, ""),
+        ledger,
+        now,
+        tries=WRONG_BODY_GONE_TRIES,
+        days=WRONG_BODY_GONE_DAYS,
+    )
+
+
+# A document whose bytes, on this many tries over this many days in a row, were the same bytes and not
+# the ones the listing's checksum names: the issuer serves them consistently, so the published checksum
+# is stale (an archive.org or DSpace record not updated, an S3 ETag that is no MD5). Each run downloaded
+# it whole and failed it again, and its source or partition never finished (2026-11-04 trawl review). A
+# mismatch whose bytes differ from the last one's is a transfer error and starts the count over.
+STALE_CHECKSUM_TRIES = 3
+STALE_CHECKSUM_DAYS = 2
+
+
+def settle_stale_checksums(report: FetchReport, ledger: Path, now: datetime) -> None:
+    """Count each document's consecutive checksum mismatches with the same bytes in ``ledger`` and move
+    one past both limits from ``report.failed`` to ``report.gone``, with an alert naming it: its bytes
+    were never taken, and the owner decides whether the listing or the file is wrong."""
+    gone = _settle_repeats(
+        report, report.mismatched, ledger, now, tries=STALE_CHECKSUM_TRIES, days=STALE_CHECKSUM_DAYS
+    )
+    for key, e in sorted(gone.items()):
+        report.alerts.append(
+            f"{key}: the listing's checksum never matches what the issuer serves ({e['sig']}, on "
+            f"{e['tries']} tries since {e['first']}); not taken, check the listing or the file"
+        )
+
+
+def _settle_repeats(
+    report: FetchReport,
+    seen_now: Mapping[str, str],
+    ledger: Path,
+    now: datetime,
+    *,
+    tries: int,
+    days: int,
+) -> dict[str, dict[str, Any]]:
+    """Count each key's consecutive tries in ``ledger``, where ``seen_now`` maps this run's keys to what
+    they failed with (another signature, or any other outcome, starts the count over); move a key past
+    both limits from ``report.failed`` to ``report.gone`` and return those keys' entries."""
     try:
         seen = cast(dict[str, dict[str, Any]], json.loads(ledger.read_text(encoding="utf-8")))
     except (OSError, ValueError):
         seen = {}
     kept: dict[str, dict[str, Any]] = {}
-    for key in sorted(report.wrong_body):
-        entry = seen.get(key) or {"first": now.isoformat(timespec="seconds"), "tries": 0}
+    for key, sig in sorted(seen_now.items()):
+        entry = seen.get(key)
+        if entry is None or str(entry.get("sig", "")) != sig:
+            entry = {"first": now.isoformat(timespec="seconds"), "tries": 0}
+            if sig:
+                entry["sig"] = sig
         entry["tries"] = int(entry["tries"]) + 1
         kept[key] = entry
     gone = {
         key: e
         for key, e in kept.items()
-        if e["tries"] >= WRONG_BODY_GONE_TRIES
-        and now - datetime.fromisoformat(e["first"]) >= timedelta(days=WRONG_BODY_GONE_DAYS)
+        if e["tries"] >= tries and now - datetime.fromisoformat(e["first"]) >= timedelta(days=days)
     }
     still: list[tuple[str, str]] = []
     for key, why in report.failed:
@@ -462,6 +512,7 @@ def settle_wrong_bodies(report: FetchReport, ledger: Path, now: datetime) -> Non
         tmp = ledger.with_name(f".{ledger.name}.{os.getpid()}.tmp")
         tmp.write_text(json.dumps(kept, indent=1, sort_keys=True), encoding="utf-8")
         tmp.replace(ledger)
+    return gone
 
 
 _NO_CONNECTION = re.compile(r"\bConnect(?:Timeout|Error)\b")
@@ -701,6 +752,11 @@ class CollectionFetcher:
             if isinstance(exc, RobotsDisallowedError):  # never asked, never retried: as good as gone
                 report.gone.append((cand.key, why))
                 return
+            if isinstance(exc, ChecksumMismatchError):  # the host answered, with other bytes
+                hosts.answered(cand.url)
+                report.failed.append((cand.key, why))
+                report.mismatched[cand.key] = f"{exc.algorithm} {exc.expected} -> {exc.actual}"
+                return
             hosts.failed(cand.url, why)
             report.failed.append((cand.key, why))
 
@@ -746,6 +802,9 @@ class CollectionFetcher:
                 pool.shutdown(wait=True, cancel_futures=True)
         part = f"-{own_partition}" if own_partition else ""
         settle_wrong_bodies(report, self.workdir / spec.id / f"wrong-body{part}.json", datetime.now(UTC))
+        settle_stale_checksums(
+            report, self.workdir / spec.id / f"stale-checksum{part}.json", datetime.now(UTC)
+        )
         self._finish(spec, coll, report, prev_gen, prev_catalog, survey, dest_dir)
         return report
 
@@ -1542,7 +1601,9 @@ def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
     if report.pending:
         out.write(
             f"{spec.id}: fetched but not ingested yet: {', '.join(report.pending)}; "
-            f"run `wsp ingest --source {spec.id}` first (nothing fetched)\n"
+            # --wait: a plain `wsp ingest` tries the lock once and fails at once while the lanes
+            # hold its queue (2026-11-04 trawl).
+            f"run `wsp ingest --source {spec.id} --wait 3600` first (nothing fetched)\n"
         )
         return EXIT_INGEST_PENDING
     if report.version != version:
@@ -1799,16 +1860,27 @@ def cmd_manual(args: argparse.Namespace, out: TextIO) -> int:
         adopt_kept=None,
         manual=folder,
     )
+    from wsp_cli import manual, ops  # the ingest (lazy: not needed to list the steps)
+
+    # Ingests go in the ingest lock's queue, ahead of the lanes' slices, as `wsp collections manual
+    # --sync` takes the owner's downloads: a non-blocking try once a minute lost every release to the
+    # lanes queued in flock and gave up after four hours with the files unsealed (2026-11-04 trawl).
+    if manual.unsealed_plans(folder.parent.parent, spec):
+        # An earlier import whose ingest did not finish (its queue wait ran out, a failure) goes first,
+        # as --sync does: the fetch would refuse (exit 5) and send the owner to a `wsp ingest` that
+        # does not queue, so a rerun of --import could never seal it (2026-11-04 trawl).
+        icode = manual._ingest(args, spec.id, None, out, ops)  # pyright: ignore[reportPrivateUsage]
+        if icode != 0 or manual.unsealed_plans(folder.parent.parent, spec):
+            out.write(f"{spec.id}: an earlier import is not ingested yet; run --import again later\n")
+            return icode or EXIT_INGEST_PENDING
+        if not any(p.is_file() for p in folder.iterdir()):
+            out.write(f"{spec.id}: the earlier import is ingested; no new file waits in {folder}\n")
+            return 0
     code = cmd_fetch(fetch_args, out)
     if code not in (EXIT_COMPLETE, EXIT_ALERT, EXIT_PARTIAL):
         return code
-    from wsp_cli import manual, ops  # the ingest (lazy: not needed to list the steps)
-
-    # In the ingest lock's queue, ahead of the lanes' slices, as `wsp collections manual --sync` takes
-    # the owner's downloads: a non-blocking try once a minute lost every release to the lanes queued
-    # in flock and gave up after four hours with the files unsealed (2026-11-04 trawl). Every planned
-    # version (None): the fetch may have taken a new one (today's sealed), and it refused to run while
-    # any other version stood unsealed, so the only one planned is the one it just wrote.
+    # Every planned version (None): the fetch may have taken a new one (today's sealed), and it refused
+    # to run while any other version stood unsealed, so the only one planned is the one it just wrote.
     icode = manual._ingest(args, spec.id, None, out, ops)  # pyright: ignore[reportPrivateUsage]
     if icode == BUSY:
         return BUSY

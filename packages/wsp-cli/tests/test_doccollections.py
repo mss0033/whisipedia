@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import dataclasses
 import io
 import json
@@ -608,6 +609,68 @@ def test_a_download_is_verified_against_the_listings_checksum_not_fetched_twice(
     assert [r.checksums for r in fetcher.remotes] == [(Checksum("sha256", sha), Checksum("md5", md5))]
 
 
+class _Verifying(FakeFetcher):
+    """Checks the listing's checksums as ``HttpFetcher`` does: other bytes are deleted, never kept."""
+
+    def download(self, remote: RemoteFile, dest: Path) -> FetchResult:
+        import hashlib
+
+        from wsp_core.errors import ChecksumMismatchError
+
+        got = super().download(remote, dest)
+        data = Path(got.path).read_bytes()
+        for c in remote.checksums:
+            actual = hashlib.new(c.algorithm, data).hexdigest()
+            if actual != c.hexdigest.lower():
+                Path(got.path).unlink()
+                raise ChecksumMismatchError(remote.url, c.algorithm, c.hexdigest, actual)
+        return got
+
+
+def test_a_listing_checksum_that_never_matches_is_set_aside_with_an_alert(
+    vault: FileVault, tmp_path: Path
+) -> None:
+    """2026-11-04 trawl review: a stale published checksum (or an S3 ETag that is no MD5) failed the
+    same bytes on every run, downloaded whole each time, and the source never finished. The same
+    bytes on three tries over two days set it aside as gone, with an alert; other bytes start over."""
+    from datetime import UTC, datetime, timedelta
+
+    from wsp_cli import doccollections as dc
+
+    listed = [("FM-5-0_2022.pdf", GOOD)]
+    served = {**routes(listed), f"{BUCKET}/{PREFIX}FM-5-0_2022.pdf": UNMARKED}  # not the listed bytes
+    work = tmp_path / "w"
+    fetch = CollectionFetcher(
+        vault.root, _Verifying(served), keys={}, user_agent="t", workdir=work, throttle=False
+    )
+    report = fetch.run(spec(listed), version="2026-10-10")
+    assert [k for k, _ in report.failed] == ["test:FM-5-0_2022.pdf"]  # one mismatch: tried again
+    assert "md5 mismatch" in report.failed[0][1]
+    assert report.gone == []
+    assert report.alerts == []
+    ledger = work / "test-pubs" / "stale-checksum.json"
+    entry = json.loads(ledger.read_text())["test:FM-5-0_2022.pdf"]
+    assert entry["tries"] == 1
+    entry["first"] = (datetime.now(UTC) - timedelta(days=3)).isoformat(timespec="seconds")
+    ledger.write_text(json.dumps({"test:FM-5-0_2022.pdf": {**entry, "tries": 2}}))
+    report = fetch.run(spec(listed), version="2026-10-10")
+    assert report.failed == []
+    assert [k for k, _ in report.gone] == ["test:FM-5-0_2022.pdf"]
+    assert len(report.alerts) == 1
+    assert "checksum never matches" in report.alerts[0]
+    assert dc.fetch_exit_code(report) != dc.EXIT_PARTIAL  # the source finishes
+    assert report.fetched == []  # the bytes are never taken
+
+    now = datetime(2026, 11, 4, tzinfo=UTC)
+    for day, sig in enumerate(["md5 a -> b", "md5 a -> c", "md5 a -> c"]):  # a transfer error, then
+        r = dc.FetchReport("s", "v", failed=[("k", "mismatch")], mismatched={"k": sig})
+        dc.settle_stale_checksums(r, tmp_path / "l.json", now + timedelta(days=day))
+        assert r.gone == []  # other bytes started the count over: two tries of "c" so far
+    r = dc.FetchReport("s", "v", failed=[("k", "mismatch")], mismatched={"k": "md5 a -> c"})
+    dc.settle_stale_checksums(r, tmp_path / "l.json", now + timedelta(days=3))
+    assert [k for k, _ in r.gone] == ["k"]
+
+
 def test_an_incomplete_listing_fetches_nothing_and_withdraws_nothing(
     vault: FileVault, tmp_path: Path
 ) -> None:
@@ -949,17 +1012,17 @@ def test_files_downloaded_by_hand_are_taken_in_and_nothing_is_fetched(
     assert (bad / "allCountries.zip").exists()
 
 
-def test_a_manual_import_queues_for_the_ingest_lock_ahead_of_the_lanes(
-    vault: FileVault, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """2026-11-04 trawl: the import tried the ingest lock once a minute without queueing, lost every
-    release to the lanes waiting in the queue, and gave up after four hours with the files unsealed.
-    It now waits in the queue, ahead of the lanes, as ``--sync`` does: one call, no polling."""
-    import argparse
+def _manual_import(
+    monkeypatch: pytest.MonkeyPatch,
+    vault: FileVault,
+    fetch: Any,
+    ingest: Any,
+) -> argparse.Namespace:
+    """``wsp collections manual test-gazetteer --import`` with its fetch and ingest replaced."""
     import sys
 
     import wsp_cli
-    from wsp_cli import bootstrap, manual
+    from wsp_cli import bootstrap
     from wsp_cli import doccollections as dc
 
     class Paths:
@@ -979,28 +1042,41 @@ def test_a_manual_import_queues_for_the_ingest_lock_ahead_of_the_lanes(
     def paths(_cfg: object) -> type[Paths]:
         return Paths
 
-    def fetch(_args: argparse.Namespace, _out: Any) -> int:
-        return dc.EXIT_COMPLETE  # the owner's files moved into the cycle and planned
+    class FakeOps:
+        cmd_ingest = staticmethod(ingest)
 
     monkeypatch.setattr(bootstrap, "layout", layout)
     monkeypatch.setattr(bootstrap, "load", load)
     monkeypatch.setattr(bootstrap, "load_sources", load_sources)
     monkeypatch.setattr(bootstrap, "paths", paths)
     monkeypatch.setattr(dc, "cmd_fetch", fetch)
+    monkeypatch.setattr(wsp_cli, "ops", FakeOps, raising=False)
+    monkeypatch.setitem(sys.modules, "wsp_cli.ops", FakeOps)
+    return argparse.Namespace(
+        config_dir=None, source="test-gazetteer", do_import=True, version=None, sync=False, status=False
+    )
+
+
+def test_a_manual_import_queues_for_the_ingest_lock_ahead_of_the_lanes(
+    vault: FileVault, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-11-04 trawl: the import tried the ingest lock once a minute without queueing, lost every
+    release to the lanes waiting in the queue, and gave up after four hours with the files unsealed.
+    It now waits in the queue, ahead of the lanes, as ``--sync`` does: one call, no polling."""
+    from wsp_cli import doccollections as dc
+    from wsp_cli import manual
+
     calls: list[argparse.Namespace] = []
     answer = [0]
 
-    class FakeOps:
-        @staticmethod
-        def cmd_ingest(args: argparse.Namespace, out: Any) -> int:
-            calls.append(args)
-            return answer[0]
+    def fetch(_args: argparse.Namespace, _out: Any) -> int:
+        return dc.EXIT_COMPLETE  # the owner's files moved into the cycle and planned
 
-    monkeypatch.setattr(wsp_cli, "ops", FakeOps, raising=False)
-    monkeypatch.setitem(sys.modules, "wsp_cli.ops", FakeOps)
-    args = argparse.Namespace(
-        config_dir=None, source="test-gazetteer", do_import=True, version=None, sync=False, status=False
-    )
+    def ingest(args: argparse.Namespace, _out: Any) -> int:
+        calls.append(args)
+        return answer[0]
+
+    args = _manual_import(monkeypatch, vault, fetch, ingest)
     assert dc.cmd_manual(args, io.StringIO()) == 0
     assert len(calls) == 1
     assert calls[0].wait == manual.INGEST_WAIT
@@ -1010,6 +1086,61 @@ def test_a_manual_import_queues_for_the_ingest_lock_ahead_of_the_lanes(
     answer[0] = dc.BUSY  # the queue wait ran out: reported busy at once, not polled for hours
     assert dc.cmd_manual(args, io.StringIO()) == dc.BUSY
     assert len(calls) == 2
+
+
+def test_a_manual_import_rerun_ingests_the_earlier_unsealed_import_first(
+    vault: FileVault, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-11-04 trawl review: after an import's queue wait ran out, a rerun of --import was refused
+    by the fetch (exit 5, "run `wsp ingest`", which does not queue) before any ingest was tried, so
+    the files never sealed. The earlier import's ingest now goes first, in the queue, as --sync's."""
+    from wsp_cli import doccollections as dc
+    from wsp_cli import manual
+
+    spec = _manual_spec()
+    plans = vault.root / "_incoming" / "_plans" / dc.PLANS_SUBDIR
+    plans.mkdir(parents=True)
+    (plans / "test-gazetteer-2026-11-03.json").write_text(
+        json.dumps([{"source_id": spec.id, "version": "2026-11-03"}])
+    )
+    sealed = vault.root / "library" / spec.vault_domain / spec.id / "2026-11-03" / "MANIFEST.json"
+    folder = vault.root / "_incoming" / dc.MANUAL_DIR / spec.id
+    fetched: list[argparse.Namespace] = []
+    calls: list[argparse.Namespace] = []
+    answer = [dc.BUSY]
+
+    def fetch(args: argparse.Namespace, _out: Any) -> int:
+        fetched.append(args)
+        return dc.EXIT_COMPLETE if sealed.is_file() else dc.EXIT_INGEST_PENDING
+
+    def ingest(args: argparse.Namespace, _out: Any) -> int:
+        calls.append(args)
+        if answer[0] == 0:
+            sealed.parent.mkdir(parents=True, exist_ok=True)
+            sealed.write_text("{}")
+        return answer[0]
+
+    args = _manual_import(monkeypatch, vault, fetch, ingest)
+    out = io.StringIO()
+    assert dc.cmd_manual(args, out) == dc.BUSY  # the queue is still held: the next rerun tries again
+    assert fetched == []
+    assert len(calls) == 1
+    assert (calls[0].wait, calls[0].priority) == (manual.INGEST_WAIT, True)
+    assert "not ingested yet" in out.getvalue()
+
+    answer[0] = 0
+    (folder / "countryInfo.txt").write_text("#ISO\tCountry\n")  # a new file waits
+    assert dc.cmd_manual(args, io.StringIO()) == 0
+    assert len(fetched) == 1  # sealed in the queue, then the new file fetched and ingested
+    assert len(calls) == 3
+    assert all(c.wait == manual.INGEST_WAIT and c.priority for c in calls)
+
+    out = io.StringIO()
+    sealed.unlink()  # unsealed again, and no new file: sealed, nothing fetched
+    (folder / "countryInfo.txt").unlink()
+    assert dc.cmd_manual(args, out) == 0
+    assert len(fetched) == 1
+    assert "no new file waits" in out.getvalue()
 
 
 def test_a_share_mounted_path_is_named_as_windows_names_it(tmp_path: Path) -> None:
