@@ -566,22 +566,26 @@ class Library:
             str(REWRITE_VERSION),
             str(self.zim.sites_version if self.zim else 0),
         )
-        # A picture lookup that failed (a busy worker, a NAS refusal) is guessed; the page is served
-        # but not kept, or its guess stayed in the page cache (2026-11-04 trawl).
+        # A picture lookup that failed (a busy worker, a NAS refusal) is guessed, and a read behind
+        # the page that failed leaves a stand-in (the raw app shell of a nautilus or MindTouch
+        # archive); the page is served but not kept, or it stayed in the page cache (2026-11-04 trawl).
         unsure: list[bool] = []
+
+        def mark_unsure() -> None:
+            unsure.append(True)
 
         def build() -> Rendered | None:
             sites: tuple[str, ...] = ()
             find: Callable[[str], str | None] | None = None
             is_image: Callable[[str], bool] | None = None
             if (zim := self.zim) is not None and html_ref.startswith("zim:"):
-                page = zim.page(source_id, gid, html_ref.removeprefix("zim:"))
+                page = zim.page(source_id, gid, html_ref.removeprefix("zim:"), unsure=mark_unsure)
                 if page is None:
                     return None
                 base, root, original, section = page.native_id, page.book_root, page.html, page.fragment
                 sites = page.site_roots
-                find = partial(zim.find, source_id, gid, unsure=lambda: unsure.append(True))
-                is_image = partial(zim.is_image, source_id, gid, unsure=lambda: unsure.append(True))
+                find = partial(zim.find, source_id, gid, unsure=mark_unsure)
+                is_image = partial(zim.is_image, source_id, gid, unsure=mark_unsure)
             else:
                 found = self.assets.html(source_id, gid, html_ref)
                 if found is None:

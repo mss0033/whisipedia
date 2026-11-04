@@ -271,6 +271,30 @@ def test_a_tile_read_that_failed_is_never_kept_by_the_browser(
     assert again.headers["cache-control"] == "public, max-age=86400"
 
 
+def test_a_cut_made_while_a_nearer_archive_failed_is_never_remembered(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-11-04 trawl: the server's cut cache is keyed by tile, not by the ancestor cut from, so
+    a coarse stand-in cut while the regional archive refused a read was served for a day after."""
+    real = Archive.tile
+    refusals = {(4, 8, 4), (3, 4, 2)}  # the regional z4 and z3 ancestors of 5/16/8
+
+    def flaky(self: Archive, z: int, x: int, y: int) -> bytes | None:
+        if (z, x, y) in refusals:
+            refusals.discard((z, x, y))
+            raise OSError(103, "Software caused connection abort")
+        return real(self, z, x, y)
+
+    monkeypatch.setattr(Archive, "tile", flaky)
+    coarse = client.get("/v1/maps/tiles/terrain/5/16/8")  # cut from the world z2 tile
+    assert coarse.status_code == 200
+    assert coarse.headers["cache-control"] == "no-store"
+    assert np.allclose(elevation(coarse.content), 100.0, atol=1.0)
+    fine = client.get("/v1/maps/tiles/terrain/5/16/8")  # the regional z4 answers now
+    assert fine.headers["cache-control"] == "public, max-age=86400"
+    assert np.allclose(elevation(fine.content), 250.0, atol=1.0)
+
+
 def test_no_gazetteer_yet_is_a_503(tmp_path: Path) -> None:
     lib = SimpleNamespace(
         s=SimpleNamespace(sources=[]), vault=FakeVault(tmp_path, {}), settings=SimpleNamespace(gazetteer=None)

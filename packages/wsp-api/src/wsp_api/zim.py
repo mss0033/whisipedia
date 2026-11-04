@@ -509,12 +509,18 @@ class ZimAssetStore:
             return None
         return None if where is None else where[0]
 
-    def _read(self, file: str, path: str, want: Want) -> EntryData | None:
+    def _read(
+        self, file: str, path: str, want: Want, *, unsure: Callable[[], None] | None = None
+    ) -> EntryData | None:
+        """The entry, or ``None`` where it is missing or could not be read (logged for the operator).
+        ``unsure()`` is called when the read failed rather than found nothing (see :meth:`page`)."""
         try:
             return self._read_or_fail(file, path, want)
         except ZimUnavailable:
             raise
         except ZimError:  # unreadable archive or entry: "not here", logged for the operator
+            if unsure is not None:
+                unsure()
             return None
 
     def _read_or_fail(self, file: str, path: str, want: Want) -> EntryData | None:
@@ -534,8 +540,14 @@ class ZimAssetStore:
 
     # --- pages and assets ---
 
-    def page(self, source_id: str, generation_id: str, native_id: str) -> ZimPage | None:
-        """The HTML page at ``native_id`` (one read: content and the entry actually served)."""
+    def page(
+        self, source_id: str, generation_id: str, native_id: str, *, unsure: Callable[[], None] | None = None
+    ) -> ZimPage | None:
+        """The HTML page at ``native_id`` (one read: content and the entry actually served).
+        ``unsure()`` is called when a read behind the page failed rather than found nothing (the
+        nautilus catalogue, a MindTouch or YouTube front page, the content a stub stands for): the
+        page is then a stand-in (the raw app shell, the main entry) a cache must not keep, or one
+        NAS refusal on its first view stayed in the page cache (2026-11-04 trawl)."""
         if native_id == BOOKS_PAGE:
             text = self._books_page(source_id, generation_id)
             return None if text is None else ZimPage(BOOKS_PAGE, text, "")
@@ -543,42 +555,46 @@ class ZimAssetStore:
         if where is None:
             return None
         file, path, root = where
-        if (catalogue := self._nautilus(file)) is not None and (
+        if (catalogue := self._nautilus(file, unsure=unsure)) is not None and (
             path in ("", nautilus.HOME, f"{nautilus.HOME}.html") or path.startswith(nautilus.ITEM_PREFIX)
         ):
-            return self._nautilus_page(source_id, file, path, root, catalogue)
+            return self._nautilus_page(source_id, file, path, root, catalogue, unsure=unsure)
         if path == mindtouch.APP_SHELL:
-            if (home := self._mindtouch_root(file)) is not None:
+            if (home := self._mindtouch_root(file, unsure=unsure)) is not None:
                 path = home  # a link to the app ("../index.html", the main entry) is its home page
-            elif (front := self._youtube_home(file) or self._fcc_home(source_id, file)) is not None:
+            elif (
+                front := self._youtube_home(file, unsure=unsure)
+                or self._fcc_home(source_id, file, unsure=unsure)
+            ) is not None:
                 return ZimPage(root + path, front, root)
         fragment = ""
         for _ in range(_MAX_STUB_HOPS + 1):
-            data = self._read(file, path, Want.HTML)
+            data = self._read(file, path, Want.HTML, unsure=unsure)
             if data is None or data.content is None:
                 return None
             text = data.content.decode("utf-8", errors="replace")
             body = (
-                self._mindtouch(file, data.path, text)
-                or self._youtube(file, data.path, text)
-                or self._fcc(file, data.path, text)
+                self._mindtouch(file, data.path, text, unsure=unsure)
+                or self._youtube(file, data.path, text, unsure=unsure)
+                or self._fcc(file, data.path, text, unsure=unsure)
             )
             if body is not None:
                 return ZimPage(root + data.path, body, root, fragment)
             # A section redirect is served as the page it points at (a link to it was a dead end:
             # IPv6 -> IPv6_stateless_address_autoconfiguration, 2026-10-16 field exam).
             hop = stub_target(text, data.path)
-            if hop is not None and not self._read(file, hop[0], Want.NONE):
+            if hop is not None and not self._read(file, hop[0], Want.NONE, unsure=unsure):
                 other = hop[0].rstrip("/") if hop[0].endswith("/") else hop[0] + "/"
-                hop = (other, hop[1]) if self._read(file, other, Want.NONE) else None
+                hop = (other, hop[1]) if self._read(file, other, Want.NONE, unsure=unsure) else None
             if hop is None:
-                return ZimPage(
-                    root + data.path, text, root, fragment, self._site_roots(file, data.path, root)
-                )
+                sites = self._site_roots(file, data.path, root, unsure=unsure)
+                return ZimPage(root + data.path, text, root, fragment, sites)
             path, fragment = hop
         return None
 
-    def _site_roots(self, file: str, path: str, root: str) -> tuple[str, ...]:
+    def _site_roots(
+        self, file: str, path: str, root: str, *, unsure: Callable[[], None] | None = None
+    ) -> tuple[str, ...]:
         """``<host>/`` of a crawled page (``example.org/a/b``), then the main page's folder."""
         out: list[str] = []
         first = path.split("/", 1)[0]
@@ -593,6 +609,8 @@ class ZimAssetStore:
             except ZimUnavailable:
                 raise
             except ZimError:  # not remembered: the next page asks again
+                if unsure is not None:
+                    unsure()
                 data = None
             else:
                 known = True
@@ -652,7 +670,7 @@ class ZimAssetStore:
             return True
         return data is not None and data.mimetype.startswith("image/")
 
-    def _nautilus(self, file: str) -> list[nautilus.Item] | None:
+    def _nautilus(self, file: str, *, unsure: Callable[[], None] | None = None) -> list[nautilus.Item] | None:
         """The catalogue of a nautilus archive (``wsp_core.nautilus``), ``None`` for any other."""
         with self._lock:
             if file in self._catalogues:
@@ -662,6 +680,8 @@ class ZimAssetStore:
         except ZimUnavailable:
             raise
         except ZimError:  # not remembered as "not a nautilus archive": the next page asks again
+            if unsure is not None:
+                unsure()
             return None
         catalogue = nautilus.items(found.content) if found is not None and found.content else []
         result = catalogue or None
@@ -670,7 +690,14 @@ class ZimAssetStore:
         return result
 
     def _nautilus_page(
-        self, source_id: str, file: str, path: str, root: str, catalogue: list[nautilus.Item]
+        self,
+        source_id: str,
+        file: str,
+        path: str,
+        root: str,
+        catalogue: list[nautilus.Item],
+        *,
+        unsure: Callable[[], None] | None = None,
     ) -> ZimPage | None:
         """A nautilus archive's front page (``home``), or a document's page with its files' text."""
         if not path.startswith(nautilus.ITEM_PREFIX):
@@ -687,51 +714,57 @@ class ZimAssetStore:
             left = deadline - time.monotonic()
             if left <= 0:
                 break
-            data = self._read(file, nautilus.FILES + name, Want.ANY)
+            data = self._read(file, nautilus.FILES + name, Want.ANY, unsure=unsure)
             if data is not None and data.content is not None and data.mimetype.startswith("application/pdf"):
                 texts[name] = pdf_text(data.content, seconds=left)
         return ZimPage(root + item.path, nautilus.item_html(item, texts), root)
 
-    def _mindtouch(self, file: str, path: str, stub: str) -> str | None:
+    def _mindtouch(
+        self, file: str, path: str, stub: str, *, unsure: Callable[[], None] | None = None
+    ) -> str | None:
         """The page a MindTouch app stub stands for (``wsp_core.mindtouch``), or ``None``."""
         entry = mindtouch.content_entry(path, stub)
         if entry is None:
             return None
-        content = self._read(file, entry, Want.ANY)
+        content = self._read(file, entry, Want.ANY, unsure=unsure)
         if content is None or content.content is None:
             return None
-        pages = self._mindtouch_maps(file)[0]
+        pages = self._mindtouch_maps(file, unsure=unsure)[0]
 
         def load(page_id: str) -> bytes | None:
-            found = self._read(file, mindtouch.content_path(page_id), Want.ANY)
+            found = self._read(file, mindtouch.content_path(page_id), Want.ANY, unsure=unsure)
             return None if found is None else found.content
 
         return mindtouch.page_html(stub, content.content, pages.ids, pages=pages, load=load)
 
-    def _youtube(self, file: str, path: str, stub: str) -> str | None:
+    def _youtube(
+        self, file: str, path: str, stub: str, *, unsure: Callable[[], None] | None = None
+    ) -> str | None:
         """The page a YouTube-scraper app stub stands for (``wsp_core.youtubezim``), or ``None``."""
         entry = youtubezim.content_entry(path, stub)
         if entry is None:
             return None
-        content = self._read(file, entry, Want.ANY)
+        content = self._read(file, entry, Want.ANY, unsure=unsure)
         return None if content is None or content.content is None else youtubezim.page_html(content.content)
 
-    def _fcc(self, file: str, path: str, stub: str) -> str | None:
+    def _fcc(
+        self, file: str, path: str, stub: str, *, unsure: Callable[[], None] | None = None
+    ) -> str | None:
         """The challenge a freeCodeCamp-scraper app stub stands for (``wsp_core.fcc``), or ``None``."""
         entry = fcc.content_entry(path, stub)
         if entry is None:
             return None
-        content = self._read(file, entry, Want.ANY)
+        content = self._read(file, entry, Want.ANY, unsure=unsure)
         return None if content is None or content.content is None else fcc.page_html(content.content)
 
-    def _fcc_home(self, source_id: str, file: str) -> str | None:
+    def _fcc_home(self, source_id: str, file: str, *, unsure: Callable[[], None] | None = None) -> str | None:
         """The front page of a freeCodeCamp-scraper archive: every challenge (its app shell is empty)."""
-        index = self._read(file, fcc.INDEX, Want.ANY)
+        index = self._read(file, fcc.INDEX, Want.ANY, unsure=unsure)
         if index is None or index.content is None:
             return None
         return fcc.home_html(self.names.get(source_id, source_id).removesuffix(" (Kiwix ZIM)"), index.content)
 
-    def _youtube_home(self, file: str) -> str | None:
+    def _youtube_home(self, file: str, *, unsure: Callable[[], None] | None = None) -> str | None:
         """The front page of a YouTube-scraper archive (its app shell is empty), or ``None``."""
         with self._lock:
             if file in self._fronts:
@@ -745,12 +778,16 @@ class ZimAssetStore:
         except ZimUnavailable:
             raise
         except ZimError:  # not remembered: the next visit asks again
+            if unsure is not None:
+                unsure()
             return None
         with self._lock:
             self._fronts[file] = front
         return front
 
-    def _mindtouch_maps(self, file: str) -> tuple[mindtouch.Pages, str | None]:
+    def _mindtouch_maps(
+        self, file: str, *, unsure: Callable[[], None] | None = None
+    ) -> tuple[mindtouch.Pages, str | None]:
         """``(page list, home page entry)`` of a MindTouch archive (both empty for any other archive),
         from ``content/shared.json``, read once per archive."""
         with self._lock:
@@ -763,6 +800,8 @@ class ZimAssetStore:
         except ZimUnavailable:
             raise
         except ZimError:  # not remembered as "not a MindTouch archive": the next page asks again
+            if unsure is not None:
+                unsure()
             return mindtouch.Pages({}), None
         raw = None if shared is None else shared.content
         pages = mindtouch.Pages({} if raw is None else mindtouch.page_ids(raw))
@@ -775,8 +814,8 @@ class ZimAssetStore:
                 self._roots.pop(gone, None)
         return pages, home
 
-    def _mindtouch_root(self, file: str) -> str | None:
-        return self._mindtouch_maps(file)[1]
+    def _mindtouch_root(self, file: str, *, unsure: Callable[[], None] | None = None) -> str | None:
+        return self._mindtouch_maps(file, unsure=unsure)[1]
 
     def exists(self, source_id: str, generation_id: str, native_id: str) -> bool:
         """An HTML page is there (no content is read)."""

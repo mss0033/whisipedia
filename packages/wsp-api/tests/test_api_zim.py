@@ -634,6 +634,41 @@ def test_a_page_whose_picture_lookup_failed_is_not_kept_in_the_page_cache(tmp_pa
         assert again.html == f"<p>Turing{picture}</p>"
 
 
+def test_a_page_whose_catalogue_read_failed_is_not_kept_in_the_page_cache(tmp_path: Path) -> None:
+    """2026-11-04 trawl: one NAS refusal of a nautilus archive's ``database.js`` on the first view
+    of its home page put the raw app shell in the page cache, served until it was evicted."""
+    services = sample_services()
+    zim_rel = "upstream/usda-2015_en_2025-04.zim"
+    database = (
+        "var DATABASE = [{'_id': '00004', 'ti': 'Part 4', 'dsc': 'Vegetables', 'aut': '', 'fp': ['G4.pdf']}];"
+    )
+    _zim(
+        tmp_path / "wikipedia-en-zim" / SAMPLE_GEN_2 / zim_rel,
+        "usda-2015_en",
+        [
+            ("home", "text/html", "<html><body>{{ x }}</body></html>"),
+            ("database.js", "text/javascript", database),
+        ],
+        [],
+    )
+    vault = InMemoryVault(root=tmp_path)
+    art = Artifact("wikipedia-en-zim", SAMPLE_GEN_2, PurePosixPath(zim_rel), 10, "a" * 64, "b" * 64)
+    vault.add(
+        Generation("wikipedia-en-zim", SAMPLE_GEN_2, GenerationStatus.SEALED, artifacts=(art,)), promote=True
+    )
+    doc = services.documents.get(make_doc_id("wikipedia-en-zim", "A/Alan_Turing"))
+    assert doc is not None
+    services.documents.put(SAMPLE_GEN_2, replace(doc, html_ref="zim:home"))  # type: ignore[attr-defined]
+    store = ZimAssetStore(vault, _RefusingReader("database.js"))
+    with local_client(create_app(replace(services, vault=vault, assets=store))) as c:
+        first = Document.model_validate(c.get(document_href(doc.doc_id)).json())
+        assert first.html is not None
+        assert "Part 4: Vegetables" not in first.html  # the refused read: the raw shell, this view only
+        again = Document.model_validate(c.get(document_href(doc.doc_id)).json())
+        assert again.html is not None
+        assert "Part 4: Vegetables" in again.html
+
+
 def test_a_failed_image_check_keeps_the_picture_and_says_so(tmp_path: Path) -> None:
     _zim(
         tmp_path / "wiki" / SAMPLE_GEN_2 / "upstream" / "w_2026-09.zim",

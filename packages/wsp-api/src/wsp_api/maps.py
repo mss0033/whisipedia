@@ -382,6 +382,8 @@ class MapLibrary:
                     hit = cut_from_ancestor(
                         blob, dz, x, y, kind=s.kind, encoding=s.encoding, tile_type=h.tile_type
                     )
+                    if failed:  # a nearer ancestor failed: a coarser stand-in, never remembered
+                        return hit, h.tile_type, Compression.NONE, False  # (2026-11-04 trawl)
                     with self._lock:
                         if len(self._cuts) >= CUT_CACHE:
                             self._cuts.pop(next(iter(self._cuts)))
