@@ -33,7 +33,6 @@ import statistics
 import subprocess
 import sys
 import tempfile
-import time
 import zipfile
 from collections import deque
 from collections.abc import Collection, Mapping, Sequence
@@ -57,6 +56,7 @@ from wsp_adapters.doccollection.adapter import (
     checked_front_matter,
     download_from_origins,
     fetched_doc,
+    remote_for,
     screen_document,
     screen_text,
     true_suffix,
@@ -770,7 +770,10 @@ class CollectionFetcher:
                     digest.update(chunk)
             if digest.hexdigest() == cand.md5.lower():
                 return done
-        remote = RemoteFile(url=cand.url, name=cand.file_name, size=cand.size, mirrors=cand.mirrors)
+        # With the listing's checksums: the download is verified against them, not corroborated by a
+        # second download that doubled the transfer and never compared the published MD5 (2026-11-04
+        # trawl). A file that does not match them fails (ChecksumMismatchError), never sealed.
+        remote = remote_for(cand)
         path = Path(download_from_origins(fetcher, remote, dest_dir / cand.file_name, origins).path)
         if cand.extra.get("unzip") == "pdf":
             unzip_pdf(path, match=cand.extra.get("unzip_match") or "")
@@ -1132,7 +1135,10 @@ class CollectionFetcher:
 
 
 # Clone and fetch over HTTPS only, refuse redirects (the origin is the URL the registry names), and
-# never let the remote pick a protocol or credentials helper.
+# never let the remote pick a protocol or credentials helper. A transfer slower than 1 kB/s for five
+# minutes is given up (git exits non-zero; the candidate fails and is tried on the next run): git has
+# no timeout of its own, and a stalled clone with its socket left open held the whole collection pass
+# (2026-11-04 trawl). A large clone that is still moving, such as frus at ~15 GB, is not capped.
 GIT_SAFE_CONFIG: tuple[str, ...] = (
     "-c",
     "protocol.allow=never",
@@ -1144,6 +1150,10 @@ GIT_SAFE_CONFIG: tuple[str, ...] = (
     "credential.helper=",
     "-c",
     "core.hooksPath=/dev/null",
+    "-c",
+    "http.lowSpeedLimit=1000",
+    "-c",
+    "http.lowSpeedTime=300",
 )
 _GITHUB_RE = re.compile(r"https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?$")
 GIT_SCREEN_PATHS_CHARS = 200_000
@@ -1792,27 +1802,15 @@ def cmd_manual(args: argparse.Namespace, out: TextIO) -> int:
     code = cmd_fetch(fetch_args, out)
     if code not in (EXIT_COMPLETE, EXIT_ALERT, EXIT_PARTIAL):
         return code
-    from wsp_cli import ops  # the ingest (lazy: not needed to list the steps)
+    from wsp_cli import manual, ops  # the ingest (lazy: not needed to list the steps)
 
-    ingest_args = argparse.Namespace(
-        config_dir=args.config_dir,
-        source=spec.id,
-        version=None,  # every planned version: the fetch may have taken a new one (today's sealed)
-        partition=None,
-        dry_run=False,
-        offline=True,
-        json=False,
-        settle_seconds=0.0,
-        allow_mirror=False,
-        max_seconds=None,
-    )
-    for _ in range(INGEST_WAITS):
-        icode = ops.cmd_ingest(ingest_args, out)
-        if icode != BUSY:
-            break
-        out.write("another ingest is running; waiting a minute\n")
-        time.sleep(60)
-    else:
+    # In the ingest lock's queue, ahead of the lanes' slices, as `wsp collections manual --sync` takes
+    # the owner's downloads: a non-blocking try once a minute lost every release to the lanes queued
+    # in flock and gave up after four hours with the files unsealed (2026-11-04 trawl). Every planned
+    # version (None): the fetch may have taken a new one (today's sealed), and it refused to run while
+    # any other version stood unsealed, so the only one planned is the one it just wrote.
+    icode = manual._ingest(args, spec.id, None, out, ops)  # pyright: ignore[reportPrivateUsage]
+    if icode == BUSY:
         return BUSY
     env = DiscoverEnv(fetcher=cast(Fetcher, _Offline()), issuer="", prefix=spec.id)
     known = {manual_name(c) for d in discovery for c in fixed_list(d, env)}
@@ -1830,7 +1828,6 @@ def cmd_manual(args: argparse.Namespace, out: TextIO) -> int:
     return icode
 
 
-INGEST_WAITS = 240  # a manual import waits up to four hours for another ingest to finish
 BUSY = 3  # = wsp_cli.locks.EXIT_BUSY
 
 

@@ -369,6 +369,25 @@ def test_a_git_clone_honours_github_robots_txt_and_sends_the_library_user_agent(
     assert "http.userAgent=Whisipedia/0.1 (test)" in seen[0]
 
 
+def test_a_stalled_git_transfer_is_given_up_not_waited_on_forever(tmp_path: Path) -> None:
+    """2026-11-04 trawl: git has no timeout of its own; a clone whose socket stayed open while nothing
+    came held the whole collection pass. Every git command carries curl's low-speed limit."""
+    cf = CollectionFetcher(
+        tmp_path / "vault", FakeFetcher(), keys={}, user_agent="t", workdir=tmp_path / "w", git="/bin/false"
+    )
+    seen: list[list[str]] = []
+
+    def run(cmd: list[str], **_: Any) -> Any:
+        seen.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, b"")
+
+    with patch.object(subprocess, "run", run):
+        cf._git("clone", "--mirror", "https://github.com/owner/repo.git", str(tmp_path / "m"))  # pyright: ignore[reportPrivateUsage]
+    pairs = {seen[0][i + 1] for i, a in enumerate(seen[0][:-1]) if a == "-c"}
+    assert {"http.lowSpeedLimit=1000", "http.lowSpeedTime=300"} <= pairs
+    assert seen[0].index("http.lowSpeedTime=300") < seen[0].index("clone")  # options before the command
+
+
 def test_an_organisation_discovery_allows_that_organisations_repositories(tmp_path: Path) -> None:
     """Standard Ebooks names no repository one by one: discovering its organisation allows them, and
     only them (all 1,533 books were refused, 2026-10-19)."""
@@ -559,6 +578,34 @@ def test_a_resumed_fetch_reuses_complete_files_with_a_published_md5(tmp_path: Pa
     (dest / cand.file_name).write_bytes(b"bad")  # same size, wrong bytes: fetched again (and here: fails)
     with pytest.raises(Exception):  # noqa: B017, PT011 - the fake fetcher has no route for it
         fetch._download(FakeFetcher(), cand, dest, ["bucket.example.gov"])  # pyright: ignore[reportPrivateUsage]
+
+
+def test_a_download_is_verified_against_the_listings_checksum_not_fetched_twice(tmp_path: Path) -> None:
+    """2026-11-04 trawl: the listing's MD5 was dropped, so every such file was corroborated by a second
+    full download and never compared with the checksum its issuer published."""
+    import hashlib
+
+    from wsp_core.model import Checksum
+
+    class Recording(FakeFetcher):
+        def __init__(self, routes: dict[str, bytes]) -> None:
+            super().__init__(routes)
+            self.remotes: list[RemoteFile] = []
+
+        def download(self, remote: RemoteFile, dest: Path) -> FetchResult:
+            self.remotes.append(remote)
+            return super().download(remote, dest)
+
+    url = "https://bucket.example.gov/a.pdf"
+    fetcher = Recording({url: GOOD})
+    fetch = CollectionFetcher(
+        tmp_path / "vault", fetcher, keys={}, user_agent="t", workdir=tmp_path, throttle=False
+    )
+    md5 = hashlib.md5(GOOD, usedforsecurity=False).hexdigest()
+    sha = hashlib.sha256(GOOD).hexdigest()
+    cand = Candidate(key="t:a", url=url, title="A", issuer="T", size=len(GOOD), md5=md5, sha256=sha)
+    fetch._download(fetcher, cand, tmp_path / "dest", ["bucket.example.gov"])  # pyright: ignore[reportPrivateUsage]
+    assert [r.checksums for r in fetcher.remotes] == [(Checksum("sha256", sha), Checksum("md5", md5))]
 
 
 def test_an_incomplete_listing_fetches_nothing_and_withdraws_nothing(
@@ -900,6 +947,69 @@ def test_files_downloaded_by_hand_are_taken_in_and_nothing_is_fetched(
     with pytest.raises(FetchError, match="does not read whole"):
         fetch._download(_Offline(), cand, tmp_path / "cycle", ["dl.example.org"])  # pyright: ignore[reportPrivateUsage]
     assert (bad / "allCountries.zip").exists()
+
+
+def test_a_manual_import_queues_for_the_ingest_lock_ahead_of_the_lanes(
+    vault: FileVault, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-11-04 trawl: the import tried the ingest lock once a minute without queueing, lost every
+    release to the lanes waiting in the queue, and gave up after four hours with the files unsealed.
+    It now waits in the queue, ahead of the lanes, as ``--sync`` does: one call, no polling."""
+    import argparse
+    import sys
+
+    import wsp_cli
+    from wsp_cli import bootstrap, manual
+    from wsp_cli import doccollections as dc
+
+    class Paths:
+        @staticmethod
+        def require_vault() -> Path:
+            return vault.root
+
+    def layout(_dir: object) -> None:
+        return None
+
+    def load(_lay: object) -> dict[str, Any]:
+        return {}
+
+    def load_sources(_cfg: object, _lay: object) -> tuple[SourceSpec, ...]:
+        return (_manual_spec(),)
+
+    def paths(_cfg: object) -> type[Paths]:
+        return Paths
+
+    def fetch(_args: argparse.Namespace, _out: Any) -> int:
+        return dc.EXIT_COMPLETE  # the owner's files moved into the cycle and planned
+
+    monkeypatch.setattr(bootstrap, "layout", layout)
+    monkeypatch.setattr(bootstrap, "load", load)
+    monkeypatch.setattr(bootstrap, "load_sources", load_sources)
+    monkeypatch.setattr(bootstrap, "paths", paths)
+    monkeypatch.setattr(dc, "cmd_fetch", fetch)
+    calls: list[argparse.Namespace] = []
+    answer = [0]
+
+    class FakeOps:
+        @staticmethod
+        def cmd_ingest(args: argparse.Namespace, out: Any) -> int:
+            calls.append(args)
+            return answer[0]
+
+    monkeypatch.setattr(wsp_cli, "ops", FakeOps, raising=False)
+    monkeypatch.setitem(sys.modules, "wsp_cli.ops", FakeOps)
+    args = argparse.Namespace(
+        config_dir=None, source="test-gazetteer", do_import=True, version=None, sync=False, status=False
+    )
+    assert dc.cmd_manual(args, io.StringIO()) == 0
+    assert len(calls) == 1
+    assert calls[0].wait == manual.INGEST_WAIT
+    assert calls[0].priority is True
+    assert calls[0].source == "test-gazetteer"
+
+    answer[0] = dc.BUSY  # the queue wait ran out: reported busy at once, not polled for hours
+    assert dc.cmd_manual(args, io.StringIO()) == dc.BUSY
+    assert len(calls) == 2
 
 
 def test_a_share_mounted_path_is_named_as_windows_names_it(tmp_path: Path) -> None:
