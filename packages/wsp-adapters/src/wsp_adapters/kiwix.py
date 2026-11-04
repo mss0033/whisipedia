@@ -70,7 +70,7 @@ from wsp_adapters.doccollection.adapter import DEFAULT_PDF_MAX_PAGES, pdf_text
 from wsp_adapters.entries import Entry, Redirect
 from wsp_adapters.html_text import html_to_text
 from wsp_core import fcc, mindtouch, nautilus, youtubezim
-from wsp_core.errors import FetchError
+from wsp_core.errors import FetchError, OwnerActionRequiredError
 from wsp_core.ids import content_hash, make_doc_id
 from wsp_core.listing import skip_paths, skip_regex
 from wsp_core.metalink import parse_metalink
@@ -700,7 +700,7 @@ class KiwixMirrorAdapter(KiwixOpdsAdapter):
             )
         if pick.unverifiable:
             # Never a release without a book it had: the owner's checksum is needed first.
-            raise FetchError(
+            raise OwnerActionRequiredError(
                 f"{spec.id}: no Kiwix checksum saved for any listed file of {', '.join(pick.unverifiable)};"
                 " it is on the owner's daily manual page"
             )

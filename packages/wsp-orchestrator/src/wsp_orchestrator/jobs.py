@@ -107,6 +107,14 @@ class JobQueue:
         )
         return _job(rows[0]) if rows else None
 
+    def held_until(self, kind: JobKind, key: str) -> datetime | None:
+        """The latest ``hold_until`` a dead job of ``kind``/``key`` left (see :meth:`fail`), if any."""
+        rows = self.store.query(
+            "SELECT MAX(run_after) AS held FROM jobs WHERE kind=? AND key=? AND status='dead'",
+            (kind.value, key),
+        )
+        return parse_ts(rows[0]["held"]) if rows else None
+
     def get(self, job_id: int) -> Job:
         return _job(self.store.query("SELECT * FROM jobs WHERE id=?", (job_id,))[0])
 
@@ -158,8 +166,20 @@ class JobQueue:
             if mark_schedule:
                 self.store.mark_schedule(c, job.kind.value, job.key, attempt=now, success=True)
 
-    def fail(self, job: Job, now: datetime, error: str, *, retry_at: datetime | None) -> None:
-        """Record a failure; requeue at ``retry_at`` or mark the job dead when it is ``None``."""
+    def fail(
+        self,
+        job: Job,
+        now: datetime,
+        error: str,
+        *,
+        retry_at: datetime | None,
+        hold_until: datetime | None = None,
+    ) -> None:
+        """Record a failure; requeue at ``retry_at`` or mark the job dead when it is ``None``.
+
+        ``hold_until`` (a dead job only) is kept in the dead row's ``run_after``, which nothing else
+        reads once a job is dead: the scheduler enqueues that kind and key again no sooner
+        (:meth:`held_until`; a permanent failure, 2026-11-04 trawl)."""
         with self.store.tx() as c:
             if retry_at is not None:
                 c.execute(
@@ -170,8 +190,8 @@ class JobQueue:
             else:
                 c.execute(
                     "UPDATE jobs SET status='dead', last_error=?, lease_until=NULL, finished_at=?,"
-                    " updated_at=? WHERE id=?",
-                    (error, ts(now), ts(now), job.id),
+                    " run_after=COALESCE(?, run_after), updated_at=? WHERE id=?",
+                    (error, ts(now), ts(hold_until) if hold_until is not None else None, ts(now), job.id),
                 )
             self.store.mark_schedule(c, job.kind.value, job.key, attempt=now, success=False)
 

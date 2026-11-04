@@ -265,6 +265,45 @@ def test_watchdog_alerts_on_a_job_running_too_long(tmp_path: Path) -> None:
     orch.close()
 
 
+def test_a_stuck_job_alert_ends_with_the_job(tmp_path: Path) -> None:
+    """2026-11-04 trawl: job-stuck was never resolved, so it stayed open after the job finished and
+    hid the next stuck job of that kind and key."""
+    orch, world = build(tmp_path, [make_spec("a")], job_stuck_after=timedelta(seconds=0))
+    orch.queue.enqueue(JobKind.DRILL, "global", now=T0)
+    [job] = orch.claim_ready()
+    time.sleep(0.01)
+    orch.watchdog()
+    assert "job-stuck:drill:global" in orch.alerter.open_keys()
+    orch.execute(job)
+    assert "job-stuck:drill:global" not in orch.alerter.open_keys()
+    orch.queue.enqueue(JobKind.DRILL, "global", now=T0)
+    orch.claim_ready()
+    time.sleep(0.01)
+    orch.watchdog()
+    assert world.sink.alert_keys().count("job-stuck:drill:global") == 2  # the next one is delivered
+    orch.close()
+
+
+def test_watchdog_resolves_a_stuck_alert_no_running_job_owns(tmp_path: Path) -> None:
+    """A stuck alert left by an earlier daemon (its job a key with ':' and '/') is resolved; the
+    alert of a job this daemon still runs stays open (2026-11-04 trawl)."""
+    from wsp_orchestrator.alerts import Alert, Severity
+
+    orch, _ = build(tmp_path, [make_spec("a")], job_stuck_after=timedelta(seconds=0))
+    stale = "job-stuck:fetch_release:kiwix-pl/2026-10+832ea15d"
+    orch.alerter.raise_(Alert(stale, Severity.WARNING, "left by the last daemon", {}))
+    orch.queue.enqueue(JobKind.DRILL, "global", now=T0)
+    orch.claim_ready()
+    time.sleep(0.01)
+    orch.watchdog()
+    open_keys = orch.alerter.open_keys()
+    assert stale not in open_keys
+    assert "job-stuck:drill:global" in open_keys
+    orch.watchdog()
+    assert "job-stuck:drill:global" in orch.alerter.open_keys()
+    orch.close()
+
+
 # --- M9: health alerts and metrics -----------------------------------------------------------------
 
 

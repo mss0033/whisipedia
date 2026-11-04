@@ -82,7 +82,9 @@ DISCOVERED → PLANNED → FETCHING → FETCHED → VERIFIED → SEALED → REFI
 * **Catch-up**: due = `cadence.next_due(last_success)`; never-run jobs are due immediately. After
   downtime each overdue entry runs once (not once per missed period) and discovery jumps straight to
   the newest upstream release. Missed scrub slices run back-to-back until the pass is complete.
-  Failed entries are retried no sooner than `job_retry_gap`.
+  Failed entries are retried no sooner than `job_retry_gap`. A permanent failure (robots refused,
+  an owner action needed, upstream lists nothing) is not retried within its job and holds that
+  entry for `permanent_retry_gap` (P1D) instead (2026-11-04 trawl).
 * **Retention-window alert**: for adapters with an upstream retention window
   (`orchestrator.retention_windows`, e.g. `wikimedia-dumps = "P60D"`), a critical alert fires once the
   cycle is overdue by half the window; it resolves when the source completes a cycle.

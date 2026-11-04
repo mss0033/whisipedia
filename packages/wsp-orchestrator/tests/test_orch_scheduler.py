@@ -192,3 +192,62 @@ def test_failing_job_retries_then_dies_with_alert(tmp_path: Path) -> None:
     # once dead, the scheduler tries again after job_retry_gap rather than hot-looping
     assert len(orch.queue.jobs(kind=JobKind.DISCOVER)) <= 3
     assert world.sink.alert_keys().count("job-dead:discover:src") == 1
+
+
+def test_permanent_failures_are_classified_apart_from_content() -> None:
+    """2026-11-04 trawl: robots refusals, the owner's missing checksum and an empty listing are not
+    fixed by a retry in minutes; a plain fetch failure (a 404, a reset) still is retried."""
+    from wsp_core.errors import (
+        FetchError,
+        NotFoundError,
+        OwnerActionRequiredError,
+        RedirectRefusedError,
+        RobotsDisallowedError,
+    )
+    from wsp_orchestrator.errors import FailureKind, classify
+    from wsp_orchestrator.pipeline import NoReleasesError
+
+    for exc in (
+        RobotsDisallowedError("https://x/a: disallowed by robots.txt"),
+        RedirectRefusedError("redirected to https://y/: disallowed by its robots.txt"),
+        OwnerActionRequiredError("kiwix-pl: no Kiwix checksum saved"),
+        NoReleasesError("kiwix-pl: upstream offers no releases"),
+    ):
+        assert classify(exc) is FailureKind.PERMANENT, exc
+    assert classify(FetchError("HTTP 503")) is FailureKind.CONTENT
+    assert classify(NotFoundError("https://x/a")) is FailureKind.CONTENT
+    assert FailureKind.PERMANENT.counts_attempt  # a release step still counts it towards quarantine
+
+
+def test_a_permanent_failure_dies_at_once_and_is_held_for_its_gap(tmp_path: Path) -> None:
+    """2026-11-04 trawl, pattern 5: the kiwix health probes made 5 attempts a job and a new job an
+    hour after each death, for ever. Now one attempt, then nothing until permanent_retry_gap."""
+    from wsp_core.errors import OwnerActionRequiredError
+
+    clock = ManualClock(T0)
+    orch, world = build(tmp_path, clock, [make_spec("src")], scrub_slices=1)
+    adapter = world.adapters["src"]
+    adapter.failures["discover"] = [OwnerActionRequiredError("src: no Kiwix checksum saved")] * 1000
+    orch.start()
+    orch.run_pending()
+    for kind in (JobKind.DISCOVER, JobKind.HEALTH_PROBE):
+        dead = orch.queue.jobs(status=JobStatus.DEAD, kind=kind)
+        assert [j.attempts for j in dead] == [1], kind
+    alert = [r for r in orch.store.open_alerts() if r["key"] == "job-dead:discover:src"]
+    assert "failed permanently" in str(alert[0]["message"])
+    for _ in range(23):  # job_retry_gap (1 h) alone brought it back every hour
+        clock.advance(timedelta(hours=1))
+        orch.run_pending()
+    assert len(orch.queue.jobs(kind=JobKind.DISCOVER)) == 1
+    assert len(orch.queue.jobs(kind=JobKind.HEALTH_PROBE)) == 1
+    wake = orch.scheduler.next_wakeup()
+    assert wake is not None
+    assert wake <= T0 + timedelta(days=1)  # the loop wakes for the hold's end
+
+    adapter.failures["discover"].clear()  # the owner saved the checksum
+    adapter.add_release("2026-10-01", FILES)
+    clock.advance(timedelta(hours=1, minutes=1))
+    orch.run_pending()
+    assert len(orch.queue.jobs(kind=JobKind.DISCOVER)) == 2
+    assert world.vault.current("src") is not None
+    assert "job-dead:discover:src" not in orch.alerter.open_keys()

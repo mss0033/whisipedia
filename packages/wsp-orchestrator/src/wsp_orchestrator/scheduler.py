@@ -2,7 +2,8 @@
 
 On every :meth:`Scheduler.tick` each schedule entry whose next due time (computed from its last
 success) has passed gets one job - so after downtime every overdue job runs once, not once per missed
-period. Failed entries are retried no sooner than ``job_retry_gap`` after the last attempt.
+period. Failed entries are retried no sooner than ``job_retry_gap`` after the last attempt, nor
+before the ``permanent_retry_gap`` hold a permanently failed job left (2026-11-04 trawl).
 
 Schedule entries:
 
@@ -135,13 +136,19 @@ class Scheduler:
     # --- due computation -----------------------------------------------------------------------
 
     def _earliest(self, e: ScheduleEntry) -> datetime | None:
-        """When ``e`` may run next: its cadence, and no sooner than ``job_retry_gap`` after a failure
-        (``None``: never ran, due now)."""
+        """When ``e`` may run next: its cadence, and no sooner than ``job_retry_gap`` after a failure,
+        nor before the hold a permanently failed job left (``None``: never ran, due now).
+
+        Without the hold a dead job's kind and key came back an hour later and failed the same way,
+        for ever (2026-11-04 trawl, pattern 5)."""
         last_success, last_attempt = self.store.schedule_marks(e.kind.value, e.key)
         due_at = e.cadence.next_due(last_success)
         failed_since = last_attempt is not None and (last_success is None or last_attempt > last_success)
         if failed_since and last_attempt is not None:
             retry_at = last_attempt + self.settings.job_retry_gap
+            held = self.queue.held_until(e.kind, e.key)
+            if held is not None:
+                retry_at = max(retry_at, held)
             due_at = retry_at if due_at is None else max(due_at, retry_at)
         return due_at
 

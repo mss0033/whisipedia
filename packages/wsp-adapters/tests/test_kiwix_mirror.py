@@ -17,7 +17,7 @@ from wsp_adapters.kiwix import (
     parse_listing,
     saved_checksum,
 )
-from wsp_core.errors import FetchError
+from wsp_core.errors import OwnerActionRequiredError
 from wsp_core.model import Checksum
 from wsp_core.testing.adapter_contract import FakeFetcher
 
@@ -114,7 +114,8 @@ def test_a_flavour_is_never_swapped_for_one_whose_checksum_is_known(tmp_path: Pa
 def test_a_book_without_any_known_checksum_blocks_the_release(tmp_path: Path) -> None:
     spec = make_spec("kiwix-ifixit", {"adapter": "kiwix-opds", "selector": {"name": "ifixit_en_all"}})
     ctx = make_ctx(spec, fetcher(), tmp_path / "work")
-    with pytest.raises(FetchError, match="no Kiwix checksum saved"):
+    # Owner action, not a fetch failure: the orchestrator does not retry it within hours (2026-11-04 trawl).
+    with pytest.raises(OwnerActionRequiredError, match="no Kiwix checksum saved"):
         KiwixMirrorAdapter(dirs=[tmp_path]).discover(ctx)
 
 

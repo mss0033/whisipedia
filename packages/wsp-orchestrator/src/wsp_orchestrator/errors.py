@@ -10,6 +10,11 @@ quarantine. :func:`classify` sorts an exception into one of:
 * ``RESOURCE`` - the step ran out of memory or was killed (an ``oom-kill`` of its transient unit,
   ``MemoryError``, ``ENOMEM``/``ENOSPC``). Counted as a *crash* of that state, never as an attempt:
   the second one in the same state backs off and alerts ("probably OOM").
+* ``PERMANENT`` - retrying soon cannot help: the host's robots.txt refused the URL or a redirect, a
+  checksum only the owner can save is missing, upstream lists nothing. Like ``CONTENT`` for a
+  release step; a scheduled job dies at once instead of being retried with backoff, and the
+  scheduler waits ``permanent_retry_gap`` before trying that job again (2026-11-04 trawl, pattern 5:
+  130 Kiwix health probes made 5 attempts every ~15 h for an error only the owner could clear).
 * ``CONTENT`` - everything else: the data, the adapter or upstream is at fault. Counts an attempt;
   enough of them quarantine the release.
 """
@@ -21,16 +26,19 @@ import sqlite3
 from collections.abc import Callable
 from enum import StrEnum
 
+from wsp_core.errors import OwnerActionRequiredError, RedirectRefusedError, RobotsDisallowedError
+
 
 class FailureKind(StrEnum):
     BUSY = "busy"
     UNAVAILABLE = "unavailable"
     RESOURCE = "resource"
+    PERMANENT = "permanent"
     CONTENT = "content"
 
     @property
     def counts_attempt(self) -> bool:
-        return self is FailureKind.CONTENT
+        return self in (FailureKind.CONTENT, FailureKind.PERMANENT)
 
 
 class TransientError(RuntimeError):
@@ -55,6 +63,10 @@ class ResourceExhaustedError(TransientError):
     """The step was killed for memory (or died without a result): a crash, not a content failure."""
 
     kind = FailureKind.RESOURCE
+
+
+class PermanentError(RuntimeError):
+    """A failure no retry within hours can fix (``FailureKind.PERMANENT``)."""
 
 
 class StepCancelledError(TransientError):
@@ -101,6 +113,10 @@ def classify(exc: BaseException, *, storage_available: Callable[[], bool] | None
         return FailureKind.BUSY
     if type(exc).__name__ == "FetchLockedError":  # another process downloads the same file (wsp_fetch)
         return FailureKind.BUSY
+    if isinstance(
+        exc, (PermanentError, RobotsDisallowedError, RedirectRefusedError, OwnerActionRequiredError)
+    ):
+        return FailureKind.PERMANENT
     if isinstance(exc, OSError):
         if exc.errno in _RESOURCE_ERRNOS:
             return FailureKind.RESOURCE

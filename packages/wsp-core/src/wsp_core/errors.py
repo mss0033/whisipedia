@@ -29,6 +29,11 @@ class NotFoundError(FetchError):
         self.url = url
 
 
+class OwnerActionRequiredError(FetchError):
+    """Only the owner can unblock this (a checksum to save from the daily manual page, a file to
+    fetch by hand): retrying within minutes or hours learns nothing (2026-11-04 trawl, pattern 5)."""
+
+
 class ChecksumMismatchError(FetchError):
     """Downloaded bytes do not match an upstream digest (PLAN §8.1). Nothing was renamed into place."""
 

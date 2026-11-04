@@ -24,6 +24,7 @@ Keys (all optional except the paths in production)::
     shutdown_grace_seconds = 10       # running work is cancelled first; must stay well under
                                        # systemd's TimeoutStopSec
     job_retry_gap = "PT1H"
+    permanent_retry_gap = "P1D"        # a job that failed permanently (robots, owner action) waits this
     log_level = "INFO"
     prune_dry_run = false              # true: retention records its plan but moves nothing
     offer_max_age = "P14D"             # upstream observations older than this cannot prove redundancy
@@ -107,6 +108,7 @@ class OrchestratorSettings:
     poll_interval_seconds: float = 30.0
     shutdown_grace_seconds: float = 10.0
     job_retry_gap: timedelta = timedelta(hours=1)
+    permanent_retry_gap: timedelta = timedelta(days=1)
     lease: timedelta = timedelta(hours=24)
     retry: RetryPolicy = field(default_factory=RetryPolicy)
     retention_windows: Mapping[str, IsoDuration] = field(
@@ -177,6 +179,7 @@ class OrchestratorSettings:
             poll_interval_seconds=float(orch.get("poll_interval_seconds", 30)),
             shutdown_grace_seconds=float(orch.get("shutdown_grace_seconds", 10)),
             job_retry_gap=IsoDuration.parse(str(orch.get("job_retry_gap", "PT1H"))).approx(),
+            permanent_retry_gap=IsoDuration.parse(str(orch.get("permanent_retry_gap", "P1D"))).approx(),
             retry=retry,
             retention_windows={k: IsoDuration.parse(v) for k, v in windows.items()},
             log_level=str(orch.get("log_level", "INFO")),

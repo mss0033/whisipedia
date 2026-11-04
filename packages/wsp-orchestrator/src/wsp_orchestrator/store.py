@@ -188,6 +188,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   lease_until TEXT, last_error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, finished_at TEXT);
 CREATE UNIQUE INDEX IF NOT EXISTS jobs_active ON jobs(kind, key) WHERE status IN ('pending', 'running');
 CREATE INDEX IF NOT EXISTS jobs_due ON jobs(status, run_after);
+CREATE INDEX IF NOT EXISTS jobs_dead ON jobs(kind, key, run_after) WHERE status = 'dead';
 CREATE TABLE IF NOT EXISTS schedule (
   kind TEXT NOT NULL, key TEXT NOT NULL, last_success TEXT, last_attempt TEXT, PRIMARY KEY (kind, key));
 CREATE TABLE IF NOT EXISTS alerts (

@@ -104,7 +104,7 @@ from wsp_orchestrator.codec import (
     release_from_json,
     release_to_json,
 )
-from wsp_orchestrator.errors import FailureKind, classify
+from wsp_orchestrator.errors import FailureKind, PermanentError, classify
 from wsp_orchestrator.integrity.findings import Action
 from wsp_orchestrator.integrity.guard import IntegrityGuard, sanity_checks
 from wsp_orchestrator.policy import SanityThresholds, check_promotion
@@ -159,6 +159,11 @@ class StepError(RuntimeError):
 
 class ChecksumMismatchError(StepError):
     pass
+
+
+class NoReleasesError(StepError, PermanentError):
+    """Upstream lists nothing to take (every book still waits for its checksum, say): a retry in
+    minutes finds the same empty listing (2026-11-04 trawl)."""
 
 
 class UnknownReleaseError(KeyError):

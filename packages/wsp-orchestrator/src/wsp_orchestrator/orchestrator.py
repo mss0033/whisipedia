@@ -43,6 +43,7 @@ from wsp_orchestrator.metrics import Metrics
 from wsp_orchestrator.pipeline import (
     DocumentScreenHook,
     IndexStep,
+    NoReleasesError,
     Outcome,
     RefineStep,
     ReleasePipeline,
@@ -194,6 +195,14 @@ def _host(ref: ReleaseRef) -> str | None:
         if host:
             return host
     return None
+
+
+_STUCK_PREFIX = "job-stuck:"
+
+
+def _stuck_key(kind: JobKind, key: str) -> str:
+    """The alert key of a job running too long; raised and resolved through this one helper."""
+    return f"{_STUCK_PREFIX}{kind.value}:{key}"
 
 
 class Orchestrator:
@@ -408,6 +417,10 @@ class Orchestrator:
             if job.host:
                 self._running_host[job.host] -= 1
 
+    def _resolve_stuck(self, key: str) -> None:
+        if self.store.alert_is_open(key):  # a read for every job, a write only when one is open
+            self.alerter.resolve(key)
+
     def run_pending(self, *, max_jobs: int = 10_000) -> int:
         """Synchronously run due jobs until none are left (tests, one-shot CLI). Returns jobs run."""
         done = 0
@@ -533,15 +546,31 @@ class Orchestrator:
                 outcome = Handled.DEFER.value
                 return
             retry = self.settings.retry
-            retry_at = now + retry.delay(job.attempts) if job.attempts < retry.max_attempts else None
-            self.queue.fail(job, now, f"{type(exc).__name__}: {exc}", retry_at=retry_at)
+            # A permanent failure (robots refused, the owner's checksum missing) dies at once and
+            # holds its kind and key for permanent_retry_gap. It used to make five attempts a job
+            # and come back an hour after each death: upstream asked ~8 times a day for ever, for
+            # an error only the owner could clear (2026-11-04 trawl, pattern 5).
+            hold_until = now + self.settings.permanent_retry_gap if kind is FailureKind.PERMANENT else None
+            retry_at = None
+            if hold_until is None and job.attempts < retry.max_attempts:
+                retry_at = now + retry.delay(job.attempts)
+            self.queue.fail(
+                job, now, f"{type(exc).__name__}: {exc}", retry_at=retry_at, hold_until=hold_until
+            )
             log.exception("job failed", extra={"fields": {"kind": job.kind.value, "key": job.key}})
             if retry_at is None:
+                if hold_until is not None:
+                    message = (
+                        f"{job.kind.value} {job.key} failed permanently: {exc};"
+                        f" not tried again before {hold_until:%Y-%m-%d %H:%M} UTC"
+                    )
+                else:
+                    message = f"{job.kind.value} {job.key} gave up after {job.attempts} attempts: {exc}"
                 self.alerter.raise_(
                     Alert(
                         key=f"job-dead:{job.kind.value}:{job.key}",
                         severity=Severity.WARNING,
-                        message=f"{job.kind.value} {job.key} gave up after {job.attempts} attempts: {exc}",
+                        message=message,
                         data={"kind": job.kind.value, "key": job.key},
                     )
                 )
@@ -549,6 +578,13 @@ class Orchestrator:
             with self._lock:
                 self._active.pop(job.id, None)
             self._release_capacity(job)
+            # Whatever the outcome the job no longer runs: its stuck alert, if any, ends here. It was
+            # never resolved, so it stayed open and hid the next stuck job of that kind and key
+            # (2026-11-04 trawl). A failing alert write must not kill this thread.
+            try:
+                self._resolve_stuck(_stuck_key(job.kind, job.key))
+            except Exception:
+                log.exception("could not resolve the job-stuck alert", extra={"fields": {"key": job.key}})
             labels = {"kind": job.kind.value}
             self.metrics.inc(
                 "jobs_total", "Jobs finished by type and outcome", {**labels, "outcome": outcome}
@@ -609,7 +645,7 @@ class Orchestrator:
         adapter = self.pipeline.resolve_adapter(spec)
         refs = list(adapter.discover(self.pipeline.ctx(spec)))
         if not refs:
-            raise StepError(f"{spec.id}: upstream offers no releases")
+            raise NoReleasesError(f"{spec.id}: upstream offers no releases")
         offers: list[Mapping[str, object]] = []
         for r in refs:
             try:
@@ -1068,9 +1104,17 @@ class Orchestrator:
         if orphans:
             n = self.queue.requeue(orphans, now, "requeued by the watchdog: no thread owned it")
             log.warning("orphaned jobs requeued", extra={"fields": {"jobs": orphans, "requeued": n}})
+        # A stuck alert whose job this daemon no longer runs (it ended while an alert write failed, or
+        # an earlier daemon raised it) is resolved: compared on the whole key, since job keys may
+        # hold ':' and '/' (2026-11-04 trawl).
+        running = {_stuck_key(job.kind, job.key) for job, _ in active.values()}
+        for row in self.store.open_alerts():
+            key = str(row["key"])
+            if key.startswith(_STUCK_PREFIX) and key not in running:
+                self.alerter.resolve(key)
         for job, started in active.values():
             self.queue.extend_lease(job, now + self.settings.lease)
-            key = f"job-stuck:{job.kind.value}:{job.key}"
+            key = _stuck_key(job.kind, job.key)
             if mono - started > self.settings.job_stuck_after.total_seconds():
                 self.alerter.raise_(
                     Alert(
