@@ -398,6 +398,57 @@ def test_ingest_promotes_r10_over_r4(vault: FileVault, tmp_path: Path) -> None:
     assert vault.current_set_ids(SID) == ["2026-10-12-r10"]
 
 
+def _counted_ledger(
+    vault: FileVault, monkeypatch: pytest.MonkeyPatch, fail: OSError | None = None
+) -> list[int]:
+    """Count (or refuse) the whole-ledger reads of ``vault``."""
+    ledger = cast(JsonlLedger, vault.ledger)
+    real, calls = ledger.events, [0]
+
+    def events(since_seq: int = 0) -> Any:
+        calls[0] += 1
+        if fail is not None:
+            raise fail
+        return real(since_seq)
+
+    monkeypatch.setattr(ledger, "events", events)
+    return calls
+
+
+def test_a_sealed_version_reads_the_ledger_only_when_needed_and_once(
+    vault: FileVault, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for version, objects in (("2026-10-12", OBJECTS), ("2026-10-13", [*OBJECTS, ("FM-6-0_2022.pdf", GOOD)])):
+        fetch(vault, tmp_path, objects, version)
+        assert ingest(vault, version)[0][1] is VersionStatus.INGESTED
+    calls = _counted_ledger(vault, monkeypatch)
+    # Both in PROMOTED.txt: before, a source-wide ingest read the whole 212 MB ledger once for each
+    # sealed version it planned (2026-11-04 trawl: 73 times for era5-daily).
+    assert ingest(vault) == [(v, VersionStatus.SEALED, False) for v in ("2026-10-12", "2026-10-13")]
+    assert calls[0] == 0
+    # Promoted before PROMOTED.txt existed and no longer current: only the ledger knows, read once.
+    (vault.source_dir(SID) / "PROMOTED.txt").unlink()
+    (vault.source_dir(SID) / "CURRENT.txt").write_text("2026-10-30\n")
+    assert ingest(vault) == [(v, VersionStatus.SEALED, False) for v in ("2026-10-12", "2026-10-13")]
+    assert calls[0] == 1
+    assert vault.current_set_ids(SID) == ["2026-10-30"]  # a rollback stands
+
+
+def test_a_ledger_the_share_refuses_fails_that_version_not_the_run(
+    vault: FileVault, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fetch(vault, tmp_path, OBJECTS, "2026-10-12")
+    assert ingest(vault, "2026-10-12")[0][1] is VersionStatus.INGESTED
+    (vault.source_dir(SID) / "PROMOTED.txt").unlink()
+    (vault.source_dir(SID) / "CURRENT.txt").write_text("2026-10-30\n")
+    _counted_ledger(vault, monkeypatch, fail=OSError(5, "Input/output error"))
+    fetch(vault, tmp_path, [*OBJECTS, ("FM-6-0_2022.pdf", GOOD)], "2026-10-13")
+    # Before: the OSError ended the run (exit 1) before it reached the pending version.
+    got = ingest(vault)
+    assert got[0][:2] == ("2026-10-12", VersionStatus.FAILED)
+    assert got[1] == ("2026-10-13", VersionStatus.INGESTED, False)  # 2026-10-30 is newer
+
+
 # --- M4: fetch locks shared by every process ----------------------------------------------------------------
 
 

@@ -987,6 +987,7 @@ def import_pubmed(
     if unsealed_plans(vault_root / "_incoming", spec):
         # An update generation whose ingest did not finish: its files already left the folder, so
         # only this retries it; nothing new is taken until it is sealed.
+        _finish_takes(vault_root / "_incoming", spec, folder)  # a run stopped mid-move goes on
         if save is not None:
             save()  # what was taken so far is on disk before the wait
         code = _ingest(args, spec.id, None, out, ops)
@@ -1017,21 +1018,21 @@ def import_pubmed(
         return 0
     version = f"pubmed{yy}-u{n:04d}"
     incoming = vault_root / "_incoming"
-    dest = incoming / spec.id / version
-    dest.mkdir(parents=True, exist_ok=True)
     targets: list[dict[str, Any]] = []
+    # Every file is read where it is and the plan written before any of them moves: a file moved
+    # before its plan existed was found by no later run when the share refused a take past its
+    # retries (the next run stopped at the first number missing from the folder, and the owner was
+    # asked for it again, 2026-11-04 trawl). With the plan written, the next run finishes the moves.
     for path in run:
 
-        def take(path: Path = path) -> tuple[str, int]:  # a refusal mid-loop left files moved, no plan
+        def read(path: Path = path) -> tuple[str, int]:
             digest = hashlib.sha256()
             with path.open("rb") as fh:
                 while chunk := fh.read(8 << 20):
                     digest.update(chunk)
-            size = path.stat().st_size
-            shutil.move(path, dest / path.name)
-            return digest.hexdigest(), size
+            return digest.hexdigest(), path.stat().st_size
 
-        sha, size = nasretry.retrying(f"take {path.name}", take)
+        sha, size = nasretry.retrying(f"read {path.name}", read)
         targets.append(
             {
                 "source_id": spec.id,
@@ -1051,6 +1052,7 @@ def import_pubmed(
     tmp = plan.with_name(plan.name + ".partial")
     tmp.write_text(json.dumps(targets, indent=1), encoding="utf-8")
     tmp.replace(plan)
+    _finish_takes(incoming, spec, folder)
     out.write(f"{spec.id}: {len(run)} update file(s) as {version}\n")
     if save is not None:
         save()  # the moves are done: a kill in the wait must not lose them
@@ -1062,6 +1064,33 @@ def import_pubmed(
             if item.id in names:
                 item.status, item.taken, item.problem = "taken", day, ""
     return code
+
+
+def _finish_takes(incoming: Path, spec: SourceSpec, folder: Path) -> int:
+    """Move every file an unsealed plan of ``spec`` names that is still in ``folder`` into its
+    ``_incoming`` version folder (each move tried again when the share refuses it); how many moved.
+    A sealed version's names are left alone: a file saved again after its seal is not that version's.
+    """
+    from wsp_cli.bulk import PLANS_SUBDIR
+
+    unsealed = set(unsealed_plans(incoming, spec))
+    moved = 0
+    for plan in sorted((incoming / "_plans" / PLANS_SUBDIR).glob(f"{spec.id}-*.json")):
+        try:
+            targets = cast(list[Mapping[str, Any]], json.loads(plan.read_text(encoding="utf-8")))
+        except (OSError, ValueError):
+            continue
+        for t in targets:
+            version = str(t.get("version"))
+            if t.get("source_id") != spec.id or version not in unsealed:
+                continue
+            src = folder / Path(str(t.get("name"))).name
+            dest = incoming / spec.id / version / src.name
+            if src.is_file() and not dest.exists():
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                nasretry.retrying(f"take {src.name}", lambda src=src, dest=dest: shutil.move(src, dest))
+                moved += 1
+    return moved
 
 
 def _ingest(args: argparse.Namespace, source: str, version: str | None, out: TextIO, ops: Any) -> int:

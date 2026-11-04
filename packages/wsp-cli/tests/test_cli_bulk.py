@@ -429,3 +429,36 @@ def test_a_file_without_size_or_checksum_must_read_to_count_as_whole(tmp_path: P
     assert not whole(empty, remote("c.txt"))
     assert whole(text, remote("d.txt"))
     assert whole(big, remote("e.tar"))  # other kinds: not read whole, only not empty
+
+
+def test_files_an_interrupted_ingest_staged_are_not_fetched_again(vault: tuple[Path, Downloads]) -> None:
+    """2026-11-04 trawl: a fetch looked only in _incoming, so every file an ingest that stopped before
+    its seal had adopted was downloaded again (NARA's 401 files, 2026-10-28), then read back twice
+    over the NAS and dropped as a duplicate."""
+    from dataclasses import replace
+
+    from wsp_cli.ingest import Ingestor, VersionStatus
+    from wsp_vault.signing import Ed25519Signer
+    from wsp_vault.vault import FileVault
+
+    root, fetcher = vault
+    assert run()[0] == bulk.EXIT_OK
+    incoming = root / "_incoming/big/2025-03-26"
+    lib = FileVault(root, Ed25519Signer.generate(), domains={"big": SPEC.vault_domain})
+    staging = lib.stage("big", "2025-03-26")
+    # a.tar.gz adopted and recorded; b.tar.gz moved aside by an ingest stopped while hashing it.
+    lib.adopt("big", "2025-03-26", incoming / "a.tar.gz", "upstream/a.tar.gz", upstream=FILES[0].checksums)
+    (incoming / "b.tar.gz").rename(staging / "upstream/b.tar.gz.adopting")
+    fetcher.downloaded.clear()
+    rc, text = run()
+    assert rc == bulk.EXIT_OK, text
+    assert fetcher.downloaded == []
+    assert "2 file(s) already here or staged" in text
+    # Not the planned size, or a checksum it was never checked against: fetched again.
+    staged = bulk._staged(staging)  # pyright: ignore[reportPrivateUsage]
+    assert staged(FILES[0])
+    assert not staged(replace(FILES[0], size=len(A) + 1))
+    assert not staged(replace(FILES[0], checksums=(Checksum("sha256", "0" * 64),)))
+    # The ingest goes on from what is staged.
+    report = Ingestor(lib, [SPEC], out=io.StringIO()).run(source_id="big")
+    assert [v.status for v in report.versions] == [VersionStatus.INGESTED]

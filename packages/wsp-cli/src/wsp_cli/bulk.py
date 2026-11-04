@@ -42,10 +42,12 @@ from pathlib import Path
 from typing import Any, TextIO
 
 from wsp_cli import bootstrap
+from wsp_cli.ingest import generation_id_for
 from wsp_cli.nasretry import copy_hashed
 from wsp_core.errors import FetchError, NotFoundError
 from wsp_core.model import Checksum, ReleaseRef, RemoteFile, SourceSpec
 from wsp_core.ports import Ctx
+from wsp_vault.vault import ADOPTING_SUFFIX, STAGING_DIR, VaultError, read_staging, staged_entry
 
 PLANS_SUBDIR = "targets.d"
 LANE = "collections"  # renamed into place only when complete: ingest needs no settle wait
@@ -171,7 +173,14 @@ def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
     out.write(
         f"{spec.id}/{release.version}: {len(release.files)} files, {_gb(total)}; fetching {len(wanted)}\n"
     )
-    todo = [(i, r) for i, r in enumerate(wanted, 1) if not _whole(dest_dir / r.name, r)]
+    staged = _staged(
+        vault_root / STAGING_DIR / spec.vault_domain / spec.id / generation_id_for(release.version)
+    )
+    todo = [(i, r) for i, r in enumerate(wanted, 1) if not _whole(dest_dir / r.name, r) and not staged(r)]
+    if len(todo) < len(wanted):
+        out.write(
+            f"{spec.id}/{release.version}: {len(wanted) - len(todo):,} file(s) already here or staged\n"
+        )
     parallel = max(1, int(getattr(args, "parallel", 1) or 1))
     quiet = len(todo) > LOUD_FILES  # 60,000 small files: a line a thousand, not a line a file
 
@@ -329,6 +338,31 @@ def _fetch_packed(
     out.write(f"{spec.id}/{release.version}: {name} {_gb(size)} written\n")
     out.write(f"next: wsp ingest --source {spec.id} --version {release.version}\n")
     return EXIT_OK
+
+
+def _staged(staging: Path) -> Callable[[RemoteFile], bool]:
+    """Whether an ingest of this version already moved a file into ``staging``: adopted and recorded
+    (:func:`wsp_vault.vault.staged_entry`, the test the ingest itself uses to skip it, with the
+    planned size), or still under its ``.adopting`` name, which the ingest finishes and checks against
+    the plan. A fetch looked only in ``_incoming``, so every file an interrupted ingest had adopted
+    was downloaded again, then read back twice over the NAS and dropped as a duplicate (NARA's 401
+    files, 2026-10-28; 2026-11-04 trawl). Read-only: no ingest lock is waited for."""
+    try:
+        record = read_staging(staging) if staging.is_dir() else {}
+    except (OSError, ValueError, VaultError):
+        record = {}  # unreadable now: fetched as before, the ingest drops a duplicate
+
+    def staged(remote: RemoteFile) -> bool:
+        rel = f"upstream/{remote.name}"
+        try:
+            if _whole(staging / f"{rel}{ADOPTING_SUFFIX}", remote):
+                return True
+            entry = staged_entry(staging, rel, remote.checksums, record) if record else None
+        except (OSError, ValueError, VaultError):
+            return False
+        return entry is not None and remote.size in (None, entry.size)
+
+    return staged
 
 
 def _whole(path: Path, remote: RemoteFile) -> bool:

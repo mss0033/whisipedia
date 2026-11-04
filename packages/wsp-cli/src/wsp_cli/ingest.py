@@ -498,13 +498,22 @@ class Ingestor:
         report = self.plan(source_id, version)
         report.dry_run = dry_run
         changed = False
+        promoted: dict[str, set[str]] = {}  # per source: generations ever promoted (ledger read once)
         for vp in report.versions:
             if any(v.status is VersionStatus.YIELDED for v in report.versions):
                 break  # out of time: the rest waits for the next run
             if vp.status is VersionStatus.SEALED and not dry_run and not isinstance(vp, ArxivSnapshotPlan):
                 # Sealed by a run that failed after the seal (a ledger write the share refused): its
                 # promotion never came, and a rerun saw only "sealed" (2026-10-29 spot check).
-                never = vp.generation_id not in self.vault.promoted_before(vp.source_id)  # a rollback stands
+                try:
+                    never = not self._promoted_before(vp.source_id, vp.generation_id, promoted)
+                except OSError as exc:  # the share refused the ledger past the retries: this one waits
+                    vp.status, vp.reason = (
+                        VersionStatus.FAILED,
+                        f"ledger not read: {type(exc).__name__}: {exc}",
+                    )
+                    self._say(f"{vp.source_id}/{vp.generation_id}: FAILED {vp.reason}")
+                    continue
                 if never and self.vault.promote_if_newer(vp.source_id, vp.generation_id):
                     vp.promoted = changed = True
                     self._say(f"{vp.source_id}/{vp.generation_id}: sealed earlier; promoted now")
@@ -524,6 +533,21 @@ class Ingestor:
         if not dry_run and changed:
             write_library_docs(self.vault, list(self.specs.values()))
         return report
+
+    def _promoted_before(self, sid: str, gid: str, seen: dict[str, set[str]]) -> bool:
+        """Whether ``gid`` was ever current (a rollback stands: it is not promoted again). The current
+        pointers and :data:`PROMOTED_NAME` first; the whole ledger only when they do not name it, read
+        once per source and run, tried again when the share refuses. Every sealed version a run
+        planned read the 212 MB ledger, with no retry, while the ingest lock was held: 73 times for
+        ``--source era5-daily``, and one refusal ended the run before its pending version (2026-11-04
+        trawl)."""
+        if gid in self.vault.promoted_before(sid, ledger=False):
+            return True
+        if sid not in seen:
+            seen[sid] = nasretry.retrying(
+                f"read the ledger for {sid}", lambda: self.vault.promoted_before(sid)
+            )
+        return gid in seen[sid]
 
     def _ingest(self, vp: VersionPlan) -> bool:
         sid, gid = vp.source_id, vp.generation_id

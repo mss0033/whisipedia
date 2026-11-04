@@ -389,6 +389,60 @@ def test_pubmed_update_files_become_a_generation_of_the_unbroken_run(
     assert [i.status for i in q.items] == ["taken", "taken", "pending", "pending"]
 
 
+def test_a_pubmed_take_the_share_refuses_is_finished_by_the_next_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-11-04 trawl: a take refused past its retries left the files before it moved into
+    _incoming with no plan; the next run stopped at the first number missing from the folder, and
+    they were never sealed."""
+    import shutil
+
+    vault = tmp_path / "vault"
+    folder = tmp_path / "manual"
+    folder.mkdir()
+    names = [f"pubmed26n{n}.xml.gz" for n in (1683, 1684, 1685)]
+    for name in names:
+        (folder / name).write_bytes(_gz(b"<PubmedArticleSet/>"))
+    version = "pubmed26-u1685"
+    dest = vault / "_incoming" / "pubmed" / version
+    ingested: list[list[str]] = []
+
+    class FakeOps:
+        @staticmethod
+        def cmd_ingest(args: argparse.Namespace, out: Any) -> int:
+            ingested.append(sorted(p.name for p in dest.iterdir()))
+            sealed = vault / "library" / "reference" / "pubmed" / version
+            sealed.mkdir(parents=True)
+            (sealed / "MANIFEST.json").write_text("{}")
+            return 0
+
+    import wsp_cli
+
+    monkeypatch.setattr(wsp_cli, "ops", FakeOps, raising=False)
+    monkeypatch.setitem(__import__("sys").modules, "wsp_cli.ops", FakeOps)
+    real_move = shutil.move
+
+    def refused(src: Any, dst: Any) -> Any:
+        if Path(src).name == names[1]:
+            raise OSError(5, "Input/output error")
+        return real_move(src, dst)
+
+    monkeypatch.setattr(shutil, "move", refused)
+    spec = _spec("pubmed", {"adapter": "pubmed"})
+    assert spec.vault_domain == "reference"
+    q = Queue("pubmed", items=manual._pubmed_items("pubmed26-u1682", 3))  # pyright: ignore[reportPrivateUsage]
+    args = argparse.Namespace(config_dir=None)
+    with pytest.raises(OSError, match="Input/output"):
+        manual.import_pubmed(args, spec, q, folder, "pubmed26-u1682", vault, io.StringIO())
+    plan = vault / "_incoming" / "_plans" / "targets.d" / f"pubmed-{version}.json"
+    assert [t["name"] for t in json.loads(plan.read_text())] == names  # planned before anything moved
+    monkeypatch.setattr(shutil, "move", real_move)
+    out = io.StringIO()
+    assert manual.import_pubmed(args, spec, q, folder, "pubmed26-u1682", vault, out) == 0, out.getvalue()
+    assert ingested == [names]
+    assert not any((folder / n).exists() for n in names)
+
+
 def test_the_newest_sealed_pubmed_generation_is_found_current_or_not(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

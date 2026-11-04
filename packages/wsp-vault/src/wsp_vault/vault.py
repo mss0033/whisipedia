@@ -540,22 +540,9 @@ class FileVault:
         dest = staging / check_relpath(relpath)
         if path.exists() or dest.with_name(dest.name + ADOPTING_SUFFIX).exists():
             return None
-        if records is None:
-            records = _read_staging(staging)
-        entry = records.get(dest.relative_to(staging).as_posix())
-        try:
-            if entry is None or dest.stat().st_size != entry.size:
-                return None
-        except FileNotFoundError:
+        entry = staged_entry(staging, relpath, upstream, records)
+        if entry is None or (expected is not None and entry.digests != expected):
             return None
-        if expected is not None and entry.digests != expected:
-            return None
-        ours = {"sha256": entry.sha256, "blake3": entry.blake3}
-        verified = {(c.algorithm, c.hexdigest) for c in entry.upstream}
-        for c in upstream:
-            algorithm, digest = normalize_algorithm(c.algorithm), c.hexdigest.strip().lower()
-            if (algorithm, digest) not in verified and ours.get(algorithm) != digest:
-                return None
         return entry
 
     def _adopt_file(
@@ -1050,15 +1037,18 @@ class FileVault:
 
         self._retry.run(attempt)
 
-    def promoted_before(self, source_id: str) -> set[str]:
+    def promoted_before(self, source_id: str, *, ledger: bool = True) -> set[str]:
         """Generations of ``source_id`` that were current at some time: :data:`PROMOTED_NAME`, the
         current pointers, and the ledger's ``vault.promote`` events (promotions before that file
-        existed). Reads the whole ledger: for a repair's rollback, which is rare."""
+        existed). Reads the whole ledger: for a repair's rollback, which is rare. ``ledger=False``
+        reads only the two small files: a generation found there needs no ledger read (an ingest
+        read the 212 MB ledger once per sealed version it planned, 2026-11-04 trawl); one not found
+        there may still be in the ledger."""
         out = set(self.current_set_ids(source_id))
         with contextlib.suppress(FileNotFoundError):
             text = (self.source_dir(source_id) / PROMOTED_NAME).read_text(encoding="utf-8")
             out |= {line.strip() for line in text.splitlines() if line.strip()}
-        events = getattr(self._ledger, "events", None)
+        events = getattr(self._ledger, "events", None) if ledger else None
         if callable(events):
             prefix = f"{source_id}/"
             for ev in cast(Iterable[Any], events()):
@@ -1390,6 +1380,39 @@ def _require_regular(path: Path) -> None:
     st = os.lstat(path)
     if not stat.S_ISREG(st.st_mode):
         raise VaultError(f"{path} is not a regular file (symlinks are not followed)")
+
+
+def staged_entry(
+    staging: Path,
+    relpath: str,
+    upstream: Sequence[Checksum] = (),
+    record: Mapping[str, ManifestEntry] | None = None,
+) -> ManifestEntry | None:
+    """The staging record's entry for ``relpath`` when the staged file is still its recorded size and
+    every checksum in ``upstream`` was verified against those bytes when they were adopted or is
+    their recorded SHA-256/BLAKE3; else ``None``. ``record``: the staging record already read
+    (:func:`read_staging`), for many files. Read-only and takes no lock: ``wsp bulk fetch`` asks it
+    which files an interrupted ingest already adopted, so it does not download them again
+    (2026-11-04 trawl)."""
+    dest = staging / check_relpath(relpath)
+    entry = (_read_staging(staging) if record is None else record).get(dest.relative_to(staging).as_posix())
+    try:
+        if entry is None or dest.stat().st_size != entry.size:
+            return None
+    except FileNotFoundError:
+        return None
+    ours = {"sha256": entry.sha256, "blake3": entry.blake3}
+    verified = {(c.algorithm, c.hexdigest) for c in entry.upstream}
+    for c in upstream:
+        algorithm, digest = normalize_algorithm(c.algorithm), c.hexdigest.strip().lower()
+        if (algorithm, digest) not in verified and ours.get(algorithm) != digest:
+            return None
+    return entry
+
+
+def read_staging(staging: Path) -> dict[str, ManifestEntry]:
+    """The staging record of a staging directory (empty when there is none)."""
+    return _read_staging(staging)
 
 
 def _read_staging(staging: Path) -> dict[str, ManifestEntry]:
