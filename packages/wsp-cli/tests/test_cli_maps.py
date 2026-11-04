@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 import pytest
@@ -312,3 +312,163 @@ def test_a_rerun_continues_the_copy_an_earlier_day_began(tmp_path: Path) -> None
     assert (
         unfinished_copy(incoming, spec, "6-14-26", name, vault) == "2026-10-28.6-14-26"
     )  # sealed: not that one
+
+
+def _fetch_harness(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, part: object, fetcher: object) -> Path:
+    """``wsp maps fetch`` over a vault ``tmp_path/vault`` offering ``part``; work disk ``tmp_path/work``."""
+    from types import SimpleNamespace
+
+    from wsp_cli import bootstrap, maps
+
+    spec = SimpleNamespace(id="maps-terrain-regional", vault_domain="maps")
+    vault = tmp_path / "vault"
+
+    def nothing(*a: object, **k: object) -> None:
+        return None
+
+    def config(*a: object) -> dict[str, object]:
+        return {}
+
+    def paths(*a: object) -> SimpleNamespace:
+        return SimpleNamespace(require_vault=lambda: vault, workdir=tmp_path / "work")
+
+    def build_fetcher(*a: object, **k: object) -> object:
+        return fetcher
+
+    def source(*a: object) -> SimpleNamespace:
+        return spec
+
+    def parts(*a: object) -> list[object]:
+        return [part]
+
+    monkeypatch.setattr(bootstrap, "layout", nothing)
+    monkeypatch.setattr(bootstrap, "load", config)
+    monkeypatch.setattr(bootstrap, "paths", paths)
+    monkeypatch.setattr(bootstrap, "ingest_pace", nothing)
+    monkeypatch.setattr(bootstrap, "build_fetcher", build_fetcher)
+    monkeypatch.setattr(maps, "_spec", source)
+    monkeypatch.setattr(maps, "_parts", parts)
+    return vault
+
+
+def _fetch_args(partition: str, version: str | None = None) -> object:
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        config_dir=None, source="maps-terrain-regional", partition=partition, version=version
+    )
+
+
+@pytest.mark.parametrize("local_kept", [True, False])
+def test_a_copied_cut_whose_plan_the_share_refused_gets_its_plan_on_a_rerun(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, local_kept: bool
+) -> None:
+    """2026-11-04 trawl: the cut was copied into _incoming and the plan write refused; every rerun skipped
+    the part, printed its ingest and exited 0, and the ingest found no plan for ever."""
+    import hashlib
+    import io
+    from typing import Any, cast
+
+    from wsp_adapters.maptiles import MapPart
+    from wsp_cli import maps
+
+    class Ranged:
+        def get_range(self, url: str, offset: int, n: int) -> bytes:
+            raise AssertionError("the part is not cut again")
+
+    part = MapPart("6-14-26", "6-14-26-z13-14.pmtiles", "https://d.example/6-14-26.pmtiles", cut=Cut(13, 14))
+    vault = _fetch_harness(monkeypatch, tmp_path, part, Ranged())
+    local = tmp_path / "work" / "maps" / part.name
+    local.parent.mkdir(parents=True)
+    write_archive(local, [(13, 0, 0, b"a"), (14, 0, 0, b"b")], tile_type=TileType.WEBP)
+    sha = hashlib.sha256(local.read_bytes()).hexdigest()
+    real_write_plan = maps.write_plan
+
+    def refused(*_a: object) -> Path:
+        raise OSError(5, "Input/output error")
+
+    def once(what: str, fn: Callable[[], object]) -> object:
+        return fn()
+
+    monkeypatch.setattr(maps, "retrying", once)
+    monkeypatch.setattr(maps, "write_plan", refused)
+    args = cast(Any, _fetch_args("6-14-26", "2026-11-04"))
+    assert maps.cmd_fetch(args, io.StringIO()) == maps.EXIT_FAILED
+    dest = vault / "_incoming" / "maps-terrain-regional" / "2026-11-04.6-14-26" / part.name
+    plan = vault / "_incoming" / "_plans" / "targets.d" / "maps-terrain-regional-2026-11-04.6-14-26.json"
+    assert dest.is_file()
+    assert local.is_file()
+    assert not plan.exists()
+    if not local_kept:
+        local.unlink()  # the work disk cleared since: the copy in _incoming is hashed where it lies
+    monkeypatch.setattr(maps, "write_plan", real_write_plan)
+    out = io.StringIO()
+    assert maps.cmd_fetch(args, out) == maps.EXIT_OK, out.getvalue()
+    target = json.loads(plan.read_text())[0]
+    assert target["checksum"] == ["sha-256", sha]
+    assert target["size"] == dest.stat().st_size
+    assert not local.exists()
+    assert "next: wsp ingest --source maps-terrain-regional --version 2026-11-04.6-14-26" in out.getvalue()
+
+
+def test_a_whole_download_continues_in_the_generation_an_earlier_day_began(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """2026-11-04 trawl: a whole archive (no upstream version) was begun again in a new folder each day;
+    a 62 GB one was downloaded twice and a third time begun (2026-10-19 to 10-21)."""
+    import io
+    from typing import Any, cast
+
+    from wsp_adapters.maptiles import MapPart
+    from wsp_cli import maps
+
+    downloads: list[Path] = []
+
+    class Fetcher:
+        def download(self, remote: object, dest: Path) -> None:
+            downloads.append(dest)
+            dest.write_bytes(b"x" * 10)
+
+    part = MapPart("6-12-23", "6-12-23.pmtiles", "https://d.example/6-12-23.pmtiles", size=10)
+    vault = _fetch_harness(monkeypatch, tmp_path, part, Fetcher())
+    base = vault / "_incoming" / "maps-terrain-regional"
+    (base / "2026-10-24.6-12-23").mkdir(parents=True)
+    (base / "2026-10-24.6-12-23" / "6-12-23.pmtiles.partial").write_bytes(b"\0" * 10)
+    (base / "2026-10-25.6-12-23").mkdir()  # begun, nothing written
+    out = io.StringIO()
+    assert maps.cmd_fetch(cast(Any, _fetch_args("6-12-23")), out) == maps.EXIT_OK
+    assert downloads == [base / "2026-10-24.6-12-23" / "6-12-23.pmtiles"]
+    plans = vault / "_incoming" / "_plans" / "targets.d"
+    assert [p.name for p in plans.iterdir()] == ["maps-terrain-regional-2026-10-24.6-12-23.json"]
+    assert "--version 2026-10-24.6-12-23" in out.getvalue()
+
+
+def test_an_earlier_generation_is_ranked_by_what_it_holds(tmp_path: Path) -> None:
+    """A ranged download sets its .partial's size at its start, so the pieces its state records rank it;
+    a folder holding the part whole comes first (2026-11-04 trawl)."""
+    from types import SimpleNamespace
+    from typing import cast
+
+    from wsp_cli.maps import unfinished_copy
+    from wsp_core.model import SourceSpec
+    from wsp_fetch.state import PartialState
+
+    spec = cast(SourceSpec, SimpleNamespace(id="maps-terrain-regional", vault_domain="maps"))
+    vault, name = tmp_path, "6-55-25.pmtiles"
+    base = vault / "_incoming" / spec.id
+
+    def partial(version: str, pieces: int) -> None:
+        (base / version).mkdir(parents=True)
+        (base / version / f"{name}.partial").write_bytes(b"\0" * 1000)  # preallocated: all one size
+        state = PartialState("u", 1000, 100, "sha-256", done=dict.fromkeys(range(pieces), "d"))
+        (base / version / f"{name}.partial.state.json").write_text(state.to_json())
+
+    partial("2026-10-19.6-55-25", 7)
+    partial("2026-10-20.6-55-25", 3)
+    partial("2026-10-21.6-55-25", 0)
+    assert unfinished_copy(vault / "_incoming", spec, "6-55-25", name, vault) == "2026-10-19.6-55-25"
+    partial("2026-10-22.6-55-25", 7)  # a tie: the newest
+    assert unfinished_copy(vault / "_incoming", spec, "6-55-25", name, vault) == "2026-10-22.6-55-25"
+    (base / "2026-10-18.6-55-25").mkdir()
+    (base / "2026-10-18.6-55-25" / name).write_bytes(b"whole")  # downloaded, not yet ingested
+    assert unfinished_copy(vault / "_incoming", spec, "6-55-25", name, vault) == "2026-10-18.6-55-25"

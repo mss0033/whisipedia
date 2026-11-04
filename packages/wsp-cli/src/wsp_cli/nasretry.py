@@ -63,6 +63,22 @@ def _shared_prefix(src: Path, other: Path, limit: int, chunk: int) -> tuple[int,
     return at, digest
 
 
+def sha256_file(path: Path, pace: Callable[[int], None] | None, *, chunk: int = COPY_CHUNK) -> str:
+    """The SHA-256 of ``path``, read paced and its pages dropped as it goes (a 76 GB part on the share:
+    the cache is charged to the job)."""
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        _sequential(fh.fileno())
+        at = 0
+        while piece := fh.read(chunk):
+            digest.update(piece)
+            _drop(fh.fileno(), at, len(piece))
+            at += len(piece)
+            if pace is not None:
+                pace(len(piece))
+    return digest.hexdigest()
+
+
 @dataclass
 class _Synced:
     at: int = 0  # bytes of the part known to be on the share

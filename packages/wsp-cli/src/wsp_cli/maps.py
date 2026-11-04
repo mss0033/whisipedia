@@ -36,7 +36,7 @@ from typing import Any, TextIO, cast
 
 from wsp_adapters.maptiles import Cut, MapConfigError, MapPart, check_cut, map_parts, map_source
 from wsp_cli import bootstrap
-from wsp_cli.nasretry import copy_hashed, retrying
+from wsp_cli.nasretry import copy_hashed, retrying, sha256_file
 from wsp_core.errors import FetchError
 from wsp_core.gazetteer import Place, place_rank, write_gazetteer
 from wsp_core.model import Checksum, RemoteFile, SourceSpec
@@ -101,12 +101,17 @@ def _sealed(vault_root: Path, spec: SourceSpec, version: str) -> bool:
     return (vault_root / "library" / spec.vault_domain / spec.id / version / "MANIFEST.json").is_file()
 
 
+def plan_path(incoming: Path, spec: SourceSpec, version: str) -> Path:
+    """Where the ingest plan of one generation of a part lives."""
+    return incoming / "_plans" / PLANS_SUBDIR / f"{spec.id}-{version}.json"
+
+
 def write_plan(
     incoming: Path, spec: SourceSpec, version: str, part: MapPart, checksum: Checksum | None, size: int | None
 ) -> Path:
     """The ingest plan of one part (``targets.d``, the format :mod:`wsp_cli.ingest` reads)."""
-    plans = incoming / "_plans" / PLANS_SUBDIR
-    plans.mkdir(parents=True, exist_ok=True)
+    path = plan_path(incoming, spec, version)
+    path.parent.mkdir(parents=True, exist_ok=True)
     algo = {"sha256": "sha-256", "md5": "md5"}
     target = {
         "source_id": spec.id,
@@ -118,7 +123,6 @@ def write_plan(
         "size": size,
         "meta": {"partition": part.partition, "cut": None if part.cut is None else part.cut.args()},
     }
-    path = plans / f"{spec.id}-{version}.json"
     tmp = path.with_name(path.name + ".partial")
     tmp.write_text(json.dumps([target], indent=1), encoding="utf-8")
     tmp.replace(path)
@@ -128,11 +132,16 @@ def write_plan(
 def unfinished_copy(
     incoming: Path, spec: SourceSpec, partition: str, name: str, vault_root: Path
 ) -> str | None:
-    """The generation an earlier run began copying this part into and did not finish (its ``.partial`` is
-    in ``_incoming``), the one with the most bytes; ``None`` if there is none. A rerun on another day
-    named a new generation and copied the part again from nothing: a 76 GB part was written whole
-    twice and two thirds a third time, 216 GB, and never finished (2026-10-28 to 11-02)."""
-    best: tuple[int, str] | None = None
+    """The unsealed generation an earlier run began this part in, ``None`` if there is none. A rerun on
+    another day named a new generation and copied the part again from nothing: a 76 GB part was written
+    whole twice and two thirds a third time, 216 GB, and never finished (2026-10-28 to 11-02).
+
+    A folder holding the part whole (its plan write refused, or not yet ingested) comes first, then the
+    one whose ``.partial`` holds the most: for a download, the pieces its ``.partial.state.json``
+    records (a ranged download sets the file's size at its start, so its size says nothing). Ties go to
+    the newest. Whole downloads were begun again each day too: a 62 GB archive downloaded twice and a
+    third time begun (2026-10-19 to 10-21; 2026-11-04 trawl)."""
+    best: tuple[int, int, str] | None = None
     try:
         folders = list((incoming / spec.id).iterdir())
     except FileNotFoundError:
@@ -140,13 +149,30 @@ def unfinished_copy(
     for folder in folders:
         if partition_of(folder.name) != partition or _sealed(vault_root, spec, folder.name):
             continue
-        try:
-            size = (folder / f"{name}.partial").stat().st_size
-        except FileNotFoundError:
-            continue
-        if best is None or size > best[0]:
-            best = (size, folder.name)
-    return None if best is None else best[1]
+        if (folder / name).is_file():
+            rank = (1, 0, folder.name)
+        else:
+            try:
+                size = (folder / f"{name}.partial").stat().st_size
+            except FileNotFoundError:
+                continue
+            rank = (0, _partial_progress(folder / f"{name}.partial.state.json", size), folder.name)
+        if best is None or rank > best:
+            best = rank
+    return None if best is None else best[2]
+
+
+def _partial_progress(state_file: Path, size: int) -> int:
+    """The bytes a ``.partial`` of ``size`` holds: the pieces its fetcher's state records, else its size
+    (a cut's copy, a single-stream or FTP download, all written in order)."""
+    from wsp_fetch.state import PartialState
+
+    try:
+        text = state_file.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return size
+    state = PartialState.from_json(text)
+    return 0 if state is None else min(len(state.done) * state.piece_size, size)
 
 
 def reusable_cut(local: Path, cut: Cut) -> bool:
@@ -181,7 +207,7 @@ def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
     incoming = vault_root / "_incoming"
     cycle = args.version or part.version or datetime.now(UTC).strftime("%Y-%m-%d")
     version = partition_generation_id(cycle, partition)
-    if not (args.version or part.version) and part.cut is not None:
+    if not (args.version or part.version):
         earlier = retrying(
             f"list {spec.id}", lambda: unfinished_copy(incoming, spec, partition, part.name, vault_root)
         )
@@ -209,7 +235,9 @@ def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
                 print(f"error: {spec.id}/{partition}: {exc}", file=sys.stderr)
                 return EXIT_FAILED
         out.write(f"{spec.id}/{version}: {part.name} {_gb(dest.stat().st_size)} downloaded\n")
-    elif not dest.is_file():
+    elif not dest.is_file() or not plan_path(incoming, spec, version).is_file():
+        # A part copied whole whose plan write the share then refused was skipped by every rerun, which
+        # still printed its ingest, and the ingest found no plan for ever (2026-11-04 trawl).
         from wsp_adapters.mapcut import Window, cut_archive
 
         work = (paths.workdir or Path.home() / ".cache" / "whisipedia") / "maps"
@@ -233,9 +261,14 @@ def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
                 out.flush()
 
         entries: int | None = None
+        src = local
         if reusable_cut(local, cut):
             # Cut by an earlier run that stopped while copying it into _incoming: only the copy is left.
             out.write(f"  {local.name}: cut by an earlier run, {_gb(local.stat().st_size)}\n")
+        elif dest.is_file() and check_cut(dest, cut, None) is None:
+            # Copied whole by an earlier run, its plan refused and its local cut since gone: hashed in place.
+            src = dest
+            out.write(f"  {dest.name}: copied by an earlier run with no plan, {_gb(dest.stat().st_size)}\n")
         else:
             try:
                 result = cut_archive(
@@ -249,14 +282,17 @@ def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
                 out.write(f"failed: {part.name}: {exc} (a rerun continues where this stopped)\n")
                 return EXIT_FAILED
             entries = result.entries
-        problem = check_cut(local, part.cut, entries)
+        problem = None if src == dest else check_cut(local, part.cut, entries)
         if problem:
             out.write(f"failed: {part.name}: {problem}\n")
             local.unlink(missing_ok=True)
             return EXIT_FAILED
-        size = local.stat().st_size
+        size = src.stat().st_size
         try:
-            sha = copy_hashed(local, dest, pace)
+            if src == dest:
+                sha = retrying(f"hash {dest.name}", lambda: sha256_file(dest, pace))
+            else:
+                sha = copy_hashed(local, dest, pace)
             # The plan first: a plan write the share refused after the cut was dropped left the part in
             # _incoming with nothing to ingest it, and no rerun could make its plan (2026-10-29).
             checksum = Checksum("sha256", sha)
@@ -264,7 +300,8 @@ def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
         except OSError as exc:  # the share refused past the retries (2026-11-02): the cut is kept
             out.write(f"failed: {part.name}: {exc} (a rerun continues the copy where this stopped)\n")
             return EXIT_FAILED
-        local.unlink()
+        if src == local:
+            local.unlink()
         out.write(f"{spec.id}/{version}: {part.name} {_gb(size)} cut and copied (sha256 {sha[:16]}...)\n")
     out.write(f"next: wsp ingest --source {spec.id} --version {version}\n")
     return EXIT_OK
