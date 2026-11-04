@@ -1195,8 +1195,8 @@ def unchanged(cand: Candidate, held: DocumentMeta | None, *, now: datetime | Non
     A listing that gives neither is trusted for :data:`REFETCH_AFTER` after the last fetch, then the
     document is fetched again, so an issuer's quiet correction is not missed forever. The catalog
     refreshes a skipped document's metadata from the listing either way."""
-    if held is None or cand.resolve == "git" or not held.sha256:
-        return False
+    if held is None or cand.resolve == "git" or not held.sha256 or not held.bytes:
+        return False  # nothing held, or an empty copy (the COD archive's placeholder, 2026-11-01)
     if held.origin_url and _same_place(cand.url) != _same_place(held.origin_url):
         # The key now lists another file (field exam 2026-10-14: the Pilot's Handbook key moved from
         # its addendum to the full handbook and kept the addendum's bytes). Fetch it; byte-identical

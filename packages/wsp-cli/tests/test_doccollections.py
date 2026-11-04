@@ -693,6 +693,7 @@ def test_unchanged_compares_the_listing_with_the_stored_bytes() -> None:
     assert not unchanged(dataclasses.replace(cand, md5="bb", size=10), held, now=now)
     assert not unchanged(dataclasses.replace(cand, size=11), held, now=now)
     assert unchanged(cand, held, now=now)  # no size, no checksum: trusted for a while
+    assert not unchanged(cand, dataclasses.replace(held, bytes=0, md5=None), now=now)  # an empty copy
     assert not unchanged(cand, held, now=now + REFETCH_AFTER)  # then re-checked
     assert not unchanged(cand, None, now=now)
     # The key now lists another file: fetched again, whatever the listing says (an http->https move

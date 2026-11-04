@@ -930,7 +930,11 @@ def import_collection(
             max_pages=None,
             dry_run=False,
             partition=part or None,
-            refetch=None,
+            # The owner's file is the bytes to take, whatever the library holds: without this a held
+            # key whose listing gives no size was "unchanged" for weeks, and the whole COD archive the
+            # owner saved stayed unread beside the empty copy sealed before it (2026-11-04).
+            # Byte-identical bytes are still recognised after reading and not kept twice.
+            refetch=[i.id for i in items],
             adopt_kept=None,
             manual=folder,
             discovery=[{"kind": "candidates", "items": [i.cand for i in items]}],

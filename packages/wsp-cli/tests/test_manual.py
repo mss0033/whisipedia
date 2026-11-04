@@ -591,6 +591,7 @@ def test_held_and_denied_documents_leave_the_offer_and_a_held_one_returns_once_d
     def fetch(args: argparse.Namespace, out: Any) -> int:
         cands = [Candidate.from_json(c) for c in args.discovery[0]["items"]]
         listed.append([c.key for c in cands])
+        assert args.refetch == [c.key for c in cands]  # the owner's file is read, whatever is held
         report = doccollections.FetchReport("s", "2026-10-29")
         for c in cands:
             (folder / f"{c.key[2:]}.pdf").unlink(missing_ok=True)
