@@ -511,12 +511,26 @@ class ZimAssetStore:
 
     def _read(self, file: str, path: str, want: Want) -> EntryData | None:
         try:
-            return self.reader.read(file, path, want)
+            return self._read_or_fail(file, path, want)
         except ZimUnavailable:
             raise
         except ZimError:  # unreadable archive or entry: "not here", logged for the operator
-            log.warning("ZIM read failed: %s %s", file, path, exc_info=True)
             return None
+
+    def _read_or_fail(self, file: str, path: str, want: Want) -> EntryData | None:
+        """Like :meth:`_read`, but a read that failed raises :class:`ZimError` instead of reading as
+        "not here": an answer remembered for the archive (is it a nautilus, MindTouch or YouTube
+        archive? where is its main page?) or a page kept in the cache must come from a read that
+        worked. libzim reports a NAS refusal (EAGAIN, ECONNABORTED) on open or read as a plain
+        ``RuntimeError``, and one such refusal on the first page of a nautilus archive lost its
+        catalogue until the API restarted (2026-11-04 trawl)."""
+        try:
+            return self.reader.read(file, path, want)
+        except ZimUnavailable:
+            raise
+        except ZimError:
+            log.warning("ZIM read failed: %s %s", file, path, exc_info=True)
+            raise
 
     # --- pages and assets ---
 
@@ -574,39 +588,68 @@ class ZimAssetStore:
             known = file in self._main_dirs
             main_dir = self._main_dirs.get(file)
         if not known:
-            data = self._read(file, "", Want.NONE)
+            try:
+                data = self._read_or_fail(file, "", Want.NONE)
+            except ZimUnavailable:
+                raise
+            except ZimError:  # not remembered: the next page asks again
+                data = None
+            else:
+                known = True
             main_dir = (
                 None if data is None or "/" not in data.path else data.path[: data.path.rindex("/") + 1]
             )
-            with self._lock:
-                self._main_dirs[file] = main_dir
+            if known:
+                with self._lock:
+                    self._main_dirs[file] = main_dir
         if main_dir and f"{root}{main_dir}" not in out:
             out.append(f"{root}{main_dir}")
         return tuple(out)
 
-    def find(self, source_id: str, generation_id: str, native_id: str) -> str | None:
+    def find(
+        self, source_id: str, generation_id: str, native_id: str, *, unsure: Callable[[], None] | None = None
+    ) -> str | None:
         """The native id of the entry at ``native_id``, its other slash form or its folder's
-        ``index.html`` (a crawled site's "/opsec/x" is "…/opsec/x/index.html"), any type; else None."""
+        ``index.html`` (a crawled site's "/opsec/x" is "…/opsec/x/index.html"), any type; else None.
+        ``unsure()`` is called when a lookup failed rather than found nothing (the answer is a guess:
+        a page rendered with it must not be kept, 2026-11-04 trawl)."""
         try:
             where = self._locate(source_id, generation_id, native_id)
         except ZimUnavailable:
+            if unsure is not None:
+                unsure()
             return None
         if where is None:
             return None
         file, path, root = where
         bare = path.rstrip("/")
         for candidate in (path, bare if path.endswith("/") else path + "/", f"{bare}/index.html"):
-            if candidate and self._read(file, candidate, Want.NONE) is not None:
+            if not candidate:
+                continue
+            try:
+                found = self._read_or_fail(file, candidate, Want.NONE)
+            except ZimUnavailable:
+                raise
+            except ZimError:
+                if unsure is not None:
+                    unsure()
+                continue
+            if found is not None:
                 return root + candidate
         return None
 
-    def is_image(self, source_id: str, generation_id: str, native_id: str) -> bool:
-        """Whether the entry at ``native_id`` is a picture (no content is read)."""
+    def is_image(
+        self, source_id: str, generation_id: str, native_id: str, *, unsure: Callable[[], None] | None = None
+    ) -> bool:
+        """Whether the entry at ``native_id`` is a picture (no content is read). A lookup that failed
+        keeps the picture, and calls ``unsure()`` (see :meth:`find`)."""
         try:
             where = self._locate(source_id, generation_id, native_id)
-            data = self._read(where[0], where[1], Want.NONE) if where is not None else None
-        except ZimUnavailable:
-            return True  # busy: keep the picture rather than drop it
+            data = self._read_or_fail(where[0], where[1], Want.NONE) if where is not None else None
+        except ZimError:  # busy, or the NAS refused: keep the picture rather than drop it
+            if unsure is not None:
+                unsure()
+            return True
         return data is not None and data.mimetype.startswith("image/")
 
     def _nautilus(self, file: str) -> list[nautilus.Item] | None:
@@ -614,7 +657,12 @@ class ZimAssetStore:
         with self._lock:
             if file in self._catalogues:
                 return self._catalogues[file]
-        found = self._read(file, nautilus.DATABASE, Want.ANY)
+        try:
+            found = self._read_or_fail(file, nautilus.DATABASE, Want.ANY)
+        except ZimUnavailable:
+            raise
+        except ZimError:  # not remembered as "not a nautilus archive": the next page asks again
+            return None
         catalogue = nautilus.items(found.content) if found is not None and found.content else []
         result = catalogue or None
         with self._lock:
@@ -688,11 +736,16 @@ class ZimAssetStore:
         with self._lock:
             if file in self._fronts:
                 return self._fronts[file]
-        home = self._read(file, youtubezim.HOME, Want.ANY)
-        front = None
-        if home is not None and home.content is not None:
-            channel = self._read(file, "channel.json", Want.ANY)
-            front = youtubezim.home_html(home.content, None if channel is None else channel.content)
+        try:
+            home = self._read_or_fail(file, youtubezim.HOME, Want.ANY)
+            front = None
+            if home is not None and home.content is not None:
+                channel = self._read_or_fail(file, "channel.json", Want.ANY)
+                front = youtubezim.home_html(home.content, None if channel is None else channel.content)
+        except ZimUnavailable:
+            raise
+        except ZimError:  # not remembered: the next visit asks again
+            return None
         with self._lock:
             self._fronts[file] = front
         return front
@@ -705,7 +758,12 @@ class ZimAssetStore:
             if pages is not None:
                 self._page_maps.move_to_end(file)
                 return pages, self._roots.get(file)
-        shared = self._read(file, mindtouch.SHARED, Want.ANY)
+        try:
+            shared = self._read_or_fail(file, mindtouch.SHARED, Want.ANY)
+        except ZimUnavailable:
+            raise
+        except ZimError:  # not remembered as "not a MindTouch archive": the next page asks again
+            return mindtouch.Pages({}), None
         raw = None if shared is None else shared.content
         pages = mindtouch.Pages({} if raw is None else mindtouch.page_ids(raw))
         home = None if raw is None else mindtouch.root_page(raw)

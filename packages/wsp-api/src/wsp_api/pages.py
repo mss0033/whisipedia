@@ -182,9 +182,12 @@ class ByteLRU[K: Hashable, V]:
                 _, (_, freed) = self._items.popitem(last=False)
                 self._bytes -= freed
 
-    def get_or_build(self, key: K, build: Callable[[], V | None]) -> V | None:
+    def get_or_build(
+        self, key: K, build: Callable[[], V | None], keep: Callable[[V], bool] | None = None
+    ) -> V | None:
         """The cached value, or ``build()`` once however many threads ask at the same time. A failed
-        or ``None`` build is not cached (no negative entries)."""
+        or ``None`` build is not cached (no negative entries), nor one ``keep`` refuses (built on a
+        lookup that failed, 2026-11-04 trawl); those waiting for it still get it."""
         with self._lock:
             found = self._items.get(key)
             if found is not None:
@@ -205,7 +208,7 @@ class ByteLRU[K: Hashable, V]:
                 del self._building[key]
             pending.set_exception(exc)
             raise
-        if value is not None:
+        if value is not None and (keep is None or keep(value)):
             self.put(key, value)
         with self._lock:
             del self._building[key]

@@ -63,6 +63,11 @@ DRAWN_MAX_ZOOM = {"vector": 15, "raster": 18, "raster-dem": 16}  # what the brow
 CUT_CACHE = 512  # tiles cut from ancestors, kept (terrain re-encoding costs ~30-60 ms)
 ASSETS_SOURCE = "maps-assets"
 CACHE_HEADER = "public, max-age=86400"
+# An archive that failed to open is tried again after RETRY_FIRST seconds, doubling up to RETRY_MAX:
+# one NAS refusal while it was first opened took it away until the API restarted (2026-11-04 trawl).
+RETRY_FIRST = 60.0
+RETRY_MAX = 900.0
+RETRY_AFTER = "30"  # a tile an archive failed to answer: the browser asks again, it caches nothing
 
 
 class Tileset(BaseModel):
@@ -111,15 +116,23 @@ class _Held:
     priority: int
     source_id: str
     archive: Archive | None = None
-    failed: bool = False
+    retry_at: float = -math.inf  # monotonic: when a failed open is tried again
+    backoff: float = 0.0
 
     def open(self) -> Archive | None:
-        if self.archive is None and not self.failed:
+        """The archive, or ``None`` while a failed open waits for its retry. A refusal (EAGAIN,
+        ECONNABORTED) and a short read of the header look alike, so every failure is retried."""
+        if self.archive is None and time.monotonic() >= self.retry_at:
             try:
                 self.archive = Archive.open_file(self.path)
             except (OSError, PMTilesError) as exc:
-                log.warning("map archive %s unreadable: %s", self.path, exc)
-                self.failed = True
+                self.backoff = min(RETRY_MAX, self.backoff * 2 or RETRY_FIRST)
+                self.retry_at = time.monotonic() + self.backoff
+                log.warning(
+                    "map archive %s unreadable (tried again in %.0f s): %s", self.path, self.backoff, exc
+                )
+            else:
+                self.backoff = 0.0
         return self.archive
 
 
@@ -327,7 +340,11 @@ class MapLibrary:
                         return 256
         return 512 if h.tile_type is TileType.WEBP else 256
 
-    def tile(self, tileset: str, z: int, x: int, y: int) -> tuple[bytes, TileType, Compression] | None:
+    def tile(self, tileset: str, z: int, x: int, y: int) -> tuple[bytes, TileType, Compression, bool] | None:
+        """``(tile, type, compression, lasting)``, or ``None`` where no archive holds it. ``lasting`` is
+        false when an archive that might have held a better tile failed (not open, or its read
+        failed): the browser must not keep that tile for a day. Where none was found because one
+        failed, :class:`ApiError` 503, not an empty tile the browser keeps (2026-11-04 trawl)."""
         s = self.sets().get(tileset)
         if s is None:
             raise ApiError(404, "tileset_not_found", f"no tileset {tileset!r}")
@@ -335,13 +352,15 @@ class MapLibrary:
         if not (0 <= x < n and 0 <= y < n):
             raise ApiError(400, "tile_out_of_range", f"tile {z}/{x}/{y} does not exist")
         bounds = tile_bounds(z, x, y)
+        failed = False
         for dz in range(0, (MAX_OVERZOOM if s.kind != "vector" else 0) + 1):
             if dz > z:
                 break
             az, ax, ay = z - dz, x >> dz, y >> dz
             for held in s.held:
                 archive = held.open()
-                if archive is None:
+                if archive is None:  # its bounds are unknown: it may have held this tile
+                    failed = True
                     continue
                 h = archive.header
                 if not (h.min_zoom <= az <= h.max_zoom) or not _overlaps(bounds, h.bounds):
@@ -350,11 +369,12 @@ class MapLibrary:
                     blob = archive.tile(az, ax, ay)
                 except (OSError, PMTilesError) as exc:
                     log.warning("map archive %s: tile %d/%d/%d: %s", held.path, az, ax, ay, exc)
+                    failed = True
                     continue
                 if not blob:
                     continue
                 if dz == 0:
-                    return blob, h.tile_type, h.tile_compression
+                    return blob, h.tile_type, h.tile_compression, not failed
                 key = (tileset, z, x, y)
                 with self._lock:
                     hit = self._cuts.get(key)
@@ -366,7 +386,14 @@ class MapLibrary:
                         if len(self._cuts) >= CUT_CACHE:
                             self._cuts.pop(next(iter(self._cuts)))
                         self._cuts[key] = hit
-                return hit, h.tile_type, Compression.NONE
+                return hit, h.tile_type, Compression.NONE, not failed
+        if failed:
+            raise ApiError(
+                503,
+                "tile_unavailable",
+                f"a map archive could not be read for {z}/{x}/{y}",
+                retry_after=RETRY_AFTER,
+            )
         return None
 
     # --- fonts and sprites ---
@@ -523,8 +550,8 @@ def maps_router(lib: Library) -> APIRouter:
         found = await pool.run(lambda: maps.tile(tileset, z, x, yy))
         if found is None:
             return Response(status_code=204, headers={"Cache-Control": CACHE_HEADER})
-        blob, tile_type, compression = found
-        headers = {"Cache-Control": CACHE_HEADER}
+        blob, tile_type, compression, lasting = found
+        headers = {"Cache-Control": CACHE_HEADER if lasting else "no-store"}
         if compression is Compression.GZIP:
             headers["Content-Encoding"] = "gzip"
         return Response(

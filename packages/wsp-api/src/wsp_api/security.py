@@ -4,6 +4,10 @@
   so any outbound request from the Navigator fails visibly in the browser.
 * Host-header allow-list: a page on another origin cannot reach the API through DNS rebinding.
 * No CORS: no ``Access-Control-Allow-*`` headers are ever sent, so other origins cannot read responses.
+* No cross-site writes: a POST, PUT, PATCH or DELETE a browser sends for another page (its
+  ``Sec-Fetch-Site`` is not ``same-origin``, or its ``Origin`` is not this one) is refused. Another
+  origin cannot read the answer, but a body-less ``no-cors`` POST still ran: any page the owner opened
+  could start a weather pull (2026-11-04 trawl). Requests with neither header (curl, ``tools/``) pass.
 
 Pure ASGI (not ``BaseHTTPMiddleware``) so streaming responses (SSE, NDJSON) are not buffered.
 """
@@ -40,6 +44,32 @@ ASSET_CSP: tuple[bytes, bytes] = (
     b"default-src 'none'; style-src 'unsafe-inline'; sandbox",
 )
 ASSET_PREFIX = "/v1/assets/"
+
+
+SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+def _header(scope: Scope, wanted: bytes) -> str | None:
+    for name, value in scope.get("headers", []):
+        if name == wanted:
+            return value.decode("latin-1")
+    return None
+
+
+def _cross_site(scope: Scope) -> bool:
+    """A state-changing request a browser sent from another origin (another site, or another port
+    of this one: a different local service)."""
+    if str(scope.get("method", "GET")).upper() in SAFE_METHODS:
+        return False
+    fetch_site = _header(scope, b"sec-fetch-site")
+    if fetch_site is not None and fetch_site.strip().lower() not in ("same-origin", "none"):
+        return True
+    origin = _header(scope, b"origin")
+    if origin is None:
+        return False
+    scheme, sep, netloc = origin.strip().lower().partition("://")
+    host = (_header(scope, b"host") or "").strip().lower()
+    return not sep or scheme not in ("http", "https") or not host or netloc != host
 
 
 def _host_of(scope: Scope) -> str:
@@ -81,6 +111,12 @@ class SecurityMiddleware:
 
         if _host_of(scope) not in self.settings.allowed_hosts:
             response = error_response(400, "invalid_host", "Host header is not an allowed local name")
+            await response(scope, receive, send_with_headers)
+            return
+        if _cross_site(scope):
+            response = error_response(
+                403, "cross_site", "a request from another site cannot change anything here"
+            )
             await response(scope, receive, send_with_headers)
             return
         await self.app(scope, receive, send_with_headers)

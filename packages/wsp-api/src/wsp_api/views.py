@@ -566,6 +566,9 @@ class Library:
             str(REWRITE_VERSION),
             str(self.zim.sites_version if self.zim else 0),
         )
+        # A picture lookup that failed (a busy worker, a NAS refusal) is guessed; the page is served
+        # but not kept, or its guess stayed in the page cache (2026-11-04 trawl).
+        unsure: list[bool] = []
 
         def build() -> Rendered | None:
             sites: tuple[str, ...] = ()
@@ -577,8 +580,8 @@ class Library:
                     return None
                 base, root, original, section = page.native_id, page.book_root, page.html, page.fragment
                 sites = page.site_roots
-                find = partial(zim.find, source_id, gid)
-                is_image = partial(zim.is_image, source_id, gid)
+                find = partial(zim.find, source_id, gid, unsure=lambda: unsure.append(True))
+                is_image = partial(zim.is_image, source_id, gid, unsure=lambda: unsure.append(True))
             else:
                 found = self.assets.html(source_id, gid, html_ref)
                 if found is None:
@@ -600,7 +603,7 @@ class Library:
             )
             return replace(out, section=section) if section else out
 
-        return self.pages.get_or_build(key, build)
+        return self.pages.get_or_build(key, build, keep=lambda _: not unsure)
 
     def live_zim(self, did: DocId) -> tuple[DocRecord, Rendered, Generation] | None:
         """A Kiwix page that is not refined (yet), read straight from the source's current ZIM."""

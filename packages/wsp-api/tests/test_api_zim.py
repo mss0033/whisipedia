@@ -13,6 +13,7 @@ from wsp_api.testing import local_client
 from wsp_api.testing.fakes import SAMPLE_GEN_2, InMemoryVault, sample_services
 from wsp_api.testing.zims import write_zim
 from wsp_api.zim import BOOKS_PAGE, ZimAssetStore
+from wsp_api.zimread import EntryData, InProcessZimReader, Want, ZimError
 from wsp_core.ids import make_doc_id
 from wsp_core.model import Artifact, Generation, GenerationStatus
 
@@ -532,3 +533,117 @@ def test_a_nautilus_archive_is_served_as_its_catalogue(tmp_path: Path) -> None:
     assert "Green beans" in item.html
     assert "Process 20 minutes" in item.html
     assert store.page("wiki", SAMPLE_GEN_2, "nautilus/99999") is None
+
+
+class _RefusingReader(InProcessZimReader):
+    """Fails the first read of each path in ``refuse`` as the worker reports a libzim I/O error (a
+    plain :class:`ZimError`: libzim raises RuntimeError for a NAS refusal), then reads normally."""
+
+    def __init__(self, *refuse: str) -> None:
+        super().__init__()
+        self.refuse = set(refuse)
+
+    def read(self, file: str, path: str, want: Want) -> EntryData | None:
+        if path in self.refuse:
+            self.refuse.discard(path)
+            raise ZimError("RuntimeError: Cannot read: Resource temporarily unavailable")
+        return super().read(file, path, want)
+
+
+def test_a_failed_read_is_not_remembered_as_not_a_nautilus_archive(tmp_path: Path) -> None:
+    """2026-11-04 trawl: one NAS refusal on the first page of a nautilus archive was cached as "not
+    a nautilus archive", and its generated home and item pages were gone until the API restarted."""
+    database = (
+        "var DATABASE = [{'_id': '00004', 'ti': 'Part 4', 'dsc': 'Vegetables', 'aut': '', 'fp': ['G4.pdf']}];"
+    )
+    _zim(
+        tmp_path / "wiki" / SAMPLE_GEN_2 / "upstream" / "usda-2015_en_2025-04.zim",
+        "usda-2015_en",
+        [
+            ("home", "text/html", "<html><body>{{ x }}</body></html>"),
+            ("database.js", "text/javascript", database),
+        ],
+        [],
+    )
+    store = ZimAssetStore(
+        _vault(tmp_path, ["upstream/usda-2015_en_2025-04.zim"]), _RefusingReader("database.js")
+    )
+    first = store.page("wiki", SAMPLE_GEN_2, "home")
+    assert first is not None
+    assert "Part 4: Vegetables" not in first.html  # the refused read: this one view is the raw shell
+    again = store.page("wiki", SAMPLE_GEN_2, "home")
+    assert again is not None
+    assert "Part 4: Vegetables" in again.html  # ... but the catalogue is read again, not "none"
+
+
+def test_a_failed_read_is_not_remembered_as_not_a_mindtouch_archive(tmp_path: Path) -> None:
+    import json
+
+    shared = {"rootPagePath": "Ocean", "pages": [{"id": "1", "title": "Ocean", "path": "Ocean"}]}
+    _zim(
+        tmp_path / "wiki" / SAMPLE_GEN_2 / "upstream" / "libretexts.org_en_geo_2026-01.zim",
+        "libretexts.org_en_geo",
+        [
+            ("index.html", "text/html", "<html><body><div id='app'></div></body></html>"),
+            ("index/page_1", "text/html", "<html><body><p>Ocean</p></body></html>"),
+            ("content/shared.json", "application/json", json.dumps(shared)),
+        ],
+        [],
+    )
+    store = ZimAssetStore(
+        _vault(tmp_path, ["upstream/libretexts.org_en_geo_2026-01.zim"]),
+        _RefusingReader("content/shared.json"),
+    )
+    first = store.page("wiki", SAMPLE_GEN_2, "index.html")
+    assert first is not None
+    assert first.native_id == "index.html"  # the refused read: no home page known for this one view
+    shell = store.page("wiki", SAMPLE_GEN_2, "index.html")
+    assert shell is not None
+    assert shell.native_id == "index/page_1"
+
+
+def test_a_page_whose_picture_lookup_failed_is_not_kept_in_the_page_cache(tmp_path: Path) -> None:
+    """2026-11-04 trawl: a refused lookup read as "the archive has no such picture"; the <img> was
+    dropped and that copy of the page was served from the page cache until it was evicted."""
+    services = sample_services()
+    zim_rel = "upstream/wikipedia_en_2026-09.zim"
+    _zim(
+        tmp_path / "wikipedia-en-zim" / SAMPLE_GEN_2 / zim_rel,
+        "wikipedia_en",
+        [
+            ("A/Alan_Turing", "text/html", '<p>Turing<img src="../I/t.svg"></p>'),
+            ("I/t.svg", "image/svg+xml", SVG),
+        ],
+        [],
+    )
+    vault = InMemoryVault(root=tmp_path)
+    art = Artifact("wikipedia-en-zim", SAMPLE_GEN_2, PurePosixPath(zim_rel), 10, "a" * 64, "b" * 64)
+    vault.add(
+        Generation("wikipedia-en-zim", SAMPLE_GEN_2, GenerationStatus.SEALED, artifacts=(art,)), promote=True
+    )
+    turing = services.documents.get(make_doc_id("wikipedia-en-zim", "A/Alan_Turing"))
+    assert turing is not None
+    services.documents.put(SAMPLE_GEN_2, replace(turing, html_ref="zim:A/Alan_Turing"))  # type: ignore[attr-defined]
+    store = ZimAssetStore(vault, _RefusingReader("I/t.svg"))
+    picture = f'<img src="/v1/assets/wikipedia-en-zim/{SAMPLE_GEN_2}/I/t.svg">'
+    with local_client(create_app(replace(services, vault=vault, assets=store))) as c:
+        first = Document.model_validate(c.get(document_href(turing.doc_id)).json())
+        assert first.html is not None
+        assert picture not in first.html  # the refused lookup: a guess for this one view
+        again = Document.model_validate(c.get(document_href(turing.doc_id)).json())
+        assert again.html == f"<p>Turing{picture}</p>"
+
+
+def test_a_failed_image_check_keeps_the_picture_and_says_so(tmp_path: Path) -> None:
+    _zim(
+        tmp_path / "wiki" / SAMPLE_GEN_2 / "upstream" / "w_2026-09.zim",
+        "w",
+        [("A/P", "text/html", "<p>p</p>"), ("I/t.svg", "image/svg+xml", SVG)],
+        [],
+    )
+    store = ZimAssetStore(_vault(tmp_path, ["upstream/w_2026-09.zim"]), _RefusingReader("I/t.svg", "A/P"))
+    unsure: list[bool] = []
+    assert store.is_image("wiki", SAMPLE_GEN_2, "I/t.svg", unsure=lambda: unsure.append(True))
+    assert unsure == [True]
+    assert store.is_image("wiki", SAMPLE_GEN_2, "A/P")  # a refused check keeps it ...
+    assert not store.is_image("wiki", SAMPLE_GEN_2, "A/P")  # ... a definite one does not

@@ -90,6 +90,41 @@ def test_loopback_host_headers_allowed(client: httpx.Client, host: str) -> None:
     assert client.get("/v1/health", headers={"Host": host}).status_code == 200
 
 
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"Sec-Fetch-Site": "cross-site", "Origin": "https://evil.example"},
+        {"Sec-Fetch-Site": "same-site", "Origin": "http://127.0.0.1:5000"},  # another local service
+        {"Origin": "https://evil.example"},  # a browser without Fetch Metadata
+        {"Origin": "http://127.0.0.1:5000"},
+        {"Origin": "null"},  # a sandboxed frame, a file: page
+    ],
+)
+def test_a_write_from_another_site_is_refused(client: httpx.Client, headers: dict[str, str]) -> None:
+    """2026-11-04 trawl: any page the owner opened could POST to the API (a no-cors POST with no body
+    needs no preflight) and start a weather pull; the answer was unreadable but the pull ran."""
+    r = client.post("/v1/links/missing", json={"addresses": []}, headers=headers)
+    assert r.status_code == 403
+    assert r.json()["error"]["code"] == "cross_site"
+    assert r.headers["content-security-policy"].startswith(CSP)
+    assert client.get("/v1/health", headers=headers).status_code == 200  # reads are not writes
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {},  # curl, the tools/ scripts
+        {"Sec-Fetch-Site": "same-origin", "Origin": "http://127.0.0.1:8737"},  # the Navigator
+        {"Origin": "http://127.0.0.1:8737"},
+        {"Sec-Fetch-Site": "none"},  # typed or bookmarked by the owner
+        {"Sec-Fetch-Site": "same-origin", "Origin": "http://127.0.0.1:5173", "Host": "127.0.0.1:5173"},
+    ],
+)
+def test_the_navigator_and_local_tools_still_write(client: httpx.Client, headers: dict[str, str]) -> None:
+    """The last case is the Navigator's dev server, whose proxy passes Host on (changeOrigin: false)."""
+    assert client.post("/v1/links/missing", json={"addresses": []}, headers=headers).status_code == 200
+
+
 def test_no_swagger_ui_since_it_needs_a_cdn(client: httpx.Client) -> None:
     assert client.get("/docs").status_code == 404
     assert client.get("/redoc").status_code == 404

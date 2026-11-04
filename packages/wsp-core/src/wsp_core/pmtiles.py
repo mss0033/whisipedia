@@ -317,7 +317,11 @@ class Archive:
     def open_file(cls, path: Path, **kwargs: int) -> Archive:
         """An archive on disk; each read opens nothing new (one handle, positioned reads)."""
         fh = path.open("rb")
-        archive = cls(lambda off, n: _pread(fh, off, n), **kwargs)
+        try:
+            archive = cls(lambda off, n: _pread(fh, off, n), **kwargs)
+        except BaseException:  # not left open: the Atlas retries a failed open (2026-11-04 trawl)
+            fh.close()
+            raise
         archive._file = fh  # type: ignore[attr-defined]  # kept open with the archive
         return archive
 

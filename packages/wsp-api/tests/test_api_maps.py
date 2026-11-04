@@ -20,7 +20,7 @@ from wsp_api.errors import install_error_handlers
 from wsp_api.maps import decode_elevation, encode_elevation, maps_router
 from wsp_core.gazetteer import Place, write_gazetteer
 from wsp_core.model import Artifact, Generation, GenerationStatus, SourceSpec, SourceStatus, Tier
-from wsp_core.pmtiles import Compression, TileType, write_archive
+from wsp_core.pmtiles import Archive, Compression, TileType, write_archive
 
 
 def spec(sid: str, tileset: str, kind: str, priority: int = 0) -> SourceSpec:
@@ -212,6 +212,63 @@ def test_places_and_nearby_come_from_the_gazetteer(client: TestClient) -> None:
     assert [p["name"] for p in near["places"]] == ["Interlaken", "Jungfrau"]
     assert near["places"][0]["distance_m"] < 1000
     assert client.get("/v1/maps/nearby", params={"lat": 95, "lon": 0}).status_code == 422
+
+
+def test_an_archive_that_failed_to_open_is_tried_again(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-11-04 trawl: one NAS refusal while an archive was first opened took it away until the
+    API restarted, and its tiles were empty ones the browser kept for a day."""
+    from wsp_api import maps
+
+    now = [1000.0]
+    monkeypatch.setattr(maps, "time", SimpleNamespace(monotonic=lambda: now[0]))
+    real = Archive.open_file
+    refusals = {"b.pmtiles": 1}
+
+    def flaky(path: Path, **kwargs: int) -> Archive:
+        if refusals.get(path.name):
+            refusals[path.name] -= 1
+            raise OSError(11, "Resource temporarily unavailable")
+        return real(path, **kwargs)
+
+    monkeypatch.setattr(Archive, "open_file", staticmethod(flaky))
+
+    def ids() -> set[str]:
+        return {t["id"] for t in client.get("/v1/maps/tilesets").json()["tilesets"]}
+
+    assert ids() == {"terrain"}
+    r = client.get("/v1/maps/tiles/basemap/1/0/0")
+    assert r.status_code == 503  # not a 204 the browser keeps
+    assert r.headers["cache-control"] == "no-store"
+    assert r.headers["retry-after"] == maps.RETRY_AFTER
+    now[0] += maps.RETRY_FIRST + 1
+    assert ids() == {"basemap", "terrain"}
+    r = client.get("/v1/maps/tiles/basemap/1/0/0")
+    assert (r.status_code, r.content) == (200, b"mvt-1")
+    assert r.headers["cache-control"] == maps.CACHE_HEADER
+
+
+def test_a_tile_read_that_failed_is_never_kept_by_the_browser(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real = Archive.tile
+    refusals = {(1, 0, 0), (4, 8, 4)}
+
+    def flaky(self: Archive, z: int, x: int, y: int) -> bytes | None:
+        if (z, x, y) in refusals:
+            refusals.discard((z, x, y))
+            raise OSError(103, "Software caused connection abort")
+        return real(self, z, x, y)
+
+    monkeypatch.setattr(Archive, "tile", flaky)
+    assert client.get("/v1/maps/tiles/basemap/1/0/0").status_code == 503
+    # The regional z4 tile failed: the one cut from its z3 is served, but only for this view.
+    cut = client.get("/v1/maps/tiles/terrain/4/8/4")
+    assert cut.status_code == 200
+    assert cut.headers["cache-control"] == "no-store"
+    again = client.get("/v1/maps/tiles/terrain/4/8/4")
+    assert again.headers["cache-control"] == "public, max-age=86400"
 
 
 def test_no_gazetteer_yet_is_a_503(tmp_path: Path) -> None:

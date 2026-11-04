@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import random
 from pathlib import Path
+from typing import BinaryIO, cast
 
 import pytest
 
@@ -101,3 +102,22 @@ def test_not_an_archive_is_refused(tmp_path: Path) -> None:
     v2 = b"PMTiles\x02" + b"\x00" * 200
     with pytest.raises(PMTilesError, match="version 2"):
         Archive(lambda off, n: v2[off : off + n])
+
+
+def test_a_file_that_fails_to_open_is_not_left_open(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The Atlas tries a failed open again (2026-11-04 trawl): each try must not leak its handle."""
+    junk = tmp_path / "junk.pmtiles"
+    junk.write_bytes(b"PK\x03\x04" + b"\x00" * 200)
+    opened: list[BinaryIO] = []
+    real = Path.open
+
+    def spy(self: Path, mode: str = "r") -> BinaryIO:
+        fh = cast(BinaryIO, real(self, mode))
+        opened.append(fh)
+        return fh
+
+    monkeypatch.setattr(Path, "open", spy)
+    with pytest.raises(PMTilesError):
+        Archive.open_file(junk)
+    assert len(opened) == 1
+    assert opened[0].closed
