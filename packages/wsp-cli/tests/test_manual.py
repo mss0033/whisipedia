@@ -318,6 +318,13 @@ def test_a_file_is_taken_only_when_it_reads_whole(tmp_path: Path) -> None:
     assert "does not read whole" in str(check(cut))
     assert "not a PDF" in str(check(page))
     assert check(fake) is not None
+    # 2026-11-01: Firefox's empty placeholder for the 26.6 GB COD archive was sealed as the archive.
+    placeholder = tmp_path / "cod-cifs-mysql.tgz"
+    placeholder.touch()
+    assert "empty file" in str(check(placeholder))
+    tgz_page = tmp_path / "e.tgz"
+    tgz_page.write_bytes(b"Service unavailable")
+    assert "not the archive" in str(check(tgz_page))
 
 
 def test_a_file_a_browser_is_still_writing_is_left_alone(tmp_path: Path) -> None:

@@ -686,13 +686,17 @@ def _check(path: Path) -> str | None:
     """Why the file cannot be taken, or None. Archives must read whole; a PDF must be one."""
     from wsp_cli.doccollections import whole
 
+    if path.stat().st_size == 0:
+        # Firefox's placeholder for the 26.6 GB COD archive was taken as the archive itself and sealed
+        # (2026-11-01): ``.tgz`` was not among the archive names checked below.
+        return "an empty file (a browser's placeholder, or a download that never began)"
     kind, problem = whole(path)
     if problem is not None:
         return problem
     suffix = "".join(path.suffixes[-2:]).lower()
     with path.open("rb") as fh:
         head = fh.read(1024)
-    if not kind and suffix.endswith((".zip", ".gz", ".bz2")):
+    if not kind and suffix.endswith((".zip", ".gz", ".tgz", ".bz2", ".tbz2")):
         return "not the archive its name says (an error page saved in its place?)"
     if path.suffix.lower() == ".pdf" and not head.lstrip().startswith(b"%PDF"):
         return "not a PDF (an error or login page saved in its place?)"
