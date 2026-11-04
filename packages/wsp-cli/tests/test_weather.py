@@ -765,3 +765,50 @@ def test_a_run_waiting_for_the_archive_outlives_the_hot_copys_pruning(
     )
     assert state["pending"] == [{"model": "gfs", "run": "2026102600", "staged": ""}]
     assert any("not staged" in s for s in said)
+
+
+def test_a_run_already_sealed_is_neither_staged_nor_ingested_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-11-04: a pull killed after its seal left the run pending; the next pull staged its 65 GRIB
+    files again and the ingest refused them (fetched after the seal) on every later pull."""
+    import argparse
+
+    calls: list[str] = []
+
+    def ingest(_cfg: object, source: str, version: str, *, wait: float = 0) -> tuple[int, str]:
+        calls.append(version)
+        return (0, "sealed")
+
+    monkeypatch.setattr(w, "run_ingest", ingest)
+
+    class Paths:
+        def require_vault(self) -> Path:
+            return tmp_path
+
+    def paths(_cfg: object) -> Paths:
+        return Paths()
+
+    def pace(_cfg: object) -> None:
+        return None
+
+    monkeypatch.setattr(bootstrap, "paths", paths)
+    monkeypatch.setattr(bootstrap, "ingest_pace", pace)
+    (tmp_path / "weather").mkdir()
+    sealed = tmp_path / "library" / "weather" / "weather-gfs" / w.archive_version("2026110400")
+    sealed.mkdir(parents=True)
+    (sealed / "MANIFEST.json").write_text("{}")
+    state: dict[str, Any] = {
+        "pending": [
+            {"model": "gfs", "run": "2026110400"},
+            {"model": "gfs", "run": "2026110406", "staged": "x"},
+        ]
+    }
+    said: list[str] = []
+    w._archive(  # pyright: ignore[reportPrivateUsage]
+        {}, w.WeatherSettings(tmp_path / "weather"), state, argparse.Namespace(config_dir=None), said.append
+    )
+    assert calls == [w.archive_version("2026110406")]
+    assert state["pending"] == []
+    assert any("already sealed" in s for s in said)
+    assert not (tmp_path / "_incoming").exists()  # nothing staged for the sealed run

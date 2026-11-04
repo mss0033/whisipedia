@@ -612,6 +612,15 @@ def _pull(
     return EXIT_FAILED if failed else EXIT_OK
 
 
+def _sealed(vault: Path, source: str, version: str) -> bool:
+    """Whether ``version`` of ``source`` is sealed in the vault (its manifest is published). A share
+    that does not answer counts as not sealed: the ingest decides then, as before."""
+    try:
+        return any((vault / "library").glob(f"*/{source}/{version}/MANIFEST.json"))
+    except OSError:
+        return False
+
+
 def _archive(
     cfg: Mapping[str, Any],
     ws: WeatherSettings,
@@ -638,6 +647,11 @@ def _archive(
         model = known.get(item["model"])
         version = archive_version(item["run"])
         if model is None:
+            continue
+        if _sealed(vault, model.source, version):
+            # A pull killed after the seal and before it saved its state staged the run again, and the
+            # ingest refused the copies (fetched after the seal) on every later pull (2026-11-04).
+            say(f"{model.source}/{version}: already sealed; taken")
             continue
         if not item.get("staged"):
             grib = ws.hot / model.id / item["run"] / "grib"
