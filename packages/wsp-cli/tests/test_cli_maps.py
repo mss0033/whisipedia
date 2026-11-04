@@ -283,3 +283,32 @@ def test_a_cut_that_fails_halfway_resumes_where_it_stopped(
     finally:
         a.close()
         s.close()
+
+
+def test_a_rerun_continues_the_copy_an_earlier_day_began(tmp_path: Path) -> None:
+    """2026-10-28 to 11-02: each rerun named a new generation and copied a 76 GB part again from nothing."""
+    from types import SimpleNamespace
+    from typing import cast
+
+    from wsp_cli.maps import unfinished_copy
+    from wsp_core.model import SourceSpec
+
+    spec = cast(SourceSpec, SimpleNamespace(id="maps-terrain-regional", vault_domain="maps"))
+    vault, name = tmp_path, "6-14-26-z13-16.pmtiles"
+    incoming = vault / "_incoming"
+    assert unfinished_copy(incoming, spec, "6-14-26", name, vault) is None
+    for version, size in [
+        ("2026-10-28.6-14-26", 900),
+        ("2026-10-29.6-14-26", 1000),
+        ("2026-11-02.6-14-26", 600),
+    ]:
+        (incoming / spec.id / version).mkdir(parents=True)
+        (incoming / spec.id / version / f"{name}.partial").write_bytes(b"x" * size)
+    (incoming / spec.id / "2026-11-02.6-16-25").mkdir()
+    (incoming / spec.id / "2026-11-02.6-16-25" / f"{name}.partial").write_bytes(b"x" * 5000)  # another part
+    assert unfinished_copy(incoming, spec, "6-14-26", name, vault) == "2026-10-29.6-14-26"
+    (vault / "library" / "maps" / spec.id / "2026-10-29.6-14-26").mkdir(parents=True)
+    (vault / "library" / "maps" / spec.id / "2026-10-29.6-14-26" / "MANIFEST.json").write_text("{}")
+    assert (
+        unfinished_copy(incoming, spec, "6-14-26", name, vault) == "2026-10-28.6-14-26"
+    )  # sealed: not that one

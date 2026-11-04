@@ -40,7 +40,7 @@ from wsp_cli.nasretry import copy_hashed, retrying
 from wsp_core.errors import FetchError
 from wsp_core.gazetteer import Place, place_rank, write_gazetteer
 from wsp_core.model import Checksum, RemoteFile, SourceSpec
-from wsp_core.partitions import PartitionError, check_partition, partition_generation_id
+from wsp_core.partitions import PartitionError, check_partition, partition_generation_id, partition_of
 
 PLANS_SUBDIR = "targets.d"
 LANE = "collections"  # renamed into place only when complete: ingest needs no settle wait
@@ -125,6 +125,30 @@ def write_plan(
     return path
 
 
+def unfinished_copy(
+    incoming: Path, spec: SourceSpec, partition: str, name: str, vault_root: Path
+) -> str | None:
+    """The generation an earlier run began copying this part into and did not finish (its ``.partial`` is
+    in ``_incoming``), the one with the most bytes; ``None`` if there is none. A rerun on another day
+    named a new generation and copied the part again from nothing: a 76 GB part was written whole
+    twice and two thirds a third time, 216 GB, and never finished (2026-10-28 to 11-02)."""
+    best: tuple[int, str] | None = None
+    try:
+        folders = list((incoming / spec.id).iterdir())
+    except FileNotFoundError:
+        return None
+    for folder in folders:
+        if partition_of(folder.name) != partition or _sealed(vault_root, spec, folder.name):
+            continue
+        try:
+            size = (folder / f"{name}.partial").stat().st_size
+        except FileNotFoundError:
+            continue
+        if best is None or size > best[0]:
+            best = (size, folder.name)
+    return None if best is None else best[1]
+
+
 def reusable_cut(local: Path, cut: Cut) -> bool:
     """A finished cut in the work directory (renamed into place, so whole) that fits ``cut``."""
     building = local.with_name(local.name + ".building")
@@ -154,12 +178,19 @@ def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
         return EXIT_REFUSED
     paths = bootstrap.paths(cfg)
     vault_root = paths.require_vault()
+    incoming = vault_root / "_incoming"
     cycle = args.version or part.version or datetime.now(UTC).strftime("%Y-%m-%d")
     version = partition_generation_id(cycle, partition)
+    if not (args.version or part.version) and part.cut is not None:
+        earlier = retrying(
+            f"list {spec.id}", lambda: unfinished_copy(incoming, spec, partition, part.name, vault_root)
+        )
+        if earlier is not None and earlier != version:
+            out.write(f"{spec.id}/{partition}: continuing the copy begun in {earlier}\n")
+            version = earlier
     if _sealed(vault_root, spec, version):
         out.write(f"{spec.id}/{version}: already sealed; nothing new\n")
         return EXIT_NOTHING_NEW
-    incoming = vault_root / "_incoming"
     dest_dir = incoming / spec.id / version
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / part.name

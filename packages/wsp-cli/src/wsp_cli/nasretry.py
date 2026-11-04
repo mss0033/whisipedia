@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import logging
 import os
 import time
 from collections.abc import Callable
@@ -23,6 +24,12 @@ COPY_CHUNK = 8 << 20
 # 2026-10-28 and again on 2026-10-30. Below the smallest job budget (768 MiB), so the dirty pages
 # between syncs never fill it; the synced pages are dropped at once (the cache is charged to the job).
 SYNC_EVERY = 256 << 20
+# A copy the share keeps refusing with no progress gives up after COPY_TRIES refusals in a row,
+# waiting 2, 4, 8 ... s (at most COPY_WAIT_MAX_S) between them: about 13 minutes in all.
+COPY_TRIES = 10
+COPY_WAIT_MAX_S = 300.0
+
+log = logging.getLogger(__name__)
 
 
 def _drop(fd: int, offset: int, length: int) -> None:
@@ -89,12 +96,16 @@ def copy_hashed(
         if have:
             synced.at, synced.digest = _shared_prefix(src, tmp, have, chunk)
 
+    step = ["opening"]
+
     def once() -> str:
+        step[0] = "opening"
         at, digest = synced.at, synced.digest.copy()
         resume = at > 0 and tmp.is_file() and tmp.stat().st_size >= at
         if not resume:
             at, digest = 0, hashlib.sha256()
         with src.open("rb") as fin, tmp.open("r+b" if resume else "wb") as fout:
+            step[0] = "writing"
             _sequential(fin.fileno())
             fin.seek(at)
             fout.seek(at)
@@ -113,11 +124,31 @@ def copy_hashed(
                     _drop(fout.fileno(), at - unsynced, unsynced)
                     _drop(fin.fileno(), at - unsynced, unsynced)
                     synced.at, synced.digest, unsynced = at, digest.copy(), 0
+            step[0] = "syncing the end"
             fout.flush()
             os.fsync(fout.fileno())
+            synced.at, synced.digest = at, digest.copy()  # whole: a retry goes straight to the rename
             _drop(fout.fileno(), 0, at)
             _drop(fin.fileno(), 0, at)
+            step[0] = "renaming into place"
         tmp.replace(dest)
         return digest.hexdigest()
 
-    return retrying(f"copy {src.name}", once, sleep=sleep)
+    # Patience counts from the last progress: a long copy over a share that refuses now and then used
+    # to spend all five tries (30 s of waiting) in one bad minute and fail a 76 GB part (2026-10-28,
+    # 10-29, 11-02). Each refusal waits longer, up to COPY_WAIT_MAX_S; bytes synced since the last
+    # refusal give it the whole patience again.
+    stalls, seen = 0, -1
+    while True:
+        try:
+            return once()
+        except TRANSIENT as exc:
+            if synced.at > seen:
+                stalls, seen = 0, synced.at
+            stalls += 1
+            where = f"{step[0]} at {synced.at:,} of {size:,} bytes"
+            if stalls >= COPY_TRIES:
+                raise type(exc)(exc.errno, f"{exc.strerror or exc} ({where})") from exc
+            wait = min(2.0**stalls, COPY_WAIT_MAX_S)
+            log.warning("copy %s: %s (%s); trying again in %.0f s", src.name, exc, where, wait)
+            sleep(wait)
