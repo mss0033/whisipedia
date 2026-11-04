@@ -148,8 +148,13 @@ def parse(raw: bytes | str | None) -> Robots | None:
 
 # --- an unreachable robots.txt over time (RFC 9309 2.3.1.4) -------------------------------------------
 
-UNREACHABLE_ENV = "WSP_ROBOTS_UNREACHABLE"  # a JSON file: "scheme://host" -> when its robots.txt first failed
+# A JSON file: "scheme://host" -> {"first": ..., "last": ...}, the current outage of its robots.txt
+UNREACHABLE_ENV = "WSP_ROBOTS_UNREACHABLE"
 UNREACHABLE_DAYS = 30
+# Two failures further apart than this are two outages, not one: nothing shows robots.txt stayed
+# unreachable in between. Above the 10-minute retry and a nightly lane's gap; a host tried less often
+# never reaches 30 days, which is the safe side (2026-11-04 trawl).
+UNREACHABLE_GAP = timedelta(days=2)
 
 
 def _unreachable_file() -> Path | None:
@@ -158,12 +163,12 @@ def _unreachable_file() -> Path | None:
 
 
 @contextlib.contextmanager
-def _locked(path: Path) -> Generator[dict[str, str]]:
+def _locked(path: Path) -> Generator[dict[str, object]]:
     path.parent.mkdir(parents=True, exist_ok=True)
     with (path.with_name(path.name + ".lock")).open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         try:
-            data = cast(dict[str, str], json.loads(path.read_text(encoding="utf-8")))
+            data = cast(dict[str, object], json.loads(path.read_text(encoding="utf-8")))
         except (OSError, ValueError):
             data = {}
         before = dict(data)
@@ -174,22 +179,49 @@ def _locked(path: Path) -> Generator[dict[str, str]]:
             tmp.replace(path)
 
 
+def _outage(entry: object) -> tuple[datetime, datetime] | None:
+    """A stored ``{"first", "last"}`` failure pair; a bare time (the form before 2026-11-04) is both.
+    None for a missing or unreadable record."""
+    if isinstance(entry, str):
+        entry = {"first": entry, "last": entry}
+    if not isinstance(entry, dict):
+        return None
+    pair = cast(dict[str, object], entry)
+    first, last = pair.get("first"), pair.get("last")
+    if not isinstance(first, str) or not isinstance(last, str):
+        return None
+    try:
+        start, end = datetime.fromisoformat(first), datetime.fromisoformat(last)
+    except ValueError:
+        return None
+    if start.tzinfo is None or end.tzinfo is None:
+        return None
+    return start, end
+
+
 def unreachable_long(site: str, *, now: datetime | None = None) -> bool:
     """Note that ``site``'s robots.txt could not be read (a 5xx, a 429, a timeout) and say whether it
     has been so for :data:`UNREACHABLE_DAYS` days. Until then the site is disallowed whole; after, RFC
     9309 2.3.1.4 lets a crawler take robots.txt as unavailable (no rules). api.govinfo.gov answers its
-    robots.txt with a 500 (2026-10-28). The first failure is kept in ``$WSP_ROBOTS_UNREACHABLE``
-    (shared by every process); without it, an unreachable robots.txt always disallows."""
+    robots.txt with a 500 (2026-10-28). The first and latest failure of the current outage are kept in
+    ``$WSP_ROBOTS_UNREACHABLE`` (shared by every process); without it, an unreachable robots.txt always
+    disallows. A failure more than :data:`UNREACHABLE_GAP` after the one before starts a new outage:
+    until 2026-11-04 (trawl) only the first failure was kept, so one 503, a month with no contact and
+    one more 503 counted as 30 days unreachable, and the site was crawled with no rules."""
     path = _unreachable_file()
     if path is None:
         return False
     now = now or datetime.now(UTC)
+    first = now
     try:
         with _locked(path) as data:
-            first = data.setdefault(site, now.isoformat())
+            seen = _outage(data.get(site))
+            if seen is not None and timedelta(0) <= now - seen[1] <= UNREACHABLE_GAP:
+                first = seen[0]  # the same outage, seen again in time
+            data[site] = {"first": first.isoformat(), "last": now.isoformat()}
     except OSError:
         return False
-    return now - datetime.fromisoformat(first) >= timedelta(days=UNREACHABLE_DAYS)
+    return now - first >= timedelta(days=UNREACHABLE_DAYS)
 
 
 def reachable(site: str) -> None:

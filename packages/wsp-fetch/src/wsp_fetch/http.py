@@ -423,7 +423,10 @@ class HttpFetcher:
                     reachable(site)
                     return None, ROBOTS_TTL  # "unavailable": no rules
                 return _unreachable(site)  # 5xx, 429: "unreachable"
-        except (httpx.HTTPError, OSError):
+        except (httpx.HTTPError, OSError, _RetryableError, RedirectRefusedError):
+            # A redirect we will not follow (https -> http, _refuse_downgrade) leaves robots.txt unread:
+            # unreachable too. It escaped uncached until 2026-11-04 (trawl): robots.txt was asked for
+            # again on every call and one such mirror failed a whole multi-mirror fetch.
             return _unreachable(site)
         finally:
             _IN_ROBOTS.reset(token)

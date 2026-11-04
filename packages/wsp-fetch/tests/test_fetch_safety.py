@@ -519,6 +519,36 @@ def test_an_unreachable_robots_txt_disallows_until_it_is_read_again(monkeypatch:
         assert asked.count("down.example/robots.txt") == n + 1
 
 
+def test_a_robots_txt_redirected_to_http_is_unreachable_and_cached(monkeypatch: pytest.MonkeyPatch) -> None:
+    """2026-11-04 trawl: the refused https -> http redirect escaped _read_robots uncached, so robots.txt
+    was asked for on every call, callers got a private error, and one such mirror failed the target."""
+    from wsp_core.errors import RobotsDisallowedError
+    from wsp_fetch.target import Target
+
+    monkeypatch.delenv("WSP_ROBOTS_UNREACHABLE", raising=False)
+    data = payload(PIECE)
+    asked: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        asked.append(f"{request.url.scheme}://{request.url.host}{request.url.path}")
+        if request.url.path == "/robots.txt":
+            if request.url.host == "down.example" and request.url.scheme == "https":
+                return httpx.Response(301, headers={"Location": "http://down.example/robots.txt"})
+            return httpx.Response(200, stream=httpx.ByteStream(b"User-agent: *\nDisallow:\n"))
+        return _ranged(data, request)
+
+    with HttpFetcher(replace(CFG, robots=True), transport=httpx.MockTransport(handler)) as f:
+        for _ in range(3):
+            with pytest.raises(RobotsDisallowedError):
+                f.get_bytes("https://down.example/x.bin")
+        assert asked.count("https://down.example/robots.txt") == 1  # cached for 10 minutes
+        assert "http://down.example/robots.txt" not in asked  # the downgrade is never followed
+        both = Target(
+            "https://up.example/x.bin", ("https://down.example/x.bin", "https://up.example/x.bin"), None, ()
+        )
+        assert f.robots_filter(both).urls == ("https://up.example/x.bin",)  # that mirror is dropped
+
+
 def test_a_hosts_crawl_delay_spaces_the_starts_of_our_requests() -> None:
     """2026-10-26 review #85: Crawl-delay was read but only the collection throttle kept it."""
     from wsp_core.robots import parse

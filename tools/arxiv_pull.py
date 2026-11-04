@@ -28,9 +28,16 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any, cast
+
+# The library's RFC 9309 reader (wildcards, longest match). The job runs with ``python3 -I`` and without
+# the packages installed, so their source in this checkout is put on the path by hand; it needs only
+# the standard library.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "packages" / "wsp-core" / "src"))
+from wsp_core.robots import Robots
+from wsp_core.robots import parse as parse_robots
 
 API = "https://storage.googleapis.com/storage/v1/b/arxiv-dataset/o"
 MEDIA = "https://storage.googleapis.com/arxiv-dataset/"
@@ -50,9 +57,10 @@ def _list(prefix: str, *, delimiter: str | None = None) -> Iterator[dict[str, An
             query["delimiter"] = delimiter
         if token:
             query["pageToken"] = token
-        req = urllib.request.Request(  # noqa: S310
-            f"{API}?{urllib.parse.urlencode(query)}", headers={"User-Agent": USER_AGENT}
-        )
+        url = f"{API}?{urllib.parse.urlencode(query)}"
+        if not ROBOTS.allows(url):
+            raise RobotsDisallowedError(f"{url}: robots.txt disallows us (or could not be read)")
+        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})  # noqa: S310
         page = _get_json(req)
         yield page
         token = page.get("nextPageToken")
@@ -80,27 +88,56 @@ def _get_json(req: urllib.request.Request) -> dict[str, Any]:
     raise AssertionError("unreachable")
 
 
-def robots_allows(url: str) -> bool:
-    """The host's robots.txt for ``url``, as RFC 9309 2.3.1 reads it: a 4xx other than 429 means no
-    rules; 5xx, 429 or no answer means everything is disallowed. This job runs without the library's
-    packages, so it cannot use the fetcher's check (2026-10-26 review: it read none)."""
-    import urllib.error
-    import urllib.robotparser
+ROBOTS_TTL = 24 * 3600.0  # RFC 9309 2.4: a robots.txt is not used for more than 24 hours
 
-    parts = urllib.parse.urlsplit(url)
-    req = urllib.request.Request(  # noqa: S310
-        f"{parts.scheme}://{parts.netloc}/robots.txt", headers={"User-Agent": USER_AGENT}
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=60) as resp:  # noqa: S310 (fixed https endpoint)
-            body = resp.read(512 * 1024).decode("utf-8", "replace")
-    except urllib.error.HTTPError as exc:
-        return 400 <= exc.code < 500 and exc.code != 429
-    except (urllib.error.URLError, OSError):
-        return False
-    rules = urllib.robotparser.RobotFileParser()
-    rules.parse(body.splitlines())
-    return rules.can_fetch(USER_AGENT, url)
+
+class RobotsDisallowedError(Exception):
+    """robots.txt does not let us fetch a URL the pull needs (or could not be read)."""
+
+
+class RobotsCache:
+    """Each host's robots.txt as RFC 9309 reads it (2.3.1), by the library's reader: a file is obeyed;
+    a 4xx other than 429 means no rules; a 5xx, a 429 or no answer disallows everything. A file is
+    read again once it is 24 hours old (RFC 9309 2.4); if it cannot be read then, the copy we have
+    stays in force (2.4 allows it) and the read is tried again at the next check. 2026-10-26 review:
+    the job read no robots.txt at all.
+
+    2026-11-04 trawl: robots.txt was then read once per multi-day run, for the bucket's root only, with
+    ``urllib.robotparser`` (which reads ``*`` and ``$`` literally and takes the first matching rule,
+    not the longest; see :mod:`wsp_core.robots`); the objects aria2 fetched were never checked."""
+
+    def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
+        self.clock = clock
+        self._held: dict[str, tuple[Robots | None, float]] = {}  # "scheme://host" -> (rules, read at)
+
+    @staticmethod
+    def _read(site: str) -> tuple[bool, Robots | None]:
+        """``(read, rules)``; ``read`` is False when robots.txt was unreachable."""
+        req = urllib.request.Request(f"{site}/robots.txt", headers={"User-Agent": USER_AGENT})  # noqa: S310
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:  # noqa: S310 (fixed https endpoint)
+                return True, parse_robots(resp.read(512 * 1024))
+        except urllib.error.HTTPError as exc:
+            return 400 <= exc.code < 500 and exc.code != 429, None
+        except (urllib.error.URLError, OSError):
+            return False, None
+
+    def allows(self, url: str) -> bool:
+        parts = urllib.parse.urlsplit(url)
+        site = f"{parts.scheme}://{parts.netloc.lower()}"
+        now = self.clock()
+        held = self._held.get(site)
+        if held is None or now - held[1] >= ROBOTS_TTL:
+            read, rules = self._read(site)
+            if read:
+                held = self._held[site] = (rules, now)
+            elif held is None:
+                return False  # unreachable, and never read: everything is disallowed
+        rules = held[0]
+        return rules is None or rules.can_fetch(USER_AGENT, url)
+
+
+ROBOTS = RobotsCache()
 
 
 def chunk_prefixes() -> list[str]:
@@ -124,6 +161,7 @@ def run_chunk(prefix: str, dest: Path, manifests: Path, parallel: int, aria2: st
     name = chunk_name(prefix)
     items = [it for page in _list(prefix) for it in page.get("items", []) if it["name"].endswith(".pdf")]
     lines: list[str] = []
+    disallowed = 0
     with (manifests / f"{name}.jsonl").open("w", encoding="utf-8") as mf:
         for it in items:
             md5 = base64.b64decode(it["md5Hash"]).hex()
@@ -138,14 +176,20 @@ def run_chunk(prefix: str, dest: Path, manifests: Path, parallel: int, aria2: st
                 and not Path(f"{target}.aria2").exists()
             ):
                 continue
+            url = MEDIA + urllib.parse.quote(it["name"])
+            if not ROBOTS.allows(url):
+                disallowed += 1  # not fetched; the chunk is not finished, so the next run checks again
+                continue
             lines += [
-                MEDIA + urllib.parse.quote(it["name"]),
+                url,
                 f"  dir={target.parent}",
                 f"  out={target.name}",
                 f"  checksum=md5={md5}",
             ]
+    if disallowed:
+        print(f"{name}: {disallowed} file(s) disallowed by robots.txt, not fetched", flush=True)
     if not lines:
-        return True
+        return not disallowed
     input_file = STATE_DIR / f"{name}.aria2"
     input_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
     cmd = [
@@ -172,7 +216,7 @@ def run_chunk(prefix: str, dest: Path, manifests: Path, parallel: int, aria2: st
         f"--log={STATE_DIR / 'aria2.log'}",
         "--log-level=warn",
     ]
-    return subprocess.run(cmd, check=False).returncode == 0  # noqa: S603
+    return subprocess.run(cmd, check=False).returncode == 0 and not disallowed  # noqa: S603
 
 
 def main() -> None:
@@ -196,7 +240,7 @@ def main() -> None:
     done = set(done_file.read_text().split()) if done_file.exists() else set()
 
     for url in (API, MEDIA):
-        if not robots_allows(url):
+        if not ROBOTS.allows(url):
             sys.exit(f"{url}: robots.txt disallows us (or could not be read); not pulling")
     chunks = chunk_prefixes()
     print(f"{len(chunks)} chunks, {len(done)} already done", flush=True)
@@ -206,6 +250,8 @@ def main() -> None:
             continue
         try:
             ok = run_chunk(prefix, dest, manifests, args.parallel, aria2, args.rate)
+        except RobotsDisallowedError as exc:  # the listing is no longer allowed: stop, nothing marked done
+            sys.exit(f"[{i}/{len(chunks)}] {name}: {exc}; not pulling")
         except Exception as exc:  # one chunk's listing failing for good must not end the whole pull
             print(f"[{i}/{len(chunks)}] {name}: listing failed ({exc}); next run tries it again", flush=True)
             continue

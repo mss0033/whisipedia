@@ -74,11 +74,37 @@ def test_an_unreachable_robots_txt_disallows_for_30_days_then_counts_as_absent(
     t0 = datetime(2026, 10, 28, tzinfo=UTC)
     assert robots.unreachable_long(site, now=t0) is False  # no record kept: always disallowed
     monkeypatch.setenv(robots.UNREACHABLE_ENV, str(tmp_path / "unreachable.json"))
-    assert robots.unreachable_long(site, now=t0) is False
-    assert robots.unreachable_long(site, now=t0 + timedelta(days=29)) is False  # counted from the first
+    for day in range(30):  # tried every night, failing every time
+        assert robots.unreachable_long(site, now=t0 + timedelta(days=day)) is False  # counted from the first
     assert robots.unreachable_long(site, now=t0 + timedelta(days=30)) is True
     robots.reachable(site)  # read again: the count starts over
     assert robots.unreachable_long(site, now=t0 + timedelta(days=31)) is False
+
+
+def test_two_failures_a_month_apart_are_not_a_month_unreachable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-11-04 trawl: only the first failure was kept, so one 503, a month with no contact and one
+    more 503 counted as 30 days unreachable and the site was crawled with no rules (RFC 9309 2.3.1.4
+    needs the outage to last). A record in the old form (a bare time) is the first and last failure."""
+    import json
+    from datetime import UTC, datetime, timedelta
+
+    from wsp_core import robots
+
+    store = tmp_path / "unreachable.json"
+    monkeypatch.setenv(robots.UNREACHABLE_ENV, str(store))
+    site = "https://h.example"
+    t0 = datetime(2026, 10, 1, tzinfo=UTC)
+    assert robots.unreachable_long(site, now=t0) is False
+    assert robots.unreachable_long(site, now=t0 + timedelta(days=34)) is False  # a new outage
+    assert robots.unreachable_long(site, now=t0 + timedelta(days=35)) is False  # counted from day 34
+    store.write_text(json.dumps({site: t0.isoformat()}))  # the form before 2026-11-04
+    assert robots.unreachable_long(site, now=t0 + timedelta(days=31)) is False
+    assert json.loads(store.read_text())[site]["first"] == (t0 + timedelta(days=31)).isoformat()
+    store.write_text(json.dumps({site: (t0 + timedelta(days=30)).isoformat()}))
+    assert robots.unreachable_long(site, now=t0 + timedelta(days=31)) is False  # within the gap: kept
+    assert json.loads(store.read_text())[site]["first"] == (t0 + timedelta(days=30)).isoformat()
 
 
 def test_a_sitemap_line_does_not_split_a_group_and_a_versioned_agent_is_ours() -> None:

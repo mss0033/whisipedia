@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import io
 import json
+import subprocess
+import urllib.error
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -128,3 +133,75 @@ def test_manifest_paths_must_stay_in_the_tree(tmp_path: Path) -> None:
     bad.write_text(json.dumps({"path": "pdf/../../etc/passwd", "size": 1, "md5": "0" * 32}) + "\n")
     with pytest.raises(ValueError, match="unsafe"):
         read_chunk_manifest(bad)
+
+
+def _arxiv_pull() -> Any:
+    """``tools/arxiv_pull.py`` (a script, not a package module)."""
+    import importlib.util
+
+    path = Path(__file__).resolve().parents[3] / "tools" / "arxiv_pull.py"
+    spec = importlib.util.spec_from_file_location("arxiv_pull_under_test", path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_pull_reads_robots_txt_by_rfc_9309_again_each_day_and_checks_every_object(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-11-04 trawl: tools/arxiv_pull.py read robots.txt once per multi-day run, for the bucket's
+    root only, with urllib.robotparser (``*`` and ``$`` read literally, the first match wins)."""
+    pull = _arxiv_pull()
+    answers: list[bytes | int] = [b"User-agent: *\nDisallow: /*b.pdf$\n"]
+    reads: list[str] = []
+
+    def urlopen(req: Any, timeout: float = 0) -> io.BytesIO:
+        reads.append(req.full_url)
+        answer = answers[0]
+        if isinstance(answer, int):
+            raise urllib.error.HTTPError(req.full_url, answer, "down", None, None)  # pyright: ignore[reportArgumentType]
+        return io.BytesIO(answer)
+
+    monkeypatch.setattr(pull.urllib.request, "urlopen", urlopen)
+    clock = [0.0]
+    robots = pull.RobotsCache(clock=lambda: clock[0])
+    monkeypatch.setattr(pull, "ROBOTS", robots)
+    obj = pull.MEDIA + "arxiv/hep-th/pdf/9901/9901001"
+    assert robots.allows(obj + "a.pdf")
+    assert not robots.allows(obj + "b.pdf")  # the wildcard and the anchor match (robotparser: allowed)
+    assert reads == ["https://storage.googleapis.com/robots.txt"]
+    answers[0] = b"User-agent: *\nDisallow: /arxiv-dataset/\n"  # the host changes its rules mid-pull
+    clock[0] += pull.ROBOTS_TTL - 1
+    assert robots.allows(obj + "a.pdf")
+    assert len(reads) == 1
+    clock[0] += 1
+    assert not robots.allows(obj + "a.pdf")
+    assert len(reads) == 2
+    answers[0] = 503
+    clock[0] += pull.ROBOTS_TTL
+    assert not robots.allows(obj + "a.pdf")
+    assert len(reads) == 3
+    assert not pull.RobotsCache().allows(obj + "a.pdf")  # unreachable and never read: disallowed
+
+    # every object of a chunk is checked; one left out keeps the chunk from being marked done
+    answers[0] = b"User-agent: *\nDisallow: /*b.pdf$\n"
+    clock[0] += pull.ROBOTS_TTL
+    md5 = base64.b64encode(b"\0" * 16).decode()
+    items = [{"name": f"arxiv/hep-th/pdf/9901/9901001{c}.pdf", "size": "3", "md5Hash": md5} for c in "ab"]
+
+    def listing(prefix: str, **_: object) -> Iterator[dict[str, Any]]:
+        yield {"items": items}
+
+    def aria2(cmd: list[str], **_: object) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(pull, "_list", listing)
+    monkeypatch.setattr(pull, "STATE_DIR", tmp_path)
+    monkeypatch.setattr(subprocess, "run", aria2)
+    (tmp_path / "m").mkdir()
+    assert pull.run_chunk("arxiv/hep-th/pdf/9901/", tmp_path / "dest", tmp_path / "m", 1, "aria2c") is False
+    queued = (tmp_path / "hep-th-9901.aria2").read_text()
+    assert "9901001a.pdf" in queued
+    assert "9901001b.pdf" not in queued
