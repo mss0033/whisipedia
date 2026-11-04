@@ -422,7 +422,18 @@ class RefineryWriter:
         loc[:, 2] = row_in_rg
         self._idx_h.append(np.fromiter((id_hash(r.doc_id) for r in self._buf), np.uint64, len(self._buf)))
         self._idx_loc.append(loc)
-        retrying(f"publish {name}", lambda: _atomic_replace(partial, final))
+
+        def publish() -> None:
+            """Repeatable: a refused directory fsync comes after the rename, so a retry finds the
+            ``.partial`` gone and the part already in place. Opening the gone ``.partial`` raised
+            FileNotFoundError, which no retry catches: the refine died unsealed and the next run
+            refined it all again from the first document (2026-11-04 trawl)."""
+            if partial.exists() or not final.exists():
+                _atomic_replace(partial, final)
+            else:
+                _fsync_dir(final.parent)
+
+        retrying(f"publish {name}", publish)
         drop_file_cache(final)  # written once, read later: its pages are cache charged to the job
         self._bytes += retrying(f"size {name}", lambda: final.stat().st_size)
         self._docs += len(self._buf)

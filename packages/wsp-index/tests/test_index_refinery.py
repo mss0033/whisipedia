@@ -304,6 +304,38 @@ def test_a_seal_the_share_refuses_for_a_moment_is_written_again(
     assert not list(r.dir.glob("*.partial"))
 
 
+def test_a_part_renamed_before_the_share_refused_its_directory_fsync_is_not_published_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-11-04 trawl: the rename of ``part-00001.partial`` succeeded and then the directory fsync was
+    refused; the retry opened the gone ``.partial`` (FileNotFoundError, never retried), the refine died
+    unsealed and the next run refined it all again from the first document."""
+    _no_waits(monkeypatch)
+    real_fsync_dir = refinery._fsync_dir  # pyright: ignore[reportPrivateUsage]
+    refused: list[Path] = []
+
+    def flaky_fsync_dir(directory: Path) -> None:
+        part = directory / "part-00001.parquet"
+        if part.exists() and not (directory / "part-00002.parquet").exists() and not refused:
+            refused.append(part)
+            raise ConnectionAbortedError(103, "Software caused connection abort")
+        real_fsync_dir(directory)
+
+    monkeypatch.setattr(refinery, "_fsync_dir", flaky_fsync_dir)
+    w = RefineryWriter(tmp_path, "src", "g1", docs_per_file=1)
+    w.write([doc("src", "a", "A"), doc("src", "b", "B"), doc("src", "c", "C")])
+    stats = w.close()
+    assert [p.name for p in refused] == ["part-00001.parquet"]
+    assert sealed_generations(tmp_path, "src") == ["g1"]
+    assert stats.parts == 3
+    r = RefineryReader(generation_dir(tmp_path, "src", "g1"))
+    assert len(r) == 3
+    got = r.get(make_doc_id("src", "b"))
+    assert got is not None
+    assert got.title == "B"
+    assert not list(r.dir.glob("*.partial"))
+
+
 def test_reads_the_share_refuses_for_a_moment_are_read_again_and_no_row_twice(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
