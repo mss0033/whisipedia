@@ -34,8 +34,13 @@ log) or the owner sees it at once:
 * ``log``                     a new problem line in a lane log (HTTP 429, Traceback, FAILED, a fetch
                               that failed (exits 7 and 8 are complete), partitions left for later,
                               no space); one note per problem and log a day, never the backlog
+* ``systemd-slow``            systemctl did not answer within WSP_STALL_SYSTEMCTL_S seconds (15), or the
+                              run's budget ran out: the checks that need it were skipped this run
 
-Conditions are re-checked every run: ``RAISED`` when one starts, ``CLEARED`` when it is gone.
+Conditions are re-checked every run: ``RAISED`` when one starts, ``CLEARED`` when it is gone. A check
+that could not run clears nothing. The whole run keeps within WSP_STALL_BUDGET_S seconds (240), under
+the unit's TimeoutStartSec=5min (2026-11-04 trawl: each systemctl call could wait 60 s, ~26 of them a
+run under memory pressure, and a run killed at 5 minutes wrote nothing, exactly when memory was short).
 ``--status`` prints what is open now. WSP_STALL_STATE, WSP_STALL_LOGS (colon-separated globs),
 WSP_STALL_LOCKS, WSP_STALL_PROC, WSP_STALL_CGROUP_ROOT, WSP_STALL_HEALTH_URL and WSP_STALL_NOW are
 for tests.
@@ -108,6 +113,14 @@ CAUSE_ORDER = ("ingest", "heavy", "index")  # the locks a waiting job most likel
 NOISE = re.compile(r"another '\w+' is running")  # a lock wait: lock-held reports the holder once
 NOTE_EVERY_S = 24 * 3600
 KEEP_SAMPLES_S = 26 * 3600
+SYSTEMCTL_S = float(os.environ.get("WSP_STALL_SYSTEMCTL_S", "15"))
+BUDGET_S = float(os.environ.get("WSP_STALL_BUDGET_S", "240"))
+DEADLINE = time.monotonic() + BUDGET_S
+slow: list[str] = []  # what systemctl did not answer in time this run (``systemd-slow``)
+
+
+def remaining() -> float:
+    return DEADLINE - time.monotonic()
 
 
 @dataclass
@@ -158,22 +171,30 @@ def hours(seconds: float) -> str:
     return f"{seconds / 3600:.1f} h"
 
 
-def systemctl(*args: str) -> str:
+def systemctl(*args: str) -> str | None:
+    """Its output; ``None`` when it did not answer within SYSTEMCTL_S or the run's budget (unknown)."""
     exe = shutil.which("systemctl")
     if exe is None:
         return ""
+    wait = min(SYSTEMCTL_S, remaining())
+    if wait < 1:
+        slow.append(" ".join(args[:2]) + " (the run's budget is spent)")
+        return None
     try:
         done = subprocess.run(  # noqa: S603 - fixed argv
-            [exe, "--user", *args], capture_output=True, text=True, check=False, timeout=60
+            [exe, "--user", *args], capture_output=True, text=True, check=False, timeout=wait
         )
     except subprocess.TimeoutExpired:  # systemd slow under memory pressure: unknown, not a crash
-        return ""
+        slow.append(f"{' '.join(args[:2])} ({wait:.0f} s)")
+        return None
     return done.stdout
 
 
-def units() -> list[tuple[str, str, str]]:
-    """``(unit, active, sub)`` of every whisipedia unit systemd knows."""
+def units() -> list[tuple[str, str, str]] | None:
+    """``(unit, active, sub)`` of every whisipedia unit systemd knows (``None``: unknown)."""
     out = systemctl("list-units", "--all", "--no-legend", "--plain", "whisipedia-*")
+    if out is None:
+        return None
     rows: list[tuple[str, str, str]] = []
     for line in out.splitlines():
         f = line.split()
@@ -182,8 +203,9 @@ def units() -> list[tuple[str, str, str]]:
     return rows
 
 
-def unit_prop(unit: str, prop: str) -> str:
-    return systemctl("show", unit, "-p", prop, "--value").strip()
+def unit_prop(unit: str, prop: str) -> str | None:
+    out = systemctl("show", unit, "-p", prop, "--value")
+    return None if out is None else out.strip()
 
 
 def cpu_usec(cgroup: str) -> int | None:
@@ -366,10 +388,14 @@ def open_files(pid: str) -> tuple[int, int] | None:
     return None
 
 
-def health_ok() -> bool:
+def health_ok() -> bool | None:
+    """Whether the API answered 200 (``None``: the run's budget left no time to ask)."""
     for _ in range(2):
+        wait = min(30.0, remaining())
+        if wait < 1:
+            return None
         try:
-            with urllib.request.urlopen(HEALTH_URL, timeout=30) as r:  # noqa: S310 - local API
+            with urllib.request.urlopen(HEALTH_URL, timeout=wait) as r:  # noqa: S310 - local API
                 if r.status == 200:
                     return True
         except Exception:  # noqa: BLE001 - any failure is "did not answer"; the run must go on
@@ -382,10 +408,12 @@ def short(cmd: str, width: int = 120) -> str:
     return cmd if len(cmd) <= width else cmd[: width - 1] + "…"
 
 
-def check(state: State, t: float) -> tuple[dict[str, str], list[str]]:
-    """Every open condition (``key -> message``) and the one-off notes of this run."""
+def check(state: State, t: float) -> tuple[dict[str, str], list[str], list[str]]:
+    """Every open condition (``key -> message``), the one-off notes of this run, and the key prefixes
+    of the checks that could not run (systemd too slow): their open conditions are not cleared."""
     cond: dict[str, str] = {}
     notes: list[str] = []
+    unknown: list[str] = []
     first = state.held
     held: dict[str, tuple[str, str, float]] = {}
     for name, (pid, cmd, age) in lock_holders().items():
@@ -407,7 +435,10 @@ def check(state: State, t: float) -> tuple[dict[str, str], list[str]]:
     waiters = lock_waiters()
     in_queue = queued(t)
     seen: set[str] = set()
-    rows = units()
+    listed = units()
+    rows = listed or []
+    if listed is None:  # nothing known of any unit: no unit condition ends, no job's samples go
+        unknown += ["unit-failed:", "files-high:", "job-idle:", "job-down:"]
     for unit, active, sub in rows:
         if active == "failed":
             cond[f"unit-failed:{unit}"] = f"{unit} failed ({sub}); journalctl --user -u {unit}"
@@ -416,6 +447,8 @@ def check(state: State, t: float) -> tuple[dict[str, str], list[str]]:
             cond[f"unit-failed:{unit}"] = f"{unit} is {active} ({sub})"
         if unit in CORE and active == "active":
             pid = unit_prop(unit, "MainPID")
+            if pid is None:
+                unknown.append(f"files-high:{unit}")
             files = open_files(pid) if pid and pid != "0" else None
             if files is not None and files[0] > 0.8 * files[1]:
                 cond[f"files-high:{unit}"] = f"{unit} holds {files[0]} open files of {files[1]} it may open"
@@ -424,13 +457,17 @@ def check(state: State, t: float) -> tuple[dict[str, str], list[str]]:
         if any(fnmatch.fnmatchcase(unit, pat) for pat in IDLE_OK):
             continue
         cg = unit_prop(unit, "ControlGroup")
+        # A restarted unit (a reboot, a resume) counts its CPU from zero: samples of its last run are
+        # not a baseline (2026-10-24: six jobs 12 minutes into a fresh boot were "idle for 12.1 h").
+        run = unit_prop(unit, "InvocationID") if cg else ""
+        if cg is None or run is None:
+            seen.add(unit)  # its samples are kept for the next run
+            unknown.append(f"job-idle:{unit}")
+            continue
         use = cpu_usec(cg) if cg else None
         if use is None:
             continue
         seen.add(unit)
-        # A restarted unit (a reboot, a resume) counts its CPU from zero: samples of its last run are
-        # not a baseline (2026-10-24: six jobs 12 minutes into a fresh boot were "idle for 12.1 h").
-        run = unit_prop(unit, "InvocationID")
         if state.runs.get(unit) != run:
             samples.pop(unit, None)
             state.runs[unit] = run
@@ -473,9 +510,9 @@ def check(state: State, t: float) -> tuple[dict[str, str], list[str]]:
             cond[f"job-idle:{unit}"] = (
                 f"{unit} used {(use - base) / 1e6:.0f} s of CPU in {hours(t - since)}{why}"
             )
-    for unit in [u for u in samples if u not in seen]:
+    for unit in [u for u in samples if u not in seen and listed is not None]:
         del samples[unit]
-    for unit in [u for u in state.runs if u not in seen]:
+    for unit in [u for u in state.runs if u not in seen and listed is not None]:
         del state.runs[unit]
 
     owed = JOBS / "jobs" / "yield-stopped"
@@ -500,7 +537,7 @@ def check(state: State, t: float) -> tuple[dict[str, str], list[str]]:
         ]
     except OSError:
         wanted = []
-    for name in wanted:
+    for name in wanted if listed is not None else []:  # unknown: not counted as down either
         if f"whisipedia-job-{name}.service" in active:
             state.down.pop(name, None)
             continue
@@ -515,6 +552,8 @@ def check(state: State, t: float) -> tuple[dict[str, str], list[str]]:
 
     for unit in PRESSURE_UNITS:
         cg = unit_prop(unit, "ControlGroup")
+        if cg is None:
+            unknown.append(f"mem-stall:{unit}")
         stall = memory_stall(cg) if cg else None
         if stall is not None and stall[0] >= PRESSURE_PCT:
             cond[f"mem-stall:{unit}"] = (
@@ -522,7 +561,10 @@ def check(state: State, t: float) -> tuple[dict[str, str], list[str]]:
                 "everything in it crawls; raise its ceiling or run less in it"
             )
 
-    if not health_ok():
+    health = health_ok()
+    if health is None:
+        unknown.append("api-down")
+    elif not health:
         cond["api-down"] = f"{HEALTH_URL} did not answer 200 twice"
     for mount, min_gb in MOUNTS.items():
         if mount != "/" and not os.path.ismount(mount):  # its free space would be the root disk's
@@ -537,7 +579,12 @@ def check(state: State, t: float) -> tuple[dict[str, str], list[str]]:
             cond[f"disk-low:{mount}"] = f"{mount} has {free:.0f} GB free (under {floor:.0f} GB)"
 
     notes.extend(scan_logs(state, t))
-    return cond, notes
+    if slow:
+        cond["systemd-slow"] = (
+            f"systemctl did not answer in time ({', '.join(slow[:3])}{'...' if len(slow) > 3 else ''}):"
+            " the checks that need it were skipped this run; what they had raised stays open"
+        )
+    return cond, notes, unknown
 
 
 def scan_logs(state: State, t: float) -> list[str]:
@@ -589,13 +636,14 @@ def main() -> int:
             print(f"{key} (since {stamp(since)}): {msg}")
         return 0
     t = now()
-    cond, notes = check(state, t)
+    cond, notes, unknown = check(state, t)
     lines: list[str] = []
     for key, msg in cond.items():
         if key not in open_:
             lines.append(f"{stamp(t)} RAISED {key}: {msg}")
         open_[key] = (open_.get(key, (t, ""))[0], msg)
-    for key in [k for k in open_ if k not in cond]:
+    # A check that could not run this time says nothing about its conditions: they stay open.
+    for key in [k for k in open_ if k not in cond and not k.startswith(tuple(unknown))]:
         since, _ = open_.pop(key)
         lines.append(f"{stamp(t)} CLEARED {key} (open {hours(t - since)})")
     lines += [f"{stamp(t)} NOTE log {n}" for n in notes]

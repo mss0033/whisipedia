@@ -337,6 +337,7 @@ def _run_wsp_bg(tmp_path: Path, *args: str, state: str = "inactive") -> tuple[in
         "WSP_LOCK_DIR": str(tmp_path / "locks"),
         "HOME": str(tmp_path),
         "WSP_BG_SLICE_HIGH": "7G",  # the template's MemoryHigh, whatever the test machine runs
+        "WSP_BG_FETCH_SLICE_HIGH": "2560M",  # the fetch sub-budget's
     }
     done = subprocess.run(
         [str(ROOT / "tools" / "wsp-bg"), *args], capture_output=True, text=True, env=env, check=False
@@ -392,6 +393,17 @@ def test_wsp_bg_refuses_a_job_as_big_as_the_whole_slice(tmp_path: Path, size: st
     assert code == 2
     assert argv == []
     assert "MemoryHigh" in err or "a size" in err
+
+
+def test_wsp_bg_checks_a_download_job_against_the_fetch_slice(tmp_path: Path) -> None:
+    """2026-11-04 trawl: a --fetch job was checked against the background slice's MemoryHigh (7-9G),
+    so a 3G lane passed and could hold the whole 2560M fetch sub-budget over its ceiling."""
+    code, argv, err = _run_wsp_bg(tmp_path, "--fetch", "maps-lane", "3G", "--", "lane.sh")
+    assert code == 2
+    assert argv == []
+    assert "whisipedia-background-fetch.slice MemoryHigh (2560M)" in err
+    argv = _wsp_bg(tmp_path, "--fetch", "maps-lane", "1536M", "--", "lane.sh")  # the lane's size today
+    assert "--slice=whisipedia-background-fetch.slice" in argv
 
 
 def test_the_job_inherits_the_heavy_lock_and_nobody_else_can_forge_it(
@@ -541,10 +553,15 @@ def _yield(
     reader: list[bool] | None = None,
     state: Path | None = None,
     extra: dict[str, str] | None = None,
+    control_groups: list[str] | None = None,
 ) -> tuple[str, list[str]]:
     """Run tools/wsp-yield for one check per reading of (MemAvailable MB, "full avg10" percent[, the
     background slice's own "full avg10", 0 if left out]), with a fake systemctl (``active``: its list
-    of active units) and a fake sleep that moves to the next reading."""
+    of active units) and a fake sleep that moves to the next reading.
+
+    ``control_groups``: the slice's ControlGroup at each check ("" while inactive), found under a fake
+    cgroup root whose own memory.pressure is the machine's, as the kernel's is; ``show`` calls are
+    left out of the calls returned."""
     import subprocess
 
     from test_cli_autonomy import ROOT
@@ -569,9 +586,13 @@ def _yield(
         (tmp_path / f"slice.{i}").write_text(
             f"full avg10={own[0] if own else 0}.25 avg60=0.00 avg300=0.00 total=1\n"
         )
+    for i, cg in enumerate(control_groups or []):
+        (tmp_path / f"cg.{i}").write_text(cg)
     scripts = {
         "systemctl": (
-            f'#!/bin/sh\necho "$*" >> {calls}\ncase "$*" in *list-units*) printf "{active}" ;; esac\n'
+            f'#!/bin/sh\necho "$*" >> {calls}\ncase "$*" in *list-units*) printf "{active}" ;;\n'
+            f'  *"show whisipedia-background.slice -p ControlGroup"*)\n'
+            f"    cat {tmp_path}/cg.$(cat {step}) ;;\nesac\n"
         ),
         "sleep": (
             f"#!/bin/sh\nn=$(( $(cat {step}) + 1 ))\necho $n > {step}\n"
@@ -604,12 +625,18 @@ def _yield(
         "WSP_STATE": str(state or tmp_path / "state"),
         **(extra or {}),
     }
+    if control_groups is not None:
+        cgroot = tmp_path / "cgroup"
+        (cgroot / "bg").mkdir(parents=True)
+        (cgroot / "memory.pressure").symlink_to(pressure)  # the root cgroup's: the whole machine's
+        (cgroot / "bg" / "memory.pressure").symlink_to(own_pressure)
+        env |= {"WSP_YIELD_SLICE_PRESSURE": "", "WSP_YIELD_CGROUP_ROOT": str(cgroot)}
     done = subprocess.run(
         [str(ROOT / "tools" / "wsp-yield")], capture_output=True, text=True, env=env, check=True
     )
     lines = calls.read_text().splitlines() if calls.exists() else []
     assert lines[0] == "--user thaw whisipedia-background.slice"  # never left frozen by a restart
-    return done.stdout, lines[1:]
+    return done.stdout, [c for c in lines[1:] if " show " not in f" {c} "]
 
 
 CALM, SHORT, SQUEEZED, MIDDLING = (8000, 0), (600, 2), (5000, 60), (2000, 2)
@@ -629,6 +656,17 @@ def test_yield_freezes_the_background_while_memory_is_short_and_thaws_it_after(t
     assert "froze" in out
     assert "thawed" in out
     out, calls = _yield(tmp_path / "psi", [SQUEEZED, CALM])  # memory left, but every task waits for it
+    assert calls == ["--user freeze whisipedia-background.slice", "--user thaw whisipedia-background.slice"]
+
+
+def test_yield_finds_the_slice_once_it_is_active_and_never_reads_the_root_cgroup(tmp_path: Path) -> None:
+    """2026-11-04 trawl: at boot this started a second before the slice, whose ControlGroup was still
+    empty; the path it fixed at start was the root cgroup's memory.pressure (the machine's own), so the
+    background never counted as outside pressure and no stall froze it for 42 hours."""
+    own_ceiling = (3100, 44, 43)
+    _, calls = _yield(tmp_path, [SQUEEZED, CALM, own_ceiling], control_groups=["", "/bg", "/bg"])
+    # no slice yet: all the pressure is the machine's (froze); once found, the slice's own is read
+    # (its job pressing on its own ceiling is left alone)
     assert calls == ["--user freeze whisipedia-background.slice", "--user thaw whisipedia-background.slice"]
 
 

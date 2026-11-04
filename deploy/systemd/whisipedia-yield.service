@@ -6,6 +6,10 @@
 
 [Unit]
 Description=Whisipedia yield (pauses background work while the machine is short of memory)
+# The usual order only (2026-11-04 trawl: at boot this started a second before the slice existed);
+# tools/wsp-yield itself looks the slice's cgroup up again until it has one.
+Wants=whisipedia-background.slice
+After=whisipedia-background.slice
 
 [Service]
 Type=exec

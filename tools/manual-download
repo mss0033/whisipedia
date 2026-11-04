@@ -11,13 +11,21 @@ owner's download, started by the owner, like the browser's:
 It downloads URL into FOLDER/NAME (NAME defaults to the URL's file name) over one connection with the
 library's generic User-Agent, and after any reset or timeout continues from the bytes it has (an HTTP
 Range request), waiting longer each time (up to WAIT_MAX_S). ``If-Range`` with the file's validator
-(ETag, else Last-Modified) makes the host send the whole file again rather than mix two versions.
+(a strong ETag, else Last-Modified) makes the host send the whole file again rather than mix two
+versions; a weak ETag never matches in ``If-Range`` (RFC 9110 13.1.5), so it is never sent there, and
+without a usable validator a continued range must still be of a file of the size HEAD gave. When the
+host sends the whole file to a resume, its file changed: those bytes are the new version's start, and
+its size and validator are asked again (2026-11-04 trawl: the first HEAD's were kept for the whole run,
+so every reconnect began again from byte 0, for ever). A refusal (HTTP 4xx other than 408/429), or a
+``.part`` larger than the file, stops it with a message instead of being retried for ever.
 While it runs the file is ``NAME.part`` (the manual import leaves such files alone); when the size
 matches the host's Content-Length it is renamed to NAME and the next run of the manual job takes it.
 The validator is kept beside it as the hidden ``.NAME.validator``: a ``.part`` from a run before the
 host's file changed is begun again, never continued. ``--adopt`` continues from a partial file another
 program left (a browser's ``.part``): it is renamed to ``NAME.part`` first (stop that program's download
 first); its version cannot be known, so the size and the archive's own check at import are its guard.
+If the host answers its first request with the whole file, the adopted bytes are left as they are and
+the tool stops: the owner decides (delete ``NAME.part`` to begin again).
 Stop it with Ctrl+C; run it again to go on where it stopped.
 """
 
@@ -29,6 +37,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from email.message import Message
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
@@ -49,53 +58,103 @@ def gb(n: int) -> str:
     return f"{n / 1e9:.2f} GB"
 
 
-def head(url: str) -> tuple[int, str]:
-    """The file's size and validator (ETag, else Last-Modified)."""
+class FatalError(Exception):
+    """Trying again cannot help: stop with this message."""
+
+
+class FileChangedError(OSError):
+    """The host's file is not the one the ``.part`` holds the start of: begin again, after a new HEAD."""
+
+
+class RestartedError(OSError):
+    """The host sent its whole (changed) file to a resume; the bytes written are that file's start."""
+
+    def __init__(self, have: int, validator: str) -> None:
+        super().__init__(f"the host's file changed; {have:,} bytes of the new one kept")
+        self.validator = validator
+
+
+def validators(headers: Message) -> tuple[str, str]:
+    """``(kept, if_range)``: the validator kept beside the ``.part`` (ETag, else Last-Modified), and the
+    one sent as ``If-Range`` (a strong ETag, else Last-Modified, else none: a weak one never matches)."""
+    etag, modified = headers.get("ETag") or "", headers.get("Last-Modified") or ""
+    strong = etag if etag and not etag.startswith("W/") else ""
+    return etag or modified, strong or modified
+
+
+def head(url: str) -> tuple[int, str, str]:
+    """The file's size and its validators (:func:`validators`)."""
     req = urllib.request.Request(url, method="HEAD", headers={"User-Agent": USER_AGENT})  # noqa: S310 - http(s) only (main)
     with urllib.request.urlopen(req, timeout=TIMEOUT_S) as resp:  # noqa: S310
         size = int(resp.headers.get("Content-Length") or 0)
-        validator = resp.headers.get("ETag") or resp.headers.get("Last-Modified") or ""
+        kept, if_range = validators(resp.headers)
     if size <= 0:
         raise OSError("the host gives no Content-Length; this tool needs one to know when it is done")
-    return size, validator
+    return size, kept, if_range
 
 
-def fetch_from(url: str, part: Path, size: int, validator: str) -> int:
-    """Append to ``part`` from its current length; returns the length reached. Raises on a drop."""
+def fetch_from(url: str, part: Path, size: int, if_range: str, *, adopted: bool = False) -> int:
+    """Append to ``part`` from its current length; returns the length reached. Raises on a drop, and
+    :class:`RestartedError` once a whole new file's bytes were written from 0 (``adopted``: never over an
+    adopted partial, :class:`FatalError` instead)."""
     have = part.stat().st_size if part.exists() else 0
     if have > size:
-        raise OSError(f"{part.name} is larger than the file ({have} > {size}); delete it and start again")
+        raise FatalError(
+            f"{part.name} is larger than the file ({have:,} > {size:,} bytes); delete it and start again"
+        )
     if have == size:
         return have
     headers = {"User-Agent": USER_AGENT, "Range": f"bytes={have}-"}
-    if validator:
-        headers["If-Range"] = validator
+    if if_range:
+        headers["If-Range"] = if_range
     req = urllib.request.Request(url, headers=headers)  # noqa: S310 - http(s) only (main)
+    restarted = None
     with urllib.request.urlopen(req, timeout=TIMEOUT_S) as resp:  # noqa: S310
         if resp.status == 200 and have:  # the file changed upstream (or no ranges): begin again
+            if adopted:
+                raise FatalError(
+                    f"the host sent the whole file, not the rest of the adopted {part.name}"
+                    f" ({have:,} bytes, left as it is); delete it to begin again"
+                )
             say(f"the host sent the whole file (changed since {have:,} bytes?): starting over")
+            restarted = validators(resp.headers)[0]
             have = 0
             mode = "wb"
         elif resp.status == 206:
-            start = int((resp.headers.get("Content-Range") or "bytes 0-").split()[1].split("-")[0])
+            span, _, total = (resp.headers.get("Content-Range") or "bytes 0-").split()[1].partition("/")
+            start = int(span.split("-")[0])
             if start != have:
                 raise OSError(f"asked for bytes from {have}, the host sent from {start}")
+            if total not in ("", "*") and int(total) != size:  # no If-Range guard: the file changed
+                changed = f"the host's file is now {int(total):,} bytes, not {size:,}"
+                if adopted:
+                    raise FatalError(
+                        f"{changed}; the adopted {part.name} is left as it is: delete it to begin again"
+                    )
+                raise FileChangedError(changed)
             mode = "ab"
         else:
             mode = "wb" if not have else "ab"
         written_since_sync = 0
-        with part.open(mode) as out:
-            while chunk := resp.read(CHUNK):
-                out.write(chunk)
-                have += len(chunk)
-                written_since_sync += len(chunk)
-                if written_since_sync >= SYNC_EVERY:
-                    out.flush()
-                    os.fsync(out.fileno())
-                    written_since_sync = 0
-                    say(f"{gb(have)} of {gb(size)} ({100 * have / size:.1f}%)")
-            out.flush()
-            os.fsync(out.fileno())
+        try:
+            with part.open(mode) as out:
+                while chunk := resp.read(CHUNK):
+                    out.write(chunk)
+                    have += len(chunk)
+                    written_since_sync += len(chunk)
+                    if written_since_sync >= SYNC_EVERY:
+                        out.flush()
+                        os.fsync(out.fileno())
+                        written_since_sync = 0
+                        say(f"{gb(have)} of {gb(size)} ({100 * have / size:.1f}%)")
+                out.flush()
+                os.fsync(out.fileno())
+        except Exception as exc:  # a drop in the new file: its bytes so far are kept, as the new file's
+            if restarted is None:
+                raise
+            raise RestartedError(have, restarted) from exc
+    if restarted is not None:
+        raise RestartedError(have, restarted)
     return have
 
 
@@ -122,12 +181,14 @@ def main(argv: list[str] | None = None) -> int:
         args.adopt.rename(part)
         say(f"continuing from {args.adopt.name} ({gb(part.stat().st_size)})")
     wait, tries = WAIT_MIN_S, 0
-    size = validator = None
+    size: int | None = None
+    if_range = ""
+    adopted = args.adopt is not None  # until the host continues it once
     while True:
         before = part.stat().st_size if part.exists() else 0
         try:
             if size is None:
-                size, validator = head(args.url)
+                size, validator, if_range = head(args.url)
                 say(f"{name}: {gb(size)} at {args.url}")
                 old = kept.read_text().strip() if kept.exists() else None
                 if part.exists() and validator and old is not None and old != validator:
@@ -135,7 +196,20 @@ def main(argv: list[str] | None = None) -> int:
                     part.unlink()
                 if validator:
                     kept.write_text(validator + "\n")
-            have = fetch_from(args.url, part, size, validator or "")
+            try:
+                have = fetch_from(args.url, part, size, if_range, adopted=adopted)
+            except RestartedError as exc:  # the .part now holds the new file's start: ask its size again
+                size, before = None, 0
+                if exc.validator:
+                    kept.write_text(exc.validator + "\n")
+                else:
+                    kept.unlink(missing_ok=True)
+                raise
+            except FileChangedError:
+                say(f"the host's file changed since {part.name} was begun: starting over")
+                part.unlink(missing_ok=True)
+                size = None
+                raise
             if have == size:
                 break
             raise OSError(f"the connection ended at {have:,} of {size:,} bytes")
@@ -143,7 +217,19 @@ def main(argv: list[str] | None = None) -> int:
             kept_bytes = part.stat().st_size if part.exists() else 0
             say(f"stopped; {part.name} kept ({gb(kept_bytes)}): run again to go on")
             return 130
+        except FatalError as exc:
+            say(f"stopped: {exc}")
+            return 1
         except (OSError, urllib.error.URLError, TimeoutError) as exc:
+            if (
+                isinstance(exc, urllib.error.HTTPError)
+                and 400 <= exc.code < 500
+                and exc.code not in (408, 429)
+            ):
+                say(f"stopped: the host refused it (HTTP {exc.code} {exc.reason}); a retry would not help")
+                return 1
+            if part.exists() and part.stat().st_size > before:
+                adopted = False  # the host continued it: what follows is this tool's own download
             tries += 1
             if TRIES and tries >= TRIES:
                 say(f"giving up after {tries} tries: {exc}")

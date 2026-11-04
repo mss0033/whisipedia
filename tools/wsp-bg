@@ -13,7 +13,7 @@
 # 2026-10-12, H1). Budgets: deploy/systemd/whisipedia-background.slice.
 #
 # --fetch: a download job (collection lanes): runs in whisipedia-background-fetch.slice, the fetch
-# sub-budget, and never takes the heavy lock.
+# sub-budget, and never takes the heavy lock; its MEMORY_MAX must be below that slice's MemoryHigh.
 #
 # The job holds the machine-wide "heavy" lock (<lock dir>/heavy.lock, the lock the orchestrator's
 # refine/index/profile units and `wsp index build|rank|spell|catalog` take), so heavy jobs never run
@@ -66,15 +66,22 @@ max_bytes=$(bytes "$max")
 # MemoryHigh three quarters of the way up: reclaim starts well before the kill.
 high="$(( max_bytes * 3 / 4 / 1048576 ))M"
 
-# The background slice's MemoryHigh, from the running manager (the template's value if it cannot say).
-slice_high=${WSP_BG_SLICE_HIGH:-$(systemctl --user show whisipedia-background.slice -p MemoryHigh --value 2>/dev/null || true)}
+# The MemoryHigh of the slice the job runs in, from the running manager (the template's value if it
+# cannot say). It was always the background slice's, so a --fetch job of 3G passed against 7-9G and
+# could hold the whole 2560M fetch sub-budget over its ceiling, stalling every lane (2026-11-04 trawl).
+# WSP_BG_SLICE_HIGH and WSP_BG_FETCH_SLICE_HIGH (each slice's) are for tests.
+case $slice in
+  whisipedia-background-fetch.slice) template=2560M; override=${WSP_BG_FETCH_SLICE_HIGH:-} ;;
+  *) template=7G; override=${WSP_BG_SLICE_HIGH:-} ;;
+esac
+slice_high=${override:-$(systemctl --user show "$slice" -p MemoryHigh --value 2>/dev/null || true)}
 case $slice_high in
-  '' | infinity) slice_high=$(bytes 7G) ;;
-  *) slice_high=$(bytes "$slice_high"); [ -n "$slice_high" ] || slice_high=$(bytes 7G) ;;
+  '' | infinity) slice_high=$(bytes "$template") ;;
+  *) slice_high=$(bytes "$slice_high"); [ -n "$slice_high" ] || slice_high=$(bytes "$template") ;;
 esac
 if [ "$max_bytes" -ge "$slice_high" ]; then
-  echo "wsp-bg: MEMORY_MAX $max is not below whisipedia-background.slice MemoryHigh ($((slice_high / 1048576))M):" \
-    "this job alone would throttle every background job. Use less, or raise the slice (a drop-in)." >&2
+  echo "wsp-bg: MEMORY_MAX $max is not below $slice MemoryHigh ($((slice_high / 1048576))M):" \
+    "this job alone would throttle every job in it. Use less, or raise the slice (a drop-in)." >&2
   exit 2
 fi
 

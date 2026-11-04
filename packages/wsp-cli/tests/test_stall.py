@@ -258,3 +258,33 @@ def test_a_job_that_just_took_the_lock_after_its_wait_is_not_idle(tmp_path: Path
     (proc / "locks").write_text(f"1: FLOCK  ADVISORY  WRITE 76 08:30:{ingest} 0 EOF\n")
     _run(env, 0)
     assert not [e for e in _run(env, 3.5) if "job-idle" in e]
+
+
+def test_a_slow_systemd_stays_within_the_budget_and_clears_nothing_it_could_not_check(
+    tmp_path: Path,
+) -> None:
+    """2026-11-04 trawl: each systemctl call could wait 60 s, ~26 a run when memory is short, and the
+    unit kills the run at 5 minutes before it writes anything. Now each call waits at most
+    WSP_STALL_SYSTEMCTL_S, the run at most WSP_STALL_BUDGET_S, and what went unchecked stays open."""
+    env = _world(tmp_path, usage=5_000_000, failed=True)
+    first = " ".join(_run(env, 0))
+    assert "RAISED unit-failed:whisipedia-job-maps.service" in first
+    assert "RAISED files-high:whisipedia-api.service" in first
+    (tmp_path / "bin" / "systemctl").write_text("#!/bin/sh\nexec sleep 30\n")  # systemd under pressure
+    slow = {**env, "WSP_STALL_SYSTEMCTL_S": "1", "WSP_STALL_BUDGET_S": "3"}
+    done = subprocess.run(
+        [str(ROOT / "tools" / "wsp-stall")],
+        env={**slow, "WSP_STALL_NOW": str(T0 + 3600)},
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=20,  # the run is bounded, whatever systemd does
+    )
+    lines = done.stdout.splitlines()
+    assert not [line for line in lines if " CLEARED " in line], lines
+    assert any("RAISED systemd-slow" in line for line in lines), lines
+    status = {line.split()[0] for line in _run(env, 1, "--status")}
+    assert {"unit-failed:whisipedia-job-maps.service", "files-high:whisipedia-api.service"} <= status
+    assert "api-down" in status
+    state = json.loads((tmp_path / "state" / "watch" / "state.json").read_text())
+    assert "whisipedia-job-lane.service" in state["cpu"]  # its CPU samples are kept for the next run

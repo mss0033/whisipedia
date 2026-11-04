@@ -33,7 +33,8 @@
 # background slice is frozen; once the owner has been idle that long, it is thawed. A shortage of
 # memory while reading is handled as above; memory coming back does not thaw while someone reads.
 #
-# WSP_YIELD_MEMINFO, WSP_YIELD_PRESSURE and WSP_YIELD_TICKS (stop after that many checks) are for tests.
+# WSP_YIELD_MEMINFO, WSP_YIELD_PRESSURE, WSP_YIELD_CGROUP_ROOT and WSP_YIELD_TICKS (stop after that
+# many checks) are for tests.
 INTERVAL="${WSP_YIELD_INTERVAL:-5}"
 MIN_AVAIL_MB="${WSP_YIELD_MIN_AVAIL_MB:-1024}"
 MAX_PSI="${WSP_YIELD_MAX_PSI:-30}"
@@ -51,7 +52,12 @@ TICKS="${WSP_YIELD_TICKS:-0}"
 READER_SECONDS="${WSP_YIELD_READER_SECONDS:-300}"
 MARKER="${WSP_YIELD_MARKER:-${XDG_DATA_HOME:-$HOME/.local/share}/whisipedia/state/last-interactive}"
 SLICE=whisipedia-background.slice
-SLICE_PRESSURE="${WSP_YIELD_SLICE_PRESSURE:-/sys/fs/cgroup$(systemctl --user show "$SLICE" -p ControlGroup --value 2>/dev/null)/memory.pressure}"
+CGROUP_ROOT="${WSP_YIELD_CGROUP_ROOT:-/sys/fs/cgroup}"
+# Found by slice_pressure() once the slice is active (2026-11-04 trawl: it was looked up once at start,
+# and at boot this started a second before the slice, whose ControlGroup was still empty. The path
+# became the root cgroup's memory.pressure, the whole machine's, so "outside" stayed ~0 and no stall
+# froze the background for that process's 42 hours).
+SLICE_PRESSURE="${WSP_YIELD_SLICE_PRESSURE:-}"
 STOPPABLE="whisipedia-job-* whisipedia-trawler.service whisipedia-index.service whisipedia-quality.service"
 JOBS="${WSP_STATE:-${XDG_STATE_HOME:-$HOME/.local/state}/whisipedia}/jobs"
 
@@ -64,12 +70,24 @@ full_avg10() {
     "$1" 2>/dev/null
 }
 
+# Look the slice's cgroup up until it has one. An inactive slice has none: never the root's file.
+slice_pressure() {
+  [ -z "$SLICE_PRESSURE" ] || return 0
+  cg=$(systemctl --user show "$SLICE" -p ControlGroup --value 2>/dev/null)
+  case "$cg" in
+    /?*) SLICE_PRESSURE="$CGROUP_ROOT$cg/memory.pressure" ;;
+  esac
+  return 0
+}
+
 reading() {
   avail_mb=$(awk '$1 == "MemAvailable:" { printf "%d", $2 / 1024 }' "$MEMINFO" 2>/dev/null)
   full=$(full_avg10 "$PRESSURE")
-  own=$(full_avg10 "$SLICE_PRESSURE")
+  slice_pressure
+  own=""
+  [ -z "$SLICE_PRESSURE" ] || own=$(full_avg10 "$SLICE_PRESSURE")
   avail_mb="${avail_mb:-999999}" full="${full:-0}"  # unreadable: assume calm, never act on a guess
-  own="${own:-0}"  # unreadable: all the pressure is the machine's, as before
+  own="${own:-0}"  # unreadable, or no slice yet: all the pressure is the machine's, as before
 }
 
 # reader=1 while the owner used the library within READER_SECONDS (an unreadable marker: nobody).
