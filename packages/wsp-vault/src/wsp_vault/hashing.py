@@ -51,6 +51,15 @@ class MultiHasher:
         for h in self._extra.values():
             h.update(chunk)
 
+    def copy(self) -> MultiHasher:
+        """An independent snapshot of the running state (a resumed copy goes on from a synced offset)."""
+        twin = MultiHasher.__new__(MultiHasher)
+        twin.size = self.size
+        twin._sha256 = self._sha256.copy()
+        twin._blake3 = self._blake3.copy()
+        twin._extra = {name: h.copy() for name, h in self._extra.items()}
+        return twin
+
     def digests(self) -> Digests:
         return Digests(
             size=self.size,

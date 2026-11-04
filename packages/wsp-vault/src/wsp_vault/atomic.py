@@ -15,7 +15,9 @@ and re-hash them, and only then publish the temporary under the final name:
   content (audit #4). Callers that need "last writer wins" to mean something hold the vault lock.
 
 A ``soft`` mount surfaces server timeouts as ``EIO``/``ETIMEDOUT``; those are retried with jittered
-exponential backoff, and each retry starts a fresh temporary file.
+exponential backoff, and each retry starts a fresh temporary file. :func:`atomic_copy` is the
+exception for the write itself: it syncs every :data:`SYNC_EVERY` bytes and, when the share refuses
+it, goes on in the same temporary from the last synced byte (see :func:`atomic_copy`).
 
 **Reads.** :func:`readback` hashes a file in chunks with ``pread`` and retries a chunk that fails with
 a transient error at the same offset (re-opening the file), so a 250 GB file is not re-read from the
@@ -39,7 +41,7 @@ import secrets
 import time
 from collections.abc import Callable, Iterable
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from wsp_vault.hashing import BUFSIZE, Digests, MultiHasher, ProgressFn, hash_bytes
@@ -125,6 +127,18 @@ DEFAULT_RETRY = RetryPolicy()
 # Reads ride out a soft-mount outage of about two minutes per chunk (1+2+4+8+16+32+60 s) before a
 # file is reported unreadable.
 DEFAULT_READ_RETRY = RetryPolicy(attempts=8, base_delay=1.0, max_delay=60.0)
+
+# atomic_copy syncs its temporary this often and drops the synced pages of both files, and a write
+# the share refuses goes on from the last synced byte (2026-11-04 trawl): a 200 GB release synced
+# once at its end lost the whole copy to one refusal, as a 76 GB map part did in
+# wsp_cli.nasretry.copy_hashed (2026-10-28). Below the smallest job budget (768 MiB), so the dirty
+# pages between syncs never fill it.
+SYNC_EVERY = 256 << 20
+# A copy the share keeps refusing with no progress gives up after COPY_TRIES refusals in a row,
+# waiting 2, 4, 8 ... s (at most COPY_WAIT_MAX_S) between them: about 13 minutes in all. Bytes
+# synced since the last refusal give it the whole patience again. Same budget as copy_hashed.
+COPY_TRIES = 10
+COPY_WAIT_MAX_S = 300.0
 
 
 def partial_path(dest: Path) -> Path:
@@ -337,11 +351,18 @@ def rename_with_retry(
 
 
 def _commit(
-    tmp: Path, dest: Path, written: Digests, *, overwrite: bool, on_chunk: ProgressFn | None = None
+    tmp: Path,
+    dest: Path,
+    written: Digests,
+    *,
+    overwrite: bool,
+    on_chunk: ProgressFn | None = None,
+    read_retry: RetryPolicy | None = None,
 ) -> None:
-    back = readback(
-        tmp, retry=RetryPolicy(attempts=1), on_chunk=on_chunk
-    )  # the caller's policy retries the attempt
+    """Read ``tmp`` back, compare with ``written`` and publish it. ``read_retry`` is the per-chunk
+    policy of the read-back; without one a failed chunk fails the attempt at once (the caller's policy
+    retries the whole attempt, which is cheap for a small file)."""
+    back = readback(tmp, retry=read_retry or RetryPolicy(attempts=1), on_chunk=on_chunk)
     if back != written:
         raise ReadbackError(f"{tmp}: read back {back.sha256} after writing {written.sha256}")
     if overwrite:
@@ -383,6 +404,79 @@ def atomic_write_bytes(
     return retry.run(lambda: _attempt_in_temp(dest, attempt))
 
 
+def _copy_resumable(
+    src: Path,
+    tmp: Path,
+    algorithms: tuple[str, ...],
+    *,
+    sleep: Callable[[float], None],
+    on_chunk: ProgressFn | None,
+    bufsize: int,
+    sync_every: int,
+) -> Digests:
+    """Copy ``src`` into the new temporary ``tmp`` (ours alone), hashing in the same pass.
+
+    ``tmp`` is synced every ``sync_every`` bytes and the synced pages of both files are dropped; the
+    hash state at that byte is kept. When the share refuses a read, write or sync for a moment, both
+    files are opened again, ``tmp`` is cut back to the last synced byte and the copy goes on from
+    there with the hash state of that byte, so no byte is hashed twice or left out. Gives up with the
+    last error after :data:`COPY_TRIES` refusals in a row with nothing synced in between.
+    """
+    synced_at, synced_hash = 0, MultiHasher(algorithms)
+    view = memoryview(bytearray(bufsize))
+    created = False
+    stalls, seen = 0, -1
+    while True:
+        at, hasher = synced_at, synced_hash.copy()
+        fin: int | None = None
+        fout: int | None = None
+        try:
+            if created:  # ours: the name is random and unique to this call
+                fout = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_CLOEXEC, 0o644)
+            else:
+                created = True
+                fout = create_exclusive(tmp)
+            if os.fstat(fout).st_size < at:  # the share lost synced bytes: start over
+                at, hasher = 0, MultiHasher(algorithms)
+            os.ftruncate(fout, at)
+            fin = os.open(src, os.O_RDONLY | os.O_CLOEXEC)
+            unsynced = 0
+            while n := os.preadv(fin, [view], at):
+                chunk = view[:n]
+                hasher.update(chunk)
+                while chunk:
+                    chunk = chunk[os.pwrite(fout, chunk, at + n - len(chunk)) :]
+                at += n
+                unsynced += n
+                if on_chunk is not None:
+                    on_chunk(n)
+                if unsynced >= sync_every:
+                    os.fsync(fout)
+                    drop_cache(fout, at - unsynced, unsynced)
+                    drop_cache(fin, at - unsynced, unsynced)
+                    synced_at, synced_hash, unsynced = at, hasher.copy(), 0
+            os.fsync(fout)
+            drop_cache(fout)
+            drop_cache(fin)
+            return hasher.digests()
+        except OSError as exc:
+            if isinstance(exc, FileNotFoundError) or not is_transient(exc):
+                raise
+            if synced_at > seen:
+                stalls, seen = 0, synced_at
+            stalls += 1
+            if stalls >= COPY_TRIES:
+                raise type(exc)(
+                    exc.errno, f"{exc.strerror or exc} (copying {src.name}, {synced_at:,} bytes synced)"
+                ) from exc
+            sleep(min(2.0**stalls, COPY_WAIT_MAX_S))
+        finally:
+            for fd in (fin, fout):
+                if fd is not None:
+                    with suppress(OSError):
+                        os.close(fd)
+
+
 def atomic_copy(
     src: Path,
     dest: Path,
@@ -393,33 +487,48 @@ def atomic_copy(
     overwrite: bool = False,
     retry: RetryPolicy = DEFAULT_RETRY,
     on_chunk: ProgressFn | None = None,
+    bufsize: int = BUFSIZE,
+    sync_every: int = SYNC_EVERY,
 ) -> Digests:
     """Copy ``src`` to ``dest`` hashing in the same pass; verify, read back, then publish.
 
     ``expected`` (size, sha256, blake3) and ``validate`` are checked against the source bytes before
     anything is published; a failure there raises :class:`IntegrityError` without retrying. Returns
     the digests of the bytes written (including ``extra`` algorithms).
+
+    The write is resumable (2026-11-04 trawl): the temporary is synced every ``sync_every`` bytes and
+    a refusal from the share goes on from the last synced byte, with the patience of
+    :data:`COPY_TRIES` refusals in a row (see :func:`_copy_resumable`); a copy that runs out of it is
+    not started over. The read-back retries a failed chunk at its own offset
+    (:data:`DEFAULT_READ_RETRY`). Only a read-back that disagrees (:class:`ReadbackError`), a
+    read-back chunk that keeps failing, or a transient refusal of the publish starts a fresh
+    temporary, under ``retry``. Before, one refusal anywhere in a 200 GB copy deleted the temporary
+    and started over from byte 0, with about 15 s of patience in all.
     """
     algorithms = tuple(extra)
+    read_retry = replace(DEFAULT_READ_RETRY, sleep=retry.sleep)
+    writing = [True]
 
     def attempt(tmp: Path) -> Digests:
-        hasher = MultiHasher(algorithms)
-        view = memoryview(bytearray(BUFSIZE))
-        with src.open("rb", buffering=0) as fin, os.fdopen(create_exclusive(tmp), "wb") as fout:
-            while n := fin.readinto(view):
-                chunk = view[:n]
-                hasher.update(chunk)
-                fout.write(chunk)
-                if on_chunk is not None:
-                    on_chunk(n)
-            fout.flush()
-            os.fsync(fout.fileno())
-        written = hasher.digests()
+        writing[0] = True
+        written = _copy_resumable(
+            src, tmp, algorithms, sleep=retry.sleep, on_chunk=on_chunk, bufsize=bufsize, sync_every=sync_every
+        )
+        writing[0] = False
         if expected is not None and written != expected:
             raise IntegrityError(f"{src}: content {written.sha256} does not match expected {expected.sha256}")
         if validate is not None:
             validate(written)
-        _commit(tmp, dest, written, overwrite=overwrite, on_chunk=on_chunk)
+        _commit(tmp, dest, written, overwrite=overwrite, on_chunk=on_chunk, read_retry=read_retry)
         return written
 
-    return retry.run(lambda: _attempt_in_temp(dest, attempt))
+    tries = 1
+    while True:
+        try:
+            return _attempt_in_temp(dest, attempt)
+        except (OSError, ReadbackError) as exc:
+            # The write has spent its own patience; starting it over would only multiply it.
+            if writing[0] or tries >= retry.attempts or not is_transient(exc):
+                raise
+            retry.sleep(retry.delay(tries))
+            tries += 1
