@@ -295,20 +295,14 @@ class TitleTrie:
         for score, key in heapq.nsmallest(_MAX_SCAN, window, key=lambda sk: (-sk[0], sk[1])):
             yield _split_key(key, score, self._fmt)
 
-    def exact(self, norm: str) -> list[Candidate]:
-        """Keys equal to a *normalized* string (at most :data:`_EXACT_MAX`): an alias typed in full ranks
-        with the titles, though a heavy prefix's precomputed list holds titles only."""
-        keys = itertools.islice(self._trie.iterkeys(norm + SEP), _EXACT_MAX)
-        return [_split_key(k, self._score(k), self._fmt) for k in keys]
-
-    def exact(self, norm: str, limit: int) -> list[Candidate]:
-        """Up to ``limit`` entries whose title or alias *is* ``norm`` (normalized), best first: the keys
-        ``norm`` + separator, a trie walk as short as the matches."""
+    def exact(self, norm: str, limit: int = _EXACT_MAX) -> list[Candidate]:
+        """Keys equal to a *normalized* string (at most ``limit``, in key order): an alias typed in full
+        ranks with the titles, though a heavy prefix's precomputed list holds titles only; a redirect's
+        name finds its target (:meth:`Suggester.named`). A trie walk as short as the matches."""
         if not norm:
             return []
-        keys = itertools.islice(self._trie.iterkeys(norm + SEP), _MAX_SCAN)
-        found = [(self._score(k), *_split_key(k)) for k in keys]
-        return heapq.nsmallest(limit, found, key=lambda c: (-c[0], c[1], c[2]))
+        keys = itertools.islice(self._trie.iterkeys(norm + SEP), limit)
+        return [_split_key(k, self._score(k), self._fmt) for k in keys]
 
 
 def _current(directory: Path) -> Path:
@@ -434,26 +428,42 @@ class Suggester:
 
     def named(self, text: str, *, limit: int = 16) -> list[tuple[str, str]]:
         """``(doc_id, title)`` of the documents titled or aliased exactly ``text`` (case, accents and
-        spacing aside), best first: a redirect's target is found by the redirect's name ("heart attack"
-        -> Myocardial infarction). Only what the trie holds: the titles and the redirects it kept."""
+        spacing aside), best first by the document's own score (an alias key's stored score is lowered
+        by :data:`ALIAS_PENALTY`, which here would bury the redirect's target): a redirect's target is
+        found by the redirect's name ("heart attack" -> Myocardial infarction). Only what the trie
+        holds: the titles and the redirects it kept."""
         norm = normalize_key(text)
         if not norm or limit <= 0:
             return []
         with self._lock:
             base = self._base
             hidden = frozenset(self._hidden) if self._hidden else frozenset[str]()
-            extra: list[Candidate] = [
-                (e.score, e.title, e.doc_id) for e, keys in self._added.values() if norm in keys
+            found: list[tuple[float, str, str]] = [
+                (e.score, e.title, e.doc_id)
+                for e, keys in self._added.values()
+                if any(k == norm for k, _ in keys)
             ]
-        extra.sort(key=lambda c: (-c[0], c[1], c[2]))
-        held = base.exact(norm, _MAX_SCAN) if base is not None else []
-        found = [*extra, *(c for c in held if c[2] not in hidden)]
+        if base is not None:
+            found += [
+                (_doc_score(c), c.title, c.doc_id)
+                for c in base.exact(norm, _MAX_SCAN)
+                if c.doc_id not in hidden
+            ]
         out: dict[str, str] = {}
         for _, title, doc_id in sorted(found, key=lambda c: (-c[0], c[1], c[2])):
             out.setdefault(doc_id, title)
             if len(out) >= limit:
                 break
         return list(out.items())
+
+
+def _doc_score(c: Candidate) -> float:
+    """The document's own score (:func:`entry_score` of its title) from a key's stored score: an alias
+    key stores the alias's score less :data:`ALIAS_PENALTY` (:func:`key_score`); a layout-1 key, the
+    document's."""
+    if not c.alias:
+        return c.score
+    return c.score + ALIAS_PENALTY - 1.0 / (1.0 + len(c.alias)) + 1.0 / (1.0 + len(c.title))
 
 
 def _pool_size(limit: int) -> int:
