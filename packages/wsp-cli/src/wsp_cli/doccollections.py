@@ -632,12 +632,23 @@ class EarlierCopies:
     ``planned``: this cycle's ingest plan as an earlier run of it wrote it, ``doc_key -> (file name,
     SHA-256, size)``. ``staging``/``record``: the cycle's staging directory and its staging record,
     read once (an interrupted ingest of the unsealed cycle). ``held``: the copies in
-    ``_incoming/_quarantine/<source>/`` by file stem (``None`` when two share one), listed once."""
+    ``_incoming/_quarantine/<source>/`` by file stem (``None`` when two share one), listed once.
+    ``left``: the whole downloads an interrupted run of this cycle left in its ``_incoming`` directory
+    before it wrote a plan, ``candidate file name -> name there`` (:data:`TRUE_SUFFIXES`: a ``.pdf`` the
+    screen renamed to the format its bytes are), listed once; ``None`` when two files could be it."""
 
     planned: Mapping[str, tuple[str, str, int]]
     staging: Path
     record: Mapping[str, ManifestEntry]
     held: Mapping[str, Path | None]
+    left: Mapping[str, str | None]
+
+
+# What :func:`true_suffix` renames a download guessed ``.pdf`` to: an earlier run's copy of ``x.pdf`` in the
+# cycle's directory may be ``x.docx`` (2026-11-05 deep dive).
+TRUE_SUFFIXES = frozenset(
+    (".doc", ".docx", ".odp", ".ods", ".odt", ".ppt", ".pptx", ".txt", ".xls", ".xlsx", ".zip")
+)
 
 
 def current_catalog(
@@ -791,7 +802,11 @@ class CollectionFetcher:
                 hosts.answered(cand.url)
                 self._screen(cand, path, cfg.rules, report, held_sha, screen=None)
 
-        earlier = self._earlier_copies(spec, version) if self.manual_dir is None else None
+        earlier = (
+            self._earlier_copies(spec, version, dest_dir, {c.file_name for c in docs})
+            if self.manual_dir is None
+            else None
+        )
         try:
             for cand in docs:
                 if cand.key not in refetch and unchanged(cand, held_meta.get(cand.key)):
@@ -841,10 +856,13 @@ class CollectionFetcher:
         self._finish(spec, coll, report, prev_gen, prev_catalog, survey, dest_dir)
         return report
 
-    def _earlier_copies(self, spec: SourceSpec, version: str) -> EarlierCopies:
-        """What earlier runs of this cycle left, read once per run (:class:`EarlierCopies`). Read-only
-        and best effort: a plan, record or quarantine the share refuses is empty, and every document
-        is downloaded as before."""
+    def _earlier_copies(
+        self, spec: SourceSpec, version: str, dest_dir: Path, names: Collection[str]
+    ) -> EarlierCopies:
+        """What earlier runs of this cycle left, read once per run (:class:`EarlierCopies`); ``names``
+        are the file names of the documents to fetch. Read-only and best effort: a plan, record,
+        directory or quarantine the share refuses is empty, and every document is downloaded as
+        before."""
         planned: dict[str, tuple[str, str, int]] = {}
         try:
             raw: object = json.loads(self.plan_path(spec.id, version).read_text(encoding="utf-8"))
@@ -876,7 +894,27 @@ class CollectionFetcher:
                         held[stem] = None if stem in held else Path(entry.path)
         except OSError:
             held = {}
-        return EarlierCopies(planned, staging, record, held)
+        # Only a final name: the fetchers write ``<name>.partial`` (and ``.stream.partial``, aria2's
+        # ``.partial.d``) and rename it only once whole, so a file under a document's own name is complete.
+        # A document's own name is preferred to a renamed copy (one not yet screened is the later).
+        exact: dict[str, str | None] = {}
+        renamed: dict[str, str | None] = {}
+        try:
+            with os.scandir(dest_dir) as entries:
+                for entry in entries:
+                    if not entry.is_file(follow_symlinks=False):
+                        continue
+                    if entry.name in names:
+                        exact[entry.name] = entry.name
+                        continue
+                    stem, dot, suffix = entry.name.rpartition(".")
+                    pdf = f"{stem}.pdf"
+                    if dot and f".{suffix.lower()}" in TRUE_SUFFIXES and pdf in names:
+                        renamed[pdf] = None if pdf in renamed else entry.name
+        except OSError:
+            exact, renamed = {}, {}
+        left = {**renamed, **exact}
+        return EarlierCopies(planned, staging, record, held, left)
 
     def _reuse(
         self,
@@ -892,12 +930,16 @@ class CollectionFetcher:
 
         In order: the file an interrupted ingest of this cycle staged (its staging record entry, with
         the plan's SHA-256 when the cycle's plan names it), the file this cycle's plan names still in
-        ``dest_dir`` (its SHA-256 must be the plan's), and the copy an earlier run held for review
-        (:meth:`_held_fresh`), moved into the cycle and screened again under today's rules, as
-        :meth:`_take_manual` does. The staged copy is only read: it stays where the ingest put it.
+        ``dest_dir`` (its SHA-256 must be the plan's), with no plan naming it the download an
+        interrupted run of this cycle left under the document's name (:attr:`EarlierCopies.left`,
+        :meth:`_left_fresh`), and the copy an earlier run held for review (:meth:`_held_fresh`), moved
+        into the cycle and screened again under today's rules, as :meth:`_take_manual` does. The
+        staged copy is only read: it stays where the ingest put it.
         A fetch looked at none of them: each restart of the lanes downloaded an unsealed cycle whole
         again (crs-reports, 23,188 files, six times; aozora three times), and DLA's i04 r2 downloaded
-        its 4,121 documents held for review again to find 11 new ones (2026-11-05 deep dive)."""
+        its 4,121 documents held for review again to find 11 new ones (2026-11-05 deep dive). The plan is
+        written only when a fetch ends, so a lane restarted 30 hours into aozora's first fetch of a
+        cycle kept none of its downloads either (2026-11-05 review)."""
         planned = earlier.planned.get(cand.key)
         name, sha, size = planned if planned is not None else (cand.file_name, "", None)
         rel = f"upstream/{name}"
@@ -916,6 +958,14 @@ class CollectionFetcher:
             except OSError:
                 whole = False
             if whole and self._rescreen(cand, here, sha, True, rules, report, held_sha):
+                return True
+        left = earlier.left.get(cand.file_name) if planned is None else None
+        if left is not None and self._left_fresh(cand, dest_dir / left):
+            try:
+                copy = true_suffix(dest_dir / left)  # ValueError: an error page in its place
+            except (OSError, ValueError):
+                copy = None
+            if copy is not None and self._rescreen(cand, copy, "", True, rules, report, held_sha):
                 return True
         held = earlier.held.get(cand.file_name.rsplit(".", 1)[0])
         if held is None or not self._held_fresh(cand, held):
@@ -977,6 +1027,25 @@ class CollectionFetcher:
         return True
 
     @staticmethod
+    def _left_fresh(cand: Candidate, path: Path, *, now: datetime | None = None) -> bool:
+        """Whether a download an interrupted run left in the cycle still stands for what the listing
+        offers: the listing's size where it gives one (its MD5 is checked as the copy is screened),
+        and with neither, a copy younger than :data:`REFETCH_AFTER`. A zipped PDF is never taken
+        (the run may have stopped before it was unpacked; the listing's size and MD5 are the zip's)."""
+        if cand.extra.get("unzip") == "pdf":
+            return False
+        try:
+            st = path.stat()
+        except OSError:
+            return False
+        if cand.size is not None:
+            return st.st_size == cand.size
+        if cand.md5:
+            return True
+        age = (now or datetime.now(UTC)) - datetime.fromtimestamp(st.st_mtime, UTC)
+        return age < REFETCH_AFTER
+
+    @staticmethod
     def _held_fresh(cand: Candidate, path: Path, *, now: datetime | None = None) -> bool:
         """Whether a copy held for review still stands for what the listing offers, as :func:`unchanged`
         judges a stored edition: the listing's size and MD5 where it gives them, else a copy younger
@@ -1003,7 +1072,8 @@ class CollectionFetcher:
 
         A run interrupted after some downloads (a reboot, a restarted lane) keeps them: a complete file
         already in ``dest_dir`` whose MD5 matches the one the issuer's listing published is used as is.
-        Without a published checksum the file is fetched again (its origin cannot be re-checked).
+        Without a published checksum, :meth:`_reuse` decides before this is called (``--refetch`` and
+        a stale copy are fetched again).
         """
         done = dest_dir / cand.file_name
         if self.manual_dir is not None:

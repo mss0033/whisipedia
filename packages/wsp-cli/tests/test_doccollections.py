@@ -1520,3 +1520,71 @@ def test_a_held_copy_with_no_listed_size_is_trusted_only_for_a_while(tmp_path: P
     old = time.time() - REFETCH_AFTER.total_seconds() - 86400
     os.utime(copy, (old, old))
     assert not fresh(cand, copy)  # an issuer's quiet correction is still picked up
+
+
+def test_a_fetch_killed_partway_keeps_its_whole_downloads_with_no_listed_checksum(
+    vault: FileVault, tmp_path: Path
+) -> None:
+    """2026-11-05 review: the plan is written only when a fetch ends, so a lane restarted partway
+    through a cycle's first fetch (aozora's take 34-41 hours) downloaded everything again where the
+    listing gives no MD5 (crs-reports, aozora, NIST)."""
+    import re
+
+    three = [*TWO, ("FM-7-0_2022.pdf", make_pdf([PUBLIC_A, ["Chapter 3"]]))]
+    no_md5 = {
+        k: re.sub(rb"<ETag>.*?</ETag>", b"", v) if k.endswith("/") else v for k, v in routes(three).items()
+    }
+
+    class Killed(_Counting):
+        def download(self, remote: RemoteFile, dest: Path) -> FetchResult:
+            if len(self.downloaded) == 2:
+                raise KeyboardInterrupt  # SIGTERM, an OOM: the run stops here, with no plan written
+            return super().download(remote, dest)
+
+    s = spec(three)
+    killed = Killed(no_md5)
+    with pytest.raises(KeyboardInterrupt):
+        _fetcher(vault, killed, tmp_path).run(s, version="2026-10-10")
+    assert killed.downloaded == ["FM-5-0_2022.pdf", "FM-6-0_2022.pdf"]
+    dest = vault.root / "_incoming" / s.id / "2026-10-10"
+    (dest / "FM-7-0_2022.pdf.partial").write_bytes(b"%PDF-half")  # never taken: not a final name
+    counting = _Counting(no_md5)
+    again = _fetcher(vault, counting, tmp_path).run(s, version="2026-10-10")
+    assert counting.downloaded == ["FM-7-0_2022.pdf"]
+    assert again.reused == 2
+    assert sorted(d.cand.title for d in again.fetched) == ["FM 5 0 2022", "FM 6 0 2022", "FM 7 0 2022"]
+    assert not again.failed
+    ingest(vault, s)
+
+
+def test_a_left_download_is_found_by_its_name_or_its_true_suffix_and_trusted_only_for_a_while(
+    tmp_path: Path,
+) -> None:
+    import os
+    import time
+
+    from wsp_cli.doccollections import REFETCH_AFTER
+
+    fetch = CollectionFetcher(
+        tmp_path / "vault", FakeFetcher(), keys={}, user_agent="t", workdir=tmp_path, throttle=False
+    )
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    for name in ("a.txt", "b.pdf", "b.docx", "c.pdf.partial", "d.doc", "d.xls", "e.html", "x.zip"):
+        (dest / name).write_bytes(b"%PDF-x")
+    names = {"a.pdf", "b.pdf", "c.pdf", "d.pdf", "e.pdf", "x.zip"}
+    left = fetch._earlier_copies(spec(TWO), "2026-10-10", dest, names).left  # pyright: ignore[reportPrivateUsage]
+    # renamed by the screen; its own name before a renamed copy; ambiguous; a document's own .zip
+    assert left == {"a.pdf": "a.txt", "b.pdf": "b.pdf", "d.pdf": None, "x.zip": "x.zip"}
+
+    fresh = CollectionFetcher._left_fresh  # pyright: ignore[reportPrivateUsage]
+    cand = Candidate(key="t:b", url="https://bucket.example.gov/b.pdf", title="B", issuer="T")
+    copy = dest / "b.pdf"
+    assert fresh(cand, copy)
+    assert fresh(replace(cand, size=6), copy)
+    assert not fresh(replace(cand, size=7), copy)  # not what the listing offers
+    assert not fresh(replace(cand, extra={"unzip": "pdf"}), copy)  # maybe never unpacked
+    old = time.time() - REFETCH_AFTER.total_seconds() - 86400
+    os.utime(copy, (old, old))
+    assert not fresh(cand, copy)
+    assert fresh(replace(cand, md5="0" * 32), copy)  # the MD5 is checked as it is screened

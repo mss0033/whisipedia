@@ -79,7 +79,12 @@ whose ingest was interrupted before the seal is fine: a staged file is replaced 
 verify against the newer plan's checksum (ledger event `vault.restaged`). Such a re-fetch downloads
 nothing it already has: a document the cycle's ingest staged, or that the cycle's plan names and is
 still in `_incoming` with the plan's SHA-256, is screened again from that copy (the fetch summary says
-`reused N`); a staged copy is only read, never moved. The ingest reads the staging record once a run
+`reused N`); a staged copy is only read, never moved. A fetch killed before it wrote its plan (a lane
+restart, SIGTERM, an OOM) keeps its whole downloads too: a file under a document's own name in
+`_incoming/<source>/<cycle>/` (or the format the screen renamed it to, `x.docx` for `x.pdf`) is
+screened in place when it has the listed size and MD5, or, where the listing gives neither, when it
+is younger than 180 days. A `.partial` is never taken, nor a zipped PDF (ITU) that may not have been
+unpacked; `--refetch KEY` downloads a document again regardless. The ingest reads the staging record once a run
 and skips what an earlier slice adopted without counting it against `--max-seconds`.
 
 ### Lanes: `tools/lanes/lane-run.sh`
