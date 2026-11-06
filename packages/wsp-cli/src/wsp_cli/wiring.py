@@ -613,6 +613,35 @@ def storage_probe(root: Path | None) -> Callable[[], bool]:
     return probe
 
 
+def storage_probes(
+    vault_root: Path | None, refinery_root: Path | None, *, timeout: float = 15.0
+) -> Callable[[], bool]:
+    """True while the vault mount answers (:func:`storage_probe`) and the Refinery root is a readable
+    directory, within ``timeout`` seconds: a hung soft mount answers nothing, and the caller must not
+    hang with it (the probe's thread is left behind, a daemon)."""
+    vault = storage_probe(vault_root)
+
+    def refinery() -> bool:
+        if refinery_root is None:
+            return True
+        try:
+            with os.scandir(refinery_root):
+                return True
+        except OSError:
+            return False
+
+    def probe() -> bool:
+        answer: list[bool] = []
+        worker = threading.Thread(
+            target=lambda: answer.append(vault() and refinery()), name="storage-probe", daemon=True
+        )
+        worker.start()
+        worker.join(timeout)
+        return bool(answer and answer[0])
+
+    return probe
+
+
 def _alert_sinks(config: Mapping[str, Any]) -> list[AlertSink]:
     from wsp_cli.notify import alert_sinks
 

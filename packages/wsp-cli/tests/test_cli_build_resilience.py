@@ -9,7 +9,8 @@ import errno
 import io
 import json
 import logging
-from collections.abc import Generator, Iterator
+import os
+from collections.abc import Callable, Generator, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -88,7 +89,9 @@ def spec(sid: str) -> SourceSpec:
 
 
 @contextlib.contextmanager
-def indexer(tmp_path: Path, adapter: Adapter) -> Generator[Indexer]:
+def indexer(
+    tmp_path: Path, adapter: Adapter, storage_available: Callable[[], bool] | None = None
+) -> Generator[Indexer]:
     root = tmp_path / "index"
     ix = Indexer(
         Vault(tmp_path / "vault"),  # type: ignore[arg-type]
@@ -97,6 +100,7 @@ def indexer(tmp_path: Path, adapter: Adapter) -> Generator[Indexer]:
         root,
         TantivyIndex(root / "lexical"),
         SqliteChangeFeed(root / "changes.sqlite"),
+        storage_available=storage_available,
     )
     try:
         yield ix
@@ -181,6 +185,82 @@ def test_a_stop_still_ends_the_build(tmp_path: Path, stop: BaseException) -> Non
     assert not (tmp_path / "index" / "refinery" / GOOD).exists()  # nothing after the stop ran
 
 
+def _from_text() -> ValueError:
+    try:
+        raise OSError(None, "IOError: Couldn't deserialize thrift")  # pyarrow: no errno
+    except OSError as cause:
+        try:
+            raise ValueError("Failed to open file for read: The network name is no longer available")
+        except ValueError as exc:
+            exc.__cause__ = cause
+            return exc
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [OSError(errno.EIO, "Input/output error"), OSError(errno.ETIMEDOUT, "timed out"), _from_text()],
+    ids=["eio", "etimedout", "valueerror"],
+)
+def test_a_failure_while_the_storage_does_not_answer_ends_the_build(tmp_path: Path, fault: Exception) -> None:
+    """A soft mount's EIO, or an error whose type says nothing, while the mounts do not answer: every
+    later source would fail the same way, holding the index lock (2026-11-06 review)."""
+    adapter = Adapter()
+    adapter.fail = fault
+    probes: list[bool] = []
+
+    def gone() -> bool:
+        probes.append(False)
+        return False
+
+    with indexer(tmp_path, adapter, gone) as ix, pytest.raises(type(fault)):
+        ix.build()
+    assert probes == [False]
+    assert not (tmp_path / "index" / "refinery" / GOOD).exists()
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [OSError(errno.EIO, "Input/output error"), _from_text()],
+    ids=["eio", "valueerror"],
+)
+def test_the_same_failure_with_the_storage_answering_is_the_sources_own(
+    tmp_path: Path, fault: Exception
+) -> None:
+    adapter = Adapter()
+    adapter.fail = fault
+    with indexer(tmp_path, adapter, lambda: True) as ix:
+        broken, good = ix.build()
+    assert broken.error is not None
+    assert good.indexed == GID
+
+
+def test_a_probe_that_raises_counts_as_storage_gone(tmp_path: Path) -> None:
+    adapter = Adapter()
+    adapter.fail = RuntimeError("odd")
+
+    def broken_probe() -> bool:
+        raise OSError(errno.ENOTCONN, "not connected")
+
+    with indexer(tmp_path, adapter, broken_probe) as ix, pytest.raises(RuntimeError, match="odd"):
+        ix.build()
+
+
+def test_a_rollback_that_fails_ends_the_build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Writes that cannot be discarded would be published by the next source's commit."""
+    adapter = Adapter()
+    adapter.fail = RuntimeError("bad record")
+    with indexer(tmp_path, adapter) as ix:
+        ix.index.upsert([])  # open the index, as an earlier source would have
+
+        def cannot() -> None:
+            raise RuntimeError("writer poisoned")
+
+        monkeypatch.setattr(ix.index, "rollback", cannot)
+        with pytest.raises(RuntimeError, match="writer poisoned"):
+            ix.build()
+        assert not (tmp_path / "index" / "refinery" / GOOD).exists()
+
+
 def test_a_failure_after_committed_parts_leaves_only_those_and_the_next_run_completes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -219,9 +299,12 @@ def test_the_nightly_command_exits_non_zero_when_a_source_failed(
     class Ix:
         defer_suggest = False
         shared: list[str] = []  # noqa: RUF012 - one instance
+        root = tmp_path / "index"
+        failing = True
 
         def build(self, *_a: object, **_k: object) -> list[SourceReport]:
-            return [SourceReport(BROKEN, error="InvalidDocIdError: bad id"), SourceReport(GOOD, indexed=GID)]
+            error = "InvalidDocIdError: bad id" if self.failing else None
+            return [SourceReport(BROKEN, indexed=GID, error=error), SourceReport(GOOD, indexed=GID)]
 
         def rank_if_due(self) -> bool:
             self.shared.append("rank")
@@ -249,6 +332,13 @@ def test_the_nightly_command_exits_non_zero_when_a_source_failed(
     monkeypatch.setattr(ops, "_context", context)
     monkeypatch.setattr(ops, "_index_writer", writer)
     monkeypatch.setattr(ops, "open_indexer", fake_indexer)
+    alerts: list[tuple[str, str | None]] = []
+
+    def alert(_cfg: object, key: str, message: str | None) -> None:
+        alerts.append((key, message))
+
+    monkeypatch.setattr(ops, "_alert", alert)
+    ix.root.mkdir()
     out = io.StringIO()
     args = argparse.Namespace(source=None)
     assert ops.cmd_index_build(args, out) == 1
@@ -258,3 +348,46 @@ def test_the_nightly_command_exits_non_zero_when_a_source_failed(
     assert f"1 source(s) failed: {BROKEN}" in text
     assert "rank, suggest and spell left as they were" in text
     assert ix.shared == []  # not rebuilt from a set missing a source: the last good files stay
+    assert alerts == []  # the first night: the exit code says it
+
+    # The night before was skipped too: from the second night in a row, an alert.
+    skipped = ix.root / ops.SHARED_SKIPPED_FILE
+    skipped.write_text(json.dumps({"days": ["2000-01-01"]}), encoding="utf-8")
+    out = io.StringIO()
+    assert ops.cmd_index_build(args, out) == 1
+    ((key, message),) = alerts
+    assert key == ops.SHARED_SKIPPED_ALERT
+    assert message is not None
+    assert "for 2 days (since 2000-01-01)" in message
+    assert BROKEN in message
+    assert "ALERT: rank, suggest and spell not rebuilt" in out.getvalue()
+
+    ix.failing = False  # fixed: the shared phases run, the count and the alert are cleared
+    assert ops.cmd_index_build(args, io.StringIO()) == 0
+    assert ix.shared == ["rank", "finish", "spell"]
+    assert not skipped.exists()
+    assert alerts[-1] == (ops.SHARED_SKIPPED_ALERT, None)
+
+
+def test_the_storage_probe_gives_up_on_a_hung_mount(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import threading
+
+    from wsp_cli import wiring
+
+    (tmp_path / "vault" / "x").mkdir(parents=True)
+    (tmp_path / "refinery").mkdir()
+    assert wiring.storage_probes(tmp_path / "vault", tmp_path / "refinery")()
+    assert not wiring.storage_probes(tmp_path / "vault", tmp_path / "gone")()
+    assert not wiring.storage_probes(tmp_path / "empty-mount-point", None)()
+    release = threading.Event()
+    real = os.scandir
+
+    def hung(path: Any) -> Any:
+        release.wait(5)
+        return real(path)
+
+    monkeypatch.setattr(os, "scandir", hung)  # wiring calls os.scandir
+    try:
+        assert not wiring.storage_probes(tmp_path / "vault", None, timeout=0.2)()
+    finally:
+        release.set()

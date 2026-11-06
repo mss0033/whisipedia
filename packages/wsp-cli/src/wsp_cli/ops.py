@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import json
+import os
 import sys
 import time
 from collections import Counter
@@ -32,7 +33,7 @@ from wsp_cli.locks import (
     lock_dir_for,
 )
 from wsp_cli.service import ServiceManager, unit_dir
-from wsp_cli.wiring import drill_once, parity_targets, repair_ladder, scrubber
+from wsp_cli.wiring import drill_once, parity_targets, repair_ladder, scrubber, storage_probes
 from wsp_core.model import GenerationStatus, SourceSpec
 from wsp_core.partitions import PartitionError, check_partition, partition_generation_id, partition_of
 from wsp_core.ports import Fetcher
@@ -215,6 +216,7 @@ def open_indexer(
         refinery=p.refinery,
         map_root=p.refinery_maps,
         read_pace=bootstrap.ingest_pace(cfg),
+        storage_available=storage_probes(p.vault_root, p.refinery_root),
     )
     try:
         yield ix
@@ -247,7 +249,9 @@ def cmd_index_build(args: argparse.Namespace, out: TextIO) -> int:
                 # sick share still let them read). The files of the last good run are kept; what was
                 # indexed is committed and searchable; the next run rebuilds them (2026-11-06 review).
                 out.write("rank, suggest and spell left as they were: a source failed\n")
+                _shared_phases_skipped(cfg, ix.root, [r.source_id for r in reports if r.error], out)
                 return _index_build_summary(reports, out)
+            _shared_phases_ran(cfg, ix.root)
             try:
                 if not getattr(args, "no_rank", False):
                     ix.rank_if_due()  # kept unless the link graph can have changed (or a week passed)
@@ -264,6 +268,68 @@ def cmd_index_build(args: argparse.Namespace, out: TextIO) -> int:
     except LockHeldError as exc:
         return _busy(exc)
     return _index_build_summary(reports, out)
+
+
+SHARED_SKIPPED_FILE = "shared-phases-skipped.json"
+SHARED_SKIPPED_ALERT = "index:shared-phases-skipped"
+SHARED_SKIPPED_NIGHTS = 2  # the nights in a row that raise the alert
+
+
+def _shared_phases_skipped(cfg: Mapping[str, Any], root: Path, failed: Sequence[str], out: TextIO) -> None:
+    """Count the days on which a failed source kept rank, suggest and spell from being rebuilt
+    (``<index>/shared-phases-skipped.json``); from the second in a row, an alert: each night's failure
+    exits 1, but a source that keeps failing would leave them stale for good (2026-11-06 review).
+    Best effort: never fails the build."""
+    path = root / SHARED_SKIPPED_FILE
+    today = datetime.now(UTC).date().isoformat()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        days = [str(d) for d in data.get("days", [])]
+    except (OSError, ValueError, AttributeError):
+        days = []
+    days = sorted({*days, today})[-60:]  # since the shared phases last ran (bounded)
+    try:
+        tmp = path.with_name(f"{path.name}.{os.getpid()}.partial")
+        tmp.write_text(json.dumps({"days": days, "failed": list(failed)}) + "\n", encoding="utf-8")
+        tmp.replace(path)
+    except OSError as exc:
+        out.write(f"warning: cannot record the skipped phases in {path}: {exc}\n")
+    if len(days) < SHARED_SKIPPED_NIGHTS:
+        return
+    message = (
+        f"rank, suggest and spell not rebuilt for {len(days)} days (since {days[0]}): "
+        f"{', '.join(failed)} keep failing in `wsp index build`"
+    )
+    out.write(f"ALERT: {message}\n")
+    _alert(cfg, SHARED_SKIPPED_ALERT, message)
+
+
+def _shared_phases_ran(cfg: Mapping[str, Any], root: Path) -> None:
+    path = root / SHARED_SKIPPED_FILE
+    if path.exists():
+        path.unlink(missing_ok=True)
+        _alert(cfg, SHARED_SKIPPED_ALERT, None)
+
+
+def _alert(cfg: Mapping[str, Any], key: str, message: str | None) -> None:
+    """Raise (``message``) or resolve (None) an orchestrator alert; best effort."""
+    try:
+        from wsp_cli.notify import _alerter  # pyright: ignore[reportPrivateUsage]
+        from wsp_orchestrator.alerts import Alert, Severity
+
+        pair = _alerter(cfg)
+        if pair is None:
+            return
+        alerter, store = pair
+        try:
+            if message is None:
+                alerter.resolve(key)
+            else:
+                alerter.raise_(Alert(key, Severity.WARNING, message))
+        finally:
+            store.close()
+    except Exception as exc:  # an alert that cannot be raised never fails the build
+        print(f"warning: alert {key}: {exc}", file=sys.stderr)
 
 
 def _index_build_summary(reports: Sequence[SourceReport], out: TextIO) -> int:

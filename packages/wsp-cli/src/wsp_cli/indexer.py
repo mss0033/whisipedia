@@ -261,8 +261,14 @@ class Indexer:
         refinery: Path | None = None,
         map_root: Path | None = None,
         read_pace: Callable[[int], None] | None = None,
+        storage_available: Callable[[], bool] | None = None,
     ) -> None:
         self.vault = vault
+        # A cheap probe of the vault and Refinery mounts (wiring.storage_probes): asked after any
+        # failure of a source, whatever its type. A soft mount's EIO, a pyarrow OSError without an
+        # errno or a tantivy ValueError built from text is a storage outage when the mounts are gone,
+        # and each later source would fail the same way, slowly, holding the index lock (2026-11-06).
+        self.storage_available = storage_available
         # The refine's long reads of the vault (COD's 26.6 GB archive) share the library's NAS budget
         # (:func:`wsp_cli.bootstrap.ingest_pace`) through :attr:`Ctx.read_pace` (2026-11-06 review).
         self.read_pace = read_pace
@@ -947,7 +953,7 @@ class Indexer:
             try:
                 report = self._build_source(sid, explicit=bool(source_ids))
             except Exception as exc:
-                if _stops_the_run(exc):
+                if _stops_the_run(exc) or not self._storage_answers(sid):
                     raise
                 report = self._source_failed(sid, exc)
             if report is not None:
@@ -1006,6 +1012,18 @@ class Indexer:
             sid, tuple(refined), rep.indexed, rep.upserted, rep.deleted, rep.skipped, left_out=left_out
         )
 
+    def _storage_answers(self, sid: str) -> bool:
+        """Whether the storage still answers after ``sid`` failed (no probe: assumed so)."""
+        if self.storage_available is None:
+            return True
+        try:
+            ok = bool(self.storage_available())
+        except Exception:  # a probe that cannot tell: the storage is not answering
+            ok = False
+        if not ok:
+            log.error("%s failed and the storage does not answer: the build stops", sid)
+        return ok
+
     def _source_failed(self, sid: str, exc: Exception) -> SourceReport:
         """Report a source whose build raised, and discard the index writes it left uncommitted (the
         next source's commit would publish them); its unsealed refine is rebuilt by the next run."""
@@ -1018,10 +1036,9 @@ class Indexer:
             },
         )
         if self._index is not None:
-            try:
-                self._index.rollback()
-            except Exception as again:  # said; the next commit decides
-                log.warning("%s: rollback after the failure failed too: %s", sid, again)
+            # Not caught: writes that cannot be discarded would be published by the next source's
+            # commit, so a rollback that fails ends the run.
+            self._index.rollback()
         self._say(f"{sid}: FAILED ({error})")
         return SourceReport(sid, error=error)
 
