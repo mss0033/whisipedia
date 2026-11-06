@@ -109,7 +109,18 @@ table is what keeps p99 flat for one- and two-letter prefixes.
 ## Static rank: PageRank over the link graph
 
 `wsp_index.linkrank` computes a link-analysis prior offline. `wsp index rank` runs it alone; `wsp index
-build` runs it last whenever something changed (`--no-rank` skips it).
+build` runs it after indexing when the link graph can have changed (`--no-rank` skips it):
+
+* **When.** `static_rank.json` records each source's generation, seal stamp, and the `wsp:` links and
+  aliases it brought to the graph; every new seal records the `wsp:` links its documents carry
+  (`library_links`). The build computes the rank again when a source with links or aliases changed,
+  came or left, a new generation brings links or aliases (or does not record them: sealed before
+  2026-11-05, except set members the rank read in a source that brought none), the settings changed, or link-free sources changed and the rank is 7 days old. Otherwise
+  it is kept: a new document of a link-free source (PubMed, newspapers) gets the feature of an unlinked
+  page, 0, from the missing key, which is what a recount gives it. Until 2026-11-05 it ran whenever
+  anything was indexed, 4-12 h on the NAS a night, for 8 new edges in 13 days.
+* **Suggest.** The trie is rebuilt once a night: by the rank when it runs (its priors), else in
+  `finish()`. Both rebuilt it on the same night before, 50-115 min of NAS reads wasted.
 
 * **Graph.** Nodes are the documents of every source's current Refinery generation; edges are
   `DocRecord.links` that start with `wsp:`. Targets resolve with `pyarrow.compute.index_in` (C++): the
@@ -143,6 +154,15 @@ workstation with ~2 GB of free RAM:
 Link resolution at 1.5M links/s puts English Wikipedia (~150M links) at under 2 minutes. Node ids are
 held as one Arrow string array (~35 bytes per node, ~250 MB at 7M), never as Python strings.
 
+## Catalog (portal, directory, random)
+
+`catalog/<source>.json` is built by a full scan of the indexed generation (`wsp index catalog`, a
+first index, a large change). A new generation that changed at most 1% of the documents since the last
+scan, which is less than 7 days old, is *patched* instead (`patch_source_catalog`): listed ids it no
+longer holds are dropped (from the id index), and its new documents join the lists at the next scan.
+Each PubMed update (14k-76k of 41.3M records) scanned the whole source, 71-150 min a night
+(2026-11-05 deep dive).
+
 ## "Did you mean" (spelling)
 
 `wsp_index.spelling` is a classic noisy-channel corrector. `wsp index spell` builds the vocabulary;
@@ -161,8 +181,12 @@ held as one Arrow string array (~35 bytes per node, ~250 MB at 7M), never as Pyt
   few times among untagged texts are no evidence of a spelling ("diabetis").
 * **Reuse:** `<index root>/spell-cache/` keeps each generation's language map and each language's
   counts under a key of the files its sample comes from; a rebuild counts only the languages whose
-  sources changed (the sample is deterministic: a kept vocabulary is the one a recount would make)
-  and removes what it no longer uses. It is safe to delete; the next rebuild reads everything once.
+  sources changed and removes what it no longer uses. It is safe to delete; the next rebuild reads
+  everything once. A vocabulary is also kept when its sources are the same and their rows of its
+  languages changed by at most 2% (`SpellConfig.reuse_drift`) since it was counted, less than 7 days
+  ago (`recount_days`): then a kept vocabulary is that of a slightly older library, not the one a
+  recount would make. Each PubMed update (0.03% of its records) recounted the 10+ languages it holds
+  rows of, 35-40 minutes (2026-11-05 deep dive).
 * **Error model:** each edit (insertion, deletion, substitution, adjacent transposition) costs
   ε = 0.01, plus one more when the first letter changes (people rarely mistype it). A word becomes
   `argmax count(c) · ε^cost`, the word itself included, so a known word is only replaced by a much

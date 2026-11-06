@@ -41,9 +41,14 @@ check then rejects.
 A rebuild reuses what has not changed (:class:`SpellCache`, ``<index>/lexical/spell-cache/``): each
 generation's language map (the ``lang`` column of every part, read once per generation, not once per
 night) and each vocabulary's counts, kept under a key of everything its sample is drawn from (the
-generations' files, their row groups, the settings). The sample is deterministic, so a kept
-vocabulary is the one a recount would make; only the languages whose sources changed are read again.
-2026-10-22: the nightly rebuild read every language of every source again, 8 hours on the NAS.
+generations' files, their row groups, the settings). The sample is deterministic, so a vocabulary
+kept under its key is the one a recount would make; only the languages whose sources changed are read
+again. 2026-10-22: the nightly rebuild read every language of every source again, 8 hours on the NAS.
+
+A vocabulary is also kept when its sources changed only a little (:class:`SpellConfig` ``reuse_drift``,
+2% of the language's rows, the same sources) and it was counted less than ``recount_days`` (7) ago:
+then it is the vocabulary of a slightly older library, not the recount. 2026-11-05 deep dive: each
+PubMed update (0.03% of its records) made 10+ languages it holds a few rows of recount, 35-40 minutes.
 """
 
 from __future__ import annotations
@@ -215,6 +220,11 @@ class SpellConfig:
     Open Library's catalogue scattered 458 languages one row per row group, and the step read 5.5
     million row groups from the NAS (Abkhaz: 102 of them for 102 records, 23 minutes)."""
     batch_size: int = 4096
+    reuse_drift: float = 0.02
+    """A vocabulary whose sources' rows changed by at most this share of its rows (sum of the
+    differences per source and language; the same sources) is kept without a recount..."""
+    recount_days: float = 7.0
+    """...while it was counted less than this many days ago. 0 turns the tolerance off."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -352,6 +362,7 @@ class SpellCache:
         self.root = root
         self.used: set[Path] = set()
         self.kept = 0
+        self.near = 0  # of ``kept``: kept although their sources changed a little (``reuse_drift``)
 
     def row_groups(self, reader: RefineryReader) -> tuple[str, dict[str, list[tuple[int, int, int]]]]:
         fp = generation_fingerprint(reader)
@@ -379,7 +390,17 @@ class SpellCache:
         except (OSError, ValueError, KeyError, TypeError, pa.ArrowException):
             return None
 
-    def save(self, key: str, words: list[str], values: list[int], docs: int, distinct: int) -> None:
+    def save(
+        self,
+        key: str,
+        words: list[str],
+        values: list[int],
+        docs: int,
+        distinct: int,
+        basis: tuple[str, Rows] | None = None,
+    ) -> None:
+        """Keep counts under ``key``; ``basis`` (the vocabulary's settings key and the rows it was
+        sampled from) lets a later rebuild find them while the sources drift (:meth:`near_counts`)."""
         table = pa.Table.from_arrays(
             [pa.array(words, pa.string()), pa.array(values, pa.int64())],
             names=["w", "c"],
@@ -390,6 +411,47 @@ class SpellCache:
         tmp = path.with_name(path.name + ".partial")
         pq.write_table(table, tmp)  # pyright: ignore[reportUnknownMemberType]
         os.replace(tmp, path)
+        if basis is not None:
+            stable, rows = basis
+            # Wall clock: the count's age across nightly runs and reboots, not a duration.
+            record = {"key": key, "rows": rows, "counted": time.time()}
+            target = self.basis_path(stable)
+            self.used.add(target)
+            _write_atomic(target, json.dumps(record, sort_keys=True, separators=(",", ":")).encode())
+
+    def basis_path(self, stable: str) -> Path:
+        return self.root / "vocab" / f"{stable}.basis.json"
+
+    def near_counts(
+        self, stable: str, rows: Rows, cfg: SpellConfig, now: float | None = None
+    ) -> tuple[tuple[dict[str, int], int, int], float] | None:
+        """The counts last made for the vocabulary ``stable`` names and the share of its rows that
+        changed since, if they may stand for a recount: the same sources, at most ``reuse_drift`` of
+        the rows changed, counted less than ``recount_days`` ago. The kept basis stays the one counted,
+        so the drift of several nights adds up instead of each night measuring from the last."""
+        path = self.basis_path(stable)
+        try:
+            record = cast(dict[str, Any], json.loads(path.read_text(encoding="utf-8")))
+            key = str(record["key"])
+            old = cast(Rows, record["rows"])
+            age = ((time.time() if now is None else now) - float(record["counted"])) / 86400
+            if set(old) != set(rows) or not 0 <= age < cfg.recount_days:
+                return None
+            moved = sum(
+                abs(int(rows[src].get(lang, 0)) - int(old[src].get(lang, 0)))
+                for src in rows
+                for lang in set(rows[src]) | set(old[src])
+            )
+            total = sum(int(n) for by_lang in old.values() for n in by_lang.values())
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
+            return None
+        if total <= 0 or moved > cfg.reuse_drift * total:
+            return None
+        kept = self.counts(key)
+        if kept is None:
+            return None
+        self.used.add(path)
+        return kept, moved / total
 
     def prune(self) -> None:
         """Remove what this rebuild did not use (old generations, languages whose sources changed)."""
@@ -400,10 +462,12 @@ class SpellCache:
                         path.unlink()
 
 
-def _vocab_key(
-    cfg: SpellConfig, langs: Sequence[str], sources: Mapping[str, Sequence[tuple[str, str, Sequence[Any]]]]
-) -> str:
-    settings = (
+Rows = dict[str, dict[str, int]]
+"""``{source id: {raw language tag: rows}}`` a vocabulary is sampled from (every row group, unthinned)."""
+
+
+def _settings(cfg: SpellConfig) -> tuple[int, ...]:
+    return (
         cfg.min_count,
         cfg.min_count_docs,
         cfg.max_words,
@@ -413,7 +477,19 @@ def _vocab_key(
         cfg.max_chars,
         cfg.max_docs,
     )
-    spec = [CACHE_FORMAT, settings, [(lang, [list(x) for x in sources[lang]]) for lang in langs]]
+
+
+def _vocab_key(
+    cfg: SpellConfig, langs: Sequence[str], sources: Mapping[str, Sequence[tuple[str, str, Sequence[Any]]]]
+) -> str:
+    spec = [CACHE_FORMAT, _settings(cfg), [(lang, [list(x) for x in sources[lang]]) for lang in langs]]
+    return hashlib.sha256(json.dumps(spec, separators=(",", ":")).encode()).hexdigest()[:32]
+
+
+def _stable_key(cfg: SpellConfig, vocab: str, langs: Sequence[str]) -> str:
+    """The vocabulary's name, languages and settings, without the generations: what its basis
+    (:meth:`SpellCache.near_counts`) is kept under from one generation to the next."""
+    spec = ["basis", CACHE_FORMAT, _settings(cfg), vocab, list(langs)]
     return hashlib.sha256(json.dumps(spec, separators=(",", ":")).encode()).hexdigest()[:32]
 
 
@@ -439,7 +515,8 @@ def count_words(
     """
     plan: dict[str, list[tuple[RefineryReader, str, list[tuple[int, int, int]]]]] = {}
     fingerprints: dict[str, list[tuple[str, str, list[tuple[int, int, int]]]]] = {}
-    for _source, reader in readers:
+    rows: dict[str, Rows] = {}  # by language: the rows of each source (unthinned), for near_counts
+    for source, reader in readers:
         fp, by_lang = cache.row_groups(reader) if cache is not None else ("", language_row_groups(reader))
         for raw, every in by_lang.items():
             if primary_lang(raw) in NOT_LANGUAGES:
@@ -447,6 +524,8 @@ def count_words(
             rgs = _thin(every, cfg)
             plan.setdefault(primary_lang(raw), []).append((reader, raw, rgs))
             fingerprints.setdefault(primary_lang(raw), []).append((fp, raw, rgs))
+            by_source = rows.setdefault(primary_lang(raw), {}).setdefault(source, {})
+            by_source[raw] = by_source.get(raw, 0) + sum(n for _, _, n in every)
     wanted = {primary_lang(x) for x in cfg.languages}
     sizes = {lang: sum(n for _, _, rgs in srcs for _, _, n in rgs) for lang, srcs in plan.items()}
     groups: dict[str, list[str]] = {}
@@ -462,13 +541,33 @@ def count_words(
     for vocab, langs in sorted(groups.items()):
         available = sum(sizes[lang] for lang in langs)
         key = _vocab_key(cfg, langs, fingerprints) if cache is not None else ""
+        stable = _stable_key(cfg, vocab, langs)
+        basis: Rows = {}
+        for lang in langs:
+            for source, by_raw in rows[lang].items():
+                mine = basis.setdefault(source, {})
+                for raw, n in by_raw.items():
+                    mine[raw] = mine.get(raw, 0) + n
         kept = cache.counts(key) if cache is not None else None
-        if kept is not None:
+        if kept is not None and cache is not None:
+            cache.used.add(cache.basis_path(stable))  # kept for near_counts
             out[vocab], docs_by_lang[vocab], seen = kept
             distinct += seen
-            cache.kept += 1  # pyright: ignore[reportOptionalMemberAccess]  # kept implies a cache
+            cache.kept += 1
             if progress:
                 progress(f"spell: {vocab}: unchanged, {len(out[vocab]):,} words kept")
+            continue
+        near = cache.near_counts(stable, basis, cfg) if cache is not None else None
+        if near is not None and cache is not None:
+            (out[vocab], docs_by_lang[vocab], seen), moved = near
+            distinct += seen
+            cache.kept += 1
+            cache.near += 1
+            if progress:
+                progress(
+                    f"spell: {vocab}: {moved:.2%} of its rows changed, {len(out[vocab]):,} words kept "
+                    f"(recounted within {cfg.recount_days:g} days)"
+                )
             continue
         counter = _Counter()
         docs = 0
@@ -500,7 +599,7 @@ def count_words(
         out[vocab] = dict(zip(words, values, strict=True))
         docs_by_lang[vocab] = docs
         if cache is not None:
-            cache.save(key, words, values, docs, seen)
+            cache.save(key, words, values, docs, seen, basis=(stable, basis))
         if progress:
             progress(f"spell: {vocab}: {docs:,} of {available:,} documents sampled, {len(words):,} words")
     return out, docs_by_lang, distinct

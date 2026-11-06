@@ -444,10 +444,12 @@ def test_unknown_everywhere_is_corrected_in_the_preferred_language_only() -> Non
     )  # Polish words: Polish may
 
 
-def _two_sources(tmp_path: Path, en_text: str = "insulin diabetes") -> list[tuple[str, RefineryReader]]:
+def _two_sources(
+    tmp_path: Path, en_text: str = "insulin diabetes", en_docs: int = 60, gen: str | None = None
+) -> list[tuple[str, RefineryReader]]:
     ceb = [doc("c", f"ceb/{i:05d}", "Kategoriya", "mga lungsod kategoriya", lang="ceb") for i in range(60)]
-    en = [doc("e", f"en/{i:05d}", "Article", en_text, lang="en") for i in range(60)]
-    gen = "g2" if en_text != "insulin diabetes" else "g1"
+    en = [doc("e", f"en/{i:05d}", "Article", en_text, lang="en") for i in range(en_docs)]
+    gen = gen or ("g2" if en_text != "insulin diabetes" else "g1")
     for sid, gid, docs in (("c", "g1", ceb), ("e", gen, en)):
         if not generation_dir(tmp_path / "ref", sid, gid).is_dir():
             with RefineryWriter(tmp_path / "ref", sid, gid, row_group_rows=10) as w:
@@ -462,9 +464,10 @@ def test_a_rebuild_keeps_the_vocabularies_whose_sources_did_not_change(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # 2026-10-22: every nightly build read every language of every source again (8 hours on the NAS).
+    # Exact reuse only (recount_days=0): the drift tolerance is the next test's.
     from wsp_index import spelling
 
-    cfg = SpellConfig(min_count=1, min_count_docs=0, min_language_docs=10)
+    cfg = SpellConfig(min_count=1, min_count_docs=0, min_language_docs=10, recount_days=0)
     readers = _two_sources(tmp_path)
     first = tmp_path / "first.bin"
     build_vocabulary(readers, first, cfg, cache=spelling.SpellCache(tmp_path / "cache"))
@@ -510,6 +513,73 @@ def test_a_rebuild_keeps_the_vocabularies_whose_sources_did_not_change(
     # per language remain.
     assert len(list((tmp_path / "cache" / "groups").glob("*.json"))) == 2
     assert len(list((tmp_path / "cache" / "vocab").glob("*.parquet"))) == 2
+
+
+def test_a_vocabulary_whose_sources_changed_a_little_is_kept_for_a_week(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-11-05 deep dive: a new PubMed generation (0.03% of its records changed) gave every language
+    it holds rows of a new key, and 10+ vocabularies were sampled again from the NAS, 35-40 minutes."""
+    import json
+
+    from wsp_index import spelling
+
+    cfg = SpellConfig(min_count=1, min_count_docs=0, min_language_docs=10)
+    build_vocabulary(
+        _two_sources(tmp_path), tmp_path / "first.bin", cfg, cache=spelling.SpellCache(tmp_path / "cache")
+    )
+    first = Speller.open(tmp_path / "first.bin")
+    assert first is not None
+
+    reads: list[str] = []
+    real_rg = pq.ParquetFile.read_row_group  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+
+    def counting_rg(self: pq.ParquetFile, i: int, *args: Any, **kwargs: Any) -> Any:
+        reads.append("row group")
+        return real_rg(self, i, *args, **kwargs)
+
+    monkeypatch.setattr(pq.ParquetFile, "read_row_group", counting_rg)
+    # A new English generation with as many rows (the text changed): kept, not sampled again.
+    cache = spelling.SpellCache(tmp_path / "cache")
+    out = tmp_path / "near.bin"
+    build_vocabulary(_two_sources(tmp_path, en_text="insulin glucose"), out, cfg, cache=cache)
+    assert (cache.kept, cache.near) == (2, 1)
+    assert reads == []
+    near = Speller.open(out)
+    assert near is not None
+    assert near.count("diabetes", "en") > 0  # the counted vocabulary, not a recount
+    assert near.count("glucose", "en") == 0
+
+    # More than 2% of English's rows changed since the count: counted again.
+    cache = spelling.SpellCache(tmp_path / "cache")
+    build_vocabulary(
+        _two_sources(tmp_path, en_text="insulin glucose", en_docs=62, gen="g3"), out, cfg, cache=cache
+    )
+    assert (cache.kept, cache.near) == (1, 0)
+    assert reads
+    counted = Speller.open(out)
+    assert counted is not None
+    assert counted.count("glucose", "en") > 0
+
+    # A small change once the count is a week old: counted again.
+    reads.clear()
+    (basis,) = [
+        p
+        for p in (tmp_path / "cache" / "vocab").glob("*.basis.json")
+        if "e" in json.loads(p.read_text(encoding="utf-8"))["rows"]
+    ]
+    record = json.loads(basis.read_text(encoding="utf-8"))
+    record["counted"] -= 7 * 86400
+    basis.write_text(json.dumps(record), encoding="utf-8")
+    cache = spelling.SpellCache(tmp_path / "cache")
+    build_vocabulary(
+        _two_sources(tmp_path, en_text="insulin pancreas", en_docs=62, gen="g4"), out, cfg, cache=cache
+    )
+    assert (cache.kept, cache.near) == (1, 0)
+    assert reads
+    # Every vocabulary in use keeps its counts and its basis; nothing else is left.
+    assert len(list((tmp_path / "cache" / "vocab").glob("*.parquet"))) == 2
+    assert len(list((tmp_path / "cache" / "vocab").glob("*.basis.json"))) == 2
 
 
 def test_a_damaged_kept_vocabulary_is_counted_again(tmp_path: Path) -> None:

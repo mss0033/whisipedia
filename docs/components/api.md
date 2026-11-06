@@ -150,7 +150,8 @@ wsp drill [--kind KIND] [--source ID] # chaos drill on a sandboxed copy
 wsp approve|reject <source> [<version>] [--note TEXT]
 wsp resume <source>
 wsp status                            # sources, generations, degraded, orchestrator queue
-wsp index catalog [--source ID]       # rebuild the portal/directory/random catalog only
+wsp index catalog [--source ID]       # rebuild the portal/directory/random catalog only (full scan;
+                                      # index build patches a catalog for small changes, rescans weekly)
 wsp index rank [--damping D] [--mix M] # PageRank static rank, suggest priors, featured articles
 wsp index spell                       # "did you mean" vocabulary from the indexed text
 wsp parity status                     # parity coverage of sealed generations

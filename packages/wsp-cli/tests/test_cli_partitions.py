@@ -167,6 +167,50 @@ def test_partitions_are_kept_promoted_and_indexed_together(vault: FileVault, tmp
         ix.feed.close()
 
 
+def test_a_new_link_free_partition_keeps_the_rank(vault: FileVault, tmp_path: Path) -> None:
+    """2026-11-05 deep dive: nara-catalog, cia-reading-room and others add a partition most nights;
+    each new set generation ran PageRank (4-12 h). Members sealed before seals counted their links are
+    known link-free when the rank read them in a source that brought none."""
+    import json
+
+    from wsp_index.refinery import SUCCESS_FILE
+
+    fetch(vault, tmp_path, "ak", "2026-10-03.ak", {"AK_Anchorage_1950.pdf": sheet("Anchorage")})
+    fetch(vault, tmp_path, "ca", "2026-10-02.ca", {"CA_Yosemite_1898.pdf": sheet("Yosemite")})
+    refinery = tmp_path / "index" / "refinery"
+    ix = indexer(vault, tmp_path)
+    try:
+        ix.build([SID])
+        assert ix.rank_due().due  # no rank yet
+        ix.rank()
+        assert not ix.rank_due().due
+    finally:
+        ix.close()
+    for member in ("2026-10-02.ca", "2026-10-03.ak"):  # as sealed before 2026-11-05
+        seal = part_dir(refinery, SID, member) / SUCCESS_FILE
+        meta = json.loads(seal.read_text())
+        del meta["library_links"]
+        seal.write_text(json.dumps(meta))
+    fetch(vault, tmp_path, "tx", "2026-11-01.tx", {"TX_Austin_1900.pdf": sheet("Austin")})
+    ix = indexer(vault, tmp_path)
+    try:
+        (report,) = ix.build([SID])
+        assert report.upserted == 1
+        decision = ix.rank_due()
+        assert not decision.due
+        assert SID in decision.reason
+        seal = part_dir(refinery, SID, "2026-11-01.tx") / SUCCESS_FILE
+        meta = json.loads(seal.read_text())
+        meta["library_links"] = 2
+        seal.write_text(json.dumps(meta))
+        assert ix.rank_due().due  # the new partition links into the library
+        del meta["library_links"]
+        seal.write_text(json.dumps(meta))
+        assert "does not record" in ix.rank_due().reason  # one the rank never read: unknown
+    finally:
+        ix.close()
+
+
 def test_fetch_carries_over_only_its_own_partition(vault: FileVault, tmp_path: Path) -> None:
     fetch(vault, tmp_path, "ak", "2026-10-01.ak", {"AK_Anchorage_1950.pdf": sheet("Anchorage")})
     runner = CollectionFetcher(

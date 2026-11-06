@@ -282,3 +282,59 @@ def test_a_cold_random_pick_opens_one_reader_when_the_catalog_counts_the_sources
     assert seen["wsp:wikipedia-en-zim"] > seen["wsp:kiwix-bundle"] * 2
     assert sorted(set(opened)) == ["kiwix-bundle", "wikipedia-en-zim"]  # each reader once, cached
     feed.close()
+
+
+def test_a_small_change_patches_the_catalog_without_a_scan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-11-05 deep dive: each PubMed update (14k-76k of 41.3M records) scanned the whole source
+    again for its catalog, 71-150 minutes a night."""
+    import json
+
+    from wsp_index.catalog import patch_source_catalog
+
+    refinery, cat_root = tmp_path / "refinery", tmp_path / "catalog"
+    _bundle(refinery)
+    path = build_source_catalog(refinery, "kiwix-bundle", "2026-07", cat_root)
+    built = json.loads(path.read_text())
+    assert built["scanned"]["generation_id"] == "2026-07"
+    assert (built["scanned"]["doc_count"], built["drift"]) == (20, 0)
+    gone = "wsp:kiwix-bundle/ifixit_en_all/Page_3"
+    assert any(gone in c["docs"] for c in built["categories"])
+    with RefineryWriter(refinery, "kiwix-bundle", "2026-08") as w:
+        for book in ("ifixit_en_all", "wikibooks_en_all"):
+            for i in range(10):
+                if f"{book}/Page_{i}" != "ifixit_en_all/Page_3":
+                    w.write([doc("kiwix-bundle", f"{book}/Page_{i}", f"{book} page {i}")])
+        w.write([doc("kiwix-bundle", "wikibooks_en_all/Page_new", "wikibooks_en_all page new")])
+
+    def no_scan(*_: object, **__: object) -> None:
+        raise AssertionError("a patch reads no rows")
+
+    monkeypatch.setattr(refinery_module.RefineryReader, "scan", no_scan)
+    # 2 of 20 documents changed: 10%, more than the default 1%.
+    assert patch_source_catalog(refinery, "kiwix-bundle", "2026-08", cat_root, 2) is None
+    assert patch_source_catalog(refinery, "kiwix-bundle", "2026-08", cat_root, 2, max_drift=0.2) == path
+    patched = json.loads(path.read_text())
+    assert (patched["generation_id"], patched["doc_count"], patched["drift"]) == ("2026-08", 20, 2)
+    listed = [d for c in patched["categories"] for d in c["docs"]]
+    assert gone not in listed  # the removed document is not offered
+    assert len(listed) == 19  # the new one waits for the next scan
+    assert patched["scanned"] == built["scanned"]
+    assert [c["count"] for c in patched["categories"]] == [c["count"] for c in built["categories"]]
+    # The drift adds up from the scan, not from the last patch; a week-old scan is scanned again.
+    assert patch_source_catalog(refinery, "kiwix-bundle", "2026-08", cat_root, 3, max_drift=0.2) is None
+    week = built["scanned"]["at"] + 7 * 86400
+    assert (
+        patch_source_catalog(refinery, "kiwix-bundle", "2026-08", cat_root, 0, max_drift=0.2, now=week)
+        is None
+    )
+    assert patch_source_catalog(
+        refinery, "kiwix-bundle", "2026-08", cat_root, 0, max_drift=0.2, now=week - 60
+    )
+    # A catalog from before scans were recorded, or none: scanned.
+    del patched["scanned"]
+    path.write_text(json.dumps(patched))
+    assert patch_source_catalog(refinery, "kiwix-bundle", "2026-08", cat_root, 0) is None
+    path.unlink()
+    assert patch_source_catalog(refinery, "kiwix-bundle", "2026-08", cat_root, 0) is None

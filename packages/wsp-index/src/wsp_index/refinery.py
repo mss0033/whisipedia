@@ -6,7 +6,8 @@ Layout (readable without this code)::
         part-00000.parquet   records sorted by doc_id, zstd, small row groups
         part-00001.parquet
         _ids.parquet         point-lookup index: blake2b-64(doc_id) -> (part, row_group, row), sorted
-        _SUCCESS.json        seal marker, written last: {"format": 1, "docs": n, "parts": k}
+        _SUCCESS.json        seal marker, written last: {"format": 1, "docs": n, "parts": k,
+                             "library_links": wsp: links written (since 2026-11-05)}
 
 A generation without ``_SUCCESS.json`` is incomplete and is ignored by readers. Every file is
 written as ``*.partial`` and renamed after a read-back check, so a crash never leaves a torn file.
@@ -104,6 +105,7 @@ def read_parquet[T](
 
 FORMAT_VERSION = 2  # 2: ``aliases`` column (port revision v0.2); older generations are rebuilt
 SUCCESS_FILE = "_SUCCESS.json"
+LIBRARY_LINK = "wsp:"  # a link to a document of the library (wsp_index.linkrank resolves them)
 IDS_FILE = "_ids.parquet"
 SHADOW_FILE = "_shadowed.parquet"  # rows superseded by a later row with the same doc_id
 # The id index as memory-mapped arrays: sorted hashes and (part, rg, row). Written on a sealed
@@ -181,6 +183,23 @@ def part_dir(root: Path, source_id: str, generation_id: str) -> Path:
 
 def is_sealed(gen_dir: Path) -> bool:
     return (gen_dir / SUCCESS_FILE).is_file()
+
+
+def seal_stamp(gen_dir: Path) -> str:
+    """A short hash of the generation's seal marker: it names when the seal was written
+    (:func:`_write_success`), so a generation refined again under the same id gets a new stamp."""
+    return hashlib.blake2b((gen_dir / SUCCESS_FILE).read_bytes(), digest_size=8).hexdigest()
+
+
+def library_links(gen_dir: Path) -> int | None:
+    """The ``wsp:`` links the seal of ``gen_dir`` says its documents carry (counted as written, so
+    duplicates a later row shadows count too: 0 means none). ``None``: not recorded (a generation
+    sealed before 2026-11-05, or a set with such a member) or unreadable."""
+    try:
+        value = json.loads((gen_dir / SUCCESS_FILE).read_text(encoding="utf-8")).get("library_links")
+    except (OSError, ValueError, AttributeError):
+        return None
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
 
 
 def id_map_dir(map_root: Path, gen_dir: Path) -> Path:
@@ -349,6 +368,10 @@ class RefineryWriter:
         self._bytes = 0
         self._docs = 0
         self._dropped = 0  # duplicate ids dropped within one part file
+        # ``wsp:`` links written, in the seal: the nightly build reads there whether a new generation
+        # can change the link graph, instead of scanning it (2026-11-05 deep dive: PageRank ran 4-12 h
+        # a night for PubMed updates, which carry none).
+        self._links = 0
         self._idx_h: list[npt.NDArray[np.uint64]] = []
         self._idx_loc: list[npt.NDArray[np.uint32]] = []
         self._closed = False
@@ -371,6 +394,7 @@ class RefineryWriter:
                 rec = replace(rec, content_hash=content_hash(rec.text))
             self._buf.append(rec)
             self._buf_chars += len(rec.text)
+            self._links += sum(1 for link in rec.links if link.startswith(LIBRARY_LINK))
             n += 1
             if len(self._buf) >= self._per_file or self._buf_chars >= self._max_chars:
                 self._flush()
@@ -461,6 +485,7 @@ class RefineryWriter:
                 "docs": self._docs - shadowed,
                 "parts": self._parts,
                 "shadowed": shadowed + self._dropped,
+                "library_links": self._links,
             },
         )
         self._closed = True
@@ -648,6 +673,7 @@ def compose_set(root: Path, source_id: str, members: Sequence[Path]) -> str:
     locs: list[npt.NDArray[np.uint32]] = []
     shadows: list[npt.NDArray[np.uint32]] = []
     offset = docs = shadowed = 0
+    links: int | None = 0  # None once a member does not record its own
     for m in ordered:
         meta = json.loads((m / SUCCESS_FILE).read_text(encoding="utf-8"))
         if meta.get("format") != FORMAT_VERSION:
@@ -671,6 +697,8 @@ def compose_set(root: Path, source_id: str, members: Sequence[Path]) -> str:
             shadows.append(rows)
         docs += int(meta.get("docs", ids.num_rows))
         shadowed += int(meta.get("shadowed", 0))
+        member_links = library_links(m)
+        links = None if links is None or member_links is None else links + member_links
         offset += n_parts
     h = np.concatenate(hs) if hs else np.empty(0, np.uint64)
     loc = np.concatenate(locs) if locs else np.empty((0, 3), np.uint32)
@@ -691,6 +719,7 @@ def compose_set(root: Path, source_id: str, members: Sequence[Path]) -> str:
             "parts": offset,
             "shadowed": shadowed + dropped,
             "members": list(names),
+            **({} if links is None else {"library_links": links}),
         },
     )
     return set_id
@@ -1041,6 +1070,11 @@ class RefineryReader:
 
     def __contains__(self, doc_id: object) -> bool:
         return isinstance(doc_id, str) and self.lookup(doc_id, ()) is not None
+
+    def holds(self, doc_id: str) -> bool:
+        """Whether a live row's id hashes like ``doc_id``: the id index alone, no row group read (``in``
+        reads one from the NAS to compare the id). A 64-bit collision can only say yes wrongly."""
+        return bool(self._locations(np.uint64(id_hash(doc_id))))
 
     @property
     def n_parts(self) -> int:

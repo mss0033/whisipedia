@@ -60,9 +60,20 @@ from wsp_index.catalog import (
     CatalogConfig,
     build_source_catalog,
     is_featured_source,
+    patch_source_catalog,
     refresh_featured,
 )
-from wsp_index.linkrank import RankConfig, RankStats, compute_static_rank, fence_path, write_fence
+from wsp_index.linkrank import (
+    STATS_FILE,
+    RankConfig,
+    RankDecision,
+    RankInput,
+    RankStats,
+    compute_static_rank,
+    fence_path,
+    rank_due,
+    write_fence,
+)
 from wsp_index.refinery import (
     CURRENT_FILE,
     SUCCESS_FILE,
@@ -72,7 +83,9 @@ from wsp_index.refinery import (
     generation_dir,
     id_map_dir,
     is_sealed,
+    library_links,
     part_dir,
+    seal_stamp,
     set_members,
 )
 from wsp_index.spelling import SPELL_FILE, SpellCache, SpellConfig, VocabStats, build_vocabulary
@@ -453,7 +466,7 @@ class Indexer:
         live_map = id_map_dir(self.map_root, new_dir).name if self.map_root is not None else ""
         if (freed := self._prune_maps(spec.id, {previous or ""}, live_map)) > 0:
             self._say(f"  {spec.id}: {freed / 1e6:,.0f} MB of id maps of older generations removed")
-        self.build_catalog(spec, generation_id)
+        self.build_catalog(spec, generation_id, changed=stats.upserted + stats.deleted)
         self._say(
             f"  indexed {spec.id}/{generation_id}: +{stats.upserted:,} upserted, -{stats.deleted:,} removed; "
             + memory_line()
@@ -534,9 +547,34 @@ class Indexer:
         # Every member's aliases are applied before the state is saved (a crash cannot lose them).
         return self.index_generation(spec, set_id, alias_generations=sorted(ids))
 
-    def build_catalog(self, spec: SourceSpec, generation_id: str) -> Path | None:
-        """Precompute the portal/directory/random data of one indexed generation (derived, local)."""
+    def build_catalog(
+        self, spec: SourceSpec, generation_id: str, *, changed: int | None = None
+    ) -> Path | None:
+        """Precompute the portal/directory/random data of one indexed generation (derived, local).
+
+        ``changed``: documents the generation upserted and removed against the one the catalog was
+        built for; a small change is patched in (:func:`~wsp_index.catalog.patch_source_catalog`), a
+        large or old one scanned again. ``None`` (``wsp index catalog``, a first catalog): scanned."""
         started = self.clock()
+        if changed is not None:
+            try:
+                patched = patch_source_catalog(
+                    self.refinery,
+                    spec.id,
+                    generation_id,
+                    self.root / CATALOG_DIR,
+                    changed,
+                    map_root=self.map_root,
+                )
+            except Exception as exc:  # derived data: a full scan instead
+                self._say(f"  catalog {spec.id}/{generation_id}: patch failed ({type(exc).__name__}: {exc})")
+                patched = None
+            if patched is not None:
+                self._say(
+                    f"  catalog {spec.id}/{generation_id}: patched ({changed:,} changed) in "
+                    f"{self.clock() - started:.1f}s"
+                )
+                return patched
         cfg = CatalogConfig(featured=is_featured_source(spec), rank=self.index.static_rank())
         try:
             path = build_source_catalog(
@@ -566,6 +604,47 @@ class Indexer:
         return indexed_title_sources(self.refinery, self.work, self._state())
 
     # --- static rank (PageRank) ---------------------------------------------------------------
+
+    def rank_due(self, config: RankConfig | None = None, *, now: float | None = None) -> RankDecision:
+        """Whether :meth:`rank` would change the kept rank (:func:`wsp_index.linkrank.rank_due`): read
+        from the seals and redirect tables of the current generations, not from their documents."""
+        if not self.index.rank_path.is_file():
+            return RankDecision(True, "no rank yet")
+        current: dict[str, RankInput] = {}
+        try:
+            for sid, reader in self._current_readers():
+                gen_dir = reader.dir
+                members = set_members(gen_dir) or ()
+                # A set's own seal knows its links only when every member's does: counted per member,
+                # the ones sealed before the count are named instead.
+                seals = [(m, part_dir(self.refinery, sid, m)) for m in members] or [
+                    (reader.generation_id, gen_dir)
+                ]
+                counts = [(name, library_links(d)) for name, d in seals]
+                current[sid] = RankInput(
+                    generation=reader.generation_id,
+                    seal=seal_stamp(gen_dir),
+                    links=sum(n for _, n in counts if n is not None),
+                    aliases=any(
+                        _has_rows(p) for p in self._redirect_tables(sid, (reader.generation_id, *members))
+                    ),
+                    unknown=tuple(name for name, n in counts if n is None),
+                )
+        except (OSError, ValueError) as exc:  # a seal the share refused for a moment: rank, as before
+            return RankDecision(True, f"the current seals could not be read ({type(exc).__name__}: {exc})")
+        stats = self.index.rank_path.with_name(STATS_FILE)
+        return rank_due(stats, current, config=config or RankConfig(), now=now)
+
+    def rank_if_due(self, config: RankConfig | None = None) -> bool:
+        """:meth:`rank` when :meth:`rank_due` says so (the nightly build); returns whether it ran.
+        ``wsp index rank`` always computes it."""
+        decision = self.rank_due(config)
+        if not decision.due:
+            self._say(f"rank: kept ({decision.reason})")
+            return False
+        self._say(f"rank: due ({decision.reason})")
+        self.rank(config)
+        return True
 
     @_timed("rank")
     def rank(self, config: RankConfig | None = None, *, reuse: bool = False) -> RankStats | None:
@@ -600,6 +679,7 @@ class Indexer:
             started_suggest = self.clock()
             self.index.mark_suggest_stale()
             self.index.commit()
+            self._changed = False  # committed and in the trie: a finish() after this has nothing to do
             self._say(f"rank: suggest rebuilt in {self.clock() - started_suggest:.1f}s")
             for sid, reader in readers:
                 spec = self.specs[sid]
@@ -646,7 +726,10 @@ class Indexer:
         # the kept counts stay valid for it (the same generations).
         cache = SpellCache(self.root / "spell-cache")
         stats = build_vocabulary(readers, path, config or SpellConfig(), progress=self._say, cache=cache)
-        self._say(f"spell: {stats.line()}; {cache.kept} vocabularies unchanged; {memory_line()}")
+        self._say(
+            f"spell: {stats.line()}; {cache.kept} vocabularies unchanged ({cache.near} of them changed "
+            f"a little); {memory_line()}"
+        )
         return stats
 
     # --- whole runs ----------------------------------------------------------------------------
@@ -672,7 +755,7 @@ class Indexer:
         return SourceReport(source_id, indexed=gid, upserted=stats.upserted, deleted=stats.deleted)
 
     @_timed("refine-again")
-    def refine_again(self, source_id: str, *, swap: bool = False) -> SourceReport:
+    def refine_again(self, source_id: str, *, swap: bool = False, finish: bool = True) -> SourceReport:
         """Refine the current generation of a source once more and index what changed: the adapter
         learned to read more of the same files (LibreTexts pages were app stubs, 2026-10-16).
 
@@ -684,7 +767,7 @@ class Indexer:
         with a file open in it, and the API holds Gutenberg's open (2026-10-16). Then the new copy is
         refined into ``<source>/_staging/<generation>`` and the run stops there; ``swap=True`` (with
         the API stopped, a matter of seconds) moves the old copy aside and the staged one in, and the
-        next run indexes it."""
+        next run indexes it. ``finish=False``: as in :meth:`build`."""
         spec = self.specs.get(source_id)
         if spec is None:
             return SourceReport(source_id, skipped="not in the registry")
@@ -728,7 +811,8 @@ class Indexer:
         base = old_dir if old_dir is not None and is_sealed(old_dir) else None
         rep = self.index_generation(spec, gid, since=base)
         pending.unlink(missing_ok=True)
-        self.finish()
+        if finish:
+            self.finish()
         return SourceReport(
             source_id, ((gid, result.doc_count or 0),), rep.indexed, rep.upserted, rep.deleted
         )
@@ -742,11 +826,13 @@ class Indexer:
         _write_durably(replaced / PENDING_FILE, old_dir.name + "\n")
         return old_dir
 
-    def build(self, source_ids: Sequence[str] | None = None) -> list[SourceReport]:
+    def build(self, source_ids: Sequence[str] | None = None, *, finish: bool = True) -> list[SourceReport]:
         """Refine and index the vault's current generation of each source (for a partitioned source,
         every current partition). Older generations are not refined: nothing reads them until the
         history view asks, and refining them costs as much as the current one. Ends with
-        :meth:`finish` (one suggest rebuild)."""
+        :meth:`finish` (one suggest rebuild), unless ``finish=False``: the caller calls it after
+        :meth:`rank`, whose new priors rebuild the trie anyway. The nightly build rebuilt it in finish()
+        and again in rank, 50-115 min of NAS reads wasted a night (2026-11-05 deep dive)."""
         reports: list[SourceReport] = []
         wanted = list(source_ids) if source_ids else sorted(self.specs)
         for sid in wanted:
@@ -802,7 +888,8 @@ class Indexer:
             reports.append(
                 SourceReport(sid, tuple(refined), rep.indexed, rep.upserted, rep.deleted, rep.skipped)
             )
-        self.finish()
+        if finish:
+            self.finish()
         return reports
 
 

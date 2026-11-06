@@ -10,7 +10,13 @@ small JSON file per source on local disk::
          "featured":   [doc ids of well-linked (or, without link data, long) articles of the
                         default language],
          "featured_by_lang": {lang: [doc ids, best first]},
-         "on_this_day": {"MM-DD": [{"year", "text", "doc_id"}]}}
+         "on_this_day": {"MM-DD": [{"year", "text", "doc_id"}]},
+         "scanned": {"generation_id", "doc_count", "at"},   the last full scan (epoch seconds)
+         "drift": documents changed since that scan}
+
+A new generation that changed little of a large source is *patched* (:func:`patch_source_catalog`):
+the listed ids it no longer holds are dropped, nothing is scanned. Its new documents join the lists at
+the next full scan, once 1% of the source changed or the scan is a week old.
 
 Featured articles are chosen per language, from the link-analysis rank *within* the language
 (``pr_group`` of :mod:`wsp_index.linkrank`): mixing languages let Cebuano bot stubs, which link to
@@ -70,6 +76,11 @@ pc = cast(Any, _pc)  # pyarrow-stubs type compute kernels too narrowly for colum
 
 CATALOG_FORMAT = 1
 CATALOG_DIR = "catalog"
+PATCH_DRIFT = 0.01
+"""A catalog is patched, not built again, while the documents changed since its last full scan are at
+most this share of the source (:func:`patch_source_catalog`)."""
+RESCAN_DAYS = 7.0
+"""...and its last full scan is younger than this (the lists miss the documents added since)."""
 
 _MONTHS = (
     "January",
@@ -620,12 +631,72 @@ def build_source_catalog(
         "featured": _default_featured(by_lang),
         "featured_by_lang": by_lang,
         "on_this_day": on_this_day,
+        # Wall clock: the scan's age across nightly runs (patch_source_catalog), not a duration.
+        "scanned": {"generation_id": generation_id, "doc_count": total, "at": time.time()},
+        "drift": 0,
     }
     out_root.mkdir(parents=True, exist_ok=True)
     path = out_root / f"{source_id}.json"
+    _write_payload(path, payload)
+    return path
+
+
+def _write_payload(path: Path, payload: Mapping[str, object]) -> None:
     tmp = path.with_name(path.name + ".partial")
     tmp.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n", encoding="utf-8")
     os.replace(tmp, path)
+
+
+def patch_source_catalog(
+    refinery_root: Path,
+    source_id: str,
+    generation_id: str,
+    out_root: Path,
+    changed: int,
+    *,
+    map_root: Path | None = None,
+    max_drift: float = PATCH_DRIFT,
+    max_age_days: float = RESCAN_DAYS,
+    now: float | None = None,
+) -> Path | None:
+    """Carry the catalog of ``source_id`` over to ``generation_id``, which changed ``changed``
+    documents (upserted plus removed), without scanning it; ``None`` when a full
+    :func:`build_source_catalog` is due instead (no catalog, one from before scans were recorded, or
+    too much changed or too long ago since the last scan).
+
+    Listed ids the new generation no longer holds are dropped (from the id index, no row is read);
+    the counts and lists are otherwise those of the last scan. 2026-11-05 deep dive: each PubMed update
+    (14k-76k of 41.3M records) scanned the whole source again, 71-150 minutes a night."""
+    path = out_root / f"{source_id}.json"
+    try:
+        payload = cast(dict[str, Any], json.loads(path.read_text(encoding="utf-8")))
+        scanned = cast(dict[str, Any], payload["scanned"])
+        base = int(scanned["doc_count"])
+        age = ((time.time() if now is None else now) - float(scanned["at"])) / 86400
+        drift = int(payload.get("drift", 0)) + max(0, changed)
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return None
+    if payload.get("format") != CATALOG_FORMAT or payload.get("source_id") != source_id:
+        return None
+    if drift > max_drift * base or not 0 <= age < max_age_days:
+        return None
+    reader = _job_reader(refinery_root, source_id, generation_id, map_root)
+
+    def live(ids: Iterable[object]) -> list[str]:
+        return [d for d in ids if isinstance(d, str) and reader.holds(d)]
+
+    for cat in cast(list[dict[str, Any]], payload.get("categories") or []):
+        cat["docs"] = live(cast(list[object], cat.get("docs") or []))
+    payload["featured"] = live(cast(list[object], payload.get("featured") or []))
+    by_lang = cast(dict[str, list[object]], payload.get("featured_by_lang") or {})
+    payload["featured_by_lang"] = {lang: live(ids) for lang, ids in by_lang.items()}
+    days = cast(dict[str, list[dict[str, Any]]], payload.get("on_this_day") or {})
+    kept = {d: [e for e in events if live([e.get("doc_id")])] for d, events in days.items()}
+    payload["on_this_day"] = {d: events for d, events in kept.items() if events}
+    payload["generation_id"] = generation_id
+    payload["doc_count"] = len(reader)
+    payload["drift"] = drift
+    _write_payload(path, payload)
     return path
 
 
@@ -648,9 +719,7 @@ def refresh_featured(
     by_lang = _featured(reader, source_id, cfg)
     payload["featured"] = _default_featured(by_lang)
     payload["featured_by_lang"] = by_lang
-    tmp = path.with_name(path.name + ".partial")
-    tmp.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n", encoding="utf-8")
-    os.replace(tmp, path)
+    _write_payload(path, payload)
     return True
 
 

@@ -227,6 +227,7 @@ def cmd_index_build(args: argparse.Namespace, out: TextIO) -> int:
     try:
         with _index_writer(cfg), open_indexer(cfg, lay, specs, out) as ix:
             ix.defer_suggest = bool(getattr(args, "no_suggest", False))
+            # The suggest trie is rebuilt once, after the rank (its priors), not also before it.
             if getattr(args, "reindex", False):
                 if not args.source:
                     out.write("--reindex needs --source\n")
@@ -236,12 +237,20 @@ def cmd_index_build(args: argparse.Namespace, out: TextIO) -> int:
                 if not args.source:
                     out.write("--refine-again needs --source\n")
                     return 2
-                reports = [ix.refine_again(args.source, swap=bool(getattr(args, "swap", False)))]
+                swap = bool(getattr(args, "swap", False))
+                reports = [ix.refine_again(args.source, swap=swap, finish=False)]
             else:
-                reports = ix.build([args.source] if args.source else None)
-            changed = any(r.upserted or r.deleted or r.refined for r in reports)
-            if not getattr(args, "no_rank", False) and (changed or not ix.index.rank_path.is_file()):
-                ix.rank()
+                reports = ix.build([args.source] if args.source else None, finish=False)
+            # A refine whose generation matches the index (0 upserts, 0 deletes) changed nothing a
+            # vocabulary reads; it ran spell for an hour (2026-11-05 deep dive).
+            changed = any(r.upserted or r.deleted for r in reports)
+            try:
+                if not getattr(args, "no_rank", False):
+                    ix.rank_if_due()  # kept unless the link graph can have changed (or a week passed)
+            except Exception:
+                ix.finish()  # rank did not rebuild the trie: what was indexed still reaches it
+                raise
+            ix.finish()  # nothing to do when rank just rebuilt the trie
             if not getattr(args, "no_spell", False) and (
                 changed or not (ix.index.path / SPELL_FILE).is_file()
             ):

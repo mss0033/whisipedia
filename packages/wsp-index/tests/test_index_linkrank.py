@@ -31,6 +31,7 @@ from wsp_index.linkrank import (
     RANK_FILE,
     LinkGraph,
     RankConfig,
+    RankInput,
     StaticRank,
     alias_doc_id,
     blend,
@@ -40,10 +41,11 @@ from wsp_index.linkrank import (
     key64_one,
     pagerank,
     percentiles,
+    rank_due,
     top_documents,
     write_rank_file,
 )
-from wsp_index.refinery import generation_dir
+from wsp_index.refinery import SUCCESS_FILE, compose_set, generation_dir, library_links, part_dir, seal_stamp
 from wsp_index_helpers import doc
 
 SMALL = TantivyConfig(writer_heap_bytes=20_000_000, writer_threads=1)
@@ -659,3 +661,134 @@ def test_the_fence_is_in_place_before_the_new_sidecar_appears(
     rank = linkrank.StaticRank.open(path)
     assert rank is not None
     assert rank._fence is not None  # pyright: ignore[reportPrivateUsage]
+
+
+# --- whether to compute it again (2026-11-05 deep dive) -------------------------------------------------
+
+
+def _inputs(readers: Sequence[tuple[str, RefineryReader]]) -> dict[str, RankInput]:
+    out: dict[str, RankInput] = {}
+    for sid, r in readers:
+        links = library_links(r.dir)
+        unknown = () if links is not None else (r.generation_id,)
+        out[sid] = RankInput(r.generation_id, seal_stamp(r.dir), links or 0, False, unknown)
+    return out
+
+
+def test_the_rank_records_what_each_source_brought_to_the_graph(tmp_path: Path) -> None:
+    """The seal counts the library links a generation carries; the rank's statistics record each
+    source's generation, seal, links and aliases, which is what rank_due compares."""
+    wiki = [doc("w", f"en/P{i}", f"P{i}", links=("wsp:w/en/Hub", "https://example.org/x")) for i in range(3)]
+    wiki.append(doc("w", "en/Hub", "Hub", links=("wsp:pubmed/1",)))
+    papers = [doc("pubmed", str(i), f"Paper {i}", links=("https://doi.org/10.1/x",)) for i in range(3)]
+    readers = write(tmp_path / "ref", [*wiki, *papers])
+    assert [library_links(r.dir) for _, r in readers] == [0, 4]  # pubmed, w
+    out = tmp_path / RANK_FILE
+    stats = compute_static_rank(readers, out, tmp_path / "work", aliases=[("wsp:w/en/Hub", "Centre")])
+    recorded = json.loads(out.with_name("static_rank.json").read_text())
+    seals = _inputs(readers)
+    assert recorded["inputs"] == {
+        "pubmed": {"generation": "g1", "seal": seals["pubmed"].seal, "links": 0, "aliases": 0, "members": []},
+        "w": {"generation": "g1", "seal": seals["w"].seal, "links": 4, "aliases": 1, "members": []},
+    }
+    assert recorded["computed_at"] == stats.computed_at > 0
+
+
+def test_a_rank_is_kept_while_only_link_free_sources_change(tmp_path: Path) -> None:
+    """The nightly build ran PageRank (4-12 h on the NAS) whenever anything was indexed, while PubMed
+    updates, which link nowhere, were all that changed: 8 new edges in 13 days."""
+    wiki = [doc("w", f"en/P{i}", f"P{i}", links=("wsp:w/en/Hub",)) for i in range(3)]
+    wiki.append(doc("w", "en/Hub", "Hub"))
+    papers = [doc("pubmed", str(i), f"Paper {i}") for i in range(3)]
+    readers = write(tmp_path / "ref", [*wiki, *papers])
+    out = tmp_path / RANK_FILE
+    stats = compute_static_rank(readers, out, tmp_path / "work")
+    stats_path = out.with_name("static_rank.json")
+    now = stats.computed_at + 3600
+    current = _inputs(readers)
+    assert not rank_due(stats_path, current, now=now).due  # nothing changed...
+    assert not rank_due(stats_path, current, now=now + 30 * 86400).due  # ...however old
+
+    # A PubMed update: a new generation that carries no library link and has no aliases.
+    (pubmed2,) = write(tmp_path / "ref", [*papers, doc("pubmed", "9", "Paper 9")], gen="g2")
+    update = {**current, **_inputs([pubmed2])}
+    kept = rank_due(stats_path, update, now=now)
+    assert not kept.due
+    assert "pubmed" in kept.reason
+    assert rank_due(stats_path, update, now=stats.computed_at + 7 * 86400).due  # the weekly refresh
+    assert rank_due(stats_path, update, now=stats.computed_at - 60).due  # a clock set back: recount
+    assert rank_due(stats_path, update, config=RankConfig(mix=0.3), now=now).due
+    # It brings aliases, or its seal does not say whether it carries links (sealed before the count).
+    aliased = dataclasses.replace(update["pubmed"], aliases=True)
+    assert rank_due(stats_path, {**update, "pubmed": aliased}, now=now).due
+    unknown = rank_due(
+        stats_path, {**update, "pubmed": dataclasses.replace(update["pubmed"], unknown=("g2",))}, now=now
+    )
+    assert unknown.due
+    assert "does not record" in unknown.reason
+    # A new link-free source: kept; one that links: due.
+    (news,) = write(tmp_path / "ref", [doc("news", "1", "Headline")])
+    assert not rank_due(stats_path, {**current, **_inputs([news])}, now=now).due
+    (linking,) = write(tmp_path / "ref", [doc("blog", "1", "Post", links=("wsp:w/en/Hub",))])
+    assert rank_due(stats_path, {**current, **_inputs([linking])}, now=now).due
+
+    # The linking source changed (even refined again under the same id: another seal), or left.
+    (wiki_again,) = write(tmp_path / "ref2", wiki)
+    assert wiki_again[1].generation_id == current["w"].generation
+    assert rank_due(stats_path, {**current, **_inputs([wiki_again])}, now=now).due
+    assert rank_due(stats_path, {"pubmed": current["pubmed"]}, now=now).due
+    assert not rank_due(stats_path, {"w": current["w"]}, now=now).due  # a link-free source left
+
+    # No record of the inputs (a rank computed before 2026-11-05), or no statistics at all.
+    recorded = json.loads(stats_path.read_text())
+    del recorded["inputs"]
+    stats_path.write_text(json.dumps(recorded))
+    assert rank_due(stats_path, current, now=now).due
+    stats_path.unlink()
+    assert rank_due(stats_path, current, now=now).due
+
+
+def test_a_set_generation_records_its_members_links(tmp_path: Path) -> None:
+    root = tmp_path / "ref"
+    for gid, links in (("2026.a", ("wsp:s/x",)), ("2026.b", ())):
+        with RefineryWriter(root, "s", gid, directory=part_dir(root, "s", gid)) as w:
+            w.write([doc("s", gid, gid, links=links)])
+    members = [part_dir(root, "s", g) for g in ("2026.a", "2026.b")]
+    assert library_links(generation_dir(root, "s", compose_set(root, "s", members))) == 1
+    # A member sealed before the count: the set does not know either.
+    seal = members[1] / SUCCESS_FILE
+    meta = json.loads(seal.read_text())
+    del meta["library_links"]
+    seal.write_text(json.dumps(meta))
+    with RefineryWriter(root, "s", "2026.c", directory=part_dir(root, "s", "2026.c")) as w:
+        w.write([doc("s", "c", "c")])
+    later = compose_set(root, "s", [*members, part_dir(root, "s", "2026.c")])
+    assert library_links(generation_dir(root, "s", later)) is None
+
+
+def test_a_set_keeps_the_rank_when_only_a_new_link_free_partition_joins(tmp_path: Path) -> None:
+    """nara-catalog adds a partition a night to dozens sealed before seals counted links: the old ones
+    are known to carry none when the rank read them in a source that brought none."""
+    root = tmp_path / "ref"
+    for gid in ("2026.a", "2026.b"):
+        with RefineryWriter(root, "s", gid, directory=part_dir(root, "s", gid)) as w:
+            w.write([doc("s", gid, gid)])
+    first = compose_set(root, "s", [part_dir(root, "s", g) for g in ("2026.a", "2026.b")])
+    gen_dir = generation_dir(root, "s", first)
+    out = tmp_path / RANK_FILE
+    stats = compute_static_rank([("s", RefineryReader(gen_dir))], out, tmp_path / "work")
+    stats_path = out.with_name("static_rank.json")
+    assert json.loads(stats_path.read_text())["inputs"]["s"]["members"] == ["2026.a", "2026.b"]
+    # The next night's set: a third member, counted; the first two sealed before the count.
+    with RefineryWriter(root, "s", "2026.c", directory=part_dir(root, "s", "2026.c")) as w:
+        w.write([doc("s", "c", "c")])
+    later = compose_set(root, "s", [part_dir(root, "s", g) for g in ("2026.a", "2026.b", "2026.c")])
+    seal = seal_stamp(generation_dir(root, "s", later))
+    now = stats.computed_at + 60
+    old_members = RankInput(later, seal, links=0, aliases=False, unknown=("2026.a", "2026.b"))
+    assert not rank_due(stats_path, {"s": old_members}, now=now).due
+    # A member the rank never read whose seal does not count: it may carry links.
+    stranger = RankInput(later, seal, links=0, aliases=False, unknown=("2026.a", "2026.x"))
+    assert rank_due(stats_path, {"s": stranger}, now=now).due
+    # The new member brings links: due.
+    assert rank_due(stats_path, {"s": RankInput(later, seal, 3, False, ("2026.a", "2026.b"))}, now=now).due

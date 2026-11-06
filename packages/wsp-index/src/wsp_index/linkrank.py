@@ -1,8 +1,9 @@
 """Link-analysis static rank: PageRank over the library's inter-document link graph (PLAN §9.3).
 
-Built offline at index time (``wsp index rank``, also the last step of ``wsp index build``) from the
-Refinery's ``DocRecord.links``, and stored as one static value per document in a sidecar file that
-the lexical index, the fusion stage, suggest and the portal read.
+Built offline at index time (``wsp index rank``; ``wsp index build`` runs it when the link graph can
+have changed, :func:`rank_due`) from the Refinery's ``DocRecord.links``, and stored as one static
+value per document in a sidecar file that the lexical index, the fusion stage, suggest and the portal
+read.
 
 Two PageRanks come out of one pass over the edges:
 
@@ -69,7 +70,7 @@ import pyarrow as pa
 import pyarrow.compute as _pc
 
 from wsp_core.memory import memory_line
-from wsp_index.refinery import RefineryReader, id_hash
+from wsp_index.refinery import LIBRARY_LINK, RefineryReader, id_hash, seal_stamp, set_members
 from wsp_index.text import primary_lang
 
 pc: Any = _pc  # the compute stubs are too partial for strict checking; results are cast at use
@@ -275,6 +276,12 @@ class RankStats:
     damping: float = 0.85
     mix: float = 0.5
     format: int = 2
+    inputs: Mapping[str, Mapping[str, Any]] = field(default_factory=dict[str, Mapping[str, Any]])
+    """Per source, what the rank was computed from: ``generation``, ``seal`` (its seal stamp), the
+    ``links`` and ``aliases`` it brought to the graph and a set generation's ``members``
+    (:func:`rank_due` compares them)."""
+    computed_at: float = 0.0
+    """Wall-clock time (epoch seconds) the rank was computed: its age across days and reboots."""
 
     def line(self) -> str:
         return (
@@ -511,6 +518,10 @@ class LinkGraph:
     seconds: float
     resolved: dict[str, int] = field(default_factory=dict[str, int])
     aliases: int = 0
+    source_links: dict[str, int] = field(default_factory=dict[str, int])
+    """Library (``wsp:``) links read from each source's documents, resolved or not."""
+    source_aliases: dict[str, int] = field(default_factory=dict[str, int])
+    """Aliases (redirects) whose target is a document of each source."""
 
     def _array(self, name: str, dtype: npt.DTypeLike) -> npt.NDArray[Any]:
         path = graph_file(self.workdir, name)
@@ -692,6 +703,7 @@ def build_graph(
 
     # 2. aliases: the loose key of the doc id each would have, by the exact key of its target ---
     alias_keys = _Spill(workdir, "alias", _ALIAS, limit)
+    source_aliases: dict[str, int] = {}
     if resolve:
         _release()
         prefixed_set = pa.array(prefixed, type=pa.string())
@@ -700,6 +712,10 @@ def build_graph(
             targets = pa.array([t for t, _ in chunk], type=pa.string())
             names = pa.array([a for _, a in chunk], type=pa.string())
             src = pc.replace_substring_regex(targets, pattern=r"^wsp:([^/]*)/.*$", replacement=r"\1")
+            counted = cast(list[dict[str, Any]], pc.value_counts(src).to_pylist())  # small: one per source
+            for row in counted:
+                if row["values"] in sources:
+                    source_aliases[row["values"]] = source_aliases.get(row["values"], 0) + int(row["counts"])
             is_prefixed = pc.is_in(src, value_set=prefixed_set)
             target = key64(targets)
             alias = key64(loose_ids(_alias_ids(targets, names, is_prefixed)))
@@ -710,8 +726,9 @@ def build_graph(
 
     # 3. links, by the exact key of their target ------------------------------------------------
     links = _Spill(workdir, "links", _LINK if resolve else _MISS, limit)
+    source_links = dict.fromkeys(sources, 0)
     base = batches = 0
-    for _sid, reader in readers:
+    for sid, reader in readers:
         for batch in reader.scan(["links"], batch_size=config.batch_size):
             column = cast("pa.Array[Any]", batch.column(0))
             rows = len(column)
@@ -720,9 +737,10 @@ def build_graph(
                 parents = cast(I64, pc.list_parent_indices(column).to_numpy(zero_copy_only=False)).astype(
                     np.int64
                 )
-                local = cast("pa.Array[Any]", pc.starts_with(flat, pattern="wsp:"))
+                local = cast("pa.Array[Any]", pc.starts_with(flat, pattern=LIBRARY_LINK))
                 keep = local.to_numpy(zero_copy_only=False).astype(bool)
                 flat = flat.filter(local)
+                source_links[sid] += len(flat)
                 if len(flat):
                     target = key64(flat)
                     rec = np.empty(len(flat), dtype=links.dtype)
@@ -869,6 +887,8 @@ def build_graph(
         seconds=time.monotonic() - t0,
         resolved=resolved,
         aliases=n_alias,
+        source_links=source_links,
+        source_aliases=source_aliases,
     )
 
 
@@ -1448,6 +1468,17 @@ def compute_static_rank(
         aliases=graph.aliases,
         damping=config.damping,
         mix=config.mix,
+        inputs={
+            sid: {
+                "generation": reader.generation_id,
+                "seal": seal_stamp(reader.dir),
+                "links": graph.source_links.get(sid, 0),
+                "aliases": graph.source_aliases.get(sid, 0),
+                "members": list(set_members(reader.dir) or ()),
+            }
+            for sid, reader in readers
+        },
+        computed_at=time.time(),  # wall clock: compared across days by rank_due, never a duration here
     )
     stats_path = out_path.with_name(STATS_FILE)
     tmp = stats_path.with_name(STATS_FILE + ".partial")
@@ -1456,6 +1487,98 @@ def compute_static_rank(
     if progress:
         progress(f"rank: {memory_line()}")
     return stats
+
+
+# --- whether to compute it again --------------------------------------------------------------------
+
+RANK_REFRESH_DAYS = 7.0
+"""A rank kept while link-free sources changed is computed again once it is this old: their new
+documents may resolve a few links that pointed outside the library (8 edges in 13 days, 2026-11-05),
+and the global percentiles move with the node count."""
+
+
+@dataclass(frozen=True, slots=True)
+class RankInput:
+    """What a source would bring to the link graph now (see :func:`rank_due`)."""
+
+    generation: str
+    seal: str
+    """:func:`~wsp_index.refinery.seal_stamp` of the generation (a refine-again keeps the id)."""
+    links: int
+    """``wsp:`` links its seal records (:func:`~wsp_index.refinery.library_links`), or a set
+    generation's members' seals."""
+    aliases: bool
+    """Its redirect tables (a set's: its members') hold rows: aliases resolve links to other names."""
+    unknown: tuple[str, ...] = ()
+    """The generation, or the set members, whose seal does not record its links (sealed before
+    2026-11-05): they may carry any, unless the rank read them in a source that brought none."""
+
+
+@dataclass(frozen=True, slots=True)
+class RankDecision:
+    due: bool
+    reason: str
+
+
+def rank_due(
+    stats_path: Path,
+    current: Mapping[str, RankInput],
+    *,
+    config: RankConfig = RankConfig(),  # noqa: B008 - immutable
+    max_age_days: float = RANK_REFRESH_DAYS,
+    now: float | None = None,
+) -> RankDecision:
+    """Whether the rank at ``stats_path`` (``static_rank.json``) must be computed again for the sources
+    ``current`` would rank now.
+
+    It is kept while every source that changed since brings no link and no alias to the graph, before
+    or after (PubMed, newspapers, most data sources): their new documents get the feature of an
+    unlinked page (0) from the missing key, as a recount would give them. Due when there is no record
+    of the inputs, the settings differ, a source with links or aliases changed, came or left, a new
+    generation does not record its links, or link-free changes are pending and the rank is
+    ``max_age_days`` old. 2026-11-05 deep dive: the nightly build ran PageRank whenever anything was
+    indexed, 4-12 h on the NAS a night, while the graph went from 774,222,210 to 774,222,218 edges
+    in 13 days."""
+    try:
+        data = cast(dict[str, Any], json.loads(stats_path.read_text(encoding="utf-8")))
+        recorded = cast(dict[str, object], data["inputs"])
+        computed_at = float(data["computed_at"])
+        if not recorded or not all(isinstance(v, dict) for v in recorded.values()):
+            raise ValueError("no inputs")
+        inputs = cast(dict[str, dict[str, Any]], recorded)
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return RankDecision(True, "the kept rank records no inputs")
+    if data.get("format") != 2 or data.get("damping") != config.damping or data.get("mix") != config.mix:
+        return RankDecision(True, "the rank settings changed")
+    for sid in sorted(set(inputs) - set(current)):
+        if inputs[sid].get("links") or inputs[sid].get("aliases"):
+            return RankDecision(True, f"{sid} left with links or aliases")
+    stale: list[str] = []
+    for sid, cur in sorted(current.items()):
+        old = inputs.get(sid)
+        if old is not None and old.get("generation") == cur.generation and old.get("seal") == cur.seal:
+            continue
+        if old is not None and (old.get("links") or old.get("aliases")):
+            return RankDecision(True, f"{sid} changed and had links or aliases")
+        # A member sealed before the count is known to carry none when the rank read it, in a source
+        # that brought none (nara-catalog adds a partition a night to dozens sealed before).
+        ranked = set(cast(list[str], old.get("members") or [])) if old is not None else set[str]()
+        if not set(cur.unknown) <= ranked:
+            return RankDecision(True, f"{sid}/{cur.generation} does not record its library links")
+        if cur.links or cur.aliases:
+            return RankDecision(True, f"{sid}/{cur.generation} brings links or aliases")
+        stale.append(sid)
+    age = ((time.time() if now is None else now) - computed_at) / 86400  # wall clock: days, across runs
+    if not stale:
+        return RankDecision(False, "no source changed since it was computed")
+    if age < 0 or age >= max_age_days:
+        return RankDecision(
+            True, f"{len(stale)} link-free source(s) changed and the rank is {age:.1f} days old"
+        )
+    return RankDecision(
+        False,
+        f"only link-free sources changed ({', '.join(stale)}); kept, {age:.1f} of {max_age_days:g} days old",
+    )
 
 
 def top_documents(reader: RefineryReader, rank: StaticRank, k: int) -> list[tuple[str, float]]:

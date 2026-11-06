@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Generator, Iterator
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -279,3 +279,131 @@ def test_the_nightly_build_finishes_an_interrupted_refine_again(
         assert not (source_dir / REPLACED_DIR / PENDING_FILE).exists()
     finally:
         ix.close()
+
+
+def _wire(monkeypatch: pytest.MonkeyPatch, make: Callable[[], Indexer]) -> None:
+    """``wsp index build`` (cmd_index_build) on the indexer ``make`` returns: no config, no locks."""
+    import contextlib
+
+    from wsp_cli import ops
+
+    @contextlib.contextmanager
+    def opened(*_: object) -> Generator[Indexer]:
+        ix = make()
+        try:
+            yield ix
+        finally:
+            ix.close()
+
+    def context(_args: object) -> tuple[None, dict[str, Any], tuple[SourceSpec, ...]]:
+        return None, {}, (spec(),)
+
+    def unlocked(_cfg: object) -> contextlib.nullcontext[None]:
+        return contextlib.nullcontext()
+
+    monkeypatch.setattr(ops, "_context", context)
+    monkeypatch.setattr(ops, "_index_writer", unlocked)
+    monkeypatch.setattr(ops, "open_indexer", opened)
+
+
+def _nightly(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    adapter: Adapter,
+    before: Callable[[Indexer], object] | None = None,
+    **flags: Any,
+) -> tuple[list[str], list[str], str]:
+    """Run ``wsp index build`` on the fixture's indexer; returns the rank and suggest rebuilds it made
+    (not counting the empty trie a new index opens with) and its output."""
+    import argparse
+    import io
+
+    from wsp_cli import ops
+    from wsp_index.lexical import TantivyIndex as Lexical
+
+    events: list[str] = []
+    out = io.StringIO()
+    real_rank, real_rebuild = Indexer.rank, Lexical._rebuild_suggest  # pyright: ignore[reportPrivateUsage]
+
+    def rank(self: Indexer, *a: Any, **k: Any) -> Any:
+        events.append("rank")
+        return real_rank(self, *a, **k)
+
+    def rebuild(self: Lexical) -> None:
+        events.append("suggest")
+        real_rebuild(self)
+
+    def make() -> Indexer:
+        ix = indexer(tmp_path, adapter)
+        ix.out = out  # the run log's progress lines
+        assert ix.index is not None
+        events.clear()
+        if before is not None:
+            before(ix)
+        return ix
+
+    monkeypatch.setattr(Indexer, "rank", rank)
+    monkeypatch.setattr(Lexical, "_rebuild_suggest", rebuild)
+    _wire(monkeypatch, make)
+    args = argparse.Namespace(**{"source": None, "no_spell": True, **flags})
+    assert ops.cmd_index_build(args, out) == 0
+    monkeypatch.undo()
+    return [e for e in events if e == "rank"], [e for e in events if e == "suggest"], out.getvalue()
+
+
+def test_the_nightly_build_ranks_only_when_the_link_graph_can_have_changed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-11-05 deep dive: PageRank ran 4-12 h a night whenever anything was indexed, and the
+    suggest trie was rebuilt twice on those nights (in finish(), then for the rank's priors)."""
+    adapter = Adapter()
+    ranks, tries, said = _nightly(tmp_path, monkeypatch, adapter)
+    assert ranks == ["rank"]  # no rank yet
+    assert tries == ["suggest"]  # once, for the rank's priors: not also before it
+    assert "rank: due (no rank yet)" in said
+    # The source is refined again with more text but links nowhere: the kept rank stands.
+    adapter.full = True
+    ranks, _, said = _nightly(tmp_path, monkeypatch, adapter, refine_again=True, source=SID)
+    assert ranks == []
+    assert "rank: kept (only link-free sources changed (books)" in said
+    ranks, _, said = _nightly(tmp_path, monkeypatch, adapter)
+    assert ranks == []
+    assert "rank: kept (only link-free sources changed (books)" in said
+
+    # A kept rank, or --no-rank: finish() still folds the trie when it is due.
+    def stale(ix: Indexer) -> None:
+        ix.index.mark_suggest_stale()
+
+    assert _nightly(tmp_path, monkeypatch, adapter, stale)[:2] == ([], ["suggest"])
+    assert _nightly(tmp_path, monkeypatch, adapter, stale, no_rank=True)[:2] == ([], ["suggest"])
+
+
+def test_a_failed_rank_still_folds_the_suggest_trie(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without the rebuild in finish() before it, a rank that fails must not leave what was indexed out
+    of the trie: finish() runs, then the failure is raised."""
+    import argparse
+    import io
+
+    from wsp_cli import ops
+
+    finished: list[bool] = []
+
+    def make() -> Indexer:
+        ix = indexer(tmp_path, Adapter())
+        real_finish = ix.finish
+
+        def refused(*_a: object, **_k: object) -> None:
+            raise BlockingIOError(11, "refused")
+
+        def finish(**k: Any) -> None:
+            finished.append(True)
+            real_finish(**k)
+
+        ix.rank = refused  # type: ignore[method-assign]
+        ix.finish = finish  # type: ignore[method-assign]
+        return ix
+
+    _wire(monkeypatch, make)
+    with pytest.raises(BlockingIOError):
+        ops.cmd_index_build(argparse.Namespace(source=None, no_spell=True), io.StringIO())
+    assert finished == [True]
