@@ -11,8 +11,10 @@ Its latencies are a reader's (the same API), so they are watched too: a median o
 :data:`LATENCY_FACTOR` times the best of the last :data:`BASELINE_RUNS` quiet runs (and over
 :data:`LATENCY_FLOOR_MS`) opens the ``quality:latency`` warning, and a quiet run back under it
 resolves it. A run first waits, up to :data:`BUILD_WAIT_S`, for the index build to finish, and records
-which of the library's heavy jobs (:data:`BUSY_LOCKS`) ran beside it (``contended``); a contended run
-neither opens nor resolves the warning. 2026-11-05 deep dive: the median went from about 4 s to
+whether the build's locks (:data:`BUILD_LOCKS`) were held beside it (``contended``); a contended run
+neither opens nor resolves the warning. Ingest beside it is recorded (``ingest_busy``) but judged like a
+quiet run: the lanes hold the ingest lock nearly all day, so readers see that latency too, and gating on
+it left the warning dormant (2026-11-05 review). 2026-11-05 deep dive: the median went from about 4 s to
 16-39 s with no alert, and the 11-01 run, inside a catch-up index build, could not tell a slower search
 from a busy NAS.
 """
@@ -37,8 +39,7 @@ ALERT_KEY = "quality:regression"
 LATENCY_KEY = "quality:latency"
 LATENCY_FACTOR = 2.0  # a median this many times the quiet baseline's is a regression...
 LATENCY_FLOOR_MS = 2000.0  # ...when it is also over this (a 0.1 s search taking 0.3 s is no news)
-BUILD_LOCKS = (INDEX, HEAVY)  # held by the nightly index build: waited for before the run
-BUSY_LOCKS = (INDEX, HEAVY, INGEST)  # the jobs that compete with searches for the NAS and the disk
+BUILD_LOCKS = (INDEX, HEAVY)  # held by the nightly index build: waited for, and a run beside them not judged
 BUILD_WAIT_S = 6 * 3600.0
 BUILD_POLL_S = 300.0
 
@@ -83,8 +84,9 @@ def regression(now_score: float, before: dict[str, Any] | None) -> float | None:
 
 def latency_baseline(directory: Path, before: str, runs: int = BASELINE_RUNS) -> float | None:
     """The best (lowest) median latency, in ms, of the last ``runs`` saved reports older than ``before``
-    that ran beside none of :data:`BUSY_LOCKS` (``"contended": []``), or None. Reports from before
-    2026-11-05 did not record it and are not used: the 11-01 one ran inside an index build."""
+    that ran beside none of :data:`BUILD_LOCKS` (``"contended": []``), or None. Reports from before
+    2026-11-05 did not record it and are not used: the 11-01 one ran inside an index build. Ingest
+    beside a run (``ingest_busy``) does not exclude it: it is the library's normal state."""
     quiet: list[float] = []
     for path in sorted(p for p in directory.glob("*.json") if p.name < before):
         try:
@@ -136,11 +138,13 @@ def cmd_quality_run(args: argparse.Namespace, out: TextIO) -> int:
     lock_dir = None if index_root is None else lock_dir_for(index_root)
     waited = 0.0
     busy: set[str] = set()
+    ingest_busy = False
     if lock_dir is not None:
         waited = wait_for_build(lock_dir)
         if waited >= 1:
             out.write(f"waited {waited / 60:.0f} min for the index build to finish\n")
-        busy = held(lock_dir, BUSY_LOCKS)
+        busy = held(lock_dir, BUILD_LOCKS)
+        ingest_busy = bool(held(lock_dir, (INGEST,)))
     now = datetime.now(UTC)
     report = evaluate(
         "api",
@@ -150,7 +154,8 @@ def cmd_quality_run(args: argparse.Namespace, out: TextIO) -> int:
         deadline=started + RUN_BUDGET_S,
     )
     if lock_dir is not None:
-        busy |= held(lock_dir, BUSY_LOCKS)
+        busy |= held(lock_dir, BUILD_LOCKS)
+        ingest_busy = ingest_busy or bool(held(lock_dir, (INGEST,)))
     name = now.strftime("%Y-%m-%dT%H%M%SZ") + ".json"
     saved = {
         "at": now.isoformat(),
@@ -161,8 +166,10 @@ def cmd_quality_run(args: argparse.Namespace, out: TextIO) -> int:
         "p95_ms": report.p95_ms,
         "by_domain": dict(report.by_domain),
         "skipped": report.skipped,
-        # The heavy jobs that ran beside it (seen at its start or its end); None: unknown (no index.root).
+        # The index build's locks held beside it (seen at its start or its end); None: unknown (no
+        # index.root). Ingest is recorded apart: it does not keep a run from being judged.
         "contended": None if lock_dir is None else sorted(busy),
+        "ingest_busy": None if lock_dir is None else ingest_busy,
         "waited_s": round(waited),
         "report": asdict(report),
     }
@@ -182,7 +189,10 @@ def cmd_quality_run(args: argparse.Namespace, out: TextIO) -> int:
         out.write(f"latency not judged: {', '.join(sorted(busy))} ran beside it\n")
     elif lock_dir is not None and quiet_ms is not None and report.p50_ms > 0:
         slow = latency_regressed(report.p50_ms, quiet_ms)
-        out.write(f"median latency {report.p50_ms:.0f} ms; the best of the quiet runs {quiet_ms:.0f} ms\n")
+        beside = " (ingest ran beside it)" if ingest_busy else ""
+        out.write(
+            f"median latency {report.p50_ms:.0f} ms{beside}; the best of the quiet runs {quiet_ms:.0f} ms\n"
+        )
     if args.alerts and (fallen is not None or slow is not None):
         from wsp_orchestrator.store import StateStore
 

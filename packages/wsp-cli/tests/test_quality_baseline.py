@@ -123,10 +123,82 @@ def test_a_slower_quiet_run_opens_the_latency_warning_and_a_busy_one_says_nothin
     (opened,) = latency_alert()
     assert opened["resolved_at"] is None
     assert "median 9.0 s against 3.0 s" in opened["message"]
-    with exclusive(lock_dir_for(tmp_path / "index"), "ingest"):
-        assert "latency not judged: ingest ran beside it" in run(2500.0)
-    assert latency_alert()[0]["resolved_at"] is None  # a busy run resolves nothing
+
+    def no_wait(_lock_dir: Path) -> float:  # the build outlived the run's wait
+        return 0.0
+
+    monkeypatch.setattr(quality, "wait_for_build", no_wait)
+    with exclusive(lock_dir_for(tmp_path / "index"), "index"):
+        assert "latency not judged: index ran beside it" in run(2500.0)
+    assert latency_alert()[0]["resolved_at"] is None  # a run beside the index build resolves nothing
     saved = sorted((tmp_path / "state" / "quality").glob("*.json"))
-    assert json.loads(saved[-1].read_text())["contended"] == ["ingest"]
+    assert json.loads(saved[-1].read_text())["contended"] == ["index"]
     run(4000.0)  # quiet, within twice the baseline
+    assert latency_alert()[0]["resolved_at"] is not None
+
+
+def test_ingest_beside_a_run_is_recorded_but_latency_is_still_judged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-11-05 review: the lanes hold the ingest lock nearly all day; a run gated on it was never
+    judged and never made a baseline, so the slowdown the latency warning is for stayed silent."""
+    import wsp_oracle.evaluation as evaluation
+    from wsp_cli import bootstrap, quality
+    from wsp_cli.locks import exclusive, lock_dir_for
+    from wsp_oracle.evaluation import EvalReport
+    from wsp_orchestrator.store import StateStore
+
+    state_db = tmp_path / "state" / "orchestrator.sqlite3"
+    state_db.parent.mkdir()
+    StateStore(state_db, check_local=False).close()
+    cfg = {"orchestrator": {"state_db": str(state_db)}, "index": {"root": str(tmp_path / "index")}}
+    p50 = [0.0]
+
+    def load(_lay: object) -> dict[str, Any]:
+        return cfg
+
+    def evaluate(*_a: object, **_k: object) -> EvalReport:
+        return EvalReport("api", 1, 0.6, 0.7, 0.5, p50[0], p50[0], p50[0])
+
+    def nothing(_arg: object) -> list[object]:
+        return []
+
+    monkeypatch.setattr(bootstrap, "load", load)
+    monkeypatch.setattr(evaluation, "evaluate", evaluate)
+    monkeypatch.setattr(evaluation, "api_searcher", nothing)
+    monkeypatch.setattr(evaluation, "load_gold", nothing)
+    week = iter(range(10))
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz: Any = None) -> Clock:
+            return cls(2026, 11, 8, 8, 17, tzinfo=UTC) + timedelta(weeks=next(week))
+
+    monkeypatch.setattr(quality, "datetime", Clock)
+    args = argparse.Namespace(config_dir=tmp_path, api="http://x", gold=None, alerts=True)
+
+    def run(ms: float) -> str:
+        p50[0] = ms
+        out = io.StringIO()
+        assert quality.cmd_quality_run(args, out) == 0
+        return out.getvalue()
+
+    def latency_alert() -> list[dict[str, Any]]:
+        store = StateStore(state_db, check_local=False)
+        try:
+            return [dict(r) for r in store.query("SELECT * FROM alerts WHERE key = 'quality:latency'")]
+        finally:
+            store.close()
+
+    lock_dir = lock_dir_for(tmp_path / "index")
+    with exclusive(lock_dir, "ingest"):  # held at the run's start and its end, as the lanes hold it
+        run(4000.0)  # the baseline, though ingest ran beside it
+        out = run(16000.0)
+    assert "latency not judged" not in out
+    assert "median latency 16000 ms (ingest ran beside it); the best of the quiet runs 4000 ms" in out
+    (opened,) = latency_alert()
+    assert opened["resolved_at"] is None
+    saved = [json.loads(p.read_text()) for p in sorted((tmp_path / "state" / "quality").glob("*.json"))]
+    assert [(r["contended"], r["ingest_busy"]) for r in saved] == [([], True), ([], True)]
+    assert run(5000.0).count("ingest ran beside it") == 0  # ingest done: judged, recovered
     assert latency_alert()[0]["resolved_at"] is not None
