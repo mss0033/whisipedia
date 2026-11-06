@@ -11,6 +11,15 @@ All notable changes are documented here. The format follows [Keep a Changelog](h
   the index.
 * The Navigator draws the unit cell and its atoms from the CIF (a small canvas renderer, no library),
   turned by dragging or the arrow keys, and offers the CIF as a download made in the page.
+### Added: a stored zip archive is browsed on its page, never unpacked (2026-11-05)
+* A document whose original is a zip (gNATSGO: one 117 GB zip of 149 files) shows what it holds:
+  folders with their sizes, every file with its own download (unpacked as it is sent, broken off if
+  its CRC does not match), and read-me, text and CSV files read in place. The list comes from the
+  zip's central directory (`GET /v1/files/{doc_id}/archive`, at most 2,000 files at a time,
+  `folder=` for the rest; an archive of more than 200,000 files is not listed).
+* ISO 19115-3, ISO 19139, ISO 19110 and FGDC metadata XML in an archive is shown as sections
+  (identification, contacts, reference systems, quality, lineage, distribution) and a data
+  dictionary of its tables and columns (`GET /v1/files/{doc_id}/archive/view`).
 ### Changed: Kiwix comes from the official mirrors, checked against Kiwix's own checksums (2026-10-26)
 * Kiwix's hosts refuse robots since October 2026. The `kiwix-opds` adapter (`KiwixMirrorAdapter`)
   lists ZIMs from `ftp.fau.de/kiwix` and downloads from it and `dumps.wikimedia.org/kiwix`; a file is

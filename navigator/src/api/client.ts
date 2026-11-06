@@ -5,6 +5,8 @@
  * table, so an endpoint or parameter that leaves the spec stops compiling.
  */
 import type {
+  ArchiveListing,
+  ArchiveView,
   ChangePage,
   DirectoryPage,
   DocId,
@@ -196,6 +198,16 @@ export class WspClient {
   ): Promise<DocumentResponse> {
     const fields: Array<'text'> | undefined = opts.text ? ['text'] : undefined;
     return this.get('GET /v1/documents/{doc_id}', { doc_id: id }, { at: opts.at, fields }, signal);
+  }
+
+  /** What a stored zip archive holds, by folder; `folder` lists one folder and those under it. */
+  archive(id: DocId, folder?: string, signal?: AbortSignal): Promise<ArchiveListing> {
+    return this.get('GET /v1/files/{doc_id}/archive', { doc_id: id }, { folder }, signal);
+  }
+
+  /** A text or metadata file inside a stored archive (`path` as the listing gives it). */
+  archiveView(id: DocId, path: string, signal?: AbortSignal): Promise<ArchiveView> {
+    return this.get('GET /v1/files/{doc_id}/archive/view', { doc_id: id }, { path }, signal);
   }
 
   history(id: DocId, signal?: AbortSignal): Promise<HistoryPage> {

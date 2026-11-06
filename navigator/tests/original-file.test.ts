@@ -15,6 +15,7 @@ describe('original file panel', () => {
           media_type: 'application/pdf',
           inline: true,
           preview_url: null,
+          archive_url: null,
         },
       },
       base,
@@ -43,6 +44,7 @@ describe('original file panel', () => {
           media_type: 'application/pdf',
           inline: true,
           preview_url: null,
+          archive_url: null,
         },
       },
       base,
@@ -69,6 +71,7 @@ describe('original file panel', () => {
         media_type: 'image/tiff',
         inline: false,
         preview_url: '/v1/files/x/preview',
+        archive_url: null,
       },
     })!;
     expect(el.querySelector('iframe')).toBeNull();
@@ -88,6 +91,7 @@ describe('original file panel', () => {
         media_type: 'application/zip',
         inline: false,
         preview_url: null,
+        archive_url: null,
       },
     })!;
     expect(el.querySelector('a[target="_blank"]')).toBeNull();
@@ -105,6 +109,7 @@ describe('original file panel', () => {
         media_type: 'text/plain',
         inline: false,
         preview_url: null,
+        archive_url: null,
       },
     })!;
     expect(el.textContent).not.toContain('cannot show');
@@ -121,6 +126,7 @@ describe('original file panel', () => {
         media_type: 'application/pdf',
         inline: true,
         preview_url: '/v1/files/m/preview',
+        archive_url: null,
       },
     })!;
     expect(el.querySelector('iframe')).toBeNull();
@@ -138,6 +144,7 @@ describe('original file panel', () => {
         media_type: 'application/pdf',
         inline: true,
         preview_url: '/v1/files/cp8/preview',
+        archive_url: null,
       },
     })!;
     el.querySelector<HTMLButtonElement>('button.original-show')!.click();
@@ -156,6 +163,7 @@ describe('original file panel', () => {
         media_type: 'application/pdf',
         inline: true,
         preview_url: '/v1/files/p/preview',
+        archive_url: null,
       },
     })!;
     expect(el.querySelector('iframe')).toBeNull();

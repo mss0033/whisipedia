@@ -32,6 +32,7 @@ import {
   wspLink,
 } from '../ui/components.ts';
 import { audioDeck, videoPlayer } from '../ui/player.ts';
+import { type ArchiveContext, archiveBrowser } from './archive.ts';
 import { comicBar, comicView, isComic, looksLikeComic } from './comics.ts';
 import { splitStructure, structureView } from './crystal.ts';
 import { linkCodeSections, parseCase, renderCase } from './legal.ts';
@@ -723,6 +724,7 @@ export function originalPanel(
     Partial<Pick<DocumentResponse, 'text' | 'url_native'>>,
   urlOf: (path: string) => string = (path) => path,
   media?: MediaContext,
+  archive?: ArchiveContext,
 ): HTMLElement | null {
   const o = doc.original;
   if (!o) return null;
@@ -768,6 +770,9 @@ export function originalPanel(
     );
     view = h('div', { class: 'original-frame-slot' }, show);
     show.addEventListener('click', () => view?.replaceChildren(frame()));
+  } else if (o.archive_url && archive) {
+    // A zip is browsed in place: its folders, files and metadata (2026-11-05, gNATSGO's 117 GB zip).
+    view = archiveBrowser(archive);
   }
   // A text file is shown below as it is: no "cannot show" (every RFC said so, 2026-10-17 field exam).
   const text = o.media_type.startsWith('text/plain');
@@ -786,7 +791,11 @@ export function originalPanel(
     h(
       'h2',
       { class: 'original-text-heading' },
-      text ? 'Text of the file' : 'Text extracted from the file',
+      text
+        ? 'Text of the file'
+        : o.archive_url
+          ? 'Text the library read from the archive'
+          : 'Text extracted from the file',
     ),
   );
 }
@@ -1368,11 +1377,12 @@ export async function render(ctx: PageContext): Promise<PageResult> {
     partsNav(doc),
     route.at
       ? null
-      : originalPanel(doc, (path) => ctx.app.api.url(path), {
-          app: ctx.app,
-          docId: doc.doc_id,
-          address: here,
-        }),
+      : originalPanel(
+          doc,
+          (path) => ctx.app.api.url(path),
+          { app: ctx.app, docId: doc.doc_id, address: here },
+          { api: ctx.app.api, docId: doc.doc_id, signal: ctx.signal },
+        ),
     content,
     partsNav(doc, 'bottom'),
     broken

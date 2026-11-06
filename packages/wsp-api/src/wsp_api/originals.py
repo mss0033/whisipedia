@@ -8,6 +8,8 @@ the reader also wants the file itself: a map is a picture, a handbook has figure
 * ``GET /v1/files/{doc_id}/preview``: a JPEG of a scanned map or image (browsers cannot show a GeoTIFF)
   or of a PDF's first page (a USGS map sheet), at most :data:`PREVIEW_SIZE` pixels on its long side,
   cached on local disk.
+* ``GET /v1/files/{doc_id}/archive`` (``/view``, ``/member``): what a zip archive holds, a text or
+  metadata file in it, one file of it (:mod:`wsp_api.archive`; 2026-11-05, the gNATSGO archive).
 
 The routes are in :mod:`wsp_api.files`. The security middleware gives their responses their own policy
 (:func:`files_csp`): a PDF may be framed by the Navigator; nothing else from upstream runs at our origin.
@@ -52,6 +54,7 @@ MEDIA_TYPES: dict[str, str] = {
 }
 INLINE = frozenset({".pdf", ".jpg", ".jpeg", ".png"})  # what a browser shows safely itself
 PREVIEWABLE = frozenset({".pdf", ".tif", ".tiff", ".jpg", ".jpeg", ".png"})  # a PDF: its first page
+ARCHIVES = frozenset({".zip"})  # browsable without unpacking (wsp_api.archive)
 
 
 def stored_file(doc: DocRecord) -> tuple[str, str] | None:
@@ -94,6 +97,7 @@ def original_of(doc: DocRecord) -> OriginalFile | None:
         media_type=MEDIA_TYPES.get(suffix, "application/octet-stream"),
         inline=suffix in INLINE,
         preview_url=f"{url}/preview" if suffix in PREVIEWABLE else None,
+        archive_url=f"{url}/archive" if suffix in ARCHIVES else None,
     )
 
 

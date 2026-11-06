@@ -882,6 +882,7 @@ property of some one or other of their daughters.
       media_type: 'video/webm',
       inline: true,
       preview_url: null,
+      archive_url: null,
     },
   },
   {
@@ -908,6 +909,7 @@ property of some one or other of their daughters.
       media_type: 'audio/ogg',
       inline: true,
       preview_url: null,
+      archive_url: null,
     },
   },
   {

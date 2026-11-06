@@ -4,20 +4,35 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 import os
 import tempfile
+import threading
+import zipfile
+from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any, cast
-from urllib.parse import unquote
+from typing import IO, TYPE_CHECKING, Annotated, Any, cast
+from urllib.parse import quote, unquote
 
-from fastapi import APIRouter
+import anyio
+from fastapi import APIRouter, Query, Response
 from fastapi import Path as PathParam
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from starlette.types import Receive, Scope, Send
 
+from wsp_api import archive
 from wsp_api.errors import ApiError, error_response, errors
 from wsp_api.offload import RETRY_AFTER, Offload
-from wsp_api.originals import INLINE, MEDIA_TYPES, PREVIEW_SIZE, PREVIEWABLE, display_name, stored_file
+from wsp_api.originals import (
+    ARCHIVES,
+    INLINE,
+    MEDIA_TYPES,
+    PREVIEW_SIZE,
+    PREVIEWABLE,
+    display_name,
+    stored_file,
+)
+from wsp_api.schemas import ArchiveListing, ArchiveView
 from wsp_api.views import Library, parse_doc
 from wsp_core.model import DocRecord
 
@@ -36,6 +51,25 @@ MAX_TRANSFERS = 8  # concurrent originals: a stalled NAS read holds a thread of 
 # browser waits minutes for a download to start; 30 s was too short while big ingests held the NAS
 # (an OpenStax page's Download, 2026-10-21 audit).
 TRANSFER_WAIT = 120.0
+MEMBER_CHUNK = 1024 * 1024  # an archive member is inflated and sent this much at a time
+LISTING_TIMEOUT = 60.0  # a 200,000-member directory is ~20 MB read from the NAS
+
+MemberPath = Annotated[str, Query(min_length=1, max_length=4096, description="The member's `path`.")]
+
+log = logging.getLogger(__name__)
+
+
+async def _take_slot(slots: asyncio.Semaphore, scope: Scope, receive: Receive, send: Send) -> bool:
+    """Wait up to :data:`TRANSFER_WAIT` for a transfer slot; without one, answer 503 and say so."""
+    try:
+        await asyncio.wait_for(slots.acquire(), TRANSFER_WAIT)
+    except TimeoutError:
+        busy = error_response(
+            503, "busy", "too many files are being sent; try again shortly", retry_after=RETRY_AFTER
+        )
+        await busy(scope, receive, send)
+        return False
+    return True
 
 
 class _BoundedFile(FileResponse):
@@ -46,18 +80,60 @@ class _BoundedFile(FileResponse):
         self._slots = slots
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        try:
-            await asyncio.wait_for(self._slots.acquire(), TRANSFER_WAIT)
-        except TimeoutError:
-            busy = error_response(
-                503, "busy", "too many files are being sent; try again shortly", retry_after=RETRY_AFTER
-            )
-            await busy(scope, receive, send)
+        if not await _take_slot(self._slots, scope, receive, send):
             return
         try:
             await super().__call__(scope, receive, send)
         finally:
             self._slots.release()
+
+
+def _close_member(zf: zipfile.ZipFile, fh: IO[bytes]) -> None:
+    try:
+        fh.close()
+    finally:
+        zf.close()
+
+
+class _BoundedMember(StreamingResponse):
+    """One archive member, inflated as it is sent, holding a transfer slot like :class:`_BoundedFile`.
+    The member and its archive are closed when the response ends, however it ends (sent, refused
+    busy, the reader cancelling the download, a CRC mismatch breaking it off)."""
+
+    def __init__(
+        self, slots: asyncio.Semaphore, zf: zipfile.ZipFile, fh: IO[bytes], name: str, **kwargs: Any
+    ) -> None:
+        self._slots = slots
+        self._zf = zf
+        self._fh = fh
+        self._name = name
+        super().__init__(self._chunks(), **kwargs)
+
+    async def _chunks(self) -> AsyncIterator[bytes]:
+        while True:
+            try:
+                block = await anyio.to_thread.run_sync(self._fh.read, MEMBER_CHUNK)
+            except zipfile.BadZipFile as exc:  # its CRC did not match: break the download off
+                log.warning("archive member %s is damaged: %s", self._name, exc)
+                raise
+            if not block:
+                return
+            yield block
+
+    def _close(self) -> None:
+        _close_member(self._zf, self._fh)
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        try:
+            if not await _take_slot(self._slots, scope, receive, send):
+                return
+            try:
+                await super().__call__(scope, receive, send)
+            finally:
+                self._slots.release()
+        finally:
+            with anyio.CancelScope(shield=True):
+                await anyio.to_thread.run_sync(self._close)
 
 
 def files_router(lib: Library) -> APIRouter:
@@ -134,7 +210,130 @@ def files_router(lib: Library) -> APIRouter:
             out, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=604800"}
         )
 
+    listings = archive.Listings()
+    # A metadata XML file is parsed whole (gNATSGO's is 7 MB): one at a time, like previews.
+    views = Offload(workers=1, queue=4, timeout=120.0, name="archive-view")
+
+    def locate_archive(doc_id: str) -> tuple[DocRecord, Path]:
+        doc, path = locate(doc_id)
+        if path.suffix.lower() not in ARCHIVES:
+            raise ApiError(404, "not_an_archive", "only zip archives can be listed")
+        return doc, path
+
+    @r.get(
+        "/files/{doc_id}/archive",
+        tags=["documents"],
+        response_model=ArchiveListing,
+        responses=errors(404, 413, 422, 503),
+    )
+    async def archive_listing(
+        doc_id: DocIdSegment,
+        response: Response,
+        folder: Annotated[
+            str, Query(max_length=4096, description='List only this folder and those under it ("a/b/").')
+        ] = "",
+    ) -> ArchiveListing:
+        """What a stored zip archive holds, grouped by folder with sizes, read from its central
+        directory: nothing is unpacked. At most 2,000 files at a time (``truncated``); ``folder=``
+        lists one folder and those under it."""
+
+        def run() -> ArchiveListing:
+            doc, path = locate_archive(doc_id)
+            base = f"/v1/files/{quote(doc.doc_id, safe='')}/archive"
+            return archive.listing(
+                display_name(path.name),
+                listings.entries(path),
+                folder,
+                member_url=f"{base}/member",
+                view_url=f"{base}/view",
+            )
+
+        out = await lib.nas.run(run, timeout=LISTING_TIMEOUT)
+        response.headers["Cache-Control"] = "private, max-age=86400"
+        return out
+
+    @r.get(
+        "/files/{doc_id}/archive/view",
+        tags=["documents"],
+        response_model=ArchiveView,
+        responses=errors(404, 409, 413, 415, 422, 503),
+    )
+    async def archive_view(doc_id: DocIdSegment, path: MemberPath, response: Response) -> ArchiveView:
+        """A text file in a stored archive (its first 512 KB), or an ISO 19115 / ISO 19139 / ISO 19110
+        / FGDC metadata XML file in it read into sections and a data dictionary."""
+
+        def run() -> ArchiveView:
+            with archive.open_archive(locate_archive(doc_id)[1]) as zf:
+                return archive.read_view(zf, path)
+
+        out = await views.run(run)
+        response.headers["Cache-Control"] = "private, max-age=86400"
+        return out
+
+    @r.get(
+        "/files/{doc_id}/archive/member",
+        tags=["documents"],
+        response_class=StreamingResponse,
+        responses=errors(404, 409, 413, 415, 422, 503),
+    )
+    async def archive_member(doc_id: DocIdSegment, path: MemberPath) -> StreamingResponse:
+        """One file of a stored archive, unpacked as it is sent, always as a download. A damaged file
+        (its CRC does not match) breaks off before its end, so the browser says the download failed."""
+
+        # The archive is opened on a NAS thread and handed over here. Past the deadline (or with the
+        # reader gone) nobody would close it: whichever side comes second closes it.
+        handoff = threading.Lock()
+        state: dict[str, Any] = {}
+
+        def run() -> tuple[zipfile.ZipFile, zipfile.ZipInfo, IO[bytes]]:
+            zf = archive.open_archive(locate_archive(doc_id)[1])
+            try:
+                info = archive.member_info(zf, path)
+                opened = (zf, info, archive.open_member(zf, info))
+            except BaseException:
+                zf.close()
+                raise
+            with handoff:
+                if not state.get("abandoned"):
+                    state["opened"] = opened
+                    return opened
+            _close_member(opened[0], opened[2])
+            raise ApiError(
+                503, "timeout", "the library storage did not answer in time", retry_after=RETRY_AFTER
+            )
+
+        try:
+            zf, info, fh = await lib.nas.run(run)
+        except BaseException:
+            with handoff:
+                state["abandoned"] = True
+                late = state.pop("opened", None)
+            if late is not None:
+                _close_member(late[0], late[2])
+            raise
+        name = info.filename.rsplit("/", 1)[-1] or "file"
+        return _BoundedMember(
+            transfers,
+            zf,
+            fh,
+            info.filename,
+            # Never typed by its name: a member's HTML or SVG must not render at our origin, and a
+            # 2 GB CSV must not go through gzip in the API process (2026-10-26 review #117).
+            media_type="application/octet-stream",
+            headers={
+                "Content-Length": str(info.file_size),
+                "Content-Disposition": attachment(name),
+                "Cache-Control": "private, max-age=86400",
+            },
+        )
+
     return r
+
+
+def attachment(name: str) -> str:
+    """``Content-Disposition`` of a download named ``name``: an ASCII fallback, then the UTF-8 name."""
+    plain = "".join(c if " " <= c <= "~" and c not in '"\\' else "_" for c in name)
+    return f"attachment; filename=\"{plain}\"; filename*=UTF-8''{quote(name, safe='')}"
 
 
 def _render_preview(src: Path, out: Path) -> Path:

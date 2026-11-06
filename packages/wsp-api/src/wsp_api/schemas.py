@@ -207,6 +207,117 @@ class OriginalFile(_Wire):
     preview_url: str | None = Field(
         default=None, description="A JPEG of an image or map scan (`/v1/files/{doc_id}/preview`)."
     )
+    archive_url: str | None = Field(
+        default=None,
+        description="For a zip archive: its contents, listed without unpacking it "
+        "(`/v1/files/{doc_id}/archive`).",
+    )
+
+
+class ArchiveMember(_Wire):
+    """One file inside a stored archive."""
+
+    path: str = Field(description="The member's full name in the archive: what `path=` takes.")
+    name: str = Field(description="The last part of `path`.")
+    size: int = Field(description="Bytes when unpacked.")
+    packed: int = Field(description="Bytes as stored in the archive.")
+    modified: str | None = Field(
+        default=None, description="`YYYY-MM-DDTHH:MM:SS` as the archive records it (no time zone)."
+    )
+    view: Literal["text", "metadata"] | None = Field(
+        default=None,
+        description="`text`: readable here (`/archive/view`); `metadata`: an XML file that is probably "
+        "ISO 19115 or FGDC metadata. Null: download only.",
+    )
+
+
+class ArchiveFolder(_Wire):
+    """A folder of a stored archive and the files directly in it."""
+
+    path: str = Field(description='Folder path with a trailing "/"; "" is the top of the archive.')
+    count: int = Field(description="Files directly in the folder.")
+    bytes: int = Field(description="Their unpacked size.")
+    total_count: int = Field(description="Files in the folder and every folder under it.")
+    total_bytes: int
+    files: list[ArchiveMember] = Field(
+        default_factory=list[ArchiveMember],
+        description="The files directly in it, by name; fewer than `count` when the listing is cut short.",
+    )
+
+
+class ArchiveListing(_Wire):
+    """What a stored zip archive holds, read from its central directory (nothing is unpacked)."""
+
+    name: str = Field(description="The archive's file name.")
+    folder: str = Field(description='The folder listed (`folder=`); "" for the whole archive.')
+    members: int = Field(description="Files in the listed folder and under it.")
+    bytes: int = Field(description="Their unpacked size.")
+    packed: int = Field(description="Their size as stored.")
+    folders: list[ArchiveFolder] = Field(description="Every folder in path order, each with its files.")
+    truncated: bool = Field(
+        description="True when some folders or files were left out: list a folder with `folder=`."
+    )
+    member_url: str = Field(description="Add `?path=<member>` to download one file, unpacked as it streams.")
+    view_url: str = Field(description="Add `?path=<member>` to read a text or metadata file here.")
+
+
+class MetadataField(_Wire):
+    label: str = Field(description='e.g. "Citation \u203a Title"; "" when the section heading says it all.')
+    value: str
+
+
+class MetadataSection(_Wire):
+    heading: str
+    fields: list[MetadataField]
+    more: int = Field(default=0, description="Fields left out (the section was too long).")
+
+
+class DictionaryAttribute(_Wire):
+    """One column of a table in a data dictionary (ISO 19110 or FGDC entity and attribute)."""
+
+    name: str
+    definition: str | None = None
+    type: str | None = None
+    unit: str | None = None
+    values: list[str] = Field(
+        default_factory=list[str], description='Allowed values, "label (code): definition".'
+    )
+    more_values: int = 0
+
+
+class DictionaryEntity(_Wire):
+    """One table of a data dictionary."""
+
+    name: str
+    label: str | None = Field(default=None, description="Its plain name (ISO alias, FGDC label).")
+    definition: str | None = None
+    attributes: list[DictionaryAttribute] = Field(default_factory=list[DictionaryAttribute])
+    more_attributes: int = 0
+
+
+class ArchiveMetadata(_Wire):
+    """Geospatial metadata (ISO 19115, ISO 19139, ISO 19110 or FGDC CSDGM) read into sections."""
+
+    standard: str = Field(description='e.g. "ISO 19115-3", "FGDC CSDGM".')
+    title: str | None = None
+    abstract: str | None = None
+    sections: list[MetadataSection]
+    dictionary: list[DictionaryEntity] = Field(
+        default_factory=list[DictionaryEntity],
+        description="The tables and columns the data holds (a feature catalogue), if the metadata has one.",
+    )
+    more_entities: int = 0
+
+
+class ArchiveView(_Wire):
+    """A text file inside a stored archive, or its metadata read into sections."""
+
+    path: str
+    name: str
+    size: int
+    text: str | None = Field(description="The file's text (null when `metadata` is set).")
+    truncated: bool = Field(description="True when `text` is only the start of the file.")
+    metadata: ArchiveMetadata | None = None
 
 
 class Rendition(_Wire):

@@ -15,6 +15,83 @@ export interface AlertInfo {
   raised_at: string;
 }
 
+/** A folder of a stored archive and the files directly in it. */
+export interface ArchiveFolder {
+  /** Folder path with a trailing "/"; "" is the top of the archive. */
+  path: string;
+  /** Files directly in the folder. */
+  count: number;
+  /** Their unpacked size. */
+  bytes: number;
+  /** Files in the folder and every folder under it. */
+  total_count: number;
+  total_bytes: number;
+  /** The files directly in it, by name; fewer than `count` when the listing is cut short. */
+  files: Array<ArchiveMember>;
+}
+
+/** What a stored zip archive holds, read from its central directory (nothing is unpacked). */
+export interface ArchiveListing {
+  /** The archive's file name. */
+  name: string;
+  /** The folder listed (`folder=`); "" for the whole archive. */
+  folder: string;
+  /** Files in the listed folder and under it. */
+  members: number;
+  /** Their unpacked size. */
+  bytes: number;
+  /** Their size as stored. */
+  packed: number;
+  /** Every folder in path order, each with its files. */
+  folders: Array<ArchiveFolder>;
+  /** True when some folders or files were left out: list a folder with `folder=`. */
+  truncated: boolean;
+  /** Add `?path=<member>` to download one file, unpacked as it streams. */
+  member_url: string;
+  /** Add `?path=<member>` to read a text or metadata file here. */
+  view_url: string;
+}
+
+/** One file inside a stored archive. */
+export interface ArchiveMember {
+  /** The member's full name in the archive: what `path=` takes. */
+  path: string;
+  /** The last part of `path`. */
+  name: string;
+  /** Bytes when unpacked. */
+  size: number;
+  /** Bytes as stored in the archive. */
+  packed: number;
+  /** `YYYY-MM-DDTHH:MM:SS` as the archive records it (no time zone). */
+  modified: string | null;
+  /** `text`: readable here (`/archive/view`); `metadata`: an XML file that is probably ISO 19115 or FGDC metadata. Null: download only. */
+  view: 'text' | 'metadata' | null;
+}
+
+/** Geospatial metadata (ISO 19115, ISO 19139, ISO 19110 or FGDC CSDGM) read into sections. */
+export interface ArchiveMetadata {
+  /** e.g. "ISO 19115-3", "FGDC CSDGM". */
+  standard: string;
+  title: string | null;
+  abstract: string | null;
+  sections: Array<MetadataSection>;
+  /** The tables and columns the data holds (a feature catalogue), if the metadata has one. */
+  dictionary: Array<DictionaryEntity>;
+  more_entities: number;
+}
+
+/** A text file inside a stored archive, or its metadata read into sections. */
+export interface ArchiveView {
+  path: string;
+  name: string;
+  size: number;
+  /** The file's text (null when `metadata` is set). */
+  text: string | null;
+  /** True when `text` is only the start of the file. */
+  truncated: boolean;
+  metadata: ArchiveMetadata | null;
+}
+
 /** The plan's phase-5 exit (PLAN §14): 30 days unattended, every SLO met, no manual repairs. */
 export interface AutonomyStatus {
   goal_days: number;
@@ -93,6 +170,27 @@ export interface DefinitionSense {
   part_of_speech: string;
   definition: string;
   example: string | null;
+}
+
+/** One column of a table in a data dictionary (ISO 19110 or FGDC entity and attribute). */
+export interface DictionaryAttribute {
+  name: string;
+  definition: string | null;
+  type: string | null;
+  unit: string | null;
+  /** Allowed values, "label (code): definition". */
+  values: Array<string>;
+  more_values: number;
+}
+
+/** One table of a data dictionary. */
+export interface DictionaryEntity {
+  name: string;
+  /** Its plain name (ISO alias, FGDC label). */
+  label: string | null;
+  definition: string | null;
+  attributes: Array<DictionaryAttribute>;
+  more_attributes: number;
 }
 
 export interface DidYouKnow {
@@ -420,6 +518,19 @@ export interface MapAnswer {
   license: string;
 }
 
+export interface MetadataField {
+  /** e.g. "Citation › Title"; "" when the section heading says it all. */
+  label: string;
+  value: string;
+}
+
+export interface MetadataSection {
+  heading: string;
+  fields: Array<MetadataField>;
+  /** Fields left out (the section was too long). */
+  more: number;
+}
+
 export interface OnThisDay {
   year: number;
   text: string;
@@ -459,6 +570,8 @@ export interface OriginalFile {
   inline: boolean;
   /** A JPEG of an image or map scan (`/v1/files/{doc_id}/preview`). */
   preview_url: string | null;
+  /** For a zip archive: its contents, listed without unpacking it (`/v1/files/{doc_id}/archive`). */
+  archive_url: string | null;
 }
 
 /** Another copy of the same work in the library, and why a reader might prefer it. */
@@ -1178,6 +1291,45 @@ export interface Routes {
       doc_id: string;
     };
     query: Record<string, never>;
+    body: null;
+    response: null;
+  };
+  /** Archive Listing */
+  'GET /v1/files/{doc_id}/archive': {
+    path: {
+      /** `wsp:<source_id>/<native_id>`, percent-encoded as one segment. */
+      doc_id: string;
+    };
+    query: {
+      /** List only this folder and those under it ("a/b/"). */
+      folder?: string | undefined;
+    };
+    body: null;
+    response: ArchiveListing;
+  };
+  /** Archive View */
+  'GET /v1/files/{doc_id}/archive/view': {
+    path: {
+      /** `wsp:<source_id>/<native_id>`, percent-encoded as one segment. */
+      doc_id: string;
+    };
+    query: {
+      /** The member's `path`. */
+      path: string;
+    };
+    body: null;
+    response: ArchiveView;
+  };
+  /** Archive Member */
+  'GET /v1/files/{doc_id}/archive/member': {
+    path: {
+      /** `wsp:<source_id>/<native_id>`, percent-encoded as one segment. */
+      doc_id: string;
+    };
+    query: {
+      /** The member's `path`. */
+      path: string;
+    };
     body: null;
     response: null;
   };

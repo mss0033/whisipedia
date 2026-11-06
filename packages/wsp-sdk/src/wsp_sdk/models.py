@@ -205,6 +205,83 @@ class OriginalFile(_Wire):
     media_type: str
     inline: bool
     preview_url: str | None = None
+    archive_url: str | None = None
+
+
+class ArchiveMember(_Wire):
+    path: str
+    name: str
+    size: int
+    packed: int
+    modified: str | None = None
+    view: Literal["text", "metadata"] | None = None
+
+
+class ArchiveFolder(_Wire):
+    path: str
+    count: int
+    bytes: int
+    total_count: int
+    total_bytes: int
+    files: list[ArchiveMember] = Field(default_factory=list[ArchiveMember])
+
+
+class ArchiveListing(_Wire):
+    name: str
+    folder: str
+    members: int
+    bytes: int
+    packed: int
+    folders: list[ArchiveFolder]
+    truncated: bool
+    member_url: str
+    view_url: str
+
+
+class MetadataField(_Wire):
+    label: str
+    value: str
+
+
+class MetadataSection(_Wire):
+    heading: str
+    fields: list[MetadataField]
+    more: int = 0
+
+
+class DictionaryAttribute(_Wire):
+    name: str
+    definition: str | None = None
+    type: str | None = None
+    unit: str | None = None
+    values: list[str] = Field(default_factory=list[str])
+    more_values: int = 0
+
+
+class DictionaryEntity(_Wire):
+    name: str
+    label: str | None = None
+    definition: str | None = None
+    attributes: list[DictionaryAttribute] = Field(default_factory=list[DictionaryAttribute])
+    more_attributes: int = 0
+
+
+class ArchiveMetadata(_Wire):
+    standard: str
+    title: str | None = None
+    abstract: str | None = None
+    sections: list[MetadataSection]
+    dictionary: list[DictionaryEntity] = Field(default_factory=list[DictionaryEntity])
+    more_entities: int = 0
+
+
+class ArchiveView(_Wire):
+    path: str
+    name: str
+    size: int
+    text: str | None
+    truncated: bool
+    metadata: ArchiveMetadata | None = None
 
 
 class Document(_Wire):

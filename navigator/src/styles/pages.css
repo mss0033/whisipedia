@@ -832,6 +832,139 @@
   margin-top: 14px;
   font-size: 1.05rem;
 }
+/* A stored zip browsed in place (pages/archive.ts): folders, files, metadata. */
+.archive {
+  margin: 8px 0 4px;
+  font-family: var(--ui-font);
+}
+.archive-heading {
+  font-size: 1.05rem;
+  margin: 10px 0 4px;
+}
+.archive-first {
+  border: 1px solid var(--rule);
+  padding: 4px 10px;
+  margin: 6px 0 10px;
+}
+.archive-first h3 {
+  font-size: 0.95rem;
+  margin: 4px 0;
+}
+.archive-first ul {
+  margin: 0;
+  padding-left: 18px;
+}
+.archive-folder {
+  margin: 2px 0;
+}
+.archive-folder > summary {
+  cursor: pointer;
+  padding: 2px 0;
+}
+.archive-folder-name {
+  font-family: var(--mono-font);
+  font-weight: bold;
+}
+.archive-folder-size {
+  color: var(--page-muted);
+  font-size: 0.85rem;
+}
+.archive-depth-1 {
+  margin-left: 1em;
+}
+.archive-depth-2 {
+  margin-left: 2em;
+}
+.archive-depth-3 {
+  margin-left: 3em;
+}
+.archive-depth-4,
+.archive-depth-5,
+.archive-depth-6 {
+  margin-left: 4em;
+}
+.archive-files,
+.archive-csv,
+.archive-columns {
+  border-collapse: collapse;
+  font-size: 0.9rem;
+  margin: 2px 0 6px;
+}
+.archive-files {
+  width: 100%;
+}
+.archive-files th,
+.archive-files td,
+.archive-csv th,
+.archive-csv td,
+.archive-columns th,
+.archive-columns td {
+  border-bottom: 1px solid var(--rule);
+  padding: 2px 8px 2px 0;
+  text-align: left;
+  vertical-align: top;
+}
+.archive-name {
+  overflow-wrap: anywhere;
+}
+.archive-size,
+.archive-date {
+  white-space: nowrap;
+}
+.archive-size {
+  text-align: right;
+}
+.archive-actions {
+  white-space: nowrap;
+}
+.archive-view-slot {
+  padding: 4px 0 10px;
+}
+.archive-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.archive-text {
+  max-height: 70vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  border: 1px solid var(--rule);
+  padding: 6px;
+}
+.archive-metadata-title {
+  font-size: 1rem;
+  margin: 4px 0;
+}
+.archive-metadata-abstract,
+.archive-metadata dd {
+  white-space: pre-line;
+}
+.archive-metadata-section > summary,
+.archive-entity > summary {
+  cursor: pointer;
+  font-weight: bold;
+  padding: 2px 0;
+}
+.archive-metadata dl {
+  display: grid;
+  grid-template-columns: minmax(10em, max-content) 1fr;
+  gap: 2px 12px;
+  margin: 4px 0 8px;
+}
+.archive-metadata dt {
+  color: var(--page-muted);
+}
+.archive-metadata dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.archive-entity {
+  margin: 2px 0 2px 1em;
+}
+.archive-values {
+  margin: 0;
+  padding-left: 14px;
+}
 /* Court opinions (pages/legal.ts): a caption like the head of a slip opinion, then the opinion. */
 .case {
   display: grid;

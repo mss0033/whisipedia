@@ -1537,6 +1537,333 @@
         }
       }
     },
+    "/v1/files/{doc_id}/archive": {
+      "get": {
+        "tags": [
+          "documents"
+        ],
+        "summary": "Archive Listing",
+        "description": "What a stored zip archive holds, grouped by folder with sizes, read from its central\ndirectory: nothing is unpacked. At most 2,000 files at a time (``truncated``); ``folder=``\nlists one folder and those under it.",
+        "operationId": "archive_listing_v1_files__doc_id__archive_get",
+        "parameters": [
+          {
+            "name": "doc_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "`wsp:<source_id>/<native_id>`, percent-encoded as one segment.",
+              "title": "Doc Id"
+            },
+            "description": "`wsp:<source_id>/<native_id>`, percent-encoded as one segment."
+          },
+          {
+            "name": "folder",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 4096,
+              "description": "List only this folder and those under it (\"a/b/\").",
+              "default": "",
+              "title": "Folder"
+            },
+            "description": "List only this folder and those under it (\"a/b/\")."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveListing"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid_request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/files/{doc_id}/archive/view": {
+      "get": {
+        "tags": [
+          "documents"
+        ],
+        "summary": "Archive View",
+        "description": "A text file in a stored archive (its first 512 KB), or an ISO 19115 / ISO 19139 / ISO 19110\n/ FGDC metadata XML file in it read into sections and a data dictionary.",
+        "operationId": "archive_view_v1_files__doc_id__archive_view_get",
+        "parameters": [
+          {
+            "name": "doc_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "`wsp:<source_id>/<native_id>`, percent-encoded as one segment.",
+              "title": "Doc Id"
+            },
+            "description": "`wsp:<source_id>/<native_id>`, percent-encoded as one segment."
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "description": "The member's `path`.",
+              "title": "Path"
+            },
+            "description": "The member's `path`."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveView"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "unsupported_media_type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid_request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/files/{doc_id}/archive/member": {
+      "get": {
+        "tags": [
+          "documents"
+        ],
+        "summary": "Archive Member",
+        "description": "One file of a stored archive, unpacked as it is sent, always as a download. A damaged file\n(its CRC does not match) breaks off before its end, so the browser says the download failed.",
+        "operationId": "archive_member_v1_files__doc_id__archive_member_get",
+        "parameters": [
+          {
+            "name": "doc_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "`wsp:<source_id>/<native_id>`, percent-encoded as one segment.",
+              "title": "Doc Id"
+            },
+            "description": "`wsp:<source_id>/<native_id>`, percent-encoded as one segment."
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "description": "The member's `path`.",
+              "title": "Path"
+            },
+            "description": "The member's `path`."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "unsupported_media_type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid_request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/maps/places": {
       "get": {
         "tags": [
@@ -3381,6 +3708,298 @@
         ],
         "title": "AlertInfo"
       },
+      "ArchiveFolder": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path",
+            "description": "Folder path with a trailing \"/\"; \"\" is the top of the archive."
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count",
+            "description": "Files directly in the folder."
+          },
+          "bytes": {
+            "type": "integer",
+            "title": "Bytes",
+            "description": "Their unpacked size."
+          },
+          "total_count": {
+            "type": "integer",
+            "title": "Total Count",
+            "description": "Files in the folder and every folder under it."
+          },
+          "total_bytes": {
+            "type": "integer",
+            "title": "Total Bytes"
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/ArchiveMember"
+            },
+            "type": "array",
+            "title": "Files",
+            "description": "The files directly in it, by name; fewer than `count` when the listing is cut short."
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "count",
+          "bytes",
+          "total_count",
+          "total_bytes",
+          "files"
+        ],
+        "title": "ArchiveFolder",
+        "description": "A folder of a stored archive and the files directly in it."
+      },
+      "ArchiveListing": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "The archive's file name."
+          },
+          "folder": {
+            "type": "string",
+            "title": "Folder",
+            "description": "The folder listed (`folder=`); \"\" for the whole archive."
+          },
+          "members": {
+            "type": "integer",
+            "title": "Members",
+            "description": "Files in the listed folder and under it."
+          },
+          "bytes": {
+            "type": "integer",
+            "title": "Bytes",
+            "description": "Their unpacked size."
+          },
+          "packed": {
+            "type": "integer",
+            "title": "Packed",
+            "description": "Their size as stored."
+          },
+          "folders": {
+            "items": {
+              "$ref": "#/components/schemas/ArchiveFolder"
+            },
+            "type": "array",
+            "title": "Folders",
+            "description": "Every folder in path order, each with its files."
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated",
+            "description": "True when some folders or files were left out: list a folder with `folder=`."
+          },
+          "member_url": {
+            "type": "string",
+            "title": "Member Url",
+            "description": "Add `?path=<member>` to download one file, unpacked as it streams."
+          },
+          "view_url": {
+            "type": "string",
+            "title": "View Url",
+            "description": "Add `?path=<member>` to read a text or metadata file here."
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "folder",
+          "members",
+          "bytes",
+          "packed",
+          "folders",
+          "truncated",
+          "member_url",
+          "view_url"
+        ],
+        "title": "ArchiveListing",
+        "description": "What a stored zip archive holds, read from its central directory (nothing is unpacked)."
+      },
+      "ArchiveMember": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path",
+            "description": "The member's full name in the archive: what `path=` takes."
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "The last part of `path`."
+          },
+          "size": {
+            "type": "integer",
+            "title": "Size",
+            "description": "Bytes when unpacked."
+          },
+          "packed": {
+            "type": "integer",
+            "title": "Packed",
+            "description": "Bytes as stored in the archive."
+          },
+          "modified": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Modified",
+            "description": "`YYYY-MM-DDTHH:MM:SS` as the archive records it (no time zone)."
+          },
+          "view": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "text",
+                  "metadata"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "View",
+            "description": "`text`: readable here (`/archive/view`); `metadata`: an XML file that is probably ISO 19115 or FGDC metadata. Null: download only."
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "name",
+          "size",
+          "packed",
+          "modified",
+          "view"
+        ],
+        "title": "ArchiveMember",
+        "description": "One file inside a stored archive."
+      },
+      "ArchiveMetadata": {
+        "properties": {
+          "standard": {
+            "type": "string",
+            "title": "Standard",
+            "description": "e.g. \"ISO 19115-3\", \"FGDC CSDGM\"."
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "abstract": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Abstract"
+          },
+          "sections": {
+            "items": {
+              "$ref": "#/components/schemas/MetadataSection"
+            },
+            "type": "array",
+            "title": "Sections"
+          },
+          "dictionary": {
+            "items": {
+              "$ref": "#/components/schemas/DictionaryEntity"
+            },
+            "type": "array",
+            "title": "Dictionary",
+            "description": "The tables and columns the data holds (a feature catalogue), if the metadata has one."
+          },
+          "more_entities": {
+            "type": "integer",
+            "title": "More Entities",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "standard",
+          "title",
+          "abstract",
+          "sections",
+          "dictionary",
+          "more_entities"
+        ],
+        "title": "ArchiveMetadata",
+        "description": "Geospatial metadata (ISO 19115, ISO 19139, ISO 19110 or FGDC CSDGM) read into sections."
+      },
+      "ArchiveView": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "size": {
+            "type": "integer",
+            "title": "Size"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text",
+            "description": "The file's text (null when `metadata` is set)."
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated",
+            "description": "True when `text` is only the start of the file."
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ArchiveMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "name",
+          "size",
+          "text",
+          "truncated",
+          "metadata"
+        ],
+        "title": "ArchiveView",
+        "description": "A text file inside a stored archive, or its metadata read into sections."
+      },
       "AutonomyStatus": {
         "properties": {
           "goal_days": {
@@ -3805,6 +4424,124 @@
           "example"
         ],
         "title": "DefinitionSense"
+      },
+      "DictionaryAttribute": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "definition": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Definition"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          },
+          "values": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Values",
+            "description": "Allowed values, \"label (code): definition\"."
+          },
+          "more_values": {
+            "type": "integer",
+            "title": "More Values",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "definition",
+          "type",
+          "unit",
+          "values",
+          "more_values"
+        ],
+        "title": "DictionaryAttribute",
+        "description": "One column of a table in a data dictionary (ISO 19110 or FGDC entity and attribute)."
+      },
+      "DictionaryEntity": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label",
+            "description": "Its plain name (ISO alias, FGDC label)."
+          },
+          "definition": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Definition"
+          },
+          "attributes": {
+            "items": {
+              "$ref": "#/components/schemas/DictionaryAttribute"
+            },
+            "type": "array",
+            "title": "Attributes"
+          },
+          "more_attributes": {
+            "type": "integer",
+            "title": "More Attributes",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "label",
+          "definition",
+          "attributes",
+          "more_attributes"
+        ],
+        "title": "DictionaryEntity",
+        "description": "One table of a data dictionary."
       },
       "DidYouKnow": {
         "properties": {
@@ -5392,6 +6129,53 @@
         ],
         "title": "MapAnswer"
       },
+      "MetadataField": {
+        "properties": {
+          "label": {
+            "type": "string",
+            "title": "Label",
+            "description": "e.g. \"Citation › Title\"; \"\" when the section heading says it all."
+          },
+          "value": {
+            "type": "string",
+            "title": "Value"
+          }
+        },
+        "type": "object",
+        "required": [
+          "label",
+          "value"
+        ],
+        "title": "MetadataField"
+      },
+      "MetadataSection": {
+        "properties": {
+          "heading": {
+            "type": "string",
+            "title": "Heading"
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/MetadataField"
+            },
+            "type": "array",
+            "title": "Fields"
+          },
+          "more": {
+            "type": "integer",
+            "title": "More",
+            "description": "Fields left out (the section was too long).",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "heading",
+          "fields",
+          "more"
+        ],
+        "title": "MetadataSection"
+      },
       "OnThisDay": {
         "properties": {
           "year": {
@@ -5587,6 +6371,18 @@
             ],
             "title": "Preview Url",
             "description": "A JPEG of an image or map scan (`/v1/files/{doc_id}/preview`)."
+          },
+          "archive_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archive Url",
+            "description": "For a zip archive: its contents, listed without unpacking it (`/v1/files/{doc_id}/archive`)."
           }
         },
         "type": "object",
@@ -5595,7 +6391,8 @@
           "name",
           "media_type",
           "inline",
-          "preview_url"
+          "preview_url",
+          "archive_url"
         ],
         "title": "OriginalFile",
         "description": "The stored file a collection document was refined from (a PDF, a scanned map, an archive)."

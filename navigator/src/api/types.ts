@@ -15,10 +15,17 @@
 import type * as G from './generated.ts';
 
 export type {
+  ArchiveFolder,
+  ArchiveListing,
+  ArchiveMember,
+  ArchiveMetadata,
+  ArchiveView,
   Availability,
   Change,
   ChangePage,
   DefinitionAnswer,
+  DictionaryAttribute,
+  DictionaryEntity,
   DirectoryCategory,
   DirectoryEntry,
   DirectoryPage,
@@ -34,6 +41,8 @@ export type {
   Hit,
   KindFacet,
   MapAnswer,
+  MetadataField,
+  MetadataSection,
   OriginalFile,
   OutsideCopy,
   PastSeries,
