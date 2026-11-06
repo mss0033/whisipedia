@@ -1,9 +1,15 @@
 /**
  * Search-as-you-type suggestions as an ARIA 1.2 combobox. Debounced 50 ms,
  * stale requests aborted, local history matches shown instantly.
+ *
+ * A suggestion from the API opens its document, and one an alias matched shows
+ * the alias with the title beside it: the list showed each document's own title
+ * (磷 for "pho", matched by its English label) and picking one searched for
+ * that text (2026-11-05 deep dive). Documents in the Navigator's language come
+ * first.
  */
-import type { Suggestion } from '../api/types.ts';
-import { debounce, h, uid } from '../core/dom.ts';
+import type { Suggestion, Suggestions } from '../api/types.ts';
+import { debounce, h, uid, uiLanguage } from '../core/dom.ts';
 import type { AppServices } from '../pages/types.ts';
 
 export const SUGGEST_DEBOUNCE_MS = 50;
@@ -15,6 +21,17 @@ export interface SuggestOptions {
   /** Include matching local history entries (location bar). */
   history?: boolean;
   limit?: number;
+}
+
+/** The API's suggestions, each with the page it opens (an older API sends titles only). */
+export function remoteSuggestions(r: Suggestions): PickedSuggestion[] {
+  const items = r.items ?? [];
+  if (items.length === 0) return r.suggestions.map((text) => ({ text }));
+  return items.map((i) => ({
+    text: i.text,
+    address: i.address ?? undefined,
+    title: i.title !== i.text ? i.title : undefined,
+  }));
 }
 
 export function attachSuggest(
@@ -80,7 +97,11 @@ export function attachSuggest(
             { class: 'suggest-text' },
             k ? [h('b', null, text.slice(0, k)), text.slice(k)] : text,
           ),
-          s.address ? h('span', { class: 'suggest-kind' }, 'History') : null,
+          s.history
+            ? h('span', { class: 'suggest-kind' }, 'History')
+            : s.title
+              ? h('span', { class: 'suggest-kind' }, `→ ${s.title}`)
+              : null,
         );
         li.addEventListener('pointerdown', (ev) => ev.preventDefault());
         li.addEventListener('click', () => {
@@ -108,18 +129,16 @@ export function attachSuggest(
               e.address.includes(q.toLowerCase()),
           )
           .slice(0, 3)
-          .map((e) => ({ text: e.title || e.address, address: e.address }))
+          .map((e) => ({ text: e.title || e.address, address: e.address, history: true }))
       : [];
     if (local.length) show(q, local);
     app.api
-      .suggest(q, limit, ac.signal)
+      .suggest(q, limit, ac.signal, uiLanguage())
       .then((r) => {
         if (ac.signal.aborted || input.value.trim() !== q) return;
         waiting = false;
         const seen = new Set(local.map((l) => l.text.toLowerCase()));
-        const remote: PickedSuggestion[] = r.suggestions
-          .filter((text) => !seen.has(text.toLowerCase()))
-          .map((text) => ({ text }));
+        const remote = remoteSuggestions(r).filter((s) => !seen.has(s.text.toLowerCase()));
         show(q, [...local, ...remote].slice(0, limit));
       })
       .catch(() => {

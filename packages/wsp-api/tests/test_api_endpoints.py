@@ -6,7 +6,7 @@ from typing import ClassVar
 import httpx
 
 from wsp_api import Services, create_app
-from wsp_api.addresses import document_href
+from wsp_api.addresses import address_of, document_href
 from wsp_api.schemas import (
     ChangePage,
     Document,
@@ -21,7 +21,8 @@ from wsp_api.schemas import (
 )
 from wsp_api.testing import local_client
 from wsp_api.testing.fakes import SAMPLE_GEN_1, SAMPLE_GEN_2, InMemoryLexicalIndex, sample_services
-from wsp_core.model import SearchHit
+from wsp_core.ids import DocId
+from wsp_core.model import DocRecord, SearchHit
 
 TURING = "wsp:wikipedia-en-zim/A/Alan_Turing"
 
@@ -126,8 +127,49 @@ def test_search_next_offset() -> None:
 
 
 def test_suggest(client: httpx.Client) -> None:
-    body = Suggestions.model_validate(client.get("/v1/suggest", params={"q": "al"}).json())
+    body = Suggestions.model_validate(client.get("/v1/suggest", params={"q": "al", "lang": "en-US"}).json())
     assert body.suggestions == ["Alan Turing"]
+    # Each item opens its document: a picked suggestion searched for its text (2026-11-05 deep dive).
+    [item] = body.items
+    assert (item.text, item.title, item.doc_id) == ("Alan Turing", "Alan Turing", TURING)
+    assert item.address == address_of("wikipedia-en-zim", "A/Alan_Turing")
+    assert client.get("/v1/suggest", params={"q": "al", "lang": "en; drop"}).status_code == 422
+
+
+@dataclass
+class _TitlesOnly:
+    """A lexical index without :class:`wsp_core.ports.DocSuggester` (titles, no documents)."""
+
+    inner: InMemoryLexicalIndex
+
+    def upsert(self, docs: Iterable[DocRecord]) -> int:
+        return self.inner.upsert(docs)
+
+    def delete(self, doc_ids: Iterable[DocId]) -> int:
+        return self.inner.delete(doc_ids)
+
+    def search(
+        self, query: str, *, limit: int = 10, offset: int = 0, sources: Sequence[str] | None = None
+    ) -> Sequence[SearchHit]:
+        return self.inner.search(query, limit=limit, offset=offset, sources=sources)
+
+    def suggest(self, prefix: str, *, limit: int = 10) -> Sequence[str]:
+        return self.inner.suggest(prefix, limit=limit)
+
+    def commit(self) -> None:
+        self.inner.commit()
+
+    def close(self) -> None:
+        self.inner.close()
+
+
+def test_suggest_from_an_index_of_titles_only() -> None:
+    services = sample_services()
+    assert isinstance(services.index, InMemoryLexicalIndex)
+    with local_client(create_app(replace(services, index=_TitlesOnly(services.index)))) as c:
+        body = Suggestions.model_validate(c.get("/v1/suggest", params={"q": "al"}).json())
+    assert body.suggestions == ["Alan Turing"]
+    assert [(i.text, i.doc_id, i.address) for i in body.items] == [("Alan Turing", None, None)]
 
 
 def test_changes_cursor_continues(client: httpx.Client) -> None:

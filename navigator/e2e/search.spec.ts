@@ -183,7 +183,7 @@ test('search-as-you-type suggestions are keyboard-selectable', async ({ page, na
   await page.keyboard.press('Enter');
   await nav.settled();
   await expect(list).toBeHidden();
-  // A suggestion is a title: it searches for it (or opens it).
+  // A suggestion opens its page (an older API's plain title is searched for).
   await expect(nav.main).toContainText(picked);
   await expect(page).not.toHaveTitle(/^WhizBang! Search$/);
 });

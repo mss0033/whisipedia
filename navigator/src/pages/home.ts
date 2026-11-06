@@ -7,8 +7,8 @@ import type { Change, Portal, SourceInfo } from '../api/types.ts';
 import { attachSuggest } from '../chrome/suggest.ts';
 import { makeAddress, searchAddress } from '../core/address.ts';
 import { unfinishedBooks } from '../core/book.ts';
-import { h } from '../core/dom.ts';
-import { formatDate, formatNumber, odometer } from '../core/format.ts';
+import { h, uiLanguage } from '../core/dom.ts';
+import { formatDate, formatNumber, localIsoDay, odometer } from '../core/format.ts';
 import { PLACES } from '../core/places.ts';
 import {
   docLink,
@@ -76,6 +76,85 @@ function sitesList(sources: SourceInfo[]): HTMLElement {
   );
 }
 
+/** Kinds of site worth a random page: reading matter, not data files, map tiles or media. */
+const RANDOM_KINDS: ReadonlySet<string> = new Set([
+  'encyclopedia',
+  'books',
+  'medicine',
+  'news',
+  'dictionary',
+  'law',
+  'qa',
+  'papers',
+]);
+const RANDOM_MIN_DOCS = 50; // fewer is a handful of files (a model's code and papers), not a site
+export const RANDOM_BUTTONS = 4;
+
+/** A seeded PRNG in [0, 1): the same picks all day (mulberry32 over an FNV-1a hash of the seed). */
+function seeded(seed: string): () => number {
+  let a = 0x811c9dc5;
+  for (let i = 0; i < seed.length; i++) a = Math.imul(a ^ seed.charCodeAt(i), 0x01000193);
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function shuffled<T>(items: readonly T[], rng: () => number): T[] {
+  const out = [...items];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [out[i], out[j]] = [out[j]!, out[i]!];
+  }
+  return out;
+}
+
+/**
+ * The start page's random-page sites for `day`: reading sites with more than a handful of pages, one
+ * of each kind before a second of any, in an order that changes daily. The buttons were always the
+ * first four sites by id ("Random American", "Random US", "Random Army", "Random Aurora": a weather
+ * model's files) (2026-11-05 deep dive).
+ */
+export function pickRandomSites(
+  sources: readonly SourceInfo[],
+  day: string,
+  n = RANDOM_BUTTONS,
+): SourceInfo[] {
+  const reading = sources.filter(
+    (s) => RANDOM_KINDS.has(s.kind) && (s.doc_count ?? 0) >= RANDOM_MIN_DOCS,
+  );
+  const rng = seeded(day);
+  const byKind = new Map<string, SourceInfo[]>();
+  for (const s of shuffled(reading.length ? reading : sources, rng)) {
+    const list = byKind.get(s.kind);
+    if (list) list.push(s);
+    else byKind.set(s.kind, [s]);
+  }
+  const queues = shuffled([...byKind.values()], rng);
+  const out: SourceInfo[] = [];
+  for (let round = 0; out.length < n && queues.some((q) => q.length > round); round++) {
+    for (const q of queues) {
+      const s = q[round];
+      if (s && out.length < n) out.push(s);
+    }
+  }
+  return out;
+}
+
+/**
+ * A site's name short enough for a button: before any " (", " - ", ":" or ",", and at most three
+ * words ("Project Gutenberg", "MedlinePlus", "Wikipedia"); `name.split(' ')[0]` gave "Random US"
+ * for the US Army Center of Military History.
+ */
+export function shortSiteName(name: string): string {
+  const head = (name.replace(/^"+|"+$/g, '').split(/\s+\(|\s+[-–—]\s+|[:,;]\s/)[0] ?? '').trim();
+  const words = head.split(/\s+/).filter(Boolean);
+  if (words.length === 0) return name.trim();
+  return words.length > 3 ? `${words.slice(0, 3).join(' ')}…` : words.join(' ');
+}
+
 function whatsNewList(changes: Change[]): HTMLElement {
   return h(
     'ul',
@@ -101,7 +180,12 @@ function whatsNewList(changes: Change[]): HTMLElement {
 
 export async function render(ctx: PageContext): Promise<PageResult> {
   const { app } = ctx;
-  const portal = await optional<Portal>(app.api.portal(ctx.signal));
+  // The reader's language and their own day: the featured article was Arabic one day in two and
+  // "On This Day" was tomorrow's from 7 pm in New York (2026-11-05 deep dive).
+  const today = localIsoDay();
+  const portal = await optional<Portal>(
+    app.api.portal(ctx.signal, { lang: uiLanguage(), date: today }),
+  );
   // Older daemons have no /v1/portal: build the page from the sources and the change feed.
   const sources = portal?.sites ?? (await app.sources());
   const newest =
@@ -122,21 +206,22 @@ export async function render(ctx: PageContext): Promise<PageResult> {
   const totalDocs = sources.reduce((n, s) => n + (s.doc_count ?? 0), 0);
   const visits = app.history.list().find((e) => e.address === 'wsp://home')?.visits ?? 0;
 
+  const randomable = new Set(portal?.random_sources ?? []);
   const randomButtons = h(
     'p',
     { class: 'random-buttons' },
     wspLink(makeAddress('random'), h('span', { class: 'btn-like' }, 'Random page!')),
     ' ',
-    ...sources
-      .filter((s) => (portal ? portal.random_sources.includes(s.id) : (s.doc_count ?? 0) > 0))
-      .slice(0, 4)
-      .flatMap((s) => [
-        wspLink(
-          makeAddress('random', '', { source: s.id }),
-          h('span', { class: 'btn-like' }, `Random ${s.name.split(' ')[0]}`),
-        ),
-        ' ',
-      ]),
+    ...pickRandomSites(
+      sources.filter((s) => (portal ? randomable.has(s.id) : (s.doc_count ?? 0) > 0)),
+      portal?.date ?? today,
+    ).flatMap((s) => [
+      wspLink(
+        makeAddress('random', '', { source: s.id }),
+        h('span', { class: 'btn-like', title: s.name }, `Random ${shortSiteName(s.name)}`),
+      ),
+      ' ',
+    ]),
   );
 
   const center = h(

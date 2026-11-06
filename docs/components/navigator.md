@@ -81,13 +81,13 @@ generated `Routes` table, so neither can drift from the spec. Summary:
 | Endpoint | Notes |
 |---|---|
 | `GET /v1/search?q&sources&kind&limit&offset` | `SearchResults`: `hits[]` with source name, kind, license, `as_of`, plain-text snippet and code-point `highlights`; `facets`, `total`, `took_ms`, `intent`, `navigate_to` (location-bar jumps), `instant`, `did_you_mean`, `low_confidence`. The UI maps its 1-based pages to `offset` |
-| `GET /v1/suggest?q&limit` | `{query, suggestions: string[]}` (titles) |
+| `GET /v1/suggest?q&limit&lang` | `{query, suggestions: string[], items[{text, title, doc_id, address}]}`: `text` is what matched (a title or an alias); picking an item opens `address`. `lang` is the Navigator's language (`<html lang>`), whose documents come first |
 | `GET /v1/documents/{doc_id}?at=<generation>` | `doc_id` is ONE percent-encoded segment. `format: html\|text`, `html` (rewritten original), `text`, `links[{href,target}]`, `vault{generation_id,path,manifest,entry,size,sha256,blake3}` or null, `has_history` |
 | `GET /v1/documents/{doc_id}/history` | `items[{generation_id, content_hash, revision, timestamp, kind}]`, oldest first. The time machine uses generation ids for `?at=` |
 | `GET /v1/sources` | `SourcePage` (`items`, `next_cursor`); `health` drives the status lamp (`status` is the registry lifecycle) |
 | `GET /v1/changes/recent`, `/v1/changes/stream`, `/v1/changes?since` | What's New: newest first, then live over SSE (EventSource), polling `/v1/changes` as the fallback |
 | `GET /v1/system` | Freshness and health per site, degraded generations, ledger tail and `ledger_ok`, uptime |
-| `GET /v1/portal`, `/v1/directory?path=`, `/v1/random?source=` | Start page, directory and random page. The UI falls back to `/v1/sources` and the change feed on 404/501 (older daemons) |
+| `GET /v1/portal?lang&date`, `/v1/directory?path=`, `/v1/random?source=` | Start page, directory and random page. The start page sends the Navigator's language (the featured article) and the reader's local date (the day's picks and "On This Day"). The UI falls back to `/v1/sources` and the change feed on 404/501 (older daemons) |
 | `POST /v1/gaps` | "Not in library" links and missing pages, reported once per session |
 | Errors | Any non-2xx returns `{error:{code,message}}` |
 

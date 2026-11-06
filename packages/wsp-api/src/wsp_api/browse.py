@@ -7,6 +7,7 @@ import ipaddress
 import random
 import secrets
 from collections.abc import Callable, Sequence
+from datetime import UTC, date, datetime
 from typing import Annotated
 from urllib.parse import quote
 
@@ -86,6 +87,20 @@ def _blurb(text: str) -> str:
     return cut + "…"
 
 
+_LANG_TAG = r"^[A-Za-z]{2,8}([-_][A-Za-z0-9]{1,8})*$"
+
+
+def portal_day(now: datetime, asked: date | None) -> date:
+    """The start page's day: the reader's own date when within a day of ``now``'s UTC date (the
+    Navigator sends its local date), else ``now`` in the server's time zone.
+
+    It was ``now``'s UTC date: from 7 pm in New York the start page showed tomorrow's anniversaries
+    and picks (2026-11-05 deep dive)."""
+    if asked is not None and abs((asked - now.astimezone(UTC).date()).days) <= 1:
+        return asked
+    return now.astimezone().date()
+
+
 def is_loopback(request: Request) -> bool:
     host = request.client.host if request.client else ""
     try:
@@ -112,14 +127,32 @@ def browse_router(lib: Library) -> APIRouter:
     # --- Portal ---------------------------------------------------------------------------------
 
     @r.get("/portal", tags=["navigator"], responses=errors(503))
-    async def portal() -> Portal:
+    async def portal(
+        lang: Annotated[
+            str,
+            Query(
+                max_length=35,
+                pattern=_LANG_TAG,
+                description="The reader's language (BCP-47): the featured article is one in it.",
+            ),
+        ] = "en",
+        day: Annotated[
+            date | None,
+            Query(
+                alias="date",
+                description="The reader's own calendar date: the day's picks and anniversaries follow it. "
+                "Used when within a day of the server's date (every time zone is); else the server's "
+                "local date.",
+            ),
+        ] = None,
+    ) -> Portal:
         # The random pick and the featured document read the Refinery (the NAS since ADR-0011).
-        return await lib.nas.run(_portal)
+        return await lib.nas.run(lambda: _portal(lang, day))
 
-    def _portal() -> Portal:
-        today = s.clock().date()
+    def _portal(lang: str, day: date | None) -> Portal:
+        today = portal_day(s.clock(), day)
         portal_source = lib.catalog if isinstance(lib.catalog, PortalSource) else None
-        pick = portal_source.featured(today) if portal_source is not None else None
+        pick = portal_source.featured(today, lang=lang) if portal_source is not None else None
         if pick is None:  # no precomputed picks: a random encyclopedia page, fixed for the day
             encyclopedic = [x.id for x in s.sources if sites.kind_of(x) is DocKind.ENCYCLOPEDIA]
             pick = lib.catalog.random_doc(

@@ -879,15 +879,21 @@ class RefineryCatalog:
 
     def featured(self, day: date, *, lang: str | None = None) -> DocId | None:
         """The day's featured article: from ``lang``'s own candidates where a source has them
-        (``featured_by_lang``), else from each source's default-language list."""
+        (``featured_by_lang``), else from each source's default-language list.
+
+        With ``lang``, a source whose per-language lists have none for it adds nothing: the Wikipedia
+        text dumps (ar, ja, pt, zh) put their Arabic list in as their default, and the English start
+        page featured an Arabic article about one day in two (2026-11-05 deep dive). A source without
+        per-language lists (format 1) still adds its one list."""
         pool: list[str] = []
+        want = None if lang is None else primary_lang(lang)
         for sid in self.featured_sources or self._known_sources():
             entry = self._entry(sid)
             if entry is None:
                 continue
             by_lang = cast(dict[str, list[str]], entry.data.get("featured_by_lang", {}))
-            if lang is not None and by_lang.get(primary_lang(lang)):
-                pool.extend(by_lang[primary_lang(lang)])
+            if want is not None and by_lang:
+                pool.extend(by_lang.get(want, ()))
             else:
                 pool.extend(cast(list[str], entry.data.get("featured", [])))
         if not pool:

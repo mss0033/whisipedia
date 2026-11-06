@@ -22,8 +22,8 @@ import numpy as np
 
 from wsp_core.ids import DocId, InvalidDocIdError, content_hash, parse_doc_id
 from wsp_core.listing import is_default_listing
-from wsp_core.model import DocRecord, SearchHit
-from wsp_core.ports import Embedder, LexicalIndex, Reranker
+from wsp_core.model import DocRecord, SearchHit, Suggestion
+from wsp_core.ports import DocSuggester, Embedder, LexicalIndex, Reranker
 from wsp_index import FusionConfig, HybridSearcher
 from wsp_index.text import STOPWORDS_EN, normalize_key, primary_lang, query_language
 from wsp_oracle.embedder import encode_queries
@@ -932,6 +932,13 @@ class OracleIndex:
 
     def suggest(self, prefix: str, *, limit: int = 10) -> Sequence[str]:
         return self.lexical.suggest(prefix, limit=limit)
+
+    def suggest_docs(self, prefix: str, *, limit: int = 10, lang: str | None = None) -> Sequence[Suggestion]:
+        """:class:`DocSuggester` when the lexical index is one; empty otherwise (the API then falls
+        back to :meth:`suggest`'s plain titles)."""
+        if isinstance(self.lexical, DocSuggester):
+            return self.lexical.suggest_docs(prefix, limit=limit, lang=lang)
+        return ()
 
     def scope(self, query: str, sources: Sequence[str] | None = None) -> Scope | None:
         """Where :meth:`search` looks for this query (a named site, or the whole library)."""

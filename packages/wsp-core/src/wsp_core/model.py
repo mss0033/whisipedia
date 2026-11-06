@@ -397,3 +397,12 @@ class DayEvent:
     year: int  # negative for BC
     text: str
     doc_id: DocId | None = None  # page the entry comes from (or is about)
+
+
+@dataclass(frozen=True, slots=True)
+class Suggestion:
+    """A title suggestion (PLAN §9.3) and the document it opens."""
+
+    text: str  # what matched what was typed: the title, or the alias (a redirect, a label) that did
+    title: str  # the document's own title
+    doc_id: DocId

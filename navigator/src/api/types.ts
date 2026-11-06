@@ -105,9 +105,14 @@ export interface SearchParams {
   page_size?: number | undefined;
 }
 
-/** A location-bar or search-box suggestion: from the API (titles) or from local history. */
+/** A location-bar or search-box suggestion: from the API or from local history. */
 export interface Suggestion {
-  /** A title (`/v1/suggest` returns titles only) or, from History, a page title with its address. */
+  /** What matched: a title, an alias (a redirect, a label) or, from History, a page title. */
   text: string;
+  /** The page it opens; none from an older API, whose suggestions are searched for. */
   address?: string | undefined;
+  /** The document's own title, when an alias matched (shown beside it). */
+  title?: string | undefined;
+  /** From the reader's History. */
+  history?: boolean | undefined;
 }

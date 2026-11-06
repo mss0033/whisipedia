@@ -815,9 +815,22 @@ export interface StationsInfo {
   availability: Availability;
 }
 
+export interface SuggestionItem {
+  /** What matched what was typed: the title, or an alias (a redirect, a label). */
+  text: string;
+  /** The document's own title. */
+  title: string;
+  /** The document it opens; null from an index that cannot say. */
+  doc_id: string | null;
+  /** Navigator address of the document; null with `doc_id`. */
+  address: string | null;
+}
+
 export interface Suggestions {
   query: string;
+  /** The `text` of each of `items`. */
   suggestions: Array<string>;
+  items: Array<SuggestionItem>;
 }
 
 export interface SystemStatus {
@@ -1059,6 +1072,8 @@ export interface Routes {
       /** Text typed so far: titles with a word that starts with it. */
       q: string;
       limit?: number | undefined;
+      /** The reader's language (BCP-47): documents in it come first. */
+      lang?: string | null | undefined;
     };
     body: null;
     response: Suggestions;
@@ -1319,7 +1334,12 @@ export interface Routes {
   /** Portal */
   'GET /v1/portal': {
     path: Record<string, never>;
-    query: Record<string, never>;
+    query: {
+      /** The reader's language (BCP-47): the featured article is one in it. */
+      lang?: string | undefined;
+      /** The reader's own calendar date: the day's picks and anniversaries follow it. Used when within a day of the server's date (every time zone is); else the server's local date. */
+      date?: string | null | undefined;
+    };
     body: null;
     response: Portal;
   };

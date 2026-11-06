@@ -81,8 +81,11 @@ def test_full_suggest_rebuild_offers_redirects(wiki: IndexedSource, tmp_path: Pa
     with TantivyIndex(tmp_path / "ix", cfg, titles=TitleSources([wiki])) as idx:
         idx.upsert(list(wiki.reader.records()))
         set_rank(idx, {make_doc_id("wiki", "Rome"): 0.5})
-        assert idx.suggest("eternal") == ["Rome"]
-        assert idx.suggest("city of") == ["Paris"]
+        # A redirect that matched is shown as itself and opens its target (2026-11-05 deep dive).
+        assert idx.suggest("eternal") == ["Eternal City"]
+        assert [(s.title, s.doc_id) for s in idx.suggest_docs("city of")] == [
+            ("Paris", make_doc_id("wiki", "Paris"))
+        ]
 
 
 def test_water_fill_shares_equally_and_gives_leftovers_on() -> None:
@@ -220,7 +223,7 @@ def test_suggest_scans_are_paced_by_bytes(wiki: IndexedSource) -> None:
         clock["t"] += s
 
     limiter = RateLimiter(1000.0, burst_seconds=0.0, monotonic=lambda: clock["t"], sleep=sleep)
-    total = sum(b.nbytes for b in wiki.reader.scan(["doc_id", "title", "aliases"]))
+    total = sum(b.nbytes for b in wiki.reader.scan(["doc_id", "title", "aliases", "lang"]))
     assert total > 0
     TitleSources([wiki], limiter=limiter).suggest_entries(None, budget=100)
     assert sum(slept) == pytest.approx(total / 1000.0)

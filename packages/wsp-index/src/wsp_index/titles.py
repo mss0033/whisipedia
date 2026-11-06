@@ -15,9 +15,10 @@ suggest trie's entries.
 from __future__ import annotations
 
 import sqlite3
+import sys
 from collections.abc import Iterator, Sequence
 from contextlib import closing
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import cast
 
@@ -108,7 +109,8 @@ class TitleSources:
         turns of :data:`SUGGEST_TURN` titles, in Refinery order, so a library without ranks still offers
         titles of every source. Where redirect tables exist, :data:`SUGGEST_REDIRECT_SHARE` of the keys
         is kept for the chosen titles' redirect aliases. One scan of the Refinery's
-        ``doc_id``/``title``/``aliases`` columns and one of each redirect table.
+        ``doc_id``/``title``/``aliases``/``lang`` columns and one of each redirect table (the language
+        ranks a reader's own first, 2026-11-05 deep dive).
         """
         total = budget
         if any(p.is_file() for src in self.sources for p in src.redirects):
@@ -122,7 +124,7 @@ class TitleSources:
         for src in self.sources:
             mine = turns.setdefault(src.source_id, [])
             cap = allot.get(src.source_id, 0)
-            for batch in self._scan(src, ["doc_id", "title", "aliases"]):
+            for batch in self._scan(src, ["doc_id", "title", "aliases", "lang"]):
                 ids = cast(list[str], batch.column(0).to_pylist())
                 hit = np.zeros(len(ids), dtype=np.bool_)
                 if len(top):
@@ -135,6 +137,7 @@ class TitleSources:
                     continue
                 titles = cast(list[str], batch.column(1).to_pylist())
                 names = cast(list[list[str] | None], batch.column(2).to_pylist())
+                langs = [sys.intern(x or "") for x in cast(list[str | None], batch.column(3).to_pylist())]
                 rows = np.flatnonzero(hit).tolist()
                 priors = (
                     cast(StaticRank, rank).features([ids[i] for i in rows])
@@ -143,20 +146,19 @@ class TitleSources:
                 )
                 for i, prior in zip(rows, priors, strict=True):
                     if titles[i] and prior > 0:
-                        ranked.append(SuggestEntry(ids[i], titles[i], _clean(names[i]), float(prior)))
+                        ranked.append(
+                            SuggestEntry(ids[i], titles[i], _clean(names[i]), float(prior), langs[i])
+                        )
                 if room > 0:
                     for i in np.flatnonzero(~hit).tolist():
                         if titles[i]:
-                            mine.append(SuggestEntry(ids[i], titles[i], _clean(names[i]), 0.0))
+                            mine.append(SuggestEntry(ids[i], titles[i], _clean(names[i]), 0.0, langs[i]))
                             if len(mine) >= cap:
                                 break
         if rank is not None:  # unranked here means "not in the top half"; most still have a rank
             for sid, entries in turns.items():
                 feats = rank.features([e.doc_id for e in entries])
-                turns[sid] = [
-                    SuggestEntry(e.doc_id, e.title, e.aliases, float(f))
-                    for e, f in zip(entries, feats, strict=True)
-                ]
+                turns[sid] = [replace(e, prior=float(f)) for e, f in zip(entries, feats, strict=True)]
         ranked.sort(key=lambda e: (-e.prior, e.doc_id))
         chosen: list[SuggestEntry] = []
         used = 0
@@ -202,7 +204,7 @@ class TitleSources:
             if more and room > 0:
                 new = [a for a in dict.fromkeys(more) if a not in e.aliases][:room]
                 room -= len(new)
-                e = SuggestEntry(e.doc_id, e.title, (*e.aliases, *new), e.prior)
+                e = replace(e, aliases=(*e.aliases, *new))
             out.append(e)
         return out
 

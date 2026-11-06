@@ -69,6 +69,14 @@ export function clear(el: Element): void {
   el.replaceChildren();
 }
 
+/**
+ * The language of the Navigator's own words (`<html lang>`): suggestions and the featured article
+ * prefer documents in it.
+ */
+export function uiLanguage(): string {
+  return document.documentElement.lang || 'en';
+}
+
 let idCounter = 0;
 export function uid(prefix = 'wsp'): string {
   idCounter += 1;

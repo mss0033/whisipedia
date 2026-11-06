@@ -34,6 +34,7 @@ from wsp_core.model import (
     SearchHit,
     SourceSpec,
     SourceStatus,
+    Suggestion,
     Tier,
     UpdateStrategy,
 )
@@ -124,6 +125,26 @@ class InMemoryLexicalIndex:
             return ()
         names = {n for d in self._docs.values() for n in (d.title, *d.aliases) if n.casefold().startswith(p)}
         return tuple(sorted(names)[:limit])
+
+    def suggest_docs(self, prefix: str, *, limit: int = 10, lang: str | None = None) -> Sequence[Suggestion]:
+        """Each matching title or alias once, with its document: ``lang``'s documents first, then by text."""
+        p = prefix.casefold().strip()
+        if not p:
+            return ()
+        want = (lang or "").split("-")[0].casefold()
+        found = sorted(
+            (
+                (bool(want) and d.lang.split("-")[0].casefold() != want, n, d)
+                for d in self._docs.values()
+                for n in dict.fromkeys((d.title, *d.aliases))
+                if n.casefold().startswith(p)
+            ),
+            key=lambda x: (x[0], x[1], x[2].doc_id),
+        )
+        out: dict[str, Suggestion] = {}
+        for _, n, d in found:
+            out.setdefault(n, Suggestion(text=n, title=d.title, doc_id=d.doc_id))
+        return tuple(out.values())[:limit]
 
     def close(self) -> None:
         self._pending.clear()

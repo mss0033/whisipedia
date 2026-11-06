@@ -72,9 +72,15 @@ compression measured. Groups larger than 1,024 rows push lookups past the API bu
 
 ## Suggest (< 10 ms)
 
-Every title and alias becomes one key, `normalized\x1fTitle\x1fdoc_id`, stored in a MARISA trie
-(`marisa-trie`, mmapped) with a float32 score. The score is `prior + 1/(1+len(title))`, where
-`prior` is the static-rank feature (PageRank, below), read from `static_rank.bin`. A full rebuild
+Every title and alias becomes one key, `normalized\x1fTitle\x1falias\x1flang\x1fdoc_id` (alias
+empty on the title's own key; builds before 2026-11-05 wrote `normalized\x1fTitle\x1fdoc_id` and no
+`FORMAT` file, and are still read), stored in a MARISA trie (`marisa-trie`, mmapped) with a float32
+score. The score is `prior + 1/(1+len(title))`, where `prior` is the static-rank feature (PageRank,
+below), read from `static_rank.bin`; an alias key scores 2 lower, so titles that start with what was
+typed come before documents only an alias matched (an alias typed in full ranks with the titles).
+A query reads `4 × limit` candidates (at most 32, or `limit`) and ranks the reader's language (`lang`) first. An alias match
+shows the alias and opens its document: "pho" listed 磷, 摄影 and 音位 through their English labels
+(2026-11-05 deep dive). A full rebuild
 takes its titles and aliases from the Refinery and the redirect tables (`wsp_index.titles`), never
 from a copy in a database (ADR-0011). Very short prefixes match too many keys to
 rank on every keystroke, so at build time each prefix with more than 512 completions stores its

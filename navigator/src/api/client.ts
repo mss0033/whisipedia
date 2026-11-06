@@ -180,8 +180,9 @@ export class WspClient {
     );
   }
 
-  suggest(q: string, limit = 8, signal?: AbortSignal): Promise<Suggestions> {
-    return this.get('GET /v1/suggest', NO_PATH, { q, limit }, signal);
+  /** `lang`: the reader's language (BCP-47); documents in it come first. */
+  suggest(q: string, limit = 8, signal?: AbortSignal, lang?: string): Promise<Suggestions> {
+    return this.get('GET /v1/suggest', NO_PATH, { q, limit, lang }, signal);
   }
 
   /**
@@ -357,8 +358,9 @@ export class WspClient {
     return { started: !!out?.started, message: out?.message ?? '' };
   }
 
-  portal(signal?: AbortSignal): Promise<Portal> {
-    return this.get('GET /v1/portal', NO_PATH, {}, signal);
+  /** `lang`: the featured article's language; `date`: the reader's own day (YYYY-MM-DD). */
+  portal(signal?: AbortSignal, opts: { lang?: string; date?: string } = {}): Promise<Portal> {
+    return this.get('GET /v1/portal', NO_PATH, { lang: opts.lang, date: opts.date }, signal);
   }
 
   directory(path: string, signal?: AbortSignal): Promise<DirectoryPage> {

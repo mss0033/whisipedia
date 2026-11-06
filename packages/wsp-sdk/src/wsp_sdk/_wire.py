@@ -72,8 +72,8 @@ def search(q: str, sources: Sequence[str] | None, limit: int, offset: int, kind:
     )
 
 
-def suggest(q: str, limit: int) -> Req:
-    return Req("GET", "/v1/suggest", _p(q=q, limit=limit))
+def suggest(q: str, limit: int, lang: str | None = None) -> Req:
+    return Req("GET", "/v1/suggest", _p(q=q, limit=limit, lang=lang))
 
 
 def changes(since: str | None, limit: int) -> Req:

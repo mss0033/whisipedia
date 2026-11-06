@@ -724,6 +724,26 @@
               "default": 10,
               "title": "Limit"
             }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 35,
+                  "pattern": "^[A-Za-z]{2,8}([-_][A-Za-z0-9]{1,8})*$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The reader's language (BCP-47): documents in it come first.",
+              "title": "Lang"
+            },
+            "description": "The reader's language (BCP-47): documents in it come first."
           }
         ],
         "responses": {
@@ -2679,6 +2699,41 @@
         ],
         "summary": "Portal",
         "operationId": "portal_v1_portal_get",
+        "parameters": [
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 35,
+              "pattern": "^[A-Za-z]{2,8}([-_][A-Za-z0-9]{1,8})*$",
+              "description": "The reader's language (BCP-47): the featured article is one in it.",
+              "default": "en",
+              "title": "Lang"
+            },
+            "description": "The reader's language (BCP-47): the featured article is one in it."
+          },
+          {
+            "name": "date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The reader's own calendar date: the day's picks and anniversaries follow it. Used when within a day of the server's date (every time zone is); else the server's local date.",
+              "title": "Date"
+            },
+            "description": "The reader's own calendar date: the day's picks and anniversaries follow it. Used when within a day of the server's date (every time zone is); else the server's local date."
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -2702,6 +2757,16 @@
           },
           "503": {
             "description": "unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid_request",
             "content": {
               "application/json": {
                 "schema": {
@@ -7368,6 +7433,52 @@
         ],
         "title": "StationsInfo"
       },
+      "SuggestionItem": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "title": "Text",
+            "description": "What matched what was typed: the title, or an alias (a redirect, a label)."
+          },
+          "title": {
+            "type": "string",
+            "title": "Title",
+            "description": "The document's own title."
+          },
+          "doc_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Doc Id",
+            "description": "The document it opens; null from an index that cannot say."
+          },
+          "address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address",
+            "description": "Navigator address of the document; null with `doc_id`."
+          }
+        },
+        "type": "object",
+        "required": [
+          "text",
+          "title",
+          "doc_id",
+          "address"
+        ],
+        "title": "SuggestionItem"
+      },
       "Suggestions": {
         "properties": {
           "query": {
@@ -7379,13 +7490,22 @@
               "type": "string"
             },
             "type": "array",
-            "title": "Suggestions"
+            "title": "Suggestions",
+            "description": "The `text` of each of `items`."
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SuggestionItem"
+            },
+            "type": "array",
+            "title": "Items"
           }
         },
         "type": "object",
         "required": [
           "query",
-          "suggestions"
+          "suggestions",
+          "items"
         ],
         "title": "Suggestions"
       },

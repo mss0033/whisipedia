@@ -62,6 +62,15 @@ export function isoDay(ts: string | number | Date): string {
   return Number.isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10);
 }
 
+/**
+ * YYYY-MM-DD on the reader's own clock (their time zone): the start page's day. The server's UTC
+ * day showed tomorrow's "On This Day" from 7 pm in New York (2026-11-05 deep dive).
+ */
+export function localIsoDay(d: Date = new Date()): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${String(d.getFullYear()).padStart(4, '0')}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 export function formatNumber(n: number): string {
   return numFmt.format(n);
 }

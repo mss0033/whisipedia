@@ -103,6 +103,28 @@ def test_featured_per_language_and_ranked_directory(tmp_path: Path) -> None:
     feed.close()
 
 
+def test_featured_in_a_language_skips_sources_without_it(tmp_path: Path) -> None:
+    """2026-11-05 deep dive: the Wikipedia text dumps (no English) put their Arabic list in as their
+    default, and the English start page featured an Arabic article about one day in two."""
+    refinery = tmp_path / "refinery"
+    with RefineryWriter(refinery, "wikipedia-en", "g1") as w:
+        w.write([doc("wikipedia-en", f"en/E{i}", f"E{i}", LONG) for i in range(3)])
+    with RefineryWriter(refinery, "wikipedia-ar", "g1") as w:
+        w.write([doc("wikipedia-ar", f"ar/A{i}", f"A{i}", LONG, lang="ar") for i in range(3)])
+    cfg = CatalogConfig(featured=True, featured_candidates=3, min_featured_chars=100)
+    for sid in ("wikipedia-en", "wikipedia-ar"):
+        build_source_catalog(refinery, sid, "g1", tmp_path / "catalog", cfg)
+    feed = SqliteChangeFeed(tmp_path / "f.sqlite")
+    cat = RefineryCatalog(refinery, tmp_path / "catalog", feed)
+    days = [date(2026, 1, d) for d in range(1, 29)]
+    assert {str(cat.featured(d, lang="en-US")).split("/")[1] for d in days} == {"en"}
+    assert {str(cat.featured(d, lang="ar")).split("/")[1] for d in days} == {"ar"}
+    assert cat.featured(days[0], lang="ja") is None  # no source has Japanese
+    # Without a language, both default lists still count (format 1 callers).
+    assert {str(cat.featured(d)).split("/")[1] for d in days} == {"en", "ar"}
+    feed.close()
+
+
 def test_inlinks_are_counted_across_all_parts(tmp_path: Path) -> None:
     """Without a rank, the most-linked page wins even when its linkers are stored last."""
     pages = [doc("w-x", f"A{i:03d}", f"A{i}", LONG, links=("wsp:w-x/Early",)) for i in range(40)]

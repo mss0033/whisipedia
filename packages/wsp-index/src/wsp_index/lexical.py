@@ -54,7 +54,7 @@ import time
 import unicodedata
 from collections import Counter, OrderedDict
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import TracebackType
 from typing import Any, Self, cast
@@ -64,7 +64,7 @@ import numpy.typing as npt
 import tantivy
 
 from wsp_core.ids import DocId
-from wsp_core.model import BYLINE_META, DocRecord, SearchHit
+from wsp_core.model import BYLINE_META, DocRecord, SearchHit, Suggestion
 from wsp_index.linkrank import RANK_FILE, StaticRank, key64
 from wsp_index.localfs import ensure_local
 from wsp_index.suggest import (
@@ -502,7 +502,7 @@ class TantivyIndex:
                     writer.add_document(tdoc)
                 if doc.title:
                     aliases = tuple(a for a in doc.aliases if a.strip())
-                    staged.append(SuggestEntry(doc.doc_id, doc.title, aliases, 0.0))
+                    staged.append(SuggestEntry(doc.doc_id, doc.title, aliases, 0.0, doc.lang))
                 n += 1
             if self._suggest_room(len(staged)):
                 self._pending_suggest.extend(self._with_priors(staged))
@@ -646,9 +646,7 @@ class TantivyIndex:
         if rank is None or not entries:
             return entries
         feats = rank.features([e.doc_id for e in entries])
-        return [
-            SuggestEntry(e.doc_id, e.title, e.aliases, float(f)) for e, f in zip(entries, feats, strict=True)
-        ]
+        return [replace(e, prior=float(f)) for e, f in zip(entries, feats, strict=True)]
 
     def _suggest_entries(self) -> list[SuggestEntry]:
         """Every entry of a full trie rebuild, at most ``suggest_max_keys`` keys."""
@@ -662,10 +660,10 @@ class TantivyIndex:
         entries: list[SuggestEntry] = []
         for _, a in found.hits:
             doc = searcher.doc(a)
-            route = self.route(str(doc.get_first("lang") or ""))
-            title = str(doc.get_first(f"title_{route}") or "")
+            lang = str(doc.get_first("lang") or "")
+            title = str(doc.get_first(f"title_{self.route(lang)}") or "")
             if title:
-                entries.append(SuggestEntry(str(doc.get_first("doc_id")), title))
+                entries.append(SuggestEntry(str(doc.get_first("doc_id")), title, lang=lang))
         entries = sorted(self._with_priors(entries), key=lambda e: (-e.prior, e.doc_id))
         out: list[SuggestEntry] = []
         used = 0
@@ -735,6 +733,11 @@ class TantivyIndex:
         the suggest trie (:meth:`Suggester.named`): the targets of a name the search words miss."""
         self._reload_trie_if_rebuilt()
         return self._suggester.named(text, limit=limit)
+
+    def suggest_docs(self, prefix: str, *, limit: int = 10, lang: str | None = None) -> Sequence[Suggestion]:
+        """:class:`wsp_core.ports.DocSuggester`: :meth:`suggest` with the documents, ``lang``'s first."""
+        self._reload_trie_if_rebuilt()
+        return self._suggester.suggest_docs(prefix, limit=limit, lang=lang)
 
     def _trie_file_stamp(self) -> tuple[int, int, int]:
         """Identity of the trie file on disk: a rebuild changes at least one of these."""

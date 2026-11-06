@@ -51,6 +51,7 @@ def test_unhandled_exception_is_500_envelope_without_internals() -> None:
         raise RuntimeError("/secret/path/on/disk")
 
     services.index.suggest = boom  # type: ignore[method-assign]
+    services.index.suggest_docs = boom  # type: ignore[method-assign]
     with local_client(create_app(services)) as c:
         r = c.get("/v1/suggest", params={"q": "a"})
     assert r.status_code == 500

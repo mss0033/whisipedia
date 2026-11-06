@@ -141,9 +141,13 @@ def test_suggest_priors_and_aliases(index: TantivyIndex) -> None:
     index.upsert([paris, doc("s", "pc", "Paris Commune"), doc("s", "ph", "Paris Hilton")])
     index.commit()
     assert index.suggest("paris") == ["Paris", "Paris Hilton", "Paris Commune"]  # shorter first
-    assert index.suggest("city of") == ["Paris"]  # the document's own aliases join at once
+    # The document's own aliases join at once, shown as themselves (2026-11-05 deep dive).
+    assert [(s.text, s.title) for s in index.suggest_docs("city of")] == [("City of Light", "Paris")]
     set_rank(index, {make_doc_id("s", "pc"): 0.9})  # priors are the static rank's features
     assert index.suggest("paris")[0] == "Paris Commune"
+    index.upsert([doc("s", "pb", "Parisbahn", lang="de")])
+    index.commit()
+    assert [s.title for s in index.suggest_docs("paris", lang="de-CH")][:2] == ["Parisbahn", "Paris Commune"]
 
 
 def test_suggest_rebuild_path_matches_overlay_path(tmp_path: Path) -> None:

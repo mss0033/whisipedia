@@ -220,8 +220,9 @@ class WspClient:
                 return
             offset = page.next_offset
 
-    def suggest(self, q: str, *, limit: int = 10) -> Suggestions:
-        return _parse(Suggestions, self._send(w.suggest(q, limit)))
+    def suggest(self, q: str, *, limit: int = 10, lang: str | None = None) -> Suggestions:
+        """Titles and aliases starting with ``q``, each with the document it opens; ``lang``'s first."""
+        return _parse(Suggestions, self._send(w.suggest(q, limit, lang)))
 
     # --- change feed ---
 
@@ -412,8 +413,9 @@ class AsyncWspClient:
                 return
             offset = page.next_offset
 
-    async def suggest(self, q: str, *, limit: int = 10) -> Suggestions:
-        return _parse(Suggestions, await self._send(w.suggest(q, limit)))
+    async def suggest(self, q: str, *, limit: int = 10, lang: str | None = None) -> Suggestions:
+        """Titles and aliases starting with ``q``, each with the document it opens; ``lang``'s first."""
+        return _parse(Suggestions, await self._send(w.suggest(q, limit, lang)))
 
     async def changes(self, *, since: str | None = None, limit: int = 1000) -> ChangePage:
         return _parse(ChangePage, await self._send(w.changes(since, limit)))

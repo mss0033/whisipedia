@@ -11,6 +11,7 @@ import pytest
 
 from wsp_api import create_app
 from wsp_api.addresses import document_href
+from wsp_api.browse import portal_day
 from wsp_api.gaps import JsonlGapLog
 from wsp_api.htmlrewrite import rewrite_html
 from wsp_api.schemas import (
@@ -249,22 +250,46 @@ def test_portal(browse: httpx.Client) -> None:
 class _PortalCatalog(CategorizedCatalog):
     """A catalog with precomputed start-page picks (``wsp_core.ports.PortalSource``)."""
 
-    def featured(self, day: date) -> DocId | None:
+    asked: list[tuple[date, str | None]]  # (day, lang) of each pick asked for
+
+    def featured(self, day: date, *, lang: str | None = None) -> DocId | None:
+        self.asked.append((day, lang))
         return DocId(ENIGMA)
 
     def on_this_day(self, day: date, *, limit: int = 5) -> Sequence[DayEvent]:
+        self.asked.append((day, None))
         return [DayEvent(1912, "Turing is born (not really today).", DocId(TURING))][:limit]
 
 
 def test_portal_uses_precomputed_picks() -> None:
     base = browse_services()
     assert isinstance(base.catalog, CategorizedCatalog)
-    services = replace(base, catalog=_PortalCatalog(base.changes, base.catalog.category_map))
+    catalog = _PortalCatalog(base.changes, base.catalog.category_map)
+    catalog.asked = []
+    # 21:51 in New York on 5 November is 02:51 UTC on the 6th (2026-11-05 deep dive).
+    services = replace(base, catalog=catalog, clock=lambda: datetime(2026, 11, 6, 2, 51, tzinfo=UTC))
     with local_client(create_app(services)) as c:
         portal = Portal.model_validate(c.get("/v1/portal").json())
+        assert catalog.asked[0][1] == "en"  # English unless the reader says otherwise
+        catalog.asked.clear()
+        local = Portal.model_validate(
+            c.get("/v1/portal", params={"lang": "en-US", "date": "2026-11-05"}).json()
+        )
+        assert catalog.asked == [(date(2026, 11, 5), "en-US"), (date(2026, 11, 5), None)]
+        assert local.date == date(2026, 11, 5)  # the reader's own day, not the server's UTC one
+        assert c.get("/v1/portal", params={"lang": "e n"}).status_code == 422
     assert portal.featured is not None
     assert portal.featured.doc_id == ENIGMA
     assert [(e.year, e.doc_id) for e in portal.on_this_day] == [(1912, TURING)]
+
+
+def test_portal_day_is_the_readers_date_within_a_day_of_the_servers() -> None:
+    now = datetime(2026, 11, 6, 2, 51, tzinfo=UTC)
+    assert portal_day(now, date(2026, 11, 5)) == date(2026, 11, 5)  # New York, the evening before
+    assert portal_day(now, date(2026, 11, 7)) == date(2026, 11, 7)  # Kiribati (UTC+14), a day ahead
+    # A date further off is not any time zone's today: the server's own local date then.
+    assert portal_day(now, date(2026, 11, 9)) == now.astimezone().date()
+    assert portal_day(now, None) == now.astimezone().date()
 
 
 def test_directory_tree(browse: httpx.Client) -> None:

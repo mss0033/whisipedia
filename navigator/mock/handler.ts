@@ -319,14 +319,26 @@ function mockScope(lq: string): SearchResults['scope'] {
 export function suggest(params: URLSearchParams): Response<'GET /v1/suggest'> {
   const q = (params.get('q') ?? '').toLowerCase().trim();
   const limit = Number(params.get('limit') ?? 8) || 8;
-  if (!q) return { query: q, suggestions: [] };
+  if (!q) return { query: q, suggestions: [], items: [] };
+  const item = (d: FixtureDoc, text: string) => ({
+    text,
+    title: d.title,
+    doc_id: docId(d),
+    address: address(d),
+  });
   const titles = DOCS.filter(
     (d) =>
       d.native_id !== 'Main_Page' &&
       (d.title.toLowerCase().startsWith(q) || d.title.toLowerCase().includes(` ${q}`)),
-  ).map((d) => d.title);
-  const phrases = DOCS.flatMap((d) => d.aliases ?? []).filter((a) => a.startsWith(q) && a !== q);
-  return { query: q, suggestions: [...new Set([...titles, ...phrases])].slice(0, limit) };
+  ).map((d) => item(d, d.title));
+  // An alias that matched is shown as itself and opens its document, like the API's.
+  const phrases = DOCS.flatMap((d) =>
+    (d.aliases ?? []).filter((a) => a.startsWith(q) && a !== q).map((a) => item(d, a)),
+  );
+  const byText = new Map<string, ReturnType<typeof item>>();
+  for (const i of [...titles, ...phrases]) if (!byText.has(i.text)) byText.set(i.text, i);
+  const items = [...byText.values()].slice(0, limit);
+  return { query: q, suggestions: items.map((i) => i.text), items };
 }
 
 /** Versions are newest first; generation ids are the version dates. */

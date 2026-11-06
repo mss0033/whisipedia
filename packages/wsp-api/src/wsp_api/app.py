@@ -33,7 +33,7 @@ from fastapi.telemetry import TelemetryConfig
 from starlette.middleware.gzip import DEFAULT_EXCLUDED_CONTENT_TYPES, GZipMiddleware
 
 from wsp_api import convert, memory, sites
-from wsp_api.addresses import resolve
+from wsp_api.addresses import address_of, resolve
 from wsp_api.browse import browse_router
 from wsp_api.errors import ApiError, error_response, errors, install_error_handlers, streamed
 from wsp_api.files import files_router
@@ -59,6 +59,7 @@ from wsp_api.schemas import (
     SourceFreshness,
     SourceInfo,
     SourcePage,
+    SuggestionItem,
     Suggestions,
     SystemStatus,
     TranslatedSegment,
@@ -77,8 +78,9 @@ from wsp_api.weather import weather_router
 from wsp_api.zimread import ZimUnavailable
 from wsp_core.activity import ActivityMiddleware
 from wsp_core.errors import TranslationUnavailableError
-from wsp_core.ids import DocId
+from wsp_core.ids import DocId, parse_doc_id
 from wsp_core.listing import is_replay_stub
+from wsp_core.ports import DocSuggester
 
 RECENT_SCAN_MAX = 50_000  # changes read back at most to fill one What's New page
 
@@ -418,8 +420,32 @@ def _v1(lib: Library, settings: ApiSettings) -> APIRouter:
             Query(max_length=200, description="Text typed so far: titles with a word that starts with it."),
         ],
         limit: Annotated[int, Query(ge=1, le=50)] = 10,
+        lang: Annotated[
+            str | None,
+            Query(
+                max_length=35,
+                pattern=r"^[A-Za-z]{2,8}([-_][A-Za-z0-9]{1,8})*$",
+                description="The reader's language (BCP-47): documents in it come first.",
+            ),
+        ] = None,
     ) -> Suggestions:
-        return Suggestions(query=q, suggestions=list(s.index.suggest(q, limit=limit)))
+        # Each item carries the document it opens: picking a suggestion searched for its text, so
+        # picking "磷" (Phosphorus's Chinese article, matched by its English label) searched for "磷"
+        # (2026-11-05 deep dive).
+        found = s.index.suggest_docs(q, limit=limit, lang=lang) if isinstance(s.index, DocSuggester) else ()
+        if found:
+            items = [
+                SuggestionItem(
+                    text=x.text, title=x.title, doc_id=x.doc_id, address=address_of(*parse_doc_id(x.doc_id))
+                )
+                for x in found
+            ]
+        else:
+            items = [
+                SuggestionItem(text=t, title=t, doc_id=None, address=None)
+                for t in s.index.suggest(q, limit=limit)
+            ]
+        return Suggestions(query=q, suggestions=[i.text for i in items], items=items)
 
     # --- Change feed ----------------------------------------------------------------------------
 

@@ -46,6 +46,7 @@ from wsp_core.model import (
     RemoteHead,
     SearchHit,
     SourceSpec,
+    Suggestion,
     Verdict,
 )
 
@@ -357,6 +358,19 @@ class LexicalIndex(Protocol):
 
 
 @runtime_checkable
+class DocSuggester(Protocol):
+    """Optional :class:`LexicalIndex` capability: suggestions with the document each one opens.
+
+    Checked with ``isinstance``; an index without it gets plain-text suggestions, which a reader can
+    only search for (picking "磷" searched for it instead of opening Phosphorus, 2026-11-05 deep dive).
+    """
+
+    def suggest_docs(self, prefix: str, *, limit: int = 10, lang: str | None = None) -> Sequence[Suggestion]:
+        """:meth:`LexicalIndex.suggest` with the documents, ``lang``'s first when given (BCP-47)."""
+        ...
+
+
+@runtime_checkable
 class VectorIndex(Protocol):
     def upsert(self, ids: Sequence[str], vectors: Sequence[Sequence[float]]) -> None: ...
 
@@ -472,8 +486,9 @@ class PortalSource(Protocol):
     "On this day" (PLAN §10.2).
     """
 
-    def featured(self, day: date) -> DocId | None:
-        """A well-linked encyclopedia article, the same for the whole ``day``."""
+    def featured(self, day: date, *, lang: str | None = None) -> DocId | None:
+        """A well-linked encyclopedia article, the same for the whole ``day``; in ``lang`` (BCP-47)
+        when given, from the sources that have articles in it."""
         ...
 
     def on_this_day(self, day: date, *, limit: int = 5) -> Sequence[DayEvent]:

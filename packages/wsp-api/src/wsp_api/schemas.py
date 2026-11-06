@@ -432,9 +432,19 @@ class SearchResults(_Wire):
     )
 
 
+class SuggestionItem(_Wire):
+    text: str = Field(
+        description="What matched what was typed: the title, or an alias (a redirect, a label)."
+    )
+    title: str = Field(description="The document's own title.")
+    doc_id: str | None = Field(description="The document it opens; null from an index that cannot say.")
+    address: str | None = Field(description="Navigator address of the document; null with `doc_id`.")
+
+
 class Suggestions(_Wire):
     query: str
-    suggestions: list[str]
+    suggestions: list[str] = Field(description="The `text` of each of `items`.")
+    items: list[SuggestionItem] = Field(default_factory=list[SuggestionItem])
 
 
 # --- Change feed -------------------------------------------------------------------------------
