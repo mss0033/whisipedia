@@ -92,8 +92,9 @@ from wsp_index.refinery import (
 )
 from wsp_index.spelling import SPELL_FILE, SPELL_INPUTS, SpellCache, SpellConfig, VocabStats, build_vocabulary
 from wsp_index.titles import IndexedSource, TitleSources
-from wsp_orchestrator.errors import ResourceBusyError, StepCancelledError
+from wsp_orchestrator.errors import FailureKind, ResourceBusyError, StepCancelledError, classify
 from wsp_orchestrator.pipeline import RefineResult
+from wsp_vault.canary import MountUnavailableError
 from wsp_vault.cancel import Interrupted
 from wsp_vault.ratelimit import RateLimiter
 
@@ -130,7 +131,26 @@ _STOPS: tuple[type[BaseException], ...] = (
     StepCancelledError,
     Interrupted,
     IndexStateError,
+    MountUnavailableError,
 )
+# A failure of the machine or its storage, not of one source: the NAS gone (ESTALE, ENOTCONN...), the
+# disk full, memory out, a lock held. Every source after it would "fail" the same way, and the shared
+# phases after the build (rank, suggest, spell) would rebuild from what was still readable.
+_MACHINE_KINDS = frozenset({FailureKind.BUSY, FailureKind.UNAVAILABLE, FailureKind.RESOURCE})
+
+
+def _stops_the_run(exc: BaseException) -> bool:
+    """Whether ``exc`` (or an exception it was raised from) ends the whole build, not one source."""
+    seen: set[int] = set()
+    cur: BaseException | None = exc
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        if isinstance(cur, _STOPS) or classify(cur) in _MACHINE_KINDS:
+            return True
+        cur = cur.__cause__ or cur.__context__
+    return False
+
+
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
 
@@ -926,9 +946,9 @@ class Indexer:
             # (interrupt, lock, memory) still ends the run.
             try:
                 report = self._build_source(sid, explicit=bool(source_ids))
-            except _STOPS:
-                raise
             except Exception as exc:
+                if _stops_the_run(exc):
+                    raise
                 report = self._source_failed(sid, exc)
             if report is not None:
                 reports.append(report)

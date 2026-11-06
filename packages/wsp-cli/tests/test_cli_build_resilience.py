@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import errno
 import io
+import json
 import logging
 from collections.abc import Generator, Iterator
 from pathlib import Path
@@ -14,12 +16,14 @@ from typing import Any
 import pytest
 
 from wsp_cli import ops
-from wsp_cli.indexer import Indexer, SourceReport
+from wsp_cli.indexer import Indexer, IndexStateError, SourceReport
 from wsp_cli.locks import LockHeldError
 from wsp_core.ids import content_hash, make_doc_id
 from wsp_core.model import DocRecord, Generation, GenerationStatus, SourceSpec, SourceStatus, Tier
 from wsp_index import SqliteChangeFeed, TantivyIndex
 from wsp_index.refinery import generation_dir, is_sealed
+from wsp_orchestrator.errors import StorageUnavailableError
+from wsp_vault.canary import MountUnavailableError
 from wsp_vault.cancel import Interrupted
 
 GID = "2026-10-27"
@@ -132,10 +136,42 @@ def test_a_source_that_raises_is_reported_and_the_others_are_indexed(
         assert ix.index.has_source(BROKEN)
 
 
+def _wrapped_estale() -> RuntimeError:
+    try:
+        raise OSError(errno.ESTALE, "Stale file handle")
+    except OSError as cause:
+        try:
+            raise RuntimeError("refinery part unreadable") from cause
+        except RuntimeError as exc:
+            return exc
+
+
 @pytest.mark.parametrize(
     "stop",
-    [MemoryError(), KeyboardInterrupt(), Interrupted("shutdown"), LockHeldError("index lock held")],
-    ids=["memory", "keyboard", "interrupted", "lock"],
+    [
+        MemoryError(),
+        KeyboardInterrupt(),
+        Interrupted("shutdown"),
+        LockHeldError("index lock held"),
+        OSError(errno.ESTALE, "Stale file handle"),  # the NAS went away: every source would "fail"
+        OSError(errno.ENOSPC, "No space left on device"),
+        MountUnavailableError("vault mount not answering"),
+        StorageUnavailableError("NAS down"),
+        IndexStateError("lexical index rebuilt alone"),
+        _wrapped_estale(),  # raised from a storage error: still the storage
+    ],
+    ids=[
+        "memory",
+        "keyboard",
+        "interrupted",
+        "lock",
+        "estale",
+        "enospc",
+        "mount",
+        "storage",
+        "state",
+        "cause",
+    ],
 )
 def test_a_stop_still_ends_the_build(tmp_path: Path, stop: BaseException) -> None:
     adapter = Adapter()
@@ -145,23 +181,57 @@ def test_a_stop_still_ends_the_build(tmp_path: Path, stop: BaseException) -> Non
     assert not (tmp_path / "index" / "refinery" / GOOD).exists()  # nothing after the stop ran
 
 
+def test_a_failure_after_committed_parts_leaves_only_those_and_the_next_run_completes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A refresh that committed a part and then failed: its uncommitted writes are rolled back (the
+    next source's commit would have published them), its state is not saved, and the next run
+    resumes into the whole generation."""
+    from wsp_cli import indexer as indexer_module
+    from wsp_index import refresh as real
+
+    def partly(index: TantivyIndex, feed: Any, old: Any, new: Any, **kw: Any) -> Any:
+        if new.source_id != BROKEN:
+            return real(index, feed, old, new, **kw)
+        docs = list(Adapter().documents(argparse.Namespace(source=spec(BROKEN)), Path()))
+        index.upsert(docs[:1])
+        index.commit(rebuild_suggest=False)  # a part committed
+        index.upsert(docs[1:])  # the next part, half written
+        raise RuntimeError("refinery part unreadable")
+
+    monkeypatch.setattr(indexer_module, "refresh", partly)
+    with indexer(tmp_path, Adapter()) as ix:
+        broken, good = ix.build()
+        assert broken.error == "RuntimeError: refinery part unreadable"
+        assert good.indexed == GID  # its commit came after the failure
+        assert [h.doc_id for h in ix.index.search(f"tides {BROKEN}")][:1] == [make_doc_id(BROKEN, "tides")]
+        assert make_doc_id(BROKEN, "rocks") not in {h.doc_id for h in ix.index.search("rocks")}
+        assert BROKEN not in json.loads((tmp_path / "index" / "index-state.json").read_text())
+        monkeypatch.setattr(indexer_module, "refresh", real)
+        broken, _ = ix.build()  # the next night
+        assert (broken.error, broken.indexed) == (None, GID)
+        assert make_doc_id(BROKEN, "rocks") in {h.doc_id for h in ix.index.search("rocks")}
+
+
 def test_the_nightly_command_exits_non_zero_when_a_source_failed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     class Ix:
         defer_suggest = False
-        finished = False
+        shared: list[str] = []  # noqa: RUF012 - one instance
 
         def build(self, *_a: object, **_k: object) -> list[SourceReport]:
             return [SourceReport(BROKEN, error="InvalidDocIdError: bad id"), SourceReport(GOOD, indexed=GID)]
 
         def rank_if_due(self) -> bool:
+            self.shared.append("rank")
             return False
 
         def finish(self) -> None:
-            self.finished = True
+            self.shared.append("finish")
 
         def spell_if_due(self) -> bool:
+            self.shared.append("spell")
             return False
 
     ix = Ix()
@@ -186,4 +256,5 @@ def test_the_nightly_command_exits_non_zero_when_a_source_failed(
     assert f"{BROKEN}: FAILED (InvalidDocIdError: bad id)" in text
     assert f"{GOOD}: refined nothing new; indexed {GID}" in text
     assert f"1 source(s) failed: {BROKEN}" in text
-    assert ix.finished  # the rest of the run (rank, suggest, spell) still ran
+    assert "rank, suggest and spell left as they were" in text
+    assert ix.shared == []  # not rebuilt from a set missing a source: the last good files stay

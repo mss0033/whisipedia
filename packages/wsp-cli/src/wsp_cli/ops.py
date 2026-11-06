@@ -18,7 +18,7 @@ from wsp_cli import bootstrap, doccollections
 from wsp_cli.doctor import Doctor, Level
 from wsp_cli.doctor import exit_code as doctor_exit
 from wsp_cli.doctor import render as render_doctor
-from wsp_cli.indexer import Indexer
+from wsp_cli.indexer import Indexer, SourceReport
 from wsp_cli.ingest import Ingestor, VersionStatus, render
 from wsp_cli.locks import (
     DRILL,
@@ -241,6 +241,13 @@ def cmd_index_build(args: argparse.Namespace, out: TextIO) -> int:
                 reports = [ix.refine_again(args.source, swap=swap, finish=False)]
             else:
                 reports = ix.build([args.source] if args.source else None, finish=False)
+            if any(r.error for r in reports):
+                # A source failed: the rank, the suggest trie's rebuild and spell read every indexed
+                # generation, and would be rebuilt without what that source holds (or from what a
+                # sick share still let them read). The files of the last good run are kept; what was
+                # indexed is committed and searchable; the next run rebuilds them (2026-11-06 review).
+                out.write("rank, suggest and spell left as they were: a source failed\n")
+                return _index_build_summary(reports, out)
             try:
                 if not getattr(args, "no_rank", False):
                     ix.rank_if_due()  # kept unless the link graph can have changed (or a week passed)
@@ -256,6 +263,11 @@ def cmd_index_build(args: argparse.Namespace, out: TextIO) -> int:
                 ix.spell_if_due()
     except LockHeldError as exc:
         return _busy(exc)
+    return _index_build_summary(reports, out)
+
+
+def _index_build_summary(reports: Sequence[SourceReport], out: TextIO) -> int:
+    """Write what each source's build did; 1 when one failed (the alert fires), else 0."""
     for r in reports:
         left_out = f"; {r.left_out:,} left out (invalid ids)" if r.left_out else ""
         if r.error:

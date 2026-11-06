@@ -708,6 +708,8 @@ class DocCollectionAdapter:
             )
             if verdict.verdict is Verdict.DENY:
                 log.warning("%s: %s left out of the index (%s)", spec.id, native, verdict.rule)
+                if native == raw:  # its id stays its own: a renamed work never takes a denied one's
+                    seen.add(native)
                 continue
             if verdict.verdict is Verdict.REVIEW:
                 log.info("%s: %s indexed under review (%s)", spec.id, native, verdict.rule)
@@ -732,6 +734,10 @@ class DocCollectionAdapter:
             else:
                 renamed.append((raw, record))
                 renamed_chars += len(d.text)
+        # Within one snapshot a renamed work never takes another's id. Across releases it can: if a
+        # later release of this archive adds a real file under the renamed id ("x.txt" beside "x .txt"),
+        # the real file takes the id and the renamed work is left out from then on (logged); its id
+        # then names a different work. Rare (4 of 17,337 Aozora works carry a space at all), accepted.
         for raw, record in renamed:
             if record.native_id in seen:
                 skip(raw, f"its id {record.native_id!r} is another document's")
@@ -823,8 +829,11 @@ class DocCollectionAdapter:
 
 SNAPSHOT_SCREEN_CHARS = 20_000
 """Text of each snapshot document the content screen reads with its title (front matter, as for a PDF)."""
-# The text of a snapshot's renamed works held back until its end (:meth:`_snapshot_documents`): a
-# handful in Aozora Bunko; past this, the rest are left out rather than held.
+# The text of a snapshot's renamed works held back until its end (:meth:`_snapshot_documents`), so
+# that a work whose own name is a renamed id keeps it. Held in memory, so bounded: 64M characters is
+# at most ~256 MB of str (UCS-4 worst case), a small share of the refine's memory (WSL 16 GB, the
+# nightly unit's MemoryMax), and thousands of times what Aozora Bunko needs (4 works of 17,337, about
+# 10 KB each, 2026-11-06). Past it, renamed works are left out (logged and counted), never held.
 SNAPSHOT_RENAMED_CHARS = 64_000_000
 
 

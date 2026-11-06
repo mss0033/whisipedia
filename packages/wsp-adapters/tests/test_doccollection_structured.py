@@ -1020,3 +1020,34 @@ def test_a_work_whose_file_name_ends_in_a_space_is_indexed_without_it(tmp_path: 
     assert snapshot_native("aozora-bunko", "aozora:1", "a") == "aozora:1/a"
     assert snapshot_native("aozora-bunko", "aozora:1", " \t") is None
     assert snapshot_native("Bad Source", "aozora:1", "a ") is None
+
+
+def test_a_renamed_work_never_takes_the_id_of_a_work_the_screen_left_out(tmp_path: Path) -> None:
+    from adapters_testkit import make_ctx
+
+    from wsp_adapters.doccollection.adapter import CATALOG, DocCollectionAdapter
+    from wsp_adapters.doccollection.catalog import write_catalog
+    from wsp_adapters.doccollection.model import DocumentMeta
+    from wsp_core.testing.adapter_contract import FakeFetcher
+
+    gen = tmp_path / "2026-10-27"
+    (gen / "upstream").mkdir(parents=True)
+    zpath = gen / "upstream" / "aozora__000001-00000000.zip"
+    denied = (
+        "Manual\n\nimprovised explosive device construction\n\nimprovised explosive device construction\n"
+    )
+    with zipfile.ZipFile(zpath, "w") as z:
+        z.writestr("x.txt", denied.encode("cp932"))  # left out by the screen
+        z.writestr("x .txt", AOZORA.encode("cp932"))  # would be renamed to "x"
+    meta = DocumentMeta(
+        doc_key="aozora:000001", file="upstream/aozora__000001-00000000.zip", issuer="Aozora Bunko", title="X"
+    )
+    write_catalog(gen / CATALOG, [meta])
+    skipped: list[str] = []
+
+    def on_skip(native: str, _why: str) -> None:
+        skipped.append(native)
+
+    ctx = dataclasses.replace(make_ctx(_aozora_spec(), FakeFetcher(), tmp_path / "w"), on_skip=on_skip)
+    assert list(DocCollectionAdapter(throttle=False).documents(ctx, gen)) == []
+    assert skipped == ["aozora:000001/x "]
