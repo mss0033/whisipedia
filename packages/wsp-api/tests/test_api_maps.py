@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from wsp_api.errors import install_error_handlers
-from wsp_api.maps import decode_elevation, encode_elevation, maps_router
+from wsp_api.maps import asset_names, decode_elevation, encode_elevation, maps_router
 from wsp_core.gazetteer import Place, write_gazetteer
 from wsp_core.model import Artifact, Generation, GenerationStatus, SourceSpec, SourceStatus, Tier
 from wsp_core.pmtiles import Archive, Compression, TileType, write_archive
@@ -305,3 +305,54 @@ def test_no_gazetteer_yet_is_a_503(tmp_path: Path) -> None:
     r = TestClient(app).get("/v1/maps/places", params={"q": "x"})
     assert r.status_code == 503
     assert TestClient(app).get("/v1/maps/tilesets").json()["tilesets"] == []
+
+
+def test_assets_are_served_from_a_snapshot_without_a_top_folder(tmp_path: Path) -> None:
+    """The library's maps-assets snapshot holds ``fonts/...`` at its root, not under a top folder;
+    the Atlas had no glyphs or sprites from it (2026-11-05 deep dive)."""
+    d = tmp_path / "maps-assets" / "g" / "upstream"
+    d.mkdir(parents=True)
+    with zipfile.ZipFile(d / "assets.zip", "w") as z:
+        z.writestr("README.md", b"readme")
+        z.writestr("fonts/", b"")
+        z.writestr("fonts/Noto Sans Regular/0-255.pbf", b"glyphs")
+        z.writestr("fonts/Noto Sans Regular/256-511.pbf", b"more")
+        z.writestr("sprites/v3/light.json", b'{"v": 3}')
+        z.writestr("sprites/v4/light.json", b'{"v": 4}')
+        z.writestr("sprites/v4/light@2x.png", b"png")
+    lib = SimpleNamespace(
+        s=SimpleNamespace(sources=[]),
+        vault=FakeVault(tmp_path, {"maps-assets": ["upstream/assets.zip"]}),
+        settings=SimpleNamespace(gazetteer=None),
+    )
+    app = FastAPI()
+    install_error_handlers(app)
+    app.include_router(maps_router(lib))  # type: ignore[arg-type]
+    c = TestClient(app)
+    body = c.get("/v1/maps/tilesets").json()
+    assert body["fonts"] == ["Noto Sans Regular"]
+    assert body["glyphs"] == "/v1/maps/glyphs/{fontstack}/{range}.pbf"
+    assert body["sprite"] == "/v1/maps/sprites/v4"
+    assert c.get("/v1/maps/glyphs/Noto Sans Regular/256-511.pbf").content == b"more"
+    assert c.get("/v1/maps/sprites/v3/light.json").json() == {"v": 3}
+    assert c.get("/v1/maps/sprites/v4/light@2x.png").content == b"png"
+    assert c.get("/v1/maps/sprites/v4/dark.json").status_code == 404
+
+
+def test_asset_names_drop_one_optional_top_folder() -> None:
+    names = asset_names(
+        [
+            "top/",
+            "top/fonts/A/0-255.pbf",
+            "top/scripts/x.py",
+            "README.md",
+            "top/sprites/v4/light.json",
+            "sprites/v4/light.json",  # the root entry wins, in either order
+            "a/b/fonts/A/0-255.pbf",  # two folders deep: neither layout
+            "top/fonts",  # a file, not the folder
+        ]
+    )
+    assert names == {
+        "fonts/A/0-255.pbf": "top/fonts/A/0-255.pbf",
+        "sprites/v4/light.json": "sprites/v4/light.json",
+    }

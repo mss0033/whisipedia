@@ -31,7 +31,7 @@ import re
 import threading
 import time
 import zipfile
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, cast
@@ -249,7 +249,7 @@ class MapLibrary:
         self._sets: dict[str, _Set] = {}
         self._scanned = -math.inf
         self._cuts: dict[tuple[str, int, int, int], bytes] = {}
-        self._assets: tuple[Path, zipfile.ZipFile] | None = None
+        self._assets: tuple[Path, zipfile.ZipFile, dict[str, str]] | None = None
 
     def sets(self) -> dict[str, _Set]:
         with self._lock:
@@ -400,7 +400,9 @@ class MapLibrary:
 
     # --- fonts and sprites ---
 
-    def _asset_zip(self) -> zipfile.ZipFile | None:
+    def _asset_zip(self) -> tuple[zipfile.ZipFile, dict[str, str]] | None:
+        """The assets snapshot and its names (``fonts/...`` or ``sprites/...`` -> the entry's own
+        name, :func:`asset_names`), listed once per zip; ``None`` while none is held or readable."""
         vault = self._vault()
         try:
             gen = vault.current(ASSETS_SOURCE)
@@ -414,51 +416,74 @@ class MapLibrary:
         path = Path(vault.generation_path(ASSETS_SOURCE, gen.generation_id)) / Path(str(art.relpath))
         with self._lock:
             if self._assets is not None and self._assets[0] == path:
-                return self._assets[1]
+                return self._assets[1], self._assets[2]
             try:
                 z = zipfile.ZipFile(path)
             except (OSError, zipfile.BadZipFile) as exc:
                 log.warning("map assets %s unreadable: %s", path, exc)
                 return None
+            names = asset_names(z.namelist())
             if self._assets is not None:
                 self._assets[1].close()
-            self._assets = (path, z)
-            return z
+            self._assets = (path, z, names)
+            return z, names
 
     def asset(self, inner: str) -> bytes | None:
-        """``fonts/...`` or ``sprites/...`` from the assets snapshot (its top folder is skipped)."""
-        z = self._asset_zip()
-        if z is None:
+        """``fonts/...`` or ``sprites/...`` from the assets snapshot, with or without a top folder."""
+        held = self._asset_zip()
+        if held is None:
+            return None
+        z, names = held
+        name = names.get(inner)
+        if name is None:
             return None
         with self._lock:
-            for name in (n for n in z.namelist() if n.partition("/")[2] == inner):
-                return z.read(name)
-        return None
+            return z.read(name)
 
     def fonts(self) -> list[str]:
-        z = self._asset_zip()
-        if z is None:
+        held = self._asset_zip()
+        if held is None:
             return []
         found = {
-            parts[2]
-            for parts in (n.split("/") for n in z.namelist())
-            if len(parts) == 4 and parts[1] == "fonts" and parts[3] == "0-255.pbf"
+            parts[1]
+            for parts in (n.split("/") for n in held[1])
+            if len(parts) == 3 and parts[0] == "fonts" and parts[2] == "0-255.pbf"
         }
         return sorted(found)
 
     def sprite_version(self) -> str | None:
-        z = self._asset_zip()
-        if z is None:
+        held = self._asset_zip()
+        if held is None:
             return None
         versions = sorted(
             {
-                p[2]
-                for p in (n.split("/") for n in z.namelist())
-                if len(p) >= 4 and p[1] == "sprites" and p[2].startswith("v")
+                p[1]
+                for p in (n.split("/") for n in held[1])
+                if len(p) >= 3 and p[0] == "sprites" and p[1].startswith("v")
             },
             key=lambda v: int(v[1:]) if v[1:].isdigit() else 0,
         )
         return versions[-1] if versions else None
+
+
+_ASSET_DIRS = ("fonts", "sprites")
+
+
+def asset_names(names: Iterable[str]) -> dict[str, str]:
+    """The ``fonts/...`` and ``sprites/...`` entries of a maps-assets zip, keyed without its one
+    optional top folder: a branch archive has one (``basemaps-assets-main/fonts/...``), the library's
+    snapshot of the repository has none (``fonts/...``). Expecting the top folder left every map
+    without glyphs or sprites (2026-11-05 deep dive). Where both hold a name, the root entry wins."""
+    found: dict[str, str] = {}
+    for name in names:
+        if name.endswith("/"):
+            continue
+        head, _, rest = name.partition("/")
+        if head in _ASSET_DIRS:
+            found[name] = name
+        elif "/" in rest and rest.partition("/")[0] in _ASSET_DIRS:
+            found.setdefault(rest, name)
+    return found
 
 
 _FONTSTACK = re.compile(r"^[A-Za-z0-9 ,_-]{1,200}$")
