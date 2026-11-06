@@ -1543,7 +1543,7 @@
           "documents"
         ],
         "summary": "Archive Listing",
-        "description": "What a stored zip archive holds, grouped by folder with sizes, read from its central\ndirectory: nothing is unpacked. At most 2,000 files at a time (``truncated``); ``folder=``\nlists one folder and those under it.",
+        "description": "What a stored zip archive holds, grouped by folder with sizes, read from its central\ndirectory: nothing is unpacked. At most 2,000 files a page (``truncated``, ``next`` for the\npage after with ``after=``); ``folder=`` lists one folder and those under it.",
         "operationId": "archive_listing_v1_files__doc_id__archive_get",
         "parameters": [
           {
@@ -1569,6 +1569,26 @@
               "title": "Folder"
             },
             "description": "List only this folder and those under it (\"a/b/\")."
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The `next` of the page before: list from where it stopped.",
+              "title": "After"
+            },
+            "description": "The `next` of the page before: list from where it stopped."
           }
         ],
         "responses": {
@@ -1584,6 +1604,16 @@
           },
           "500": {
             "description": "internal_error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "bad_request",
             "content": {
               "application/json": {
                 "schema": {
@@ -3793,7 +3823,19 @@
           "truncated": {
             "type": "boolean",
             "title": "Truncated",
-            "description": "True when some folders or files were left out: list a folder with `folder=`."
+            "description": "True when some folders or files were left out: ask for `next`, or list one folder with `folder=`."
+          },
+          "next": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next",
+            "description": "When `truncated`: pass it as `after=` (with the same `folder=`) for the next page, which starts where this one stopped."
           },
           "member_url": {
             "type": "string",
@@ -3815,6 +3857,7 @@
           "packed",
           "folders",
           "truncated",
+          "next",
           "member_url",
           "view_url"
         ],

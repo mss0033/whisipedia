@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { ApiRequestError } from '../src/api/client.ts';
-import type { ArchiveListing, ArchiveView } from '../src/api/types.ts';
+import type {
+  ArchiveFolder,
+  ArchiveListing,
+  ArchiveMember,
+  ArchiveView,
+} from '../src/api/types.ts';
 import { append } from '../src/core/dom.ts';
 import {
   type ArchiveApi,
@@ -63,8 +68,10 @@ function listing(over: Partial<ArchiveListing> = {}): ArchiveListing {
           member('gNATSGO/Geopackages/US/gNATSGO_10_01_2026.7z', 7_751_340_877),
         ],
       },
+      { path: 'gNATSGO/Zz/', count: 5, bytes: 500, total_count: 5, total_bytes: 500, files: [] },
     ],
     truncated: true,
+    next: 'gNATSGO/Geopackages/US/gNATSGO_10_01_2026.7z',
     member_url: `${BASE}/member`,
     view_url: `${BASE}/view`,
     ...over,
@@ -111,11 +118,66 @@ const META: ArchiveView = {
   },
 };
 
+/** Every file of the fake archive, by folder (the listing above is its first page of 3). */
+const TREE: Record<string, ArchiveMember[]> = {
+  '': [],
+  'gNATSGO/': [],
+  'gNATSGO/Geopackages/': [
+    member('gNATSGO/Geopackages/ssurgo_iso19115_3.xml', 7_049_440, 'metadata'),
+  ],
+  'gNATSGO/Geopackages/Archive/FY19/': [],
+  'gNATSGO/Geopackages/US/': [
+    member('gNATSGO/Geopackages/US/01_ReadMe.txt', 3855, 'text'),
+    member('gNATSGO/Geopackages/US/gNATSGO_10_01_2026.7z', 7_751_340_877),
+    member('gNATSGO/Geopackages/US/zz_soil_metadata.xml', 100, 'metadata'),
+  ],
+  'gNATSGO/Zz/': [1, 2, 3, 4, 5].map((i) => member(`gNATSGO/Zz/part${i}.bin`, 100)),
+};
+
+/** A page of `size` files as the API makes one: from `after`, the folders past the cut still listed. */
+function page(folder: string, after?: string, size = 3): ArchiveListing {
+  const under = (p: string) =>
+    Object.entries(TREE)
+      .filter(([k]) => k.startsWith(p))
+      .flatMap(([, v]) => v);
+  const resume = after ? after.slice(0, after.lastIndexOf('/') + 1) : null;
+  const folders: ArchiveFolder[] = [];
+  let shown = 0;
+  let last: string | null = null;
+  let cut: string | null = null;
+  for (const p of Object.keys(TREE).filter((k) => k.startsWith(folder))) {
+    if (resume !== null && p < resume) continue;
+    const all = TREE[p]!;
+    const rest = p === resume ? all.filter((m) => m.path > after!) : all;
+    const files = rest.slice(0, size - shown);
+    if (files.length) last = files.at(-1)!.path;
+    if (rest.length > files.length) cut ??= last;
+    shown += files.length;
+    const sum = (ms: ArchiveMember[]) => ms.reduce((n, m) => n + m.size, 0);
+    folders.push({
+      path: p,
+      count: all.length,
+      bytes: sum(all),
+      total_count: under(p).length,
+      total_bytes: sum(under(p)),
+      files,
+    });
+  }
+  return listing({
+    folder,
+    members: under(folder).length,
+    bytes: under(folder).reduce((n, m) => n + m.size, 0),
+    folders,
+    truncated: cut !== null,
+    next: cut,
+  });
+}
+
 function fakeApi(log: string[], view: ArchiveView | Error = META): ArchiveApi {
   return {
-    archive: async (_id, folder) => {
-      log.push(`archive ${folder ?? ''}`);
-      return listing(folder ? { folder, truncated: false } : {});
+    archive: async (_id, folder, _signal, after) => {
+      log.push(`archive ${folder ?? ''}${after ? ` after ${after}` : ''}`);
+      return page(folder ?? '', after);
     },
     archiveView: async (_id, path) => {
       log.push(`view ${path}`);
@@ -143,6 +205,7 @@ describe('archive browser', () => {
       'gNATSGO/Geopackages/',
       'gNATSGO/Geopackages/Archive/FY19/',
       'gNATSGO/Geopackages/US/',
+      'gNATSGO/Zz/',
     ]);
     const us = box.querySelectorAll('details.archive-folder')[2]!;
     expect(us.className).toContain('archive-depth-2');
@@ -159,10 +222,104 @@ describe('archive browser', () => {
     expect(first.querySelector('button.archive-read')!.textContent).toBe('Read the metadata');
     const rows = us.querySelectorAll('tbody tr:not(.archive-view-row)');
     expect(rows[1]!.querySelector('button.archive-read')).toBeNull();
-    // Cut short: the folder offers the rest of itself.
-    expect(box.querySelector('.archive-truncated')).not.toBeNull();
-    us.querySelector<HTMLButtonElement>('button.archive-show-folder')!.click();
-    expect(shown).toEqual(['gNATSGO/Geopackages/US/']);
+    // Cut short: the folder the next page starts in lists more in place; a later one cut short
+    // (listed without its files) is listed on its own.
+    expect(box.querySelector<HTMLElement>('.archive-truncated')!.hidden).toBe(false);
+    expect(us.querySelector('.archive-more')!.textContent).toContain('1 more file in this folder');
+    expect(us.querySelector('button.archive-next-folder')).not.toBeNull();
+    expect(us.querySelector('button.archive-show-folder')).toBeNull();
+    const zz = box.querySelectorAll('details.archive-folder')[3]!;
+    zz.querySelector<HTMLButtonElement>('button.archive-show-folder')!.click();
+    expect(shown).toEqual(['gNATSGO/Zz/']);
+  });
+
+  it('lists more of a listing cut short in place until every file is listed', async () => {
+    const log: string[] = [];
+    const host = document.createElement('div');
+    host.append(archiveBrowser({ api: fakeApi(log), docId: DOC }));
+    await until(() => host.querySelector('.archive-summary') !== null);
+    const rows = (folder: number) =>
+      [
+        ...host
+          .querySelectorAll('details.archive-folder')
+          [folder]!.querySelectorAll('tbody tr:not(.archive-view-row) .archive-name'),
+      ].map((n) => n.textContent);
+    expect(host.querySelector('.archive-truncated')!.textContent).toContain(
+      '3 files of 9 listed so far',
+    );
+    host.querySelector<HTMLButtonElement>('button.archive-next-folder')!.click();
+    await until(() => rows(2).length === 3);
+    expect(log.at(-1)).toBe('archive  after gNATSGO/Geopackages/US/gNATSGO_10_01_2026.7z');
+    expect(rows(2)).toEqual(['01_ReadMe.txt', 'gNATSGO_10_01_2026.7z', 'zz_soil_metadata.xml']);
+    // The metadata file the new page listed joins "Read first"; US is complete, Zz is where it goes on.
+    expect(host.querySelector('.archive-first')!.textContent).toContain('zz_soil_metadata.xml');
+    const folders = host.querySelectorAll('details.archive-folder');
+    expect(folders.length).toBe(4); // folders listed again are filled in, not repeated
+    expect(folders[2]!.querySelector<HTMLElement>('.archive-more')!.hidden).toBe(true);
+    expect(rows(3)).toEqual(['part1.bin', 'part2.bin']);
+    expect(folders[3]!.querySelector('button.archive-next-folder')).not.toBeNull();
+    host.querySelector<HTMLButtonElement>('button.archive-next-page')!.click();
+    await until(() => rows(3).length === 5);
+    expect(log.at(-1)).toBe('archive  after gNATSGO/Zz/part2.bin');
+    expect(host.querySelector<HTMLElement>('.archive-truncated')!.hidden).toBe(true);
+    expect(host.querySelector<HTMLElement>('.archive-next')!.hidden).toBe(true);
+    expect(folders[3]!.querySelector<HTMLElement>('.archive-more')!.hidden).toBe(true);
+    expect(log.filter((l) => l.startsWith('archive')).length).toBe(3);
+  });
+
+  it('lists a folder of more files than a page to its last file', async () => {
+    const log: string[] = [];
+    const host = document.createElement('div');
+    host.append(archiveBrowser({ api: fakeApi(log), docId: DOC }, 'gNATSGO/Zz/'));
+    await until(() => host.querySelector('.archive-summary') !== null);
+    expect(log).toEqual(['archive gNATSGO/Zz/']);
+    const names = () =>
+      [...host.querySelectorAll('tbody tr:not(.archive-view-row) .archive-name')].map(
+        (n) => n.textContent,
+      );
+    expect(names()).toEqual(['part1.bin', 'part2.bin', 'part3.bin']);
+    // The folder being listed never offers "Show all" of itself (that fetched the same page again).
+    expect(host.querySelector('button.archive-show-folder')).toBeNull();
+    host.querySelector<HTMLButtonElement>('button.archive-next-folder')!.click();
+    await until(() => names().length === 5);
+    expect(log.at(-1)).toBe('archive gNATSGO/Zz/ after gNATSGO/Zz/part3.bin');
+    expect(names()).toEqual(['part1.bin', 'part2.bin', 'part3.bin', 'part4.bin', 'part5.bin']);
+    expect(host.querySelector<HTMLElement>('.archive-truncated')!.hidden).toBe(true);
+  });
+
+  it('says when the next page cannot be read and tries again', async () => {
+    const log: string[] = [];
+    const api = fakeApi(log);
+    let fail = true;
+    const flaky: ArchiveApi = {
+      ...api,
+      archive: async (id, folder, signal, after) => {
+        if (after && fail) {
+          fail = false;
+          throw new ApiRequestError(503, 'busy', 'busy');
+        }
+        return api.archive(id, folder, signal, after);
+      },
+    };
+    const host = document.createElement('div');
+    host.append(archiveBrowser({ api: flaky, docId: DOC }));
+    await until(() => host.querySelector('.archive-summary') !== null);
+    const more = host.querySelector<HTMLButtonElement>('button.archive-next-page')!;
+    more.click();
+    await until(() => host.querySelector('.archive-next-problem')!.textContent !== '');
+    expect(host.querySelector('.archive-next-problem')!.textContent).toContain('busy');
+    expect(more.disabled).toBe(false);
+    more.click();
+    await until(() =>
+      host
+        .querySelectorAll('details.archive-folder')[2]!
+        .textContent!.includes('zz_soil_metadata.xml'),
+    );
+    expect(host.querySelector('.archive-next-problem')!.textContent).toBe('');
+    expect(log).toEqual([
+      'archive ',
+      'archive  after gNATSGO/Geopackages/US/gNATSGO_10_01_2026.7z',
+    ]);
   });
 
   it('loads, narrows to a folder and back, and reads metadata in place', async () => {
@@ -173,9 +330,9 @@ describe('archive browser', () => {
     expect(host.querySelector('.archive')!.hasAttribute('aria-busy')).toBe(false);
     host.querySelector<HTMLButtonElement>('button.archive-show-folder')!.click();
     await until(() => log.length === 2);
-    expect(log[1]).toBe('archive gNATSGO/Geopackages/US/');
+    expect(log[1]).toBe('archive gNATSGO/Zz/');
     await until(() => host.querySelector('button.archive-all') !== null);
-    expect(host.querySelector('h2')!.textContent).toBe('In the folder gNATSGO/Geopackages/US/');
+    expect(host.querySelector('h2')!.textContent).toBe('In the folder gNATSGO/Zz/');
     host.querySelector<HTMLButtonElement>('button.archive-all')!.click();
     await until(() => log.length === 3 && host.querySelector('.archive-first') !== null);
 

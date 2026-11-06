@@ -15,8 +15,9 @@ All notable changes are documented here. The format follows [Keep a Changelog](h
 * A document whose original is a zip (gNATSGO: one 117 GB zip of 149 files) shows what it holds:
   folders with their sizes, every file with its own download (unpacked as it is sent, broken off if
   its CRC does not match), and read-me, text and CSV files read in place. The list comes from the
-  zip's central directory (`GET /v1/files/{doc_id}/archive`, at most 2,000 files at a time,
-  `folder=` for the rest; an archive of more than 200,000 files is not listed).
+  zip's central directory (`GET /v1/files/{doc_id}/archive`, 2,000 files a page, `next` and
+  `after=` for the page after, `folder=` for one folder; an archive of more than 200,000 files is
+  not listed). A listing cut short lists more in place ("List more") until every file is listed.
 * ISO 19115-3, ISO 19139, ISO 19110 and FGDC metadata XML in an archive is shown as sections
   (identification, contacts, reference systems, quality, lineage, distribution) and a data
   dictionary of its tables and columns (`GET /v1/files/{doc_id}/archive/view`).

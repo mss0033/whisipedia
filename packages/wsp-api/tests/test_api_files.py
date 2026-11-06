@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from pathlib import Path
-from typing import IO, cast
+from typing import IO, Any, cast
 from urllib.parse import quote
 
 import httpx
@@ -448,12 +448,38 @@ def test_archive_listing_groups_files_by_folder_with_sizes(arch: tuple[httpx.Cli
     assert big["modified"][4] == "-"
 
 
-def test_archive_listing_is_cut_short_and_narrowed_by_folder(
+def _all_pages(c: httpx.Client, folder: str = "") -> list[dict[str, Any]]:
+    """Every page of a listing, following ``next`` (a bound on the pages: paging must end)."""
+    pages: list[dict[str, Any]] = []
+    after: str | None = None
+    for _ in range(50):
+        params = {"folder": folder} if folder else {}
+        if after is not None:
+            params["after"] = after
+        r = c.get(url("arch", "/archive"), params=params)
+        assert r.status_code == 200, r.text
+        page = r.json()
+        pages.append(page)
+        if not page["truncated"]:
+            assert page["next"] is None
+            return pages
+        after = page["next"]
+        assert isinstance(after, str)
+    raise AssertionError("the listing never ended")
+
+
+def _listed(pages: list[dict[str, Any]]) -> list[str]:
+    return [m["path"] for p in pages for f in p["folders"] for m in f["files"]]
+
+
+def test_archive_listing_is_cut_short_and_paged_to_its_last_file(
     arch: tuple[httpx.Client, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from wsp_api import archive
 
     c, _ = arch
+    whole = _listed(_all_pages(c))
+    assert len(whole) == 10
     monkeypatch.setattr(archive, "LISTED_FILES", 3)
     body = c.get(url("arch", "/archive")).json()
     assert body["truncated"] is True
@@ -462,14 +488,85 @@ def test_archive_listing_is_cut_short_and_narrowed_by_folder(
     data = next(f for f in body["folders"] if f["path"] == "pack/data/")
     assert data["count"] == 4
     assert len(data["files"]) < 4
+    # The folders past the last file listed are still there, without their files: the whole tree.
+    assert [f["path"] for f in body["folders"]] == ["", "pack/", "pack/data/", "pack/empty/", "pack/meta/"]
+    assert body["next"] == _listed([body])[-1]
+    # Paged to the end: every file once, in the order of the whole listing.
+    pages = _all_pages(c)
+    assert len(pages) == 4
+    assert _listed(pages) == whole
+    assert all(sum(len(f["files"]) for f in p["folders"]) <= 3 for p in pages)
+
+
+def test_archive_folder_bigger_than_a_page_is_paged_to_its_last_member(
+    arch: tuple[httpx.Client, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-11-05 review: a folder of more files than a page was listed again from its start by
+    "Show all", so the files past the 2,000th could not be reached at all."""
+    from wsp_api import archive
+
+    c, _ = arch
+    monkeypatch.setattr(archive, "LISTED_FILES", 3)
     one = c.get(url("arch", "/archive"), params={"folder": "pack/data"}).json()  # slash optional
     assert one["folder"] == "pack/data/"
     assert [f["path"] for f in one["folders"]] == ["pack/data/"]
-    assert len(one["folders"][0]["files"]) == 3
+    assert [m["name"] for m in one["folders"][0]["files"]] == ["big.bin", "notes.txt", "page.html"]
     assert one["members"] == 4
+    assert one["truncated"] is True
+    assert one["next"] == "pack/data/page.html"
+    rest = c.get(url("arch", "/archive"), params={"folder": "pack/data/", "after": one["next"]}).json()
+    assert [f["path"] for f in rest["folders"]] == ["pack/data/"]
+    assert rest["folders"][0]["count"] == 4  # still the whole folder's
+    assert [m["name"] for m in rest["folders"][0]["files"]] == ["table.csv"]
+    assert rest["truncated"] is False
+    assert rest["next"] is None
     missing = c.get(url("arch", "/archive"), params={"folder": "nope/"})
     assert missing.status_code == 404
     assert missing.json()["error"]["code"] == "member_not_found"
+    # A cursor from another folder is refused, not taken to mean "from the start".
+    stray = c.get(url("arch", "/archive"), params={"folder": "pack/data/", "after": "pack/meta/x.xml"})
+    assert stray.status_code == 400
+    assert stray.json()["error"]["code"] == "invalid_cursor"
+
+
+def test_archive_listing_pages_a_flat_archive_and_a_tree_of_many_folders(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The top of a flat zip of more files than a page (the review's case), and an archive of more
+    folders than a page: both are reached to the end by ``next``, nothing twice."""
+    from wsp_api import archive
+    from wsp_api.schemas import ArchiveListing
+
+    def pages(entries: tuple[archive.Entry, ...]) -> list[ArchiveListing]:
+        out: list[ArchiveListing] = []
+        after: str | None = None
+        while True:
+            page = archive.listing("a.zip", entries, "", member_url="m", view_url="v", after=after)
+            out.append(page)
+            if page.next is None:
+                assert not page.truncated
+                return out
+            assert page.truncated
+            after = page.next
+            assert len(out) < 100
+
+    monkeypatch.setattr(archive, "LISTED_FILES", 4)
+    monkeypatch.setattr(archive, "LISTED_FOLDERS", 3)
+    flat = tuple(archive.Entry(f"tile_{i:03d}.png", i, i, None, False) for i in range(10))
+    got = pages(flat)
+    assert [len(p.folders[0].files) for p in got] == [4, 4, 2]
+    assert [m.path for p in got for m in p.folders[0].files] == [e.path for e in flat]
+    assert all(p.folders[0].count == 10 for p in got)
+    tree = (
+        *(archive.Entry(f"d{i}/f.txt", 1, 1, None, False) for i in range(7)),
+        archive.Entry("d9/", 0, 0, None, True),
+    )
+    got = pages(tree)
+    folders = [f.path for p in got for f in p.folders]
+    assert sorted(set(folders)) == ["", *[f"d{i}/" for i in range(7)], "d9/"]
+    files = [m.path for p in got for f in p.folders for m in f.files]
+    assert files == [f"d{i}/f.txt" for i in range(7)]
+    assert all(len(p.folders) <= 3 for p in got)
 
 
 def test_archive_listing_is_read_once_per_archive(

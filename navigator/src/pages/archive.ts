@@ -20,7 +20,12 @@ import { formatBytes, formatNumber } from '../core/format.ts';
 
 /** What the browser needs from the API client. */
 export interface ArchiveApi {
-  archive(id: DocId, folder?: string, signal?: AbortSignal): Promise<ArchiveListing>;
+  archive(
+    id: DocId,
+    folder?: string,
+    signal?: AbortSignal,
+    after?: string,
+  ): Promise<ArchiveListing>;
   archiveView(id: DocId, path: string, signal?: AbortSignal): Promise<ArchiveView>;
   url(path: string): string;
 }
@@ -78,18 +83,97 @@ export function archiveBrowser(ctx: ArchiveContext, folder = ''): HTMLElement {
   return box;
 }
 
-/** The listing's nodes: a summary, the files to read first, then every folder. */
+/** The folder a listing's `next` resumes in: a file's folder, or none when it is a folder. */
+function resumesIn(next: string | null): string | null {
+  return next && !next.endsWith('/') ? next.slice(0, next.lastIndexOf('/') + 1) : null;
+}
+
+/**
+ * The listing's nodes: a summary, the files to read first, then every folder. A listing cut short
+ * lists more in place, page by page from where it stopped (its `next`), so every file is reachable:
+ * "Show all" on the folder being listed used to fetch the same first page again (2026-11-05 review).
+ */
 export function archiveContents(
   listing: ArchiveListing,
   ctx: ArchiveContext,
   show: (folder: string) => void,
 ): Child[] {
-  const files = listing.folders.reduce((n, f) => n + f.files.length, 0);
-  const open = files <= OPEN_FOLDERS_UP_TO;
-  const first = listing.folders
-    .flatMap((f) => f.files)
-    .filter((m) => m.view === 'metadata' || (m.view === 'text' && README.test(m.name)));
-  const folders = listing.folders.filter((f) => f.count > 0 || f.total_count === 0);
+  let listed = listing.folders.reduce((n, f) => n + f.files.length, 0);
+  let next = listing.next;
+  const open = listed <= OPEN_FOLDERS_UP_TO;
+  const views = new Map<string, FolderView>();
+  const firstList = h('ul', null);
+  const firstBox = h(
+    'div',
+    { class: 'archive-first', hidden: true },
+    h('h3', null, 'Read first'),
+    firstList,
+  );
+  const foldersBox = h('div', { class: 'archive-folders' });
+  const banner = h('p', { class: 'notice archive-truncated' });
+  const moreButton = h('button', { type: 'button', class: 'btn archive-next-page' }, 'List more');
+  const moreProblem = h('span', { class: 'archive-next-problem' });
+  const morePara = h('p', { class: 'archive-next' }, moreButton, ' ', moreProblem);
+
+  const refresh = () => {
+    const cut = listing.truncated && next !== null;
+    banner.hidden = !cut;
+    morePara.hidden = !cut;
+    banner.textContent = cut
+      ? `${plural(listed, 'file')} of ${formatNumber(listing.members)} listed so far. ` +
+        '“List more” lists the next ones; “Show all” on a folder lists just that folder.'
+      : '';
+    const resume = resumesIn(next);
+    for (const v of views.values()) v.update(resume);
+  };
+  const addPage = (page: ArchiveListing) => {
+    const first = page.folders
+      .flatMap((f) => f.files)
+      .filter((m) => m.view === 'metadata' || (m.view === 'text' && README.test(m.name)));
+    for (const m of first) firstList.append(h('li', null, memberLine(m, listing, ctx)));
+    if (first.length) firstBox.hidden = false;
+    for (const f of page.folders) {
+      const known = views.get(f.path);
+      if (known) known.add(f.files);
+      else if (f.count > 0 || f.total_count === 0) {
+        // Folders that only hold folders are not shown as empty boxes. A page lists folders in path
+        // order, past every folder an earlier page listed: a new one goes at the end.
+        const v = folderView(f, listing, ctx, open, show, () => loadMore());
+        v.add(f.files);
+        views.set(f.path, v);
+        foldersBox.append(v.el);
+      }
+    }
+  };
+  let loading = false;
+  const loadMore = () => {
+    if (loading || next === null) return;
+    loading = true;
+    moreButton.disabled = true;
+    moreProblem.textContent = '';
+    for (const v of views.values()) v.busy(true);
+    ctx.api
+      .archive(ctx.docId, listing.folder || undefined, ctx.signal, next)
+      .then((page) => {
+        listed += page.folders.reduce((n, f) => n + f.files.length, 0);
+        next = page.next;
+        addPage(page);
+      })
+      .catch((err: unknown) => {
+        if (ctx.signal?.aborted) return;
+        moreProblem.textContent = problem(err);
+      })
+      .finally(() => {
+        loading = false;
+        moreButton.disabled = false;
+        for (const v of views.values()) v.busy(false);
+        refresh();
+      });
+  };
+  moreButton.addEventListener('click', loadMore);
+  addPage(listing);
+  refresh();
+
   return [
     h(
       'h2',
@@ -114,30 +198,10 @@ export function archiveContents(
           ]
         : null,
     ),
-    listing.truncated
-      ? h(
-          'p',
-          { class: 'notice archive-truncated' },
-          `Only the first ${plural(files, 'file')} are listed. Use “Show all” on a folder to list the rest of it.`,
-        )
-      : null,
-    first.length
-      ? h(
-          'div',
-          { class: 'archive-first' },
-          h('h3', null, 'Read first'),
-          h(
-            'ul',
-            null,
-            first.map((m) => h('li', null, memberLine(m, listing, ctx))),
-          ),
-        )
-      : null,
-    h(
-      'div',
-      { class: 'archive-folders' },
-      folders.map((f) => folderBlock(f, listing, ctx, open, show)),
-    ),
+    banner,
+    firstBox,
+    foldersBox,
+    morePara,
   ];
 }
 
@@ -152,17 +216,46 @@ function folderSummary(f: ArchiveFolder): string {
     : own;
 }
 
-function folderBlock(
+/** One folder's box, filled in as later pages list more of its files. */
+interface FolderView {
+  el: HTMLElement;
+  /** Files of the folder a later page listed. */
+  add(files: ArchiveMember[]): void;
+  /** Its "more files" line, given the folder the next page resumes in. */
+  update(resumesIn: string | null): void;
+  busy(on: boolean): void;
+}
+
+function folderView(
   f: ArchiveFolder,
   listing: ArchiveListing,
   ctx: ArchiveContext,
   open: boolean,
   show: (folder: string) => void,
-): HTMLElement {
+  more: () => void,
+): FolderView {
   const name = f.path || '(top of the archive)';
-  const more = f.count - f.files.length;
-  const rows = f.files.map((m) => memberRow(m, listing, ctx));
-  return h(
+  let shown = 0;
+  const tbody = h('tbody', null);
+  const table = h(
+    'table',
+    { class: 'archive-files', hidden: true },
+    h(
+      'thead',
+      null,
+      h(
+        'tr',
+        null,
+        h('th', { scope: 'col' }, 'File'),
+        h('th', { scope: 'col' }, 'Size'),
+        h('th', { scope: 'col' }, 'Dated'),
+        h('th', { scope: 'col' }, h('span', { class: 'visually-hidden' }, 'Actions')),
+      ),
+    ),
+    tbody,
+  );
+  const moreLine = h('p', { class: 'archive-more', hidden: true });
+  const el = h(
     'details',
     {
       class: `archive-folder archive-depth-${Math.min(depth(f.path), 6)}`,
@@ -175,38 +268,49 @@ function folderBlock(
       ' ',
       h('span', { class: 'archive-folder-size' }, folderSummary(f)),
     ),
-    rows.length
-      ? h(
-          'table',
-          { class: 'archive-files' },
-          h(
-            'thead',
-            null,
-            h(
-              'tr',
-              null,
-              h('th', { scope: 'col' }, 'File'),
-              h('th', { scope: 'col' }, 'Size'),
-              h('th', { scope: 'col' }, 'Dated'),
-              h('th', { scope: 'col' }, h('span', { class: 'visually-hidden' }, 'Actions')),
-            ),
-          ),
-          h('tbody', null, rows),
-        )
-      : null,
-    more > 0
-      ? h(
-          'p',
-          { class: 'archive-more' },
-          `${plural(more, 'more file')} in this folder. `,
+    table,
+    moreLine,
+  );
+  let nextButton: HTMLButtonElement | null = null;
+  return {
+    el,
+    add(files) {
+      for (const m of files) append(tbody, memberRow(m, listing, ctx));
+      shown += files.length;
+      if (shown) table.hidden = false;
+    },
+    update(resume) {
+      const left = f.count - shown;
+      nextButton = null;
+      moreLine.hidden = left <= 0;
+      if (left <= 0) {
+        moreLine.replaceChildren();
+        return;
+      }
+      // The next page starts in this folder: list it in place. Any other folder cut short (one past
+      // the last file listed) is listed on its own.
+      nextButton =
+        resume === f.path
+          ? h(
+              'button',
+              { type: 'button', class: 'btn archive-next-folder', onclick: more },
+              'List more',
+            )
+          : null;
+      moreLine.replaceChildren(
+        `${plural(left, 'more file')} in this folder. `,
+        nextButton ??
           h(
             'button',
             { type: 'button', class: 'btn archive-show-folder', onclick: () => show(f.path) },
             `Show all ${formatNumber(f.count)}`,
           ),
-        )
-      : null,
-  );
+      );
+    },
+    busy(on) {
+      if (nextButton) nextButton.disabled = on;
+    },
+  };
 }
 
 export function memberUrl(listing: ArchiveListing, ctx: ArchiveContext, m: ArchiveMember): string {

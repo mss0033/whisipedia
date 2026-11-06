@@ -44,8 +44,10 @@ export interface ArchiveListing {
   packed: number;
   /** Every folder in path order, each with its files. */
   folders: Array<ArchiveFolder>;
-  /** True when some folders or files were left out: list a folder with `folder=`. */
+  /** True when some folders or files were left out: ask for `next`, or list one folder with `folder=`. */
   truncated: boolean;
+  /** When `truncated`: pass it as `after=` (with the same `folder=`) for the next page, which starts where this one stopped. */
+  next: string | null;
   /** Add `?path=<member>` to download one file, unpacked as it streams. */
   member_url: string;
   /** Add `?path=<member>` to read a text or metadata file here. */
@@ -1303,6 +1305,8 @@ export interface Routes {
     query: {
       /** List only this folder and those under it ("a/b/"). */
       folder?: string | undefined;
+      /** The `next` of the page before: list from where it stopped. */
+      after?: string | null | undefined;
     };
     body: null;
     response: ArchiveListing;

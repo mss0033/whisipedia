@@ -234,6 +234,7 @@ class ArchiveListing(_Wire):
     packed: int
     folders: list[ArchiveFolder]
     truncated: bool
+    next: str | None = None
     member_url: str
     view_url: str
 

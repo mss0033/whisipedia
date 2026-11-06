@@ -255,7 +255,13 @@ class ArchiveListing(_Wire):
     packed: int = Field(description="Their size as stored.")
     folders: list[ArchiveFolder] = Field(description="Every folder in path order, each with its files.")
     truncated: bool = Field(
-        description="True when some folders or files were left out: list a folder with `folder=`."
+        description="True when some folders or files were left out: ask for `next`, or list one folder "
+        "with `folder=`."
+    )
+    next: str | None = Field(
+        default=None,
+        description="When `truncated`: pass it as `after=` (with the same `folder=`) for the next page, "
+        "which starts where this one stopped.",
     )
     member_url: str = Field(description="Add `?path=<member>` to download one file, unpacked as it streams.")
     view_url: str = Field(description="Add `?path=<member>` to read a text or metadata file here.")

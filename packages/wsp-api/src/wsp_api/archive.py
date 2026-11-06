@@ -30,8 +30,8 @@ from wsp_api.schemas import ArchiveFolder, ArchiveListing, ArchiveMember, Archiv
 
 MAX_MEMBERS = 200_000  # more and the central directory is not parsed (zipfile keeps a ZipInfo each)
 MAX_DIRECTORY_BYTES = 64 * 1024 * 1024
-LISTED_FILES = 2000  # files in one listing; `folder=` lists the rest a folder at a time
-LISTED_FOLDERS = 2000
+LISTED_FILES = 2000  # files in one page of a listing; `after=` lists the next page
+LISTED_FOLDERS = 2000  # folders in one page (at least 2: a page cut after the top folder alone has no `next`)
 VIEW_BYTES = 512 * 1024  # of a text member shown here (the start of a big CSV)
 METADATA_BYTES = 16 * 1024 * 1024  # an XML member read whole for its sections (gNATSGO's: 7 MB)
 CACHED_LISTINGS = 4
@@ -181,12 +181,26 @@ def _sort_key(path: str) -> tuple[str, str]:
 
 
 def listing(
-    name: str, entries: tuple[Entry, ...], folder: str, *, member_url: str, view_url: str
+    name: str,
+    entries: tuple[Entry, ...],
+    folder: str,
+    *,
+    member_url: str,
+    view_url: str,
+    after: str | None = None,
 ) -> ArchiveListing:
     """The files under ``folder`` ("" for all) grouped by folder, folders in path order, files by name.
-    At most :data:`LISTED_FILES` files and :data:`LISTED_FOLDERS` folders; ``truncated`` says so."""
+    At most :data:`LISTED_FILES` files and :data:`LISTED_FOLDERS` folders a page; ``truncated`` says so
+    and ``next`` is where the next page starts (``after``). Once the files run out, the folders that
+    follow are still listed (without their files) so the reader sees the whole tree.
+
+    ``after`` is the last file listed, or the last folder listed in full: a page resumes in that file's
+    folder, after it. Without it a folder of more than 2,000 files, the top of an archive too, could
+    never be listed past its 2,000th (2026-11-05 review: "Show all" on it fetched the same page)."""
     if folder and not folder.endswith("/"):
         folder += "/"
+    if after is not None and (not after or not after.startswith(folder)):
+        raise ApiError(400, "invalid_cursor", f"after={after!r} is not in the folder {folder!r}")
     files = [e for e in entries if not e.is_dir and e.path.startswith(folder)]
     dirs = {
         e.path if e.path.endswith("/") else e.path + "/"
@@ -217,18 +231,35 @@ def listing(
             if len(at) <= len(folder):
                 break
             at = _folder_of(at[:-1])
+    order = sorted(direct, key=_sort_key)
+    resume_in: str | None = None  # the folder `after` is a file of: listed from after that file
+    if after is not None and after.endswith("/"):  # a folder listed in full, and every one before it
+        order = [f for f in order if _sort_key(f) > _sort_key(after)]
+    elif after is not None:
+        resume_in = _folder_of(after)
+        order = [f for f in order if _sort_key(f) >= _sort_key(resume_in)]
     out: list[ArchiveFolder] = []
     shown = 0
     truncated = False
-    for f in sorted(direct, key=_sort_key):
+    last_file: str | None = None
+    cut: str | None = None  # the last file listed before the first one left out
+    for f in order:
         if len(out) >= LISTED_FOLDERS:
             truncated = True
             break
         members = sorted(direct[f], key=lambda e: _sort_key(e.path))
+        rest = members
+        if f == resume_in and after is not None:
+            past = _sort_key(after)
+            rest = [m for m in members if _sort_key(m.path) > past]
         room = max(0, LISTED_FILES - shown)
-        if len(members) > room:
+        listed = rest[:room]
+        if listed:
+            last_file = listed[-1].path
+        if len(rest) > room:
             truncated = True
-        listed = members[:room]
+            if cut is None:
+                cut = last_file
         shown += len(listed)
         out.append(
             ArchiveFolder(
@@ -240,6 +271,10 @@ def listing(
                 files=[_member(m) for m in listed],
             )
         )
+    # Cut among the files: after the last one listed. Cut only among the folders (every file of the
+    # folders listed is listed): after the last folder. Either way a page lists at least one file or
+    # one folder past `after`, so paging ends.
+    following = (cut or out[-1].path) if truncated and out else None
     return ArchiveListing(
         name=name,
         folder=folder,
@@ -248,6 +283,7 @@ def listing(
         packed=sum(e.packed for e in files),
         folders=out,
         truncated=truncated,
+        next=following,
         member_url=member_url,
         view_url=view_url,
     )

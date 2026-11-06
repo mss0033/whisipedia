@@ -224,7 +224,7 @@ def files_router(lib: Library) -> APIRouter:
         "/files/{doc_id}/archive",
         tags=["documents"],
         response_model=ArchiveListing,
-        responses=errors(404, 413, 422, 503),
+        responses=errors(400, 404, 413, 422, 503),
     )
     async def archive_listing(
         doc_id: DocIdSegment,
@@ -232,10 +232,18 @@ def files_router(lib: Library) -> APIRouter:
         folder: Annotated[
             str, Query(max_length=4096, description='List only this folder and those under it ("a/b/").')
         ] = "",
+        after: Annotated[
+            str | None,
+            Query(
+                min_length=1,
+                max_length=4096,
+                description="The `next` of the page before: list from where it stopped.",
+            ),
+        ] = None,
     ) -> ArchiveListing:
         """What a stored zip archive holds, grouped by folder with sizes, read from its central
-        directory: nothing is unpacked. At most 2,000 files at a time (``truncated``); ``folder=``
-        lists one folder and those under it."""
+        directory: nothing is unpacked. At most 2,000 files a page (``truncated``, ``next`` for the
+        page after with ``after=``); ``folder=`` lists one folder and those under it."""
 
         def run() -> ArchiveListing:
             doc, path = locate_archive(doc_id)
@@ -246,6 +254,7 @@ def files_router(lib: Library) -> APIRouter:
                 folder,
                 member_url=f"{base}/member",
                 view_url=f"{base}/view",
+                after=after,
             )
 
         out = await lib.nas.run(run, timeout=LISTING_TIMEOUT)
