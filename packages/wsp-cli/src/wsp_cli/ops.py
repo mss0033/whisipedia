@@ -249,9 +249,9 @@ def cmd_index_build(args: argparse.Namespace, out: TextIO) -> int:
                 # sick share still let them read). The files of the last good run are kept; what was
                 # indexed is committed and searchable; the next run rebuilds them (2026-11-06 review).
                 out.write("rank, suggest and spell left as they were: a source failed\n")
-                _shared_phases_skipped(cfg, ix.root, [r.source_id for r in reports if r.error], out)
+                if _full_build(args):
+                    _shared_phases_skipped(cfg, ix.root, [r.source_id for r in reports if r.error], out)
                 return _index_build_summary(reports, out)
-            _shared_phases_ran(cfg, ix.root)
             try:
                 if not getattr(args, "no_rank", False):
                     ix.rank_if_due()  # kept unless the link graph can have changed (or a week passed)
@@ -265,6 +265,8 @@ def cmd_index_build(args: argparse.Namespace, out: TextIO) -> int:
             # (2026-11-06 review).
             if not getattr(args, "no_spell", False):
                 ix.spell_if_due()
+            if _full_build(args):  # rank, suggest and spell all ran (or were not due): fresh again
+                _shared_phases_ran(cfg, ix.root)
     except LockHeldError as exc:
         return _busy(exc)
     return _index_build_summary(reports, out)
@@ -273,6 +275,16 @@ def cmd_index_build(args: argparse.Namespace, out: TextIO) -> int:
 SHARED_SKIPPED_FILE = "shared-phases-skipped.json"
 SHARED_SKIPPED_ALERT = "index:shared-phases-skipped"
 SHARED_SKIPPED_NIGHTS = 2  # the nights in a row that raise the alert
+
+
+def _full_build(args: argparse.Namespace) -> bool:
+    """The nightly build: every source, and rank, suggest and spell after it. Only it counts the days
+    the shared phases were skipped, or clears them: a lane's ``--source X --no-rank --no-spell`` (or a
+    reindex, a refine-again) neither ran them nor skipped them for the library (2026-11-06 review)."""
+    return not any(
+        getattr(args, flag, False)
+        for flag in ("source", "reindex", "refine_again", "no_rank", "no_spell", "no_suggest")
+    )
 
 
 def _shared_phases_skipped(cfg: Mapping[str, Any], root: Path, failed: Sequence[str], out: TextIO) -> None:
@@ -301,14 +313,18 @@ def _shared_phases_skipped(cfg: Mapping[str, Any], root: Path, failed: Sequence[
         f"{', '.join(failed)} keep failing in `wsp index build`"
     )
     out.write(f"ALERT: {message}\n")
+    # An alert already open keeps its first text (the store does not rewrite an open alert, and
+    # resolving to raise it again would notify every night); the count of days is in this run's
+    # output and in the counter file.
     _alert(cfg, SHARED_SKIPPED_ALERT, message)
 
 
 def _shared_phases_ran(cfg: Mapping[str, Any], root: Path) -> None:
-    path = root / SHARED_SKIPPED_FILE
-    if path.exists():
-        path.unlink(missing_ok=True)
-        _alert(cfg, SHARED_SKIPPED_ALERT, None)
+    """Clear the count and resolve the alert, unconditionally: the counter file can be gone (removed
+    by hand, an index root rebuilt) while the alert is still open."""
+    with contextlib.suppress(OSError):
+        (root / SHARED_SKIPPED_FILE).unlink(missing_ok=True)
+    _alert(cfg, SHARED_SKIPPED_ALERT, None)
 
 
 def _alert(cfg: Mapping[str, Any], key: str, message: str | None) -> None:

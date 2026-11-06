@@ -618,7 +618,12 @@ def storage_probes(
 ) -> Callable[[], bool]:
     """True while the vault mount answers (:func:`storage_probe`) and the Refinery root is a readable
     directory, within ``timeout`` seconds: a hung soft mount answers nothing, and the caller must not
-    hang with it (the probe's thread is left behind, a daemon)."""
+    hang with it (the probe's thread is left behind, a daemon).
+
+    A configured Refinery root that does not exist, or an empty vault root, also reads as "not
+    answering" on purpose: that is what an unmounted share looks like, and on a machine whose library
+    holds generations to index neither is a healthy state (a build then stops instead of failing each
+    source in turn)."""
     vault = storage_probe(vault_root)
 
     def refinery() -> bool:

@@ -362,11 +362,31 @@ def test_the_nightly_command_exits_non_zero_when_a_source_failed(
     assert BROKEN in message
     assert "ALERT: rank, suggest and spell not rebuilt" in out.getvalue()
 
-    ix.failing = False  # fixed: the shared phases run, the count and the alert are cleared
+    # A lane's partial build (one source, no rank or spell), a reindex or a refine-again neither counts
+    # a day nor clears the count: the shared phases were not the library's to run.
+    days_before = skipped.read_text(encoding="utf-8")
+    for partial in (
+        argparse.Namespace(source=BROKEN, no_rank=True, no_spell=True),
+        argparse.Namespace(source=None, no_rank=True),
+        argparse.Namespace(source=None, no_suggest=True),
+    ):
+        ix.failing = True
+        assert ops.cmd_index_build(partial, io.StringIO()) == 1
+        ix.failing = False
+        assert ops.cmd_index_build(partial, io.StringIO()) == 0
+    assert skipped.read_text(encoding="utf-8") == days_before
+    assert len(alerts) == 1  # neither raised again nor resolved
+
+    ix.failing = False  # fixed: the full build runs the shared phases; the count and the alert are cleared
+    ix.shared.clear()
     assert ops.cmd_index_build(args, io.StringIO()) == 0
     assert ix.shared == ["rank", "finish", "spell"]
     assert not skipped.exists()
     assert alerts[-1] == (ops.SHARED_SKIPPED_ALERT, None)
+    # The counter gone (removed by hand) while the alert is open: a good full build still resolves it.
+    alerts.clear()
+    assert ops.cmd_index_build(args, io.StringIO()) == 0
+    assert alerts == [(ops.SHARED_SKIPPED_ALERT, None)]
 
 
 def test_the_storage_probe_gives_up_on_a_hung_mount(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
