@@ -395,11 +395,12 @@ def test_a_resumed_ingest_reads_the_staging_record_once_and_skips_what_it_has_fo
     batches, and files an earlier run recorded cost nothing against the slice."""
     from wsp_adapters.doccollection.testing import PUBLIC_A, make_pdf
     from wsp_vault import vault as vault_mod
+    from wsp_vault.atomic import readback as real_readback
 
     objects = [(f"FM-{i}_2022.pdf", make_pdf([PUBLIC_A, [f"Chapter {i}"]])) for i in range(12)]
     fetch(vault, tmp_path, objects, "2026-10-12")
     reads, writes, hashed = [0], [0], [0]
-    real_read, real_write, real_readback = vault_mod._read_staging, vault._write_record, vault_mod.readback  # pyright: ignore[reportPrivateUsage]
+    real_read, real_write = vault_mod._read_staging, vault._write_record  # pyright: ignore[reportPrivateUsage]
 
     def read(staging: Path) -> Any:
         reads[0] += 1

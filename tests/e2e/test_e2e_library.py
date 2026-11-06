@@ -226,8 +226,12 @@ def test_ingest_index_and_serve(library: dict[str, Any]) -> None:
     cfg = bootstrap.load(lay)
     ledger = JsonlLedger(vault / "ledger", bootstrap.load_signer(cfg, lay))
     assert ledger.verify()
-    kinds = [e.kind for e in ledger.events()]
-    assert kinds.count("vault.adopt") == 3
+    events = list(ledger.events())
+    kinds = [e.kind for e in events]
+    # Ingest adopts through adopt_many: one vault.adopt_batch per flush, counting its files.
+    batches = [e for e in events if e.kind == "vault.adopt_batch"]
+    assert kinds.count("vault.adopt") == 0
+    assert sum(e.data["files"] for e in batches) == 3
     assert kinds.count("ingest.adopted") == 2
 
     # 3. Idempotent: a second run changes nothing.
@@ -275,9 +279,16 @@ def test_ingest_index_and_serve(library: dict[str, Any]) -> None:
         assert "first algorithm" in doc.text
         assert doc.license == "CC-BY-SA-4.0"
         assert [v.generation_id for v in wsp.iter_history("wsp:wikipedia-en-zim/A/Enigma")] == ["2026-08"]
-        # Redirects become aliases: the prefix matches the alias, the suggestion is the article title.
-        assert "Alan Turing" in wsp.suggest("tur").suggestions  # ZIM redirect "Turing"
-        assert "Ada Lovelace" in wsp.suggest("love").suggestions  # dump redirect "Lovelace"
+        # Redirects become aliases: the prefix matches the alias, the suggestion shows the alias typed
+        # with the article's title beside it (items), and opens the article.
+        tur = wsp.suggest("tur")  # ZIM redirect "Turing"
+        assert "Turing" in tur.suggestions
+        assert ("Alan Turing", "wsp:wikipedia-en-zim/A/Alan_Turing") in [
+            (i.title, i.doc_id) for i in tur.items
+        ]
+        love = wsp.suggest("love")  # dump redirect "Lovelace"
+        assert "Lovelace" in love.suggestions
+        assert ("Ada Lovelace", "wsp:wikipedia-en/Ada_Lovelace") in [(i.title, i.doc_id) for i in love.items]
         turing = wsp.document("wsp:wikipedia-en-zim/A/Alan_Turing")
         assert turing.format == "html"  # original HTML straight from the sealed ZIM (ZimAssetStore)
         assert turing.html is not None
