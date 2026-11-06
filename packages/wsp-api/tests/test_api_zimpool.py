@@ -309,3 +309,29 @@ def test_a_random_page_is_never_a_captured_bot_challenge(tmp_path: Path) -> None
     archive = open_archive(str(write_zim(tmp_path / "c.zim", "c", items, [])))
     picks = {random_article(archive) for _ in range(20)}
     assert picks <= {("www.ex.org/learning/", "www.ex.org/learning/"), None}
+
+
+def test_a_random_page_is_never_a_bot_check_captured_in_a_pages_place(tmp_path: Path) -> None:
+    """2026-11-05 deep dive: FAS's Military Medicine archive holds the SF Medical Handbook's part 1 as
+    an AWS WAF page at the PDF's own address (no path rule finds it); Random opened it every other
+    visit. A small page is read and its text decides; a long page is drawn as it is."""
+    from wsp_api.zimread import open_archive, random_article
+    from wsp_core.listing import BOT_WALL_MAX_BYTES
+
+    wall = (
+        "<html><head><script>window.gokuProps = {};</script></head><body><noscript>JavaScript is "
+        "disabled. In order to continue, we need to verify that you&#039;re not a robot.</noscript>"
+        "</body></html>"
+    )
+    long_page = "<p>" + "A long page about the handbook. " * (BOT_WALL_MAX_BYTES // 20) + "</p>"
+    items = [("irp.fas.org/index.html", "text/html", "<p>Military medicine</p>")]
+    items += [(f"irp.fas.org/doddir/milmed/sfhandbook-pt{i}.pdf", "text/html", wall) for i in range(30)]
+    items += [("irp.fas.org/long.html", "text/html", long_page)]
+    archive = open_archive(str(write_zim(tmp_path / "m.zim", "m", items, [])))
+    picks = {random_article(archive) for _ in range(30)}
+    assert picks <= {
+        ("irp.fas.org/index.html", "irp.fas.org/index.html"),
+        ("irp.fas.org/long.html", "irp.fas.org/long.html"),
+        None,
+    }
+    assert picks - {None}

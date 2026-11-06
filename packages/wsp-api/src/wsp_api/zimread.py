@@ -24,6 +24,8 @@ from typing import Protocol
 
 from libzim.reader import Archive, Entry
 
+from wsp_core.listing import BOT_WALL_MAX_BYTES, is_bot_wall_page
+
 MAX_REDIRECTS = 5
 # Bytes an entry may have to be sent whole (Want.ANY): a file a page links to is read into memory and
 # passed between processes, so a film in a video archive is left out (found, without content).
@@ -178,14 +180,19 @@ NOT_A_PAGE = re.compile(
 
 
 def random_article(archive: Archive) -> tuple[str, str] | None:
-    """``(path, title)`` of a random HTML entry that is not a redirect or a crawler's capture of site
-    machinery (:data:`NOT_A_PAGE`), or ``None`` after a few tries."""
+    """``(path, title)`` of a random HTML entry that is not a redirect, a crawler's capture of site
+    machinery (:data:`NOT_A_PAGE`) or of a bot check in a page's place (:func:`is_bot_wall_page`: an
+    entry under ``BOT_WALL_MAX_BYTES`` is read; 2026-11-05 deep dive), or ``None`` after a few tries."""
     for _ in range(RANDOM_TRIES):
         entry = archive.get_random_entry()
         if entry.is_redirect or NOT_A_PAGE.search(entry.path):
             continue
-        if str(entry.get_item().mimetype).startswith("text/html"):
-            return entry.path, entry.title
+        item = entry.get_item()
+        if not str(item.mimetype).startswith("text/html"):
+            continue
+        if item.size <= BOT_WALL_MAX_BYTES and is_bot_wall_page(bytes(item.content)):
+            continue
+        return entry.path, entry.title
     return None
 
 

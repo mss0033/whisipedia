@@ -55,6 +55,10 @@ SERVED_MIMETYPES = frozenset(
         "image/vnd.microsoft.icon",
     }
 )
+# Shown by the browser too, not saved: a PDF the archive holds (FAS's military-medicine handbooks, a
+# song's lyrics and score) opened in the Navigator's PDF frame, under the policy a stored original's
+# PDF has (security.asset_csp); every "view" was a download to the Downloads folder (2026-11-05 deep dive).
+INLINE_MIMETYPES = frozenset({"application/pdf"})
 # A page, a script or a stylesheet is never an asset: the API serves pages through the page route, and
 # code from an upstream container must not run (or style) at our origin. Every other type a page links
 # to (htmlrewrite.FILES: PDFs, EPUBs, sheet music, recordings, data) is sent as a download.
@@ -282,9 +286,9 @@ def browse_router(lib: Library) -> APIRouter:
         response_class=Response,
         responses={
             200: {
-                "description": "The image, with a long-lived cache header (generations are immutable); "
-                "any other file a page links to (EPUB, PDF, a recording, sheet music) is sent as an "
-                "attachment. Pages, scripts and stylesheets are never served here.",
+                "description": "The image or PDF, with a long-lived cache header (generations are "
+                "immutable); any other file a page links to (EPUB, a recording, sheet music) is sent as "
+                "an attachment. Pages, scripts and stylesheets are never served here.",
                 "content": {
                     "image/*": {"schema": {"type": "string", "format": "binary"}},
                     "application/epub+zip": {"schema": {"type": "string", "format": "binary"}},
@@ -304,8 +308,9 @@ def browse_router(lib: Library) -> APIRouter:
             )
         headers = {"Cache-Control": "public, max-age=31536000, immutable"}
         if kind not in SERVED_MIMETYPES:
-            name = path.rsplit("/", 1)[-1]
-            headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(name, safe='')}"
+            name = quote(path.rsplit("/", 1)[-1], safe="")
+            how = "inline" if kind in INLINE_MIMETYPES else "attachment"  # inline keeps the name to save
+            headers["Content-Disposition"] = f"{how}; filename*=UTF-8''{name}"
         return Response(content=found.content, media_type=found.mimetype, headers=headers)
 
     # --- Outside links ----------------------------------------------------------------------------

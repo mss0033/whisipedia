@@ -2,7 +2,15 @@ import re
 
 import pytest
 
-from wsp_core.listing import DEFAULT_SKIP_PATHS, is_default_listing, skip_paths, skip_regex
+from wsp_core.listing import (
+    BOT_WALL_MAX_BYTES,
+    DEFAULT_SKIP_PATHS,
+    is_bot_wall,
+    is_bot_wall_page,
+    is_default_listing,
+    skip_paths,
+    skip_regex,
+)
 
 
 @pytest.mark.parametrize(
@@ -51,3 +59,48 @@ def test_a_wiki_resource_page_is_never_a_document() -> None:
     assert not is_default_listing("www.google.com/search/howsearchworks")
     assert not is_default_listing("womenshistory.si.edu/media/oembed-guide")
     assert re.fullmatch(skip_regex(DEFAULT_SKIP_PATHS), "_assets_/f8/File:OS_policy.pdf")
+
+
+@pytest.mark.parametrize(
+    ("text", "wall"),
+    [
+        # FAS's Military Medicine archive, AWS WAF (2026-11-05 deep dive)
+        (
+            "JavaScript is disabled In order to continue, we need to verify that you\u2019re not a robot. "
+            "This requires JavaScript. Enable JavaScript and then reload the page.",
+            True,
+        ),
+        ("Just a moment... Checking if the site connection is secure. Ray ID: 8a1b", True),
+        ("www.example.org needs to review the security of your connection before proceeding.", True),
+        ("Verify you are human by completing the action below.", True),
+        ("Press & Hold to confirm you are a human (and not a bot).", True),
+        # an article about CAPTCHAs is long; a short page that does not ask is a page
+        ("A CAPTCHA asks you to verify that you're not a robot. " + "History of the test. " * 120, False),
+        ("Robots: a short glossary entry on industrial robots.", False),
+        ("", False),
+    ],
+)
+def test_bot_wall(text: str, wall: bool) -> None:
+    assert is_bot_wall(text) is wall
+
+
+FAS_CAPTURE = (
+    b'<!DOCTYPE html><html><head><script>window.gokuProps = {"key": "AQID"};</script><title></title>'
+    b'</head><body><div id="challenge-container"></div><script>AwsWafIntegration.getToken();</script>'
+    b"<noscript><h1>JavaScript is disabled</h1>In order to continue, we need to verify that you&#039;re "
+    b"not a robot. This requires JavaScript. Enable JavaScript and then reload the page.</noscript>"
+    b"</body></html>"
+)
+
+
+def test_a_captured_bot_check_page() -> None:
+    """The FAS capture's words are in <noscript>, which a page's readable text drops (2026-11-05 deep
+    dive): the page itself is read, scripts and styles left out."""
+    assert is_bot_wall_page(FAS_CAPTURE)
+    cloudflare = b"<title>Just a moment...</title><style>p{}</style><p>Verify you are human by completing</p>"
+    assert is_bot_wall_page(cloudflare)
+    # The words in a script are not the page's: a page whose code mentions robots is a page.
+    assert not is_bot_wall_page(b"<script>// verify that you're not a robot</script><p>Field dressing.</p>")
+    assert not is_bot_wall_page(b"<p>Field dressing: apply pressure.</p>")
+    big = FAS_CAPTURE.replace(b"</body>", b"<!--" + b"x" * BOT_WALL_MAX_BYTES + b"--></body>")
+    assert not is_bot_wall_page(big)  # never read past the limit

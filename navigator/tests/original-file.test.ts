@@ -277,3 +277,51 @@ describe('a front page with no way in (2026-10-17 field exam)', () => {
     expect(deadEndNotice({ ...doc, doc_id: 'wsp:aops/A/Other' }, source, bare)).toBeNull();
   });
 });
+
+describe('a PDF an archived page links to (2026-11-05 deep dive)', () => {
+  const page = () => {
+    const content = document.createElement('div');
+    content.innerHTML =
+      '<p>Lyrics: <a href="/v1/assets/kiwix-tl/2026-05/t.com/agnes.pdf" data-pdf="agnes.pdf" target="_blank">view</a></p>' +
+      '<ul><li><a href="/v1/assets/kiwix-tl/2026-05/t.com/score.pdf" data-pdf="score.pdf">score</a></li></ul>' +
+      '<a href="/v1/assets/kiwix-tl/2026-05/t.com/x.png" target="_blank">picture</a>';
+    document.body.append(content);
+    return content;
+  };
+
+  it('shows it in the original’s frame below its paragraph on a click, and closes it on another', async () => {
+    const { pdfLinks } = await import('../src/pages/document.ts');
+    const content = page();
+    expect(pdfLinks(content, base)).toBe(2);
+    expect(content.querySelector('iframe')).toBeNull(); // never loaded with the page
+    const view = content.querySelector<HTMLAnchorElement>('a[data-pdf="agnes.pdf"]')!;
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 });
+    view.dispatchEvent(click);
+    expect(click.defaultPrevented).toBe(true);
+    const frame = content.querySelector('p + .pdf-inline iframe.original-frame')!;
+    expect(frame.getAttribute('src')).toBe(
+      'http://lib.test/v1/assets/kiwix-tl/2026-05/t.com/agnes.pdf',
+    );
+    expect(frame.getAttribute('title')).toBe('view (PDF document)');
+    expect(content.querySelector('.pdf-inline a[download="agnes.pdf"]')).not.toBeNull();
+    expect(view.getAttribute('aria-expanded')).toBe('true');
+    view.click();
+    expect(content.querySelector('iframe')).toBeNull();
+    expect(view.getAttribute('aria-expanded')).toBe('false');
+    // In a list, the frame goes inside the item.
+    content.querySelector<HTMLAnchorElement>('a[data-pdf="score.pdf"]')!.click();
+    expect(content.querySelector('li > .pdf-inline iframe')).not.toBeNull();
+    content.remove();
+  });
+
+  it('leaves a modified click to the browser (a new tab)', async () => {
+    const { pdfLinks } = await import('../src/pages/document.ts');
+    const content = page();
+    pdfLinks(content, base);
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true });
+    content.querySelector('a[data-pdf]')!.dispatchEvent(click);
+    expect(click.defaultPrevented).toBe(false);
+    expect(content.querySelector('iframe')).toBeNull();
+    content.remove();
+  });
+});

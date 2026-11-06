@@ -172,3 +172,54 @@ def test_stack_exchange_listing_pages_are_not_documents(tmp_path: Path) -> None:
     assert ids == ["questions/1/q"]
     ctx = make_ctx(make_spec("se", {**base, "skip_paths": []}), FakeFetcher(), tmp_path / "w")
     assert len(list(KiwixOpdsAdapter().documents(ctx, gen.parent))) == 3
+
+
+BOT_WALL_PAGE = (
+    "<html><head><title></title><script>window.gokuProps = {};</script>"
+    '<script src="challenge.js"></script></head><body><noscript><h1>JavaScript is disabled</h1>'
+    "In order to continue, we need to verify that you&#039;re not a robot. This requires JavaScript. "
+    "Enable JavaScript and then reload the page.</noscript></body></html>"
+)
+
+
+def test_a_captured_bot_check_is_not_a_document(tmp_path: Path) -> None:
+    """2026-11-05 deep dive: FAS's Military Medicine archive holds the SF Medical Handbook's part 1 as
+    an AWS WAF page at the PDF's own address; Random landed on it every other visit."""
+    gen = tmp_path / "src" / "2026-05" / "upstream"
+    pages = [
+        ("irp.fas.org/index.html", "Military Medicine", "<p>Handbooks of military medicine.</p>"),
+        ("irp.fas.org/doddir/milmed/sfhandbook-pt1.pdf", "sfhandbook pt1", BOT_WALL_PAGE),
+    ]
+    build_zim(gen / "irp.fas.org_en_military-medicine_2026-05.zim", name="milmed", articles=pages)
+    spec = make_spec("milmed", {"adapter": "kiwix-opds", "selector": {"name": "milmed"}, "workers": 1})
+    ctx = make_ctx(spec, FakeFetcher(), tmp_path / "w")
+    assert [e.native_id for e in KiwixOpdsAdapter().documents(ctx, gen.parent)] == ["irp.fas.org/index.html"]
+
+
+def test_a_title_cut_at_a_character_reference_is_completed_from_the_page(tmp_path: Path) -> None:
+    """2026-11-05 deep dive: warc2zim stores "Auteur Encyclopédie de l" for a page titled
+    "Auteur Encyclopédie de l&#039;Environnement"; a title that is whole stays the archive's."""
+    gen = tmp_path / "src" / "2026-05" / "upstream"
+    pages = [
+        (
+            "site.org/author/x/",
+            "Mohamed HANCHANE - Auteur Encyclopédie de l",
+            "<html><head><title>Mohamed HANCHANE - Auteur Encyclopédie de l&#039;Environnement</title>"
+            "</head><body><p>Author page.</p></body></html>",
+        ),
+        (
+            "site.org/learn/spoofing/",
+            "What is email spoofing? | How it works",
+            "<title>What is email spoofing? | How it works &amp; prevention | Cloudflare</title><p>x</p>",
+        ),
+        ("A/Alan_Turing", "Alan Turing", "<title>Alan Turing - Wikipedia</title><p>Turing.</p>"),
+    ]
+    build_zim(gen / "site_en_all_2026-05.zim", name="site", articles=pages)
+    spec = make_spec("site", {"adapter": "kiwix-opds", "selector": {"name": "site"}, "workers": 1})
+    ctx = make_ctx(spec, FakeFetcher(), tmp_path / "w")
+    titles = {d.native_id: d.title for d in KiwixOpdsAdapter().documents(ctx, gen.parent)}
+    assert titles == {
+        "site.org/author/x/": "Mohamed HANCHANE - Auteur Encyclopédie de l'Environnement",
+        "site.org/learn/spoofing/": "What is email spoofing? | How it works & prevention | Cloudflare",
+        "A/Alan_Turing": "Alan Turing",
+    }

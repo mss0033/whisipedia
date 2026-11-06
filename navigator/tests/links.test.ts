@@ -280,6 +280,19 @@ describe('the Gutenberg cover page (2026-10-16 field exam)', () => {
     expect(mid!.hasAttribute('target')).toBe(false);
   });
 
+  it('opens a PDF the archive holds to read, not to save (2026-11-05 deep dive)', () => {
+    const div = render(
+      `<a href="/v1/assets/kiwix-tl/2026-05/tomlehrersongs.com/wp-content/uploads/agnes.pdf">view</a>` +
+        `<a href="/v1/assets/kiwix-tl/2026-05/tomlehrersongs.com/x/agnes.PDF">score</a>`,
+    );
+    const [lyrics, score] = [...div.querySelectorAll('a')];
+    expect(lyrics!.hasAttribute('download')).toBe(false);
+    expect(lyrics!.getAttribute('target')).toBe('_blank');
+    expect(lyrics!.dataset.pdf).toBe('agnes.pdf');
+    expect(score!.dataset.pdf).toBe('agnes.PDF');
+    expect(lyrics!.dataset.wsp).toBeUndefined();
+  });
+
   it('does not offer a download outside the library’s assets', () => {
     expect(resolveHref('/v1/assets/../search?q=x', cover).kind).toBe('missing');
     expect(resolveHref('/v1/files/x.epub', cover).kind).toBe('local');

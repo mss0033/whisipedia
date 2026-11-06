@@ -44,6 +44,18 @@ ASSET_CSP: tuple[bytes, bytes] = (
     b"default-src 'none'; style-src 'unsafe-inline'; sandbox",
 )
 ASSET_PREFIX = "/v1/assets/"
+# A PDF from a container is shown in the Navigator's frame, as a stored original's PDF is
+# (originals.files_csp): Chrome's PDF viewer draws nothing in a sandboxed document, so a PDF gets no
+# sandbox, only no subresources and no framing but by our own pages (2026-11-05 deep dive).
+ASSET_PDF_CSP = b"default-src 'none'; frame-ancestors 'self'"
+
+
+def asset_csp(path: str, content_type: bytes) -> bytes | None:
+    """The policy for a ``/v1/assets/`` PDF, which replaces the page policy and :data:`ASSET_CSP`;
+    ``None`` for any other response."""
+    if path.startswith(ASSET_PREFIX) and content_type.split(b";")[0].strip().lower() == b"application/pdf":
+        return ASSET_PDF_CSP
+    return None
 
 
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
@@ -93,7 +105,6 @@ class SecurityMiddleware:
             return
 
         path = str(scope.get("path", ""))
-        extra = (ASSET_CSP,) if path.startswith(ASSET_PREFIX) else ()
 
         async def send_with_headers(message: Message) -> None:
             if message["type"] == "http.response.start":
@@ -101,8 +112,10 @@ class SecurityMiddleware:
                 headers = [(k, v) for k, v in message.get("headers", []) if k.lower() not in drop]
                 base = SECURITY_HEADERS
                 ctype = next((v for k, v in headers if k.lower() == b"content-type"), b"")
-                own = files_csp(path, ctype)
-                if own is not None:  # a stored original: its own policy replaces the page policy
+                pdf = asset_csp(path, ctype)
+                extra = (ASSET_CSP,) if path.startswith(ASSET_PREFIX) and pdf is None else ()
+                own = files_csp(path, ctype) or pdf
+                if own is not None:  # a stored original or an archive's PDF: its policy replaces the page's
                     base = tuple(
                         (k, own if k == b"content-security-policy" else v) for k, v in SECURITY_HEADERS
                     )

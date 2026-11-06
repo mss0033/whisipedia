@@ -2051,7 +2051,10 @@ sources:
     retention:
       gfs: {last: 2, monthly: 6, yearly: forever}
     scores: {authority: 3, density: 3, uniqueness: 3, license: 3, bulk: 5, health: 4, longevity: 4, cost: 3}
-    notes: Found by the kiwix-opds bot on 2026-10-11 in category 'other'.
+    notes: >-
+      Found by the kiwix-opds bot on 2026-10-11 in category 'other'. The 2026-05 capture holds the
+      Special Forces Medical Handbook whole (sfhandbook.pdf); its part 1 (sfhandbook-pt1.pdf) was
+      captured as the site's bot check, which the refine leaves out (2026-11-05 deep dive).
 
   - id: kiwix-www-ready-gov-en
     name: Ready.gov (Kiwix ZIM)

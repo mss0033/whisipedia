@@ -784,6 +784,65 @@ export function originalPanel(
   );
 }
 
+/** Where a PDF's frame goes: below the paragraph or heading holding its link, else at the end of
+ * the list item or table cell holding it, else right after the link. */
+const PDF_BLOCK = 'p, h1, h2, h3, h4, h5, h6, blockquote, figcaption, pre';
+const PDF_CELL = 'li, dd, dt, td, th';
+
+/**
+ * PDFs an archived page links to (`a[data-pdf]`, core/links.ts) open in the same frame as a stored
+ * original's PDF, below the link, on a plain click; a second click closes it. A modified or middle
+ * click still opens a new tab, and the frame's bar keeps the download. Loaded on the reader's word,
+ * as the original's frame is: Chrome's PDF viewer takes the keyboard (2026-10-22). Each "view"
+ * saved a file to Downloads before (Tom Lehrer's lyrics and scores, FAS's handbooks; 2026-11-05
+ * deep dive). Returns how many links it wired.
+ */
+export function pdfLinks(content: HTMLElement, urlOf: (path: string) => string = (p) => p): number {
+  const links = [...content.querySelectorAll<HTMLAnchorElement>('a[data-pdf]')];
+  const open = new WeakMap<HTMLAnchorElement, HTMLElement>();
+  for (const a of links) {
+    a.setAttribute('aria-expanded', 'false');
+    a.addEventListener('click', (ev) => {
+      if (ev.button !== 0 || ev.ctrlKey || ev.metaKey || ev.shiftKey || ev.altKey) return;
+      ev.preventDefault();
+      const shown = open.get(a);
+      if (shown) {
+        shown.remove();
+        open.delete(a);
+        a.setAttribute('aria-expanded', 'false');
+        return;
+      }
+      const path = a.getAttribute('href') ?? '';
+      const name = a.dataset.pdf ?? 'file.pdf';
+      const url = urlOf(path);
+      const label = a.textContent?.trim() || name;
+      const slot = h(
+        'div',
+        { class: 'original pdf-inline' },
+        h(
+          'p',
+          { class: 'original-links' },
+          h('b', null, 'PDF: '),
+          h('code', null, name),
+          ' · ',
+          h('a', { href: url, target: '_blank', rel: 'noopener' }, 'Open in a new window'),
+          ' · ',
+          h('a', { href: url, download: name }, 'Download'),
+        ),
+        h('iframe', { class: 'original-frame', src: url, title: `${label} (PDF document)` }),
+      );
+      const block = a.closest<HTMLElement>(PDF_BLOCK);
+      const cell = a.closest<HTMLElement>(PDF_CELL);
+      if (block && block !== content && content.contains(block)) block.after(slot);
+      else if (cell && cell !== content && content.contains(cell)) cell.append(slot);
+      else a.after(slot);
+      open.set(a, slot);
+      a.setAttribute('aria-expanded', 'true');
+    });
+  }
+  return links.length;
+}
+
 /** A film or a recording: the Screening Room's player, then the download and the text as usual. */
 function mediaPanel(
   doc: Pick<DocumentResponse, 'title'>,
@@ -1325,6 +1384,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
   else void markUncaptured(ctx, content, uncapturedNote);
   if (doc.format === 'html' && doc.html && hasTex(doc.html)) typesetSoon(content);
   replaceBrokenImages(content);
+  pdfLinks(content, (path) => ctx.app.api.url(path));
   titleOf = () => titleHeading(body);
   const title = titleHeading(body);
   if (title) {

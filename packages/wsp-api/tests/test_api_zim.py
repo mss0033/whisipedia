@@ -682,3 +682,41 @@ def test_a_failed_image_check_keeps_the_picture_and_says_so(tmp_path: Path) -> N
     assert unsure == [True]
     assert store.is_image("wiki", SAMPLE_GEN_2, "A/P")  # a refused check keeps it ...
     assert not store.is_image("wiki", SAMPLE_GEN_2, "A/P")  # ... a definite one does not
+
+
+def test_a_title_cut_at_a_character_reference_is_completed_from_the_page(tmp_path: Path) -> None:
+    """2026-11-05 deep dive: a zimit archive's refined title stopped at "&#039;" ("Auteur
+    Encyclopédie de l"); the served document carries the page's whole title, and a title that is
+    whole stays the refined one (never "<title> - Wikipedia")."""
+    services = sample_services()
+    zim_rel = "upstream/wikipedia_en_2026-09.zim"
+    gen_dir = tmp_path / "wikipedia-en-zim" / SAMPLE_GEN_2
+    cut = "<html><head><title>Auteur Encyclopédie de l&#039;Environnement</title></head><p>x</p></html>"
+    whole = "<html><head><title>Alan Turing - Wikipedia</title></head><p>Turing</p></html>"
+    _zim(
+        gen_dir / zim_rel,
+        "wikipedia_en",
+        [("A/Cut", "text/html", cut), ("A/Alan_Turing", "text/html", whole)],
+        [],
+    )
+    vault = InMemoryVault(root=tmp_path)
+    art = Artifact("wikipedia-en-zim", SAMPLE_GEN_2, PurePosixPath(zim_rel), 10, "a" * 64, "b" * 64)
+    vault.add(
+        Generation("wikipedia-en-zim", SAMPLE_GEN_2, GenerationStatus.SEALED, artifacts=(art,)), promote=True
+    )
+    turing = services.documents.get(make_doc_id("wikipedia-en-zim", "A/Alan_Turing"))
+    assert turing is not None
+    cut_doc = replace(
+        turing,
+        doc_id=make_doc_id("wikipedia-en-zim", "A/Cut"),
+        native_id="A/Cut",
+        title="Auteur Encyclopédie de l",
+        html_ref="zim:A/Cut",
+    )
+    services.documents.put(SAMPLE_GEN_2, cut_doc)  # type: ignore[attr-defined]
+    services.documents.put(SAMPLE_GEN_2, replace(turing, html_ref="zim:A/Alan_Turing"))  # type: ignore[attr-defined]
+    with local_client(create_app(replace(services, vault=vault))) as c:
+        doc = Document.model_validate(c.get(document_href(cut_doc.doc_id)).json())
+        assert doc.title == "Auteur Encyclopédie de l'Environnement"
+        doc = Document.model_validate(c.get(document_href(turing.doc_id)).json())
+        assert doc.title == turing.title

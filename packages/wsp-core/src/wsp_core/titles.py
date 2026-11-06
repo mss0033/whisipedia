@@ -6,6 +6,7 @@ before the adapter cleaned them still show a file name; field exam 2026-10-14).
 
 from __future__ import annotations
 
+import html as htmllib
 import re
 from urllib.parse import unquote
 
@@ -74,3 +75,34 @@ def shown_title(title: str) -> str:
     if not t or not (_EXT_RE.search(t) or _PCT_RE.search(t)):
         return title
     return display_title(t) or title
+
+
+_PAGE_TITLE_RE = re.compile(r"<title\b[^>]*>(.*?)</title\s*>", re.IGNORECASE | re.DOTALL)
+_PAGE_TITLE_BYTES_RE = re.compile(rb"<title\b[^>]*>(.*?)</title\s*>", re.IGNORECASE | re.DOTALL)
+_SPACES_RE = re.compile(r"\s+")
+
+
+def repaired_title(stored: str, page: str | bytes) -> str:
+    """``stored`` completed from the page's own ``<title>`` when the stored title stops exactly where
+    the raw ``<title>`` text has a character reference; otherwise ``stored`` unchanged.
+
+    warc2zim (zimit site archives) cuts an entry's title at its first ``&...;``: "Auteur Encyclopédie
+    de l" for "...de l&#039;Environnement", "Blog | Smithsonian American Women" for
+    "...Women&#039;s History Museum" (2026-11-05 deep dive). Only that cut is repaired, so a curated
+    title ("Alan Turing" beside "<title>Alan Turing - Wikipedia") is never replaced by the page's."""
+    if not stored:
+        return stored
+    if isinstance(page, bytes):
+        mb = _PAGE_TITLE_BYTES_RE.search(page)
+        raw = mb.group(1).decode("utf-8", "replace") if mb is not None else None
+    else:
+        ms = _PAGE_TITLE_RE.search(page)
+        raw = ms.group(1) if ms is not None else None
+    if raw is None:
+        return stored
+    raw = raw.lstrip()
+    # The cut title may have lost the space before the reference ("How it works" of "How it works &amp;").
+    if not raw.startswith(stored) or not raw[len(stored) :].lstrip().startswith("&"):
+        return stored
+    full = _SPACES_RE.sub(" ", htmllib.unescape(raw)).strip()
+    return full if len(full) > len(stored.rstrip()) and full.startswith(stored.strip()) else stored

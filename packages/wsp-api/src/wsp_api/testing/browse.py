@@ -112,6 +112,7 @@ def browse_services() -> Services:
                 b"PK\x03\x04epub", "application/epub+zip"
             ),
             ("wikipedia-en-zim", SAMPLE_GEN_2, "I/tune.mid"): Asset(b"MThd", "audio/midi"),
+            ("wikipedia-en-zim", SAMPLE_GEN_2, "milmed/first aid.pdf"): Asset(b"%PDF-1.4", "application/pdf"),
             ("wikipedia-en-zim", SAMPLE_GEN_2, "I/s.css"): Asset(b"body{}", "text/css"),
         }
     )

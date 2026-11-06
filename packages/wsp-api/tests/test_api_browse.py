@@ -22,6 +22,7 @@ from wsp_api.schemas import (
     RecentChanges,
     SearchResults,
 )
+from wsp_api.security import ASSET_PDF_CSP, asset_csp
 from wsp_api.testing import local_client
 from wsp_api.testing.browse import ENIGMA, PIXEL_PNG, CategorizedCatalog, InMemoryGapLog, browse_services
 from wsp_api.testing.fakes import SAMPLE_GEN_2, sample_services
@@ -141,6 +142,31 @@ def test_asset_route_sends_any_other_file_a_page_links_to_as_a_download(browse: 
     assert r.content == b"MThd"
     assert r.headers["content-disposition"] == "attachment; filename*=UTF-8''tune.mid"
     assert r.headers["x-content-type-options"] == "nosniff"
+
+
+def test_asset_route_shows_a_pdf_in_the_navigators_frame(browse: httpx.Client) -> None:
+    """A PDF a page links to (FAS's military-medicine handbooks, a song's lyrics and score) is shown,
+    not saved, under a stored original's PDF policy: no sandbox (Chrome's PDF viewer draws nothing
+    in one), framed by our own pages only (2026-11-05 deep dive)."""
+    r = browse.get(f"/v1/assets/wikipedia-en-zim/{SAMPLE_GEN_2}/milmed/first%20aid.pdf")
+    assert r.status_code == 200
+    assert r.content == b"%PDF-1.4"
+    assert r.headers["content-type"] == "application/pdf"
+    assert r.headers["content-disposition"] == "inline; filename*=UTF-8''first%20aid.pdf"
+    assert r.headers.get_list("content-security-policy") == ["default-src 'none'; frame-ancestors 'self'"]
+    assert r.headers["x-content-type-options"] == "nosniff"
+    # Everything else from an archive keeps the sandbox, a 404 for a PDF too.
+    missing = browse.get(f"/v1/assets/wikipedia-en-zim/{SAMPLE_GEN_2}/milmed/sfhandbook-pt1.pdf")
+    assert missing.status_code == 404
+    assert any("sandbox" in p for p in missing.headers.get_list("content-security-policy"))
+
+
+def test_asset_policy_frames_only_a_pdf() -> None:
+    assert asset_csp("/v1/assets/s/g/a.pdf", b"application/pdf") == ASSET_PDF_CSP
+    assert asset_csp("/v1/assets/s/g/a.pdf", b"Application/PDF; charset=binary") == ASSET_PDF_CSP
+    assert asset_csp("/v1/assets/s/g/a.svg", b"image/svg+xml") is None
+    assert asset_csp("/v1/files/wsp%3Ax", b"application/pdf") is None  # originals.files_csp's
+    assert asset_csp("/v1/documents/x", b"application/pdf") is None
 
 
 # --- search ------------------------------------------------------------------------------------

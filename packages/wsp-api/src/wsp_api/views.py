@@ -54,7 +54,7 @@ from wsp_core.model import (
     searchable,
 )
 from wsp_core.ports import AssetStore, Catalog
-from wsp_core.titles import shown_title
+from wsp_core.titles import repaired_title, shown_title
 
 log = logging.getLogger(__name__)
 MANIFEST_NAME = "MANIFEST.json"  # same name as wsp_vault.manifest.MANIFEST_NAME
@@ -687,6 +687,12 @@ class Library:
                 page = self.rendered(doc.source_id, gen, doc.html_ref, doc.native_id)
                 if page is not None:
                     html, section = page.html, page.section
+                    # A title refined before the repair stops at a character reference (warc2zim:
+                    # "Auteur Encyclopédie de l"); the page's own <title> completes it (2026-11-05
+                    # deep dive). The rewrite keeps the <title> byte-for-byte.
+                    fixed = repaired_title(doc.title, page.html)
+                    if fixed != doc.title:
+                        doc = replace(doc, title=fixed)
             if html is None and at is None:
                 # e.g. the Wikipedia dump (indexed text) rendered with the Kiwix ZIM's page for its title.
                 for alt in renditions(self.s.source(doc.source_id), doc, self.vault):

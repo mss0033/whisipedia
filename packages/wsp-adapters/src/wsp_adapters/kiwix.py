@@ -72,7 +72,7 @@ from wsp_adapters.html_text import html_to_text
 from wsp_core import fcc, mindtouch, nautilus, youtubezim
 from wsp_core.errors import FetchError, OwnerActionRequiredError
 from wsp_core.ids import content_hash, make_doc_id
-from wsp_core.listing import skip_paths, skip_regex
+from wsp_core.listing import is_bot_wall_page, skip_paths, skip_regex
 from wsp_core.metalink import parse_metalink
 from wsp_core.model import (
     Checksum,
@@ -86,6 +86,7 @@ from wsp_core.model import (
     Verdict,
 )
 from wsp_core.ports import Ctx, Fetcher
+from wsp_core.titles import repaired_title
 
 log = logging.getLogger(__name__)
 
@@ -860,6 +861,8 @@ def _read_html(task: _HtmlTask) -> list[DocRow]:
             continue
         native_id = p.prefix + blob.path
         page = _mindtouch_page(task.clusters.scan.zim, blob.path, blob.content)
+        if page is None and is_bot_wall_page(blob.content):  # a bot check in the page's place (2026-11-05)
+            continue
         text = html_to_text(blob.content if page is None else page)
         lang = (
             page_lang(blob.content, p.lang) or _translation_lang(task.clusters.scan.zim, blob.path) or p.lang
@@ -870,7 +873,8 @@ def _read_html(task: _HtmlTask) -> list[DocRow]:
                     doc_id=make_doc_id(p.source_id, native_id),
                     source_id=p.source_id,
                     native_id=native_id,
-                    title=blob.title,
+                    # warc2zim cuts a title at its first character reference (2026-11-05 deep dive)
+                    title=repaired_title(blob.title, blob.content),
                     lang=lang,
                     license=p.license,
                     text=text,

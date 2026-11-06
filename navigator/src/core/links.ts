@@ -43,7 +43,14 @@ function missing(original: string, ctx?: LinkContext): LinkTarget {
 }
 
 /** Files a browser shows by itself (the asset route serves these inline). */
-const VIEWABLE = /\.(png|jpe?g|gif|webp|avif|bmp|svg|ico)$/i;
+const VIEWABLE = /\.(png|jpe?g|gif|webp|avif|bmp|svg|ico|pdf)$/i;
+/**
+ * A PDF the archive holds: the asset route serves it inline and the document page shows it in the
+ * reader's PDF frame on a click (`pdfLinks` in pages/document.ts). Song lyrics and scores, FAS's
+ * military-medicine handbooks: the page's content is its PDFs, and each "view" saved a file to
+ * Downloads (2026-11-05 deep dive).
+ */
+export const PDF_FILE = /\.pdf$/i;
 
 export function anchorId(id: string): string {
   return ANCHOR_PREFIX + id;
@@ -77,7 +84,7 @@ export function resolveHref(rawHref: string, ctx: LinkContext): LinkTarget {
 
   if (href.startsWith('/v1/assets/')) {
     // The server writes a link to a file in an archive (EPUB, PDF, a picture, sheet music) as its
-    // asset URL. A picture opens to look at; anything else is saved.
+    // asset URL. A picture or a PDF opens to look at; anything else is saved.
     const path = allowedImagePath(href);
     if (!path) return missing(href, ctx);
     const name = decodeURIComponent(path.split('?')[0]!.split('/').pop() ?? '') || 'download';
@@ -802,6 +809,7 @@ export function rewriteAnchor(
       if (target.view) {
         a.setAttribute('target', '_blank');
         a.setAttribute('rel', 'noopener');
+        if (PDF_FILE.test(target.name)) a.dataset.pdf = target.name;
       } else a.setAttribute('download', target.name);
       break;
     case 'missing':
