@@ -221,6 +221,52 @@ def test_adopt_many_neither_reads_files_adopted_before_again_nor_fails_on_one_re
     assert len(reads) == 1
 
 
+def test_adopt_many_takes_over_adopts_checks_for_the_ingest(vault: FileVault, tmp_path: Path) -> None:
+    """2026-11-05 deep dive: ``wsp ingest`` adopts a collection through adopt_many (one record read a
+    run), so it keeps adopt()'s case check, replacement of a re-fetched verified file, restaged event
+    and merged upstream checksums, and reports each file as it goes."""
+    sha = [Checksum("sha256", hashlib.sha256(b"old").hexdigest())]
+    vault.adopt(SOURCE, GEN, _incoming(tmp_path, b"old", "a.pdf"), "upstream/a.pdf", upstream=sha)
+    new_sha = [Checksum("sha256", hashlib.sha256(b"new").hexdigest())]
+    seen: list[tuple[str, bool]] = []
+    items: list[tuple[Path, str, list[Checksum]]] = [
+        (_incoming(tmp_path, b"new", "a.pdf"), "upstream/a.pdf", new_sha),  # re-fetched, verified
+        (_incoming(tmp_path, b"b", "b.pdf"), "upstream/b.pdf", []),
+    ]
+    with pytest.raises(VaultError, match="already staged with different content"):
+        vault.adopt_many(SOURCE, GEN, items[:1], workers=1)  # without replace_staged: refused
+    n = vault.adopt_many(
+        SOURCE, GEN, items, workers=1, replace_staged=True, on_file=lambda r, a: seen.append((r, a))
+    )
+    assert n == 2
+    assert seen == [("upstream/a.pdf", True), ("upstream/b.pdf", True)]
+    staging = vault.stage(SOURCE, GEN)
+    assert (staging / "upstream/a.pdf").read_bytes() == b"new"
+    seen.clear()
+    assert vault.adopt_many(SOURCE, GEN, items, on_file=lambda r, a: seen.append((r, a))) == 2
+    assert seen == [("upstream/a.pdf", False), ("upstream/b.pdf", False)]  # recorded: not read again
+    # the same bytes fetched again with other checksums: every one stays recorded as verified
+    for c in (
+        Checksum("md5", hashlib.md5(b"b").hexdigest()),
+        Checksum("sha1", hashlib.sha1(b"b").hexdigest()),
+    ):
+        vault.adopt_many(SOURCE, GEN, [(_incoming(tmp_path, b"b", "b.pdf"), "upstream/b.pdf", [c])])
+    record = json.loads((staging / STAGING_RECORD).read_text())
+    assert {u["algorithm"] for u in record["upstream/b.pdf"]["upstream"]} == {"md5", "sha1"}
+    # a name that differs only in case from a recorded one is refused, as adopt() refuses it
+    with pytest.raises(VaultError, match="case-insensitive"):
+        vault.adopt_many(SOURCE, GEN, [(_incoming(tmp_path, b"c", "B.pdf"), "upstream/B.pdf", [])])
+    with pytest.raises(VaultError, match="case-insensitive"):
+        vault.adopt_many(
+            SOURCE,
+            GEN,
+            [
+                (_incoming(tmp_path, b"d", "d.pdf"), "upstream/d.pdf", []),
+                (_incoming(tmp_path, b"d", "D2.pdf"), "upstream/D.pdf", []),
+            ],
+        )
+
+
 def test_a_leftover_adoption_with_the_same_bytes_as_a_new_fetch_is_dropped(
     vault: FileVault, tmp_path: Path
 ) -> None:

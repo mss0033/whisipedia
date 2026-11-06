@@ -8,6 +8,7 @@ import io
 import json
 import zipfile
 from collections.abc import Iterable
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -182,6 +183,54 @@ def test_one_partition_in_parallel_with_a_kept_workdir(vault: tuple[Path, Downlo
     assert "next: wsp ingest --source big --version 2026-10-18.p0001" in text
     assert ADAPTER.workdir == tmp_path / "state" / "bulk" / "big"  # kept between runs (PMC's inventory)
     assert run(partition="p0099")[0] == bulk.EXIT_NOTHING_NEW  # an empty partition
+
+
+class ListingDated(Adapter):
+    """A partition versioned by the day its listing was read (PubMed Central's daily inventory)."""
+
+    listing_dated = True
+
+
+def test_a_listing_dated_partition_sealed_within_its_cadence_is_not_fetched_again(
+    vault: tuple[Path, Downloads], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-11-05 deep dive: PMC's version is the inventory's day, so the exact-version check never
+    matched after a day; every lane restart fetched and sealed p0272..p0269 again (p0269 five times)."""
+    from datetime import UTC, datetime, timedelta
+
+    root, fetcher = vault
+    lib = root / "library" / SPEC.vault_domain / "big"
+    today = datetime.now(UTC).date()
+
+    def sealed(days_ago: int, partition: str = "p0001") -> None:
+        gen = lib / f"{today - timedelta(days=days_ago)}.{partition}"
+        gen.mkdir(parents=True)
+        (gen / "MANIFEST.json").write_text("{}")
+
+    def returning(value: object) -> Any:
+        def stub(*args: object, **kwargs: object) -> object:
+            return value
+
+        return stub
+
+    sealed(3, "p0002")  # another partition sealed lately says nothing about this one
+    sealed(40)  # past a month: fetched again
+    monkeypatch.setattr(bootstrap, "load_adapters", returning({"big": ListingDated()}))
+    assert run(partition="p0001")[0] == bulk.EXIT_OK
+    assert fetcher.downloaded == ["a.tar.gz"]
+    fetcher.downloaded.clear()
+    sealed(3)
+    rc, text = run(partition="p0001")
+    assert rc == bulk.EXIT_NOTHING_NEW
+    assert f"was sealed as {today - timedelta(days=3)}.p0001, within P1M" in text
+    assert fetcher.downloaded == []
+    # the source's own cadence decides when it has one
+    monkeypatch.setattr(bootstrap, "load_sources", returning([replace(SPEC, cadence="P2D")]))
+    assert run(partition="p0001")[0] == bulk.EXIT_OK
+    # an adapter whose versions are the issuer's releases is checked by the exact version only
+    monkeypatch.setattr(bootstrap, "load_sources", returning([SPEC]))
+    monkeypatch.setattr(bootstrap, "load_adapters", returning({"big": ADAPTER}))
+    assert run(partition="p0001")[0] == bulk.EXIT_OK
 
 
 class Packed(Adapter):

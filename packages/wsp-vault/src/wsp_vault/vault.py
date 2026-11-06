@@ -58,6 +58,7 @@ import re
 import shutil
 import stat
 import threading
+import time
 from collections import OrderedDict, deque
 from collections.abc import Callable, Generator, Iterable, Mapping, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -652,6 +653,9 @@ class FileVault:
         *,
         workers: int = 4,
         flush_every: int = 1000,
+        flush_seconds: float | None = None,
+        replace_staged: bool = False,
+        on_file: Callable[[str, bool], None] | None = None,
     ) -> int:
         """:meth:`adopt` for many files (mirror trees with thousands of files per generation).
 
@@ -669,20 +673,40 @@ class FileVault:
         trawl). Returns the number of files in ``items`` that are now staged and recorded, those
         recorded before included. Stops at the first failing file (already adopted files stay
         recorded).
+
+        ``items`` is consumed lazily, so a caller that stops yielding (a time budget) ends the call
+        after the files in hand, recorded. ``flush_seconds`` also flushes a pending batch that old,
+        so a run killed mid-way re-hashes at most that much work. ``replace_staged`` and the
+        case-collision check are :meth:`adopt`'s; ``on_file(relpath, adopted)`` is called per file
+        in ``items`` order (``adopted`` false for a file recorded before). ``wsp ingest`` adopted
+        collection files one :meth:`adopt` at a time, and each read the multi-megabyte staging record
+        twice (and rewrote it once per new file): a resumed slice of crs-reports (18,257 recorded)
+        spent its hour re-checking files it had, and aozora added nothing in two slices (2026-11-05
+        deep dive).
         """
         with self._locks.generation(source_id, generation_id, exclusive=False):
             staging = self.stage(source_id, generation_id)
             with self._locks.record(source_id, generation_id):
                 recorded = _read_staging(staging)
+            folded = {p.casefold(): p for p in recorded}
             pending: list[tuple[str, Digests, Sequence[Checksum]]] = []
             count = 0
+            flushed = time.monotonic()
 
             def flush() -> None:
+                nonlocal flushed
+                flushed = time.monotonic()
                 if not pending:
                     return
                 with self._locks.record(source_id, generation_id):
                     records = _read_staging(staging)
                     for rel, digests, upstream in pending:
+                        clash = [p for p in records if p != rel and p.casefold() == rel.casefold()]
+                        if clash:
+                            raise VaultError(f"{rel} collides with {clash[0]} on a case-insensitive share")
+                        previous = records.get(rel)
+                        if previous is not None and previous.digests == digests:
+                            upstream = [*previous.upstream, *upstream]
                         records[rel] = ManifestEntry.from_digests(rel, digests, upstream=upstream)
                     self._write_record(staging, records)
                 self._log(
@@ -692,27 +716,50 @@ class FileVault:
                 )
                 pending.clear()
 
-            def one(item: tuple[Path, str, Sequence[Checksum]]) -> _Adopted:
+            def one(item: tuple[Path, str, Sequence[Checksum]]) -> tuple[str, _Adopted]:
                 path, relpath, upstream = item
                 if self._adopted_before(staging, path, relpath, upstream, None, recorded) is not None:
-                    return None
-                rel, digests, _ = self._retry.run(lambda: self._adopt_file(staging, path, relpath, upstream))
-                return rel, digests, upstream
+                    return relpath, None
+                rel, digests, replaced = self._retry.run(
+                    lambda: self._adopt_file(staging, path, relpath, upstream, replace_staged=replace_staged)
+                )
+                if replaced is not None:
+                    self._log(
+                        "vault.restaged",
+                        f"{source_id}/{generation_id}",
+                        {"path": rel, "old_sha256": replaced.sha256, "sha256": digests.sha256},
+                    )
+                return relpath, (rel, digests, upstream)
 
-            def take(done: _Adopted) -> None:
+            def take(done: tuple[str, _Adopted]) -> None:
                 nonlocal count
+                relpath, adopted = done
                 count += 1
-                if done is not None:
-                    pending.append(done)
+                if adopted is not None:
+                    pending.append(adopted)
+                if on_file is not None:
+                    on_file(relpath, adopted is not None)
+
+            def due() -> bool:
+                if len(pending) >= flush_every:
+                    return True
+                return flush_seconds is not None and time.monotonic() - flushed >= flush_seconds
+
+            def check_case(relpath: str) -> None:
+                rel = check_relpath(relpath).as_posix()
+                other = folded.setdefault(rel.casefold(), rel)
+                if other != rel:
+                    raise VaultError(f"{rel} collides with {other} on a case-insensitive share")
 
             with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
-                window: deque[Future[_Adopted]] = deque()
+                window: deque[Future[tuple[str, _Adopted]]] = deque()
                 try:
                     for item in items:
+                        check_case(item[1])
                         window.append(pool.submit(one, item))
                         if len(window) >= 2 * max(1, workers):
                             take(window.popleft().result())
-                            if len(pending) >= flush_every:
+                            if due():
                                 flush()
                     while window:
                         take(window.popleft().result())

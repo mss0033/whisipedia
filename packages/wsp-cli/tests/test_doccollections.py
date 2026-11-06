@@ -1387,3 +1387,136 @@ def test_a_zipped_pdf_download_keeps_the_pdf_it_holds(tmp_path: Path) -> None:
     with pytest.raises(FetchError, match="not a zip"):
         unzip_pdf(path)
     assert not list(tmp_path.glob("*.unzip"))
+
+
+# --- 2026-11-05 deep dive: a fetch of a cycle screens the copies earlier runs left ------------------------
+
+
+class _Counting(FakeFetcher):
+    """Records the documents downloaded (the listing is read through ``get_bytes``)."""
+
+    def __init__(self, routes: dict[str, bytes]) -> None:
+        super().__init__(routes)
+        self.downloaded: list[str] = []
+
+    def download(self, remote: RemoteFile, dest: Path) -> FetchResult:
+        self.downloaded.append(remote.url.rsplit("/", 1)[-1])
+        return super().download(remote, dest)
+
+
+def _fetcher(vault: FileVault, fetcher: FakeFetcher, tmp_path: Path) -> CollectionFetcher:
+    return CollectionFetcher(
+        vault.root,
+        fetcher,
+        keys={},
+        user_agent="t",
+        workdir=tmp_path / "work",
+        out=io.StringIO(),
+        throttle=False,
+    )
+
+
+TWO = [("FM-5-0_2022.pdf", GOOD), ("FM-6-0_2022.pdf", make_pdf([PUBLIC_A, ["Chapter 2"]]))]
+
+
+def test_a_cycle_fetched_again_screens_what_its_ingest_staged_and_downloads_nothing(
+    vault: FileVault, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """crs-reports' cycle 2026-10-20 was downloaded whole six times (23,188 files, up to 34 hours a
+    time): every lane restart fetched again what the cycle's unsealed ingest had already staged."""
+    s = spec(TWO)
+    first = _fetcher(vault, _Counting(routes(TWO)), tmp_path).run(s, version="2026-10-10")
+    assert len(first.fetched) == 2
+    real_seal = vault.seal
+
+    def reboot(*a: Any, **kw: Any) -> Any:
+        raise OSError("the machine rebooted before the seal")
+
+    monkeypatch.setattr(vault, "seal", reboot)
+    result = Ingestor(vault, [s], out=io.StringIO()).run(source_id=s.id)
+    assert [v.status for v in result.versions] == [VersionStatus.FAILED]  # staged, not sealed
+    monkeypatch.setattr(vault, "seal", real_seal)
+    counting = _Counting(routes(TWO))
+    again = _fetcher(vault, counting, tmp_path).run(s, version="2026-10-10")
+    assert counting.downloaded == []
+    assert again.reused == 2
+    assert sorted(d.file for d in again.fetched) == sorted(d.file for d in first.fetched)
+    staging = vault.staging_path(s.id, "2026-10-10")
+    assert all((staging / d.file).is_file() for d in again.fetched)  # read where it is, never moved
+    ingest(vault, s)
+    gen = vault.generation_path(s.id, "2026-10-10")
+    assert all((gen / d.file).is_file() for d in first.fetched)
+
+
+def test_a_cycle_fetched_again_before_its_ingest_takes_its_downloads_by_the_plans_checksum(
+    vault: FileVault, tmp_path: Path
+) -> None:
+    s = spec(TWO)
+    first = _fetcher(vault, _Counting(routes(TWO)), tmp_path).run(s, version="2026-10-10")
+    one = vault.root / "_incoming" / s.id / "2026-10-10" / first.fetched[0].file.removeprefix("upstream/")
+    one.write_bytes(GOOD[:-1] + b"!")  # the same size, other bytes: not what the plan names
+    counting = _Counting(routes(TWO))
+    again = _fetcher(vault, counting, tmp_path).run(s, version="2026-10-10")
+    assert counting.downloaded == ["FM-5-0_2022.pdf"]
+    assert again.reused == 1
+    assert one.read_bytes() == GOOD
+    ingest(vault, s)
+
+
+def test_a_document_held_for_review_is_screened_again_from_its_copy_not_downloaded(
+    vault: FileVault, tmp_path: Path
+) -> None:
+    """DLA's i04 r2 (2026-11-05) downloaded its 4,121 documents held for review again to find 11 new
+    ones; the owner's accepted rows were never taken while the copies sat in the quarantine."""
+    held_only = [("unmarked.pdf", UNMARKED)]
+    s = spec(held_only)
+    first = _fetcher(vault, _Counting(routes(held_only)), tmp_path).run(s, version="2026-10-10")
+    (row,) = first.held
+    copy = Path(row["quarantined"])
+    counting = _Counting(routes(held_only))
+    again = _fetcher(vault, counting, tmp_path).run(s, version="2026-10-11")
+    assert counting.downloaded == []
+    assert again.reused == 1
+    assert [r["key"] for r in again.held] == [row["key"]]
+    assert copy.is_file()  # held again, where it was
+    # the issuer's file changed (another size and MD5 in the listing): downloaded
+    changed = [("unmarked.pdf", make_pdf([["PLANNING HANDBOOK", "Contents", "Second edition"]]))]
+    counting = _Counting(routes(changed))
+    _fetcher(vault, counting, tmp_path).run(spec(changed), version="2026-10-12")
+    assert counting.downloaded == ["unmarked.pdf"]
+    # the owner accepts it: taken from the copy into the cycle, and ingested
+    rules = tmp_path / "rules.yaml"
+    rules.write_text("allow_all: true\n", encoding="utf-8")
+    (tmp_path / "decisions").mkdir()
+    (tmp_path / "decisions" / "rules.yaml").write_text(
+        yaml.safe_dump({"allow_documents": [row["key"]], "allow_content_review": [row["key"]]}),
+        encoding="utf-8",
+    )
+    raw = dict(s.raw)
+    access = cast(dict[str, Any], raw["access"])
+    accepted = replace(
+        s, raw={**raw, "access": {**access, "filter": {**access["filter"], "rules": str(rules)}}}
+    )
+    counting = _Counting(routes(changed))
+    taken = _fetcher(vault, counting, tmp_path).run(accepted, version="2026-10-13")
+    assert counting.downloaded == []
+    assert [d.cand.key for d in taken.fetched] == [row["key"]]
+    assert not taken.held
+    assert not copy.exists()  # moved into the cycle
+    ingest(vault, accepted)
+
+
+def test_a_held_copy_with_no_listed_size_is_trusted_only_for_a_while(tmp_path: Path) -> None:
+    import os
+    import time
+
+    from wsp_cli.doccollections import REFETCH_AFTER
+
+    cand = Candidate(key="t:a", url="https://bucket.example.gov/a.pdf", title="A", issuer="T")
+    copy = tmp_path / cand.file_name
+    copy.write_bytes(b"%PDF-held")
+    fresh = CollectionFetcher._held_fresh  # pyright: ignore[reportPrivateUsage]
+    assert fresh(cand, copy)
+    old = time.time() - REFETCH_AFTER.total_seconds() - 86400
+    os.utime(copy, (old, old))
+    assert not fresh(cand, copy)  # an issuer's quiet correction is still picked up

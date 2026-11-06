@@ -221,6 +221,36 @@ def test_two_lanes_never_work_on_one_source_at_once(lane: Lane) -> None:
     assert lane.run("fema-building-science") == 0
 
 
+def test_a_partition_lane_waits_for_its_source_while_another_lane_holds_it(lane: Lane) -> None:
+    """2026-11-05 deep dive: lane-accepted-dla left dla-assist at once whenever lane-dla held it, 128
+    times in a week, and the owner's accepted documents were never taken. A lane over one source's
+    partitions waits in the lock's queue and takes the source when the other lets it go."""
+    import threading
+
+    lane.script(fetch=[0], ingest=[0])
+    locks = lane.state / "locks"
+    locks.mkdir(parents=True)
+    fd = os.open(locks / "dla-assist.lock", os.O_RDWR | os.O_CREAT, 0o644)
+    fcntl.flock(fd, fcntl.LOCK_EX)  # the other lane, between two of its items in a second
+    release = threading.Timer(1.0, os.close, (fd,))
+    release.start()
+    try:
+        assert lane.run("i00", source="dla-assist") == 0
+    finally:
+        release.join()
+    assert lane.done() == ["i00"]
+    assert "waiting up to 21600 s" in (lane.state / "lane-t.log").read_text()
+    # held past the wait: left for a later run, nothing fetched
+    lane.script(fetch=[0], ingest=[0])
+    fd = os.open(locks / "dla-assist.lock", os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        assert lane.run("i01", source="dla-assist", LANE_LOCK_WAIT="1") == 1
+    finally:
+        os.close(fd)
+    assert [c for c in lane.calls() if "i01" in c] == []
+
+
 def test_sigterm_reaches_the_running_fetch_and_stops_the_lane(lane: Lane) -> None:
     lane.script(fetch=["hang", 0], ingest=[0, 0])
     proc = subprocess.Popen([str(LANE), "lane-t", "-", "neets", "cia-csi"], env=lane.env)

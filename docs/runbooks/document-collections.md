@@ -76,7 +76,11 @@ version only):
 A version sealed after a partial fetch (6) cannot take more files: the next fetch uses a new cycle
 label (`2026-10-12-r2`, ...; ordered naturally, so `-r10` is newer than `-r4`). A re-fetch of a cycle
 whose ingest was interrupted before the seal is fine: a staged file is replaced only by bytes that
-verify against the newer plan's checksum (ledger event `vault.restaged`).
+verify against the newer plan's checksum (ledger event `vault.restaged`). Such a re-fetch downloads
+nothing it already has: a document the cycle's ingest staged, or that the cycle's plan names and is
+still in `_incoming` with the plan's SHA-256, is screened again from that copy (the fetch summary says
+`reused N`); a staged copy is only read, never moved. The ingest reads the staging record once a run
+and skips what an earlier slice adopted without counting it against `--max-seconds`.
 
 ### Lanes: `tools/lanes/lane-run.sh`
 
@@ -92,7 +96,9 @@ fetch was complete (0, 7, 8) **and** `wsp ingest --version <cycle>` ingested tha
 a fetch that found nothing new). An incomplete listing (4) is retried in the same cycle; a partial
 fetch (6) is ingested, and the item is fetched again in a new cycle. An item whose fetch completed but
 whose ingest was interrupted resumes at the ingest. A lane takes a lock per source, so two lanes never
-fetch the same source at once; the second one leaves the item for its next run.
+fetch the same source at once. A lane over one source's partitions waits for the other lane to let the
+source go between its items (`LANE_LOCK_WAIT`, 6 hours by default), then leaves the item for its next
+run; a lane over many sources (`-`) leaves a busy one at once (`LANE_LOCK_WAIT=0`).
 
 Run sources one after another (or in separate shells per host); long ones belong in `tools/wsp-bg`:
 
@@ -114,7 +120,9 @@ git diff registry/filters/ && git commit -am "chore(registry): owner review of <
 ```
 
 Accepting writes the publication numbers into `registry/filters/<source>.yaml`; the next fetch takes
-them. Delete quarantined files of rejected documents (`_incoming/_quarantine/<source>/`).
+them, from the quarantined copy when it still stands for the listing (its listed size and MD5, else
+younger than 180 days), without downloading them again. A fetch of a later cycle screens every held
+document again from its copy in the same way. Delete quarantined files of rejected documents (`_incoming/_quarantine/<source>/`).
 
 ## 4. The large D14 sets (partitioned sources)
 

@@ -386,6 +386,90 @@ def test_an_ingest_out_of_time_yields_and_the_next_run_goes_on(vault: FileVault,
     assert ingest(vault, "2026-10-12") == [("2026-10-12", VersionStatus.INGESTED, True)]
 
 
+def test_a_resumed_ingest_reads_the_staging_record_once_and_skips_what_it_has_for_free(
+    vault: FileVault, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-11-05 deep dive: each file's adopt() read the whole staging record twice and rewrote it per
+    new file; a resumed crs-reports slice (7.9 MB record) spent its hour re-checking files it had, and
+    aozora's slices added nothing. The record is read a fixed number of times a run, written in
+    batches, and files an earlier run recorded cost nothing against the slice."""
+    from wsp_adapters.doccollection.testing import PUBLIC_A, make_pdf
+    from wsp_vault import vault as vault_mod
+
+    objects = [(f"FM-{i}_2022.pdf", make_pdf([PUBLIC_A, [f"Chapter {i}"]])) for i in range(12)]
+    fetch(vault, tmp_path, objects, "2026-10-12")
+    reads, writes, hashed = [0], [0], [0]
+    real_read, real_write, real_readback = vault_mod._read_staging, vault._write_record, vault_mod.readback  # pyright: ignore[reportPrivateUsage]
+
+    def read(staging: Path) -> Any:
+        reads[0] += 1
+        return real_read(staging)
+
+    def write(staging: Path, records: Any) -> None:
+        writes[0] += 1
+        real_write(staging, records)
+
+    def readback(path: Path, **kw: Any) -> Any:
+        hashed[0] += 1
+        return real_readback(path, **kw)
+
+    monkeypatch.setattr(vault_mod, "_read_staging", read)
+    monkeypatch.setattr(vault, "_write_record", write)
+    monkeypatch.setattr(vault_mod, "readback", readback)
+    real_seal = vault.seal
+
+    def reboot(*a: Any, **kw: Any) -> Any:
+        raise OSError("the machine rebooted before the seal")
+
+    monkeypatch.setattr(vault, "seal", reboot)
+    run = Ingestor(vault, [spec(objects)], out=io.StringIO()).run(source_id=SID, version="2026-10-12")
+    assert [v.status for v in run.versions] == [VersionStatus.FAILED]
+    assert hashed[0] == 13  # 12 documents and the catalog
+    assert reads[0] <= 3  # not three a file
+    assert writes[0] == 1  # one batch, not one a file
+    monkeypatch.setattr(vault, "seal", real_seal)
+    reads[0] = writes[0] = hashed[0] = 0
+    out = io.StringIO()
+    # No time left at all: what is recorded does not need any, so the version is sealed.
+    report = Ingestor(vault, [spec(objects)], out=out, max_seconds=0).run(source_id=SID, version="2026-10-12")
+    assert [v.status for v in report.versions] == [VersionStatus.INGESTED]
+    assert hashed[0] == 0
+    assert writes[0] == 0
+    assert reads[0] <= 4  # the ingest, adopt_many and the seal's manifest
+    assert "13 file(s) adopted by an earlier run, unchanged" in out.getvalue()
+
+
+def test_an_ingest_takes_new_files_before_re_hashing_fetched_again_copies(
+    vault: FileVault, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-11-05 deep dive: 16,005 crs-reports files already recorded came back into _incoming; each
+    is hashed in both places, and in plan order they kept the slice from the files not yet in."""
+    from wsp_adapters.doccollection.testing import PUBLIC_A, make_pdf
+
+    objects = [(f"FM-{i}_2022.pdf", make_pdf([PUBLIC_A, [f"Chapter {i}"]])) for i in range(4)]
+    fetch(vault, tmp_path, objects, "2026-10-12")
+    plan = Ingestor(vault, [spec(objects)], out=io.StringIO()).plan(SID, "2026-10-12")
+    files = plan.versions[0].files
+    # an earlier run adopted the first two; the lane brought them back since
+    for f in files[:2]:
+        vault.adopt(SID, "2026-10-12", f.path, f.target.relpath)
+        f.path.parent.mkdir(parents=True, exist_ok=True)
+        f.path.write_bytes((vault.staging_path(SID, "2026-10-12") / f.target.relpath).read_bytes())
+    order: list[str] = []
+    real = vault.adopt_many
+
+    def spy(sid: str, gid: str, items: Any, **kw: Any) -> int:
+        taken = list(items)
+        order.extend(rel for _, rel, _ in taken)
+        return real(sid, gid, taken, **kw)
+
+    monkeypatch.setattr(vault, "adopt_many", spy)
+    assert ingest(vault, "2026-10-12") == [("2026-10-12", VersionStatus.INGESTED, True)]
+    again = {f.target.relpath for f in files[:2]}
+    assert set(order[-2:]) == again
+    assert not again & set(order[:-2])
+
+
 # --- M3: natural order in `wsp ingest` --------------------------------------------------------------------
 
 

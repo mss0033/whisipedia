@@ -32,8 +32,8 @@
 # fetch crashes. The item's alert is resolved once it is done. LANE_ALERT_CMD replaces `$WSP` for them.
 #
 # One lane per source at a time: each item holds <state>/locks/<source>.lock (flock) for its fetch and
-# ingest, so two lanes listing the same source never fetch it at once (audit M6); the second one leaves
-# the item for its next run. SIGTERM/SIGINT are passed on to the running command and the lane stops
+# ingest, so two lanes listing the same source never fetch it at once (audit M6); the second one waits
+# for it up to LANE_LOCK_WAIT seconds (below), then leaves the item for its next run. SIGTERM/SIGINT are passed on to the running command and the lane stops
 # after it, leaving the item undone (audit M5). Exit: 0 when every item is done, 1 if any is left.
 set -u
 usage() { echo "usage: $0 NAME SOURCE|- ITEM..." >&2; exit 2; }
@@ -64,6 +64,13 @@ INGEST_SLICE=${LANE_INGEST_SLICE:-3600}
 ROUNDS=${LANE_ROUNDS:-3}  # passes over the items left for later, an hour apart
 ROUND_WAIT=${LANE_ROUND_WAIT:-3600}
 MAX_SLICES=${LANE_MAX_SLICES:-48}  # one-hour ingest slices of one version in a row, at most
+# Seconds an item waits in its source's lock queue while another lane holds the source, before it is
+# left for a later run. A lane over one source's partitions waits (6 h by default): the other lane
+# lets the lock go between its items, and the waiter takes it then. Leaving at once lost every race:
+# lane-accepted-dla, the owner's accepted DLA documents, found dla-assist held by lane-dla 128 times in
+# a week and took nothing, while lane-dla worked through i04..i10 for days (2026-11-05 deep dive). A
+# lane over many sources ("-") still leaves a busy one at once and goes on with the others.
+if [ "$SRC" = - ]; then LOCK_WAIT=${LANE_LOCK_WAIT:-0}; else LOCK_WAIT=${LANE_LOCK_WAIT:-21600}; fi
 mkdir -p "$STATE/locks"
 DONE=$STATE/$NAME.done CYCLES=$STATE/$NAME.cycles FETCHED=$STATE/$NAME.fetched LOG=$STATE/$NAME.log
 touch "$DONE" "$CYCLES" "$FETCHED"
@@ -185,10 +192,22 @@ for item in "$@"; do
   # One lane per source: fd 8 holds <locks>/<source>.lock for this item (the children inherit it).
   exec 8>> "$STATE/locks/$src.lock"
   if ! flock --nonblock 8; then
-    say "$item: another lane is working on $src; left for the next run"
-    exec 8>&-
-    left=1
-    continue
+    got=1
+    if [ "$LOCK_WAIT" -gt 0 ]; then
+      say "$item: another lane is working on $src; waiting up to $LOCK_WAIT s for it"
+      flock --wait "$LOCK_WAIT" 8 &  # in the background, so a signal reaches it (the trap above)
+      child=$!
+      wait "$child"
+      got=$?
+      child=""
+      [ "$stopping" = 1 ] && { say "stopped by a signal; $item is left for the next run"; exit 143; }
+    fi
+    if [ "$got" -ne 0 ]; then
+      say "$item: another lane is working on $src; left for the next run"
+      exec 8>&-
+      left=1
+      continue
+    fi
   fi
 
   listing=0 partial=0 pending=0 done_item=0

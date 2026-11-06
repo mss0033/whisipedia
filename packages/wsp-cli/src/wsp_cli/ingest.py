@@ -18,7 +18,8 @@ only when every planned file is complete (or already staged by an earlier, inter
 1. expected checksums: the plan's; for Kiwix metalink items (``checksum: null``) the ``.zim.sha256``
    Kiwix publishes, fetched through the ``kiwix-opds`` adapter; otherwise the file is *unverifiable*
    (the ``.meta4`` files next to downloads are never stored);
-2. ``Vault.adopt`` hashes each file in place, checks it and renames it into staging;
+2. ``Vault.adopt_many`` hashes each file in place, checks it and renames it into staging (the
+   staging record read once per run, rewritten in batches; files an earlier run recorded are skipped);
 3. ``seal`` (signed manifest), ledger events, ``promote`` unless a newer generation is current
    (for a partitioned source, ADR-0010: a newer generation *of the same partition*);
 4. ``README.txt``/``CATALOG.*`` are regenerated.
@@ -73,7 +74,7 @@ from wsp_core.model import Checksum, Generation, SourceSpec, SourceStatus
 from wsp_core.ports import Ctx, Fetcher
 from wsp_vault.atomic import IntegrityError
 from wsp_vault.docs import write_library_docs
-from wsp_vault.vault import ADOPTING_SUFFIX, FileVault, VaultError
+from wsp_vault.vault import ADOPTING_SUFFIX, FileVault, VaultError, read_staging
 
 ARXIV_SOURCE = "arxiv"
 PLANS_DIR = "_plans"
@@ -87,6 +88,10 @@ _YYYYMMDD = re.compile(r"^(\d{4})(\d{2})(\d{2})$")
 _YYMMDD = re.compile(r"^(\d{2})(\d{2})(\d{2})$")  # OSM planet files (planet-YYMMDD.osm.pbf)
 _DATED = re.compile(r"^\d{4}-\d{2}(-\d{2})?$")
 PROGRESS = logging.getLogger("wsp.ingest.progress")
+# The staging record is rewritten after this many newly adopted files, or after this long with any
+# pending: a run killed mid-way hashes at most that much again (2026-11-05 deep dive).
+ADOPT_FLUSH_FILES = 500
+ADOPT_FLUSH_SECONDS = 60.0
 
 
 class FileState(StrEnum):
@@ -554,27 +559,8 @@ class Ingestor:
         spec = self.specs[sid]
         self._say(f"{sid}/{gid}: adopting {len(vp.files)} file(s)")
         try:
-            self.vault.stage(sid, gid)
-            for f in vp.files:
-                if self.max_seconds is not None and time.monotonic() - self._started > self.max_seconds:
-                    vp.status, vp.reason = VersionStatus.YIELDED, f"stopped after {self.max_seconds:.0f} s"
-                    self._say(f"  yielded after {self.max_seconds:.0f} s; run again to continue")
-                    return False
-                started = time.monotonic()
-                # A verified file replaces a different one staged by an interrupted ingest of the same
-                # version (re-fetched since: the plan is the newer truth, H2); unverifiable ones never.
-                # The share refused for a moment (ECONNABORTED, EAGAIN) mid-adoption: tried again
-                # (adopt resumes from any step); a NARA partition of 401 files failed on one, and its
-                # lane fetched it all again (2026-10-28).
-                nasretry.retrying(
-                    f"adopt {f.target.name}",
-                    lambda f=f: self.vault.adopt(
-                        sid, gid, f.path, f.target.relpath, upstream=f.checksums, replace_staged=f.verifiable
-                    ),
-                )
-                f.state = FileState.STAGED
-                how = "verified" if f.verifiable else "unverifiable"
-                self._say(f"  {f.target.name}: {how} ({time.monotonic() - started:.1f}s)")
+            if not self._adopt_all(vp):
+                return False
             with diag.phase("seal", source=sid, generation=gid):
                 gen = self.vault.seal(sid, gid, parity_percent=10 if spec.irreplaceable else None)
         except (IntegrityError, VaultError, OSError) as exc:
@@ -595,6 +581,84 @@ class Ingestor:
                     "promoted": vp.promoted,
                 },
             )
+        return True
+
+    def _adopt_all(self, vp: VersionPlan) -> bool:
+        """Adopt every file of ``vp`` into staging; ``False`` when ``max_seconds`` ran out first.
+
+        One :meth:`FileVault.adopt_many` call (one thread, so files are read one at a time as
+        before): the staging record is read once per run and rewritten in batches. Files are taken
+        in order of cost: those an earlier run recorded and nothing has touched since (skipped
+        without a read), then new ones, then recorded ones whose incoming copy came back (both
+        copies hashed). Each :meth:`FileVault.adopt` read the whole record twice and rewrote it per
+        new file; a resumed slice of crs-reports (7.9 MB record, 18,257 entries) spent 0.46 s per
+        file only to skip what it had, and aozora's slices re-checked recorded files for an hour
+        and added none (2026-11-05 deep dive). A verified file replaces a different one staged by
+        an interrupted ingest of the same version (re-fetched since: the plan is the newer truth,
+        H2); the vault refuses unverifiable bytes that would replace staged ones either way. The
+        share refused for a moment (ECONNABORTED, EAGAIN): the vault retries the file, and the
+        whole call is tried again (recorded files are skipped; a NARA partition of 401 files failed
+        on one, and its lane fetched it all again, 2026-10-28)."""
+        sid, gid = vp.source_id, vp.generation_id
+        staging = self.vault.staging_path(sid, gid)
+        record = nasretry.retrying(f"read the staging record of {sid}/{gid}", lambda: read_staging(staging))
+
+        def cost(f: FilePlan) -> int:
+            rel = f.target.relpath
+            if rel not in record:
+                return 1
+            return 0 if f.state is FileState.STAGED else 2
+
+        files = sorted(vp.files, key=cost)
+        by_rel = {f.target.relpath: f for f in files}
+        stopped = False
+        skipped: set[str] = set()  # a set: the call may be tried again
+        last = time.monotonic()
+
+        def todo() -> Iterator[tuple[Path, str, Sequence[Checksum]]]:
+            nonlocal stopped
+            for f in files:
+                free = f.state is FileState.STAGED and f.target.relpath in record  # nothing to read
+                if (
+                    not free
+                    and self.max_seconds is not None
+                    and time.monotonic() - self._started > self.max_seconds
+                ):
+                    stopped = True
+                    return
+                yield f.path, f.target.relpath, f.checksums
+
+        def done(rel: str, adopted: bool) -> None:
+            nonlocal last
+            f = by_rel[rel]
+            f.state = FileState.STAGED
+            now = time.monotonic()
+            if adopted:
+                how = "verified" if f.verifiable else "unverifiable"
+                self._say(f"  {f.target.name}: {how} ({now - last:.1f}s)")
+            else:
+                skipped.add(rel)
+            last = now
+
+        nasretry.retrying(
+            f"adopt {sid}/{gid}",
+            lambda: self.vault.adopt_many(
+                sid,
+                gid,
+                todo(),
+                workers=1,
+                flush_every=ADOPT_FLUSH_FILES,
+                flush_seconds=ADOPT_FLUSH_SECONDS,
+                replace_staged=True,
+                on_file=done,
+            ),
+        )
+        if skipped:
+            self._say(f"  {len(skipped)} file(s) adopted by an earlier run, unchanged")
+        if stopped:
+            vp.status, vp.reason = VersionStatus.YIELDED, f"stopped after {self.max_seconds:.0f} s"
+            self._say(f"  yielded after {self.max_seconds:.0f} s; run again to continue")
+            return False
         return True
 
     def _ingest_arxiv(self, vp: ArxivSnapshotPlan) -> bool:

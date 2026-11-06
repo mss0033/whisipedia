@@ -24,6 +24,13 @@ left in ``_incoming/<source>/*.<partition>`` are moved into the local staging fi
 So are the files an older version of the partition left staged: the partition's version is the day of
 PMC's listing, which changes more often than 85,000 files take to fetch, and each new day began the
 partition again from nothing (seven copies of p0272 staged, 60 GB, 2026-11-01).
+
+**A partition sealed lately is not fetched again.** For an adapter whose partition versions name the
+day its listing was read (``listing_dated``: PMC's daily inventory), a partition with a generation
+sealed within the source's update cadence (``update.cadence``, else :data:`PARTITION_REFRESH`) is
+nothing new: the exact-version check never matched a newer day, so every lane restart sealed the
+partitions it had sealed before again (p0269 five times, 45 hours of one pass spent on four
+partitions sealed days earlier; 2026-11-05 deep dive).
 """
 
 from __future__ import annotations
@@ -32,12 +39,14 @@ import argparse
 import fnmatch
 import json
 import os
+import re
 import shutil
 import sys
 import zipfile
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TextIO
 
@@ -46,13 +55,17 @@ from wsp_cli.ingest import generation_id_for
 from wsp_cli.nasretry import copy_hashed
 from wsp_core.errors import FetchError, NotFoundError
 from wsp_core.model import Checksum, ReleaseRef, RemoteFile, SourceSpec
+from wsp_core.partitions import partition_of
 from wsp_core.ports import Ctx
+from wsp_orchestrator.durations import DurationError, IsoDuration
 from wsp_vault.vault import ADOPTING_SUFFIX, STAGING_DIR, VaultError, read_staging, staged_entry
 
 PLANS_SUBDIR = "targets.d"
 LANE = "collections"  # renamed into place only when complete: ingest needs no settle wait
 EXIT_OK, EXIT_REFUSED, EXIT_FAILED, EXIT_NOTHING_NEW = 0, 2, 6, 7
 LOUD_FILES = 500  # beyond this many files to fetch, progress is reported per thousand
+PARTITION_REFRESH = "P1M"  # a listing-dated partition is fetched again this long after its seal
+_DAY = re.compile(r"^(\d{4}-\d{2}-\d{2})")
 _ALGO = {"sha256": "sha-256", "sha1": "sha-1", "md5": "md5"}
 
 
@@ -116,6 +129,33 @@ def _gb(n: int | None) -> str:
     return "?" if n is None else f"{n / 1e9:,.2f} GB"
 
 
+def sealed_lately(source_dir: Path, partition: str, every: str, now: datetime) -> str | None:
+    """The newest generation of ``partition`` sealed within ``every`` (an ISO 8601 duration) before
+    ``now``, by the day its name begins with (else its manifest's time), or ``None``. A listing the
+    share refuses, or a cadence that does not parse, is ``None``: the partition is fetched as before."""
+    try:
+        step = IsoDuration.parse(every)
+        names = [p.name for p in source_dir.iterdir() if partition_of(p.name) == partition]
+    except (OSError, DurationError):
+        return None
+    for name in sorted(names, reverse=True):
+        manifest = source_dir / name / "MANIFEST.json"
+        try:
+            if not manifest.is_file():
+                continue
+            day = _DAY.match(name)
+            when = (
+                datetime.fromisoformat(day.group(1)).replace(tzinfo=UTC)
+                if day
+                else datetime.fromtimestamp(manifest.stat().st_mtime, UTC)
+            )
+        except (OSError, ValueError):
+            continue
+        if step.add_to(when) > now:
+            return name
+    return None
+
+
 def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
     lay = bootstrap.layout(args.config_dir)
     cfg = bootstrap.load(lay)
@@ -135,6 +175,16 @@ def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
         if by_partition is None:
             print(f"error: {spec.id}: its adapter has no partitions", file=sys.stderr)
             return EXIT_REFUSED
+        if getattr(adapter, "listing_dated", False):
+            every = spec.cadence or PARTITION_REFRESH
+            lately = sealed_lately(
+                vault_root / "library" / spec.vault_domain / spec.id, partition, every, datetime.now(UTC)
+            )
+            if lately is not None:
+                out.write(
+                    f"{spec.id}: partition {partition} was sealed as {lately}, within {every}; nothing new\n"
+                )
+                return EXIT_NOTHING_NEW
         releases = list(by_partition(ctx, partition))
         if not releases:
             out.write(f"{spec.id}: partition {partition} holds nothing; nothing new\n")

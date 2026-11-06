@@ -81,10 +81,12 @@ from wsp_adapters.doccollection.policy import (
 )
 from wsp_cli import bootstrap, nasretry
 from wsp_core.errors import ChecksumMismatchError, FetchError, NotFoundError, RobotsDisallowedError
-from wsp_core.model import FetchResult, RemoteFile, SourceSpec, SourceStatus
+from wsp_core.model import Checksum, FetchResult, RemoteFile, SourceSpec, SourceStatus
 from wsp_core.partitions import PartitionError, check_partition, partition_generation_id, partition_of
 from wsp_core.ports import Ctx, Fetcher, SupportsHead
 from wsp_core.versions import is_newer, newest
+from wsp_vault.manifest import ManifestEntry
+from wsp_vault.vault import STAGING_DIR, VaultError, read_staging, staged_entry
 
 # Research doc §6, in order. Git-hosted and file-set sources are surveyed through the same path.
 TOP_PICKS: tuple[str, ...] = (
@@ -413,6 +415,9 @@ class FetchReport:
     # Keys whose bytes did not match the listing's checksum: "md5 <expected> -> <actual>".
     mismatched: dict[str, str] = field(default_factory=dict[str, str])
     planned: bool = False  # an ingest plan was written (new documents, or a changed catalog)
+    # Documents screened from a copy already here, not downloaded: staged or downloaded by an earlier
+    # run of this cycle, or held for review by an earlier run (2026-11-05 deep dive).
+    reused: int = 0
 
 
 def fetch_exit_code(report: FetchReport) -> int:
@@ -620,6 +625,21 @@ def manual_name(cand: Candidate) -> str:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class EarlierCopies:
+    """What earlier runs left that a fetch can screen in place of a download (2026-11-05 deep dive).
+
+    ``planned``: this cycle's ingest plan as an earlier run of it wrote it, ``doc_key -> (file name,
+    SHA-256, size)``. ``staging``/``record``: the cycle's staging directory and its staging record,
+    read once (an interrupted ingest of the unsealed cycle). ``held``: the copies in
+    ``_incoming/_quarantine/<source>/`` by file stem (``None`` when two share one), listed once."""
+
+    planned: Mapping[str, tuple[str, str, int]]
+    staging: Path
+    record: Mapping[str, ManifestEntry]
+    held: Mapping[str, Path | None]
+
+
 def current_catalog(
     vault_root: Path, spec: SourceSpec, partition: str | None = None
 ) -> tuple[str | None, list[DocumentMeta]]:
@@ -771,10 +791,19 @@ class CollectionFetcher:
                 hosts.answered(cand.url)
                 self._screen(cand, path, cfg.rules, report, held_sha, screen=None)
 
+        earlier = self._earlier_copies(spec, version) if self.manual_dir is None else None
         try:
             for cand in docs:
                 if cand.key not in refetch and unchanged(cand, held_meta.get(cand.key)):
                     report.skipped += 1  # held, and the listing says the same bytes: not downloaded again
+                    continue
+                if (
+                    earlier is not None
+                    and cand.key not in refetch
+                    and cand.key not in self.adopt_kept
+                    and cand.resolve != "git"
+                    and self._reuse(cand, earlier, dest_dir, cfg.rules, report, held_sha)
+                ):
                     continue
                 if (down := hosts.down(cand.url)) is not None:
                     report.failed.append((cand.key, down))
@@ -800,6 +829,10 @@ class CollectionFetcher:
         finally:
             if pool is not None:
                 pool.shutdown(wait=True, cancel_futures=True)
+        if report.reused:
+            self._say(
+                f"{spec.id}: {report.reused} document(s) screened from a copy already here, not downloaded"
+            )
         part = f"-{own_partition}" if own_partition else ""
         settle_wrong_bodies(report, self.workdir / spec.id / f"wrong-body{part}.json", datetime.now(UTC))
         settle_stale_checksums(
@@ -807,6 +840,163 @@ class CollectionFetcher:
         )
         self._finish(spec, coll, report, prev_gen, prev_catalog, survey, dest_dir)
         return report
+
+    def _earlier_copies(self, spec: SourceSpec, version: str) -> EarlierCopies:
+        """What earlier runs of this cycle left, read once per run (:class:`EarlierCopies`). Read-only
+        and best effort: a plan, record or quarantine the share refuses is empty, and every document
+        is downloaded as before."""
+        planned: dict[str, tuple[str, str, int]] = {}
+        try:
+            raw: object = json.loads(self.plan_path(spec.id, version).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            raw = []
+        for t in cast(list[Mapping[str, Any]], raw if isinstance(raw, list) else []):
+            meta, checksum, size, name = t.get("meta"), t.get("checksum"), t.get("size"), t.get("name")
+            key = cast(Mapping[str, Any], meta).get("doc_key") if isinstance(meta, Mapping) else None
+            pair = cast(list[Any], checksum) if isinstance(checksum, list) else []
+            if (
+                isinstance(key, str)
+                and isinstance(name, str)
+                and isinstance(size, int)
+                and len(pair) == 2
+                and pair[0] == "sha-256"
+            ):
+                planned[key] = (name, str(pair[1]).lower(), size)
+        staging = self.vault_root / STAGING_DIR / spec.vault_domain / spec.id / version
+        try:
+            record = read_staging(staging) if staging.is_dir() else {}
+        except (OSError, ValueError, VaultError):
+            record = {}
+        held: dict[str, Path | None] = {}
+        try:
+            with os.scandir(self.incoming / "_quarantine" / spec.id) as entries:
+                for entry in entries:
+                    if entry.is_file(follow_symlinks=False):
+                        stem = entry.name.rsplit(".", 1)[0]
+                        held[stem] = None if stem in held else Path(entry.path)
+        except OSError:
+            held = {}
+        return EarlierCopies(planned, staging, record, held)
+
+    def _reuse(
+        self,
+        cand: Candidate,
+        earlier: EarlierCopies,
+        dest_dir: Path,
+        rules: Rules,
+        report: FetchReport,
+        held_sha: Mapping[str, str],
+    ) -> bool:
+        """Screen ``cand`` from a copy an earlier run left instead of downloading it; ``False`` when
+        there is none to trust (then it is downloaded as before).
+
+        In order: the file an interrupted ingest of this cycle staged (its staging record entry, with
+        the plan's SHA-256 when the cycle's plan names it), the file this cycle's plan names still in
+        ``dest_dir`` (its SHA-256 must be the plan's), and the copy an earlier run held for review
+        (:meth:`_held_fresh`), moved into the cycle and screened again under today's rules, as
+        :meth:`_take_manual` does. The staged copy is only read: it stays where the ingest put it.
+        A fetch looked at none of them: each restart of the lanes downloaded an unsealed cycle whole
+        again (crs-reports, 23,188 files, six times; aozora three times), and DLA's i04 r2 downloaded
+        its 4,121 documents held for review again to find 11 new ones (2026-11-05 deep dive)."""
+        planned = earlier.planned.get(cand.key)
+        name, sha, size = planned if planned is not None else (cand.file_name, "", None)
+        rel = f"upstream/{name}"
+        if earlier.record:
+            try:
+                upstream = (Checksum("sha256", sha),) if sha else ()
+                entry = staged_entry(earlier.staging, rel, upstream, earlier.record)
+            except (OSError, ValueError, VaultError):
+                entry = None
+            if entry is not None and cand.size in (None, entry.size):
+                return self._rescreen(cand, earlier.staging / rel, sha, False, rules, report, held_sha)
+        if planned is not None and cand.size in (None, size):
+            here = dest_dir / name
+            try:
+                whole = here.is_file() and here.stat().st_size == size
+            except OSError:
+                whole = False
+            if whole and self._rescreen(cand, here, sha, True, rules, report, held_sha):
+                return True
+        held = earlier.held.get(cand.file_name.rsplit(".", 1)[0])
+        if held is None or not self._held_fresh(cand, held):
+            return False
+        target = dest_dir / held.name
+        try:
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            nasretry.retrying(f"take {held.name}", lambda: held.replace(target))
+        except OSError:
+            return False
+        report.reused += 1
+        self._screen(cand, target, rules, report, held_sha)
+        return True
+
+    def _rescreen(
+        self,
+        cand: Candidate,
+        path: Path,
+        sha: str,
+        movable: bool,
+        rules: Rules,
+        report: FetchReport,
+        held_sha: Mapping[str, str],
+    ) -> bool:
+        """Screen ``path`` (an earlier run's copy of ``cand``) and file it as a download would be.
+        ``False`` (download it) when it cannot be read or is not the bytes expected: ``sha`` (the
+        plan's), the listing's MD5. A staged copy (not ``movable``) is never moved or deleted: one
+        today's rules no longer allow is a failure for a person, as the ingest would seal it."""
+        try:
+            screen = nasretry.retrying(
+                f"screen {path.name}", lambda: screen_document(path, rules, keys=(cand.key, cand.pub_number))
+            )
+            doc = nasretry.retrying(
+                f"hash {path.name}", lambda: fetched_doc(cand, path, screen, file=f"upstream/{path.name}")
+            )
+        except (OSError, ValueError):
+            return False
+        if (sha and doc.sha256 != sha) or (cand.md5 and doc.md5 != cand.md5.lower()):
+            return False
+        report.reused += 1
+        if screen.decision.verdict is not Verdict.ALLOW:
+            if movable:
+                self._screen(cand, path, rules, report, held_sha, screen=screen)
+            else:
+                report.failed.append(
+                    (
+                        cand.key,
+                        f"staged by an earlier run of {report.version}, but now {screen.decision}: "
+                        f"take {path} out of the staging by hand",
+                    )
+                )
+            return True
+        if held_sha.get(cand.key) == doc.sha256:
+            if movable:
+                path.unlink(missing_ok=True)  # byte-identical to the stored edition: nothing new
+            report.skipped += 1
+            return True
+        report.fetched.append(doc)
+        return True
+
+    @staticmethod
+    def _held_fresh(cand: Candidate, path: Path, *, now: datetime | None = None) -> bool:
+        """Whether a copy held for review still stands for what the listing offers, as :func:`unchanged`
+        judges a stored edition: the listing's size and MD5 where it gives them, else a copy younger
+        than :data:`REFETCH_AFTER` (so an issuer's quiet correction is still picked up)."""
+        try:
+            st = path.stat()
+            if cand.size is not None and st.st_size != cand.size:
+                return False
+            if cand.md5:
+                digest = hashlib.md5(usedforsecurity=False)
+                with path.open("rb") as fh:
+                    while chunk := fh.read(8 << 20):
+                        digest.update(chunk)
+                return digest.hexdigest() == cand.md5.lower()
+        except OSError:
+            return False
+        if cand.size is not None:
+            return True
+        age = (now or datetime.now(UTC)) - datetime.fromtimestamp(st.st_mtime, UTC)
+        return age < REFETCH_AFTER
 
     def _download(self, fetcher: Fetcher, cand: Candidate, dest_dir: Path, origins: Sequence[str]) -> Path:
         """Download within ``origins``; every redirect hop and the final URL are checked too.
@@ -1623,7 +1813,9 @@ def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
     out.write(
         f"{spec.id}/{version}: fetched {len(report.fetched)}, skipped {report.skipped}, "
         f"rejected {len(report.rejected)}, held {len(report.held)}, review {len(report.review)}, "
-        f"failed {len(report.failed)}, gone {len(report.gone)}\n"
+        f"failed {len(report.failed)}, gone {len(report.gone)}"
+        + (f", reused {report.reused} (not downloaded again)" if report.reused else "")
+        + "\n"
     )
     for alert in report.alerts:
         out.write(f"ALERT restricted document listed by the issuer: {alert}\n")

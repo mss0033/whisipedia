@@ -191,6 +191,9 @@ class PmcAdapter:
     """``SourceAdapter`` for the PMC Article Datasets, one partition of PMC ids per release."""
 
     id = "pmc-oa"
+    # A partition's version is the day of the inventory it was read from, not a release: `wsp bulk
+    # fetch` leaves a partition sealed within the source's cadence alone (2026-11-05 deep dive).
+    listing_dated = True
 
     def _inventory(self, ctx: Ctx) -> tuple[str, list[Path]]:
         prefix = latest_inventory(ctx)
