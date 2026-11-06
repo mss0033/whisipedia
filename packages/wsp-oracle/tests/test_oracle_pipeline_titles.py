@@ -476,6 +476,78 @@ def test_a_name_that_is_a_title_or_leads_outside_the_sources_pins_nothing_more(n
     assert aliased(heart, [medline], None) == []
 
 
+def test_a_foreign_reference_page_with_the_exact_title_leaves_the_name_its_target(tmp_path: Path) -> None:
+    # "Einstein": the only exact title left was the Cebuano stub wikipedia-top10/ceb/Einstein; as a
+    # heavy-source pin it switched the alias off and Albert Einstein was never pinned (2026-11-05 review).
+    docs = [
+        _doc("wiki", "ceb/Einstein", "Einstein", "Ang Einstein usa ka kráter sa bulan.", "ceb"),
+        _aliased(
+            _doc(
+                "wiki",
+                "en/Albert_Einstein",
+                "Albert Einstein",
+                "Albert Einstein was a theoretical physicist who developed the theory of relativity.",
+            ),
+            "Einstein",
+        ),
+        _doc("music", "Einstein_on_the_Beach", "Einstein on the Beach", "An opera: Einstein, Einstein."),
+    ]
+    idx = TantivyIndex(tmp_path / "lexical", STORED)
+    idx.upsert(docs)
+    idx.commit()
+    searcher = _named(idx)
+    route = searcher.router.route("Einstein")
+    ceb = SearchHit(make_doc_id("wiki", "ceb/Einstein"), 1.0, "Einstein", "", "wiki", "ceb")
+    albert = make_doc_id("wiki", "en/Albert_Einstein")
+    aliased = searcher._aliased  # pyright: ignore[reportPrivateUsage]
+    assert [h.doc_id for h in aliased(route, [ceb], None)] == [albert]
+    # an exact reference page in the query's language still needs no other name
+    assert aliased(route, [replace(ceb, lang="en")], None) == []
+    ids = [h.doc_id for h in searcher.run("Einstein").hits]
+    assert albert in ids[:2]
+    idx.close()
+
+
+def test_a_reference_title_buried_past_the_title_search_is_found_in_the_trie(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # "Albert Einstein": thirty Wikipedia titles holding the words (schools, prizes, streets) came
+    # before the article in the heavy title search, so explainxkcd's page led and the English article
+    # was in no result; the German edition's title match also skipped that search (2026-11-05 review).
+    docs = [
+        _doc("wiki", "en/Albert_Einstein", "Albert Einstein", "Albert Einstein was a theoretical physicist."),
+        _doc("wiki", "de/Albert_Einstein", "Albert Einstein", "Albert Einstein war ein Physiker.", "de"),
+        _doc("xkcd", "Albert_Einstein", "Albert Einstein", "Albert Einstein appears in comics."),
+    ]
+    idx = TantivyIndex(tmp_path / "lexical", STORED)
+    idx.upsert(docs)
+    idx.commit()
+    searcher = OracleSearcher(
+        idx, router=Router.from_sources(["wiki", "xkcd"]), reranker=OverlapReranker(), resolve=idx.lookup
+    )
+    searcher.source_weights = {"wiki": 1.15}
+    buried = make_doc_id("wiki", "en/Albert_Einstein")
+    searched: list[Sequence[str] | None] = []
+    titled = searcher._titled  # pyright: ignore[reportPrivateUsage]
+
+    def without_the_article(title: str, sources: Sequence[str] | None) -> list[SearchHit]:
+        searched.append(sources)
+        return [h for h in titled(title, sources) if h.doc_id != buried]
+
+    monkeypatch.setattr(searcher, "_titled", without_the_article)
+    best = searcher._best_titled  # pyright: ignore[reportPrivateUsage]
+    route = searcher.router.route("Albert Einstein")
+    hit = best(route, "Albert Einstein", [], None)  # not among the candidates either
+    assert hit is not None
+    assert hit.doc_id == buried
+    assert searched == [None, ["wiki"]]  # the German edition did not stand in for the reference search
+    # outside the sources searched, the trie's page is not offered
+    other = best(route, "Albert Einstein", [], ["xkcd"])
+    assert other is not None
+    assert other.doc_id == make_doc_id("xkcd", "Albert_Einstein")
+    idx.close()
+
+
 def test_a_misspelling_matching_only_another_language_pins_the_corrected_title(tmp_path: Path) -> None:
     # "Isaac Newtonn": the French stemmer matched French pages only; the English article was absent.
     docs = [

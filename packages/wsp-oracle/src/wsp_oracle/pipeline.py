@@ -277,15 +277,32 @@ class OracleSearcher:
         Ten Wikipedias, Citizendium, Wikiquote and Simple English all hold "Genghis Khan": the
         candidates had Citizendium's and the first title matches never the English Wikipedia's, so
         "who was genghis khan" led with Citizendium (2026-10-17); a heavy source the title search
-        missed is searched on its own. "root cellar" opened Wiktionary's entry, not the article."""
+        missed is searched on its own. "root cellar" opened Wiktionary's entry, not the article.
+
+        Missed means no heavy page with the title in the query's language, and the suggest trie is
+        asked last: "Albert Einstein" led with explainxkcd's page and the English article was in no
+        result, as thirty Wikipedia pages with the words in their titles (schools, prizes, streets)
+        came before it in the heavy title search (2026-11-05 review)."""
         key = _title_key(title)
+        lang = query_language((route.title or route.query).split()) or "en"
         seen: set[str] = set()
         pool: list[SearchHit] = []
         heavy = [s for s, w in self.source_weights.items() if w > 1.0 and (sources is None or s in sources)]
+
+        def missed(hits: Sequence[SearchHit]) -> bool:
+            return bool(heavy) and not any(
+                (h.source_id or source_of(h.doc_id)) in heavy
+                and _title_key(h.title) == key
+                and (not h.lang or primary_lang(h.lang) == lang)
+                for h in hits
+            )
+
         found = self._titled(title, sources)
-        if heavy and not any((h.source_id or source_of(h.doc_id)) in heavy for h in found):
+        if missed([*held, *found]):
             # the reference copy may be past the first matches (every Wikipedia language has the title)
             found += self._titled(title, heavy)
+        if missed([*held, *found]):
+            found += self._named_titled(title, lang, heavy)
         for h in [*held, *found]:
             if h.doc_id in seen or _title_key(h.title) != key or not self._pinnable(route.query, h):
                 continue
@@ -295,7 +312,6 @@ class OracleSearcher:
             pool.append(h)
         if not pool:
             return None
-        lang = query_language((route.title or route.query).split()) or "en"
 
         def rank(item: tuple[int, SearchHit]) -> tuple[bool, float, int]:
             i, h = item
@@ -303,6 +319,31 @@ class OracleSearcher:
             return (bool(h.lang) and primary_lang(h.lang) != lang, -self.source_weights.get(src, 1.0), i)
 
         return min(enumerate(pool), key=rank)[1]
+
+    def _named_titled(self, title: str, lang: str, heavy: Sequence[str]) -> list[SearchHit]:
+        """The pages of the ``heavy`` sources the suggest trie holds as titled exactly ``title``, the
+        query's language's edition looked up first (``"en/"``), at most :data:`NAMED_LOOKUPS` reads;
+        only those in the query's language. The trie knows a title the word search buries."""
+        named = getattr(self.lexical, "named", None)
+        resolve = getattr(self.lexical, "lookup", None) or self.resolve
+        if not callable(named) or not callable(resolve):
+            return []
+        key = _title_key(title)
+        found = cast(Sequence[tuple[str, str]], named(title, limit=NAMED_TARGETS))
+        wanted = [
+            (i, doc_id)
+            for i, (doc_id, name) in enumerate(found)
+            if source_of(doc_id) in heavy and _title_key(name) == key
+        ]
+        wanted.sort(
+            key=lambda t: (not t[1].removeprefix(f"wsp:{source_of(t[1])}/").startswith(f"{lang}/"), t[0])
+        )
+        out: list[SearchHit] = []
+        for _, doc_id in wanted[:NAMED_LOOKUPS]:
+            hit = cast(SearchHit | None, resolve(doc_id))
+            if hit is not None and hit.lang and primary_lang(hit.lang) == lang:
+                out.append(hit)
+        return out
 
     def _pinnable(self, query: str, hit: SearchHit) -> bool:
         """A down-weighted source (catalog cards, abstracts) never leads by its title alone, unless the
@@ -342,8 +383,8 @@ class OracleSearcher:
         while suggest offered each from its redirects (2026-11-05 deep dive). The suggest trie holds the
         redirects of the titles it keeps (:mod:`wsp_index.titles`), so nothing is re-indexed: a redirect
         it does not hold is not found. A title that is the query itself is the exact pin's, not this,
-        and an exact pin from a heavy source (the reference article "Paris") needs no other name: a
-        lesser wiki's redirect "Paris" to its "Paris (film)" would follow it.
+        and an exact pin from a heavy source in the query's language (the reference article "Paris")
+        needs no other name: a lesser wiki's redirect "Paris" to its "Paris (film)" would follow it.
 
         Every Wikipedia language may hold the redirect: a target whose native id starts with the
         query's language ("en/") is looked up first, before :data:`NAMED_LOOKUPS` reads run out."""
@@ -352,14 +393,21 @@ class OracleSearcher:
             or not route.title
         ):
             return []
-        if any(self.source_weights.get(p.source_id or source_of(p.doc_id), 1.0) > 1.0 for p in pins):
+        lang = query_language(route.title.split()) or "en"
+        # Only a heavy pin in the query's language: the Cebuano "Einstein" stub the title search falls
+        # back to is no answer to "Einstein", and it kept Albert Einstein out (2026-11-05 review).
+        if any(
+            self.source_weights.get(p.source_id or source_of(p.doc_id), 1.0) > 1.0
+            and p.lang
+            and primary_lang(p.lang) == lang
+            for p in pins
+        ):
             return []
         named = getattr(self.lexical, "named", None)
         resolve = getattr(self.lexical, "lookup", None) or self.resolve
         if not callable(named) or not callable(resolve):
             return []
         key = normalize_key(route.title.replace("_", " "))
-        lang = query_language(route.title.split()) or "en"
         allowed = None if sources is None else frozenset(sources)
         found = cast(Sequence[tuple[str, str]], named(route.title, limit=NAMED_TARGETS))
         pinned = {p.doc_id for p in pins}
