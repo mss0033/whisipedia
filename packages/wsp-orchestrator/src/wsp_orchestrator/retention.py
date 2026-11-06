@@ -96,9 +96,20 @@ class GenerationInfo:
         needed: bool = False,
         in_flight: bool = False,
     ) -> GenerationInfo:
+        """``taken`` dates only matter for SEALED generations: the planners keep the others whatever
+        their date. An unsealed one that cannot be dated gets ``date.min`` (2026-11-05 deep dive: the
+        arxiv staging generation ``2026-10.pdf.arxiv-0712`` has no day and no seal, and its ValueError
+        killed every arxiv prune from 2026-10-29)."""
+        if g.status is GenerationStatus.SEALED:
+            taken = generation_date(g)
+        else:
+            try:
+                taken = generation_date(g)
+            except ValueError:
+                taken = date.min
         return cls(
             g.generation_id,
-            generation_date(g),
+            taken,
             g.status,
             holds_last_copy,
             known_good,

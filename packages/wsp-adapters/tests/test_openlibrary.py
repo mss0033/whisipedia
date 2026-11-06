@@ -11,7 +11,7 @@ from adapters_testkit import make_ctx, make_spec
 from wsp_adapters import available_adapters
 from wsp_adapters.openlibrary import DATA_URL, OpenLibraryAdapter
 from wsp_core.model import RemoteHead, VerdictStatus
-from wsp_core.ports import Ctx, SourceAdapter
+from wsp_core.ports import Ctx, SourceAdapter, SupportsProbeUrls
 from wsp_core.testing.adapter_contract import FakeFetcher, SourceAdapterContract
 
 SPEC = make_spec("open-library", {"adapter": "open-library", "workers": 1}, license_="CC0-1.0")
@@ -124,6 +124,16 @@ def test_discover_uses_the_dated_redirect(tmp_path: Path) -> None:
         "ol_dump_editions_latest.txt.gz",
     ]
     assert release.files[0].size == 42
+
+
+def test_the_health_probe_heads_the_dumps_not_the_data_base() -> None:
+    """2026-11-05 deep dive: the registry-health bot HEADed the ``/data/`` endpoint, a 404, and called
+    Open Library unreachable every week. It probes the URLs discover heads (``SupportsProbeUrls``)."""
+    adapter = OpenLibraryAdapter()
+    assert isinstance(adapter, SupportsProbeUrls)
+    assert adapter.probe_urls(SPEC) == tuple(DATA_URL + n for n in OpenLibraryAdapter.file_names(SPEC))
+    spec = make_spec("ol", {"adapter": "open-library", "endpoints": ["https://mirror.example/data"]})
+    assert adapter.probe_urls(spec)[0] == "https://mirror.example/data/ol_dump_authors_latest.txt.gz"
 
 
 def test_catalog_records(generation_dir: Path, tmp_path: Path) -> None:

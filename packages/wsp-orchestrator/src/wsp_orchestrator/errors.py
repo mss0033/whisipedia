@@ -15,6 +15,9 @@ quarantine. :func:`classify` sorts an exception into one of:
   release step; a scheduled job dies at once instead of being retried with backoff, and the
   scheduler waits ``permanent_retry_gap`` before trying that job again (2026-11-04 trawl, pattern 5:
   130 Kiwix health probes made 5 attempts every ~15 h for an error only the owner could clear).
+  A robots.txt that could not be read (a 5xx, a 429, a timeout: ``RobotsUnreachableError``) is not
+  one: RFC 9309 disallows everything only until it is read again, minutes later, so it is ``CONTENT``
+  and retried with backoff (2026-11-05 deep dive: since 2026-11-04 one such blip held a job a day).
 * ``CONTENT`` - everything else: the data, the adapter or upstream is at fault. Counts an attempt;
   enough of them quarantine the release.
 """
@@ -26,7 +29,12 @@ import sqlite3
 from collections.abc import Callable
 from enum import StrEnum
 
-from wsp_core.errors import OwnerActionRequiredError, RedirectRefusedError, RobotsDisallowedError
+from wsp_core.errors import (
+    OwnerActionRequiredError,
+    RedirectRefusedError,
+    RobotsDisallowedError,
+    RobotsUnreachableError,
+)
 
 
 class FailureKind(StrEnum):
@@ -113,6 +121,8 @@ def classify(exc: BaseException, *, storage_available: Callable[[], bool] | None
         return FailureKind.BUSY
     if type(exc).__name__ == "FetchLockedError":  # another process downloads the same file (wsp_fetch)
         return FailureKind.BUSY
+    if isinstance(exc, RobotsUnreachableError):  # transient, though a RobotsDisallowedError
+        return FailureKind.CONTENT
     if isinstance(
         exc, (PermanentError, RobotsDisallowedError, RedirectRefusedError, OwnerActionRequiredError)
     ):

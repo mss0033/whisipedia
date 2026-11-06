@@ -445,8 +445,9 @@ def test_every_request_mirror_and_redirect_honours_robots_txt(tmp_path: Path) ->
     transport, asked = _robots_world(data)
     cfg = replace(CFG, robots=True)
     with HttpFetcher(cfg, transport=transport) as f:
-        with pytest.raises(RobotsDisallowedError):
+        with pytest.raises(RobotsDisallowedError) as refused:
             f.get_bytes("https://bad.example/x.bin")
+        assert type(refused.value) is RobotsDisallowedError  # a real Disallow, not "unreachable"
         assert "bad.example/x.bin" not in asked
         with pytest.raises(RobotsDisallowedError):
             f.get_bytes("https://good.example/private/notes.txt")
@@ -481,10 +482,12 @@ def test_robots_txt_can_be_turned_off_for_tests() -> None:
 def test_an_unreachable_robots_txt_disallows_until_it_is_read_again(monkeypatch: pytest.MonkeyPatch) -> None:
     """RFC 9309 2.3.1 (2026-10-26 review): a 5xx or 429 robots.txt is "unreachable", so everything is
     disallowed, tried again after 10 minutes; a 4xx (403, 404) is "unavailable", so there are no rules.
-    A file is kept 24 hours."""
+    A file is kept 24 hours. 2026-11-05 deep dive: that refusal is a RobotsUnreachableError (the
+    orchestrator retries it with backoff), never the plain refusal it holds a day as permanent."""
     import time
 
-    from wsp_core.errors import RobotsDisallowedError
+    from wsp_core.errors import RobotsUnreachableError
+    from wsp_fetch.target import Target
 
     data = payload(PIECE)
     answers = {"down.example": 503, "busy.example": 429, "closed.example": 403}
@@ -495,18 +498,30 @@ def test_an_unreachable_robots_txt_disallows_until_it_is_read_again(monkeypatch:
         if request.url.path == "/robots.txt":
             code = answers.get(request.url.host, 200)
             return httpx.Response(code, stream=httpx.ByteStream(b"User-agent: *\nDisallow:\n"))
+        if request.url.host == "hop.example":
+            return httpx.Response(302, headers={"Location": "https://down.example/x.bin"})
         return _ranged(data, request)
 
     clock = [1000.0]
     monkeypatch.setattr(time, "monotonic", lambda: clock[0])
     with HttpFetcher(replace(CFG, robots=True), transport=httpx.MockTransport(handler)) as f:
         for host in ("down.example", "busy.example"):
-            with pytest.raises(RobotsDisallowedError):
+            with pytest.raises(RobotsUnreachableError):
                 f.get_bytes(f"https://{host}/x.bin")
         assert f.get_bytes("https://closed.example/x.bin") == data  # 403: no rules
         assert "down.example/x.bin" not in asked
+        both = Target(
+            "https://down.example/x.bin",
+            ("https://down.example/x.bin", "https://busy.example/x.bin"),
+            None,
+            (),
+        )
+        with pytest.raises(RobotsUnreachableError):  # no mirror left, but only for want of a robots.txt
+            f.robots_filter(both)
+        with pytest.raises(RobotsUnreachableError):  # a redirect there: not a refused redirect for good
+            f.get_bytes("https://hop.example/x.bin")
         answers["down.example"] = 200  # the site recovers
-        with pytest.raises(RobotsDisallowedError):
+        with pytest.raises(RobotsUnreachableError):
             f.get_bytes("https://down.example/x.bin")  # still the cached answer
         clock[0] += 601
         assert f.get_bytes("https://down.example/x.bin") == data
@@ -539,8 +554,9 @@ def test_a_robots_txt_redirected_to_http_is_unreachable_and_cached(monkeypatch: 
 
     with HttpFetcher(replace(CFG, robots=True), transport=httpx.MockTransport(handler)) as f:
         for _ in range(3):
-            with pytest.raises(RobotsDisallowedError):
+            with pytest.raises(RobotsDisallowedError) as refused:
                 f.get_bytes("https://down.example/x.bin")
+            assert type(refused.value) is RobotsDisallowedError  # the file answers: not "unreachable"
         assert asked.count("https://down.example/robots.txt") == 1  # cached for 10 minutes
         assert "http://down.example/robots.txt" not in asked  # the downgrade is never followed
         both = Target(
@@ -594,7 +610,7 @@ def test_a_hosts_crawl_delay_spaces_the_starts_of_our_requests() -> None:
 
     with HttpFetcher(replace(CFG, robots=True)) as f:
         rules = parse("User-agent: *\nCrawl-delay: 0.3\n")
-        f._robots["https://slow.example"] = (rules, time.monotonic() + 3600)  # pyright: ignore[reportPrivateUsage]
+        f._robots["https://slow.example"] = (rules, time.monotonic() + 3600, False)  # pyright: ignore[reportPrivateUsage]
         t0 = time.monotonic()
         for _ in range(3):
             with f.host_slot("https://slow.example/a"):

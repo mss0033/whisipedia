@@ -59,6 +59,7 @@ from wsp_core.model import (
     Generation,
     ReleaseRef,
     RemoteFile,
+    SourceSpec,
     Verdict,
 )
 from wsp_core.ports import Ctx
@@ -130,10 +131,21 @@ class CourtListenerAdapter:
 
     id = "courtlistener"
 
-    def discover(self, ctx: Ctx) -> Iterable[ReleaseRef]:
-        spec = ctx.source
+    @staticmethod
+    def _bucket_prefix(spec: SourceSpec) -> tuple[str, str]:
         endpoint = (str_list(access(spec).get("endpoints")) or (DEFAULT_ENDPOINT,))[0]
         bucket, _, prefix = endpoint.rstrip("/").rpartition("/")
+        return bucket, prefix
+
+    def probe_urls(self, spec: SourceSpec) -> tuple[str, ...]:
+        """One key of the listing ``discover`` reads (``SupportsProbeUrls``): the endpoint is an S3
+        prefix, and a HEAD of a prefix is a 404 (2026-11-05 deep dive)."""
+        bucket, prefix = self._bucket_prefix(spec)
+        return (f"{bucket}/?list-type=2&prefix={prefix}/&max-keys=1",)
+
+    def discover(self, ctx: Ctx) -> Iterable[ReleaseRef]:
+        spec = ctx.source
+        bucket, prefix = self._bucket_prefix(spec)
         tables = set(str_list(access(spec).get("tables")))
         by_date: dict[str, list[RemoteFile]] = {}
         token: str | None = None

@@ -15,6 +15,14 @@ class RobotsDisallowedError(FetchError):
     """The host's robots.txt does not allow this URL for us; never retried."""
 
 
+class RobotsUnreachableError(RobotsDisallowedError):
+    """The host's robots.txt could not be read (a 5xx, a 429, a timeout, a refused connection), so
+    RFC 9309 2.3.1.3 disallows everything until it is read again, minutes later. A transient refusal:
+    a scheduler retries it with backoff, never holds it as permanent (2026-11-05 deep dive: since
+    2026-11-04 one robots.txt blip held a job a whole day). A subclass, so a caller that only asks
+    "may I fetch this?" still catches it as :class:`RobotsDisallowedError`."""
+
+
 class RedirectRefusedError(FetchError):
     """A redirect leads somewhere the caller's guard (:func:`wsp_core.redirects.redirect_guard`)
     refuses: another origin, or a host whose robots.txt disallows us. Raised before the redirect is

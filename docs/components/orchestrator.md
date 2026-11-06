@@ -112,7 +112,7 @@ DISCOVERED → PLANNED → FETCHING → FETCHED → VERIFIED → SEALED → REFI
 |---|---|---|
 | `kiwix-opds` | yes | a `kiwix-title` candidate for every catalog title in `curator.kiwix_categories` that no registry selector covers (topic subsets of a held project are skipped) |
 | `wikimedia-ranking` | yes | a `new-variant` of `wikipedia-top10` when the top 10 Wikipedias by article count change (always reviewed: size unknown) |
-| `registry-health` | yes | after two failed weekly probes of every `access.endpoints` URL: an alert and a `registry-fix` proposal |
+| `registry-health` | yes | after two failed weekly probes of every `access.endpoints` URL (or of the adapter's `probe_urls` when its endpoints are bases, e.g. Open Library, CourtListener; a refused HEAD is tried as a small GET): an alert and a `registry-fix` proposal |
 | `adapter-contract` | yes | weekly live smoke per adapter in use (`discover` offers a sane release, `plan` accepts it): alerts only |
 | `gap-miner` | no | "seek a source for X" from `gaps.jsonl` (broken links by site/domain) and `queries.jsonl` (searches with no results, by query and word) |
 

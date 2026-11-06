@@ -72,7 +72,13 @@ from wsp_adapters.doccollection.model import (
     title_from_url,
 )
 from wsp_adapters.doccollection.policy import DocFacts, Rules, Verdict, classify_metadata
-from wsp_core.errors import FetchError, NotFoundError, RedirectRefusedError, RobotsDisallowedError
+from wsp_core.errors import (
+    FetchError,
+    NotFoundError,
+    RedirectRefusedError,
+    RobotsDisallowedError,
+    RobotsUnreachableError,
+)
 from wsp_core.model import FetchResult, RemoteFile, RemoteHead
 from wsp_core.ports import Fetcher, SupportsHead
 from wsp_core.redirects import redirect_guard, unguarded
@@ -134,24 +140,28 @@ class Throttle:
         self.clock = clock
         self.sleep = sleep
         self.robots = robots
-        self._rules: dict[str, tuple[Robots | None, float]] = {}  # "scheme://host" -> (rules, expiry)
+        # "scheme://host" -> (rules, expiry, whether they stand in for an unreachable robots.txt)
+        self._rules: dict[str, tuple[Robots | None, float, bool]] = {}
         self._last: dict[str, float] = {}  # host -> start time of its latest (reserved) request
         self.requests: dict[str, int] = {}
         self._lock = threading.Lock()
 
-    def _robots(self, url: str) -> Robots | None:
+    def _robots(self, url: str) -> tuple[Robots | None, bool]:
         """The host's rules as RFC 9309 reads them (2.3.1): none at all for a 4xx other than 429;
         disallow-all, retried after 10 minutes, for an unreachable one (5xx, 429, timeout); 24 hours
-        otherwise. 2026-10-26 review: an unreachable robots.txt counted as allow-all for the run."""
+        otherwise. 2026-10-26 review: an unreachable robots.txt counted as allow-all for the run.
+        The flag says the rules stand in for an unreachable file, so a refusal is raised as
+        :class:`RobotsUnreachableError`, which a scheduler retries (2026-11-05 deep dive)."""
         parts = urlsplit(url)
         site = f"{parts.scheme}://{parts.netloc.lower()}"
         now = self.clock()
         with self._lock:
             hit = self._rules.get(site)
             if hit is not None and now < hit[1]:
-                return hit[0]
+                return hit[0], hit[2]
         rules: Robots | None = None
         ttl = _ROBOTS_TTL
+        down = False
         try:
             with unguarded():  # robots.txt itself may be redirected; it is not a page we crawl
                 body = self.inner.get_bytes(f"{site}/robots.txt", max_bytes=512 * 1024)
@@ -174,18 +184,24 @@ class Throttle:
             else:  # unreachable: disallow-all, or no rules after 30 days of it (RFC 9309 2.3.1.4)
                 rules = None if unreachable_long(site) else _DISALLOW_ALL
                 ttl = _ROBOTS_UNREACHABLE_TTL
+                down = True
         with self._lock:
-            self._rules[site] = (rules, now + ttl)
+            self._rules[site] = (rules, now + ttl, down)
             self.requests[parts.netloc.lower()] = self.requests.get(parts.netloc.lower(), 0) + 1
-        return rules
+        return rules, down
 
     def _wait(self, url: str) -> None:
         """Reserve this host's next start slot, then sleep until it. Thread-safe: concurrent callers
         get consecutive slots, so requests may overlap but never *start* closer than the interval."""
         host = urlsplit(url).netloc.lower()
         gap = max(self.interval, self.per_host.get(host, 0.0))
-        if self.robots is not None and (rules := self._robots(url)) is not None:
+        rules, down = self._robots(url) if self.robots is not None else (None, False)
+        if self.robots is not None and rules is not None:
             if not rules.can_fetch(self.robots, url):
+                if down:
+                    raise RobotsUnreachableError(
+                        f"{url}: disallowed by {host}/robots.txt (unreachable; read again in minutes)"
+                    )
                 raise RobotsDisallowedError(f"{url}: disallowed by {host}/robots.txt")
             delay = rules.crawl_delay(self.robots)
             gap = max(gap, float(delay) if delay else 0.0)
@@ -200,9 +216,14 @@ class Throttle:
 
     def _hop(self, url: str) -> None:
         """A redirect target: refused when its host's robots.txt disallows it."""
-        rules = self._robots(url)
+        rules, down = self._robots(url)
         if rules is not None and self.robots is not None and not rules.can_fetch(self.robots, url):
             host = urlsplit(url).netloc.lower()
+            if down:
+                raise RobotsUnreachableError(
+                    f"redirected to {url}: disallowed by {host}/robots.txt"
+                    " (unreachable; read again in minutes)"
+                )
             raise RedirectRefusedError(f"redirected to {url}: disallowed by {host}/robots.txt")
 
     def _guarded(self) -> AbstractContextManager[None]:

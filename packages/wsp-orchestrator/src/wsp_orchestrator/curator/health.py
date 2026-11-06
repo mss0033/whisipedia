@@ -2,7 +2,10 @@
 
 * :class:`RegistryHealthBot` checks that every listed ``access.endpoints`` URL still answers (a HEAD,
   or a small GET). An active source unreachable on two runs in a row gets an alert and a
-  "registry fix" proposal for the owner.
+  "registry fix" proposal for the owner. An adapter whose endpoints are bases it builds URLs from
+  (``SupportsProbeUrls``: Open Library's ``/data/``, CourtListener's S3 prefix) names the URLs to
+  probe instead; a HEAD of a base is a 404, and both sources were reported unreachable every week
+  while they discovered fine (2026-11-05 deep dive).
 * :class:`AdapterSmokeBot` runs each adapter in use against live upstream with a small sample:
   ``discover`` must offer a sortable, checksummed release and ``plan`` must accept it. It catches
   format drift a week before a cycle depends on it; nothing is downloaded.
@@ -10,12 +13,13 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping, Sequence
 from typing import Any, cast
 
-from wsp_core.errors import FetchError
+from wsp_core.errors import FetchError, NotFoundError, RobotsDisallowedError
 from wsp_core.model import SourceSpec, SourceStatus
-from wsp_core.ports import SupportsHead
+from wsp_core.ports import SupportsHead, SupportsProbeUrls
 from wsp_orchestrator.alerts import Alert, Severity
 from wsp_orchestrator.bots import BotContext, BotResult
 from wsp_orchestrator.policy import Candidate, CandidateKind
@@ -29,6 +33,24 @@ def endpoints(spec: SourceSpec) -> list[str]:
     return [str(u) for u in cast(list[object], raw)] if isinstance(raw, list) else []
 
 
+# A HEAD the host answered with a refusal of the method or of a bare base (403, 404, 405, 501): a
+# small GET may still answer, as S3 and some file hosts do.
+_HEAD_REFUSED = re.compile(r"HTTP (4\d\d|501)\b")
+
+
+def probe_urls(ctx: BotContext, spec: SourceSpec) -> list[str]:
+    """What the health bot probes for ``spec``: its adapter's ``probe_urls`` (``SupportsProbeUrls``)
+    when it has them, else ``access.endpoints``."""
+    if spec.adapter:
+        try:
+            adapter = ctx.adapter_for(spec)
+        except Exception:  # no adapter (a candidate): its endpoints are all there is
+            return endpoints(spec)
+        if isinstance(adapter, SupportsProbeUrls):
+            return [str(u) for u in adapter.probe_urls(spec)]
+    return endpoints(spec)
+
+
 class RegistryHealthBot:
     name = "registry-health"
     cadence: str | None = "P1W"
@@ -40,9 +62,15 @@ class RegistryHealthBot:
     def _probe(self, ctx: BotContext, url: str) -> str | None:
         try:
             if isinstance(ctx.fetcher, SupportsHead):
-                ctx.fetcher.head(url)
-            else:
-                ctx.fetcher.get_bytes(url, max_bytes=256 * 1024)
+                try:
+                    ctx.fetcher.head(url)
+                    return None
+                except RobotsDisallowedError:
+                    raise
+                except FetchError as exc:
+                    if not isinstance(exc, NotFoundError) and not _HEAD_REFUSED.search(str(exc)):
+                        raise
+            ctx.fetcher.get_bytes(url, max_bytes=256 * 1024)
         except FetchError as exc:
             if "max" in str(exc) and "bytes" in str(exc):  # answered, just large
                 return None
@@ -60,7 +88,7 @@ class RegistryHealthBot:
         for spec in ctx.sources:
             if spec.status not in (SourceStatus.ACTIVE, SourceStatus.PAUSED, SourceStatus.CANDIDATE):
                 continue
-            urls = endpoints(spec)[: self.max_endpoints]
+            urls = probe_urls(ctx, spec)[: self.max_endpoints]
             if not urls:
                 continue
             errors = {u: e for u in urls if (e := self._probe(ctx, u)) is not None}

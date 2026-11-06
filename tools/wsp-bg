@@ -66,15 +66,24 @@ max_bytes=$(bytes "$max")
 # MemoryHigh three quarters of the way up: reclaim starts well before the kill.
 high="$(( max_bytes * 3 / 4 / 1048576 ))M"
 
+repo=$(cd "$(dirname "$0")/.." && pwd)
+
 # The MemoryHigh of the slice the job runs in, from the running manager (the template's value if it
-# cannot say). It was always the background slice's, so a --fetch job of 3G passed against 7-9G and
-# could hold the whole 2560M fetch sub-budget over its ceiling, stalling every lane (2026-11-04 trawl).
+# cannot say: no user bus, the slice not loaded yet after a reboot, no answer within 10 s). It was
+# always the background slice's, so a --fetch job of 3G passed against 7-9G and could hold the whole
+# fetch sub-budget over its ceiling, stalling every lane (2026-11-04 trawl). The template's value is
+# read from the slice file in deploy/systemd that `wsp service install` renders: written here by hand,
+# it stayed 2560M when the fetch slice was raised to 3584M and refused lanes the slice allows
+# (2026-11-05 deep dive). The value after it is used only if that file cannot be read.
 # WSP_BG_SLICE_HIGH and WSP_BG_FETCH_SLICE_HIGH (each slice's) are for tests.
 case $slice in
-  whisipedia-background-fetch.slice) template=2560M; override=${WSP_BG_FETCH_SLICE_HIGH:-} ;;
-  *) template=7G; override=${WSP_BG_SLICE_HIGH:-} ;;
+  whisipedia-background-fetch.slice) fallback=3584M; override=${WSP_BG_FETCH_SLICE_HIGH:-} ;;
+  *) fallback=7G; override=${WSP_BG_SLICE_HIGH:-} ;;
 esac
-slice_high=${override:-$(systemctl --user show "$slice" -p MemoryHigh --value 2>/dev/null || true)}
+template=$(sed -n 's/^MemoryHigh=\([0-9][0-9]*[KMGT]\{0,1\}\)[[:space:]]*$/\1/p' \
+  "$repo/deploy/systemd/$slice" 2>/dev/null | head -n 1)
+[ -n "$template" ] || template=$fallback
+slice_high=${override:-$(timeout 10 systemctl --user show "$slice" -p MemoryHigh --value 2>/dev/null || true)}
 case $slice_high in
   '' | infinity) slice_high=$(bytes "$template") ;;
   *) slice_high=$(bytes "$slice_high"); [ -n "$slice_high" ] || slice_high=$(bytes "$template") ;;
@@ -85,7 +94,6 @@ if [ "$max_bytes" -ge "$slice_high" ]; then
   exit 2
 fi
 
-repo=$(cd "$(dirname "$0")/.." && pwd)
 if [ "$lock" = 1 ]; then
   command -v flock >/dev/null 2>&1 || { echo "wsp-bg: flock (util-linux) not found; use --no-heavy-lock" >&2; exit 2; }
   lockdir=${WSP_LOCK_DIR:-$(WSP_CONFIG_DIR="$repo/config" "$repo/.venv/bin/python" -c \

@@ -131,6 +131,19 @@ class GenerationDependencies(Protocol):
 
 
 @runtime_checkable
+class SupportsProbeUrls(Protocol):
+    """Optional adapter capability: the URLs that show the source's upstream still answers, for an
+    adapter whose ``access.endpoints`` are bases it builds URLs from rather than URLs to fetch. The
+    registry-health bot probes these instead of the endpoints (2026-11-05 deep dive: a HEAD of Open
+    Library's ``/data/`` and of CourtListener's S3 ``bulk-data/`` prefix is a 404, so both sources
+    were reported unreachable every week while they discovered fine)."""
+
+    def probe_urls(self, spec: SourceSpec) -> Sequence[str]:
+        """URLs a HEAD (or a small GET) of which answers while upstream serves the source."""
+        ...
+
+
+@runtime_checkable
 class GenerationFinalizer(Protocol):
     """Optional adapter capability: files derived from the whole release, sealed with it.
 

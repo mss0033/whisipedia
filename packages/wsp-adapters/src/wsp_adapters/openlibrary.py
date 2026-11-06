@@ -91,10 +91,8 @@ class OpenLibraryAdapter:
 
     def discover(self, ctx: Ctx) -> Iterable[ReleaseRef]:
         spec = ctx.source
-        base = (str_list(access(spec).get("endpoints")) or (DATA_URL,))[0]
-        base = base if base.endswith("/") else base + "/"
         names = self.file_names(spec)
-        files, meta = head_release(ctx.fetcher, [(f"{base}{n}", n) for n in names])
+        files, meta = head_release(ctx.fetcher, list(zip(self.probe_urls(spec), names, strict=True)))
         # ``*_latest`` redirects to the dated dump; that date names the release. Without it the
         # version is the HEAD identity (audit H3); today's date only when HEAD says nothing.
         dated = ""
@@ -117,6 +115,13 @@ class OpenLibraryAdapter:
     @staticmethod
     def file_names(spec: SourceSpec) -> tuple[str, ...]:
         return tuple(f"ol_dump_{k}_latest.txt.gz" for k in (str_list(access(spec).get("kinds")) or KINDS))
+
+    def probe_urls(self, spec: SourceSpec) -> tuple[str, ...]:
+        """The ``*_latest`` dump URLs ``discover`` heads (``SupportsProbeUrls``): the endpoint is the
+        ``/data/`` base, which answers a HEAD with 404 (2026-11-05 deep dive)."""
+        base = (str_list(access(spec).get("endpoints")) or (DATA_URL,))[0]
+        base = base if base.endswith("/") else base + "/"
+        return tuple(f"{base}{n}" for n in self.file_names(spec))
 
     def plan(self, ctx: Ctx, have: Generation | None, want: ReleaseRef) -> FetchPlan:
         """Skip dump files the previous generation holds unchanged (no checksums upstream)."""

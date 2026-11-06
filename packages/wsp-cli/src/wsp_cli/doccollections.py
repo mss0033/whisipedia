@@ -80,7 +80,13 @@ from wsp_adapters.doccollection.policy import (
     decisions_path,
 )
 from wsp_cli import bootstrap, nasretry
-from wsp_core.errors import ChecksumMismatchError, FetchError, NotFoundError, RobotsDisallowedError
+from wsp_core.errors import (
+    ChecksumMismatchError,
+    FetchError,
+    NotFoundError,
+    RobotsDisallowedError,
+    RobotsUnreachableError,
+)
 from wsp_core.model import Checksum, FetchResult, RemoteFile, SourceSpec, SourceStatus
 from wsp_core.partitions import PartitionError, check_partition, partition_generation_id, partition_of
 from wsp_core.ports import Ctx, Fetcher, SupportsHead
@@ -780,7 +786,9 @@ class CollectionFetcher:
                 hosts.answered(cand.url)
                 report.gone.append((cand.key, why))
                 return
-            if isinstance(exc, RobotsDisallowedError):  # never asked, never retried: as good as gone
+            # never asked, never retried: as good as gone; but a robots.txt that could not be read
+            # disallows only until it is read again, so that is a failure of the host (2026-11-05)
+            if isinstance(exc, RobotsDisallowedError) and not isinstance(exc, RobotsUnreachableError):
                 report.gone.append((cand.key, why))
                 return
             if isinstance(exc, ChecksumMismatchError):  # the host answered, with other bytes

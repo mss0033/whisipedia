@@ -432,8 +432,9 @@ def test_throttle_never_takes_a_refused_robots_txt_redirect_as_no_rules(
     inner = Answers({"https://moved.gov/x": b"x"})
     t = Throttle(inner, interval=0.0, clock=lambda: now[0], sleep=lambda s: None, robots="Whisipedia/0.1")
     for _ in range(3):
-        with pytest.raises(RobotsDisallowedError):
+        with pytest.raises(RobotsDisallowedError) as refused:
             t.get_bytes("https://moved.gov/x")
+        assert type(refused.value) is RobotsDisallowedError  # the file answers: not "unreachable"
         now[0] += 601
     assert inner.requests.count("https://moved.gov/robots.txt") == 3
     assert "https://moved.gov/x" not in inner.requests
@@ -442,8 +443,9 @@ def test_throttle_never_takes_a_refused_robots_txt_redirect_as_no_rules(
 
 def test_throttle_reads_an_unreachable_robots_txt_as_disallow_all() -> None:
     """RFC 9309 2.3.1 (2026-10-26 review): 5xx/429/timeout disallow everything, for 10 minutes; a 4xx
-    other than 429 means no rules."""
-    from wsp_core.errors import FetchError, RobotsDisallowedError
+    other than 429 means no rules. 2026-11-05 deep dive: the refusal is a RobotsUnreachableError, which
+    the orchestrator retries with backoff instead of holding a day as permanent."""
+    from wsp_core.errors import FetchError, RobotsUnreachableError
 
     now = [0.0]
 
@@ -465,11 +467,13 @@ def test_throttle_reads_an_unreachable_robots_txt_as_disallow_all() -> None:
         }
     )
     t = Throttle(inner, interval=0.0, clock=lambda: now[0], sleep=lambda s: None, robots="Whisipedia/0.1")
-    with pytest.raises(RobotsDisallowedError):
+    with pytest.raises(RobotsUnreachableError):
         t.get_bytes("https://down.gov/x")
     assert t.get_bytes("https://closed.gov/y") == b"y"
+    with pytest.raises(RobotsUnreachableError):  # a redirect there is not refused for good either
+        t._hop("https://down.gov/elsewhere")  # pyright: ignore[reportPrivateUsage]
     now[0] = 650.0  # read again after 10 minutes (still down: still disallowed)
-    with pytest.raises(RobotsDisallowedError):
+    with pytest.raises(RobotsUnreachableError):
         t.get_bytes("https://down.gov/x")
     now[0] = 1300.0  # recovered
     assert t.get_bytes("https://down.gov/x") == b"x"

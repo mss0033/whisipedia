@@ -1326,6 +1326,37 @@ def test_a_listed_file_the_issuer_no_longer_has_does_not_make_the_fetch_partial(
     assert fetch_exit_code(report) == EXIT_COMPLETE
 
 
+@pytest.mark.parametrize("unreachable", [False, True])
+def test_only_a_robots_txt_that_answers_makes_a_document_gone(
+    vault: FileVault, tmp_path: Path, unreachable: bool
+) -> None:
+    """2026-11-05 deep dive: a robots.txt that could not be read (a 5xx, a timeout) disallows only until
+    it is read again, so the document failed (tried next pass); a real Disallow is as good as gone."""
+    from wsp_core.errors import RobotsDisallowedError, RobotsUnreachableError
+
+    refused = f"{BUCKET}/{PREFIX}restricted.pdf"
+
+    class Refusing(FakeFetcher):
+        def download(self, remote: RemoteFile, dest: Path) -> FetchResult:
+            if remote.url == refused:
+                cls = RobotsUnreachableError if unreachable else RobotsDisallowedError
+                raise cls(f"{refused}: disallowed by robots.txt")
+            return super().download(remote, dest)
+
+    fetcher = CollectionFetcher(
+        vault.root,
+        Refusing(routes(OBJECTS)),
+        keys={},
+        user_agent="test",
+        workdir=tmp_path / "work",
+        out=io.StringIO(),
+        throttle=False,
+    )
+    report = fetcher.run(spec(OBJECTS), version="2026-10-10")
+    failed, gone = [k for k, _ in report.failed], [k for k, _ in report.gone]
+    assert (failed, gone) == ((["test:restricted.pdf"], []) if unreachable else ([], ["test:restricted.pdf"]))
+
+
 def test_a_document_that_is_always_a_web_page_is_gone_after_a_week_of_tries(tmp_path: Path) -> None:
     """2026-10-29: one CIA document was an HTML page on 19 tries over 8 days and kept its partition
     from ever finishing. Five tries over seven days in a row make it gone; anything else starts over."""

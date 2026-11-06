@@ -68,7 +68,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from wsp_core.errors import RedirectRefusedError, RobotsDisallowedError
+from wsp_core.errors import RedirectRefusedError, RobotsDisallowedError, RobotsUnreachableError
 from wsp_core.model import RemoteFile, RemoteHead
 from wsp_core.nasretry import retrying
 from wsp_core.redirects import current_guard, unguarded
@@ -279,7 +279,8 @@ class HttpFetcher:
             transport=transport,
             event_hooks={"response": [_refuse_downgrade, _guard_redirect, self._robots_hop]},
         )
-        self._robots: dict[str, tuple[Robots | None, float]] = {}  # "scheme://host" -> (rules, expiry)
+        # "scheme://host" -> (rules, expiry, whether they stand in for an unreachable robots.txt)
+        self._robots: dict[str, tuple[Robots | None, float, bool]] = {}
         self._robots_lock = threading.Lock()
         self._bucket = TokenBucket(c.bandwidth_limit) if c.bandwidth_limit else None
         self._hosts: dict[str, threading.BoundedSemaphore] = {}
@@ -391,27 +392,43 @@ class HttpFetcher:
         Rules are kept 24 hours (the RFC's limit), an unreachable answer 10 minutes. An FTP service's
         rules are its ``ftp://HOST/robots.txt`` (RFC 9309 covers FTP: NCBI's disallows every agent,
         2026-10-24). 2026-10-26 review: an unreachable robots.txt counted as allow-all, for good."""
+        return self._robots_verdict(url)[0]
+
+    def _robots_verdict(self, url: str) -> tuple[bool, bool]:
+        """``(allowed, unreachable)``: :meth:`robots_allows`, and whether a refusal only stands in for a
+        robots.txt that could not be read (a 5xx, a 429, a timeout), which a retry in minutes may lift.
+        2026-11-05 deep dive: both raised the same error, and since 2026-11-04 the orchestrator holds a
+        robots refusal a day as permanent, so one robots.txt blip cost a scheduled job a whole day."""
         if not self.config.robots or _IN_ROBOTS.get():
-            return True
+            return True, False
         parts = urlsplit(url)
         site = f"{parts.scheme}://{parts.netloc.lower()}"
         now = time.monotonic()
         with self._robots_lock:
             hit = self._robots.get(site)
         if hit is None or now >= hit[1]:
-            rules, ttl = self._read_robots(site)
-            hit = (rules, now + ttl)
+            rules, ttl, down = self._read_robots(site)
+            hit = (rules, now + ttl, down)
             with self._robots_lock:
                 self._robots[site] = hit
         rules = hit[0]
-        return rules is None or rules.can_fetch(self.config.user_agent, url)
+        if rules is None or rules.can_fetch(self.config.user_agent, url):
+            return True, False
+        return False, hit[2]
 
     def check_robots(self, url: str) -> None:
-        if not self.robots_allows(url):
-            raise RobotsDisallowedError(f"{url}: disallowed by {urlsplit(url).netloc}/robots.txt")
+        allowed, down = self._robots_verdict(url)
+        if allowed:
+            return
+        where = f"{urlsplit(url).netloc}/robots.txt"
+        if down:
+            raise RobotsUnreachableError(f"{url}: disallowed by {where} (unreachable; read again in minutes)")
+        raise RobotsDisallowedError(f"{url}: disallowed by {where}")
 
-    def _read_robots(self, site: str) -> tuple[Robots | None, float]:
-        """``(rules, seconds to keep them)``; ``None`` rules allow everything (see robots_allows)."""
+    def _read_robots(self, site: str) -> tuple[Robots | None, float, bool]:
+        """``(rules, seconds to keep them, unreachable)``; ``None`` rules allow everything (see
+        robots_allows). ``unreachable`` is set only where RFC 9309 2.3.1.3 reads the failure as one:
+        a refused redirect answers, so it stays a plain disallow (:meth:`_robots_verdict`)."""
         token = _IN_ROBOTS.set(True)
         try:
             if site.startswith("ftp://"):
@@ -424,10 +441,10 @@ class HttpFetcher:
                         if len(body) >= ROBOTS_MAX_BYTES:  # RFC 9309 2.5: at least 500 KiB parsed
                             break
                     reachable(site)
-                    return _parse_robots(bytes(body[:ROBOTS_MAX_BYTES])), ROBOTS_TTL
+                    return _parse_robots(bytes(body[:ROBOTS_MAX_BYTES])), ROBOTS_TTL, False
                 if 400 <= r.status_code < 500 and r.status_code != 429:
                     reachable(site)
-                    return None, ROBOTS_TTL  # "unavailable": no rules
+                    return None, ROBOTS_TTL, False  # "unavailable": no rules
                 return _unreachable(site)  # 5xx, 429: "unreachable"
         except (_RetryableError, RedirectRefusedError):
             # A redirect we will not follow (https -> http, _refuse_downgrade) leaves robots.txt unread.
@@ -435,13 +452,13 @@ class HttpFetcher:
             # and one such mirror failed a whole multi-mirror fetch. Disallow-all, read again in 10
             # minutes, but never "unreachable": the file answers, we only refuse its redirect, so 30 days
             # of it must not end in no rules (RFC 9309 2.3.1.4 covers server and network errors only).
-            return DISALLOW_ALL, ROBOTS_UNREACHABLE_TTL
+            return DISALLOW_ALL, ROBOTS_UNREACHABLE_TTL, False
         except (httpx.HTTPError, OSError):
             return _unreachable(site)
         finally:
             _IN_ROBOTS.reset(token)
 
-    def _ftp_robots(self, site: str) -> tuple[Robots | None, float]:
+    def _ftp_robots(self, site: str) -> tuple[Robots | None, float, bool]:
         try:
             raw = ftp.get(
                 f"{site}/robots.txt",
@@ -451,19 +468,27 @@ class HttpFetcher:
             )
         except ftp.FtpNotFoundError:
             reachable(site)
-            return None, ROBOTS_TTL
+            return None, ROBOTS_TTL, False
         except (ftp.FtpTooLargeError, *ftp.TRANSIENT):
             return _unreachable(site)
         reachable(site)
-        return _parse_robots(raw), ROBOTS_TTL
+        return _parse_robots(raw), ROBOTS_TTL, False
 
     def _robots_hop(self, response: httpx.Response) -> None:
-        """Response hook: a redirect to a host whose robots.txt disallows the target is not followed."""
+        """Response hook: a redirect to a host whose robots.txt disallows the target is not followed.
+        One whose robots.txt could not be read is a :class:`RobotsUnreachableError`, not a refused
+        redirect: it may be followed minutes later (2026-11-05 deep dive)."""
         if _IN_ROBOTS.get() or not response.has_redirect_location:
             return
         target = str(response.request.url.join(response.headers["Location"]))
-        if not self.robots_allows(target):
-            raise RedirectRefusedError(f"redirected to {target}: disallowed by its robots.txt")
+        allowed, down = self._robots_verdict(target)
+        if allowed:
+            return
+        if down:
+            raise RobotsUnreachableError(
+                f"redirected to {target}: disallowed by its robots.txt (unreachable; read again in minutes)"
+            )
+        raise RedirectRefusedError(f"redirected to {target}: disallowed by its robots.txt")
 
     def get_bytes(self, url: str, *, max_bytes: int = 64 * 1024 * 1024) -> bytes:
         self.check_robots(url)
@@ -669,9 +694,15 @@ class HttpFetcher:
     def robots_filter(self, target: Target) -> Target:
         """``target`` without the sources whose robots.txt disallows us; :class:`RobotsDisallowedError`
         when none is left. The aria2 engine uses it too (its downloads skipped the check until
-        2026-10-24; a Kiwix metalink names mirrors of every kind)."""
-        allowed = tuple(u for u in target.urls if self.robots_allows(u))
+        2026-10-24; a Kiwix metalink names mirrors of every kind). :class:`RobotsUnreachableError` when
+        one of them was refused only because its robots.txt could not be read: a later try may pass."""
+        verdicts = [(u, *self._robots_verdict(u)) for u in target.urls]
+        allowed = tuple(u for u, ok, _ in verdicts if ok)
         if not allowed:
+            if any(down for _, _, down in verdicts):
+                raise RobotsUnreachableError(
+                    f"{target.url}: every source's robots.txt disallows us (one or more unreachable)"
+                )
             raise RobotsDisallowedError(f"{target.url}: every source's robots.txt disallows us")
         if len(allowed) < len(target.urls):
             log.info("%s: %d mirror(s) dropped by robots.txt", target.url, len(target.urls) - len(allowed))
@@ -1179,10 +1210,10 @@ ROBOTS_UNREACHABLE_TTL = 600.0  # an unreachable robots.txt disallows everything
 DISALLOW_ALL = parse_robots("User-agent: *\nDisallow: /\n")
 
 
-def _unreachable(site: str) -> tuple[Robots | None, float]:
+def _unreachable(site: str) -> tuple[Robots | None, float, bool]:
     """Disallow-all, read again in 10 minutes; no rules once it has been unreachable for 30 days
     (RFC 9309 2.3.1.4; :func:`wsp_core.robots.unreachable_long`)."""
-    return (None if unreachable_long(site) else DISALLOW_ALL), ROBOTS_UNREACHABLE_TTL
+    return (None if unreachable_long(site) else DISALLOW_ALL), ROBOTS_UNREACHABLE_TTL, True
 
 
 def _raise_for_status(r: httpx.Response) -> None:

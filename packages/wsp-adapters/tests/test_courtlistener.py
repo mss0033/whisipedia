@@ -12,7 +12,7 @@ from adapters_testkit import make_ctx, make_spec
 
 from wsp_adapters import available_adapters
 from wsp_adapters.courtlistener import DEFAULT_ENDPOINT, CourtListenerAdapter, csv_rows, parse_s3_listing
-from wsp_core.ports import Ctx, SourceAdapter
+from wsp_core.ports import Ctx, SourceAdapter, SupportsProbeUrls
 from wsp_core.testing.adapter_contract import FakeFetcher, SourceAdapterContract
 
 DATE = "2026-09-30"
@@ -175,6 +175,15 @@ def test_discover(tmp_path: Path) -> None:
     (release,) = releases
     assert sorted(f.name for f in release.files) == sorted(FILES)
     assert all(f.checksums and f.checksums[0].algorithm == "md5" for f in release.files)
+
+
+def test_the_health_probe_lists_one_key_not_the_bare_prefix() -> None:
+    """2026-11-05 deep dive: a HEAD of the S3 ``bulk-data/`` prefix is a 404, so the registry-health
+    bot called CourtListener unreachable every week. It probes the listing discover reads."""
+    adapter = CourtListenerAdapter()
+    assert isinstance(adapter, SupportsProbeUrls)
+    bucket = DEFAULT_ENDPOINT.rstrip("/").rpartition("/")[0]
+    assert adapter.probe_urls(SPEC) == (f"{bucket}/?list-type=2&prefix=bulk-data/&max-keys=1",)
 
 
 def test_multipart_etag_is_not_a_checksum() -> None:

@@ -203,6 +203,7 @@ def test_permanent_failures_are_classified_apart_from_content() -> None:
         OwnerActionRequiredError,
         RedirectRefusedError,
         RobotsDisallowedError,
+        RobotsUnreachableError,
     )
     from wsp_orchestrator.errors import FailureKind, classify
     from wsp_orchestrator.pipeline import NoReleasesError
@@ -215,8 +216,30 @@ def test_permanent_failures_are_classified_apart_from_content() -> None:
     ):
         assert classify(exc) is FailureKind.PERMANENT, exc
     assert classify(FetchError("HTTP 503")) is FailureKind.CONTENT
+    # 2026-11-05 deep dive: a robots.txt that could not be read disallows only for minutes
+    assert classify(RobotsUnreachableError("https://x/a: robots.txt unreachable")) is FailureKind.CONTENT
     assert classify(NotFoundError("https://x/a")) is FailureKind.CONTENT
     assert FailureKind.PERMANENT.counts_attempt  # a release step still counts it towards quarantine
+
+
+def test_an_unreachable_robots_txt_is_retried_with_backoff_not_held_a_day(tmp_path: Path) -> None:
+    """2026-11-05 deep dive: since 2026-11-04 every robots refusal was permanent, so one 503 from a
+    robots.txt killed the job at its first attempt and held it a day. It is retried, as before."""
+    from wsp_core.errors import RobotsUnreachableError
+
+    clock = ManualClock(T0)
+    orch, world = build(tmp_path, clock, [make_spec("src")], scrub_slices=1)
+    adapter = world.adapters["src"]
+    blip = RobotsUnreachableError("https://src.example/x: disallowed by src.example/robots.txt (unreachable)")
+    adapter.failures["discover"] = [blip, blip]
+    adapter.add_release("2026-10-01", FILES)
+    orch.start()
+    for _ in range(6):
+        orch.run_pending()
+        clock.advance(timedelta(minutes=30))
+    assert orch.queue.jobs(status=JobStatus.DEAD, kind=JobKind.DISCOVER) == []
+    assert world.vault.current("src") is not None  # the third attempt went through
+    assert not [k for k in orch.alerter.open_keys() if k.startswith("job-dead:discover")]
 
 
 def test_a_permanent_failure_dies_at_once_and_is_held_for_its_gap(tmp_path: Path) -> None:

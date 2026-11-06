@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -276,6 +276,59 @@ def test_registry_health_alerts_after_two_failed_probes(tmp_path: Path) -> None:
     assert second.candidates[0].kind is CandidateKind.REGISTRY_FIX
     ok = bot.run(_ctx(tmp_path, [spec], {"https://gone.example/": b"hi"}))
     assert ok.resolved == ["registry-health:dead"]
+
+
+def test_registry_health_probes_what_the_adapter_fetches_not_a_base_endpoint(tmp_path: Path) -> None:
+    """2026-11-05 deep dive: Open Library's ``/data/`` and CourtListener's S3 ``bulk-data/`` are bases
+    their adapters build URLs from; a HEAD of either is a 404, so both were "unreachable" every week
+    while they discovered fine. The adapter names its probe URLs; a HEAD the host refuses (S3 may)
+    gets a small GET before the endpoint counts as failing."""
+    from wsp_core.errors import FetchError, NotFoundError
+    from wsp_core.model import RemoteHead
+
+    listing = "https://bucket.example/?list-type=2&prefix=bulk-data/&max-keys=1"
+    dump = "https://data.example/data/ol_dump_editions_latest.txt.gz"
+
+    class Prefixed:
+        def probe_urls(self, spec: SourceSpec) -> tuple[str, ...]:
+            return (listing,) if spec.id == "court" else (dump,)
+
+    class Heads(FakeFetcher):
+        def head(self, url: str) -> RemoteHead:
+            self.requested.append(f"HEAD {url}")
+            if url == dump:
+                return RemoteHead(url=url)
+            if url == listing:
+                raise FetchError(f"HEAD {url} failed after 1 attempt(s): HTTP 405")
+            raise NotFoundError(url, "HTTP 404")
+
+    def adapter_for(spec: SourceSpec) -> Any:
+        if spec.id == "plain":
+            raise LookupError(spec.id)
+        return Prefixed()
+
+    court = make_spec(
+        "court",
+        adapter="courtlistener",
+        raw={"access": {"adapter": "courtlistener", "endpoints": ["https://bucket.example/bulk-data/"]}},
+    )
+    books = make_spec(
+        "books",
+        adapter="open-library",
+        raw={"access": {"adapter": "open-library", "endpoints": ["https://data.example/data/"]}},
+    )
+    plain = make_spec("plain", adapter="gone", raw={"access": {"endpoints": ["https://gone.example/"]}})
+    fetcher = Heads({listing: b"<ListBucketResult/>"})
+    bot = RegistryHealthBot()
+    ctx = _ctx(tmp_path, [court, books, plain], {}, adapter_for=adapter_for)
+    first = bot.run(replace(ctx, fetcher=fetcher))
+    second = bot.run(replace(ctx, fetcher=fetcher, previous=first.notes))
+    assert [a.key for a in second.alerts] == ["registry-health:plain"]  # its endpoints, as before
+    assert set(second.resolved) == {"registry-health:court", "registry-health:books"}
+    assert "HEAD https://bucket.example/bulk-data/" not in fetcher.requested
+    assert listing in fetcher.requested  # the GET after the refused HEAD
+    assert dump not in fetcher.requested  # a HEAD that answers needs no GET
+    assert "https://gone.example/" in fetcher.requested  # a 404 HEAD is tried once more as a GET
 
 
 def test_adapter_smoke_reports_contract_problems(tmp_path: Path) -> None:

@@ -82,6 +82,20 @@ def test_generation_date() -> None:
         generation_date(Generation("s", "r42", SEALED))
 
 
+def test_an_unsealed_generation_that_cannot_be_dated_is_kept_not_an_error() -> None:
+    """2026-11-05 deep dive: arxiv's staging "2026-10.pdf.arxiv-0712" (no day, no seal) raised before
+    planning and killed every arxiv prune from 2026-10-29. A sealed one still must be dated."""
+    staging = Generation("s", "2026-10.pdf.x", GenerationStatus.STAGING)
+    info = GenerationInfo.from_generation(staging)
+    assert info.taken == date.min
+    sealed = GenerationInfo("2026-10-01", date(2026, 10, 1))
+    plan = plan_retention([info, sealed], GfsPolicy(last=1, monthly=0, yearly=0), current="2026-10-01")
+    assert plan.prune == ()
+    assert plan.reasons["2026-10.pdf.x"] == ("status staging",)
+    with pytest.raises(ValueError, match="cannot date"):
+        GenerationInfo.from_generation(Generation("s", "2026-10.pdf.x", SEALED))
+
+
 def test_duplicate_ids_rejected() -> None:
     g = GenerationInfo("a", date(2026, 1, 1))
     with pytest.raises(ValueError, match="duplicate"):

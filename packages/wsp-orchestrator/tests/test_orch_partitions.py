@@ -8,7 +8,7 @@ from unittest.mock import ANY
 
 from wsp_core.model import Generation, ReleaseState, SourceSpec, Verdict, VerdictStatus
 from wsp_orchestrator.clock import ManualClock
-from wsp_orchestrator.jobs import JobKind
+from wsp_orchestrator.jobs import JobKind, JobStatus
 from wsp_orchestrator.orchestrator import Orchestrator
 from wsp_orchestrator.pipeline import Outcome, Withheld
 from wsp_orchestrator.retention import GenerationInfo, GfsPolicy, plan_partitioned_retention, plan_retention
@@ -96,6 +96,26 @@ def test_prune_keeps_every_partition_and_what_current_ones_read(tmp_path: Path) 
     assert world.vault.pruned == [("topo", "2025-06-01.ak")]
     (plan,) = world.ledger.of_kind("retention.plan", "topo")
     assert plan.data["prune"] == ["2025-06-01.ak"]
+
+
+def test_an_undated_staging_generation_never_stops_the_prune(tmp_path: Path) -> None:
+    """2026-11-05 deep dive: arxiv's staging generation ``2026-10.pdf.arxiv-0712`` (a month, no day,
+    no seal) raised "cannot date generation" before planning, so arxiv was never pruned from
+    2026-10-29 and its job died every ~15 h. A staging generation is kept whatever its date."""
+    spec = partitioned_spec()
+    orch, world = build(tmp_path, [spec])
+    world.vault.add_sealed("topo", "2026-09.pdf.a")
+    world.vault.add_sealed("topo", "2026-10.pdf.a", current=True)
+    world.vault.add_sealed("topo", "2026-10.pdf.b", current=True)
+    world.vault.stage("topo", "2026-10.pdf.c")
+    world.adapters["parts"].dependencies = {}
+    orch.queue.enqueue(JobKind.PRUNE, "topo", now=T0, payload={"source_id": "topo"})
+    orch.run_pending()
+    assert [j.status for j in orch.queue.jobs(kind=JobKind.PRUNE)] == [JobStatus.DONE]
+    assert world.vault.pruned == [("topo", "2026-09.pdf.a")]  # an older "a"; "c" is staging
+    (plan,) = world.ledger.of_kind("retention.plan", "topo")
+    assert "2026-10.pdf.c" in cast(list[str], plan.data["keep"])
+    assert plan.data["prune"] == ["2026-09.pdf.a"]
 
 
 def test_prune_refuses_to_guess_when_dependencies_cannot_be_read(tmp_path: Path) -> None:

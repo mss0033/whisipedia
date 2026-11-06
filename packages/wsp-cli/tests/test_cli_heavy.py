@@ -317,9 +317,12 @@ def test_uninstall_leaves_the_owners_own_units_alone(tmp_path: Path) -> None:
     assert own.exists()
 
 
-def _run_wsp_bg(tmp_path: Path, *args: str, state: str = "inactive") -> tuple[int, list[str], str]:
+def _run_wsp_bg(
+    tmp_path: Path, *args: str, state: str = "inactive", manager_high: str | None = "7G"
+) -> tuple[int, list[str], str]:
     """Run tools/wsp-bg with a fake systemd-run that prints its argv (no unit is started) and a fake
-    systemctl that reports the job ``state``."""
+    systemctl that reports the job ``state``. ``manager_high=None``: the manager reports no slice
+    MemoryHigh (nor do the test overrides), so wsp-bg falls back to the slice files' values."""
     import subprocess
 
     from test_cli_autonomy import ROOT
@@ -330,15 +333,18 @@ def _run_wsp_bg(tmp_path: Path, *args: str, state: str = "inactive") -> tuple[in
     fake.write_text('#!/bin/sh\nfor a in "$@"; do printf "%s\\n" "$a"; done\n')
     fake.chmod(0o755)
     ctl = fakebin / "systemctl"
-    ctl.write_text(f'#!/bin/sh\ncase "$*" in *ActiveState*) echo {state} ;; *) echo 7G ;; esac\n')
+    ctl.write_text(
+        f'#!/bin/sh\ncase "$*" in *ActiveState*) echo {state} ;; *) echo {manager_high or ""} ;; esac\n'
+    )
     ctl.chmod(0o755)
     env = {
         "PATH": f"{fakebin}:/usr/bin:/bin",
         "WSP_LOCK_DIR": str(tmp_path / "locks"),
         "HOME": str(tmp_path),
-        "WSP_BG_SLICE_HIGH": "7G",  # the template's MemoryHigh, whatever the test machine runs
-        "WSP_BG_FETCH_SLICE_HIGH": "2560M",  # the fetch sub-budget's
     }
+    if manager_high is not None:
+        env["WSP_BG_SLICE_HIGH"] = "7G"  # the template's MemoryHigh, whatever the test machine runs
+        env["WSP_BG_FETCH_SLICE_HIGH"] = "3584M"  # the fetch sub-budget's
     done = subprocess.run(
         [str(ROOT / "tools" / "wsp-bg"), *args], capture_output=True, text=True, env=env, check=False
     )
@@ -397,13 +403,45 @@ def test_wsp_bg_refuses_a_job_as_big_as_the_whole_slice(tmp_path: Path, size: st
 
 def test_wsp_bg_checks_a_download_job_against_the_fetch_slice(tmp_path: Path) -> None:
     """2026-11-04 trawl: a --fetch job was checked against the background slice's MemoryHigh (7-9G),
-    so a 3G lane passed and could hold the whole 2560M fetch sub-budget over its ceiling."""
-    code, argv, err = _run_wsp_bg(tmp_path, "--fetch", "maps-lane", "3G", "--", "lane.sh")
+    so a 4G lane passed and could hold the whole fetch sub-budget over its ceiling."""
+    code, argv, err = _run_wsp_bg(tmp_path, "--fetch", "maps-lane", "4G", "--", "lane.sh")
     assert code == 2
     assert argv == []
-    assert "whisipedia-background-fetch.slice MemoryHigh (2560M)" in err
+    assert "whisipedia-background-fetch.slice MemoryHigh (3584M)" in err
     argv = _wsp_bg(tmp_path, "--fetch", "maps-lane", "1536M", "--", "lane.sh")  # the lane's size today
     assert "--slice=whisipedia-background-fetch.slice" in argv
+
+
+def test_wsp_bg_falls_back_to_the_slice_files_not_a_number_of_its_own(tmp_path: Path) -> None:
+    """2026-11-05 deep dive: when the manager could not say, wsp-bg used a hand-written 2560M for the
+    fetch slice, which stayed so after the slice was raised to 3584M, and refused lanes it allows. The
+    fallback is now the MemoryHigh of the slice file `wsp service install` renders."""
+    import re
+
+    from test_cli_autonomy import ROOT
+
+    def file_high(name: str) -> int:
+        text = (ROOT / "deploy" / "systemd" / name).read_text()
+        m = re.search(r"^MemoryHigh=(\d+)([MG])\s*$", text, re.MULTILINE)
+        assert m is not None, name
+        return int(m[1]) * (1024 if m[2] == "G" else 1)  # MiB
+
+    fetch = file_high("whisipedia-background-fetch.slice")
+    background = file_high("whisipedia-background.slice")
+    assert fetch > 2560  # the old hand-written ceiling: a job between them was refused for nothing
+    code, argv, err = _run_wsp_bg(
+        tmp_path, "--fetch", "lane", f"{fetch - 1}M", "--", "lane.sh", manager_high=None
+    )
+    assert code == 0, err
+    assert f"MemoryMax={fetch - 1}M" in argv
+    code, argv, err = _run_wsp_bg(
+        tmp_path, "--fetch", "lane", f"{fetch}M", "--", "lane.sh", manager_high=None
+    )
+    assert code == 2
+    assert f"whisipedia-background-fetch.slice MemoryHigh ({fetch}M)" in err
+    code, argv, err = _run_wsp_bg(tmp_path, "big", f"{background}M", "--", "job.py", manager_high=None)
+    assert code == 2
+    assert f"whisipedia-background.slice MemoryHigh ({background}M)" in err
 
 
 def test_the_job_inherits_the_heavy_lock_and_nobody_else_can_forge_it(
