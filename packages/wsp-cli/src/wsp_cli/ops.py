@@ -257,13 +257,21 @@ def cmd_index_build(args: argparse.Namespace, out: TextIO) -> int:
     except LockHeldError as exc:
         return _busy(exc)
     for r in reports:
-        if r.skipped:
-            out.write(f"{r.source_id}: skipped ({r.skipped})\n")
+        left_out = f"; {r.left_out:,} left out (invalid ids)" if r.left_out else ""
+        if r.error:
+            out.write(f"{r.source_id}: FAILED ({r.error})\n")
+        elif r.skipped:
+            out.write(f"{r.source_id}: skipped ({r.skipped}){left_out}\n")
         else:
             refined = ", ".join(f"{g} ({n:,} docs)" for g, n in r.refined) or "nothing new"
-            out.write(f"{r.source_id}: refined {refined}; indexed {r.indexed}\n")
+            out.write(f"{r.source_id}: refined {refined}; indexed {r.indexed}{left_out}\n")
     if not reports:
         out.write("nothing to index: no sealed generations\n")
+    # A source that failed did not stop the others (2026-11-06), but the run is not a success: the
+    # exit code still raises the alert.
+    if failed := [r.source_id for r in reports if r.error]:
+        out.write(f"index build: {len(failed)} source(s) failed: {', '.join(failed)}\n")
+        return 1
     return 0
 
 

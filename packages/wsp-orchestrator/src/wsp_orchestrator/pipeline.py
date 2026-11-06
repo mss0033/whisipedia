@@ -173,6 +173,7 @@ class UnknownReleaseError(KeyError):
 @dataclass(frozen=True, slots=True)
 class RefineResult:
     doc_count: int | None = None
+    left_out: int = 0  # documents the adapter left out for a fault of their own (Ctx.on_skip)
 
 
 class RefineStep(Protocol):

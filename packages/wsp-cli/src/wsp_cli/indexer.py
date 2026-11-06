@@ -25,6 +25,7 @@ catalog see every partition, not only the last one ingested.
 
 from __future__ import annotations
 
+import dataclasses
 import functools
 import json
 import logging
@@ -40,6 +41,7 @@ from pathlib import Path
 from typing import Any, Concatenate, ParamSpec, TextIO, TypeVar, cast
 
 from wsp_adapters.entries import EntrySource, Redirect
+from wsp_core.diag import LOG as DIAG
 from wsp_core.diag import phase
 from wsp_core.errors import FetchError
 from wsp_core.memory import memory_line
@@ -90,7 +92,9 @@ from wsp_index.refinery import (
 )
 from wsp_index.spelling import SPELL_FILE, SPELL_INPUTS, SpellCache, SpellConfig, VocabStats, build_vocabulary
 from wsp_index.titles import IndexedSource, TitleSources
+from wsp_orchestrator.errors import ResourceBusyError, StepCancelledError
 from wsp_orchestrator.pipeline import RefineResult
+from wsp_vault.cancel import Interrupted
 from wsp_vault.ratelimit import RateLimiter
 
 PROGRESS_EVERY = 10_000
@@ -116,6 +120,17 @@ class OfflineFetcher:
 
 
 PROGRESS = logging.getLogger("wsp.index.progress")
+log = logging.getLogger(__name__)
+# What ends a build however many sources are left: a stop asked for (an interrupt, a cancelled step),
+# a lock held elsewhere, memory running out (the next source would only fail the same way), and an
+# index that does not hold what its state says (rebuilt alone: the operator decides, audit 2026-10-12).
+_STOPS: tuple[type[BaseException], ...] = (
+    MemoryError,
+    ResourceBusyError,
+    StepCancelledError,
+    Interrupted,
+    IndexStateError,
+)
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
 
@@ -153,6 +168,8 @@ class SourceReport:
     upserted: int = 0
     deleted: int = 0
     skipped: str | None = None  # reason the source was skipped
+    left_out: int = 0  # documents its refine left out (an id that cannot be made valid)
+    error: str | None = None  # why its build failed (the run goes on, and exits non-zero)
 
 
 def _write_durably(path: Path, text: str) -> None:
@@ -362,7 +379,12 @@ class Indexer:
             raise LookupError(f"no adapter installed for {spec.id} ({spec.adapter})")
         if out_dir.exists():
             shutil.rmtree(out_dir)  # derived, local and unsealed: rebuild from the vault
-        ctx = self.ctx(spec, gid)
+        left_out = [0]  # documents the adapter left out (each logged by it, with its id)
+
+        def note(_native: str, _why: str) -> None:
+            left_out[0] += 1
+
+        ctx = dataclasses.replace(self.ctx(spec, gid), on_skip=note)
         redirects = ctx.workdir / "redirects.sqlite"
         redirects.unlink(missing_ok=True)
         started, n = self.clock(), 0
@@ -378,10 +400,12 @@ class Indexer:
                     rate = n / max(self.clock() - started, 1e-6)
                     self._say(f"  refine {spec.id}/{gid}: {n:,} documents ({rate:,.0f}/s)")
             db.commit()
+        dropped = f" ({left_out[0]:,} left out: invalid ids)" if left_out[0] else ""
         self._say(
-            f"  refined {spec.id}/{gid}: {n:,} documents in {self.clock() - started:.1f}s; {memory_line()}"
+            f"  refined {spec.id}/{gid}: {n:,} documents{dropped} in {self.clock() - started:.1f}s; "
+            + memory_line()
         )
-        return RefineResult(n)
+        return RefineResult(n, left_out=left_out[0])
 
     @staticmethod
     def _documents(
@@ -896,61 +920,90 @@ class Indexer:
         reports: list[SourceReport] = []
         wanted = list(source_ids) if source_ids else sorted(self.specs)
         for sid in wanted:
-            spec = self.specs.get(sid)
-            if spec is None:
-                reports.append(SourceReport(sid, skipped="not in the registry"))
-                continue
-            if not searchable(spec):
-                removed = self.purge(spec)
-                if source_ids or removed:
-                    reports.append(
-                        SourceReport(sid, deleted=removed, skipped="not indexed (registry index: false)")
-                    )
-                continue
-            gens = [g for g in self.vault.generations(sid) if g.status is GenerationStatus.SEALED]
-            if not gens:
-                if source_ids:
-                    reports.append(SourceReport(sid, skipped="no sealed generation"))
-                continue
-            if self.adapter_for(spec) is None:
-                reports.append(SourceReport(sid, skipped=f"no adapter installed for {spec.adapter!r}"))
-                continue
-            wanted_ids = {g.generation_id for g in self.vault.current_set(sid)}
-            self._say(f"{sid}: {len(gens)} sealed generation(s), {len(wanted_ids)} current")
-            refined: list[tuple[str, int]] = []
-            for g in gens:
-                if g.generation_id not in wanted_ids or is_sealed(self.refined_dir(spec, g.generation_id)):
-                    continue
-                result = self.refine(spec, g, self.vault.generation_path(sid, g.generation_id))
-                refined.append((g.generation_id, result.doc_count or 0))
-            if spec.partitioned:
-                rep = self.index_partitioned(spec)
-                reports.append(
-                    SourceReport(sid, tuple(refined), rep.indexed, rep.upserted, rep.deleted, rep.skipped)
-                )
-                continue
-            current = self.vault.current(sid)
-            if current is None:
-                reports.append(SourceReport(sid, tuple(refined), skipped="no current generation"))
-                continue
-            # A refine-again that was interrupted after its new copy was in place: the index still holds
-            # the old one, and the generation id did not change. It diffs from the replaced copy named
-            # in PENDING, not "already indexed" (2026-10-26 review #8).
-            gid = current.generation_id
-            pending = self.refined_dir(spec, gid).parent / REPLACED_DIR / PENDING_FILE
-            base = None
-            if pending.is_file():
-                named = pending.parent / pending.read_text(encoding="utf-8").strip()
-                base = named if named.name.startswith(f"{gid}-") and is_sealed(named) else None
-            rep = self.index_generation(spec, gid, since=base)
-            if base is not None and rep.indexed == gid:
-                pending.unlink(missing_ok=True)
-            reports.append(
-                SourceReport(sid, tuple(refined), rep.indexed, rep.upserted, rep.deleted, rep.skipped)
-            )
+            # One source's failure is its own: an invalid id in Aozora Bunko ended the whole nightly
+            # build after 45 minutes, and no other source was indexed (2026-11-06). It is reported
+            # (a failed report, the run log's phase-error) and the caller exits non-zero; a stop
+            # (interrupt, lock, memory) still ends the run.
+            try:
+                report = self._build_source(sid, explicit=bool(source_ids))
+            except _STOPS:
+                raise
+            except Exception as exc:
+                report = self._source_failed(sid, exc)
+            if report is not None:
+                reports.append(report)
         if finish:
             self.finish()
         return reports
+
+    def _build_source(self, sid: str, *, explicit: bool) -> SourceReport | None:
+        """:meth:`build` for one source: None when there is nothing to say (a source not asked for by
+        name that has no sealed generation, or that was never indexed)."""
+        spec = self.specs.get(sid)
+        if spec is None:
+            return SourceReport(sid, skipped="not in the registry")
+        if not searchable(spec):
+            removed = self.purge(spec)
+            if explicit or removed:
+                return SourceReport(sid, deleted=removed, skipped="not indexed (registry index: false)")
+            return None
+        gens = [g for g in self.vault.generations(sid) if g.status is GenerationStatus.SEALED]
+        if not gens:
+            return SourceReport(sid, skipped="no sealed generation") if explicit else None
+        if self.adapter_for(spec) is None:
+            return SourceReport(sid, skipped=f"no adapter installed for {spec.adapter!r}")
+        wanted_ids = {g.generation_id for g in self.vault.current_set(sid)}
+        self._say(f"{sid}: {len(gens)} sealed generation(s), {len(wanted_ids)} current")
+        refined: list[tuple[str, int]] = []
+        left_out = 0
+        for g in gens:
+            if g.generation_id not in wanted_ids or is_sealed(self.refined_dir(spec, g.generation_id)):
+                continue
+            result = self.refine(spec, g, self.vault.generation_path(sid, g.generation_id))
+            refined.append((g.generation_id, result.doc_count or 0))
+            left_out += result.left_out
+        if spec.partitioned:
+            rep = self.index_partitioned(spec)
+            return SourceReport(
+                sid, tuple(refined), rep.indexed, rep.upserted, rep.deleted, rep.skipped, left_out=left_out
+            )
+        current = self.vault.current(sid)
+        if current is None:
+            return SourceReport(sid, tuple(refined), skipped="no current generation", left_out=left_out)
+        # A refine-again that was interrupted after its new copy was in place: the index still holds
+        # the old one, and the generation id did not change. It diffs from the replaced copy named
+        # in PENDING, not "already indexed" (2026-10-26 review #8).
+        gid = current.generation_id
+        pending = self.refined_dir(spec, gid).parent / REPLACED_DIR / PENDING_FILE
+        base = None
+        if pending.is_file():
+            named = pending.parent / pending.read_text(encoding="utf-8").strip()
+            base = named if named.name.startswith(f"{gid}-") and is_sealed(named) else None
+        rep = self.index_generation(spec, gid, since=base)
+        if base is not None and rep.indexed == gid:
+            pending.unlink(missing_ok=True)
+        return SourceReport(
+            sid, tuple(refined), rep.indexed, rep.upserted, rep.deleted, rep.skipped, left_out=left_out
+        )
+
+    def _source_failed(self, sid: str, exc: Exception) -> SourceReport:
+        """Report a source whose build raised, and discard the index writes it left uncommitted (the
+        next source's commit would publish them); its unsealed refine is rebuilt by the next run."""
+        error = f"{type(exc).__name__}: {exc}"
+        log.error("%s: build failed; going on with the other sources", sid, exc_info=exc)
+        DIAG.error(
+            f"index-source {sid} failed",
+            extra={
+                "fields": {"event": "phase-error", "phase": "index-source", "source": sid, "error": error}
+            },
+        )
+        if self._index is not None:
+            try:
+                self._index.rollback()
+            except Exception as again:  # said; the next commit decides
+                log.warning("%s: rollback after the failure failed too: %s", sid, again)
+        self._say(f"{sid}: FAILED ({error})")
+        return SourceReport(sid, error=error)
 
 
 def indexed_title_sources(

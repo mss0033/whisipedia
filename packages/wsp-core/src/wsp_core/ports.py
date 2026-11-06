@@ -62,6 +62,9 @@ class Ctx:
     # Told the bytes an adapter reads from the vault in one long stream (the refine's COD archive): the
     # library's shared NAS budget (``wsp_cli.bootstrap.ingest_pace``); None = unpaced (2026-11-06 review).
     read_pace: Callable[[int], None] | None = None
+    # Told each document an adapter leaves out for a fault of its own record (a work whose id cannot be
+    # made valid), with its id and why: the refine counts them in its report, and goes on (2026-11-06).
+    on_skip: Callable[[str, str], None] | None = None
 
 
 # --- Acquisition -------------------------------------------------------------------------------

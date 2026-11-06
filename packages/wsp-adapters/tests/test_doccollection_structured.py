@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from wsp_adapters.doccollection.tei import read_snapshot
+from wsp_core.model import SourceSpec
 
 
 def _attack() -> bytes:
@@ -943,3 +944,79 @@ def test_the_cod_archive_is_its_own_document_and_one_per_structure(tmp_path: Pat
     assert quartz.meta[BYLINE_META] == "Köhler, J.; O'Neil, M."
     assert quartz.meta["cod_id"] == "1000000"
     assert "COD 1000000" in quartz.aliases
+
+
+def _aozora_spec() -> SourceSpec:
+    from adapters_testkit import make_spec
+
+    return make_spec(
+        "aozora-bunko",
+        {
+            "adapter": "doc-collection",
+            "issuer": "Aozora Bunko",
+            "key_prefix": "aozora",
+            "origins": ["www.aozora.gr.jp"],
+            "discovery": [
+                {"kind": "list", "items": [{"url": "https://www.aozora.gr.jp/cards/x/files/48068.zip"}]}
+            ],
+            "filter": {"allow_all": True},
+            "reader": "aozora-text",
+        },
+        license_="LicenseRef-PD-JP",
+    )
+
+
+def test_a_work_whose_file_name_ends_in_a_space_is_indexed_without_it(tmp_path: Path) -> None:
+    """``chino_sakazuki .txt`` made the id ``aozora:048068/chino_sakazuki `` (invalid), and the
+    exception ended the whole nightly build (2026-11-06). A valid id is never changed; a renamed work
+    that would take another work's id, and a work whose id cannot be made valid, are left out and
+    told to the refine; the rest of the snapshot is indexed."""
+    from adapters_testkit import make_ctx
+
+    from wsp_adapters.doccollection.adapter import CATALOG, DocCollectionAdapter, snapshot_native
+    from wsp_adapters.doccollection.catalog import write_catalog
+    from wsp_adapters.doccollection.model import DocumentMeta
+    from wsp_core.ids import make_doc_id
+    from wsp_core.testing.adapter_contract import FakeFetcher
+
+    gen = tmp_path / "2026-10-27"
+    (gen / "upstream").mkdir(parents=True)
+    zpath = gen / "upstream" / "aozora__048068-55ea9c80.zip"
+    work = AOZORA.encode("cp932")
+    with zipfile.ZipFile(zpath, "w") as z:
+        z.writestr("chino_sakazuki .txt", work)  # the 2026-11-06 failure: renamed
+        z.writestr("dup .txt", work)  # would take the id of "dup", read after it: left out
+        z.writestr("dup.txt", work)
+        z.writestr("　.txt", work)  # a blank name (an ideographic space): no valid id
+        z.writestr(" lead.txt", work)  # valid as it was ("aozora:048068/ lead"): unchanged
+        z.writestr("wide　.txt", work)  # an ideographic space at the end: renamed too
+    meta = DocumentMeta(
+        doc_key="aozora:048068",
+        file="upstream/aozora__048068-55ea9c80.zip",
+        issuer="Aozora Bunko",
+        title="血の盃 (小酒井不木)",
+        origin_url="https://www.aozora.gr.jp/cards/000262/files/48068_ruby_38061.zip",
+        language="ja",
+    )
+    write_catalog(gen / CATALOG, [meta])
+    skipped: list[tuple[str, str]] = []
+
+    def on_skip(native: str, why: str) -> None:
+        skipped.append((native, why))
+
+    ctx = dataclasses.replace(make_ctx(_aozora_spec(), FakeFetcher(), tmp_path / "w"), on_skip=on_skip)
+    docs = list(DocCollectionAdapter(throttle=False).documents(ctx, gen))
+    assert [d.native_id for d in docs] == [
+        "aozora:048068/dup",
+        "aozora:048068/ lead",
+        "aozora:048068/chino_sakazuki",  # the renamed come after the rest of the snapshot
+        "aozora:048068/wide",
+    ]
+    assert docs[2].doc_id == "wsp:aozora-bunko/aozora:048068/chino_sakazuki"
+    assert all(d.doc_id == make_doc_id("aozora-bunko", d.native_id) for d in docs)
+    assert [native for native, _ in skipped] == ["aozora:048068/　", "aozora:048068/dup "]
+    assert "another document's" in skipped[1][1]
+    assert snapshot_native("aozora-bunko", "aozora:1", "a ") == "aozora:1/a"
+    assert snapshot_native("aozora-bunko", "aozora:1", "a") == "aozora:1/a"
+    assert snapshot_native("aozora-bunko", "aozora:1", " \t") is None
+    assert snapshot_native("Bad Source", "aozora:1", "a ") is None

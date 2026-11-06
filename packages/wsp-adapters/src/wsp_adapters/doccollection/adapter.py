@@ -94,7 +94,7 @@ from wsp_adapters.html_text import html_to_text
 from wsp_adapters.pdftext import Section, outline_marks, page_text, plan_sections
 from wsp_core.banners import banner_for
 from wsp_core.errors import RedirectRefusedError
-from wsp_core.ids import content_hash, make_doc_id
+from wsp_core.ids import InvalidDocIdError, content_hash, make_doc_id
 from wsp_core.memory import drop_file_cache
 from wsp_core.model import (
     BYLINE_META,
@@ -584,7 +584,7 @@ class DocCollectionAdapter:
                     yield from self._archive_documents(spec, cfg, meta, path, generation_dir, ctx.read_pace)
                     continue
                 if cfg.reader and path.suffix.lower() in (".zip", ".xml", ".json"):
-                    yield from self._snapshot_documents(spec, cfg, meta, path)
+                    yield from self._snapshot_documents(spec, cfg, meta, path, ctx.on_skip)
                     continue
                 read = FileText((), "", (), "")
             if read.sections:
@@ -660,7 +660,12 @@ class DocCollectionAdapter:
             )
 
     def _snapshot_documents(
-        self, spec: SourceSpec, cfg: CollectionConfig, meta: DocumentMeta, path: Path
+        self,
+        spec: SourceSpec,
+        cfg: CollectionConfig,
+        meta: DocumentMeta,
+        path: Path,
+        on_skip: Callable[[str, str], None] | None = None,
     ) -> Iterator[DocRecord]:
         """The documents ``cfg.reader`` finds in a repository snapshot (FRUS volumes, Perseus texts),
         each screened on its own: the fetch screened the archive as a whole (names, READMEs, the first
@@ -669,11 +674,31 @@ class DocCollectionAdapter:
         owner's ``override_safety`` names ``<archive key>/<work key>`` or the work's key; a review (one
         or two hits: an 1864 letter that mentions gunsmiths) is indexed and logged, the archive having
         passed the gate as a whole. Measured 2026-10-26: 1 deny and 1 review in 3,000 documents of the
-        held snapshot sources."""
+        held snapshot sources.
+
+        A work's key is its file's name in the archive, and a name can end in a space (Aozora Bunko's
+        ``chino_sakazuki .txt``): such an id was invalid and ended the whole nightly build
+        (2026-11-06). Its id is the key without the surrounding whitespace (:func:`snapshot_native`);
+        an id that was valid is never changed. Those works come after the rest of the snapshot, so a
+        work whose own name is that id keeps it and the renamed one is left out (``on_skip``), as is a
+        work whose id cannot be made valid."""
         published = urlsplit(meta.origin_url).path.rsplit("/", 1)[-1] if meta.origin_url else None
         rules = cfg.rules
+        seen: set[str] = set()
+        renamed: list[tuple[str, DocRecord]] = []
+        renamed_chars = 0
+
+        def skip(native: str, why: str) -> None:
+            log.warning("%s: %r left out of the index (%s)", spec.id, native, why)
+            if on_skip is not None:
+                on_skip(native, why)
+
         for d in tei.read_snapshot(path, cfg.reader, unquote(published) if published else None):
-            native = f"{meta.doc_key}/{d.key}"
+            raw = f"{meta.doc_key}/{d.key}"
+            native = snapshot_native(spec.id, meta.doc_key, d.key)
+            if native is None:
+                skip(raw, "invalid id")
+                continue
             verdict = classify_content(
                 f"{d.title}\n\n{d.text[:SNAPSHOT_SCREEN_CHARS]}",
                 rules,
@@ -686,7 +711,7 @@ class DocCollectionAdapter:
                 continue
             if verdict.verdict is Verdict.REVIEW:
                 log.info("%s: %s indexed under review (%s)", spec.id, native, verdict.rule)
-            yield DocRecord(
+            record = DocRecord(
                 doc_id=make_doc_id(spec.id, native),
                 source_id=spec.id,
                 native_id=native,
@@ -699,6 +724,21 @@ class DocCollectionAdapter:
                 content_hash=content_hash(d.text),
                 meta=meta.record_meta(),
             )
+            if native == raw:
+                seen.add(native)
+                yield record
+            elif renamed_chars + len(d.text) > SNAPSHOT_RENAMED_CHARS:  # held back: bounded memory
+                skip(raw, "too many renamed ids in one snapshot")
+            else:
+                renamed.append((raw, record))
+                renamed_chars += len(d.text)
+        for raw, record in renamed:
+            if record.native_id in seen:
+                skip(raw, f"its id {record.native_id!r} is another document's")
+                continue
+            seen.add(record.native_id)
+            log.info("%s: %r indexed as %r", spec.id, raw, record.native_id)
+            yield record
 
     def _archive_documents(
         self,
@@ -783,6 +823,31 @@ class DocCollectionAdapter:
 
 SNAPSHOT_SCREEN_CHARS = 20_000
 """Text of each snapshot document the content screen reads with its title (front matter, as for a PDF)."""
+# The text of a snapshot's renamed works held back until its end (:meth:`_snapshot_documents`): a
+# handful in Aozora Bunko; past this, the rest are left out rather than held.
+SNAPSHOT_RENAMED_CHARS = 64_000_000
+
+
+def snapshot_native(source_id: str, doc_key: str, key: str) -> str | None:
+    """The native id of the work ``key`` of the snapshot ``doc_key``: ``<doc_key>/<key>`` as before
+    when that is a valid id, else without its surrounding whitespace (a file name ending in a space);
+    None when that is still not a valid id (an empty or blank key)."""
+    native = f"{doc_key}/{key}"
+    try:
+        make_doc_id(source_id, native)
+        return native
+    except InvalidDocIdError:
+        pass
+    if not key.strip():
+        return None
+    native = native.strip()
+    try:
+        make_doc_id(source_id, native)
+    except InvalidDocIdError:
+        return None
+    return native
+
+
 DISCOVERY_CANDIDATES = "documents.jsonl"
 DISCOVERY_LISTING = "listing.json"
 
