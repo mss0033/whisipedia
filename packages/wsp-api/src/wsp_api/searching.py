@@ -38,6 +38,10 @@ HIT_FIELD_WORKERS = 6  # header-field reads of one search page run side by side
 SPARSE = 5  # fewer results than this: "did you mean" may correct any unknown or rare word
 
 
+def _title_key(text: str) -> str:
+    return " ".join(text.replace("_", " ").casefold().split())
+
+
 class SingleFlight[K: Hashable, V]:
     """Concurrent calls with the same key run ``fn`` once and share its result (or exception)."""
 
@@ -118,6 +122,7 @@ class Searcher:
         self.lib = lib
         self._flight: SingleFlight[tuple[str, tuple[str, ...] | None], Retrieval] = SingleFlight()
         self._listing: dict[str, re.Pattern[str] | None] = {}  # source id -> listing-path regex
+        self._copies: dict[str, tuple[tuple[str, str], ...]] = {}  # source id -> (twin source, prefix)
 
     def is_listing(self, h: SearchHit) -> bool:
         """A ZIM listing page (a tag's question list, ``users_page=3``) an older refine indexed: an index of
@@ -139,6 +144,51 @@ class Searcher:
         raw: Mapping[str, object] = cast(Mapping[str, object], access) if isinstance(access, Mapping) else {}
         return re.compile(skip_regex(skip_paths(raw)))
 
+    def _twin_rules(self, source_id: str) -> tuple[tuple[str, str], ...]:
+        """``(source, prefix)`` of the sources holding the same pages as ``source_id`` under the same
+        native id: a copy by native id (``access.copies``) that is also its rendition, so both open as
+        one page (``wiktionary-en`` and ``kiwix-wiktionary-en-all``). A copy that is another text, as
+        Simple English Wikipedia's articles are of the English ones, is not a twin."""
+        spec = self.lib.s.source(source_id)
+        if spec is None:
+            return ()
+        access = _access(spec)
+        rends = access.get("rendition")
+        renders = {
+            str(cast(Mapping[str, object], r).get("source", ""))
+            for r in (cast(list[object], rends) if isinstance(rends, list) else [])
+            if isinstance(r, Mapping)
+        }
+        rules = access.get("copies")
+        out: list[tuple[str, str]] = []
+        for raw in cast(list[object], rules) if isinstance(rules, list) else []:
+            if not isinstance(raw, Mapping):
+                continue
+            rule = cast(Mapping[str, object], raw)
+            target = str(rule.get("source", ""))
+            if rule.get("match", "native") == "native" and target in renders and self.lib.s.source(target):
+                out.append((target, str(rule.get("prefix") or "")))
+        return tuple(out)
+
+    def one_copy(self, hits: Sequence[SearchHit]) -> list[SearchHit]:
+        """``hits`` with each page held twice (:meth:`_twin_rules`) listed once, where it ranks first.
+
+        Over 27 queries 11 pairs of the same Wiktionary or Wikisource page, from the dumps and from the
+        Kiwix archive, shared a first page of ten (2026-11-05 deep dive). The page opened from either
+        is the same (the dump's renders with the archive's HTML), and lists the other as a copy."""
+        seen: set[str] = set()
+        out: list[SearchHit] = []
+        for h in hits:
+            source_id, _, native = h.doc_id.removeprefix("wsp:").partition("/")
+            if source_id not in self._copies:
+                self._copies[source_id] = self._twin_rules(source_id)
+            ids = {h.doc_id, *(f"wsp:{t}/{prefix}{native}" for t, prefix in self._copies[source_id])}
+            if ids & seen:
+                continue
+            seen |= ids
+            out.append(h)
+        return out
+
     def kind_of(self, h: SearchHit) -> DocKind:
         spec = self.lib.s.source(h.source_id or h.doc_id[4:].partition("/")[0])
         return DocKind.OTHER if spec is None else sites.kind_of(spec)
@@ -154,21 +204,51 @@ class Searcher:
         key = (" ".join(q.split()), None if wanted is None else tuple(sorted(wanted)))
         return self._flight.do(key, lambda: retrieve(self.lib.s.index, q, wanted))
 
-    def did_you_mean(self, q: str, wanted: Sequence[str] | None, found: int) -> str | None:
-        """A correction when results are sparse, or when a word is unknown to the vocabulary (no hit
-        can contain it; only those words may change). Offered only if it finds at least as much."""
+    def correction(self, q: str, found: int, titles: Sequence[str] = ()) -> str | None:
+        """The speller's correction of ``q`` (None: none), before any count. With ``found`` results or
+        more than :data:`SPARSE`, only words the vocabulary does not know may change, or words it knows
+        far less often than a word an edit or two away (``rare``: "einstien" is an iFixit user's name,
+        and "Albert Einstien" was offered nothing; 2026-11-05 deep dive), unless a result is titled as
+        the query (a rare name that is a page: "Larry Tesler" is not "Larry Tester")."""
         speller = self.lib.s.speller
         if speller is None:
             return None
         only: list[str] | None = None
         if found >= SPARSE:
             only = list(speller.unknown(q))
+            rare = getattr(speller, "rare", None)  # optional: a corrector may know no frequencies
+            key = _title_key(q)
+            if callable(rare) and not any(_title_key(t) == key for t in titles):
+                only += [w for w in cast(Sequence[str], rare(q)) if w not in only]
             if not only:
                 return None
         fixed = speller.correct(q, only=only)
         if fixed is None or fixed.casefold() == q.casefold():
             return None
+        return fixed
+
+    def did_you_mean(
+        self, q: str, wanted: Sequence[str] | None, found: int, titles: Sequence[str] = ()
+    ) -> str | None:
+        """A correction (:meth:`correction`) offered only if it finds at least as much."""
+        fixed = self.correction(q, found, titles)
+        if fixed is None:
+            return None
         return fixed if _count(self.lib.s.index, fixed, wanted, max(found, 1)) >= max(found, 1) else None
+
+    def correction_pin(
+        self, q: str, hits: Sequence[SearchHit], wanted: Sequence[str] | None
+    ) -> SearchHit | None:
+        """The page titled like the corrected query when ``hits`` hold nothing in the query's language
+        at their head (the Oracle's ``correction_pin``): "Isaac Newtonn" listed ten French pages, the
+        French stemmer's matches, and the English article not at all (2026-11-05 deep dive). Decided on
+        the whole list, so every page of the results places it alike."""
+        pin = getattr(self.lib.s.index, "correction_pin", None)
+        if not callable(pin) or self.lib.s.speller is None:
+            return None
+        titles = [h.title for h in hits]
+        found = cast(SearchHit | None, pin(q, hits, lambda: self.correction(q, len(hits), titles), wanted))
+        return None if found is None or self.is_listing(found) else found
 
     def searched_instead(
         self, wanted: Sequence[str] | None
@@ -240,7 +320,7 @@ class Searcher:
 
         found = self.retrieval(q, wanted)
         t = lap("retrieval", t0)
-        content = [h for h in found.hits if not self.is_listing(h)]
+        content = self.one_copy([h for h in found.hits if not self.is_listing(h)])
         kinds = [self.kind_of(h) for h in content]
         shown = [h for h, k in zip(content, kinds, strict=True) if kind is None or k is kind]
         if kind is not None:
@@ -251,9 +331,14 @@ class Searcher:
             if scope:
                 found = self.retrieval(q, scope)
                 t = lap("kind_retrieval", t)
-                shown = [h for h in found.hits if not self.is_listing(h) and self.kind_of(h) is kind]
+                shown = self.one_copy(
+                    [h for h in found.hits if not self.is_listing(h) and self.kind_of(h) is kind]
+                )
             else:
                 shown = []
+        fixed = self.correction_pin(q, content, wanted)
+        if fixed is not None and (kind is None or self.kind_of(fixed) is kind):
+            shown = [fixed, *(h for h in shown if h.doc_id != fixed.doc_id)]
         # The pin is placed the same way on every page, so pages slice one list; only page 1 also
         # says "go straight there" (a hit was skipped or shown twice past page 1: review #112).
         target = search.navigate_to(s, q, exists=lib.exists)
@@ -284,7 +369,11 @@ class Searcher:
             )
         t = lap("hit_fields", t)
         counts = Counter(kinds)
-        did_you_mean = self.did_you_mean(q, self.scope_of(kind, wanted), len(shown)) if offset == 0 else None
+        did_you_mean = (
+            self.did_you_mean(q, self.scope_of(kind, wanted), len(shown), [h.title for h in shown])
+            if offset == 0
+            else None
+        )
         t = lap("did_you_mean", t)
         low = found.low_confidence or not shown
         if s.queries is not None and offset == 0:

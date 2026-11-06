@@ -8,6 +8,24 @@ def test_plain_snippet_strips_markup_and_highlights_plain_text() -> None:
     assert [plain[a:b] for a, b in highlights(plain, ["insulin"])] == ["insulin", "insulins"]
 
 
+def test_template_holes_and_site_menus_leave_snippets() -> None:
+    """2026-11-05 deep dive: "Van de Kamp v. Goldstein, , was", "FC Ulaanbaatar () is", and Stack
+    Exchange snippets opening "Questions Tags Users About Home"."""
+    assert (
+        plain_snippet("<b>Van de Kamp v. Goldstein</b>, , was a case")
+        == "Van de Kamp v. Goldstein, was a case"
+    )
+    assert plain_snippet("FC <b>Ulaanbaatar</b> () is a club") == "FC Ulaanbaatar is a club"
+    assert (
+        plain_snippet("Presidential Library ( )\nOnline documents")
+        == "Presidential Library\nOnline documents"
+    )
+    assert plain_snippet("call print() and f(x)") == "call print() and f(x)"  # code keeps its brackets
+    menu = "Questions\nTags\nUsers\nAbout\nHome\nQuestions\nTags\n<b>CVE-2021-44228</b> in log4j"
+    assert plain_snippet(menu) == "CVE-2021-44228 in log4j"
+    assert plain_snippet("About\nthe <b>moon</b>") == "About\nthe moon"  # one such line is not a menu
+
+
 def test_readable_titles_for_the_start_page() -> None:
     assert _readable("Insulin")
     assert _readable("Ångström")

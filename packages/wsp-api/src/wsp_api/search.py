@@ -99,13 +99,27 @@ def intent(query: str, *, navigational: bool) -> QueryIntent:
 
 
 _TAG = re.compile(r"<[^>]+>")
+# What a removed template leaves in Wikipedia text: "Van de Kamp v. Goldstein, , was", "FC Ulaanbaatar
+# () is", "Presidential Library ()" (2026-11-05 deep dive). Only after a word and a space, so a call
+# in code ("print()") keeps its brackets.
+_TEMPLATE_HOLE = re.compile(r"(?<=\w) \(\s*[,;]?\s*\)(?=[\s,.;:]|$)")
+_DOUBLE_COMMA = re.compile(r"(?<=\w), ,(?= )")
+# Stack Exchange archives open each page with their menus, one word a line: five of ten snippets for
+# "CVE-2021-44228" read "Questions Tags Users About Home Questions Tags ..." (2026-11-05 deep dive).
+_SITE_MENU = re.compile(
+    r"\A(?:[ \t]*(?:Questions|Tags|Users|About|Home|Badges|Unanswered|Ask Question|Companies|Jobs)"
+    r"[ \t]*\n){2,}"
+)
 
 
 def plain_snippet(snippet: str) -> str:
-    """Index snippets carry HTML highlight markup; the API returns plain text plus ``highlights``."""
-    return (
+    """Index snippets carry HTML highlight markup; the API returns plain text plus ``highlights``.
+    Template holes are closed and a leading run of site menu lines is dropped."""
+    text = (
         html.unescape(_TAG.sub("", snippet)).replace("\ufffd", " ").replace("\u00ad", "")
     )  # see convert.readable_text
+    text = _DOUBLE_COMMA.sub(",", _TEMPLATE_HOLE.sub("", text))
+    return _SITE_MENU.sub("", text)
 
 
 def highlights(snippet: str, query_terms: Iterable[str]) -> list[tuple[int, int]]:

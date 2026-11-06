@@ -237,6 +237,15 @@ class TitleTrie:
         for score, key in heapq.nsmallest(_MAX_SCAN, window, key=lambda sk: (-sk[0], sk[1])):
             yield (score, *_split_key(key))
 
+    def exact(self, norm: str, limit: int) -> list[Candidate]:
+        """Up to ``limit`` entries whose title or alias *is* ``norm`` (normalized), best first: the keys
+        ``norm`` + separator, a trie walk as short as the matches."""
+        if not norm:
+            return []
+        keys = itertools.islice(self._trie.iterkeys(norm + SEP), _MAX_SCAN)
+        found = [(self._score(k), *_split_key(k)) for k in keys]
+        return heapq.nsmallest(limit, found, key=lambda c: (-c[0], c[1], c[2]))
+
 
 def _current(directory: Path) -> Path:
     """The directory of the current build: the one ``CURRENT`` names, else the flat older layout."""
@@ -358,6 +367,29 @@ class Suggester:
             if len(out) >= limit:
                 break
         return out
+
+    def named(self, text: str, *, limit: int = 16) -> list[tuple[str, str]]:
+        """``(doc_id, title)`` of the documents titled or aliased exactly ``text`` (case, accents and
+        spacing aside), best first: a redirect's target is found by the redirect's name ("heart attack"
+        -> Myocardial infarction). Only what the trie holds: the titles and the redirects it kept."""
+        norm = normalize_key(text)
+        if not norm or limit <= 0:
+            return []
+        with self._lock:
+            base = self._base
+            hidden = frozenset(self._hidden) if self._hidden else frozenset[str]()
+            extra: list[Candidate] = [
+                (e.score, e.title, e.doc_id) for e, keys in self._added.values() if norm in keys
+            ]
+        extra.sort(key=lambda c: (-c[0], c[1], c[2]))
+        held = base.exact(norm, _MAX_SCAN) if base is not None else []
+        found = [*extra, *(c for c in held if c[2] not in hidden)]
+        out: dict[str, str] = {}
+        for _, title, doc_id in sorted(found, key=lambda c: (-c[0], c[1], c[2])):
+            out.setdefault(doc_id, title)
+            if len(out) >= limit:
+                break
+        return list(out.items())
 
 
 def suggest_entries_bruteforce(entries: Iterable[SuggestEntry], prefix: str, limit: int) -> list[str]:

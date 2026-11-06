@@ -143,3 +143,8 @@
 {"id": "q218", "query": "should I use git merge or git rebase", "lang": "en", "domain": "library", "relevant": {"wsp:stackexchange/stackoverflow.com_en_all/questions/28595991/git-merge-or-git-rebase": 2}}
 {"id": "q219", "query": "pancake recipe", "lang": "en", "domain": "library", "relevant": {"wsp:kiwix-based-cooking-en-all/based.cooking/pancake/": 2}}
 {"id": "q220", "query": "home canning vegetables in a pressure canner", "lang": "en", "domain": "library", "relevant": {"wsp:usda-home-canning/usda-canning:GUIDE04-HomeCan-rev0715": 2}}
+{"id": "q221", "query": "heart attack", "lang": "en", "domain": "library", "relevant": {"wsp:wikipedia-top10/en/Myocardial_infarction": 2}}
+{"id": "q222", "query": "acetaminophen", "lang": "en", "domain": "library", "relevant": {"wsp:wikipedia-top10/en/Paracetamol": 2}}
+{"id": "q223", "query": "Einstein", "lang": "en", "domain": "library", "relevant": {"wsp:wikipedia-top10/en/Albert_Einstein": 2}}
+{"id": "q224", "query": "Albert Einstien", "lang": "en", "domain": "library", "relevant": {"wsp:wikipedia-top10/en/Albert_Einstein": 2}}
+{"id": "q225", "query": "Isaac Newtonn", "lang": "en", "domain": "library", "relevant": {"wsp:wikipedia-top10/en/Isaac_Newton": 2}}

@@ -47,9 +47,11 @@ import contextlib
 import html
 import json
 import os
+import re
 import sqlite3
 import threading
 import time
+import unicodedata
 from collections import Counter, OrderedDict
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -728,6 +730,12 @@ class TantivyIndex:
         self._reload_trie_if_rebuilt()
         return self._suggester.suggest(prefix, limit=limit)
 
+    def named(self, text: str, *, limit: int = 16) -> Sequence[tuple[str, str]]:
+        """``(doc_id, title)`` of the documents whose title or alias (a redirect's name) is ``text``, from
+        the suggest trie (:meth:`Suggester.named`): the targets of a name the search words miss."""
+        self._reload_trie_if_rebuilt()
+        return self._suggester.named(text, limit=limit)
+
     def _trie_file_stamp(self) -> tuple[int, int, int]:
         """Identity of the trie file on disk: a rebuild changes at least one of these."""
         return TitleTrie.stamp(self._suggest_dir)
@@ -1163,6 +1171,32 @@ class TantivyIndex:
         found = searcher.search(by_id, len(doc_ids), count=False)
         return self._snippet_map(searcher, parsed, [searcher.doc(a) for _, a in found.hits])
 
+    def leads(self, doc_ids: Sequence[str]) -> dict[str, str]:
+        """The lead of each of ``doc_ids`` (:func:`lead_passage`), HTML-escaped like a snippet: the
+        snippet of a page the query names (the Oracle's title pins). Ids without a prose lead, or not
+        in the index, are left out (they get the usual cut)."""
+        wanted = list(dict.fromkeys(doc_ids))
+        if not wanted:
+            return {}
+        texts: dict[str, str] = {}
+        if self.config.store_text:
+            searcher = self._index.searcher()
+            by_id = tantivy.Query.term_set_query(self._schema, "doc_id", wanted)
+            for _, a in searcher.search(by_id, len(wanted), count=False).hits:
+                doc = searcher.doc(a)
+                route = self.route(str(doc.get_first("lang") or ""))
+                texts[passage_parent(str(doc.get_first("doc_id")))] = str(
+                    doc.get_first(f"text_{route}") or ""
+                )
+        elif self.texts is not None:
+            texts = dict(self.texts(wanted))
+        out: dict[str, str] = {}
+        for doc_id, text in texts.items():
+            lead = lead_passage(text)
+            if lead:
+                out[doc_id] = _lead(lead, self.config.snippet_chars)
+        return out
+
     def _snippet_map(
         self, searcher: tantivy.Searcher, parsed: tantivy.Query, docs: Sequence[tantivy.Document]
     ) -> dict[str, str]:
@@ -1204,6 +1238,45 @@ def _stamp(path: Path) -> tuple[int, int, int]:
     except OSError:
         return (0, 0, 0)
     return (st.st_ino, st.st_mtime_ns, st.st_size)
+
+
+LEAD_SCAN_CHARS = 8_000  # of a text, read for its first prose paragraph
+LEAD_MIN_CHARS = 50  # a shorter line is a heading, a label or an infobox value, not the lead (a wide
+# character counts twice: "東京都は日本の首都である。" is a sentence in half the characters)
+# A line ending a sentence: after a word of three letters or more, a digit or a bracket, not after an
+# abbreviation ("Full case name Oliver Brown, et al. v. Board of Education of Topeka, et al." is an
+# infobox value; "Argued December 9, 1952" ends no sentence at all).
+# Closing quotes and brackets may follow; a wide full stop, exclamation or question mark ends a
+# sentence by itself.
+_SENTENCE_LINE = re.compile(
+    r"(?:[^\W\d_]{3}|\d|\))[.!?][\"'\u201d\u2019)\]]*$|[\u3002\uff01\uff1f][\u300d\u300f\uff09]*$"
+)
+_HATNOTE = re.compile(
+    r"^(?:for (?:other|the) |this (?:article|page) is about|not to be confused with"
+    r"|.{0,80} redirects here\b|main articles?:|see also:|coordinates:)",
+    re.I,
+)
+
+
+def lead_passage(text: str) -> str:
+    """The text from its first prose paragraph on: the first line of :data:`LEAD_MIN_CHARS` or more
+    that ends a sentence and is not a hatnote ("For other uses, see ..."), within the first
+    :data:`LEAD_SCAN_CHARS`. Empty when there is none (a list, a table, a stub).
+
+    The title line, an infobox's label and value lines and the hatnotes are passed over: a lead cut
+    as the first 200 characters would show those (the Simple English copies did, 2026-11-05 deep
+    dive)."""
+    lines = text[:LEAD_SCAN_CHARS].split("\n")
+    for i, raw in enumerate(lines):
+        line = raw.strip()
+        if _width(line) < LEAD_MIN_CHARS or _HATNOTE.match(line) or not _SENTENCE_LINE.search(line):
+            continue
+        return "\n".join(s for s in (x.strip() for x in lines[i:]) if s)
+    return ""
+
+
+def _width(line: str) -> int:
+    return sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in line)
 
 
 def _lead(text: str, max_chars: int) -> str:

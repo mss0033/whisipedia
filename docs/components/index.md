@@ -66,8 +66,9 @@ compression measured. Groups larger than 1,024 rows push lookups past the API bu
 - `upsert` is delete-by-term on `doc_id` followed by add. Writes become visible on `commit()`, or
   automatically every `commit_every` operations. The writer heap and thread count are configurable.
 - Snippets come from Tantivy's `SnippetGenerator` (`<b>` highlighting, HTML-escaped). When only the
-  title matched, the snippet falls back to the first 200 characters. Storing body text for snippets
-  costs index space; `store_text=False` turns it off.
+  title matched, the snippet falls back to the first 200 characters. `leads(doc_ids)` cuts a page's
+  lead instead (its first prose line), the Oracle's snippet for a page the query names. Storing body
+  text for snippets costs index space; `store_text=False` turns it off.
 
 ## Suggest (< 10 ms)
 
@@ -80,6 +81,10 @@ rank on every keystroke, so at build time each prefix with more than 512 complet
 top 32 keys in a second trie. Every other prefix ranks at most 512 candidates. Between rebuilds,
 incremental changes go to an in-memory overlay. The overlay is folded into the trie on commit once
 more than 2,000 titles have changed, and on close.
+
+`named(text)` walks the keys `normalize(text) + \x1f`: the documents titled or aliased exactly so
+("heart attack" -> Myocardial infarction), which the Oracle pins for a page-name query (2026-11-05).
+It finds only the redirects the trie keeps (up to 8 per kept title, 40% of the key budget).
 
 Alternatives measured by `scripts/bench_index.py` on the same 200k titles:
 

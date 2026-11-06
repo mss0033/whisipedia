@@ -2,7 +2,7 @@
 
 import threading
 import time
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Any, ClassVar, cast
 
@@ -15,7 +15,7 @@ from wsp_api.testing import local_client
 from wsp_api.testing.browse import browse_services
 from wsp_api.testing.fakes import InMemoryDocumentStore, InMemoryLexicalIndex, sample_services
 from wsp_core.ids import DocId
-from wsp_core.model import DocRecord, SearchHit
+from wsp_core.model import DocRecord, SearchHit, SourceSpec, SourceStatus, Tier
 
 
 class CountingIndex:
@@ -237,3 +237,140 @@ def test_a_document_the_query_cites_comes_first() -> None:
     assert res.hits[0].doc_id == "wsp:rfc/rfc:RFC-4242"
     assert res.hits[0].title == "Information Refresh Time Option"
     assert "wsp:rfc/rfc:RFC-4242" not in {h.doc_id for h in plain.hits}
+
+
+# --- one copy of a page, rare-word corrections, the corrected title (2026-11-05 deep dive) ----------
+
+
+def _spec(sid: str, access: Mapping[str, object] | None = None) -> SourceSpec:
+    return SourceSpec(
+        id=sid,
+        name=sid,
+        tier=Tier.T1,
+        status=SourceStatus.ACTIVE,
+        license="CC-BY-SA-4.0",
+        legal_basis="open-license",
+        domain=("dictionary",),
+        raw={"access": dict(access or {})},
+    )
+
+
+TWIN_SOURCES = (
+    _spec(
+        "wiktionary-en",
+        {
+            "rendition": [{"source": "kiwix-wiktionary-en-all"}],
+            "copies": [{"source": "kiwix-wiktionary-en-all", "match": "native"}],
+        },
+    ),
+    _spec("kiwix-wiktionary-en-all"),
+    _spec("simple", {"copies": [{"source": "wiki", "match": "native", "prefix": "en/"}]}),
+    _spec("wiki"),
+)
+
+
+class FixedOracle:
+    """Answers every query with the same ranked hits (an Oracle's ``result``)."""
+
+    def __init__(self, hits: Sequence[SearchHit], pin: SearchHit | None = None) -> None:
+        self.hits = tuple(hits)
+        self.pin = pin
+        self.asked: list[str | None] = []
+
+    def result(self, query: str, *, sources: Sequence[str] | None = None, depth: int = 0) -> _Result:
+        return _Result(self.hits, exhaustive=True)
+
+    def search(
+        self, query: str, *, limit: int = 10, offset: int = 0, sources: Sequence[str] | None = None
+    ) -> Sequence[SearchHit]:
+        return self.hits[offset : offset + limit]
+
+    def suggest(self, prefix: str, *, limit: int = 10) -> Sequence[str]:
+        return []
+
+    def correction_pin(
+        self,
+        query: str,
+        hits: Sequence[SearchHit],
+        corrected: Callable[[], str | None],
+        sources: Sequence[str] | None = None,
+    ) -> SearchHit | None:
+        self.asked.append(corrected())
+        return self.pin
+
+
+def _h(source: str, native: str, title: str = "x", lang: str = "en") -> SearchHit:
+    return SearchHit(DocId(f"wsp:{source}/{native}"), 1.0, title, "", source, lang)
+
+
+def test_a_page_held_by_two_sources_that_render_alike_is_listed_once() -> None:
+    hits = [
+        _h("kiwix-wiktionary-en-all", "photosynthesis"),
+        _h("wiki", "en/Photosynthesis"),
+        _h("wiktionary-en", "photosynthesis"),  # the same entry: it renders with the archive's page
+        _h("simple", "Photosynthesis"),  # another text of the article: kept
+        _h("wiktionary-en", "chlorophyll"),
+        _h("kiwix-wiktionary-en-all", "chlorophyll"),
+    ]
+    services = replace(sample_services(sources=TWIN_SOURCES), index=cast(Any, FixedOracle(hits)))
+    with local_client(create_app(services)) as c:
+        res = _search(c, q="photosynthesis")
+    assert [h.doc_id for h in res.hits] == [
+        "wsp:kiwix-wiktionary-en-all/photosynthesis",
+        "wsp:wiki/en/Photosynthesis",
+        "wsp:simple/Photosynthesis",
+        "wsp:wiktionary-en/chlorophyll",
+    ]
+    assert res.total == 4
+
+
+class _Rare(_Speller):
+    """Knows "einstien" (an iFixit user's name) as a thousand times rarer than "einstein"."""
+
+    def correct(self, query: str, *, only: Iterable[str] | None = None) -> str | None:
+        if only is not None and "einstien" not in only:
+            return None
+        fixed = query.replace("Einstien", "Einstein")
+        return None if fixed == query else fixed
+
+    def unknown(self, query: str) -> list[str]:
+        return []
+
+    def rare(self, query: str) -> list[str]:
+        return ["einstien"] if "Einstien" in query else []
+
+
+def test_a_typo_the_library_shares_is_corrected_unless_a_page_is_titled_so() -> None:
+    many = [_h("wiki", f"en/Page_{i}", f"Albert Einstein {i}") for i in range(8)]
+    services = replace(
+        sample_services(sources=TWIN_SOURCES), index=cast(Any, FixedOracle(many)), speller=_Rare()
+    )
+    with local_client(create_app(services)) as c:
+        assert _search(c, q="Albert Einstien").did_you_mean == "Albert Einstein"
+    titled = [_h("wiki", "en/Albert_Einstien", "Albert Einstien"), *many]
+    services = replace(services, index=cast(Any, FixedOracle(titled)))
+    with local_client(create_app(services)) as c:
+        assert _search(c, q="Albert Einstien").did_you_mean is None  # a page has that name
+
+
+def test_the_corrected_title_leads_every_page_alike() -> None:
+    french = [_h("wiki", f"fr/Page_{i}", f"Newton {i}", "fr") for i in range(6)]
+    english = _h("wiki", "en/Isaac_Newton", "Isaac Newton")
+    oracle = FixedOracle(french, pin=english)
+
+    class _Newton(_Speller):
+        def correct(self, query: str, *, only: Iterable[str] | None = None) -> str | None:
+            return "Isaac Newton" if "Newtonn" in query else None
+
+        def unknown(self, query: str) -> list[str]:
+            return ["newtonn"]
+
+    services = replace(sample_services(sources=TWIN_SOURCES), index=cast(Any, oracle), speller=_Newton())
+    with local_client(create_app(services)) as c:
+        first = _search(c, q="Isaac Newtonn", limit=3)
+        second = _search(c, q="Isaac Newtonn", limit=3, offset=3)
+    assert first.hits[0].doc_id == "wsp:wiki/en/Isaac_Newton"
+    assert first.total == second.total == 7
+    paged = [h.doc_id for h in (*first.hits, *second.hits)]
+    assert len(set(paged)) == 6  # one list: the pin is not shown twice nor a hit skipped
+    assert oracle.asked[0] == "Isaac Newton"

@@ -11,6 +11,7 @@ import logging
 import re
 import threading
 import time
+import unicodedata
 from collections import OrderedDict
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -20,10 +21,11 @@ from typing import cast
 import numpy as np
 
 from wsp_core.ids import DocId, InvalidDocIdError, content_hash, parse_doc_id
+from wsp_core.listing import is_default_listing
 from wsp_core.model import DocRecord, SearchHit
 from wsp_core.ports import Embedder, LexicalIndex, Reranker
 from wsp_index import FusionConfig, HybridSearcher
-from wsp_index.text import STOPWORDS_EN, primary_lang, query_language
+from wsp_index.text import STOPWORDS_EN, normalize_key, primary_lang, query_language
 from wsp_oracle.embedder import encode_queries
 from wsp_oracle.reranker import plain
 from wsp_oracle.router import Intent, Route, Router
@@ -46,6 +48,9 @@ TITLE_PINS = 8
 NAMED_RUNS = 8  # runs of a question's words looked up as titles (each one title-list lookup)
 DICTIONARY_PROJECTS = frozenset({"wiktionary"})
 TITLED_DEPTH = 30  # title matches read to choose among same-titled pages (ten Wikipedias share titles)
+NAMED_TARGETS = 16  # documents a name (a redirect) is looked up as, from the suggest trie
+NAMED_LOOKUPS = 4  # of them resolved (a stored-document read each) to find one in the query's language
+FOREIGN_WINDOW = 10  # first hits read to tell a query whose results hold nothing in its language
 
 
 def source_of(doc_id: str) -> str:
@@ -302,8 +307,12 @@ class OracleSearcher:
     def _pinnable(self, query: str, hit: SearchHit) -> bool:
         """A down-weighted source (catalog cards, abstracts) never leads by its title alone, unless the
         query asks for it: "capital of australia" pinned an Open Library record of that title above
-        the article on Canberra (2026-10-14)."""
+        the article on Canberra (2026-10-14). Nor does a listing page (:mod:`wsp_core.listing`), which
+        the API drops anyway: an iFixit profile titled "einstein" took the exact-title pin for
+        "Einstein" with a reranker score of 0.04, and the article went unpinned (2026-11-05 deep dive)."""
         src = hit.source_id or source_of(hit.doc_id)
+        if is_default_listing(hit.doc_id.removeprefix(f"wsp:{src}/")):
+            return False
         return self.source_weights.get(src, 1.0) >= 1.0 or src in weight_exempt(query)
 
     def _pins(self, route: Route, fused: list[SearchHit], sources: Sequence[str] | None) -> list[SearchHit]:
@@ -321,6 +330,66 @@ class OracleSearcher:
             if hit is not None and all(p.doc_id != hit.doc_id for p in pins):
                 pins.append(hit)
         return pins
+
+    def _aliased(
+        self, route: Route, pins: Sequence[SearchHit], sources: Sequence[str] | None
+    ) -> list[SearchHit]:
+        """For a page-name query, the page it names by another name: the target of a redirect (or an
+        alias) called exactly the query, in the query's language, from the heaviest source; at most one.
+
+        Search matched the words, never the names: "heart attack" listed songs, a restaurant and films
+        and no Myocardial infarction, "acetaminophen" no Paracetamol and "Einstein" no Albert Einstein,
+        while suggest offered each from its redirects (2026-11-05 deep dive). The suggest trie holds the
+        redirects of the titles it keeps (:mod:`wsp_index.titles`), so nothing is re-indexed: a redirect
+        it does not hold is not found. A title that is the query itself is the exact pin's, not this,
+        and an exact pin from a heavy source (the reference article "Paris") needs no other name: a
+        lesser wiki's redirect "Paris" to its "Paris (film)" would follow it.
+
+        Every Wikipedia language may hold the redirect: a target whose native id starts with the
+        query's language ("en/") is looked up first, before :data:`NAMED_LOOKUPS` reads run out."""
+        if (
+            route.intent not in (Intent.NAVIGATE, Intent.LOOKUP, Intent.DEFINE, Intent.LOCATE)
+            or not route.title
+        ):
+            return []
+        if any(self.source_weights.get(p.source_id or source_of(p.doc_id), 1.0) > 1.0 for p in pins):
+            return []
+        named = getattr(self.lexical, "named", None)
+        resolve = getattr(self.lexical, "lookup", None) or self.resolve
+        if not callable(named) or not callable(resolve):
+            return []
+        key = normalize_key(route.title.replace("_", " "))
+        lang = query_language(route.title.split()) or "en"
+        allowed = None if sources is None else frozenset(sources)
+        found = cast(Sequence[tuple[str, str]], named(route.title, limit=NAMED_TARGETS))
+        pinned = {p.doc_id for p in pins}
+        targets = [
+            (i, doc_id)
+            for i, (doc_id, title) in enumerate(found)
+            if doc_id not in pinned
+            and normalize_key(title.replace("_", " ")) != key
+            and (allowed is None or source_of(doc_id) in allowed)
+        ]
+
+        def order(t: tuple[int, str]) -> tuple[float, bool, int]:
+            i, doc_id = t
+            src = source_of(doc_id)
+            native = doc_id.removeprefix(f"wsp:{src}/")
+            # the heaviest source (the reference article), its edition in the query's language, the
+            # trie's order (the prior)
+            return (-self.source_weights.get(src, 1.0), not native.startswith(f"{lang}/"), i)
+
+        targets.sort(key=order)
+        for _, doc_id in targets[:NAMED_LOOKUPS]:
+            hit = cast(SearchHit | None, resolve(doc_id))
+            if hit is None or not hit.lang or primary_lang(hit.lang) != lang:
+                continue  # gone from the index since the trie was built, or another language's page
+            if not self._pinnable(route.query, hit):
+                continue
+            if route.intent is not Intent.DEFINE and _is_dictionary(hit):
+                continue
+            return [replace(hit, snippet="")]
+        return []
 
     def _title_pins(self, route: Route, candidates: Iterable[SearchHit], pinned: set[str]) -> list[SearchHit]:
         """For a page-name query, each source's best near-exact title: one holding every word of the
@@ -578,9 +647,11 @@ class OracleSearcher:
         )
         t = lap("lexical+fusion", t)
         pins = self._pins(route, fused, sources)
+        pins += self._aliased(route, pins, sources)
         # Candidates from the lexical window too: a book's long text ranks it below the fusion's cut.
         named = self._title_pins(route, [*fused, *found.lexical], {p.doc_id for p in pins})
         pins += named
+        titled = {p.doc_id for p in pins}  # the pages the query names: their snippets are their leads
         pins += self._embedded_title(route, [*fused, *found.lexical], {p.doc_id for p in pins}, sources)
         pinned = {p.doc_id for p in pins}
         rest = [h for h in fused if h.doc_id not in pinned]
@@ -588,7 +659,7 @@ class OracleSearcher:
 
         head, tail = rest[: self.rerank_top], rest[self.rerank_top :]
         pins, head = (
-            self.with_snippets(route.lexical or query, pins),
+            self.with_snippets(route.lexical or query, self.with_leads(pins, titled)),
             self.with_snippets(route.lexical or query, head),
         )
         t = lap("snippets", t)
@@ -616,6 +687,9 @@ class OracleSearcher:
                 near.sort(key=lambda h: (not h.lang or primary_lang(h.lang) != lang, -h.score))
             pins, head = [*exact, *near[:TITLE_PINS]], [*near[TITLE_PINS:], *head]
         head, tail = _prefer_language(route.query or query, head, tail, reranked=confidence is not None)
+        pins, head = _spread_foreign_dictionaries(
+            route.query or query, pins, head, fixed=len(pins) - min(len(named), TITLE_PINS)
+        )
         hits = tuple([*pins, *head, *tail])
         total = (time.perf_counter() - t0) * 1000
         timings["total"] = round(total, 3)
@@ -628,6 +702,48 @@ class OracleSearcher:
     def _cut(self) -> Callable[[str, Sequence[str]], Mapping[str, str]] | None:
         cut = getattr(self.lexical, "snippets", None)
         return cast(Callable[[str, Sequence[str]], Mapping[str, str]], cut) if callable(cut) else None
+
+    def with_leads(self, hits: Sequence[SearchHit], wanted: Iterable[str]) -> list[SearchHit]:
+        """``hits`` with the lead of each page in ``wanted`` that has no snippet yet, as its snippet (when
+        the lexical index can cut leads; a page without a prose lead keeps none and gets the usual cut).
+
+        A title hit is the page the query names: its first paragraph says what it is, while the densest
+        cut of the query's words is where the title repeats most, the external links and the lists of
+        namesakes: "photosynthesis", "Brown v. Board of Education" and "Marie Curie" showed link lists
+        under the English article while the Simple English copy showed its lead (2026-11-05 deep dive)."""
+        lead = getattr(self.lexical, "leads", None)
+        chosen = set(wanted)
+        missing = [h.doc_id for h in hits if not h.snippet and h.doc_id in chosen]
+        if not callable(lead) or not missing:
+            return list(hits)
+        found = cast(Mapping[str, str], lead(missing))
+        return [
+            replace(h, snippet=found[h.doc_id]) if not h.snippet and found.get(h.doc_id) else h for h in hits
+        ]
+
+    def correction_pin(
+        self,
+        query: str,
+        hits: Sequence[SearchHit],
+        corrected: Callable[[], str | None],
+        sources: Sequence[str] | None = None,
+    ) -> SearchHit | None:
+        """The page titled like the corrected query, in the query's language, when the first
+        :data:`FOREIGN_WINDOW` of ``hits`` hold nothing in that language (``corrected`` is asked only
+        then). "Isaac Newtonn" matched French pages alone (the French stemmer undoes the double n): all
+        ten hits were French while "did you mean" offered "Isaac Newton" (2026-11-05 deep dive)."""
+        lang = query_language(query.split()) or "en"
+        first = hits[:FOREIGN_WINDOW]
+        if not first or any(not h.lang or primary_lang(h.lang) == lang for h in first):
+            return None
+        fixed = corrected()
+        if not fixed or fixed.casefold() == query.casefold():
+            return None
+        route = self.router.route(fixed)
+        hit = self._best_titled(route, route.title or fixed, [], sources)
+        if hit is None or not hit.lang or primary_lang(hit.lang) != lang:
+            return None
+        return hit
 
     def with_snippets(self, query: str, hits: Sequence[SearchHit]) -> list[SearchHit]:
         """``hits`` with a snippet cut for each one that has none (when the lexical index can cut them)."""
@@ -756,6 +872,16 @@ class OracleIndex:
         route, _ = self.searcher.scoped(query, None)
         return self.searcher.with_snippets(route.lexical or query, hits)
 
+    def correction_pin(
+        self,
+        query: str,
+        hits: Sequence[SearchHit],
+        corrected: Callable[[], str | None],
+        sources: Sequence[str] | None = None,
+    ) -> SearchHit | None:
+        """:meth:`OracleSearcher.correction_pin` for ``hits`` of :meth:`result` (the API's list)."""
+        return self.searcher.correction_pin(query, hits, corrected, sources)
+
     def suggest(self, prefix: str, *, limit: int = 10) -> Sequence[str]:
         return self.lexical.suggest(prefix, limit=limit)
 
@@ -855,9 +981,53 @@ def _named(title: Sequence[str]) -> bool:
 
 
 def _is_dictionary(h: SearchHit) -> bool:
-    """A dictionary's entry (Wiktionary, either edition): the page for "define", not for a question."""
+    """A dictionary's entry (Wiktionary, either edition, or a bundle's: ``kiwix-multilingual-pl`` holds
+    ``wiktionary_pl_all``): the page for "define", not for a question."""
     src = h.source_id or source_of(h.doc_id)
-    return _project(src) in DICTIONARY_PROJECTS or _project(src.removeprefix("kiwix-")) in DICTIONARY_PROJECTS
+    if _project(src) in DICTIONARY_PROJECTS or _project(src.removeprefix("kiwix-")) in DICTIONARY_PROJECTS:
+        return True
+    book, sep, _ = h.doc_id.removeprefix(f"wsp:{src}/").partition("/")
+    return bool(sep) and src.startswith("kiwix-") and _project(book) in DICTIONARY_PROJECTS
+
+
+def _latin(text: str) -> bool:
+    """Every letter of ``text`` is a Latin one (the query's language may default to English)."""
+    return all(unicodedata.name(c, "").startswith("LATIN") for c in text if c.isalpha())
+
+
+def _spread_foreign_dictionaries(
+    query: str, pins: Sequence[SearchHit], head: Sequence[SearchHit], *, fixed: int
+) -> tuple[list[SearchHit], list[SearchHit]]:
+    """Of the dictionary entries in another language than the query's, the first keeps its place and
+    the others go to the end of the reranked head, below the hits in the query's language.
+
+    Every Wiktionary has an entry for "acetaminophen": the Arabic, Polish and Chinese ones each took a
+    slot of the first ten, five Wiktionary entries in all (2026-11-05 deep dive). The first ``fixed``
+    pins (the exact title, the alias) stay. The query's language must be known, or the query written
+    in Latin letters (English, the interface language, then): "東京" (seven Wiktionary entries) says
+    nothing about which edition it wants, and keeps its order. Nothing is dropped."""
+    lang = query_language(query.split())
+    if lang is None:
+        if not _latin(query):
+            return list(pins), list(head)
+        lang = "en"
+
+    def foreign(h: SearchHit) -> bool:
+        return bool(h.lang) and primary_lang(h.lang) != lang and _is_dictionary(h)
+
+    seen = any(foreign(h) for h in pins[:fixed])
+    later: list[SearchHit] = []
+    near: list[SearchHit] = []
+    rest: list[SearchHit] = []
+    for out, hits in ((near, pins[fixed:]), (rest, head)):
+        for h in hits:
+            if foreign(h):
+                if seen:
+                    later.append(h)
+                    continue
+                seen = True
+            out.append(h)
+    return [*pins[:fixed], *near], [*rest, *later]
 
 
 def _holds(words: Sequence[str], part: Sequence[str]) -> bool:

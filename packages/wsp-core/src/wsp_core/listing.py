@@ -1,10 +1,10 @@
 """Listing pages of ZIM archives: indexes of other pages, never content.
 
 Stack Exchange archives hold one page per tag and per page of every list ("questions/tagged/first-aid",
-"questions_page=10", "users_page=3"). The Kiwix refine leaves them out (``wsp_adapters.kiwix``) and the
-search API drops any that an older refine kept, with the same rule. ``access.skip_paths`` in the
-registry replaces the default per source. A crawler's capture of a bot check (:func:`is_bot_wall`) is
-found by its text and left out the same way.
+"questions_page=10", "users_page=3"); iFixit's hold a profile page per user ("User/1554889/einstein").
+The Kiwix refine leaves them out (``wsp_adapters.kiwix``) and the search API drops any that an older
+refine kept, with the same rule. ``access.skip_paths`` in the registry replaces the default per source.
+A crawler's capture of a bot check (:func:`is_bot_wall`) is found by its text and left out the same way.
 """
 
 from __future__ import annotations
@@ -16,6 +16,10 @@ from collections.abc import Mapping, Sequence
 DEFAULT_SKIP_PATHS: tuple[str, ...] = (
     r"(?:questions|users|tags|badges|unanswered)_page=\d+",
     r"questions/tagged/[^/]+",  # every question with a tag, page by page ("first-aid_page=3")
+    # iFixit's user profiles: a name, a handle, a reputation and a join date. Famous names are popular
+    # user names: "Einstein" led with one, and all ten hits for "Albert Einstien" were profiles, each
+    # once per language edition (2026-11-05 deep dive). MediaWiki's "User:Name" pages do not match.
+    r"User/\d+/[^/]+",
     # mwoffliner's resources: a page there describes a file and often holds only the wiki's menus.
     # Appropedia's 15, titled "null", led meaning-based search for "running fix" (2026-10-16).
     r"_assets_/.+",

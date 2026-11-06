@@ -97,3 +97,34 @@ def test_a_build_replaces_both_tries_at_once(tmp_path: Path) -> None:
     assert all((tmp_path / "v000003" / f).is_file() for f in (TRIE_FILE, HEAVY_FILE))
     assert Suggester(TitleTrie.open(tmp_path)).suggest("g") == ["Gamma"]
     assert Suggester(first).suggest("a") == ["Alpha"]  # a reader of a deleted version keeps its mapping
+
+
+def test_a_name_finds_the_documents_titled_or_aliased_so(tmp_path: Path) -> None:
+    """2026-11-05 deep dive: "heart attack" never reached the article Myocardial infarction; the trie
+    holds the redirect, and an exact name lookup finds its target (a prefix is not a name)."""
+    base = TitleTrie.build(
+        [
+            SuggestEntry("wsp:w/en/Myocardial_infarction", "Myocardial infarction", ("Heart attack",), 3.0),
+            SuggestEntry("wsp:m/heart-attack", "Heart Attack", prior=1.0),
+            SuggestEntry("wsp:w/en/Heart_attack_grill", "Heart Attack Grill", prior=2.0),
+            SuggestEntry("wsp:w/de/Herzinfarkt", "Herzinfarkt", ("Heart attack", "Herzanfall"), 0.5),
+        ],
+        tmp_path,
+    )
+    sug = Suggester(base)
+    assert sug.named("HEART  attack") == [
+        ("wsp:w/en/Myocardial_infarction", "Myocardial infarction"),
+        ("wsp:m/heart-attack", "Heart Attack"),
+        ("wsp:w/de/Herzinfarkt", "Herzinfarkt"),
+    ]
+    assert sug.named("heart attack", limit=1) == [("wsp:w/en/Myocardial_infarction", "Myocardial infarction")]
+    assert sug.named("heart") == []  # a prefix names nothing
+    assert sug.named("") == []
+    # the overlay: a document upserted since the build, and one removed
+    sug.upsert([SuggestEntry("wsp:w/en/Cardiac_arrest", "Cardiac arrest", ("heart attack",), 9.0)])
+    sug.remove(["wsp:w/de/Herzinfarkt"])
+    assert [d for d, _ in sug.named("heart attack")] == [
+        "wsp:w/en/Cardiac_arrest",
+        "wsp:w/en/Myocardial_infarction",
+        "wsp:m/heart-attack",
+    ]

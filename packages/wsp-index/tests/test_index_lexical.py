@@ -705,3 +705,40 @@ def test_words_standing_together_outrank_the_same_words_apart(tmp_path: Path) ->
             assert ids(idx.search_window("running fix", limit=5, partial=False).hits)[0] == make_doc_id(
                 "s", first
             )
+
+
+# --- leads: the snippet of a page the query names (2026-11-05 deep dive) ----------------------------
+
+ARTICLE = (
+    "Brown v. Board of Education\n"
+    "Argued December 9, 1952\n"
+    "Full case name Oliver Brown, et al. v. Board of Education of Topeka, et al.\n"
+    'This article is about the court case. For the "Brown v. Board" library, see Brown Library.\n'
+    "Brown v. Board of Education of Topeka was a landmark decision of the Supreme Court of the United "
+    "States which ruled that racial segregation in public schools was unconstitutional.\n"
+    "External links\nBrown v. Board of Education, Dwight D. Eisenhower Presidential Library ()"
+)
+
+
+def test_a_lead_skips_the_title_the_infobox_and_the_hatnote() -> None:
+    from wsp_index.lexical import lead_passage
+
+    assert lead_passage(ARTICLE).startswith("Brown v. Board of Education of Topeka was a landmark decision")
+    assert lead_passage("Isaac Newton\nSir Isaac Newton was an English polymath active as a mathematician.")
+    assert lead_passage("Lists\n- one\n- two\n- three") == ""  # no prose: the usual cut instead
+    assert lead_passage(
+        "東京\n東京都は日本の首都であり、関東地方に位置する都市で、人口は約千四百万人である。多くの企業がある。"
+    )
+
+
+def test_leads_from_the_stored_text_or_the_document_store(tmp_path: Path) -> None:
+    docs = [doc("w", "Brown", "Brown v. Board of Education", ARTICLE), doc("w", "List", "List", "a\nb")]
+    for config, cls in ((replace(SMALL, store_text=True), TantivyIndex), (SMALL, SnippetIndex)):
+        with cls(tmp_path / f"ix-{config.store_text}", config) as idx:
+            idx.upsert(docs)
+            idx.commit()
+            leads = idx.leads([make_doc_id("w", "Brown"), make_doc_id("w", "List"), make_doc_id("w", "gone")])
+            assert list(leads) == [make_doc_id("w", "Brown")]
+            assert leads[make_doc_id("w", "Brown")].startswith("Brown v. Board of Education of Topeka")
+            assert len(leads[make_doc_id("w", "Brown")]) <= SMALL.snippet_chars + 1
+            assert idx.leads([]) == {}

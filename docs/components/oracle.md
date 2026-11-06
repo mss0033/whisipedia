@@ -19,13 +19,21 @@ query ─► Router ─┬─► lexical rewrite ─► TantivyIndex (BM25, top 
                                                                       ▼
                          HybridSearcher: RRF (k = 60) × source priors × intent preferences
                                                                       ▼
-                exact-title pins (lookup/navigate/define/locate; both sides of a comparison)
+                exact-title pins (lookup/navigate/define/locate; both sides of a comparison),
+                then the page the query names by another name (a redirect in the suggest trie)
                                                                       ▼
                      CrossEncoderReranker over the top 30, scoring the passage that matched
                                                                       ▼
                        hits + best passage per hit + confidence (max relevance probability)
 ```
 
+* **Names and leads** (2026-11-05). A page-name query also pins the target of a redirect or alias
+  named exactly like it ("heart attack" -> Myocardial infarction), looked up in the suggest trie
+  (`TantivyIndex.named`; only the redirects the trie keeps), in the query's language, unless the
+  exact title already comes from a heavy source. Title pins show their lead (`TantivyIndex.leads`:
+  the first prose line, past infobox lines and hatnotes) instead of the densest cut of the query's
+  words. Other-language dictionary entries after the first move to the end of the reranked head.
+  Listing pages (`wsp_core.listing`, iFixit profiles among them) are never pinned.
 * **Router** (`router.py`, deterministic, ~20 µs): intents *lookup, define, how-to, navigate, locate,
   compare, ask* by rules in English plus the configured index languages. The lexical retriever gets
   the query without question scaffolding (BM25 ORs every term); the embedder gets the original
@@ -168,7 +176,8 @@ Ablations (learning-to-rank ready: each feature is measured on the gold set befo
   and in fusion (`fw`); `0/0` is "no PageRank".
 * `--typos` makes one deterministic one-edit typo in the longest word of every gold query (first
   letter kept) and reports nDCG@10 for the clean queries, the typo'd ones, and the typo'd ones after
-  the "did you mean" correction (unknown words corrected, as the search page does).
+  the "did you mean" correction (unknown words corrected; the search page also corrects a known word
+  a thousand times rarer than a word an edit or two away, unless a result is titled as the query).
 
 Results on the 20,000-document English Wikipedia sample (lexical mode, `bench/wiki20k` copied to a
 scratch directory; 2026-10-10):

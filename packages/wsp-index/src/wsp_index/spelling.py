@@ -77,6 +77,10 @@ SPELL_FILE = "spelling.bin"
 MAGIC = b"WSPSPEL2"
 MAGIC_V1 = b"WSPSPEL1"
 ANY = "any"
+RARE_RATIO = 1_000.0
+"""A known word this many times rarer than a word one or two edits away is a suspected typo
+(:meth:`Speller.rare`)."""
+RARE_MIN_LENGTH = 5  # shorter words have common neighbours by chance ("hume" and "home")
 
 pc: Any = _pc  # the compute stubs are too partial for strict checking; results are cast at use
 
@@ -794,6 +798,25 @@ class Vocabulary:
                 out.append((cand, dist, int(self._count[i])))
         return out
 
+    def rival(self, word: str, ratio: float = RARE_RATIO) -> Correction | None:
+        """The most frequent word within the edit limit, with the same first letter, that is at least
+        ``ratio`` times more frequent than ``word`` (a known word); None when there is none."""
+        own = self.count(word)
+        if not own:
+            return None
+        limit = self.limit(word)
+        for i in self._candidate_ids(word, limit).tolist():
+            count = int(self._count[i])
+            if count < ratio * own:
+                break  # sorted by count: no remaining candidate is frequent enough
+            cand = self._word(i)
+            if cand == word or cand[:1] != word[:1]:
+                continue
+            dist = osa_distance(word, cand, limit)
+            if dist <= limit:
+                return Correction(word, cand, dist, count)
+        return None
+
     def best(self, word: str) -> tuple[Correction | None, float]:
         """The noisy-channel choice for one normalized word (None: keep it) and the log probability
         of the word under this vocabulary (its own count, or its best correction's, minus the edits).
@@ -1121,6 +1144,17 @@ class Speller:
             return []
         return [w for w in words if len(w) >= 3 and not vocab.count(w)]
 
+    def rare(self, query: str, ratio: float = RARE_RATIO) -> list[str]:
+        """Normalized words of the query (:data:`RARE_MIN_LENGTH` letters or more) that its vocabulary
+        knows but holds ``ratio`` times less often than a word one or two edits away: a typo the corpus
+        shares. "einstien" is a word because iFixit users are named so, and "Albert Einstien" was
+        offered no correction (2026-11-05 deep dive)."""
+        words = [w for _, w in query_words(query)]
+        vocab = self.choose(words)
+        if vocab is None:
+            return []
+        return [w for w in words if len(w) >= RARE_MIN_LENGTH and vocab.rival(w, ratio) is not None]
+
 
 class ReloadingSpeller:
     """A :class:`Speller` over a file that ``wsp index spell`` may replace while the API runs."""
@@ -1153,3 +1187,7 @@ class ReloadingSpeller:
     def unknown(self, query: str) -> list[str]:
         s = self.current()
         return [] if s is None else s.unknown(query)
+
+    def rare(self, query: str, ratio: float = RARE_RATIO) -> list[str]:
+        s = self.current()
+        return [] if s is None else s.rare(query, ratio)

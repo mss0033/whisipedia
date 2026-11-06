@@ -104,3 +104,14 @@ def test_a_captured_bot_check_page() -> None:
     assert not is_bot_wall_page(b"<p>Field dressing: apply pressure.</p>")
     big = FAS_CAPTURE.replace(b"</body>", b"<!--" + b"x" * BOT_WALL_MAX_BYTES + b"--></body>")
     assert not is_bot_wall_page(big)  # never read past the limit
+
+
+def test_an_ifixit_user_profile_is_never_a_document() -> None:
+    """2026-11-05 deep dive: an iFixit profile stub titled "einstein" led the results for "Einstein", and
+    every hit for "Albert Einstien" was one (once per language edition of the archive)."""
+    assert is_default_listing("ifixit_en_all/User/1554889/einstein")
+    assert is_default_listing("User/2932530/albert einstien")
+    assert not is_default_listing("ifixit_en_all/Guide/iPhone+6+Battery+Replacement/9581")
+    assert not is_default_listing("ifixit_en_all/Device/iPhone_6")
+    assert not is_default_listing("User:Jimbo_Wales")  # a MediaWiki user page is named with a colon
+    assert not is_default_listing("ifixit_en_all/User/1554889/einstein/extra")

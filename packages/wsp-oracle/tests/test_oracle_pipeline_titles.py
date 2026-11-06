@@ -359,3 +359,190 @@ def test_of_the_same_title_the_query_language_preferred_and_heaviest_source(tmp_
     assert word is not None
     assert word.doc_id == make_doc_id("wiki", "en/Ephemeral")  # the article; the definition box has the gloss
     idx.close()
+
+
+# --- names, leads, other editions (2026-11-05 deep dive) -----------------------------------------
+
+STORED = TantivyConfig(languages=("en",), writer_heap_bytes=30_000_000, writer_threads=1, store_text=True)
+
+
+def _aliased(doc: DocRecord, *aliases: str) -> DocRecord:
+    return replace(doc, aliases=aliases)
+
+
+@pytest.fixture
+def names(tmp_path: Path) -> Iterator[TantivyIndex]:
+    """Pages a query names by another name (redirects), beside pages that merely hold its words."""
+    docs = [
+        _aliased(
+            _doc(
+                "wiki",
+                "en/Myocardial_infarction",
+                "Myocardial infarction",
+                "Myocardial infarction\nSpecialty: Cardiology\n"
+                "A myocardial infarction occurs when blood flow to a part of the myocardium stops.\n"
+                "External links\nMyocardial infarction at a glance",
+            ),
+            "Heart attack",
+        ),
+        _aliased(
+            _doc("wiki", "de/Herzinfarkt", "Herzinfarkt", "Ein Herzinfarkt ist ...", "de"), "Heart attack"
+        ),
+        _doc("medline", "heart-attack", "Heart Attack", "Heart attack: call for help at once."),
+        _doc("music", "This_Heart_Attack", "This Heart Attack", "A song: heart attack, heart attack."),
+        _doc(
+            "wiktionary-en", "heart_attack", "heart attack", "heart attack (noun): a myocardial infarction."
+        ),
+        _aliased(
+            _doc(
+                "wiki",
+                "en/Albert_Einstein",
+                "Albert Einstein",
+                "Albert Einstein was a theoretical physicist who developed the theory of relativity.",
+            ),
+            "Einstein",
+        ),
+        _doc(
+            "ifixit",
+            "ifixit_en_all/User/1554889/einstein",
+            "einstein",
+            "einstein\n@ein\neinstein\n1\nReputation",
+        ),
+        _doc(
+            "wiki",
+            "en/Photosynthesis",
+            "Photosynthesis",
+            "Photosynthesis\nFor other uses, see Photosynthesis (disambiguation) and the rest of them.\n"
+            "Photosynthesis is the process by which plants turn light into chemical energy.\n"
+            "External links\nPhotosynthesis at an intermediate level\nPhotosynthesis photosynthesis "
+            "photosynthesis: an animation of photosynthesis",
+        ),
+    ]
+    idx = TantivyIndex(tmp_path / "lexical", STORED)
+    idx.upsert(docs)
+    idx.commit()
+    yield idx
+    idx.close()
+
+
+def _named(idx: TantivyIndex) -> OracleSearcher:
+    searcher = OracleSearcher(
+        idx,
+        router=Router.from_sources(["wiki", "medline", "music", "wiktionary-en", "ifixit"]),
+        reranker=OverlapReranker(),
+        resolve=idx.lookup,
+    )
+    searcher.source_weights = {"wiki": 1.15}
+    return searcher
+
+
+def test_a_name_leads_to_the_page_it_redirects_to(names: TantivyIndex) -> None:
+    # "heart attack" listed songs and films, never Myocardial infarction, while suggest offered it.
+    res = _named(names).run("heart attack")
+    ids = [h.doc_id for h in res.hits]
+    assert ids[0] == make_doc_id("medline", "heart-attack")  # the exact title still leads
+    assert ids[1] == make_doc_id("wiki", "en/Myocardial_infarction")  # then the page the name redirects to
+    assert make_doc_id("wiki", "de/Herzinfarkt") not in ids[:2]  # another language's target is not pinned
+    # its snippet is its lead, not the external links
+    assert res.hits[1].snippet.startswith("A myocardial infarction occurs")
+
+
+def test_a_user_profile_never_takes_the_exact_title_pin(names: TantivyIndex) -> None:
+    # "Einstein" led with an iFixit profile titled "einstein" (reranker score 0.04).
+    res = _named(names).run("Einstein")
+    assert res.hits[0].doc_id == make_doc_id("wiki", "en/Albert_Einstein")
+
+
+def test_a_title_hit_shows_its_lead_past_the_hatnote(names: TantivyIndex) -> None:
+    res = _named(names).run("photosynthesis")
+    assert res.hits[0].doc_id == make_doc_id("wiki", "en/Photosynthesis")
+    assert res.hits[0].snippet.startswith("Photosynthesis is the process by which plants")
+
+
+def test_a_name_that_is_a_title_or_leads_outside_the_sources_pins_nothing_more(names: TantivyIndex) -> None:
+    searcher = _named(names)
+    aliased = searcher._aliased  # pyright: ignore[reportPrivateUsage]
+    heart = searcher.router.route("heart attack")
+    assert aliased(searcher.router.route("This Heart Attack"), [], None) == []  # a title, not an alias
+    assert aliased(heart, [], ["wiktionary-en", "medline"]) == []
+    held = SearchHit(
+        make_doc_id("wiki", "en/Myocardial_infarction"), 1.0, "Myocardial infarction", "", "wiki", "en"
+    )
+    assert aliased(heart, [replace(held, source_id="other")], None) == []  # held already; de is not English
+    # an exact title from the reference source needs no other name
+    medline = SearchHit(make_doc_id("medline", "heart-attack"), 1.0, "Heart Attack", "", "medline", "en")
+    assert [h.doc_id for h in aliased(heart, [medline], None)] == [held.doc_id]
+    searcher.source_weights["medline"] = 1.2
+    assert aliased(heart, [medline], None) == []
+
+
+def test_a_misspelling_matching_only_another_language_pins_the_corrected_title(tmp_path: Path) -> None:
+    # "Isaac Newtonn": the French stemmer matched French pages only; the English article was absent.
+    docs = [
+        _doc("wiki", "fr/Isaac_Newton_(bryologiste)", "Isaac Newton (bryologiste)", "Bryologiste.", "fr"),
+        _doc("wiki", "fr/Rue_Newton", "Rue Newton", "Une rue.", "fr"),
+        _doc("wiki", "en/Isaac_Newton", "Isaac Newton", "Isaac Newton was an English mathematician."),
+    ]
+    idx = TantivyIndex(tmp_path / "lexical", SMALL)
+    idx.upsert(docs)
+    idx.commit()
+    index = OracleIndex(_named(idx))
+    french = [
+        SearchHit(make_doc_id("wiki", "fr/Rue_Newton"), 1.0, "Rue Newton", "", "wiki", "fr"),
+        SearchHit(make_doc_id("wiki", "fr/Isaac_Newton_(bryologiste)"), 0.9, "x", "", "wiki", "fr"),
+    ]
+    asked: list[str] = []
+
+    def corrected() -> str:
+        asked.append("yes")
+        return "Isaac Newton"
+
+    pin = index.correction_pin("Isaac Newtonn", french, corrected)
+    assert pin is not None
+    assert pin.doc_id == make_doc_id("wiki", "en/Isaac_Newton")
+    # a list holding a page in the query's language is left alone, and the speller is not asked
+    mixed = [*french, SearchHit(make_doc_id("wiki", "en/X"), 0.5, "X", "", "wiki", "en")]
+    asked.clear()
+    assert index.correction_pin("Isaac Newtonn", mixed, corrected) is None
+    assert asked == []
+    assert index.correction_pin("Isaac Newtonn", [], corrected) is None
+    assert index.correction_pin("Isaac Newtonn", french, lambda: None) is None
+    assert index.correction_pin("Isaac Newtonn", french, lambda: "Rue Newton") is None  # French: no pin
+    idx.close()
+
+
+def _hit(source: str, native: str, lang: str) -> SearchHit:
+    return SearchHit(make_doc_id(source, native), 1.0, native, "", source, lang)
+
+
+def test_other_language_dictionary_editions_make_room_for_the_query_language() -> None:
+    from wsp_oracle.pipeline import (
+        _is_dictionary,  # pyright: ignore[reportPrivateUsage]
+        _spread_foreign_dictionaries,  # pyright: ignore[reportPrivateUsage]
+    )
+
+    ar = _hit("kiwix-multilingual-ar", "wiktionary_ar_all/acetaminophen", "ar")
+    pl = _hit("kiwix-multilingual-pl", "wiktionary_pl_all/acetaminophen", "pl")
+    zh = _hit("kiwix-multilingual-zh", "wiktionary_zh_all/acetaminophen", "zh")
+    en = _hit("wiktionary-en", "acetaminophen", "en")
+    ncbi = _hit("ncbi", "Acetaminophen", "en")
+    article = _hit("wiki", "en/Paracetamol", "en")
+    pt_wiki = _hit("kiwix-multilingual-pt", "wikipedia_pt_all/Paracetamol", "pt")
+    assert _is_dictionary(ar)
+    assert _is_dictionary(en)
+    assert not _is_dictionary(pt_wiki)
+    assert not _is_dictionary(_hit("wiki", "en/wiktionary_x/y", "en"))  # not a bundle's book
+    pins, head = _spread_foreign_dictionaries(
+        "acetaminophen", [article, ar, pl], [en, zh, pt_wiki, ncbi], fixed=1
+    )
+    assert pins == [article, ar]  # the first other-language entry keeps its place
+    assert head == [en, pt_wiki, ncbi, pl, zh]  # the others follow the hits in English: moved, never dropped
+    # an exact pin in another language counts as the first; a query in Chinese characters moves nothing
+    assert _spread_foreign_dictionaries("acetaminophen", [ar], [pl, article], fixed=1) == (
+        [ar],
+        [article, pl],
+    )
+    assert _spread_foreign_dictionaries("東京", [], [en, zh, pl, article], fixed=0) == (
+        [],
+        [en, zh, pl, article],
+    )

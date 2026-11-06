@@ -545,3 +545,29 @@ def test_the_streamed_file_is_byte_for_byte_the_encoded_one(tmp_path: Path) -> N
     data, m = encode_vocabularies(vocabs, cfg)
     assert path.read_bytes() == data
     assert n == m
+
+
+def test_a_known_word_far_rarer_than_its_neighbour_is_suspect() -> None:
+    """2026-11-05 deep dive: "einstien" is in the vocabulary (iFixit users are named so), so "Albert
+    Einstien" was never corrected; a known word a thousand times rarer than a word within the edit
+    limit now is. A short word, and a word whose neighbour is not that much commoner, stay."""
+    s = Speller.from_counts(
+        {
+            "albert": 30_000,
+            "einstein": 50_000,
+            "einstien": 5,
+            "david": 40_000,
+            "home": 2_000_000,
+            "hume": 1_500,
+            "kepler": 9_000,
+            "keplar": 40,
+            "relativity": 20_000,
+        }
+    )
+    assert s.rare("Albert Einstien") == ["einstien"]
+    assert s.correct("Albert Einstien", only=s.rare("Albert Einstien")) == "Albert Einstein"
+    assert s.rare("Albert Einstein") == []
+    assert s.rare("David Hume") == []  # four letters: "hume" is not "home"
+    assert s.rare("keplar") == []  # 225 times rarer only
+    assert s.rare("zzqxv relativity") == []  # unknown words are unknown(), not rare()
+    assert s.rare("") == []
