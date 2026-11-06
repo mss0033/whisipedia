@@ -845,10 +845,12 @@ def test_shutdown_thaws_the_background_before_it_stops_the_jobs(tmp_path: Path) 
     (fakebin / "systemctl").chmod(0o755)
     subprocess.run(
         [str(ROOT / "tools" / "wsp-shutdown")],
-        env={"PATH": f"{fakebin}:/usr/bin:/bin"},
+        env={"PATH": f"{fakebin}:/usr/bin:/bin", "HOME": str(tmp_path)},
         capture_output=True,
         check=False,
     )
+    # The halt's marker: tools/wsp-stall raises no alert for the stopped services while it stands.
+    assert (tmp_path / ".local" / "state" / "whisipedia" / "halted").is_file()
     lines = calls.read_text().splitlines()
     order = [
         i
@@ -865,6 +867,54 @@ def test_shutdown_thaws_the_background_before_it_stops_the_jobs(tmp_path: Path) 
         "--user thaw whisipedia-background.slice",
         "--user stop whisipedia-job-lane.service",
     ]
+
+
+def test_start_brings_back_the_memory_guard_and_what_a_halt_stopped(tmp_path: Path) -> None:
+    """2026-11-05 deep dive: after a halt without a reboot the services were started again by hand,
+    all but the memory guard, which stayed stopped for 6 days. tools/wsp-start starts the guard first,
+    then the enabled services and timers that are not running, then the resume of the lanes."""
+    import subprocess
+
+    from test_cli_autonomy import ROOT
+
+    calls, active = tmp_path / "calls", tmp_path / "active"
+    active.write_text("whisipedia-api.service\nwhisipedia-stall.timer\n")
+    fakebin = tmp_path / "bin"
+    fakebin.mkdir()
+    (fakebin / "systemctl").write_text(
+        f'#!/bin/sh\necho "$*" >> {calls}\n'
+        'case "$*" in\n'
+        '  *"is-enabled -q whisipedia-trawler.service"*) exit 1 ;;\n'  # the owner turned it off
+        "  *is-enabled*) exit 0 ;;\n"
+        f'  *is-active*) grep -qx "$4" {active} ;;\n'
+        '  *list-unit-files*) printf "whisipedia-index.timer enabled enabled\\n'
+        'whisipedia-stall.timer enabled enabled\\n" ;;\n'
+        "  *cat*) exit 0 ;;\n"
+        "  *start*whisipedia-orchestrator*) exit 1 ;;\n"  # fails to start
+        f'  *start*) echo "$3" >> {active} ;;\n'
+        "esac\n"
+    )
+    (fakebin / "systemctl").chmod(0o755)
+    halted = tmp_path / ".local" / "state" / "whisipedia" / "halted"
+    halted.parent.mkdir(parents=True)
+    halted.touch()  # tools/wsp-shutdown's
+    done = subprocess.run(
+        [str(ROOT / "tools" / "wsp-start")],
+        env={"PATH": f"{fakebin}:/usr/bin:/bin", "HOME": str(tmp_path)},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert not halted.exists()  # watched again
+    starts = [line for line in calls.read_text().splitlines() if line.startswith("--user start")]
+    assert starts == [
+        "--user start whisipedia-yield.service",
+        "--user start whisipedia-orchestrator.service",
+        "--user start whisipedia-index.timer",
+        "--user start --no-block whisipedia-resume.service",
+    ]
+    assert done.returncode == 1
+    assert "not running: whisipedia-orchestrator.service" in done.stdout
 
 
 def test_wsp_bg_refuses_a_second_start_without_touching_the_saved_command(tmp_path: Path) -> None:

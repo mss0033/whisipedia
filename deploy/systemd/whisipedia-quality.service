@@ -1,6 +1,7 @@
 # The weekly search-quality check (`wsp quality run --alerts`): the gold queries through the running
-# library's API, saved under <state>/quality/; a drop against the previous run opens a warning.
-# Started by whisipedia-quality.timer. Its searches are marked as a background probe.
+# library's API, saved under <state>/quality/; a drop of nDCG@10, or a median latency twice the best
+# quiet run's, opens a warning. It first waits up to 6 h for a running index build to finish
+# (wsp_cli.quality). Started by whisipedia-quality.timer. Its searches are marked as a background probe.
 #
 # Template: `wsp service install` renders @REPO@ and @CONFIG_DIR@ (docs/runbooks/install-services.md).
 

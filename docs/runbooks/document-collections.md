@@ -96,14 +96,16 @@ tools/wsp-bg --no-heavy-lock collections-small 2G -- tools/lanes/lane-run.sh lan
 tools/wsp-bg --no-heavy-lock collections-cia 2G -- tools/lanes/lane-run.sh lane-cia cia-reading-room b0001 b0002
 ```
 
-It marks an item done (`<state>/collections/<lane>.done`, skipped by every later run) only when the
-fetch was complete (0, 7, 8) **and** `wsp ingest --version <cycle>` ingested that cycle (0, or 8 after
-a fetch that found nothing new). An incomplete listing (4) is retried in the same cycle; a partial
-fetch (6) is ingested, and the item is fetched again in a new cycle. An item whose fetch completed but
-whose ingest was interrupted resumes at the ingest. A lane takes a lock per source, so two lanes never
-fetch the same source at once. A lane over one source's partitions waits for the other lane to let the
-source go between its items (`LANE_LOCK_WAIT`, 6 hours by default), then leaves the item for its next
-run; a lane over many sources (`-`) leaves a busy one at once (`LANE_LOCK_WAIT=0`).
+It marks an item done (`$WSP_LANE_STATE/<lane>.done`, by default
+`~/.local/state/whisipedia/collections/<lane>.done`, next to the lane's log; skipped by every later
+run) only when the fetch was complete (0, 7, 8) **and** `wsp ingest --version <cycle>` ingested that
+cycle (0, or 8 after a fetch that found nothing new). An incomplete listing (4) is retried in the
+same cycle; a partial fetch (6) is ingested, and the item is fetched again in a new cycle. An item
+whose fetch completed but whose ingest was interrupted resumes at the ingest. A lane takes a lock per
+source, so two lanes never fetch the same source at once. A lane over one source's partitions waits
+for the other lane to let the source go between its items (`LANE_LOCK_WAIT`, 6 hours by default),
+then leaves the item for its next run; a lane over many sources (`-`) leaves a busy one at once
+(`LANE_LOCK_WAIT=0`).
 
 Run sources one after another (or in separate shells per host); long ones belong in `tools/wsp-bg`:
 

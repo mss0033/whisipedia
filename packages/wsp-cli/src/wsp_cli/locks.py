@@ -30,7 +30,7 @@ import os
 import signal
 import threading
 import time
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Iterable
 from pathlib import Path
 
 from wsp_orchestrator.errors import ResourceBusyError
@@ -60,6 +60,41 @@ def lock_dir_for(index_root: Path) -> Path:
 
 
 INHERITED_ENV = "WSP_INHERITED_LOCKS"  # "name:fd[,name:fd]": locks a parent holds on our behalf
+
+
+def held(lock_dir: Path, names: Iterable[str], *, proc_locks: Path = Path("/proc/locks")) -> set[str]:
+    """Which of the locks ``names`` some process holds now, read from ``/proc/locks``.
+
+    Never by trying the lock: for that instant a holder that does not wait would be refused, and the
+    nightly ``index build`` exits busy at once and skips the night (2026-11-05 deep dive: the quality
+    run, timing searches, needs to know whether the build or an ingest is competing with it).
+    Unknown (no lock file, ``/proc/locks`` unreadable) is not held."""
+    by_file: dict[tuple[int, int, int], str] = {}
+    for name in names:
+        try:
+            st = (lock_dir / f"{name}.lock").stat()
+        except OSError:
+            continue
+        by_file[(os.major(st.st_dev), os.minor(st.st_dev), st.st_ino)] = name
+    if not by_file:
+        return set()
+    try:
+        lines = proc_locks.read_text().splitlines()
+    except OSError:
+        return set()
+    out: set[str] = set()
+    for line in lines:
+        f = line.split()
+        if len(f) < 6 or f[1] != "FLOCK":  # "N: -> FLOCK ...": a waiter, not a holder
+            continue
+        try:
+            major, minor, inode = f[5].split(":")
+            name = by_file.get((int(major, 16), int(minor, 16), int(inode)))
+        except ValueError:
+            continue
+        if name is not None:
+            out.add(name)
+    return out
 
 
 def _holds_inherited(name: str, path: Path) -> bool:

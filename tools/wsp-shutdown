@@ -5,9 +5,16 @@
 # ingest or index build resumes where it was), the trawler, the index build and the orchestrator (its
 # own shutdown grace), and the API. Then it says whether anything of the library is
 # still running. After the restart, whisipedia-resume.service starts the jobs in
-# ~/.local/state/whisipedia/jobs.conf again (docs/runbooks/install-services.md).
+# ~/.local/state/whisipedia/jobs.conf again (docs/runbooks/install-services.md). With no restart after
+# it, tools/wsp-start starts the library again, the memory guard included.
+#
+# It leaves $WSP_STATE/halted (default ~/.local/state/whisipedia/halted): while it is there and none of
+# the long-running services runs, tools/wsp-stall takes their stop for this halt and raises no alert for
+# it. tools/wsp-start and the resume after a reboot remove it.
 set -u
 say() { echo "$(date +%H:%M:%S) $*"; }
+S=${WSP_STATE:-${XDG_STATE_HOME:-${HOME:-}/.local/state}/whisipedia}
+{ mkdir -p "$S" && date -Is >"$S/halted"; } 2>/dev/null || say "could not write $S/halted: tools/wsp-stall will alert"
 units() { systemctl --user list-units --plain --no-legend --state=active,activating "$@" | awk '{print $1}'; }
 
 if systemctl --user is-active -q whisipedia-yield.service; then

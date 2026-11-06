@@ -55,9 +55,10 @@ they are not planned.
   the newest run whose last wanted step is published, fetched field by field with HTTP range requests
   from the provider's index files (`.idx` for GFS, `.index` for ECMWF), decoded with ecCodes,
   normalised to one grid (0.25°, 90°N to 90°S, 0° to 359.75°E) and units, and written to the hot copy
-  as one memory-mapped `uint16` array per variable (`<state>/weather/hot/<model>/<run>/`). The GRIB
-  bytes of an archived run go to `_incoming/<source>/<day>.<run>/`; `wsp weather archive` writes the
-  ingest plan and the vault seals the day (a partition per run, ADR-0010).
+  as one memory-mapped `uint16` array per variable (`<index.root>/weather/hot/<model>/<run>/`). The
+  GRIB bytes of an archived run go to `_incoming/<source>/<day>.<run>/`: the same `wsp weather pull`
+  (unless `--no-archive`) stages them with their ingest plan and runs the ingest, and the vault seals
+  the day (a partition per run, ADR-0010).
 * **ERA5.** `wsp weather era5 --year Y` reads ERA5's hourly fields (t2m, tp hourly; others 3-hourly),
   makes the day's eight daily fields, and packs a year as two files per variable: the year's maps
   (a zip of one PNG per day) and its point series (an `.npz` of 40×40-point tiles × days). Newest years

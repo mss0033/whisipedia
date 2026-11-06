@@ -1,10 +1,11 @@
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
-from wsp_cli.locks import LockHeldError, exclusive
+from wsp_cli.locks import LockHeldError, exclusive, held
 
 
 def test_second_holder_is_refused_and_lock_frees_on_exit(tmp_path: Path) -> None:
@@ -180,3 +181,28 @@ def test_tickets_of_the_wall_clock_naming_are_served_before_steady_clock_ones() 
     assert _ahead(steady, steady_later)
     assert _ahead("0" + steady_later, wall)  # a priority ticket, even a later one, goes first
     assert not _ahead(wall, "0" + steady_later)
+
+
+def test_held_reads_the_kernels_lock_table_without_taking_the_lock(tmp_path: Path) -> None:
+    """2026-11-05 deep dive: the quality run must know whether the index build holds its locks; trying
+    them would, for that instant, refuse a build that starts then (it exits busy and skips the night)."""
+    assert held(tmp_path, ["index", "heavy"]) == set()  # no lock files yet
+    with exclusive(tmp_path, "index"):
+        (tmp_path / "heavy.lock").touch()
+        assert held(tmp_path, ["index", "heavy", "ingest"]) == {"index"}
+        assert held(tmp_path, ["index"], proc_locks=tmp_path / "missing") == set()  # unknown: not held
+    assert held(tmp_path, ["index", "heavy"]) == set()
+
+
+def test_held_ignores_a_waiter_and_another_files_inode(tmp_path: Path) -> None:
+    (tmp_path / "index.lock").touch()
+    st = (tmp_path / "index.lock").stat()
+    dev = f"{os.major(st.st_dev):02x}:{os.minor(st.st_dev):02x}"
+    table = tmp_path / "locks"
+    table.write_text(
+        f"1: -> FLOCK  ADVISORY  WRITE 77 {dev}:{st.st_ino} 0 EOF\n"  # waiting for it, not holding it
+        f"2: FLOCK  ADVISORY  WRITE 42 ff:01:{st.st_ino} 0 EOF\n"  # the same inode on another device
+    )
+    assert held(tmp_path, ["index"], proc_locks=table) == set()
+    table.write_text(f"3: FLOCK  ADVISORY  WRITE 42 {dev}:{st.st_ino} 0 EOF\n")
+    assert held(tmp_path, ["index"], proc_locks=table) == {"index"}

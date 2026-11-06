@@ -1,9 +1,12 @@
 # Notices stalled background work (tools/wsp-stall). Started by whisipedia-stall.timer.
+# The serious conditions are also raised as watch:<key> alerts through this checkout's `wsp alerts`,
+# which reads the config named here (2026-11-05 deep dive: they reached only a Claude session).
 
 [Unit]
 Description=Whisipedia stall check
 
 [Service]
 Type=oneshot
+Environment=WSP_CONFIG_DIR=@CONFIG_DIR@
 ExecStart=@REPO@/tools/wsp-stall
 TimeoutStartSec=5min

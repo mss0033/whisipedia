@@ -154,12 +154,25 @@ def digest_lines(
         if raised >= cutoff and a.get("resolved_at") is None:
             fresh.append(a)
     by = {s: sum(1 for a in fresh if a["severity"] == s.value) for s in Severity}
-    open_total = sum(1 for a in alerts if a.get("resolved_at") is None)
+    still = [a for a in alerts if a.get("resolved_at") is None]
+    open_total = len(still)
     parts = [f"{n} {s.value}" for s, n in sorted(by.items(), key=lambda kv: -RANK[kv[0]]) if n]
+    # The open total by kind: 133 of 193 were one burst of job-dead for one known cause, and the
+    # bare total said nothing of the other 60 (2026-11-05 deep dive).
+    kinds_open: dict[str, int] = {}
+    for a in still:
+        kind = str(a.get("key", "")).split(":", 1)[0]
+        kinds_open[kind] = kinds_open.get(kind, 0) + 1
+    top = sorted(kinds_open.items(), key=lambda kv: (-kv[1], kv[0]))
+    split = (
+        " (" + ", ".join(f"{n} {k}" for k, n in top[:3]) + (", …" if len(top) > 3 else "") + ")"
+        if open_total > GROUP_OVER and len(top) > 1
+        else ""
+    )
     summary = (
-        f"{len(fresh)} new alert(s) in the last day ({', '.join(parts)}); {open_total} open in all."
+        f"{len(fresh)} new alert(s) in the last day ({', '.join(parts)}); {open_total} open in all{split}."
         if fresh
-        else f"No new alerts in the last day; {open_total} open in all."
+        else f"No new alerts in the last day; {open_total} open in all{split}."
     )
     fresh.sort(key=lambda a: (-RANK[Severity(a["severity"])], str(a["key"])))
     # Many alerts of one kind (36 "dormant upstream" after a discovery pass) read as one line each

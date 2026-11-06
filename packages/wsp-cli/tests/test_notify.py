@@ -80,3 +80,17 @@ def test_the_digest_counts_what_is_new_and_still_open() -> None:
     assert digest_lines([], NOW)[0] == "No new alerts in the last day; 0 open in all."
     many = [row(f"dormant:s{i}", "warning", 1) for i in range(5)]
     assert digest_lines(many, NOW)[1] == ["[warning] 5 alerts of kind dormant: s0, s1, s2, …"]
+
+
+def test_the_open_total_is_split_by_kind_when_there_are_many() -> None:
+    """2026-11-05 deep dive: "193 open in all", 133 of them one burst of job-dead for one known cause."""
+    old = (NOW - timedelta(days=7)).isoformat()
+
+    def row(key: str) -> dict[str, Any]:
+        return {"key": key, "severity": "warning", "message": key, "raised_at": old, "resolved_at": None}
+
+    rows = [row(f"job-dead:health_probe:{i}") for i in range(6)]
+    rows += [row(f"lane:lane-govinfo:b{i}") for i in range(2)] + [row("watch:api-down"), row("trawl:x")]
+    summary, _ = digest_lines(rows, NOW)
+    assert summary == "No new alerts in the last day; 10 open in all (6 job-dead, 2 lane, 1 trawl, …)."
+    assert digest_lines(rows[:4], NOW)[0] == "No new alerts in the last day; 4 open in all."  # one kind

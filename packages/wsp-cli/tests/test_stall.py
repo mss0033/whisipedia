@@ -9,6 +9,7 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
 from test_cli_autonomy import ROOT
 
 CG = "/whisipedia.slice/whisipedia-job-lane.service"
@@ -28,6 +29,11 @@ def _world(tmp: Path, *, usage: int, failed: bool = False, run: str = "r1") -> d
         f" *MainPID*) echo 99 ;; *InvocationID*) echo {run} ;; esac\n"
     )
     (fakebin / "systemctl").chmod(0o755)
+    (fakebin / "journalctl").write_text('#!/bin/sh\necho "the journal of $3"\n')
+    (fakebin / "journalctl").chmod(0o755)
+    # `wsp alerts raise|resolve`: recorded; it fails while <tmp>/alert-fail exists.
+    (fakebin / "wsp").write_text(f'#!/bin/sh\necho "$*" >> {tmp}/alerts\n[ ! -e {tmp}/alert-fail ]\n')
+    (fakebin / "wsp").chmod(0o755)
     cg = tmp / "cgroup" / CG.strip("/")
     cg.mkdir(parents=True, exist_ok=True)
     (cg / "cpu.stat").write_text(f"usage_usec {usage}\nuser_usec 1\n")
@@ -67,6 +73,7 @@ def _world(tmp: Path, *, usage: int, failed: bool = False, run: str = "r1") -> d
         "WSP_STALL_LOGS": str(tmp / "logs" / "*.log"),
         "WSP_STALL_HEALTH_URL": "http://127.0.0.1:9/v1/health",  # nothing answers there
         "WSP_STALL_MIN_FREE_GB": "0",
+        "WSP_STALL_ALERT_CMD": str(fakebin / "wsp"),  # never the checkout's: tests raise no real alert
         "HOME": str(tmp),
     }
 
@@ -288,3 +295,192 @@ def test_a_slow_systemd_stays_within_the_budget_and_clears_nothing_it_could_not_
     assert "api-down" in status
     state = json.loads((tmp_path / "state" / "watch" / "state.json").read_text())
     assert "whisipedia-job-lane.service" in state["cpu"]  # its CPU samples are kept for the next run
+
+
+def _alerts(tmp: Path) -> list[str]:
+    path = tmp / "alerts"
+    return path.read_text().splitlines() if path.exists() else []
+
+
+def test_a_long_running_service_left_stopped_is_raised_and_reaches_the_owner(tmp_path: Path) -> None:
+    """2026-11-05 deep dive: a halt stopped the memory guard, the library was started again without a
+    reboot, and the guard stayed stopped for 6 days; only the API and the orchestrator were watched,
+    and what was watched reached only a Claude session."""
+    env = _world(tmp_path, usage=10**9)
+    with (tmp_path / "units").open("a") as fh:
+        fh.write("whisipedia-yield.service loaded inactive dead yield\n")
+        fh.write("whisipedia-trawler.service loaded inactive dead trawler\n")
+    jobs = tmp_path / ".local" / "state" / "whisipedia" / "jobs"
+    jobs.mkdir(parents=True)
+    (jobs / "yield-stopped").write_text("whisipedia-trawler.service\n")  # owed by the guard: jobs-owed
+    first = " ".join(_run(env, 0))
+    assert "unit-failed:whisipedia-yield" not in first  # a restart is not an outage
+    assert "raise --key watch:api-down --severity critical" in " ".join(_alerts(tmp_path))
+    later = [line for line in _run(env, 0.5) if "unit-failed:" in line]
+    assert len(later) == 1, later
+    assert (
+        "RAISED unit-failed:whisipedia-yield.service: whisipedia-yield.service is inactive (dead)" in later[0]
+    )
+    assert "systemctl --user start whisipedia-yield.service" in later[0]
+    saved = later[0].split("its journal then: ", 1)[1]
+    assert Path(saved).read_text() == "the journal of whisipedia-yield.service\n"
+    assert any(
+        a.startswith("alerts raise --key watch:unit-failed:whisipedia-yield.service --severity critical")
+        for a in _alerts(tmp_path)
+    )
+    _run(env, 0.7)
+    assert sum("watch:unit-failed:whisipedia-yield" in a for a in _alerts(tmp_path)) == 1  # raised once
+    rows = (tmp_path / "units").read_text().replace("inactive dead yield", "active running yield")
+    (tmp_path / "units").write_text(rows)
+    assert any("CLEARED unit-failed:whisipedia-yield.service" in line for line in _run(env, 1))
+    assert _alerts(tmp_path)[-1] == "alerts resolve --key watch:unit-failed:whisipedia-yield.service"
+    state = json.loads((tmp_path / "state" / "watch" / "state.json").read_text())
+    assert state["saved"] == {}
+
+
+def test_a_halt_stops_the_services_without_an_alert_until_one_of_them_runs_again(tmp_path: Path) -> None:
+    """Halts for a game are routine (tools/wsp-shutdown): the stopped services and the silent API are
+    the halt's. On 2026-10-30 all but the memory guard were started again by hand: then it counts."""
+    env = _world(tmp_path, usage=10**9)
+    rows = "".join(
+        f"whisipedia-{name}.service loaded inactive dead {name}\n"
+        for name in ("api", "orchestrator", "trawler", "yield")
+    )
+    (tmp_path / "units").write_text(rows)
+    halted = tmp_path / ".local" / "state" / "whisipedia" / "halted"
+    halted.parent.mkdir(parents=True)
+    halted.touch()
+    first = " ".join(_run(env, 0))
+    assert "RAISED halted" in first
+    assert "RAISED api-down" in first  # in the log, as always
+    assert "unit-failed" not in " ".join(_run(env, 2))
+    assert _alerts(tmp_path) == []  # nothing for the owner: the owner halted it
+    (tmp_path / "units").write_text(rows.replace("inactive dead api", "active running api"))
+    resumed = " ".join(_run(env, 2.1))
+    assert "CLEARED halted" in resumed
+    assert "unit-failed" not in resumed  # down from now on, not from the halt
+    later = " ".join(_run(env, 2.5))
+    assert "RAISED unit-failed:whisipedia-yield.service" in later
+    assert "watch:unit-failed:whisipedia-yield.service --severity critical" in " ".join(_alerts(tmp_path))
+
+
+def test_an_alert_the_cli_could_not_raise_is_tried_again_and_lock_waits_stay_in_the_log(
+    tmp_path: Path,
+) -> None:
+    env = _world(tmp_path, usage=10**9, failed=True)
+    (tmp_path / "alert-fail").touch()
+    _run(env, 0)
+    assert "watch:unit-failed:whisipedia-job-maps.service --severity warning" in " ".join(_alerts(tmp_path))
+    (tmp_path / "alert-fail").unlink()
+    (tmp_path / "alerts").unlink()
+    _run(env, 0.2)
+    keys = sorted(a.split()[3] for a in _alerts(tmp_path))
+    assert keys == [
+        "watch:api-down",
+        "watch:files-high:whisipedia-api.service",
+        "watch:unit-failed:whisipedia-job-maps.service",
+    ]
+    _run(env, 9)  # lock-held (ingest, heavy) is open now: a log condition, never an alert
+    assert not [a for a in _alerts(tmp_path) if "lock-held" in a]
+
+
+def _index_build(tmp: Path, *, quiet_h: float) -> Path:
+    """pid 43 runs `wsp index build`, holding index and heavy; its run log was last written quiet_h
+    before T0."""
+    locks, proc = tmp / "locks", tmp / "proc"
+    (locks / "index.lock").touch()
+    index, heavy = (locks / "index.lock").stat().st_ino, (locks / "heavy.lock").stat().st_ino
+    (proc / "43").mkdir(parents=True, exist_ok=True)
+    (proc / "43" / "cmdline").write_bytes(
+        b"/r/.venv/bin/python3\0/r/.venv/bin/wsp\0--config-dir\0c\0index\0build\0"
+    )
+    (proc / "43" / "stat").write_text("43 (wsp) S " + " ".join(["0"] * 18) + " 100 0 0\n")
+    (proc / "locks").write_text(
+        f"1: FLOCK  ADVISORY  WRITE 43 08:30:{heavy} 0 EOF\n"
+        f"2: FLOCK  ADVISORY  WRITE 43 08:30:{index} 0 EOF\n"
+    )
+    log = tmp / "state" / "logs" / "index-build" / "20261102T093000Z-43.jsonl"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.write_text('{"msg": "run start"}\n{"msg": "rank: 67,109,080/348,642,755 documents scanned"}\n')
+    os.utime(log, (T0 - quiet_h * 3600, T0 - quiet_h * 3600))
+    return log
+
+
+def test_the_nightly_build_holds_its_locks_without_noise_and_a_silent_one_is_raised(tmp_path: Path) -> None:
+    """2026-11-05 deep dive: lock-held:index and lock-held:heavy were raised as a pair by most nightly
+    builds (8 to 10 hours), while the builds that hung on 11-02 and 11-03 looked the same."""
+    env = _world(tmp_path, usage=10**9)
+    log = _index_build(tmp_path, quiet_h=0)
+    _run(env, 0)
+    busy = " ".join(_run(env, 9))
+    assert "lock-held:index" not in busy  # a normal night
+    assert "index-silent" in busy  # but 9 h without a line is not
+    assert f"has written nothing to {log} for 9.0 h" in busy
+    assert "rank: 67,109,080/348,642,755 documents scanned" in busy
+    os.utime(log, (T0 + 14 * 3600, T0 + 14 * 3600))  # writing again
+    held = [line for line in _run(env, 14.5) if "lock-held" in line or "index-silent" in line]
+    assert [line.split()[1:3] for line in held] == [
+        ["RAISED", "lock-held:index:"],
+        ["CLEARED", "index-silent"],
+    ]
+    assert "index and heavy locks held 14.5 h by pid 43: wsp --config-dir c index build" in held[0]
+
+
+def test_a_frozen_index_build_is_not_silent(tmp_path: Path) -> None:
+    env = _world(tmp_path, usage=10**9)
+    _index_build(tmp_path, quiet_h=7)
+    (tmp_path / "proc" / "43" / "cgroup").write_text("0::/bg.slice/whisipedia-index.service\n")
+    (tmp_path / "cgroup" / "bg.slice").mkdir(parents=True)
+    (tmp_path / "cgroup" / "bg.slice" / "cgroup.freeze").write_text("1\n")
+    assert not [line for line in _run(env, 0) if "index-silent" in line]
+    (tmp_path / "cgroup" / "bg.slice" / "cgroup.freeze").write_text("0\n")
+    assert [line for line in _run(env, 0.2) if "RAISED index-silent" in line]
+
+
+def test_a_lanes_own_retries_are_noted_weekly_and_ingest_pending_is_not_a_problem(tmp_path: Path) -> None:
+    """2026-11-05 deep dive: 70% of the notes were a lane's retries of a known outage, every day, and
+    fetch exit 5 (an earlier fetch waits for its ingest, which the lane runs next) counted as one."""
+    env = _world(tmp_path, usage=1)
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    lane = logs / "lane-govinfo.log"
+    lane.write_text("")
+    _run(env, 0)
+
+    def say(hours: float, *lines: str) -> list[str]:
+        with lane.open("a") as fh:
+            fh.write("".join(f"{line}\n" for line in lines))
+        return [line for line in _run(env, hours) if " NOTE " in line]
+
+    notes = say(0.1, "fetch exit 5", "fetch exit 6", "Traceback (most recent call last):")
+    assert len(notes) == 2
+    assert not [n for n in notes if "fetch exit 5" in n]
+    notes = say(25, "fetch exit 6", "b0002 left for a later run", "Traceback (most recent call last):")
+    assert [n.split("lane-govinfo.log: ", 1)[1] for n in notes] == [
+        "b0002 left for a later run",  # first seen: noted
+        "Traceback (most recent call last):",  # a day later: noted again
+    ]
+    assert not say(50, "fetch exit 6", "b0003 left for a later run")  # a routine retry, within the week
+    assert len(say(7 * 24 + 1, "fetch exit 6")) == 1  # a week on, still waiting: noted again
+
+
+def test_the_watched_services_are_the_long_running_ones_service_install_enables(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import sys
+    from importlib.machinery import SourceFileLoader
+    from importlib.util import module_from_spec, spec_from_loader
+
+    from wsp_cli.service import ENABLE
+
+    loader = SourceFileLoader("wsp_stall", str(ROOT / "tools" / "wsp-stall"))
+    spec = spec_from_loader("wsp_stall", loader)
+    assert spec is not None
+    module = module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, "wsp_stall", module)  # its dataclass looks itself up there
+    loader.exec_module(module)
+    assert sorted(module.RUNNING) == sorted(u for u in ENABLE if u.endswith(".service"))
+    assert module.push_severity("unit-failed:whisipedia-yield.service") == "critical"
+    assert module.push_severity("unit-failed:whisipedia-weather.service") == "warning"
+    assert module.push_severity("lock-held:index") is None
+    assert module.push_severity("job-idle:whisipedia-job-x.service") is None

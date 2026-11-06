@@ -5,16 +5,35 @@
 sat waiting behind it, and the Chronicling America lane stopped on HTTP 429 at 05:13; both were found
 by hand hours later. This looks for such things and writes each one once, when it starts and when it
 ends, to ``<state>/watch/events.log`` (and the journal), where a Claude session (a Monitor tailing the
-log) or the owner sees it at once:
+log) sees it at once. The serious ones (PUSHED: a unit failed or down, the API silent, memory stalls,
+jobs owed a start, a silent index build, the disk or the NAS) are also raised as ``watch:<key>``
+alerts through ``wsp alerts raise``/``resolve``, so they reach the owner: a notification when
+critical, the morning digest and ``wsp://system`` (2026-11-05 deep dive: 83 conditions in 14 days, a
+failed nightly index and five API outages among them, reached nobody without a Claude session).
 
-* ``unit-failed:<unit>``      a whisipedia unit failed; a core service (API, orchestrator) not running
+* ``unit-failed:<unit>``      a whisipedia unit failed; a long-running service (RUNNING: the API, the
+                              orchestrator, the trawler, the memory guard) not running for
+                              WSP_STALL_UNIT_DOWN_MIN minutes (20), unless tools/wsp-yield stopped it for
+                              memory (``jobs-owed`` says so): 2026-11-05, the memory guard had been
+                              stopped by a halt for 6 days and nothing said so. The unit's last journal
+                              lines are saved at once to ``<state>/watch/failures/`` and the message
+                              names that file (the journal keeps only about 14 hours on this machine:
+                              deploy/journald/), and the unit's run log when it keeps one
 * ``job-idle:<unit>``         a background job (whisipedia-job-*) used under IDLE_CPU_S of CPU in the
                               last WSP_STALL_IDLE_H hours (default 3): stuck, or waiting on something
                               (the message names a long-held lock, or a frozen background slice); not
                               the jobs named by WSP_STALL_IDLE_OK (default whisipedia-job-*-watch.service)
 * ``lock-held:<lock>``        a lock (ingest, heavy, index...) held by one process over WSP_STALL_LOCK_H
                               hours (8), counted from the first run that saw it held (the scrub lock
-                              is the orchestrator's for its whole life, and is not counted)
+                              is the orchestrator's for its whole life, and is not counted). The nightly
+                              ``index build`` holds index and heavy for WSP_STALL_INDEX_LOCK_H (14) before
+                              it counts, as one condition (2026-11-05 deep dive: most normal builds take
+                              8 to 10 hours, and every one raised the pair at 8)
+* ``index-silent``            the running ``index build`` has written nothing to its run log
+                              (``<state>/logs/index-build/*-<pid>.jsonl``) for WSP_STALL_INDEX_SILENT_H
+                              hours (6; a normal build's longest quiet step is under 5): hung, which the
+                              lock's age cannot tell (2026-11-02 and 11-03: builds that stopped writing
+                              hours before they died looked like healthy ones)
 * ``jobs-owed``               jobs tools/wsp-yield stopped for memory (``jobs/yield-stopped``) not started
                               again after WSP_STALL_OWED_MIN minutes (30): 2026-10-22, every lane stood
                               still for 10 hours and nothing here said so
@@ -22,6 +41,10 @@ log) or the owner sees it at once:
                               for WSP_STALL_DOWN_H hours (1): stopped, crashed, or finished (then take it
                               out of jobs.conf)
 * ``api-down``                /v1/health did not answer 200 twice in a row
+* ``halted``                  tools/wsp-shutdown left its marker (``halted`` in tools/wsp-bg's state) and
+                              none of the long-running services runs: their stop and the silent API
+                              are this halt's, and raise no alert (2026-11-05: halts for a game are
+                              routine)
 * ``files-high:<unit>``       a core service holds over 80% of the files it may open (the API ran out at
                               1,024 on 2026-10-20 and answered pages with HTTP 500)
 * ``mem-stall:<unit>``         the background slice, the download lanes' slice or the API spent over
@@ -32,8 +55,13 @@ log) or the owner sees it at once:
 * ``disk-low:<mount>``        under WSP_STALL_MIN_FREE_GB free locally (50) or on the NAS (2000)
 * ``nas-missing:<mount>``     the NAS share is not mounted (its free space is not checked then)
 * ``log``                     a new problem line in a lane log (HTTP 429, Traceback, FAILED, a fetch
-                              that failed (exits 7 and 8 are complete), partitions left for later,
-                              no space); one note per problem and log a day, never the backlog
+                              that failed (exits 7 and 8 are complete; 5, an earlier fetch waiting for
+                              its ingest, is the lane's routine), partitions left for later, no space);
+                              one note per problem and log a day, never the backlog. The retries a lane
+                              makes on its own (fetch exits 4 and 6, items left for a later run) are
+                              noted once a week: they were 70% of the notes, the same waiting outage
+                              every day, and lane-run.sh raises its own ``lane:`` alert once its tries
+                              run out (2026-11-05 deep dive)
 * ``systemd-slow``            systemctl did not answer within WSP_STALL_SYSTEMCTL_S seconds (15), or the
                               run's budget ran out: the checks that need it were skipped this run
 
@@ -42,8 +70,9 @@ that could not run clears nothing. The whole run keeps within WSP_STALL_BUDGET_S
 the unit's TimeoutStartSec=5min (2026-11-04 trawl: each systemctl call could wait 60 s, ~26 of them a
 run under memory pressure, and a run killed at 5 minutes wrote nothing, exactly when memory was short).
 ``--status`` prints what is open now. WSP_STALL_STATE, WSP_STALL_LOGS (colon-separated globs),
-WSP_STALL_LOCKS, WSP_STALL_PROC, WSP_STALL_CGROUP_ROOT, WSP_STALL_HEALTH_URL and WSP_STALL_NOW are
-for tests.
+WSP_STALL_LOCKS, WSP_STALL_PROC, WSP_STALL_CGROUP_ROOT, WSP_STALL_HEALTH_URL, WSP_STALL_ALERT_CMD (the
+``wsp`` that raises the alerts; default this checkout's .venv/bin/wsp, run from the checkout, which
+reads WSP_CONFIG_DIR) and WSP_STALL_NOW are for tests.
 """
 
 from __future__ import annotations
@@ -65,10 +94,12 @@ from pathlib import Path
 from typing import Any, cast
 
 HOME = Path.home()
+REPO = Path(__file__).resolve().parent.parent
 STATE = Path(os.environ.get("WSP_STALL_STATE", HOME / ".local/share/whisipedia/state"))
 WATCH = STATE / "watch"
 LOCKS = Path(os.environ.get("WSP_STALL_LOCKS", HOME / ".local/share/whisipedia/locks"))
 JOBS = Path(os.environ.get("WSP_STALL_JOBS", HOME / ".local/state/whisipedia"))  # tools/wsp-bg's state
+HALTED = JOBS / "halted"  # tools/wsp-shutdown's marker; tools/wsp-start removes it
 PROC = Path(os.environ.get("WSP_STALL_PROC", "/proc"))
 CGROUP_ROOT = os.environ.get("WSP_STALL_CGROUP_ROOT", "/sys/fs/cgroup")
 HEALTH_URL = os.environ.get("WSP_STALL_HEALTH_URL", "http://127.0.0.1:8737/v1/health")
@@ -94,17 +125,49 @@ LOCK_H = float(os.environ.get("WSP_STALL_LOCK_H", "8"))
 OWED_MIN = float(os.environ.get("WSP_STALL_OWED_MIN", "30"))
 DOWN_H = float(os.environ.get("WSP_STALL_DOWN_H", "1"))
 MOUNTS = {"/": 50, "/mnt/z": 2000}  # free GB below which the disk is low
-CORE = ("whisipedia-api.service", "whisipedia-orchestrator.service")
+CORE = ("whisipedia-api.service", "whisipedia-orchestrator.service")  # also watched for open files
+# The long-running services `wsp service install` enables (the `.service` units in
+# wsp_cli.service.ENABLE; a test keeps the two lists equal): each must be running. Until 2026-11-05 only
+# CORE was, and the memory guard sat stopped for 6 days after a halt without a word.
+RUNNING = (*CORE, "whisipedia-trawler.service", "whisipedia-yield.service")
+UNIT_DOWN_MIN = float(os.environ.get("WSP_STALL_UNIT_DOWN_MIN", "20"))  # a restart is not an outage
+# The nightly `index build` holds index and heavy for 8 to 10 hours on a normal night (2026-11-05 deep
+# dive: 4 of 7 good builds passed the general 8 h); its silence in its run log is what tells a hung one.
+INDEX_LOCK_H = float(os.environ.get("WSP_STALL_INDEX_LOCK_H", "14"))
+INDEX_SILENT_H = float(os.environ.get("WSP_STALL_INDEX_SILENT_H", "6"))
+# A failed unit's journal, saved when it is seen (the journal kept ~14 hours, 2026-11-05): the newest kept.
+FAILURES_KEEP = 200
+JOURNAL_LINES = 80
+# Units whose command keeps a diagnostic run log (wsp_core.diag): <state>/logs/<folder>/.
+RUN_LOGS = {"whisipedia-index.service": "index-build"}
+# Conditions raised as `watch:<key>` alerts (key prefix -> severity); the rest stay in events.log.
+PUSHED = {
+    "api-down": "critical",
+    "nas-missing:": "critical",
+    "disk-low:": "critical",
+    "index-silent": "critical",
+    "unit-failed:": "warning",  # critical for a RUNNING unit (push_severity)
+    "mem-stall:": "warning",
+    "jobs-owed": "warning",
+    "files-high:": "warning",
+}
+ALERT_CMD = os.environ.get("WSP_STALL_ALERT_CMD") or str(REPO / ".venv" / "bin" / "wsp")
+ALERT_S = 60.0  # one `wsp alerts` call at most
 PRESSURE_UNITS = (
     "whisipedia-background.slice",
     "whisipedia-background-fetch.slice",
     "whisipedia-api.service",
 )
 PRESSURE_PCT = float(os.environ.get("WSP_STALL_PRESSURE_PCT", "50"))
+# Exit 5 is EXIT_INGEST_PENDING (wsp_cli.doccollections): an earlier fetch waits for its ingest, which
+# lane-run.sh runs next, alerting after 3 tries; it is not a problem (2026-11-05 deep dive).
 PROBLEM = re.compile(
-    r"HTTP 429|Too Many Requests|Traceback|FAILED|fetch exit [1-69]|left for a later run|No space left"
+    r"HTTP 429|Too Many Requests|Traceback|FAILED|fetch exit [1-469]|left for a later run|No space left"
     r"|Killed|OOM"
 )
+# A lane's own retries: noted once a week per log, not every day (their keys start "w:").
+ROUTINE = re.compile(r"fetch exit [46]|left for a later run")
+NOTE_ROUTINE_S = 7 * 24 * 3600
 LIFETIME_LOCKS = {"scrub"}
 # Locks held for hours by design: a generation's profile samples a 60 GB archive at a paced rate
 # (wsp_cli.integrity.profile_child; 8 h on the Spanish Wikipedia, 2026-10-20).
@@ -136,6 +199,9 @@ class State:
     noted: dict[str, float] = field(default_factory=dict[str, float])  # problem kind -> when noted
     down: dict[str, float] = field(default_factory=dict[str, float])  # jobs.conf name -> first seen down
     runs: dict[str, str] = field(default_factory=dict[str, str])  # job unit -> InvocationID of its samples
+    inactive: dict[str, float] = field(default_factory=dict[str, float])  # RUNNING unit -> first seen down
+    saved: dict[str, str] = field(default_factory=dict[str, str])  # unit-failed key -> its saved journal
+    pushed: dict[str, float] = field(default_factory=dict[str, float])  # key raised as a watch: alert
 
     @classmethod
     def load(cls, path: Path) -> State:
@@ -149,6 +215,9 @@ class State:
                 noted={k: float(v) for k, v in raw.get("noted", {}).items()},
                 down={k: float(v) for k, v in raw.get("down", {}).items()},
                 runs={k: str(v) for k, v in raw.get("runs", {}).items()},
+                inactive={k: float(v) for k, v in raw.get("inactive", {}).items()},
+                saved={k: str(v) for k, v in raw.get("saved", {}).items()},
+                pushed={k: float(v) for k, v in raw.get("pushed", {}).items()},
             )
         except (OSError, ValueError, TypeError, AttributeError, IndexError):
             return cls()
@@ -408,6 +477,101 @@ def short(cmd: str, width: int = 120) -> str:
     return cmd if len(cmd) <= width else cmd[: width - 1] + "…"
 
 
+def index_build(cmd: str) -> bool:
+    """Whether a lock holder's command line is the nightly ``wsp ... index build``."""
+    return re.search(r"(^|\s)index build(\s|$)", cmd) is not None
+
+
+def index_silence(pid: str, t: float) -> str | None:
+    """The ``index-silent`` message when the build ``pid`` has written nothing to its run log for
+    INDEX_SILENT_H hours (None: it has, it keeps no log, or a pause of tools/wsp-yield holds it)."""
+    logs = sorted((STATE / "logs" / "index-build").glob(f"*-{pid}.jsonl"))
+    if not logs:
+        return None
+    log = logs[-1]
+    try:
+        quiet = t - log.stat().st_mtime
+    except OSError:
+        return None
+    if quiet < INDEX_SILENT_H * 3600:
+        return None
+    try:
+        cgroup = (PROC / pid / "cgroup").read_text().strip().splitlines()[-1].split(":", 2)[2]
+    except (OSError, IndexError):
+        cgroup = ""
+    if cgroup and frozen(cgroup):
+        return None  # held by the memory guard or the reading pause, not hung
+    try:
+        with log.open("rb") as fh:
+            fh.seek(max(0, fh.seek(0, os.SEEK_END) - 4096))
+            tail = fh.read().decode(errors="replace").strip().splitlines()
+        last = str(json.loads(tail[-1]).get("msg", ""))[:160] if tail else ""
+    except (OSError, ValueError, AttributeError):
+        last = ""
+    return (
+        f"the index build (pid {pid}) has written nothing to {log} for {hours(quiet)} (a normal step is "
+        f"quiet under 5 h): hung? Its last line: {last or 'unreadable'}"
+    )
+
+
+def owed_by_yield() -> set[str]:
+    """The units tools/wsp-yield stopped for memory and owes a start (``jobs/yield-stopped``)."""
+    try:
+        text = (JOBS / "jobs" / "yield-stopped").read_text()
+    except OSError:
+        return set()
+    return {line.strip() for line in text.splitlines() if line.strip()}
+
+
+def save_journal(unit: str, t: float) -> Path | None:
+    """The unit's last JOURNAL_LINES journal lines, saved under ``<watch>/failures/`` (the newest
+    FAILURES_KEEP files are kept); None when journalctl did not answer in time."""
+    exe = shutil.which("journalctl")
+    wait = min(SYSTEMCTL_S, remaining())
+    if exe is None or wait < 1:
+        return None
+    try:
+        done = subprocess.run(  # noqa: S603 - fixed argv
+            [exe, "--user", "-u", unit, "-n", str(JOURNAL_LINES), "--no-pager", "-o", "short-iso"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=wait,
+        )
+    except subprocess.TimeoutExpired:
+        return None
+    folder = WATCH / "failures"
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"{datetime.fromtimestamp(t, UTC).strftime('%Y%m%dT%H%M%SZ')}-{unit}.log"
+    path.write_text(done.stdout + done.stderr)
+    for old in sorted(folder.glob("*.log"))[:-FAILURES_KEEP]:  # named by time: the oldest first
+        old.unlink(missing_ok=True)
+    return path
+
+
+def failure_pointers(state: State, unit: str, t: float) -> str:
+    """Where to read why ``unit`` failed: its journal, saved the first time the failure is seen (the
+    journal itself keeps only about 14 hours here, 2026-11-05 deep dive; deploy/journald/), and the
+    run log of a command that keeps one."""
+    key = f"unit-failed:{unit}"
+    if key not in state.saved:
+        path = save_journal(unit, t)
+        if path is not None:
+            state.saved[key] = str(path)
+    saved = state.saved.get(key)
+    text = (
+        f"; its journal then: {saved}"
+        if saved
+        else f"; journalctl --user -u {unit} (kept about 14 hours: deploy/journald/)"
+    )
+    folder = RUN_LOGS.get(unit)
+    if folder is not None:
+        logs = sorted((STATE / "logs" / folder).glob("*.jsonl"))
+        if logs:
+            text += f"; its run log: {logs[-1]}"
+    return text
+
+
 def check(state: State, t: float) -> tuple[dict[str, str], list[str], list[str]]:
     """Every open condition (``key -> message``), the one-off notes of this run, and the key prefixes
     of the checks that could not run (systemd too slow): their open conditions are not cleared."""
@@ -416,7 +580,9 @@ def check(state: State, t: float) -> tuple[dict[str, str], list[str], list[str]]
     unknown: list[str] = []
     first = state.held
     held: dict[str, tuple[str, str, float]] = {}
-    for name, (pid, cmd, age) in lock_holders().items():
+    holders = lock_holders()
+    index_pid = holders["index"][0] if "index" in holders else None
+    for name, (pid, cmd, age) in holders.items():
         if name in LIFETIME_LOCKS:
             continue
         key = f"{name}:{pid}"
@@ -424,8 +590,19 @@ def check(state: State, t: float) -> tuple[dict[str, str], list[str], list[str]]
         since = max(first.get(key, t), t - age)
         first[key] = since
         held[name] = (pid, cmd, t - since)
-        if t - since >= LOCK_LIMIT_H.get(name, LOCK_H) * 3600:
-            cond[f"lock-held:{name}"] = f"{name} lock held {hours(t - since)} by pid {pid}: {short(cmd)}"
+        limit = LOCK_LIMIT_H.get(name, LOCK_H)
+        if name in ("index", "heavy") and index_build(cmd):
+            limit = max(limit, INDEX_LOCK_H)
+        if name == "heavy" and pid == index_pid:
+            continue  # one job holding both is one condition: lock-held:index names both
+        if t - since >= limit * 3600:
+            both = name == "index" and holders.get("heavy", ("",))[0] == pid
+            what = "index and heavy locks" if both else f"{name} lock"
+            cond[f"lock-held:{name}"] = f"{what} held {hours(t - since)} by pid {pid}: {short(cmd)}"
+    if index_pid is not None and index_build(holders["index"][1]):
+        silent = index_silence(index_pid, t)
+        if silent is not None:
+            cond["index-silent"] = silent
     for key in list(first):
         name, _, pid = key.partition(":")
         if name not in held or held[name][0] != pid:
@@ -439,12 +616,29 @@ def check(state: State, t: float) -> tuple[dict[str, str], list[str], list[str]]
     rows = listed or []
     if listed is None:  # nothing known of any unit: no unit condition ends, no job's samples go
         unknown += ["unit-failed:", "files-high:", "job-idle:", "job-down:"]
+    owed_units = owed_by_yield()
+    # A halt (tools/wsp-shutdown, for a game or before a restart) stops them all on purpose: one quiet
+    # condition, not an alert each. Once any of them runs again, the others are watched again: on
+    # 2026-10-30 all but the memory guard were started by hand after a halt.
+    halted = (
+        HALTED.exists() and listed is not None and not any(u in RUNNING and a == "active" for u, a, _ in rows)
+    )
+    if halted:
+        cond["halted"] = (
+            f"the library is halted (tools/wsp-shutdown, {HALTED}): tools/wsp-start starts it again"
+        )
     for unit, active, sub in rows:
         if active == "failed":
-            cond[f"unit-failed:{unit}"] = f"{unit} failed ({sub}); journalctl --user -u {unit}"
+            cond[f"unit-failed:{unit}"] = f"{unit} failed ({sub})" + failure_pointers(state, unit, t)
             continue
-        if unit in CORE and active != "active":
-            cond[f"unit-failed:{unit}"] = f"{unit} is {active} ({sub})"
+        if unit in RUNNING and active != "active" and unit not in owed_units and not halted:
+            down = state.inactive.setdefault(unit, t)
+            if t - down >= UNIT_DOWN_MIN * 60:
+                cond[f"unit-failed:{unit}"] = (
+                    f"{unit} is {active} ({sub}) for {hours(t - down)}: systemctl --user start {unit}"
+                    " (after a halt without a reboot, tools/wsp-start starts the whole library)"
+                    + failure_pointers(state, unit, t)
+                )
         if unit in CORE and active == "active":
             pid = unit_prop(unit, "MainPID")
             if pid is None:
@@ -512,15 +706,18 @@ def check(state: State, t: float) -> tuple[dict[str, str], list[str], list[str]]
             )
     for unit in [u for u in samples if u not in seen and listed is not None]:
         del samples[unit]
+    downs = {u for u, a, _ in rows if u in RUNNING and a != "active" and u not in owed_units and not halted}
+    for unit in [u for u in state.inactive if u not in downs and listed is not None]:
+        del state.inactive[unit]
     for unit in [u for u in state.runs if u not in seen and listed is not None]:
         del state.runs[unit]
 
     owed = JOBS / "jobs" / "yield-stopped"
     try:
         age = t - owed.stat().st_mtime
-        names = sorted({line.strip() for line in owed.read_text().splitlines() if line.strip()})
     except OSError:
-        age, names = 0.0, []
+        age = 0.0
+    names = sorted(owed_units)
     if names and age >= OWED_MIN * 60:
         short_names = ", ".join(n.removeprefix("whisipedia-job-").removesuffix(".service") for n in names)
         cond["jobs-owed"] = (
@@ -568,7 +765,9 @@ def check(state: State, t: float) -> tuple[dict[str, str], list[str], list[str]]
         cond["api-down"] = f"{HEALTH_URL} did not answer 200 twice"
     for mount, min_gb in MOUNTS.items():
         if mount != "/" and not os.path.ismount(mount):  # its free space would be the root disk's
-            cond[f"nas-missing:{mount}"] = f"{mount} is not mounted: the vault is unreachable; remount the share"
+            cond[f"nas-missing:{mount}"] = (
+                f"{mount} is not mounted: the vault is unreachable; remount the share"
+            )
             continue
         try:
             free = shutil.disk_usage(mount).free / 1e9
@@ -588,10 +787,12 @@ def check(state: State, t: float) -> tuple[dict[str, str], list[str], list[str]]
 
 
 def scan_logs(state: State, t: float) -> list[str]:
-    """New problem lines since the last run, one note per problem and log a day (the last line, and
-    how many)."""
+    """New problem lines since the last run, one note per problem and log a day, a week for a lane's
+    own retries (ROUTINE) (the last line, and how many)."""
     offsets, noted = state.offsets, state.noted
-    for k in [k for k, v in noted.items() if t - v > NOTE_EVERY_S]:
+    for k in [
+        k for k, v in noted.items() if t - v > (NOTE_ROUTINE_S if k.startswith("w:") else NOTE_EVERY_S)
+    ]:
         del noted[k]
     notes: list[str] = []
     paths = sorted({p for pattern in LOGS if pattern for p in glob.glob(pattern)})
@@ -613,6 +814,8 @@ def scan_logs(state: State, t: float) -> list[str]:
             if m is None or NOISE.search(line):
                 continue
             kind = hashlib.sha1(f"{path}\0{m.group(0)}".encode()).hexdigest()[:16]  # noqa: S324 - a key
+            if ROUTINE.fullmatch(m.group(0)):
+                kind = "w:" + kind  # a lane's own retry: once a week
             n, _ = hits.get(kind, (0, ""))
             hits[kind] = (n + 1, line.strip())
         for kind, (n, line) in hits.items():
@@ -647,12 +850,65 @@ def main() -> int:
         since, _ = open_.pop(key)
         lines.append(f"{stamp(t)} CLEARED {key} (open {hours(t - since)})")
     lines += [f"{stamp(t)} NOTE log {n}" for n in notes]
+    state.saved = {k: v for k, v in state.saved.items() if k in open_}
     if lines:
         with events.open("a", encoding="utf-8") as fh:
             fh.write("".join(f"{line}\n" for line in lines))
         print("\n".join(lines))
-    state.save(state_path)
+    state.save(state_path)  # before the alerts: a run killed while raising them writes no event twice
+    if push(state, t):
+        state.save(state_path)
     return 0
+
+
+def push_severity(key: str, halted: bool = False) -> str | None:
+    """The severity a condition is raised with as a ``watch:`` alert, or None (events.log only). While
+    the library is halted on purpose its API is down on purpose too."""
+    if halted and key == "api-down":
+        return None
+    for prefix, severity in PUSHED.items():
+        if key == prefix or (prefix.endswith(":") and key.startswith(prefix)):
+            if prefix == "unit-failed:" and key.removeprefix(prefix) in RUNNING:
+                return "critical"
+            return severity
+    return None
+
+
+def alert(*args: str) -> bool:
+    """``wsp alerts ARGS`` (ALERT_CMD), within the run's budget; whether it succeeded."""
+    wait = min(ALERT_S, remaining())
+    if wait < 5 or not os.access(ALERT_CMD, os.X_OK):
+        return False
+    try:
+        done = subprocess.run(  # noqa: S603 - fixed argv
+            [ALERT_CMD, "alerts", *args],
+            cwd=REPO,  # the checkout's config/ unless WSP_CONFIG_DIR names another
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=wait,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return done.returncode == 0
+
+
+def push(state: State, t: float) -> bool:
+    """Raise each open PUSHED condition as ``watch:<key>`` and resolve those gone; one that fails (no
+    budget left, the CLI slow) is tried again next run. Whether anything changed."""
+    changed = False
+    for key, (_, msg) in sorted(state.open.items()):
+        severity = push_severity(key, "halted" in state.open)
+        if severity is None or key in state.pushed:
+            continue
+        if alert("raise", "--key", f"watch:{key}", "--severity", severity, "--message", msg):
+            state.pushed[key] = t
+            changed = True
+    for key in [k for k in state.pushed if k not in state.open]:
+        if alert("resolve", "--key", f"watch:{key}"):
+            del state.pushed[key]
+            changed = True
+    return changed
 
 
 if __name__ == "__main__":

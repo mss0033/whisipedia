@@ -31,6 +31,7 @@ NAS_WAIT=${WSP_NAS_WAIT:-900}
 NAS_POLL=${WSP_NAS_POLL:-15}
 SETTLE=${WSP_RESUME_SETTLE:-60}  # after the mount: let the API and the orchestrator start first
 cd "$REPO" || exit 1
+rm -f "$S/halted"  # tools/wsp-shutdown's, before the reboot: the library runs again
 
 waited=0
 until mountpoint -q "$NAS"; do

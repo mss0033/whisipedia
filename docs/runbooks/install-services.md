@@ -11,7 +11,7 @@ Whisipedia runs as three systemd **user** units (PLAN §6.5, §12.6), rendered f
 | `whisipedia-trawler.service` | `tools/wsp-trawl`: opens unvisited pages in a headless Chromium, one a minute, pausing while the owner reads; `wsp trawl report` shows what it found | loopback only |
 | `whisipedia-yield.service` | `tools/wsp-yield`: when the whole machine runs short of memory, freezes `whisipedia-background.slice`; still short after 30 s, stops its resumable jobs (`wsp-bg` jobs, the trawler, the nightly index) and starts the trawler and `whisipedia-resume.service` after 10 calm minutes. While the owner reads (the API's `last-interactive` marker is younger than `WSP_YIELD_READER_SECONDS`, 300 by default, 0 for never), it also freezes the slice, and thaws it once the library has gone unused that long: downloads, ingests and the index build stop competing with the reader for the NAS. Probes (`X-Whisipedia-Probe`: audit, trawler, health check) and polling (health, system, events, the change feed) do not count as reading. The API is left alone, and so is the weather pull (`app.slice`: the weather page's refresh is the owner asking). A unit started during a pause waits for the thaw: the trawler is `Type=simple` so its start cannot time out, and the quality run's start timeout is 12 h | none |
 | `whisipedia-digest.timer` → `whisipedia-digest.service` | 09:00 daily: `wsp alerts digest --notify`, the last day's alerts and trawler findings as one Windows notification (critical alerts also show at once, from the orchestrator) | none |
-| `whisipedia-quality.timer` → `whisipedia-quality.service` | Sundays 03:17: `wsp quality run --alerts`, the gold queries through the API; a drop of nDCG@10 opens a warning | loopback only |
+| `whisipedia-quality.timer` → `whisipedia-quality.service` | Sundays 03:17: `wsp quality run --alerts`, the gold queries through the API, after a running index build (up to 6 h); a drop of nDCG@10 opens a warning, and so does a median latency twice the best of the recent runs that had no index build or ingest beside them | loopback only |
 
 ## Before you start
 
@@ -41,6 +41,14 @@ NAS share is not mounted yet (WSL just started), the unit fails and systemd retr
 ## Operate
 
 * Logs: `journalctl --user -u whisipedia-orchestrator -o cat` (JSON lines), `-u whisipedia-api`.
+  The journal keeps only about 14 hours until the drop-in under "Journal retention" is installed;
+  the long commands keep their own run logs (`<state>/logs/`, the diagnostic-logs runbook), and
+  `tools/wsp-stall` saves a failed unit's last journal lines to `<state>/watch/failures/` when it
+  sees the failure, and names that file in its alert.
+* Stalls and outages: `tools/wsp-stall --status` (every 10 minutes from `whisipedia-stall.timer`;
+  its events go to `<state>/watch/events.log`). The serious ones (a unit failed or a long-running
+  service down, the API silent, memory stalls, a silent index build, the disk or the NAS) are also
+  `watch:` alerts: the morning digest, `wsp://system`, and a notification when critical.
 * State: `wsp status`, `wsp doctor`, `wsp parity status`, `wsp proposals list`, or `wsp://system` in
   the Navigator.
 * Stop: `systemctl --user stop whisipedia-orchestrator` (graceful: in-flight steps finish, the rest
@@ -73,6 +81,21 @@ share, and the shares fit under the slice's MemoryHigh, so one job cannot thrott
   memory guard stopped were never started again. A restart of `tools/wsp-yield` keeps what it owes
   (`jobs/yield-stopped`).
 
+## Resuming after a halt without a reboot
+
+`tools/wsp-shutdown` stops the memory guard and the services; with no reboot after it, nothing starts
+them again (`Restart=always` does not undo a stop, and the user manager starts the enabled units only
+when it starts). `tools/wsp-start` does: the memory guard first, then the API, the orchestrator, the
+trawler and any enabled timer that is stopped, then `whisipedia-resume.service` (the lanes and jobs,
+once the NAS is there). It starts only the units `wsp service install` enabled, and exits 1 naming any
+that is still not running. 2026-10-30: after a halt the rest was started by hand and the memory guard
+was not, and nothing paused the background for the reader or a memory shortage for 6 days; now
+`tools/wsp-stall` raises `unit-failed:` for a long-running service down for 20 minutes. A halt itself
+raises nothing: `tools/wsp-shutdown` leaves `~/.local/state/whisipedia/halted`, and while it is there
+and none of those services runs, `tools/wsp-stall` only notes `halted`. Once any of them runs again
+(started by hand), the others are watched again; `tools/wsp-start` and the resume after a reboot
+remove the marker.
+
 ## Restarting WSL or the PC
 
 1. In WSL: `tools/wsp-shutdown`. It stops the background jobs (a lane notes where it stopped; ingests
@@ -82,6 +105,19 @@ share, and the shares fit under the slice's MemoryHigh, so one job cannot thrott
 3. After the restart, open a WSL terminal (the user services start with it): `whisipedia-resume.service`
    waits for the NAS, then starts the jobs named in `~/.local/state/whisipedia/jobs.conf` again.
    Check `systemctl --user --failed` and `tools/wsp-stall --status`.
+
+## Journal retention (root, once)
+
+The journal kept about 14 hours (2026-11-05): the WSL VM's clock jumps backwards now and then,
+journald starts new files at each jump, and its default cap of 100 files (system and user journals
+together) dropped the oldest each time, with the disk nearly empty. Raise the cap with the system
+drop-in (a user one under `~/.config/systemd/journald.conf.d` is not read for this):
+
+```
+sudo install -D -m 0644 deploy/journald/50-whisipedia.conf /etc/systemd/journald.conf.d/50-whisipedia.conf
+sudo systemctl restart systemd-journald
+journalctl --user -q --no-pager | head -1   # a day later: its oldest line is over a day old
+```
 
 ## Uninstall
 

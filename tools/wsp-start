@@ -1,0 +1,50 @@
+#!/bin/sh
+# Start the library again after tools/wsp-shutdown when WSL was NOT restarted (a reboot starts the
+# enabled services by itself). 2026-11-05 deep dive: after the 10-30 halt the jobs, the API, the
+# orchestrator and the trawler were started again by hand, the memory guard was not, and the background
+# ran for 6 days with nothing to pause it for the reader or for a memory shortage.
+#
+# In order: the memory guard first (it holds back what starts after it while memory is short), the API,
+# the orchestrator, the trawler, any enabled timer that is stopped, then whisipedia-resume.service (the
+# lanes, jobs.conf, a rebuild, the jobs the guard owes; it waits for the NAS, so it is not waited for).
+# Only units `wsp service install` enabled are started: one the owner disabled stays off. Exit 1 when
+# an enabled service is still not running; then see `tools/wsp-stall --status`.
+set -u
+say() { echo "$(date +%H:%M:%S) $*"; }
+S=${WSP_STATE:-${XDG_STATE_HOME:-${HOME:-}/.local/state}/whisipedia}
+rm -f "$S/halted"  # tools/wsp-shutdown's: the library is meant to run again, and be watched
+SERVICES="whisipedia-yield.service whisipedia-api.service whisipedia-orchestrator.service whisipedia-trawler.service"
+
+started=""
+for u in $SERVICES; do
+  systemctl --user is-enabled -q "$u" 2>/dev/null || continue
+  started="$started $u"
+  if ! systemctl --user is-active -q "$u"; then
+    say "starting $u"
+    systemctl --user start "$u" || say "$u did not start: journalctl --user -u $u"
+  fi
+done
+timers=$(systemctl --user list-unit-files --no-legend --plain --state=enabled 'whisipedia-*.timer' | awk '{print $1}')
+for u in $timers; do
+  if ! systemctl --user is-active -q "$u"; then
+    say "starting $u"
+    systemctl --user start "$u" || say "$u did not start"
+  fi
+done
+if systemctl --user cat whisipedia-resume.service >/dev/null 2>&1; then
+  say "starting whisipedia-resume.service (the lanes and jobs, once the NAS is there)"
+  systemctl --user start --no-block whisipedia-resume.service
+else
+  say "whisipedia-resume.service is not installed: the lanes and jobs are not started (docs/runbooks/install-services.md)"
+fi
+
+down=""
+for u in $started; do
+  systemctl --user is-active -q "$u" || down="$down $u"
+done
+if [ -n "$down" ]; then
+  say "not running:$down"
+  exit 1
+fi
+say "the library is running again: check tools/wsp-stall --status in a few minutes"
+exit 0
