@@ -64,7 +64,7 @@ import numpy.typing as npt
 import tantivy
 
 from wsp_core.ids import DocId
-from wsp_core.model import BYLINE_META, DocRecord, SearchHit, Suggestion
+from wsp_core.model import BYLINE_META, SEARCH_CHARS_META, DocRecord, SearchHit, Suggestion
 from wsp_index.linkrank import RANK_FILE, StaticRank, key64
 from wsp_index.localfs import ensure_local
 from wsp_index.suggest import (
@@ -482,8 +482,9 @@ class TantivyIndex:
                 # A second title value: a book is found by its author as by its title (hits show the
                 # first value only).
                 by = doc.meta.get(BYLINE_META, "").strip() if doc.meta else ""
-                long = min_chars > 0 and size > 0 and len(doc.text) > min_chars
-                parts = split_passages(doc.text, size) if long else [doc.text]
+                text = searched_text(doc)
+                long = min_chars > 0 and size > 0 and len(text) > min_chars
+                parts = split_passages(text, size) if long else [text]
                 if replace:
                     writer.delete_documents_by_term("doc_id", doc.doc_id)
                     if doc.doc_id in had:
@@ -1280,6 +1281,16 @@ def lead_passage(text: str) -> str:
 
 def _width(line: str) -> int:
     return sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in line)
+
+
+def searched_text(doc: DocRecord) -> str:
+    """The part of a document's text the index holds: its first ``meta["search_chars"]`` characters
+    when the adapter says so (a crystal structure's summary, not its CIF: COD, 2026-11-05), else all
+    of it. A value that is not a non-negative count is ignored (the whole text is searched)."""
+    raw = doc.meta.get(SEARCH_CHARS_META, "") if doc.meta else ""
+    if not raw.isdigit():
+        return doc.text
+    return doc.text[: int(raw)]
 
 
 def _lead(text: str, max_chars: int) -> str:

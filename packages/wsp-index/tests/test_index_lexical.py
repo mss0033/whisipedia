@@ -622,6 +622,35 @@ def test_a_book_is_found_by_its_byline_and_hits_show_its_title(tmp_path: Path) -
     idx.close()
 
 
+def test_only_the_searched_part_of_a_document_is_indexed(tmp_path: Path) -> None:
+    """COD, 2026-11-05: a crystal structure's text is its summary and then its CIF; the CIF's coordinates
+    are shown, not searched (``meta["search_chars"]``), so they make no passages and match nothing."""
+    from wsp_core.model import SEARCH_CHARS_META
+    from wsp_index.lexical import PASSAGE_SEP, searched_text
+
+    idx = TantivyIndex(tmp_path / "lex", config=TantivyConfig(passage_min_chars=6_000, passage_chars=2_000))
+    summary = "Quartz (COD 9000000)\nFormula: O2 Si\nAuthors: Glinnemann, J."
+    cif = "\nloop_\n_atom_site_label\nzirconolite 0.4697 0.0000 0.0000\n" * 400  # ~20k chars
+    quartz = DocRecord(
+        make_doc_id("cod", "9000000"),
+        "cod",
+        "9000000",
+        "Quartz (COD 9000000)",
+        "en",
+        "CC0-1.0",
+        summary + cif,
+        meta={SEARCH_CHARS_META: str(len(summary))},
+    )
+    assert searched_text(quartz) == summary
+    assert searched_text(replace(quartz, meta={SEARCH_CHARS_META: "-1"})) == quartz.text  # not a count
+    idx.upsert([quartz])
+    idx.commit()
+    assert ids(idx.search("Glinnemann")) == [quartz.doc_id]
+    assert idx.search("zirconolite") == []
+    assert not idx.present([f"{quartz.doc_id}{PASSAGE_SEP}1"])  # no passages of the CIF either
+    idx.close()
+
+
 def test_a_long_document_is_found_by_a_passage_deep_inside_and_listed_once(tmp_path: Path) -> None:
     # 2026-10-16 field exam: "running fix" never found Bowditch (1.4M characters, scored whole).
     from wsp_index.lexical import PASSAGE_SEP, TantivyConfig, split_passages

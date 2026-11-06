@@ -292,6 +292,10 @@ class Generation:
 
 
 BYLINE_META = "byline"  # DocRecord.meta: the authors as a reader names them; searched with the title
+SEARCH_CHARS_META = "search_chars"
+"""DocRecord.meta: how many leading characters of the text search indexes; the rest is shown, not searched.
+A crystal structure's text is its summary and then its CIF, tens of KB of coordinates that would fill the
+index with numbers no reader searches for (COD, 2026-11-05). Absent: the whole text."""
 
 
 @dataclass(frozen=True, slots=True)

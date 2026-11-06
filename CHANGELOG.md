@@ -3,6 +3,14 @@
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Added: the Crystallography Open Database, one page per structure (2026-11-05)
+* `reader: cod-cif` streams COD's 26.6 GB archive once and makes each of its ~520,000 CIFs a document:
+  "<name or formula> (COD <id>)", a summary (formula, space group, cell, authors, journal, year, DOI)
+  and the CIF itself, without its embedded reflection data. The archive keeps its own page, to download.
+* Only the summary is searched (`DocRecord.meta["search_chars"]`): the CIF's coordinates stay out of
+  the index.
+* The Navigator draws the unit cell and its atoms from the CIF (a small canvas renderer, no library),
+  turned by dragging or the arrow keys, and offers the CIF as a download made in the page.
 ### Changed: Kiwix comes from the official mirrors, checked against Kiwix's own checksums (2026-10-26)
 * Kiwix's hosts refuse robots since October 2026. The `kiwix-opds` adapter (`KiwixMirrorAdapter`)
   lists ZIMs from `ftp.fau.de/kiwix` and downloads from it and `dumps.wikimedia.org/kiwix`; a file is

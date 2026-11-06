@@ -582,6 +582,35 @@
   text-indent: 1.5em;
   margin: 0.5em 0;
 }
+/* Crystal structures (pages/crystal.ts): the facts, the drawing of the cell, the CIF folded. */
+.crystal-facts th {
+  text-align: left;
+  vertical-align: top;
+  padding-right: 1em;
+  white-space: nowrap;
+}
+.crystal-viewer {
+  margin: 1em 0;
+}
+.crystal-canvas {
+  display: block;
+  width: 100%;
+  max-width: 640px;
+  height: auto;
+  aspect-ratio: 4 / 3;
+  background: var(--page-bg);
+  color: var(--page-fg);
+  border: 1px solid var(--box-border);
+  cursor: grab;
+  touch-action: none;
+}
+.crystal-canvas:focus-visible {
+  outline: 2px dotted var(--focus);
+}
+.crystal-cif pre {
+  max-height: 40em;
+  overflow: auto;
+}
 .doc-body img {
   max-width: 100%;
   height: auto;

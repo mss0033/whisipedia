@@ -56,7 +56,7 @@ from typing import Any, NamedTuple, cast
 from urllib.parse import unquote, urlsplit
 
 from wsp_adapters._common import access, available_cpus, upstream_dir, verify_file
-from wsp_adapters.doccollection import structured, tei
+from wsp_adapters.doccollection import cod, structured, tei
 from wsp_adapters.doccollection.catalog import FetchedDoc, build_catalog, excluded_by, write_catalog
 from wsp_adapters.doccollection.discovery import (
     DiscoverEnv,
@@ -97,6 +97,8 @@ from wsp_core.errors import RedirectRefusedError
 from wsp_core.ids import content_hash, make_doc_id
 from wsp_core.memory import drop_file_cache
 from wsp_core.model import (
+    BYLINE_META,
+    SEARCH_CHARS_META,
     Checksum,
     DocRecord,
     FetchPlan,
@@ -159,7 +161,7 @@ class CollectionConfig:
         if not isinstance(formats, list):
             raise ValueError(f"{spec.id}: access.formats must be a list of file extensions, got {formats!r}")
         reader = str(acc.get("reader") or "")
-        known = {**tei.READERS, **structured.READERS, **structured.ARCHIVE_READERS}
+        known = {**tei.READERS, **structured.READERS, **structured.ARCHIVE_READERS, **cod.TAR_READERS}
         if reader and reader not in known:
             raise ValueError(f"{spec.id}: access.reader must be one of {sorted(known)}, got {reader!r}")
         return CollectionConfig(
@@ -567,12 +569,20 @@ class DocCollectionAdapter:
                     continue
                 yield meta, path
 
+        def streamed(path: Path) -> bool:  # a tar archive its reader streams (COD's 26.6 GB of CIFs)
+            return cfg.reader in cod.TAR_READERS and cod.is_archive(path)
+
         def needs_reading(item: tuple[DocumentMeta, Path]) -> bool:
-            snapshot = cfg.reader and item[1].suffix.lower() in (".zip", ".xml", ".json")
+            snapshot = cfg.reader and (
+                item[1].suffix.lower() in (".zip", ".xml", ".json") or streamed(item[1])
+            )
             return cfg.index_text and not snapshot
 
         for meta, path, read in read_in_order(admitted(), needs_reading, cfg.pdf_max_pages):
             if read is None:
+                if streamed(path):
+                    yield from self._archive_documents(spec, cfg, meta, path, generation_dir)
+                    continue
                 if cfg.reader and path.suffix.lower() in (".zip", ".xml", ".json"):
                     yield from self._snapshot_documents(spec, cfg, meta, path)
                     continue
@@ -688,6 +698,77 @@ class DocCollectionAdapter:
                 url_native=d.url or meta.origin_url or None,
                 content_hash=content_hash(d.text),
                 meta=meta.record_meta(),
+            )
+
+    def _archive_documents(
+        self, spec: SourceSpec, cfg: CollectionConfig, meta: DocumentMeta, path: Path, generation_dir: Path
+    ) -> Iterator[DocRecord]:
+        """A tar archive read as a stream by its reader (``cod-cif``: one document per crystal
+        structure, :mod:`wsp_adapters.doccollection.cod`), after the archive's own document (its
+        catalog record and the file to download, as before), which every structure links back to.
+
+        Each structure is screened like a snapshot's work (:meth:`_snapshot_documents`), on its title
+        and summary: the CIF after it is coordinates. Only the summary is searched
+        (:data:`SEARCH_CHARS_META`); the authors are searched with the title (:data:`BYLINE_META`).
+        The owner asked for the Crystallography Open Database's structures to be readable one by one
+        (2026-11-05): the 26.6 GB archive was one "data file" document nothing could look inside."""
+        title = reader_title(meta, path, "")
+        license_ = meta.license or spec.license
+        record_meta = meta.record_meta()
+        text = catalog_header(meta, title=title) + (
+            "\n\nEach crystal structure in this archive has a page of its own in the library: its "
+            "summary, a drawing of its unit cell and its CIF file. Search for a name, a formula or a COD id."
+        )
+        yield DocRecord(
+            doc_id=make_doc_id(spec.id, meta.doc_key),
+            source_id=spec.id,
+            native_id=meta.doc_key,
+            title=title,
+            lang=meta.language or "en",
+            license=license_,
+            text=text,
+            revision=meta.edition_date or None,
+            url_native=meta.origin_url or None,
+            html_ref=f"file:{meta.generation or generation_dir.name}/{meta.file}",
+            content_hash=content_hash(text),
+            meta=record_meta,
+        )
+        rules = cfg.rules
+        for entry in cod.archive_entries(path, title):
+            native = f"{meta.doc_key}/{entry.cod_id}"
+            s = entry.structure
+            verdict = classify_content(
+                entry.summary,
+                rules,
+                overridden=bool(
+                    {normalize_pub_number(native), normalize_pub_number(entry.cod_id)} & rules.override_safety
+                ),
+            )
+            if verdict.verdict is Verdict.DENY:
+                log.warning("%s: %s left out of the index (%s)", spec.id, native, verdict.rule)
+                continue
+            if verdict.verdict is Verdict.REVIEW:
+                log.info("%s: %s indexed under review (%s)", spec.id, native, verdict.rule)
+            extra = {
+                SEARCH_CHARS_META: str(len(entry.summary)),
+                "cod_id": entry.cod_id,
+                "archive_member": entry.member,
+            }
+            if s.byline:
+                extra[BYLINE_META] = s.byline
+            yield DocRecord(
+                doc_id=make_doc_id(spec.id, native),
+                source_id=spec.id,
+                native_id=native,
+                title=s.title,
+                lang="en",
+                license=license_,
+                text=entry.text,
+                revision=meta.edition_date or None,
+                url_native=cod.page_url(entry.cod_id),
+                content_hash=content_hash(entry.text),
+                aliases=cod.aliases(s),
+                meta={**record_meta, **extra},
             )
 
 

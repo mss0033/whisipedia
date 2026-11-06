@@ -5126,6 +5126,8 @@ sources:
       issuer: "Crystallography Open Database"
       key_prefix: cod
       origins: [www.crystallography.net]
+      # One document per structure, the archive streamed once (wsp_adapters.doccollection.cod; owner request 2026-11-05).
+      reader: cod-cif
       manual: {daily: 10, list: {kind: discovery}}
       discovery:
         - kind: list

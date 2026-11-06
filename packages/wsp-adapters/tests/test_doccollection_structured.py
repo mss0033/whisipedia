@@ -595,3 +595,292 @@ def test_the_2015_government_manual_package_zip_is_an_agency_a_document(tmp_path
     assert doc.title == "United States Botanic Garden (United States Government Manual 2015)"
     assert "importance of plants" in doc.text
     assert "x@y" not in doc.text
+
+
+# --- the Crystallography Open Database (reader cod-cif, owner request 2026-11-05) ----------------------
+
+COD_CIF = """#------------------------------------------------------------------------------
+#$URL: svn://www.crystallography.net/cod/cif/1/00/00/1000000.cif $
+#------------------------------------------------------------------------------
+data_1000000
+loop_
+_publ_author_name
+'K\\"ohler, J.'
+"O'Neil, M."
+_publ_section_title
+;
+ The crystal structure of \\a-quartz
+ at low temperature
+;
+_journal_name_full               'Acta Crystallographica Section B'
+_journal_volume                  62
+_journal_page_first              101
+_journal_page_last               108
+_journal_year                    2006
+_journal_paper_doi               10.1107/S0108768105000000
+_chemical_name_mineral           Quartz
+_chemical_name_systematic        'Silicon dioxide'
+_chemical_formula_sum            'O2 Si'
+_space_group_IT_number           154
+_symmetry_space_group_name_H-M   'P 32 2 1'
+_cell_length_a                   4.9134(2)
+_cell_length_b                   4.9134(2)
+_cell_length_c                   5.4052(3)
+_cell_angle_alpha                90
+_cell_angle_beta                 90
+_cell_angle_gamma                120
+_cell_volume                     113.01(1)
+_cell_formula_units_Z            3
+_cell_measurement_temperature    ?
+_cod_database_code               1000000
+loop_
+_space_group_symop_operation_xyz
+x,y,z
+-y,x-y,z+2/3
+y-x,-x,z+1/3
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+Si1 Si 0.4697(1) 0 0
+O1 O 0.4133 0.2672 0.1188 # a comment after a row
+loop_
+_refln_index_h
+_refln_index_k
+_refln_index_l
+_refln_F_squared_meas
+1 0 0 12.5
+1 1 0 3.25
+_shelx_hkl_file
+;
+   1   0   0  12.50   0.10
+   1   1   0   3.25   0.05
+;
+_shelx_res_checksum              12345
+"""
+
+
+def test_a_cif_is_read_forgivingly() -> None:
+    from wsp_adapters.doccollection.cod import parse_cif
+
+    (block,) = parse_cif(COD_CIF)
+    assert block.name == "1000000"
+    assert block.column("_publ_author_name") == ['K\\"ohler, J.', "O'Neil, M."]  # a quote ends before a space
+    assert block.value("_publ_section_title") == "The crystal structure of \\a-quartz at low temperature"
+    assert block.value("_chemical_formula_sum") == "O2 Si"
+    assert block.value("_cell_measurement_temperature") == ""  # CIF's "unknown"
+    assert block.column("_atom_site_fract_x") == ["0.4697(1)", "0.4133"]  # the comment is not a value
+    assert block.value("_shelx_res_checksum") == "12345"
+    # a truncated file keeps what was read; a loop's incomplete last row is dropped
+    (cut,) = parse_cif("data_x\n_cell_length_a 4.9\nloop_\n_a\n_b\n1 2\n3")
+    assert cut.value("_cell_length_a") == "4.9"
+    assert cut.loops == [(("_a", "_b"), [("1", "2")])]
+    assert parse_cif("no data block here\n_cell_length_a 1") == []
+
+
+def test_reflections_and_embedded_files_are_left_out_of_the_kept_cif() -> None:
+    """A modern CIF's bytes are mostly its reflections (``_refln_`` loops, ``_shelx_hkl_file``): shown to
+    no one, so each is a comment saying the archive's copy has it."""
+    from wsp_adapters.doccollection.cod import CIF_MAX_CHARS, parse_cif, trim_cif
+
+    kept = trim_cif(COD_CIF)
+    assert "12.5" not in kept  # neither the loop's rows nor the embedded file's
+    assert "# loop of _refln_index_h left out here (2 rows); the archive's copy has it" in kept
+    assert "# _shelx_hkl_file left out here (2 lines); the archive's copy of this file has it" in kept
+    assert "_shelx_res_checksum              12345" in kept  # what follows is kept
+    (block,) = parse_cif(kept)
+    assert block.column("_atom_site_label") == ["Si1", "O1"]
+    assert not any(t[0].startswith("_refln") for t, _rows in block.loops)
+    huge = "data_x\n" + "_note 'x'\n" * (CIF_MAX_CHARS // 8)
+    cut = trim_cif(huge)
+    assert len(cut) < CIF_MAX_CHARS + 200
+    assert cut.rstrip().endswith("more characters in the archive's copy")
+
+
+def test_a_structure_is_summarized_for_its_page_and_search() -> None:
+    from wsp_adapters.doccollection.cod import CIF_HEADING, aliases, cif_text, read_entry
+
+    entry = read_entry("cod/cif/1/00/00/1000000.cif", COD_CIF.encode(), "COD full release")
+    assert entry is not None
+    s = entry.structure
+    assert s.title == "Quartz (COD 1000000)"
+    assert s.authors == ("Köhler, J.", "O'Neil, M.")
+    assert entry.summary.splitlines() == [
+        "Quartz (COD 1000000)",
+        "Crystal structure 1000000 of the Crystallography Open Database.",
+        "Name: Quartz",
+        "Also named: Silicon dioxide",
+        "Formula: O2 Si",
+        "Space group: P 32 2 1 (No. 154)",
+        "Cell: a = 4.9134 Å, b = 4.9134 Å, c = 5.4052 Å; α = 90°, β = 90°, γ = 120°; V = 113.01 Å³; Z = 3",
+        "Authors: Köhler, J.; O'Neil, M.",
+        "Article: The crystal structure of α-quartz at low temperature",
+        "Published in: Acta Crystallographica Section B 62 (2006), 101-108",
+        "DOI: 10.1107/S0108768105000000",
+        "From the archive: COD full release (cod/cif/1/00/00/1000000.cif)",
+    ]
+    assert entry.text.startswith(entry.summary + f"\n\n{CIF_HEADING} 1000000.cif\n#---")
+    assert "_atom_site_fract_x" in entry.text
+    assert aliases(s) == ("Quartz", "Silicon dioxide", "O2Si", "COD 1000000")
+    assert cif_text("Fe^3+^ C~6~H~12~ \\ss \\'ecole \\G") == "Fe3+ C6H12 ß école Γ"
+    # no name: the formula; a very long systematic name is shortened in the title only
+    bare = read_entry("cif/2/00/00/2000000.cif", b"data_2000000\n_chemical_formula_sum 'C6 H12 O6'\n", "A")
+    assert bare is not None
+    assert bare.structure.title == "C6H12O6 (COD 2000000)"
+    long_name = "2-(" + "methyl " * 40 + ")ethanol"
+    named = read_entry(
+        "cif/2/00/00/2000001.cif", f"data_x\n_chemical_name_systematic '{long_name}'\n".encode(), "A"
+    )
+    assert named is not None
+    assert named.structure.title.endswith("… (COD 2000001)")
+    assert len(named.structure.title) < 140
+    assert long_name in named.summary
+    assert read_entry("cif/readme.cif", b"data_x\n", "A") is None  # not a COD entry's file
+    assert read_entry("cif/2/00/00/2000002.cif", b"# only a comment\n", "A") is None
+
+
+def _cod_archive(path: Path, files: dict[str, bytes]) -> None:
+    import io
+    import tarfile
+
+    with tarfile.open(path, "w:gz") as tar:
+        for name, data in files.items():
+            info = tarfile.TarInfo(name.rstrip("/"))
+            if name.endswith("/"):
+                info.type = tarfile.DIRTYPE
+                tar.addfile(info)
+                continue
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+
+
+def test_the_archive_is_streamed_and_only_structures_are_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import tarfile
+
+    from wsp_adapters.doccollection.cod import archive_cifs, archive_entries
+
+    held: list[int] = []  # member headers the TarFile holds as each next one is read
+    real_next = tarfile.TarFile.next
+
+    def next_member(self: tarfile.TarFile) -> tarfile.TarInfo | None:
+        held.append(len(vars(self)["members"]))
+        return real_next(self)
+
+    monkeypatch.setattr(tarfile.TarFile, "next", next_member)
+
+    tgz = tmp_path / "cod__cod-cifs-mysql-63aad8d2.tgz"
+    _cod_archive(
+        tgz,
+        {
+            "cif/": b"",
+            "cif/1/00/00/1000000.cif": COD_CIF.encode(),
+            "mysql/cod.sql": b"INSERT INTO data VALUES (1000000);\n" * 100,
+            "cif/1/00/00/1000001.cif": b"data_1000001\n_chemical_formula_sum 'Na Cl'\n",
+            "cif/1/00/00/README.cif": b"data_x\n",
+            "cif/dup/1/00/00/1000001.cif": b"data_1000001\n_chemical_formula_sum 'K Cl'\n",
+        },
+    )
+    assert [n for n, _ in archive_cifs(tgz)] == [
+        "cif/1/00/00/1000000.cif",
+        "cif/1/00/00/1000001.cif",
+        "cif/dup/1/00/00/1000001.cif",
+    ]
+    assert max(held) <= 1  # stream mode would keep all 520,000 headers to the end
+    entries = list(archive_entries(tgz, "COD"))
+    assert [(e.cod_id, e.structure.formula) for e in entries] == [("1000000", "O2 Si"), ("1000001", "Na Cl")]
+
+
+def test_a_read_the_share_refuses_for_a_moment_is_made_again_at_the_same_offset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import os
+
+    from wsp_adapters.doccollection import cod
+
+    path = tmp_path / "f.bin"
+    data = bytes(range(256)) * 4
+    path.write_bytes(data)
+    real = os.pread
+    refusals = iter([True, False, True, True, True, True, True])
+
+    def flaky(fd: int, n: int, offset: int) -> bytes:
+        if next(refusals):
+            raise BlockingIOError(11, "Resource temporarily unavailable")
+        return real(fd, n, offset)
+
+    monkeypatch.setattr(os, "pread", flaky)
+    monkeypatch.setattr(cod, "DROP_EVERY", 100)
+    with cod.ShareReader(path, sleep=(0.0,)) as raw:
+        assert raw.read(300) == data[:300]  # one refusal, then read
+        assert raw.tell() == 300
+        with pytest.raises(BlockingIOError):  # the fifth refusal in a row ends the read
+            raw.read(10)
+
+
+def test_the_cod_archive_is_its_own_document_and_one_per_structure(tmp_path: Path) -> None:
+    from adapters_testkit import make_ctx, make_spec
+
+    from wsp_adapters.doccollection.adapter import CATALOG, DocCollectionAdapter
+    from wsp_adapters.doccollection.catalog import write_catalog
+    from wsp_adapters.doccollection.cod import CIF_HEADING
+    from wsp_adapters.doccollection.model import DocumentMeta
+    from wsp_core.model import BYLINE_META, SEARCH_CHARS_META
+    from wsp_core.testing.adapter_contract import FakeFetcher
+
+    gen = tmp_path / "2026-11-04"
+    (gen / "upstream").mkdir(parents=True)
+    tgz = gen / "upstream" / "cod__cod-cifs-mysql-63aad8d2.tgz"
+    denied = "data_1000002\n_chemical_name_common 'improvised explosive device construction'\n"
+    _cod_archive(
+        tgz,
+        {
+            "cif/1/00/00/1000000.cif": COD_CIF.encode(),
+            "cif/1/00/00/1000002.cif": denied.encode(),
+            "cif/1/00/00/1000003.cif": denied.replace("1000002", "1000003").encode(),
+        },
+    )
+    meta = DocumentMeta(
+        doc_key="cod:cod-cifs-mysql",
+        file="upstream/cod__cod-cifs-mysql-63aad8d2.tgz",
+        issuer="Crystallography Open Database",
+        title="COD most recent full release: all CIFs + MySQL dump (tar.gz)",
+        origin_url="https://www.crystallography.net/cod/archives/cod-cifs-mysql.tgz",
+    )
+    write_catalog(gen / CATALOG, [meta])
+    spec = make_spec(
+        "cod-full-archive",
+        {
+            "adapter": "doc-collection",
+            "issuer": "Crystallography Open Database",
+            "key_prefix": "cod",
+            "origins": ["www.crystallography.net"],
+            "discovery": [{"kind": "list", "items": [{"url": meta.origin_url}]}],
+            "filter": {"allow_all": True, "data_files": True, "override_safety": {"1000003": "test"}},
+            "reader": "cod-cif",
+        },
+        license_="CC0-1.0",
+    )
+    ctx = make_ctx(spec, FakeFetcher(), tmp_path / "w")
+    docs = list(DocCollectionAdapter(throttle=False).documents(ctx, gen))
+    assert [d.native_id for d in docs] == [
+        "cod:cod-cifs-mysql",  # the archive itself, to download
+        "cod:cod-cifs-mysql/1000000",
+        "cod:cod-cifs-mysql/1000003",  # the owner's override; 1000002 is left out by the deny core
+    ]
+    archive, quartz = docs[0], docs[1]
+    assert archive.html_ref == "file:2026-11-04/upstream/cod__cod-cifs-mysql-63aad8d2.tgz"
+    assert "a page of its own" in archive.text
+    assert quartz.title == "Quartz (COD 1000000)"
+    assert quartz.url_native == "https://www.crystallography.net/cod/1000000.html"
+    assert quartz.html_ref is None  # the page is the structure, not the 26.6 GB archive
+    assert quartz.license == "CC0-1.0"
+    head = int(quartz.meta[SEARCH_CHARS_META])
+    assert quartz.text[:head].endswith("(cif/1/00/00/1000000.cif)")
+    assert quartz.text[head:].startswith(f"\n\n{CIF_HEADING} 1000000.cif\n")
+    assert quartz.meta[BYLINE_META] == "Köhler, J.; O'Neil, M."
+    assert quartz.meta["cod_id"] == "1000000"
+    assert "COD 1000000" in quartz.aliases
