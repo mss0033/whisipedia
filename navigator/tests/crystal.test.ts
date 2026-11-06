@@ -217,8 +217,18 @@ describe('a structure document', () => {
     const { mockFetch } = await import('./helpers.ts');
     const { WspClient } = await import('../src/api/client.ts');
     const doc = await new WspClient({ fetch: mockFetch() }).document('wsp:gutenberg/84');
-    const { node } = renderBody({ ...doc, format: 'text', html: null, text: TEXT, original: null });
-    expect(node.querySelector('.crystal canvas')).not.toBeNull();
+    const plain = { ...doc, format: 'text' as const, html: null, text: TEXT, original: null };
+    // A book quoting a CIF line is a book (2026-11-06 review): only a COD structure is drawn.
+    expect(renderBody(plain).node.querySelector('.crystal')).toBeNull();
+    const cod = {
+      ...plain,
+      source_id: 'cod-full-archive',
+      native_id: 'cod:cod-cifs-mysql/1000000',
+    };
+    expect(renderBody(cod).node.querySelector('.crystal canvas')).not.toBeNull();
+    // the CIF line must name the structure the document's id names
+    const other = { ...cod, native_id: 'cod:cod-cifs-mysql/1000001' };
+    expect(renderBody(other).node.querySelector('.crystal')).toBeNull();
   });
 
   it('draws the atoms and the cell, and turns and zooms on the keyboard', () => {
@@ -268,5 +278,25 @@ describe('a structure document', () => {
     expect(calls).toEqual([]); // not its key: left to the app
     el.querySelector<HTMLButtonElement>('button.btn')!.click(); // Zoom in
     expect(arcs()).toHaveLength(10);
+
+    // The wheel scrolls the page past the drawing; it zooms only with the focus or Ctrl (2026-11-06 review).
+    document.body.append(el);
+    try {
+      const wheel = (init: WheelEventInit) => {
+        const e = new WheelEvent('wheel', { deltaY: -100, cancelable: true, ...init });
+        calls.length = 0;
+        canvas.dispatchEvent(e);
+        return e.defaultPrevented;
+      };
+      (document.activeElement as HTMLElement | null)?.blur();
+      expect(wheel({})).toBe(false);
+      expect(calls).toEqual([]);
+      expect(wheel({ ctrlKey: true })).toBe(true);
+      expect(arcs()).toHaveLength(10);
+      canvas.focus();
+      expect(wheel({})).toBe(true);
+    } finally {
+      el.remove();
+    }
   });
 });

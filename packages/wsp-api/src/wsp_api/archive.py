@@ -8,7 +8,9 @@ and nothing is unpacked to disk:
 * :func:`directory_size` reads only the end-of-central-directory records (ZIP64 too) and refuses an
   archive whose directory is too large to hold in memory, before :mod:`zipfile` parses it;
 * :class:`Listings` keeps the parsed member list of the last few archives (they are sealed, so a
-  listing never goes stale), and :func:`listing` groups it by folder with sizes;
+  listing never goes stale) and, with it, the folder index of the last few folders listed
+  (:func:`folder_index`: files grouped by folder, sorted, with totals), so the next page of a listing
+  is cut from it; :func:`listing` makes one page of it;
 * :func:`read_view` reads one small member: a text file (the start of it, for a big one) or an XML
   metadata file read into sections (:mod:`wsp_api.geometa`);
 * :func:`open_member` opens one member for streaming; the route in :mod:`wsp_api.files` sends it in
@@ -17,10 +19,12 @@ and nothing is unpacked to disk:
 
 from __future__ import annotations
 
+import bisect
 import struct
 import threading
 import zipfile
 from collections import OrderedDict
+from collections.abc import Sequence
 from pathlib import Path
 from typing import IO, NamedTuple
 
@@ -35,7 +39,11 @@ LISTED_FOLDERS = 2000  # folders in one page (at least 2: a page cut after the t
 VIEW_BYTES = 512 * 1024  # of a text member shown here (the start of a big CSV)
 METADATA_BYTES = 16 * 1024 * 1024  # an XML member read whole for its sections (gNATSGO's: 7 MB)
 CACHED_LISTINGS = 4
-CACHED_MEMBERS = 400_000  # members held by the listing cache in all
+CACHED_MEMBERS = 400_000  # members held by the listing cache in all, a folder index's counted again
+CACHED_FOLDERS = 8  # folder indexes kept per archive (the whole, and the folders a reader opened)
+# At most MAX_MEMBERS (200,000) members a listing: an Entry with its path is about 250 bytes and an
+# index's reference to it 8, so the cache stays under about 150 MB of the API's memory in the 16 GB VM
+# (2026-11-06 review), whatever the archives listed.
 TEXT_SUFFIXES = frozenset(
     {
         ".txt", ".text", ".md", ".rst", ".csv", ".tsv", ".tab", ".json", ".geojson", ".xml", ".xsd",
@@ -132,16 +140,47 @@ def entries_of(zf: zipfile.ZipFile) -> tuple[Entry, ...]:
 
 
 class Listings:
-    """The member lists of the last few archives listed, by ``(path, size, mtime)``. Sealed files do
-    not change, and a folder opened after the whole listing needs no second read of the directory."""
+    """The member lists of the last few archives listed, by ``(path, size, mtime)``, each with the
+    folder indexes (:func:`folder_index`) of its last :data:`CACHED_FOLDERS` folders listed. Sealed
+    files do not change: a folder opened after the whole listing needs no second read of the
+    directory, and the next page of a listing no second grouping and sorting of 200,000 members
+    (2026-11-06 review: each page of gNATSGO's listing did both again).
 
-    def __init__(self, size: int = CACHED_LISTINGS, members: int = CACHED_MEMBERS) -> None:
+    Bounded by :data:`CACHED_LISTINGS` archives and :data:`CACHED_MEMBERS` members in all, a folder
+    index's members counted again (the oldest archive goes first; the archive just listed stays)."""
+
+    def __init__(
+        self, size: int = CACHED_LISTINGS, members: int = CACHED_MEMBERS, folders: int = CACHED_FOLDERS
+    ) -> None:
         self._size = size
         self._members = members
+        self._folders = max(1, folders)
         self._lock = threading.Lock()
-        self._items: OrderedDict[tuple[str, int, int], tuple[Entry, ...]] = OrderedDict()
+        self._items: OrderedDict[tuple[str, int, int], _Cached] = OrderedDict()
 
     def entries(self, path: Path) -> tuple[Entry, ...]:
+        return self._cached(path).entries
+
+    def index(self, path: Path, folder: str) -> FolderIndex:
+        """The folder index of ``folder`` ("" for all) in the archive at ``path``: :func:`folder_index`,
+        kept with its archive's entries."""
+        folder = _as_folder(folder)
+        cached = self._cached(path)
+        with self._lock:
+            hit = cached.indexes.get(folder)
+            if hit is not None:
+                cached.indexes.move_to_end(folder)
+                return hit
+        built = folder_index(cached.entries, folder)  # outside the lock: 200,000 members take a while
+        with self._lock:
+            cached.indexes[folder] = built
+            cached.indexes.move_to_end(folder)
+            while len(cached.indexes) > self._folders:
+                cached.indexes.popitem(last=False)
+            self._trim()
+        return built
+
+    def _cached(self, path: Path) -> _Cached:
         st = path.stat()
         key = (str(path), st.st_size, st.st_mtime_ns)
         with self._lock:
@@ -150,15 +189,93 @@ class Listings:
                 self._items.move_to_end(key)
                 return hit
         with open_archive(path) as zf:
-            found = entries_of(zf)
+            found = _Cached(entries_of(zf))
         with self._lock:
-            self._items[key] = found
+            found = self._items.setdefault(key, found)  # another request may have read it meanwhile
             self._items.move_to_end(key)
-            while len(self._items) > 1 and (
-                len(self._items) > self._size or sum(len(v) for v in self._items.values()) > self._members
-            ):
-                self._items.popitem(last=False)
+            self._trim()
         return found
+
+    def _trim(self) -> None:
+        """Drop the oldest archives (lock held) while over a bound; the newest always stays."""
+        while len(self._items) > 1 and (
+            len(self._items) > self._size or sum(c.weight for c in self._items.values()) > self._members
+        ):
+            self._items.popitem(last=False)
+
+
+class FolderIndex(NamedTuple):
+    """An archive's files under one folder, grouped for :func:`listing`: computed once per folder."""
+
+    folder: str
+    order: tuple[str, ...]  # every folder under ``folder`` (itself too), in path order
+    direct: dict[str, tuple[Entry, ...]]  # folder -> its own files, sorted by path
+    totals: dict[str, tuple[int, int]]  # folder -> (files, bytes) in it and under it
+    members: int  # files under ``folder``
+    bytes: int
+    packed: int
+
+
+class _Cached:
+    """An archive's entries and the folder indexes made from them (most recently used last)."""
+
+    __slots__ = ("entries", "indexes")
+
+    def __init__(self, entries: tuple[Entry, ...]) -> None:
+        self.entries = entries
+        self.indexes: OrderedDict[str, FolderIndex] = OrderedDict()
+
+    @property
+    def weight(self) -> int:
+        return len(self.entries) + sum(i.members for i in self.indexes.values())
+
+
+def _as_folder(folder: str) -> str:
+    return folder + "/" if folder and not folder.endswith("/") else folder
+
+
+def folder_index(entries: tuple[Entry, ...], folder: str) -> FolderIndex:
+    """The files under ``folder`` ("" for all) grouped by folder, sorted, with each folder's totals;
+    ``404`` when the archive has no such folder."""
+    folder = _as_folder(folder)
+    files = [e for e in entries if not e.is_dir and e.path.startswith(folder)]
+    dirs = {
+        e.path if e.path.endswith("/") else e.path + "/"
+        for e in entries
+        if e.is_dir and e.path.startswith(folder)
+    }
+    if folder and not files and folder not in dirs:
+        raise ApiError(404, "member_not_found", f"the archive has no folder {folder!r}")
+    grouped: dict[str, list[Entry]] = {}
+    totals: dict[str, list[int]] = {}  # folder -> [files, bytes] in it and under it
+    for d in dirs | {folder}:
+        grouped.setdefault(d, [])
+    for e in files:
+        grouped.setdefault(_folder_of(e.path), []).append(e)
+    for f in list(grouped):  # every ancestor down from `folder` is a folder too
+        at = f
+        while len(at) > len(folder):
+            at = _folder_of(at[:-1])
+            grouped.setdefault(at, [])
+    for f, members in grouped.items():
+        n, b = len(members), sum(m.size for m in members)
+        at = f
+        while True:
+            t = totals.setdefault(at, [0, 0])
+            t[0] += n
+            t[1] += b
+            if len(at) <= len(folder):
+                break
+            at = _folder_of(at[:-1])
+    return FolderIndex(
+        folder=folder,
+        order=tuple(sorted(grouped, key=_sort_key)),
+        direct={f: tuple(sorted(m, key=lambda e: _sort_key(e.path))) for f, m in grouped.items()},
+        totals={f: (t[0], t[1]) for f, t in totals.items()},
+        members=len(files),
+        bytes=sum(e.size for e in files),
+        packed=sum(e.packed for e in files),
+    )
 
 
 def view_kind(path: str) -> str | None:
@@ -182,7 +299,7 @@ def _sort_key(path: str) -> tuple[str, str]:
 
 def listing(
     name: str,
-    entries: tuple[Entry, ...],
+    entries: tuple[Entry, ...] | FolderIndex,
     folder: str,
     *,
     member_url: str,
@@ -194,50 +311,24 @@ def listing(
     and ``next`` is where the next page starts (``after``). Once the files run out, the folders that
     follow are still listed (without their files) so the reader sees the whole tree.
 
+    ``entries``: the archive's, or the folder's index (:meth:`Listings.index`, made once for every page).
+
     ``after`` is the last file listed, or the last folder listed in full: a page resumes in that file's
     folder, after it. Without it a folder of more than 2,000 files, the top of an archive too, could
     never be listed past its 2,000th (2026-11-05 review: "Show all" on it fetched the same page)."""
-    if folder and not folder.endswith("/"):
-        folder += "/"
+    folder = _as_folder(folder)
     if after is not None and (not after or not after.startswith(folder)):
         raise ApiError(400, "invalid_cursor", f"after={after!r} is not in the folder {folder!r}")
-    files = [e for e in entries if not e.is_dir and e.path.startswith(folder)]
-    dirs = {
-        e.path if e.path.endswith("/") else e.path + "/"
-        for e in entries
-        if e.is_dir and e.path.startswith(folder)
-    }
-    if folder and not files and folder not in dirs:
-        raise ApiError(404, "member_not_found", f"the archive has no folder {folder!r}")
-    direct: dict[str, list[Entry]] = {}
-    totals: dict[str, list[int]] = {}  # folder -> [files, bytes] in it and under it
-    for d in dirs | {folder}:
-        direct.setdefault(d, [])
-    for e in files:
-        parent = _folder_of(e.path)
-        direct.setdefault(parent, []).append(e)
-    for f in list(direct):  # every ancestor down from `folder` is a folder too
-        at = f
-        while len(at) > len(folder):
-            at = _folder_of(at[:-1])
-            direct.setdefault(at, [])
-    for f, members in direct.items():
-        n, b = len(members), sum(m.size for m in members)
-        at = f
-        while True:
-            t = totals.setdefault(at, [0, 0])
-            t[0] += n
-            t[1] += b
-            if len(at) <= len(folder):
-                break
-            at = _folder_of(at[:-1])
-    order = sorted(direct, key=_sort_key)
+    ix = entries if isinstance(entries, FolderIndex) else folder_index(entries, folder)
+    if ix.folder != folder:
+        raise ValueError(f"the index is of {ix.folder!r}, not {folder!r}")
+    order: Sequence[str] = ix.order
     resume_in: str | None = None  # the folder `after` is a file of: listed from after that file
     if after is not None and after.endswith("/"):  # a folder listed in full, and every one before it
-        order = [f for f in order if _sort_key(f) > _sort_key(after)]
+        order = order[bisect.bisect_right(order, _sort_key(after), key=_sort_key) :]
     elif after is not None:
         resume_in = _folder_of(after)
-        order = [f for f in order if _sort_key(f) >= _sort_key(resume_in)]
+        order = order[bisect.bisect_left(order, _sort_key(resume_in), key=_sort_key) :]
     out: list[ArchiveFolder] = []
     shown = 0
     truncated = False
@@ -247,11 +338,10 @@ def listing(
         if len(out) >= LISTED_FOLDERS:
             truncated = True
             break
-        members = sorted(direct[f], key=lambda e: _sort_key(e.path))
-        rest = members
+        members = ix.direct[f]
+        rest: Sequence[Entry] = members
         if f == resume_in and after is not None:
-            past = _sort_key(after)
-            rest = [m for m in members if _sort_key(m.path) > past]
+            rest = members[bisect.bisect_right(members, _sort_key(after), key=lambda e: _sort_key(e.path)) :]
         room = max(0, LISTED_FILES - shown)
         listed = rest[:room]
         if listed:
@@ -266,8 +356,8 @@ def listing(
                 path=f,
                 count=len(members),
                 bytes=sum(m.size for m in members),
-                total_count=totals[f][0],
-                total_bytes=totals[f][1],
+                total_count=ix.totals[f][0],
+                total_bytes=ix.totals[f][1],
                 files=[_member(m) for m in listed],
             )
         )
@@ -278,9 +368,9 @@ def listing(
     return ArchiveListing(
         name=name,
         folder=folder,
-        members=len(files),
-        bytes=sum(e.size for e in files),
-        packed=sum(e.packed for e in files),
+        members=ix.members,
+        bytes=ix.bytes,
+        packed=ix.packed,
         folders=out,
         truncated=truncated,
         next=following,

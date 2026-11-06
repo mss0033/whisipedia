@@ -17,13 +17,14 @@ import pytest
 import yaml
 
 from wsp_adapters.doccollection import DocCollectionAdapter
-from wsp_adapters.doccollection.adapter import CATALOG, screen_text
+from wsp_adapters.doccollection.adapter import CATALOG, Screen, screen_text
 from wsp_adapters.doccollection.catalog import read_catalog_file
 from wsp_adapters.doccollection.model import Candidate
-from wsp_adapters.doccollection.policy import Rules, load_rules
+from wsp_adapters.doccollection.policy import Decision, Marking, Rules, Verdict, load_rules
 from wsp_adapters.doccollection.testing import PUBLIC_A, RESTRICTED_C, make_pdf, s3_listing
 from wsp_cli.doccollections import (
     CollectionFetcher,
+    FetchReport,
     ReviewDecisionError,
     apply_review_decision,
     collection_spec,
@@ -1619,3 +1620,37 @@ def test_a_left_download_is_found_by_its_name_or_its_true_suffix_and_trusted_onl
     os.utime(copy, (old, old))
     assert not fresh(cand, copy)
     assert fresh(replace(cand, md5="0" * 32), copy)  # the MD5 is checked as it is screened
+
+
+def test_a_held_copy_today_s_rules_deny_stays_held_for_the_owner(vault: FileVault, tmp_path: Path) -> None:
+    """2026-11-06 review: a copy held for the owner's review was moved out of the quarantine and
+    screened again; a deny under today's rules deleted it, perhaps the only copy, before the owner had
+    decided. It is held again, the deny noted; only the owner's own deny deletes it."""
+    held_only = [("unmarked.pdf", UNMARKED)]
+    s = spec(held_only)
+    (row,) = _fetcher(vault, _Counting(routes(held_only)), tmp_path).run(s, version="2026-10-10").held
+    copy = Path(row["quarantined"])
+    raw = dict(s.raw)
+    access = cast(dict[str, Any], raw["access"])
+
+    def with_filter(**extra: object) -> SourceSpec:
+        return replace(s, raw={**raw, "access": {**access, "filter": {**access["filter"], **extra}}})
+
+    denying = with_filter(deny_keywords=["planning handbook"])
+    counting = _Counting(routes(held_only))
+    again = _fetcher(vault, counting, tmp_path).run(denying, version="2026-10-11")
+    assert counting.downloaded == []
+    assert not again.rejected
+    (held,) = again.held
+    assert held["rule"].startswith("deny:keyword=planning handbook")
+    assert "owner to decide" in held["rule"]
+    assert copy.is_file()  # held again, never deleted
+    # the owner's own deny is a decision: that one deletes it
+    fetcher = _fetcher(vault, _Counting(routes(held_only)), tmp_path)
+    report = FetchReport(source_id=s.id, version="2026-10-12")
+    denied = Screen(Decision(Verdict.DENY, "owner=deny"), Marking(), False)
+    cand = Candidate(key=row["key"], url=row["url"], title=row["title"], issuer="T")
+    fetcher._screen(cand, copy, Rules(), report, {}, screen=denied, was_held=True)  # pyright: ignore[reportPrivateUsage]
+    assert [k for k, _ in report.rejected] == [row["key"]]
+    assert not report.held
+    assert not copy.exists()

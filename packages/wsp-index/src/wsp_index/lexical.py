@@ -1286,11 +1286,17 @@ def _width(line: str) -> int:
 def searched_text(doc: DocRecord) -> str:
     """The part of a document's text the index holds: its first ``meta["search_chars"]`` characters
     when the adapter says so (a crystal structure's summary, not its CIF: COD, 2026-11-05), else all
-    of it. A value that is not a non-negative count is ignored (the whole text is searched)."""
+    of it. A value that is not a non-negative count is ignored (the whole text is searched).
+
+    ``isdecimal``, not ``isdigit``: ``"²"`` is a digit ``int`` cannot read, and one such value raised
+    out of an index batch (2026-11-06 review). Any value ``int`` refuses is ignored the same way."""
     raw = doc.meta.get(SEARCH_CHARS_META, "") if doc.meta else ""
-    if not raw.isdigit():
+    if not raw.isdecimal():
         return doc.text
-    return doc.text[: int(raw)]
+    try:
+        return doc.text[: int(raw)]
+    except ValueError:
+        return doc.text
 
 
 def _lead(text: str, max_chars: int) -> str:

@@ -643,6 +643,11 @@ def test_only_the_searched_part_of_a_document_is_indexed(tmp_path: Path) -> None
     )
     assert searched_text(quartz) == summary
     assert searched_text(replace(quartz, meta={SEARCH_CHARS_META: "-1"})) == quartz.text  # not a count
+    # a digit int() cannot read must not fail the index batch (2026-11-06 review)
+    arabic_12 = "\u0661\u0662"  # Arabic-Indic 12: decimal, and int() reads it
+    for odd in ("\u00b2", arabic_12 + "x", "", " 12"):  # "²" is a digit int() cannot read
+        assert searched_text(replace(quartz, meta={SEARCH_CHARS_META: odd})) == quartz.text
+    assert searched_text(replace(quartz, meta={SEARCH_CHARS_META: arabic_12})) == quartz.text[:12]
     idx.upsert([quartz])
     idx.commit()
     assert ids(idx.search("Glinnemann")) == [quartz.doc_id]

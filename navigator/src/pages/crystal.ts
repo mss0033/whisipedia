@@ -7,7 +7,7 @@
  *
  * The drawing is a small canvas renderer written here, not a library: atoms as shaded spheres
  * painted back to front, bonds from covalent radii, the cell's edges; drag (or the arrow keys) to
- * turn it, the wheel (or + and -) to zoom. A CIF lists the asymmetric unit; its symmetry operations
+ * turn it, + and - (or the wheel, once it has the focus or with Ctrl) to zoom. A CIF lists the asymmetric unit; its symmetry operations
  * fill the cell.
  */
 import { makeAddress } from '../core/address.ts';
@@ -24,6 +24,28 @@ export interface StructureText {
   summary: string;
   cif: string;
   fileName: string;
+}
+
+/** The sources whose documents are COD structures (registry: `reader: cod-cif`). */
+export const COD_SOURCES: ReadonlySet<string> = new Set(['cod-full-archive']);
+/** A structure's native id: `<archive key>/<COD id>` (`cod:cod-cifs-mysql/1000000`). */
+const COD_NATIVE = /^cod:[^/]+\/(\d{7})$/;
+
+/**
+ * The structure of a COD structure's document, or null for any other document: a text that only
+ * contains a line like `Crystallographic Information File 1000000.cif` (a paper about COD, a mailing
+ * list post quoting one) is not drawn as a crystal (2026-11-06 review). The CIF line must name the
+ * structure the document's own id names.
+ */
+export function structureOf(doc: {
+  source_id: string;
+  native_id: string;
+  text?: string | null | undefined;
+}): StructureText | null {
+  if (!COD_SOURCES.has(doc.source_id)) return null;
+  const id = COD_NATIVE.exec(doc.native_id)?.[1];
+  const st = id ? splitStructure(doc.text) : null;
+  return st && st.fileName === `${id}.cif` ? st : null;
 }
 
 /** A structure document's summary and CIF, or null when the text is not one. */
@@ -520,6 +542,9 @@ export function structureViewer(uc: UnitCell, title: string): HTMLElement {
   canvas.addEventListener(
     'wheel',
     (e) => {
+      // Only once the drawing is chosen (it has the focus: clicked or tabbed to) or with Ctrl held:
+      // a reader scrolling the page past it with the wheel zoomed it instead (2026-11-06 review).
+      if (!e.ctrlKey && document.activeElement !== canvas) return;
       e.preventDefault();
       zoomBy(e.deltaY < 0 ? 1.15 : 1 / 1.15);
     },
@@ -564,7 +589,7 @@ export function structureViewer(uc: UnitCell, title: string): HTMLElement {
     `The unit cell (a, b and c marked) with ${uc.atoms.length.toLocaleString('en-US')} atoms`,
     uc.truncated ? ` (the first ${MAX_ATOMS.toLocaleString('en-US')} only)` : '',
     links.length ? ` and ${links.length.toLocaleString('en-US')} bonds` : '',
-    '. Drag to turn it, or use the arrow keys; the wheel or + and − zoom.',
+    '. Drag to turn it, or use the arrow keys; + and − zoom, and the wheel once it is selected (or with Ctrl).',
   );
   // Drawn again at its new size when the window (or the text size) changes the canvas's width.
   if (typeof ResizeObserver === 'function') new ResizeObserver(redraw).observe(canvas);

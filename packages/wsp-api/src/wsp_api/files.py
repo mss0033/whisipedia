@@ -250,7 +250,7 @@ def files_router(lib: Library) -> APIRouter:
             base = f"/v1/files/{quote(doc.doc_id, safe='')}/archive"
             return archive.listing(
                 display_name(path.name),
-                listings.entries(path),
+                listings.index(path, folder),  # kept for the next page (2026-11-06 review)
                 folder,
                 member_url=f"{base}/member",
                 view_url=f"{base}/view",

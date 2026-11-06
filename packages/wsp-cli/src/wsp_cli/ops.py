@@ -37,7 +37,6 @@ from wsp_core.model import GenerationStatus, SourceSpec
 from wsp_core.partitions import PartitionError, check_partition, partition_generation_id, partition_of
 from wsp_core.ports import Fetcher
 from wsp_core.registry import RegistryError, load_registry
-from wsp_index.spelling import SPELL_FILE
 from wsp_orchestrator.curator import ProposalFiles
 from wsp_orchestrator.curator.registry_edit import apply_to_registry_text, remove_from_overlay
 from wsp_orchestrator.orchestrator import Orchestrator
@@ -215,6 +214,7 @@ def open_indexer(
         out=out,
         refinery=p.refinery,
         map_root=p.refinery_maps,
+        read_pace=bootstrap.ingest_pace(cfg),
     )
     try:
         yield ix
@@ -241,9 +241,6 @@ def cmd_index_build(args: argparse.Namespace, out: TextIO) -> int:
                 reports = [ix.refine_again(args.source, swap=swap, finish=False)]
             else:
                 reports = ix.build([args.source] if args.source else None, finish=False)
-            # A refine whose generation matches the index (0 upserts, 0 deletes) changed nothing a
-            # vocabulary reads; it ran spell for an hour (2026-11-05 deep dive).
-            changed = any(r.upserted or r.deleted for r in reports)
             try:
                 if not getattr(args, "no_rank", False):
                     ix.rank_if_due()  # kept unless the link graph can have changed (or a week passed)
@@ -251,10 +248,12 @@ def cmd_index_build(args: argparse.Namespace, out: TextIO) -> int:
                 ix.finish()  # rank did not rebuild the trie: what was indexed still reaches it
                 raise
             ix.finish()  # nothing to do when rank just rebuilt the trie
-            if not getattr(args, "no_spell", False) and (
-                changed or not (ix.index.path / SPELL_FILE).is_file()
-            ):
-                ix.spell()
+            # Built again only when the generations it reads changed since it was built (a refine
+            # that changed nothing ran spell for an hour, 2026-11-05 deep dive), compared with what it
+            # was built from, not with this run: a failed spell run is tried again the next night
+            # (2026-11-06 review).
+            if not getattr(args, "no_spell", False):
+                ix.spell_if_due()
     except LockHeldError as exc:
         return _busy(exc)
     for r in reports:

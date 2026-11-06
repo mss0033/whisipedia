@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, onTestFinished } from 'vitest';
 import { ApiRequestError } from '../src/api/client.ts';
 import type {
   ArchiveFolder,
@@ -325,6 +325,8 @@ describe('archive browser', () => {
   it('loads, narrows to a folder and back, and reads metadata in place', async () => {
     const log: string[] = [];
     const host = document.createElement('div');
+    document.body.append(host); // focus moves only within the document
+    onTestFinished(() => host.remove());
     host.append(archiveBrowser({ api: fakeApi(log), docId: DOC }));
     await until(() => host.querySelector('.archive-summary') !== null);
     expect(host.querySelector('.archive')!.hasAttribute('aria-busy')).toBe(false);
@@ -333,8 +335,12 @@ describe('archive browser', () => {
     expect(log[1]).toBe('archive gNATSGO/Zz/');
     await until(() => host.querySelector('button.archive-all') !== null);
     expect(host.querySelector('h2')!.textContent).toBe('In the folder gNATSGO/Zz/');
+    // the pressed button went with the old listing: the focus is on the new heading (2026-11-06 review)
+    expect(document.activeElement).toBe(host.querySelector('h2'));
     host.querySelector<HTMLButtonElement>('button.archive-all')!.click();
     await until(() => log.length === 3 && host.querySelector('.archive-first') !== null);
+    expect(document.activeElement).toBe(host.querySelector('h2'));
+    expect(document.activeElement!.textContent).toBe('What is in the archive');
 
     const read = host.querySelector<HTMLButtonElement>('.archive-first button.archive-read')!;
     read.click();

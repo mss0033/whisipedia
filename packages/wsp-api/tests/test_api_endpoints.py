@@ -22,7 +22,7 @@ from wsp_api.schemas import (
 from wsp_api.testing import local_client
 from wsp_api.testing.fakes import SAMPLE_GEN_1, SAMPLE_GEN_2, InMemoryLexicalIndex, sample_services
 from wsp_core.ids import DocId
-from wsp_core.model import DocRecord, SearchHit
+from wsp_core.model import DocRecord, SearchHit, Suggestion
 
 TURING = "wsp:wikipedia-en-zim/A/Alan_Turing"
 
@@ -170,6 +170,38 @@ def test_suggest_from_an_index_of_titles_only() -> None:
         body = Suggestions.model_validate(c.get("/v1/suggest", params={"q": "al"}).json())
     assert body.suggestions == ["Alan Turing"]
     assert [(i.text, i.doc_id, i.address) for i in body.items] == [("Alan Turing", None, None)]
+
+
+class _NoPlainSearch(_TitlesOnly):
+    """Suggests documents; its plain :meth:`suggest` must not be asked (2026-11-06 review)."""
+
+    def suggest(self, prefix: str, *, limit: int = 10) -> Sequence[str]:
+        raise AssertionError("a miss of suggest_docs searched the trie again")
+
+    def suggest_docs(self, prefix: str, *, limit: int = 10, lang: str | None = None) -> Sequence[Suggestion]:
+        return self.inner.suggest_docs(prefix, limit=limit, lang=lang)
+
+
+class _Wrapped(_TitlesOnly):
+    """A wrapper with the method whose index lacks the capability (the Oracle pipeline's case)."""
+
+    def suggest_docs(self, prefix: str, *, limit: int = 10, lang: str | None = None) -> Sequence[Suggestion]:
+        raise NotImplementedError
+
+
+def test_a_suggestion_miss_searches_the_trie_once() -> None:
+    """2026-11-06 review: an empty answer from suggest_docs fell back to suggest(), a second search
+    of the same trie on every miss; only an index that cannot suggest documents falls back."""
+    services = sample_services()
+    assert isinstance(services.index, InMemoryLexicalIndex)
+    with local_client(create_app(replace(services, index=_NoPlainSearch(services.index)))) as c:
+        body = Suggestions.model_validate(c.get("/v1/suggest", params={"q": "zzzz"}).json())
+        assert body.items == []
+        hit = Suggestions.model_validate(c.get("/v1/suggest", params={"q": "al"}).json())
+        assert [i.doc_id for i in hit.items] != [None]
+    with local_client(create_app(replace(services, index=_Wrapped(services.index)))) as c:
+        body = Suggestions.model_validate(c.get("/v1/suggest", params={"q": "al"}).json())
+    assert [(i.text, i.doc_id) for i in body.items] == [("Alan Turing", None)]
 
 
 def test_changes_cursor_continues(client: httpx.Client) -> None:

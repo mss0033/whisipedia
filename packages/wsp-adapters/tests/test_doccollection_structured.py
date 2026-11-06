@@ -5,6 +5,7 @@ the SP 800-53 OSCAL catalog and the MedlinePlus health topics (owner request 202
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import zipfile
 from pathlib import Path
@@ -805,7 +806,7 @@ def test_a_read_the_share_refuses_for_a_moment_is_made_again_at_the_same_offset(
     data = bytes(range(256)) * 4
     path.write_bytes(data)
     real = os.pread
-    refusals = iter([True, False, True, True, True, True, True])
+    refusals = iter([True, False, *([True] * cod.READ_TRIES)])
 
     def flaky(fd: int, n: int, offset: int) -> bytes:
         if next(refusals):
@@ -817,8 +818,64 @@ def test_a_read_the_share_refuses_for_a_moment_is_made_again_at_the_same_offset(
     with cod.ShareReader(path, sleep=(0.0,)) as raw:
         assert raw.read(300) == data[:300]  # one refusal, then read
         assert raw.tell() == 300
-        with pytest.raises(BlockingIOError):  # the fifth refusal in a row ends the read
+        with pytest.raises(BlockingIOError):  # the READ_TRIES-th refusal in a row ends the read
             raw.read(10)
+
+
+def test_an_eio_from_the_share_is_read_again_from_the_last_byte_on_a_fresh_handle_and_paced(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-11-06 review: a ``soft`` CIFS mount answers a reconnect with EIO, which ended the refine of
+    COD's 26.6 GB archive at once; the read was unpaced against the library's NAS budget too."""
+    import errno
+    import os
+
+    from wsp_adapters.doccollection import cod
+
+    path = tmp_path / "f.bin"
+    data = bytes(range(256)) * 4
+    path.write_bytes(data)
+    real_pread, real_open = os.pread, os.open
+    opened: list[int] = []
+    refusals = iter([False, True, True, False])
+
+    def flaky(fd: int, n: int, offset: int) -> bytes:
+        if next(refusals, False):
+            raise OSError(errno.EIO, "Input/output error")
+        return real_pread(fd, n, offset)
+
+    def counting_open(p: object, flags: int, *args: int) -> int:
+        fd = real_open(p, flags, *args)  # pyright: ignore[reportArgumentType]
+        opened.append(fd)
+        return fd
+
+    monkeypatch.setattr(os, "pread", flaky)
+    monkeypatch.setattr(os, "open", counting_open)
+    paced: list[int] = []
+    with cod.ShareReader(path, sleep=(0.0,), pace=paced.append) as raw:
+        assert raw.read(100) == data[:100]
+        assert raw.read(200) == data[100:300]  # two EIOs, then read on from byte 100
+        assert raw.tell() == 300
+    assert len(opened) == 3  # a fresh handle after each refusal
+    assert sum(paced) == 300
+
+    def broken(fd: int, n: int, offset: int) -> bytes:
+        raise OSError(errno.EBADF, "Bad file descriptor")
+
+    monkeypatch.setattr(os, "pread", broken)
+    with cod.ShareReader(path, sleep=(0.0,)) as raw, pytest.raises(OSError, match="Bad file"):
+        raw.read(10)  # not a moment's trouble: no retry
+
+
+def test_the_refine_paces_the_cod_archive_through_the_context(tmp_path: Path) -> None:
+    """The refine's ``Ctx.read_pace`` reaches the archive's reader (2026-11-06 review)."""
+    from wsp_adapters.doccollection import cod
+
+    tgz = tmp_path / "cod.tgz"
+    _cod_archive(tgz, {"cif/1/00/00/1000000.cif": COD_CIF.encode()})
+    paced: list[int] = []
+    assert [e.cod_id for e in cod.archive_entries(tgz, "COD", pace=paced.append)] == ["1000000"]
+    assert 0 < sum(paced) <= tgz.stat().st_size
 
 
 def test_the_cod_archive_is_its_own_document_and_one_per_structure(tmp_path: Path) -> None:
@@ -864,8 +921,10 @@ def test_the_cod_archive_is_its_own_document_and_one_per_structure(tmp_path: Pat
         },
         license_="CC0-1.0",
     )
-    ctx = make_ctx(spec, FakeFetcher(), tmp_path / "w")
+    paced: list[int] = []
+    ctx = dataclasses.replace(make_ctx(spec, FakeFetcher(), tmp_path / "w"), read_pace=paced.append)
     docs = list(DocCollectionAdapter(throttle=False).documents(ctx, gen))
+    assert paced  # the refine's pace reaches the archive's reads (2026-11-06 review)
     assert [d.native_id for d in docs] == [
         "cod:cod-cifs-mysql",  # the archive itself, to download
         "cod:cod-cifs-mysql/1000000",

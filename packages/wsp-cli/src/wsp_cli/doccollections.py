@@ -985,7 +985,7 @@ class CollectionFetcher:
         except OSError:
             return False
         report.reused += 1
-        self._screen(cand, target, rules, report, held_sha)
+        self._screen(cand, target, rules, report, held_sha, was_held=True)
         return True
 
     def _rescreen(
@@ -1259,7 +1259,15 @@ class CollectionFetcher:
         held_sha: Mapping[str, str],
         *,
         screen: Screen | None = None,
+        was_held: bool = False,
     ) -> None:
+        """Screen ``path`` (a download of ``cand``) and file it: allowed into the cycle, held for review
+        in ``_incoming/_quarantine/<source>/``, or deleted when denied.
+
+        ``was_held``: the copy came out of the quarantine, where an earlier run held it for the
+        owner's review. A deny from today's rules then holds it again, the deny noted, and never
+        deletes it: it may be the only copy, and the owner has not decided (2026-11-06 review). Only
+        the owner's own ``deny_documents`` decision (``owner=deny``) deletes it."""
         if screen is None and path.suffix != ".bundle":
             try:
                 # A name guessed ".pdf" gets its real office/zip/text suffix; an error or landing page
@@ -1284,20 +1292,28 @@ class CollectionFetcher:
         elif screen is None:  # a bundle is never kept unscreened
             screen = Screen(Decision(Verdict.REVIEW, "git=unscreened", Stage.CONTENT), Marking(), False)
         decided: Screen = screen
+        rehold = (
+            was_held and decided.decision.verdict is Verdict.DENY and decided.decision.rule != "owner=deny"
+        )
 
         def keep() -> None:  # each step is safe to do again after a refusal (unlink, replace, hash)
-            if decided.decision.verdict is Verdict.DENY:
+            if decided.decision.verdict is Verdict.DENY and not rehold:
                 path.unlink(missing_ok=True)  # restricted or out-of-scope bytes are not kept anywhere
                 report.rejected.append((cand.key, str(decided.decision)))
                 if decided.decision.alert:
                     report.alerts.append(f"{cand.key}: {decided.decision.rule} ({cand.url})")
                 return
-            if decided.decision.verdict is Verdict.REVIEW:
+            if decided.decision.verdict is Verdict.REVIEW or rehold:
                 qdir = self.incoming / "_quarantine" / report.source_id
                 qdir.mkdir(parents=True, exist_ok=True)
                 target = qdir / path.name
                 path.replace(target)
-                row = _review_row(cand, str(decided.decision))
+                why = str(decided.decision)
+                if rehold:
+                    why = f"{why} (held before; kept for the owner to decide)"
+                    if decided.decision.alert:
+                        report.alerts.append(f"{cand.key}: {decided.decision.rule} ({cand.url})")
+                row = _review_row(cand, why)
                 row["distribution_text"] = decided.marking.text
                 row["quarantined"] = str(target)
                 report.held.append(row)

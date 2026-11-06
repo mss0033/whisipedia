@@ -79,6 +79,10 @@ from wsp_index.refinery import RefineryReader, read_parquet
 from wsp_index.text import language_row_groups, primary_lang
 
 SPELL_FILE = "spelling.bin"
+SPELL_INPUTS = "spelling.inputs.json"
+"""Beside :data:`SPELL_FILE`: the generations (and their seals) it was built from, written once it is
+built, so the nightly build rebuilds it only when they changed, and again after a failed build
+(``wsp_cli.indexer.Indexer.spell_due``; 2026-11-06 review)."""
 MAGIC = b"WSPSPEL2"
 MAGIC_V1 = b"WSPSPEL1"
 ANY = "any"

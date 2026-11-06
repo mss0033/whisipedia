@@ -413,6 +413,7 @@ class ChildContext:
             user_agent=bootstrap.user_agent(cfg),
             refinery=p.refinery,
             map_root=p.refinery_maps,
+            read_pace=bootstrap.ingest_pace(cfg),
         )
 
 

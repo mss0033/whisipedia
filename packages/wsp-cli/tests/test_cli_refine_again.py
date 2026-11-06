@@ -7,6 +7,7 @@ from collections.abc import Callable, Generator, Iterator
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
@@ -243,6 +244,36 @@ def test_the_spelling_vocabulary_leaves_out_catalogues(tmp_path: Path) -> None:
     ix = indexer(tmp_path, Adapter(), replace(spec(), domain=("catalog",)))
     try:
         assert ix.spell() is None
+    finally:
+        ix.close()
+
+
+def test_spell_is_due_against_what_its_vocabulary_was_built_from(tmp_path: Path) -> None:
+    """2026-11-06 review: the nightly build ran spell only when its own run changed documents, so a
+    spell run that failed the night they changed was never tried again on the quiet nights after."""
+    from wsp_index.spelling import SPELL_FILE, SPELL_INPUTS
+
+    ix = indexer(tmp_path, Adapter())
+    try:
+        ix.build([SID])
+        assert ix.spell_due() == (True, "no vocabulary yet")
+        with (
+            patch("wsp_cli.indexer.build_vocabulary", side_effect=OSError("the share went away")),
+            pytest.raises(OSError, match="share went away"),
+        ):
+            ix.spell()
+        assert not (ix.index.path / SPELL_INPUTS).exists()
+        assert ix.spell_if_due()  # the failed run is tried again (nothing changed in between)
+        assert (ix.index.path / SPELL_FILE).is_file()
+        assert ix.spell_due() == (False, "built from the current generations")
+        assert not ix.spell_if_due()
+        # a vocabulary whose build stopped after it was written, before its inputs were: built again
+        (ix.index.path / SPELL_INPUTS).unlink()
+        assert ix.spell_due()[0]
+        ix.spell()
+        # the generation refined again under the same id (a new seal): due
+        ix.refine_again(SID)
+        assert ix.spell_due() == (True, "the indexed generations changed since it was built")
     finally:
         ix.close()
 

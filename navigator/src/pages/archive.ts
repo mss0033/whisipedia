@@ -56,29 +56,46 @@ function problem(err: unknown): string {
 /**
  * The archive browser: loads the listing (all of it, or one folder with `folder`) into a section
  * and replaces itself when the reader narrows to a folder or goes back to the whole.
+ *
+ * `focus`: the browser replaced one whose "Show all" or "Show the whole archive" was pressed. The
+ * button is gone with the old section, which left the keyboard focus on the page's body; it goes to
+ * the new heading instead, first the loading one, then the listing's (2026-11-06 review).
  */
-export function archiveBrowser(ctx: ArchiveContext, folder = ''): HTMLElement {
+export function archiveBrowser(ctx: ArchiveContext, folder = '', focus = false): HTMLElement {
   const box = h(
     'section',
     { class: 'archive', 'aria-label': 'What is in the archive', 'aria-busy': 'true' },
-    h('h2', { class: 'archive-heading' }, 'What is in the archive'),
+    h('h2', { class: 'archive-heading', tabindex: '-1' }, 'What is in the archive'),
     h('p', { class: 'fineprint' }, 'Reading the archive’s list of files…'),
   );
-  const show = (next: string) => box.replaceWith(archiveBrowser(ctx, next));
+  const show = (next: string) => {
+    const shown = archiveBrowser(ctx, next, true);
+    box.replaceWith(shown);
+    shown.querySelector<HTMLElement>('.archive-heading')?.focus();
+  };
+  // Only when the focus has not moved on meanwhile (the reader went elsewhere while it loaded).
+  const refocus = () => {
+    const at = document.activeElement;
+    if (focus && (at === null || at === document.body || box.contains(at))) {
+      box.querySelector<HTMLElement>('.archive-heading')?.focus();
+    }
+  };
   ctx.api
     .archive(ctx.docId, folder || undefined, ctx.signal)
     .then((listing) => {
       box.replaceChildren();
       append(box, archiveContents(listing, ctx, show));
       box.removeAttribute('aria-busy');
+      refocus();
     })
     .catch((err: unknown) => {
       if (ctx.signal?.aborted) return;
       box.removeAttribute('aria-busy');
       box.replaceChildren(
-        h('h2', { class: 'archive-heading' }, 'What is in the archive'),
+        h('h2', { class: 'archive-heading', tabindex: '-1' }, 'What is in the archive'),
         h('p', { class: 'notice' }, problem(err)),
       );
+      refocus();
     });
   return box;
 }
@@ -177,7 +194,7 @@ export function archiveContents(
   return [
     h(
       'h2',
-      { class: 'archive-heading' },
+      { class: 'archive-heading', tabindex: '-1' },
       listing.folder ? `In the folder ${listing.folder}` : 'What is in the archive',
     ),
     h(

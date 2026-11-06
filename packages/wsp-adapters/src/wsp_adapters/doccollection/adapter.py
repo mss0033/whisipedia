@@ -581,7 +581,7 @@ class DocCollectionAdapter:
         for meta, path, read in read_in_order(admitted(), needs_reading, cfg.pdf_max_pages):
             if read is None:
                 if streamed(path):
-                    yield from self._archive_documents(spec, cfg, meta, path, generation_dir)
+                    yield from self._archive_documents(spec, cfg, meta, path, generation_dir, ctx.read_pace)
                     continue
                 if cfg.reader and path.suffix.lower() in (".zip", ".xml", ".json"):
                     yield from self._snapshot_documents(spec, cfg, meta, path)
@@ -701,7 +701,13 @@ class DocCollectionAdapter:
             )
 
     def _archive_documents(
-        self, spec: SourceSpec, cfg: CollectionConfig, meta: DocumentMeta, path: Path, generation_dir: Path
+        self,
+        spec: SourceSpec,
+        cfg: CollectionConfig,
+        meta: DocumentMeta,
+        path: Path,
+        generation_dir: Path,
+        pace: Callable[[int], None] | None = None,
     ) -> Iterator[DocRecord]:
         """A tar archive read as a stream by its reader (``cod-cif``: one document per crystal
         structure, :mod:`wsp_adapters.doccollection.cod`), after the archive's own document (its
@@ -711,7 +717,8 @@ class DocCollectionAdapter:
         and summary: the CIF after it is coordinates. Only the summary is searched
         (:data:`SEARCH_CHARS_META`); the authors are searched with the title (:data:`BYLINE_META`).
         The owner asked for the Crystallography Open Database's structures to be readable one by one
-        (2026-11-05): the 26.6 GB archive was one "data file" document nothing could look inside."""
+        (2026-11-05): the 26.6 GB archive was one "data file" document nothing could look inside.
+        ``pace`` (the refine's :attr:`Ctx.read_pace`) paces the archive's reads (2026-11-06 review)."""
         title = reader_title(meta, path, "")
         license_ = meta.license or spec.license
         record_meta = meta.record_meta()
@@ -734,7 +741,7 @@ class DocCollectionAdapter:
             meta=record_meta,
         )
         rules = cfg.rules
-        for entry in cod.archive_entries(path, title):
+        for entry in cod.archive_entries(path, title, pace=pace):
             native = f"{meta.doc_key}/{entry.cod_id}"
             s = entry.structure
             verdict = classify_content(

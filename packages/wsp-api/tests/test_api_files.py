@@ -590,6 +590,53 @@ def test_archive_listing_is_read_once_per_archive(
     assert len(opened) == 1  # a sealed file: the folder came from the kept listing
 
 
+def test_archive_folder_index_is_kept_for_the_next_page_and_bounded(
+    arch: tuple[httpx.Client, Path], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """2026-11-06 review: each page of a listing grouped and sorted the archive's 200,000 members
+    again. The folder index is made once per folder and kept with the entries, within the bounds."""
+    import zipfile
+
+    from wsp_api import archive
+
+    c, _ = arch
+    built: list[str] = []
+    real = archive.folder_index
+
+    def counting(entries: tuple[archive.Entry, ...], folder: str) -> archive.FolderIndex:
+        built.append(folder)
+        return real(entries, folder)
+
+    monkeypatch.setattr(archive, "folder_index", counting)
+    monkeypatch.setattr(archive, "LISTED_FILES", 2)
+    first = c.get(url("arch", "/archive")).json()
+    assert first["next"]
+    assert c.get(url("arch", "/archive"), params={"after": first["next"]}).status_code == 200
+    assert c.get(url("arch", "/archive"), params={"folder": "pack/meta"}).status_code == 200
+    assert c.get(url("arch", "/archive"), params={"folder": "pack/meta/"}).status_code == 200
+    assert built == ["", "pack/meta/"]  # once per folder, whatever the page
+
+    # bounded: folder indexes per archive, and members in all (an index's counted again)
+    zips: list[Path] = []
+    for i in range(3):
+        z = tmp_path / f"z{i}.zip"
+        with zipfile.ZipFile(z, "w") as zf:
+            for k in range(5):
+                zf.writestr(f"d{k}/f.txt", "x")
+        zips.append(z)
+    cache = archive.Listings(size=4, members=16, folders=2)
+    for f in ("", "d0/", "d1/"):
+        cache.index(zips[0], f)
+    items = vars(cache)["_items"]
+    (only,) = items.values()
+    assert list(only.indexes) == ["d0/", "d1/"]  # the oldest folder went
+    assert only.weight == 5 + 1 + 1
+    cache.index(zips[1], "")  # 7 + 10 = 17 > 16: the first archive goes
+    assert len(items) == 1
+    cache.entries(zips[2])
+    assert len(items) == 2
+
+
 def test_archive_too_big_to_list_and_not_a_zip(
     arch: tuple[httpx.Client, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:

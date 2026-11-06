@@ -34,7 +34,7 @@ import {
 import { audioDeck, videoPlayer } from '../ui/player.ts';
 import { type ArchiveContext, archiveBrowser } from './archive.ts';
 import { comicBar, comicView, isComic, looksLikeComic } from './comics.ts';
-import { splitStructure, structureView } from './crystal.ts';
+import { structureOf, structureView } from './crystal.ts';
 import { linkCodeSections, parseCase, renderCase } from './legal.ts';
 import { isManPage, looksLikeManPage, manPageView } from './manpages.ts';
 import { looksLikePlanetMath, planetMathView } from './planetmath.ts';
@@ -194,7 +194,8 @@ export function renderBody(
     return { node: wrap, broken: stats.broken };
   }
   // A crystal structure (COD): its summary, a drawing of its cell and its CIF (pages/crystal.ts).
-  const structure = splitStructure(doc.text);
+  // Only a COD structure's document: not any text with a CIF file's line (2026-11-06 review).
+  const structure = structureOf(doc);
   if (structure) {
     wrap.appendChild(structureView(doc, structure));
     return { node: wrap, broken: 0 };

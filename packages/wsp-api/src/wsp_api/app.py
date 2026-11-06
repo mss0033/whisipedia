@@ -22,7 +22,7 @@ import hashlib
 import re
 import threading
 import time
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Sequence
 from dataclasses import replace
 from typing import Annotated, Any, Literal
 from urllib.parse import unquote
@@ -80,6 +80,7 @@ from wsp_core.activity import ActivityMiddleware
 from wsp_core.errors import TranslationUnavailableError
 from wsp_core.ids import DocId, parse_doc_id
 from wsp_core.listing import is_replay_stub
+from wsp_core.model import Suggestion
 from wsp_core.ports import DocSuggester
 
 RECENT_SCAN_MAX = 50_000  # changes read back at most to fill one What's New page
@@ -432,8 +433,16 @@ def _v1(lib: Library, settings: ApiSettings) -> APIRouter:
         # Each item carries the document it opens: picking a suggestion searched for its text, so
         # picking "磷" (Phosphorus's Chinese article, matched by its English label) searched for "磷"
         # (2026-11-05 deep dive).
-        found = s.index.suggest_docs(q, limit=limit, lang=lang) if isinstance(s.index, DocSuggester) else ()
-        if found:
+        # An index that suggests documents is asked once: when it finds nothing, its plain titles
+        # (the same trie) find nothing either, and a second search was the cost of every miss
+        # (2026-11-06 review). Plain titles only from an index that cannot suggest documents.
+        found: Sequence[Suggestion] | None = None
+        if isinstance(s.index, DocSuggester):
+            try:
+                found = s.index.suggest_docs(q, limit=limit, lang=lang)
+            except NotImplementedError:  # a wrapper over an index without the capability
+                found = None
+        if found is not None:
             items = [
                 SuggestionItem(
                     text=x.text, title=x.title, doc_id=x.doc_id, address=address_of(*parse_doc_id(x.doc_id))

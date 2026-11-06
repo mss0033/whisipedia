@@ -33,7 +33,7 @@ from pathlib import Path
 from wsp_index import TantivyIndex, refresh
 from wsp_index.linkrank import RANK_FILE, fence_path
 from wsp_index.refinery import COLUMNS, RefineryReader, generation_dir, is_sealed, record_from_row
-from wsp_index.spelling import SPELL_FILE
+from wsp_index.spelling import SPELL_FILE, SPELL_INPUTS
 from wsp_vault.ratelimit import RateLimiter
 
 CHECKPOINT = "REBUILD.json"
@@ -206,7 +206,7 @@ class Relexer:
 
     def finish(self, live_lexical: Path) -> None:
         """Carry over the static rank and the spelling vocabulary, then build the suggest trie once."""
-        for name in (RANK_FILE, fence_path(Path(RANK_FILE)).name, SPELL_FILE):
+        for name in (RANK_FILE, fence_path(Path(RANK_FILE)).name, SPELL_FILE, SPELL_INPUTS):
             src, dst = live_lexical / name, self.index.path / name
             if src.is_file() and not dst.exists():
                 partial = dst.with_name(dst.name + ".partial")

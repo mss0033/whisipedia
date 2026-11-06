@@ -26,6 +26,7 @@ at: :func:`trim_cif` replaces each with a comment that says so (the archive keep
 from __future__ import annotations
 
 import contextlib
+import errno
 import io
 import logging
 import os
@@ -33,9 +34,11 @@ import re
 import tarfile
 import time
 import unicodedata
-from collections.abc import Buffer, Iterator, Mapping, Sequence
+from collections.abc import Buffer, Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
+
+from wsp_core import nasretry
 
 log = logging.getLogger(__name__)
 
@@ -470,28 +473,69 @@ def read_entry(member: str, data: bytes, archive_title: str) -> CodEntry | None:
 
 # --- the archive -------------------------------------------------------------------------------------
 
-READ_TRIES = 5
+READ_TRIES = 8
+READ_WAITS = (2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 120.0)
+"""Seconds before each new try of a refused read: about four minutes in all, long enough for the
+CIFS client to reconnect after a NAS hiccup (2026-11-06 review)."""
 DROP_EVERY = 64 << 20
-_TRANSIENT: tuple[type[OSError], ...] = (BlockingIOError, ConnectionError, TimeoutError)
+TRANSIENT_ERRNOS = frozenset(
+    {
+        errno.EIO,  # a ``soft`` CIFS mount turns a server timeout or reconnect into EIO
+        errno.EAGAIN,
+        errno.ETIMEDOUT,
+        errno.ESTALE,
+        errno.ECONNRESET,
+        errno.ECONNABORTED,
+        errno.EHOSTDOWN,
+        errno.EHOSTUNREACH,
+        errno.ENETDOWN,
+        errno.ENETUNREACH,
+        errno.ENETRESET,
+    }
+)
+"""Errors of a read on the share that a moment later may succeed (as ``wsp_vault.atomic``'s)."""
+
+
+def transient(exc: OSError) -> bool:
+    """Whether a refused read is worth making again: :data:`wsp_core.nasretry.TRANSIENT` or an errno
+    of :data:`TRANSIENT_ERRNOS` (EIO above all: the 2026-11-06 review found one EIO 20 GB into the
+    26.6 GB archive would have ended the refine and thrown away hours of reading)."""
+    return isinstance(exc, nasretry.TRANSIENT) or exc.errno in TRANSIENT_ERRNOS
 
 
 class ShareReader(io.RawIOBase):
     """A file on the NAS read front to back, as a raw stream for :mod:`tarfile` and :mod:`gzip`.
 
-    * A read the share refuses for a moment (EAGAIN, a dropped connection) is made again at the same
-      offset after 2, 4, 8, 16 s (``pread``: nothing is skipped or read twice); the fifth refusal ends
-      the read, as for every other NAS read (:func:`wsp_index.refinery.read_parquet`).
+    * A read the share refuses for a moment (:func:`transient`: EAGAIN, EIO, a dropped connection) is
+      made again from the last byte read, after :data:`READ_WAITS` (``pread`` at the offset reached:
+      nothing is skipped or read twice, so the gzip stream above goes on as if nothing happened). The
+      file is opened again first: after a reconnect the old handle may be stale. The
+      :data:`READ_TRIES`-th refusal in a row ends the read, as for every other NAS read.
+    * ``pace`` is told every byte read: the library's shared budget for NAS reads and writes
+      (``wsp_cli.bootstrap.ingest_pace``), so 26.6 GB read at the link's full speed does not starve the
+      API's reads and the ingests running at once (2026-11-06 review).
     * The page cache behind the read is released every :data:`DROP_EVERY` bytes: 26.6 GB read once
       would otherwise sit in the cache charged to the refine's memory budget, which is what pushed the
       nightly job against its limit (2026-10-14 follow-ups).
     """
 
-    def __init__(self, path: Path, *, sleep: Sequence[float] = (2.0, 4.0, 8.0, 16.0)) -> None:
+    def __init__(
+        self,
+        path: Path,
+        *,
+        sleep: Sequence[float] = READ_WAITS,
+        pace: Callable[[int], None] | None = None,
+    ) -> None:
         super().__init__()
+        self._path = path
         self._fd = os.open(path, os.O_RDONLY)
         self._pos = 0
         self._dropped = 0
         self._waits = tuple(sleep)
+        self._pace = pace
+        self._sequential()
+
+    def _sequential(self) -> None:
         if hasattr(os, "posix_fadvise"):
             with contextlib.suppress(OSError):
                 os.posix_fadvise(self._fd, 0, 0, os.POSIX_FADV_SEQUENTIAL)
@@ -504,6 +548,8 @@ class ShareReader(io.RawIOBase):
         n = len(data)
         memoryview(buffer).cast("B")[:n] = data
         self._pos += n
+        if self._pace is not None and n:
+            self._pace(n)
         if self._pos - self._dropped >= DROP_EVERY:
             self._drop()
         return n
@@ -512,13 +558,25 @@ class ShareReader(io.RawIOBase):
         for attempt in range(1, READ_TRIES + 1):
             try:
                 return os.pread(self._fd, want, self._pos)
-            except _TRANSIENT as exc:
-                if attempt == READ_TRIES:
+            except OSError as exc:
+                if not transient(exc) or attempt == READ_TRIES:
                     raise
                 wait = self._waits[min(attempt, len(self._waits)) - 1] if self._waits else 0.0
                 log.warning("read at byte %d refused (%s); reading again in %.0f s", self._pos, exc, wait)
                 time.sleep(wait)
+                self._reopen()
         raise AssertionError("unreachable")
+
+    def _reopen(self) -> None:
+        """A fresh handle on the file (best effort: the old one is kept when the share still refuses)."""
+        try:
+            fd = os.open(self._path, os.O_RDONLY)
+        except OSError:
+            return
+        with contextlib.suppress(OSError):
+            os.close(self._fd)
+        self._fd = fd
+        self._sequential()
 
     def tell(self) -> int:
         return self._pos
@@ -536,13 +594,17 @@ class ShareReader(io.RawIOBase):
         super().close()
 
 
-def archive_cifs(path: Path) -> Iterator[tuple[str, bytes]]:
-    """``(member name, bytes)`` of every structure's CIF in a COD archive, in archive order.
+def archive_cifs(path: Path, *, pace: Callable[[int], None] | None = None) -> Iterator[tuple[str, bytes]]:
+    """``(member name, bytes)`` of every structure's CIF in a COD archive, in archive order; its
+    reads paced by ``pace`` (:class:`ShareReader`).
 
     Stream mode keeps every member header it has read (``TarFile.members``): 520,000 of them would be
     hundreds of MB by the end, so the list is emptied as the read goes (``next`` reads on from its own
     offset, not from the list)."""
-    with ShareReader(path) as raw, tarfile.open(fileobj=io.BufferedReader(raw, 1 << 20), mode="r|gz") as tar:
+    with (
+        ShareReader(path, pace=pace) as raw,
+        tarfile.open(fileobj=io.BufferedReader(raw, 1 << 20), mode="r|gz") as tar,
+    ):
         read: list[tarfile.TarInfo] = vars(tar)["members"]  # the list ``next`` appends to (untyped)
         while (member := tar.next()) is not None:
             read.clear()
@@ -556,10 +618,13 @@ def archive_cifs(path: Path) -> Iterator[tuple[str, bytes]]:
                 yield member.name, fh.read()
 
 
-def archive_entries(path: Path, archive_title: str) -> Iterator[CodEntry]:
-    """Every structure of the archive as an entry, each COD id once (a later copy is logged and left out)."""
+def archive_entries(
+    path: Path, archive_title: str, *, pace: Callable[[int], None] | None = None
+) -> Iterator[CodEntry]:
+    """Every structure of the archive as an entry, each COD id once (a later copy is logged and left
+    out); ``pace`` as :func:`archive_cifs`."""
     seen: set[int] = set()
-    for name, data in archive_cifs(path):
+    for name, data in archive_cifs(path, pace=pace):
         try:
             entry = read_entry(name, data, archive_title)
         except (ValueError, IndexError) as exc:  # a parser bug must not end a 520,000-file read

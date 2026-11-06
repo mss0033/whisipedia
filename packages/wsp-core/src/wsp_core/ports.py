@@ -21,7 +21,7 @@ makes a partitioned source's generation current for its partition only; adapters
 from __future__ import annotations
 
 import random
-from collections.abc import Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -59,6 +59,9 @@ class Ctx:
     fetcher: Fetcher
     workdir: Path  # scratch space on local disk for this source
     user_agent: str
+    # Told the bytes an adapter reads from the vault in one long stream (the refine's COD archive): the
+    # library's shared NAS budget (``wsp_cli.bootstrap.ingest_pace``); None = unpaced (2026-11-06 review).
+    read_pace: Callable[[int], None] | None = None
 
 
 # --- Acquisition -------------------------------------------------------------------------------

@@ -934,11 +934,12 @@ class OracleIndex:
         return self.lexical.suggest(prefix, limit=limit)
 
     def suggest_docs(self, prefix: str, *, limit: int = 10, lang: str | None = None) -> Sequence[Suggestion]:
-        """:class:`DocSuggester` when the lexical index is one; empty otherwise (the API then falls
-        back to :meth:`suggest`'s plain titles)."""
+        """:class:`DocSuggester` when the lexical index is one; ``NotImplementedError`` otherwise, so
+        the API falls back to :meth:`suggest`'s plain titles. Not an empty answer: the API takes an
+        empty one as "nothing matches" and does not search the trie twice (2026-11-06 review)."""
         if isinstance(self.lexical, DocSuggester):
             return self.lexical.suggest_docs(prefix, limit=limit, lang=lang)
-        return ()
+        raise NotImplementedError("the lexical index suggests titles only")
 
     def scope(self, query: str, sources: Sequence[str] | None = None) -> Scope | None:
         """Where :meth:`search` looks for this query (a named site, or the whole library)."""

@@ -88,7 +88,7 @@ from wsp_index.refinery import (
     seal_stamp,
     set_members,
 )
-from wsp_index.spelling import SPELL_FILE, SpellCache, SpellConfig, VocabStats, build_vocabulary
+from wsp_index.spelling import SPELL_FILE, SPELL_INPUTS, SpellCache, SpellConfig, VocabStats, build_vocabulary
 from wsp_index.titles import IndexedSource, TitleSources
 from wsp_orchestrator.pipeline import RefineResult
 from wsp_vault.ratelimit import RateLimiter
@@ -223,8 +223,12 @@ class Indexer:
         clock: Callable[[], float] = time.monotonic,
         refinery: Path | None = None,
         map_root: Path | None = None,
+        read_pace: Callable[[int], None] | None = None,
     ) -> None:
         self.vault = vault
+        # The refine's long reads of the vault (COD's 26.6 GB archive) share the library's NAS budget
+        # (:func:`wsp_cli.bootstrap.ingest_pace`) through :attr:`Ctx.read_pace` (2026-11-06 review).
+        self.read_pace = read_pace
         self.specs = {s.id: s for s in specs}
         self.adapters = adapters
         self.root = ensure_local(root)
@@ -314,7 +318,13 @@ class Indexer:
     def ctx(self, spec: SourceSpec, generation_id: str) -> Ctx:
         work = self.work / spec.id / generation_id
         work.mkdir(parents=True, exist_ok=True)
-        return Ctx(source=spec, fetcher=OfflineFetcher(), workdir=work, user_agent=self.user_agent)
+        return Ctx(
+            source=spec,
+            fetcher=OfflineFetcher(),
+            workdir=work,
+            user_agent=self.user_agent,
+            read_pace=self.read_pace,
+        )
 
     def _state(self) -> dict[str, str]:
         path = self.root / STATE_FILE
@@ -710,22 +720,72 @@ class Indexer:
         map_dir = None if self.map_root is None else id_map_dir(self.map_root, gen_dir)
         return RefineryReader(gen_dir, map_dir=map_dir)
 
+    def _spell_readers(self) -> list[tuple[str, RefineryReader]]:
+        return [
+            (sid, r) for sid, r in self._current_readers() if CATALOG_DOMAIN not in self.specs[sid].domain
+        ]
+
+    @staticmethod
+    def _spell_inputs(readers: Sequence[tuple[str, RefineryReader]], config: SpellConfig) -> dict[str, Any]:
+        """What a vocabulary is built from: each source's generation and the stamp of its seal (a
+        generation refined again under the same id gets a new one), and the settings."""
+        return {
+            "config": repr(config),
+            "sources": {sid: f"{r.generation_id}@{seal_stamp(r.dir)}" for sid, r in readers},
+        }
+
+    def spell_due(self, config: SpellConfig | None = None) -> tuple[bool, str]:
+        """Whether :meth:`spell` would build a vocabulary other than the kept one, and why: compared
+        with what it was built from (:data:`SPELL_INPUTS`), as :meth:`rank_due` compares the rank's.
+
+        The nightly build skipped spell when its own run changed no document; a spell run that failed
+        the night the documents changed was then never run again while the next nights changed
+        nothing, and searches kept the old vocabulary (2026-11-06 review)."""
+        path = self.index.path / SPELL_FILE
+        if not path.is_file():
+            return True, "no vocabulary yet"
+        try:
+            recorded = json.loads((self.index.path / SPELL_INPUTS).read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return True, "what it was built from was not recorded"
+        except (OSError, ValueError) as exc:
+            return True, f"its record could not be read ({type(exc).__name__}: {exc})"
+        try:
+            current = self._spell_inputs(self._spell_readers(), config or SpellConfig())
+        except (OSError, ValueError) as exc:  # a seal the share refused for a moment: build, as before
+            return True, f"the current seals could not be read ({type(exc).__name__}: {exc})"
+        if recorded != current:
+            return True, "the indexed generations changed since it was built"
+        return False, "built from the current generations"
+
+    def spell_if_due(self, config: SpellConfig | None = None) -> bool:
+        """:meth:`spell` when :meth:`spell_due` says so (the nightly build); returns whether it ran."""
+        due, why = self.spell_due(config)
+        if not due:
+            self._say(f"spell: kept ({why})")
+            return False
+        self._say(f"spell: due ({why})")
+        self.spell(config)
+        return True
+
     @_timed("spell")
     def spell(self, config: SpellConfig | None = None) -> VocabStats | None:
         """Rebuild the spelling vocabulary from every indexed source (``wsp index spell``), except
         catalogues (registry domain ``catalog``): their records are book titles in hundreds of
-        languages, not the words people search the library's text for."""
-        readers = [
-            (sid, r) for sid, r in self._current_readers() if CATALOG_DOMAIN not in self.specs[sid].domain
-        ]
+        languages, not the words people search the library's text for. What it was built from is
+        recorded once it is built (:data:`SPELL_INPUTS`, :meth:`spell_due`)."""
+        readers = self._spell_readers()
         if not readers:
             self._say("spell: no indexed source to read")
             return None
+        config = config or SpellConfig()
+        inputs = self._spell_inputs(readers, config)  # the seals as read, not as they are after
         path = self.index.path / SPELL_FILE
         # Local disk, beside the index, not inside it: a full relex carries the index files over and
         # the kept counts stay valid for it (the same generations).
         cache = SpellCache(self.root / "spell-cache")
-        stats = build_vocabulary(readers, path, config or SpellConfig(), progress=self._say, cache=cache)
+        stats = build_vocabulary(readers, path, config, progress=self._say, cache=cache)
+        _write_durably(self.index.path / SPELL_INPUTS, json.dumps(inputs, indent=1, sort_keys=True) + "\n")
         self._say(
             f"spell: {stats.line()}; {cache.kept} vocabularies unchanged ({cache.near} of them changed "
             f"a little); {memory_line()}"
