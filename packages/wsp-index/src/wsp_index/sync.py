@@ -126,8 +126,13 @@ def refresh(
     new: RefineryReader,
     *,
     progress: Callable[[str], None] | None = None,
+    derive_old: bool = False,
 ) -> SyncStats:
     """Diff two generations and apply the difference to ``index`` and ``feed``, part by part.
+
+    A document is upserted when its text or its index fingerprint (title, language, aliases, byline)
+    changed; ``derive_old`` computes the fingerprints ``old`` was refined without (a refine-again:
+    :mod:`wsp_index.delta`).
 
     Resumable with a :class:`CheckpointingFeed`; the caller rebuilds derived structures (suggest)
     once afterwards. Without an ``old`` generation, documents of this source that the index still holds
@@ -178,7 +183,7 @@ def refresh(
             return checkpointing.publish(records, checkpoint=(key, json.dumps(mark)))
         return feed.publish(records)
 
-    keys = KeyIndex.build(old, progress) if old is not None else KeyIndex.empty()
+    keys = KeyIndex.build(old, progress, derive_missing=derive_old) if old is not None else KeyIndex.empty()
     hashes = OldHashes(old)
     matched = np.zeros(len(keys), np.bool_)
     cursor: str | None = None

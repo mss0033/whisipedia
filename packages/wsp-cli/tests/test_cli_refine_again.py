@@ -438,3 +438,50 @@ def test_a_failed_rank_still_folds_the_suggest_trie(tmp_path: Path, monkeypatch:
     with pytest.raises(BlockingIOError):
         ops.cmd_index_build(argparse.Namespace(source=None, no_spell=True), io.StringIO())
     assert finished == [True]
+
+
+class CutTitles(Adapter):
+    """Reads "Tides" with its title cut at an HTML entity until it learns to repair it (``full``):
+    Encyclopédie de l'environnement, 2026-11-06. The text is the same either way."""
+
+    def documents(self, ctx: Any, generation_path: Path) -> Iterator[DocRecord]:
+        for native, title in (
+            ("tides", "Tides and the moon" if self.full else "Tides and the m"),
+            ("rocks", "Rocks"),
+        ):
+            text = f"{native.title()} body."
+            yield DocRecord(
+                make_doc_id(SID, native),
+                SID,
+                native,
+                title,
+                "en",
+                "CC0-1.0",
+                text,
+                content_hash=content_hash(text),
+            )
+
+
+def test_refine_again_indexes_a_title_it_repaired_from_a_copy_without_fingerprints(tmp_path: Path) -> None:
+    """The old copy was refined before index fingerprints existed: the refine-again derives them, so
+    the repaired title is upserted although the text (its content hash) did not change."""
+    import pyarrow.parquet as pq
+
+    from wsp_index.refinery import INDEX_HASH, RefineryReader
+
+    adapter = CutTitles()
+    ix = indexer(tmp_path, adapter)
+    try:
+        ix.build([SID])
+        gen_dir = tmp_path / "index" / "refinery" / SID / "2026-01"
+        for part in RefineryReader(gen_dir).parts:  # as refined before 2026-11-06
+            table = pq.read_table(part)  # pyright: ignore[reportUnknownMemberType]
+            pq.write_table(table.drop([INDEX_HASH]), part)  # pyright: ignore[reportUnknownMemberType]
+        assert [h.title for h in ix.index.search("tides")] == ["Tides and the m"]
+        adapter.full = True
+        report = ix.refine_again(SID)
+        assert (report.indexed, report.upserted) == ("2026-01", 1)
+        assert [h.title for h in ix.index.search("tides")] == ["Tides and the moon"]
+        assert ix.build([SID])[0].upserted == 0
+    finally:
+        ix.close()

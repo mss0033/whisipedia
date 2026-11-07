@@ -514,7 +514,11 @@ class Indexer:
         if self.map_root is not None and ensure_id_map(new_dir, id_map_dir(self.map_root, new_dir)):
             self._say(f"  {spec.id}/{generation_id}: id map written")
         _write_durably(self.refinery / spec.id / CURRENT_FILE, generation_id + "\n")
-        stats = refresh(self.index, self.feed, old, new, progress=self._say)
+        # A refine-again's old copy was refined by older code, perhaps without index fingerprints: derive
+        # them, so a title it repaired reaches the index (2026-11-06: 739 Encyclopédie de
+        # l'environnement titles did not). Only here: the nightly diff of a new generation from an old
+        # one without them compares content alone, not reading every title of the library.
+        stats = refresh(self.index, self.feed, old, new, progress=self._say, derive_old=since is not None)
         if any(_has_rows(p) for p in self._redirect_tables(spec.id, (generation_id, *alias_generations))):
             # Its redirects join the trie at the next due rebuild (within a day), not at once: a full
             # scan per Kiwix release (they all carry redirects) took 1.5 h each (review 2026-10-14).

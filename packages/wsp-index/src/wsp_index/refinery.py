@@ -53,7 +53,7 @@ import pyarrow.parquet as pq
 
 from wsp_core.ids import DocId, content_hash
 from wsp_core.memory import drop_file_cache
-from wsp_core.model import ChangeRecord, DocRecord
+from wsp_core.model import BYLINE_META, SEARCH_CHARS_META, ChangeRecord, DocRecord
 from wsp_core.nasretry import retrying
 from wsp_index.localfs import REMOTE_FS_TYPES, filesystem_type
 
@@ -129,6 +129,10 @@ ROW_GROUP_TARGET_CHARS = 4_000_000  # long documents get fewer rows per row grou
 # decodes a whole row group: 256 books would be ~100 MB)
 DEFAULT_ZSTD_LEVEL = 6
 
+INDEX_HASH = "index_hash"
+INDEX_FIELDS = ("title", "lang", "aliases", "meta")
+"""The Refinery columns :func:`index_fingerprint` reads (``meta``: only the keys the index uses)."""
+
 SCHEMA = pa.schema(
     [
         pa.field("doc_id", pa.string(), nullable=False),
@@ -149,10 +153,14 @@ SCHEMA = pa.schema(
         # Optional (v0.3, additive): DocRecord.meta as a JSON object string, null when empty. Files
         # written before it existed lack the column; readers treat it as absent (no format bump).
         pa.field("meta", pa.string()),
+        # Optional (2026-11-06, additive): :func:`index_fingerprint` of the fields the search index holds
+        # besides the text. Null or absent in rows written before it: the index diff then compares the
+        # content hash alone, as it always did (no mass upsert of the existing library).
+        pa.field(INDEX_HASH, pa.uint64()),
     ]
 )
 COLUMNS: tuple[str, ...] = tuple(SCHEMA.names)
-OPTIONAL_COLUMNS = frozenset({"meta"})
+OPTIONAL_COLUMNS = frozenset({"meta", INDEX_HASH})
 
 _IDS_SCHEMA = pa.schema(
     [("h", pa.uint64()), ("part", pa.uint32()), ("rg", pa.uint32()), ("row", pa.uint32())]
@@ -268,7 +276,39 @@ def _to_row(rec: DocRecord) -> dict[str, object]:
         "content_hash": rec.content_hash,
         "aliases": list(rec.aliases),
         "meta": json.dumps(dict(rec.meta), sort_keys=True) if rec.meta else None,
+        INDEX_HASH: index_fingerprint(rec.title, rec.lang, rec.aliases, rec.meta),
     }
+
+
+def index_fingerprint(title: str, lang: str, aliases: Sequence[str], meta: Mapping[str, str] | None) -> int:
+    """A non-zero 64-bit fingerprint of what the search index holds of a document besides its text
+    (which ``content_hash`` covers): the title, the language (the analyzer), the aliases (suggest), and
+    the byline and searched-text length from ``meta`` (``TantivyIndex.upsert``). The index diff upserts
+    a document whose fingerprint changed although its text did not: a title repaired by a refine-again
+    (cut at an HTML entity, 2026-11-06) never reached the index.
+
+    Only the fields the index reads, not all of ``meta``: a volatile key would re-upsert a whole source
+    every generation. Changing what goes in here changes every stored fingerprint, so the whole library
+    would be upserted at its next generations: a new definition needs a new column, not an edit."""
+    m = meta or {}
+    body = json.dumps(
+        # Aliases as a set: suggest does not care about their order, which an adapter may not keep.
+        ["v1", title, lang, m.get(BYLINE_META, ""), m.get(SEARCH_CHARS_META, ""), sorted(set(aliases))],
+        ensure_ascii=False,
+    )
+    value = int.from_bytes(hashlib.blake2b(body.encode("utf-8"), digest_size=8).digest(), "little")
+    return value or 1  # 0 means "no fingerprint" in the index diff
+
+
+def row_fingerprint(row: Mapping[str, Any]) -> int:
+    """:func:`index_fingerprint` of a Refinery row holding :data:`INDEX_FIELDS` (rows written before
+    the column existed: the index diff of a refine-again derives the old copy's fingerprints so)."""
+    return index_fingerprint(
+        str(row.get("title") or ""),
+        str(row.get("lang") or ""),
+        tuple(row.get("aliases") or ()),
+        _meta(row.get("meta")),
+    )
 
 
 def record_from_row(row: Mapping[str, Any]) -> DocRecord:
