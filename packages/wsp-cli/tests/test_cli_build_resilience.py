@@ -411,3 +411,60 @@ def test_the_storage_probe_gives_up_on_a_hung_mount(tmp_path: Path, monkeypatch:
         assert not wiring.storage_probes(tmp_path / "vault", None, timeout=0.2)()
     finally:
         release.set()
+
+
+class PromotingVault(Vault):
+    """CURRENT moves to ``r2`` (sealed by a lane) while the build refines the first generation."""
+
+    def __init__(self, root: Path) -> None:
+        super().__init__(root)
+        self.ids = [GID]
+        self.current_id = GID
+
+    def generations(self, source_id: str) -> list[Generation]:
+        return [Generation(source_id, g, GenerationStatus.SEALED) for g in self.ids]
+
+    def current(self, source_id: str) -> Generation | None:
+        return Generation(source_id, self.current_id, GenerationStatus.SEALED)
+
+    def current_set(self, source_id: str) -> list[Generation]:
+        current = self.current(source_id)
+        return [] if current is None else [current]
+
+
+class PromotingAdapter(Adapter):
+    def __init__(self, vault: PromotingVault) -> None:
+        super().__init__()
+        self.vault = vault
+        self.promote = True
+
+    def documents(self, ctx: Any, generation_path: Path) -> Iterator[DocRecord]:
+        if self.promote and ctx.source.id == GOOD:
+            self.promote = False
+            self.vault.ids.append(f"{GID}r2")  # the collections lane seals and promotes r2 mid-refine
+            self.vault.current_id = f"{GID}r2"
+        yield from super().documents(ctx, generation_path)
+
+
+def test_a_generation_promoted_during_the_refine_is_left_to_the_next_run(tmp_path: Path) -> None:
+    # 2026-11-07: crs-reports/2026-10-20r2 was promoted 11 minutes into the refine of 2026-10-20, and
+    # the build indexed r2, which had no Refinery copy: FileNotFoundError on its _SUCCESS.json.
+    vault = PromotingVault(tmp_path / "vault")
+    adapter = PromotingAdapter(vault)
+    root = tmp_path / "index"
+    ix = Indexer(
+        vault,  # type: ignore[arg-type]
+        [spec(GOOD)],
+        {"fake": adapter},  # type: ignore[dict-item]
+        root,
+        TantivyIndex(root / "lexical"),
+        SqliteChangeFeed(root / "changes.sqlite"),
+    )
+    try:
+        (report,) = ix.build()
+        assert (report.error, report.indexed, report.refined) == (None, GID, ((GID, 2),))
+        (report,) = ix.build()  # the next night: r2 is refined and indexed
+        assert (report.error, report.indexed, report.refined) == (None, f"{GID}r2", ((f"{GID}r2", 2),))
+        assert is_sealed(generation_dir(ix.refinery, GOOD, f"{GID}r2"))
+    finally:
+        ix.close()

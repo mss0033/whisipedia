@@ -977,12 +977,18 @@ class Indexer:
             if explicit or removed:
                 return SourceReport(sid, deleted=removed, skipped="not indexed (registry index: false)")
             return None
+        # CURRENT is read once, before the sealed generations are listed: a lane that promotes a new
+        # generation while this source refines (a 16-minute crs-reports refine, 2026-11-07) leaves this
+        # run on the one it refined, not on one with no Refinery copy (FileNotFoundError on its
+        # _SUCCESS.json); the next run takes the new one.
+        current = None if spec.partitioned else self.vault.current(sid)
         gens = [g for g in self.vault.generations(sid) if g.status is GenerationStatus.SEALED]
         if not gens:
             return SourceReport(sid, skipped="no sealed generation") if explicit else None
         if self.adapter_for(spec) is None:
             return SourceReport(sid, skipped=f"no adapter installed for {spec.adapter!r}")
-        wanted_ids = {g.generation_id for g in self.vault.current_set(sid)}
+        wanted = self.vault.current_set(sid) if spec.partitioned else [current] if current else []
+        wanted_ids = {g.generation_id for g in wanted}
         self._say(f"{sid}: {len(gens)} sealed generation(s), {len(wanted_ids)} current")
         refined: list[tuple[str, int]] = []
         left_out = 0
@@ -997,7 +1003,6 @@ class Indexer:
             return SourceReport(
                 sid, tuple(refined), rep.indexed, rep.upserted, rep.deleted, rep.skipped, left_out=left_out
             )
-        current = self.vault.current(sid)
         if current is None:
             return SourceReport(sid, tuple(refined), skipped="no current generation", left_out=left_out)
         # A refine-again that was interrupted after its new copy was in place: the index still holds
