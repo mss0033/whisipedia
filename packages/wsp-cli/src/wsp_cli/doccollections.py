@@ -560,9 +560,9 @@ def _permanent_tries(kind: str) -> int:
     return PERMANENT_TRIES if kind.startswith("refused:") else PERMANENT_TRIES_CONTENT
 
 
-# Held documents downloaded again, at most, to show that a host still serves good files when this run
-# downloaded none from it (a pass that holds every document but the failing ones), and the largest.
-PROBE_MAX = PERMANENT_MAX + 2
+# Held documents downloaded again, at most, to show that a host still serves good files when no clean
+# take since a due document's first failure proves it (settle_permanent), and the largest.
+PROBE_MAX = 3
 PROBE_MAX_BYTES = 32 << 20
 # A document given up this long ago is due for another try even when nothing fetches its source
 # (``wsp collections given-up``; the weekly refresh runs those sources again).
@@ -578,6 +578,24 @@ def served_host(result: object, url: str) -> str:
     return (urlsplit(url).hostname or "").lower()
 
 
+CLEAN_HOSTS = "clean-hosts.json"  # per source: host -> its last clean take, from any run
+
+
+def _read_json(path: Path) -> dict[str, dict[str, Any]]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return cast(dict[str, dict[str, Any]], data) if isinstance(data, dict) else {}
+
+
+def _write_json(path: Path, data: Mapping[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(data, indent=1, sort_keys=True), encoding="utf-8")
+    tmp.replace(path)
+
+
 def settle_permanent(
     report: FetchReport,
     ledger: Path,
@@ -586,33 +604,50 @@ def settle_permanent(
     tried: int,
     good: Mapping[str, int],
     host_of: Mapping[str, str],
-    probe: Callable[[str, int], int] | None = None,
+    probe: Callable[[str], tuple[int, int]] | None = None,
 ) -> None:
     """Count each document's consecutive failures of one permanent kind (``report.permanent``) in
-    ``ledger`` and move one seen on enough runs in a row (:func:`_permanent_tries`), the first at
-    least PERMANENT_MIN_AGE ago, from ``report.failed`` to ``report.given_up``.
+    ``ledger`` and move one from ``report.failed`` to ``report.given_up`` when
 
-    Only single documents of a host that serves good files: the host's good downloads this run
-    (``good``, by host; ``host_of`` maps each key to its host) must outnumber its documents failing
-    so, and ``probe(host, n)`` (n held documents downloaded again and found the same, at most) makes
-    up the difference on a pass that downloaded nothing new (asked only once one is due). No more of
-    them than PERMANENT_MAX and PERMANENT_SHARE of the ``tried`` downloads either. A blocked document's
-    count starts over, so a site-wide refusal that shrinks to a few documents never gives them up at
-    once, and a host refusing everything is asked again only after the full count (review of
-    2026-11-09)."""
+    * it failed so on enough runs in a row (:func:`_permanent_tries`), the first at least
+      PERMANENT_MIN_AGE ago, and
+    * its host (``host_of``) made a clean take (fetched, or the same bytes as held) in a run at or
+      after the document's first such failure: kept per source in ``clean-hosts.json`` from every
+      run's ``good`` (clean takes by host), so a document that failed beside siblings that downloaded
+      is proven on later passes that download nothing (an NTRS or CRS listing gives no size: held
+      documents are not downloaded again); one that first failed inside a site-wide block is proven
+      only once the host serves cleanly again (review of 2026-11-09, round 3).
+
+    Unproven, it keeps its count and is only not given up. ``probe(host)`` (held documents downloaded
+    again: ``(tried, the same)``) may prove a host on a due document; a probe that got nothing good
+    starts the host's counts over, as do more such documents in this run than PERMANENT_MAX (or
+    PERMANENT_SHARE of the ``tried`` downloads). A host with clean takes this run but no more of them
+    than its failing documents gives none up. A document given up before stays given up while it
+    fails (a monthly retry that fails again): its record is never dropped, only ``retried`` stamped."""
     failing = {key for key, _ in report.failed}
     seen_now = {key: kind for key, kind in report.permanent.items() if key in failing}
-    try:
-        seen = cast(dict[str, dict[str, Any]], json.loads(ledger.read_text(encoding="utf-8")))
-    except (OSError, ValueError):
-        seen = {}
+    seen = _read_json(ledger)
+    proofs_path = ledger.parent / CLEAN_HOSTS
+    proofs = _read_json(proofs_path)
     stamp = now.isoformat(timespec="seconds")
+
+    def record(host: str) -> None:
+        p = proofs.setdefault(host, {"count": 0})
+        p["last_clean"] = stamp
+        p["count"] = int(p.get("count", 0)) + 1  # runs with a clean take
+
+    for host, n in sorted(good.items()):
+        if n > 0:
+            record(host)
     entries: dict[str, dict[str, Any]] = {}
     for key, sig in sorted(seen_now.items()):
         old = seen.get(key)
-        entry = (
-            dict(old) if old is not None and str(old.get("sig", "")) == sig else {"first": stamp, "tries": 0}
-        )
+        if old is not None and str(old.get("sig", "")) == sig:
+            entry = dict(old)
+        else:
+            entry = {"first": stamp, "tries": 0}
+            if old is not None and "given_up" in old:
+                entry["given_up"] = old["given_up"]  # another permanent failure: still given up
         entry["sig"] = sig
         entry["tries"] = int(entry["tries"]) + 1
         entries[key] = entry
@@ -622,39 +657,55 @@ def settle_permanent(
         if e["tries"] >= _permanent_tries(str(e["sig"]))
         and now - datetime.fromisoformat(e["first"]) >= PERMANENT_MIN_AGE
     }
+
+    def proven(key: str) -> bool:
+        p = proofs.get(host_of.get(key, ""))
+        try:
+            return p is not None and datetime.fromisoformat(str(p["last_clean"])) >= datetime.fromisoformat(
+                entries[key]["first"]
+            )
+        except (KeyError, ValueError):
+            return False
+
     over = len(seen_now) > max(PERMANENT_MAX, int(tried * PERMANENT_SHARE))
-    blocked: set[str] = set(seen_now) if over else set()
+    reset: set[str] = set(seen_now) if over else set()
+    refused: set[str] = set()
     if not over:
         for host in sorted({host_of.get(key, "") for key in seen_now}):
             keys = {key for key in seen_now if host_of.get(key, "") == host}
-            ok = good.get(host, 0)
-            if ok > len(keys) or not keys & due:
-                continue  # well, or nothing due yet: counted
-            if probe is not None:
-                ok += probe(host, len(keys) + 1 - ok)
-            if ok <= len(keys):
-                blocked |= keys  # due, but the host serves nothing good: the count starts over
-    moved: dict[str, dict[str, Any]] = {}
-    for key in sorted(due - blocked):
-        e = entries[key]
-        e.setdefault("given_up", stamp)
-        e["retried"] = stamp  # tried, by a fetch that ran to its end (due_for_retry)
-        moved[key] = e
-    still: list[tuple[str, str]] = []
+            ok_now = good.get(host, 0)
+            if ok_now and len(keys) >= ok_now:  # this run's clean takes no more than its failures
+                refused |= keys
+                continue
+            if probe is not None and any(not proven(key) for key in keys & due):
+                attempted, same = probe(host)
+                if same:
+                    record(host)
+                elif attempted:
+                    reset |= keys  # held documents of the host failed too: a block
+            refused |= {key for key in keys if not proven(key)}
+    still_given_up = {key for key, e in entries.items() if "given_up" in e}
+    moved = ((due - reset - refused) | still_given_up) & set(entries)
+    for key in moved:
+        entries[key].setdefault("given_up", stamp)
+        entries[key]["retried"] = stamp  # tried, by a fetch that ran to its end (due_for_retry)
+    out: list[tuple[str, str]] = []
     for key, why in report.failed:
         if key in moved:
-            e = moved[key]
+            e = entries[key]
             report.given_up.append((key, f"{why}, on every one of {e['tries']} tries since {e['first']}"))
         else:
-            still.append((key, why))
-    report.failed = still
-    kept = {key: e for key, e in entries.items() if key not in blocked}
+            out.append((key, why))
+    report.failed = out
+    kept = {key: e for key, e in entries.items() if key not in reset or key in still_given_up}
+    for key, e in seen.items():  # given up, failing otherwise now (a timeout): kept as it was
+        if key not in kept and "given_up" in e and key in failing:
+            kept[key] = e
     if kept or seen:
-        ledger.parent.mkdir(parents=True, exist_ok=True)
-        tmp = ledger.with_name(f".{ledger.name}.{os.getpid()}.tmp")
-        tmp.write_text(json.dumps(kept, indent=1, sort_keys=True), encoding="utf-8")
-        tmp.replace(ledger)
-    report.permanent_over = len(blocked)
+        _write_json(ledger, kept)
+    if good or proofs:
+        _write_json(proofs_path, proofs)
+    report.permanent_over = len((reset | refused) - moved)
     if report.given_up:
         report.given_up_ledger = str(ledger)
 
@@ -925,6 +976,7 @@ class CollectionFetcher:
         # key -> host that served this run's download of it (the origin that sent the bytes; written
         # from the download threads, read after each is screened). A copy already here is not in it.
         self._served: dict[str, str] = {}
+        self.clock: Callable[[], datetime] = lambda: datetime.now(UTC)  # tests move it
         self.vault_root = vault_root
         self.incoming = vault_root / "_incoming"
         self.fetcher = fetcher
@@ -1020,14 +1072,15 @@ class CollectionFetcher:
             if sent is not None and (len(report.fetched), report.skipped) != before:
                 good[sent] = good.get(sent, 0) + 1
 
-        def probe(name: str, want: int) -> int:
-            """Held documents of host ``name`` downloaded again (smallest first) and found the same."""
+        def probe(name: str) -> tuple[int, int]:
+            """Held documents of host ``name`` downloaded again (smallest first): ``(tried, the same)``;
+            it stops at the first that is the same."""
             same = tries = 0
             picks = sorted(held_by_host.get(name, []), key=lambda c: c.size or 0)
             self.workdir.mkdir(parents=True, exist_ok=True)
             with tempfile.TemporaryDirectory(dir=self.workdir, prefix=".probe-") as tmp:
                 for cand in picks:
-                    if same >= want or tries >= PROBE_MAX:
+                    if same or tries >= PROBE_MAX:
                         break
                     tries += 1
                     try:
@@ -1044,7 +1097,7 @@ class CollectionFetcher:
                     except fetch_errors:
                         continue
                     same += digest.hexdigest() == held_sha.get(cand.key)
-            return same
+            return tries, same
 
         def failed(cand: Candidate, exc: BaseException) -> None:
             why = f"{type(exc).__name__}: {exc}"
@@ -1145,7 +1198,7 @@ class CollectionFetcher:
             settle_permanent(
                 report,
                 self.workdir / spec.id / f"failed-for-good{part}.json",
-                datetime.now(UTC),
+                self.clock(),
                 tried=report.tried,
                 good=good,
                 host_of=report.permanent_hosts,

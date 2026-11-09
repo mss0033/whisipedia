@@ -1456,7 +1456,7 @@ def test_a_failure_seen_the_same_way_on_runs_in_a_row_no_longer_makes_the_run_pa
         *,
         tried: int = 10,
         good: int = 100,
-        probe: Callable[[str, int], int] | None = None,
+        probe: Callable[[str], tuple[int, int]] | None = None,
     ) -> dc.FetchReport:
         report = dc.FetchReport("ntrs", "v", planned=True)
         for key, kind in failures.items():
@@ -1493,7 +1493,7 @@ def test_a_failure_seen_the_same_way_on_runs_in_a_row_no_longer_makes_the_run_pa
     assert seen["a"]["tries"] == 4  # every document, with its count
     assert seen["a"]["given_up"] == "2026-11-09T02:00:00+00:00"  # kept from the first time
     other = run(3, {"a": "refused: HTTP 403", "b": "refused: HTTP 401"})  # b fails otherwise now
-    assert [k for k, _ in other.given_up] == ["a"]
+    assert sorted(k for k, _ in other.given_up) == ["a", "b"]  # given up before: stays given up
     run(4, {})  # a run without them (fetched, or not tried): the counts start over
     assert run(6.5, {"a": "refused: HTTP 403"}).given_up == []
 
@@ -1513,67 +1513,115 @@ def test_a_failure_seen_the_same_way_on_runs_in_a_row_no_longer_makes_the_run_pa
     assert sorted(k for k, _ in run(26, many, tried=1_000).given_up) == sorted(many)
 
 
-def test_nothing_is_given_up_while_its_host_serves_nothing_good(tmp_path: Path) -> None:
-    """Review of 2026-11-09: a resume pass holds every document but the failing ones, so it tried
-    only those; a WAF or a rate-limit page over a lane's rounds gave up the last ten at once. A host
-    that served no good file this run (nor, downloaded again, a held one) gives up nothing, and its
-    documents' counts start over; a block that shrinks to a few documents gives up none at once."""
-    from datetime import UTC, datetime, timedelta
+PAGE = b"<!DOCTYPE html><html><head><title>Just a moment...</title></head><body>Checking</body></html>"
+SIBLINGS = [
+    ("a-1990.pdf", make_pdf([PUBLIC_A, ["Alloys"]])),
+    ("b-1991.pdf", make_pdf([PUBLIC_A, ["Fatigue"]])),
+    ("c-1992.pdf", make_pdf([PUBLIC_A, ["Fracture"]])),
+]
 
-    from wsp_cli import doccollections as dc
 
-    ledger = tmp_path / "failed-for-good.json"
-    now = datetime(2026, 11, 9, tzinfo=UTC)
-    asked: list[tuple[str, int]] = []
+class _Timeline:
+    """An NTRS-shaped source over a lane's passes: a plain list of URLs, no size, no MD5 (held
+    documents are not downloaded again for REFETCH_AFTER), one document always an HTML page, and a
+    site-wide block (every download a challenge page) while ``blocked``."""
 
-    def run(hour: float, keys: list[str], *, good: int, same: int = 0) -> dc.FetchReport:
-        report = dc.FetchReport("crs", "v")
-        for key in keys:
-            report.failed.append((key, "HTTP 403"))
-            report.permanent[key] = "refused: HTTP 403"
+    def __init__(self, vault: FileVault, tmp_path: Path) -> None:
+        from datetime import UTC, datetime
 
-        def probe(host: str, want: int) -> int:
-            asked.append((host, want))
-            return min(same, want)
+        self.vault, self.tmp = vault, tmp_path
+        self.blocked = False
+        self.t0 = datetime(2026, 11, 9, 6, tzinfo=UTC)
+        self.bad = f"{BUCKET}/{PREFIX}html-1989.pdf"
+        names = [n for n, _ in SIBLINGS] + ["html-1989.pdf"]
+        s = spec(OBJECTS)
+        access: dict[str, Any] = {
+            **cast(dict[str, Any], s.raw["access"]),
+            "discovery": [{"kind": "list", "items": [{"url": f"{BUCKET}/{PREFIX}{n}"} for n in names]}],
+        }
+        self.spec = replace(s, raw={**s.raw, "access": access})
 
-        dc.settle_permanent(
-            report,
-            ledger,
-            now + timedelta(hours=hour),
-            tried=len(keys) + good,
-            good={"www.everycrsreport.com": good} if good else {},
-            host_of=dict.fromkeys(keys, "www.everycrsreport.com"),
-            probe=probe,
+    def fetch(self, hour: float) -> Any:
+        from datetime import timedelta
+
+        timeline = self
+
+        class Site(FakeFetcher):
+            def download(self, remote: RemoteFile, dest: Path) -> FetchResult:
+                if timeline.blocked or remote.url == timeline.bad:
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    dest.write_bytes(PAGE)
+                    return FetchResult(dest, len(PAGE), "0" * 64, "0" * 64)
+                return super().download(remote, dest)
+
+        fetcher = CollectionFetcher(
+            self.vault.root,
+            Site({f"{BUCKET}/{PREFIX}{n}": b for n, b in SIBLINGS}),
+            keys={},
+            user_agent="test",
+            workdir=self.tmp / "work",
+            out=io.StringIO(),
+            throttle=False,
         )
+        fetcher.clock = lambda: self.t0 + timedelta(hours=hour)
+        report = fetcher.run(self.spec, version="2026-11-09")
+        if report.planned:
+            ingest(self.vault, self.spec)
         return report
 
-    three = ["95-602", "94-459", "93-931"]
-    host = "www.everycrsreport.com"
-    for hour in (0, 1, 2, 3, 5):  # every download refused, held ones too: an all-failed resume pass
-        r = run(hour, three, good=0)
-        assert r.given_up == []
-        assert dc.fetch_exit_code(r) == dc.EXIT_PARTIAL
-    assert r.permanent_over == 3
-    assert asked == [(host, 4), (host, 4)]  # due at 2 and 5 h: held ones downloaded again, refused
-    assert json.loads(ledger.read_text()) == {}  # each time the count started over
 
-    # A site-wide refusal of 11 that shrinks to 3 documents: their count starts there.
-    eleven = [f"k{i}" for i in range(8)] + three
-    run(10, eleven, good=0)
-    run(12, eleven, good=0)
-    run(14, three, good=50)
-    assert run(14.5, three, good=50).given_up == []  # two tries, not yet 2 hours
-    assert sorted(k for k, _ in run(16, three, good=50).given_up) == sorted(three)
+def test_a_web_page_in_place_of_a_pdf_on_a_listing_without_sizes_is_given_up_on_later_passes(
+    vault: FileVault, tmp_path: Path
+) -> None:
+    """Review of 2026-11-09, round 3: NTRS and CRS list no size or MD5, so a later pass downloads only
+    the failing document and proves nothing about its host. The clean takes of the first pass, kept
+    per source, prove it: the third pass over 2 hours gives the document up."""
+    from wsp_cli.doccollections import EXIT_PARTIAL, fetch_exit_code
 
-    # A pass that downloads nothing new: held documents downloaded again show the host is well.
-    ledger.unlink()
-    run(20, three, good=0)
-    asked.clear()
-    assert run(22, three, good=0, same=0).given_up == []  # due, but the probe got other bytes
-    assert asked == [(host, 4)]
-    run(23, three, good=0)
-    assert sorted(k for k, _ in run(25, three, good=0, same=4).given_up) == sorted(three)
-    assert run(25.5, three, good=2, same=1).given_up == []  # 2 + 1 good for 3 failing: not more
+    site = _Timeline(vault, tmp_path)
+    first = site.fetch(0)  # the siblings download; the page fails
+    assert len(first.fetched) == 3
+    [(bad, _)] = first.failed
+    assert "html-1989" in bad
+    second = site.fetch(1)  # a resume pass: nothing downloaded but the page
+    assert second.fetched == []
+    assert second.reused == 0
+    assert [k for k, _ in second.failed] == [bad]
+    assert fetch_exit_code(second) == EXIT_PARTIAL
+    third = site.fetch(2.5)
+    assert [k for k, _ in third.given_up] == [bad]
+    assert third.failed == []
+    assert fetch_exit_code(third) != EXIT_PARTIAL
+    fourth = site.fetch(30)  # still failing: stays given up, its record kept, retried stamped
+    assert [k for k, _ in fourth.given_up] == [bad]
+    seen = json.loads((tmp_path / "work" / "test-pubs" / "failed-for-good.json").read_text())
+    assert seen[bad]["given_up"] == "2026-11-09T08:30:00+00:00"
+    assert seen[bad]["retried"] == "2026-11-10T12:00:00+00:00"
+
+
+def test_a_block_from_before_the_first_failure_gives_up_nothing_and_one_that_clears_proves_the_rest(
+    vault: FileVault, tmp_path: Path
+) -> None:
+    """A site-wide block (a challenge page for every file) from the first pass on: every document
+    fails the same way on every pass and none is given up. Once the block clears and the siblings
+    download, the document still failing is proven and given up."""
+    from wsp_cli.doccollections import EXIT_PARTIAL, fetch_exit_code
+
+    site = _Timeline(vault, tmp_path)
+    site.blocked = True
+    for hour in (0, 0.25, 0.5, 1.5, 2.5, 3.5, 6, 12, 24):
+        report = site.fetch(hour)
+        assert report.given_up == [], hour
+        assert len(report.failed) == 4
+        assert fetch_exit_code(report) == EXIT_PARTIAL
+    seen = json.loads((tmp_path / "work" / "test-pubs" / "failed-for-good.json").read_text())
+    [bad] = [k for k in seen if "html-1989" in k]
+    assert seen[bad]["tries"] == 9  # counted all along; only not given up
+    site.blocked = False
+    cleared = site.fetch(25)
+    assert len(cleared.fetched) == 3
+    assert [k for k, _ in cleared.given_up] == [bad]
+    assert cleared.failed == []
 
 
 def test_given_up_documents_are_due_for_another_try_once_a_month(tmp_path: Path) -> None:
@@ -1629,6 +1677,7 @@ def _failing_fetches(vault: FileVault, tmp_path: Path, bad: str, body: Any) -> t
                 got = body()
                 if isinstance(got, BaseException):
                     raise got
+                dest.parent.mkdir(parents=True, exist_ok=True)
                 dest.write_bytes(got)
                 return FetchResult(dest, len(got), "0" * 64, "0" * 64)
             return super().download(remote, dest)

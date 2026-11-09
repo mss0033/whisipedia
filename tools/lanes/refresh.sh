@@ -69,7 +69,8 @@ DUE
     # shellcheck disable=SC2086  # partition names hold no spaces
     reopen "$NAME-$s" $parts
     # shellcheck disable=SC2086
-    "$REPO/tools/lanes/lane-run.sh" "$NAME-$s" "$s" $parts || rc=1
+    # Another lane on the source: wait half an hour at most, then leave it for next week.
+    LANE_LOCK_WAIT=${LANE_REFRESH_LOCK_WAIT:-1800} "$REPO/tools/lanes/lane-run.sh" "$NAME-$s" "$s" $parts || rc=1
   done
   exit "$rc"
 fi
