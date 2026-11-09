@@ -35,7 +35,7 @@ import sys
 import tempfile
 import zipfile
 from collections import deque
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
@@ -164,7 +164,7 @@ def api_keys(cfg: Mapping[str, Any]) -> dict[str, str]:
 # ever complete. Only 0, 7 and 8 are complete; a lane marks an item done only after one of them AND a
 # successful `wsp ingest --source S --version V` (where, after 7 or 8, "nothing planned" is expected).
 EXIT_COMPLETE = 0  # every listed document fetched, unchanged, rejected or held (or failed for good,
-# the same way on PERMANENT_TRIES runs in a row: settle_permanent); the plan is written
+# the same way on enough runs in a row: settle_permanent); the plan is written
 EXIT_REFUSED = 2  # not fetched at all: excluded source, no legal basis, wrong or missing --partition
 EXIT_LISTING_INCOMPLETE = 4  # a listing failed; nothing fetched, retry later (same cycle)
 EXIT_INGEST_PENDING = 5  # refused: an earlier fetch of the source awaits `wsp ingest`; nothing fetched
@@ -434,7 +434,8 @@ class FetchReport:
     permanent: dict[str, str] = field(default_factory=dict[str, str])
     given_up: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
     given_up_ledger: str = ""  # where every document failing for good is listed, with its count
-    permanent_over: int = 0  # more failed for good than PERMANENT_SHARE allows: kept as failures
+    permanent_over: int = 0  # more failed for good than PERMANENT_MAX allows: kept as failures
+    tried: int = 0  # documents downloaded (or tried) this run: not held unchanged, not reused
 
 
 def fetch_exit_code(report: FetchReport) -> int:
@@ -501,15 +502,22 @@ def settle_stale_checksums(report: FetchReport, ledger: Path, now: datetime) -> 
 # verified (no checksum published and every second download differs). Each lane pass sealed another
 # cycle for them and never finished its item: NTRS materials (one not-a-PDF), USMC MCPEL (archive.org
 # 401 and 403), CRS reports (three 403s) cycled r2, r3, ... until the lane gave up (2026-11-09). One
-# that failed the same way on PERMANENT_TRIES runs in a row no longer keeps the run from being
-# complete; it is listed as failed for good, in the run's report and its ledger, and tried again on
-# every run (so a document the issuer fixes is fetched). A timeout, a 5xx, a 429, a refused connection,
-# a share that did not answer is never permanent: it keeps the run partial, retried as before.
-PERMANENT_TRIES = 2
-# More such documents in one run than this share of the listing (or PERMANENT_FLOOR) is a site-wide
+# that failed the same way on enough runs in a row, over PERMANENT_MIN_AGE, no longer keeps the run
+# from being complete; it is listed as failed for good, in the run's report and its ledger. Any later
+# fetch of the source tries it again (a lane's item is done, though: only a new lane or a scheduled
+# refresh fetches it again). A timeout, a 5xx, a 429, a refused connection, a short read, a share that
+# did not answer is never permanent: it keeps the run partial, retried as before.
+PERMANENT_TRIES = 2  # a refusal (HTTP 401/403/451)
+# A wrong body or an unverifiable file: a challenge, maintenance or rate-limit page served with 200
+# looks like a wrong body too, so it takes more tries (review of 2026-11-09).
+PERMANENT_TRIES_CONTENT = 3
+# The first such failure at least this long before: two passes of a lane minutes apart are not enough
+# to tell a document from a passing outage.
+PERMANENT_MIN_AGE = timedelta(hours=2)
+# More such documents in one run than this (or this share of the downloads tried) is a site-wide
 # refusal (a WAF, a login wall in front of every file), not single documents: they stay failures.
+PERMANENT_MAX = 10
 PERMANENT_SHARE = 0.02
-PERMANENT_FLOOR = 25
 _TRANSIENT = re.compile(
     r"\bHTTP (?:408|425|429|5\d\d)\b|timed? ?out|Timeout|Connect(?:Error|Timeout)|RemoteProtocolError|"
     r"ReadError|WriteError|NetworkError|ProxyError|Temporary failure|Name or service not known|"
@@ -517,6 +525,12 @@ _TRANSIENT = re.compile(
     re.IGNORECASE,
 )
 _REFUSED = re.compile(r"\bHTTP (401|403|451)\b")
+# An unverifiable file is permanent only when the second download got other bytes (a file generated
+# on each request) or the policy refuses it; a short read, a Range ignored, a redirect are transient.
+_UNVERIFIABLE_FOR_GOOD = re.compile(r"more than the \d+ bytes expected|unverified_policy = 'refuse'")
+_UNVERIFIABLE_TRANSIENT = re.compile(
+    r"ended after|short read|ignored Range|unexpected status|incomplete|truncated|fewer than", re.IGNORECASE
+)
 
 
 def permanent_kind(exc: BaseException) -> str | None:
@@ -531,33 +545,39 @@ def permanent_kind(exc: BaseException) -> str | None:
     if _TRANSIENT.search(text) is not None:
         return None
     if isinstance(exc, UnverifiableError):
+        if _UNVERIFIABLE_TRANSIENT.search(text) or not _UNVERIFIABLE_FOR_GOOD.search(text):
+            return None
         return "unverifiable: no checksum published and no second download the same"
     if isinstance(exc, FetchError) and (m := _REFUSED.search(text)) is not None:
         return f"refused: HTTP {m.group(1)}"
     return None
 
 
-def settle_permanent(report: FetchReport, ledger: Path, now: datetime, *, listed: int) -> None:
+def _permanent_tries(kind: str) -> int:
+    return PERMANENT_TRIES if kind.startswith("refused:") else PERMANENT_TRIES_CONTENT
+
+
+def settle_permanent(report: FetchReport, ledger: Path, now: datetime, *, tried: int) -> None:
     """Count each document's consecutive failures of one permanent kind (``report.permanent``) in
-    ``ledger`` and move one seen on PERMANENT_TRIES runs in a row from ``report.failed`` to
-    ``report.given_up``, unless more failed so than PERMANENT_SHARE of the ``listed`` documents."""
+    ``ledger`` and move one seen on enough runs in a row (:func:`_permanent_tries`), the first at
+    least PERMANENT_MIN_AGE ago, from ``report.failed`` to ``report.given_up``; unless more failed so
+    than PERMANENT_MAX and PERMANENT_SHARE of the ``tried`` downloads (a site-wide refusal)."""
     failing = {key for key, _ in report.failed}
     seen_now = {key: kind for key, kind in report.permanent.items() if key in failing}
-    cap = max(PERMANENT_FLOOR, int(listed * PERMANENT_SHARE))
-    over = len(seen_now) > cap
-    settled = _settle_repeats(
+    over = len(seen_now) > max(PERMANENT_MAX, int(tried * PERMANENT_SHARE))
+    _settle_repeats(
         report,
         seen_now,
         ledger,
         now,
-        tries=PERMANENT_TRIES,
-        age=timedelta(0),
+        tries=_permanent_tries,
+        age=PERMANENT_MIN_AGE,
         into=report.given_up,
         move=not over,
     )
     if over:
         report.permanent_over = len(seen_now)
-    if settled or report.given_up:
+    if report.given_up:
         report.given_up_ledger = str(ledger)
 
 
@@ -567,7 +587,7 @@ def _settle_repeats(
     ledger: Path,
     now: datetime,
     *,
-    tries: int,
+    tries: int | Callable[[str], int],
     age: timedelta,
     into: list[tuple[str, str]] | None = None,
     move: bool = True,
@@ -592,7 +612,8 @@ def _settle_repeats(
     gone = {
         key: e
         for key, e in kept.items()
-        if e["tries"] >= tries and now - datetime.fromisoformat(e["first"]) >= age
+        if e["tries"] >= (tries if isinstance(tries, int) else tries(str(e.get("sig", ""))))
+        and now - datetime.fromisoformat(e["first"]) >= age
     }
     if not move:
         gone = {}
@@ -917,6 +938,7 @@ class CollectionFetcher:
                     and self._reuse(cand, earlier, dest_dir, cfg.rules, report, held_sha)
                 ):
                     continue
+                report.tried += 1
                 if (down := hosts.down(cand.url)) is not None:
                     report.failed.append((cand.key, down))
                     continue
@@ -955,7 +977,7 @@ class CollectionFetcher:
                 report,
                 self.workdir / spec.id / f"failed-for-good{part}.json",
                 datetime.now(UTC),
-                listed=len(docs),
+                tried=report.tried,
             )
         self._finish(spec, coll, report, prev_gen, prev_catalog, survey, dest_dir)
         return report
@@ -2018,7 +2040,9 @@ def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
     for key, why in report.gone[:20]:
         out.write(f"gone (listed, but the issuer has no file): {key}: {why}\n")
     for key, why in report.given_up[:20]:
-        out.write(f"failed for good (the same answer every run; tried again next run): {key}: {why}\n")
+        out.write(
+            f"failed for good (the same answer every run; tried again by a later fetch): {key}: {why}\n"
+        )
     if report.given_up:
         # One line lane-run.sh reads (tools/lanes/lane-run.sh: an info alert once the item is done).
         out.write(

@@ -202,6 +202,19 @@ def test_a_cycle_whose_only_failures_failed_for_good_is_done_and_the_owner_told(
     assert f"usmc-mcpel: {GIVEN_UP}" in log
 
 
+def test_failed_for_good_reaches_the_owner_when_a_later_run_finishes_the_ingest(lane: Lane) -> None:
+    """The ingest waited past the lane's patience (exit 3); the next run ingests without fetching."""
+    lane.script(fetch=[f"8:{GIVEN_UP}"], ingest=[3])
+    assert lane.run("usmc-mcpel", LANE_BUSY_TRIES="1") == 1
+    assert not [a for a in lane.alerts() if "lane-failed-for-good" in a]
+    lane.script(fetch=[], ingest=[8])
+    assert lane.run("usmc-mcpel") == 0
+    assert lane.done() == ["usmc-mcpel"]
+    info = [a for a in lane.alerts() if "lane-failed-for-good:lane-t:usmc-mcpel" in a]
+    assert len(info) == 1
+    assert "2 document(s), listed in /w/usmc-mcpel/failed-for-good.json" in info[0]
+
+
 def test_failed_for_good_beside_other_failures_is_still_partial_and_tells_no_one(lane: Lane) -> None:
     lane.script(fetch=[f"6:{GIVEN_UP}", 6], ingest=[0, 8])
     assert lane.run("crs-reports", LANE_PARTIAL_TRIES="2") == 1

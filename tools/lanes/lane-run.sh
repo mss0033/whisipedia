@@ -76,6 +76,7 @@ MAX_SLICES=${LANE_MAX_SLICES:-48}  # one-hour ingest slices of one version in a 
 if [ "$SRC" = - ]; then LOCK_WAIT=${LANE_LOCK_WAIT:-0}; else LOCK_WAIT=${LANE_LOCK_WAIT:-21600}; fi
 mkdir -p "$STATE/locks"
 DONE=$STATE/$NAME.done CYCLES=$STATE/$NAME.cycles FETCHED=$STATE/$NAME.fetched LOG=$STATE/$NAME.log
+GAVEUP=$STATE/$NAME.gaveup  # "ITEM CYCLE TEXT": a fetch's documents failed for good (the last wins)
 touch "$DONE" "$CYCLES" "$FETCHED"
 cd "$REPO" || exit 1
 
@@ -240,6 +241,8 @@ for item in "$@"; do
           cyc=$moved
           set_cycle "$item" "$cyc"
         fi
+        # Kept with the cycle: an ingest left waiting is finished by a later run, which does not fetch.
+        echo "$item $cyc ${gave_up:--}" >> "$GAVEUP"
         ;;
     esac
     case $frc in
@@ -299,6 +302,8 @@ for item in "$@"; do
     echo "$item" >> "$DONE"
     say "$item: done (cycle $cyc)"
     clear_alert
+    [ -n "$gave_up" ] || gave_up=$(awk -v i="$item" -v c="$cyc" '$1 == i && $2 == c { $1 = $2 = ""; r = substr($0, 3) } END { print r }' "$GAVEUP" 2>/dev/null)
+    [ "$gave_up" = - ] && gave_up=""
     if [ -n "$gave_up" ]; then
       say "$item: failed for good: $gave_up"
       note_given_up "$gave_up"

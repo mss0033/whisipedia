@@ -61,16 +61,19 @@ Scripts and lanes decide by these codes, never by reading the output (audit 2026
 | 8 | complete, nothing new: no plan | (nothing planned) | yes |
 | 137, 143 | killed (OOM, SIGTERM) | no | no |
 
-Failed for good: a document whose download failed the same permanent way on two runs in a row (HTTP
-401, 403 or 451 for that file alone; a web page or error body in place of the file; no checksum
-published and no second download the same) no longer makes the fetch partial: 0, 7 and 8 also cover
-it, and the lane marks the item done. A timeout, a 5xx, a 429, a refused connection or a share that
-did not answer never counts. Each run lists them (`failed for good ...: KEY: WHY`, and one line
+Failed for good: a document whose download failed the same permanent way on runs in a row (two for
+HTTP 401, 403 or 451 for that file alone; three for a web page or error body in place of the file, or
+no checksum published and a second download of other bytes), the first at least 2 hours before, no
+longer makes the fetch partial: 0, 7 and 8 also cover it, and the lane marks the item done. A
+timeout, a 5xx, a 429, a refused connection, a short read or a share that did not answer never
+counts. Each run lists them (`failed for good ...: KEY: WHY`, and one line
 `failed for good: N document(s), listed in <ledger>`; the ledger is
 `<workdir>/collections/<source>/failed-for-good[-<partition>].json`, with each document's count and
 first failure); the lane raises the info alert `lane-failed-for-good:<lane>:<item>` once the item is
-done, for the owner. They are still tried on every run, so one the issuer fixes is fetched. More of
-them in one run than 2% of the listing (at least 25) is a site-wide refusal: they stay failures.
+done, for the owner. Every later fetch of the source tries them again, so one the issuer fixes is
+fetched; but a lane's done item is not fetched again by that lane: a source that keeps publishing
+needs a new lane or a scheduled refresh. More of them in one run than 10 (or 2% of the downloads
+tried) is a site-wide refusal: they stay failures.
 
 `wsp ingest` (for every planned version; with `--source S --version V [--partition P]`, for that
 version only):

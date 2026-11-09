@@ -104,7 +104,14 @@ STATE = Path(os.environ.get("WSP_STALL_STATE", HOME / ".local/share/whisipedia/s
 WATCH = STATE / "watch"
 LOCKS = Path(os.environ.get("WSP_STALL_LOCKS", HOME / ".local/share/whisipedia/locks"))
 # The collection lanes' own per-source locks (tools/lanes/lane-run.sh: one lane per source at a time).
-LANE_LOCKS = Path(os.environ.get("WSP_STALL_LANE_LOCKS", HOME / ".local/state/whisipedia/collections/locks"))
+LANE_LOCKS = Path(
+    os.environ.get("WSP_STALL_LANE_LOCKS")
+    or Path(
+        os.environ.get("WSP_LANE_STATE")
+        or Path(os.environ.get("XDG_STATE_HOME") or HOME / ".local/state") / "whisipedia/collections"
+    )
+    / "locks"
+)
 JOBS = Path(os.environ.get("WSP_STALL_JOBS", HOME / ".local/state/whisipedia"))  # tools/wsp-bg's state
 HALTED = JOBS / "halted"  # tools/wsp-shutdown's marker; tools/wsp-start removes it
 PROC = Path(os.environ.get("WSP_STALL_PROC", "/proc"))

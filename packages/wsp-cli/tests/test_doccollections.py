@@ -1411,6 +1411,10 @@ def test_failures_another_download_answers_the_same_way_are_permanent_the_rest_t
         f"{url} failed after 6 attempt(s): more than the 11510 bytes expected); first copy kept as x"
     )
     assert permanent_kind(unverifiable) is not None
+    # A challenge or maintenance page served with 200 is a wrong body too: counted, but over more tries.
+    assert (
+        permanent_kind(WrongBodyError("expected a PDF, got html")) == "not the file: expected a PDF, got html"
+    )
     for transient in (
         exhausted("6 attempt(s): HTTP 500"),
         exhausted("6 attempt(s): HTTP 503"),
@@ -1421,6 +1425,9 @@ def test_failures_another_download_answers_the_same_way_are_permanent_the_rest_t
         UnverifiableError(
             f"{url}: no second download succeeded ({url}: failed after 6 attempt(s): HTTP 502)"
         ),
+        UnverifiableError(f"{url}: no second download succeeded ({url}: body ended after 5 of 9 bytes)"),
+        UnverifiableError(f"{url}: no second download succeeded ({url}: server ignored Range)"),
+        UnverifiableError(f"{url}: no second download succeeded ({url}: HTTP 404)"),
         FetchError("HostUnreachable: x took no connection 5 times in a row"),
         OSError(11, "Resource temporarily unavailable"),
         NotFoundError(url),  # gone already: never counted here
@@ -1428,12 +1435,13 @@ def test_failures_another_download_answers_the_same_way_are_permanent_the_rest_t
         assert permanent_kind(transient) is None, transient
 
 
-def test_a_failure_seen_the_same_way_on_two_runs_in_a_row_no_longer_makes_the_run_partial(
+def test_a_failure_seen_the_same_way_on_runs_in_a_row_no_longer_makes_the_run_partial(
     tmp_path: Path,
 ) -> None:
     """2026-11-09: NTRS materials (one not-a-PDF), USMC MCPEL (archive.org 401 and 403) and CRS reports
-    (three 403s) sealed cycle after cycle and their lanes never finished. The second run in a row that
-    fails a document the same permanent way is complete; anything else keeps it partial."""
+    (three 403s) sealed cycle after cycle and their lanes never finished. A refusal on two runs in a
+    row, a wrong body on three, the first at least 2 hours before, no longer keeps the run partial;
+    anything else does."""
     from collections.abc import Mapping
     from datetime import UTC, datetime, timedelta
 
@@ -1442,53 +1450,62 @@ def test_a_failure_seen_the_same_way_on_two_runs_in_a_row_no_longer_makes_the_ru
     ledger = tmp_path / "failed-for-good.json"
     now = datetime(2026, 11, 9, tzinfo=UTC)
 
-    def run(hour: float, failures: Mapping[str, str | None], *, listed: int = 15_000) -> dc.FetchReport:
+    def run(hour: float, failures: Mapping[str, str | None], *, tried: int = 10) -> dc.FetchReport:
         report = dc.FetchReport("ntrs", "v", planned=True)
         for key, kind in failures.items():
             report.failed.append((key, f"why {key}"))
             if kind is not None:
                 report.permanent[key] = kind
-        dc.settle_permanent(report, ledger, now + timedelta(hours=hour), listed=listed)
+        dc.settle_permanent(report, ledger, now + timedelta(hours=hour), tried=tried)
         return report
 
-    first = run(0, {"a": "refused: HTTP 403", "b": "not the file: x"})
+    both = {"a": "refused: HTTP 403", "b": "not the file: x"}
+    first = run(0, {"a": "refused: HTTP 403"})
     assert first.given_up == []
     assert dc.fetch_exit_code(first) == dc.EXIT_PARTIAL
-    second = run(0.25, {"a": "refused: HTTP 403", "b": "not the file: x", "t": None})
-    assert [k for k, _ in second.given_up] == ["a", "b"]
-    assert "on every one of 2 tries since 2026-11-09T00:00:00+00:00" in second.given_up[0][1]
-    assert second.failed == [("t", "why t")]  # a transient failure keeps the run partial
+    assert run(0.25, both).given_up == []  # two passes of a lane minutes apart: a passing outage?
+    second = run(2, {**both, "t": None})
+    assert [k for k, _ in second.given_up] == ["a"]  # a refusal: here three tries over 2 hours
+    assert "on every one of 3 tries since 2026-11-09T00:00:00+00:00" in second.given_up[0][1]
+    assert second.failed == [("b", "why b"), ("t", "why t")]  # b: two tries; t is transient
     assert dc.fetch_exit_code(second) == dc.EXIT_PARTIAL
-    third = run(0.5, {"a": "refused: HTTP 403", "b": "refused: HTTP 401"})  # b fails otherwise now
-    assert [k for k, _ in third.given_up] == ["a"]
-    assert third.failed == [("b", "why b")]
-    fourth = run(0.75, {"a": "refused: HTTP 403", "b": "refused: HTTP 401"})
-    assert fourth.failed == []
-    assert dc.fetch_exit_code(fourth) == dc.EXIT_COMPLETE
-    assert fourth.given_up_ledger == str(ledger)
+    third = run(2.5, both)
+    assert sorted(k for k, _ in third.given_up) == ["a", "b"]
+    assert third.failed == []
+    assert dc.fetch_exit_code(third) == dc.EXIT_COMPLETE
+    assert third.given_up_ledger == str(ledger)
     assert json.loads(ledger.read_text())["a"]["tries"] == 4  # every document, with its count
-    run(1, {})  # a run without them (fetched, or not tried): the counts start over
-    assert run(1.25, {"a": "refused: HTTP 403"}).given_up == []
+    other = run(3, {"a": "refused: HTTP 403", "b": "refused: HTTP 401"})  # b fails otherwise now
+    assert [k for k, _ in other.given_up] == ["a"]
+    run(4, {})  # a run without them (fetched, or not tried): the counts start over
+    assert run(6.5, {"a": "refused: HTTP 403"}).given_up == []
 
-    # A site-wide refusal is not single documents: more than 2% of the listing (at least 25) stay
-    # failures.
-    many = {f"k{i}": "refused: HTTP 403" for i in range(30)}
-    run(2, many, listed=1_000)
-    over = run(2.25, many, listed=1_000)
+    # Two refusals 2 hours apart are enough; a wrong body takes a third.
+    run(10, {"r": "refused: HTTP 403", "w": "not the file: x"})
+    assert [k for k, _ in run(12, {"r": "refused: HTTP 403", "w": "not the file: x"}).given_up] == ["r"]
+
+    # A site-wide refusal is not single documents: more than 10, or 2% of the downloads tried, stay
+    # failures, whatever the size of the listing.
+    many = {f"k{i}": "refused: HTTP 403" for i in range(11)}
+    run(20, many, tried=11)
+    over = run(23, many, tried=11)
     assert over.given_up == []
-    assert len(over.failed) == 30
-    assert over.permanent_over == 30
-    assert sorted(k for k, _ in run(2.5, many, listed=10_000).given_up) == sorted(many)
+    assert len(over.failed) == 11
+    assert over.permanent_over == 11
+    assert sorted(k for k, _ in run(24, many, tried=1_000).given_up) == sorted(many)
 
 
-def test_a_document_refused_on_two_fetches_in_a_row_is_failed_for_good_and_the_fetch_complete(
+def test_a_document_refused_on_two_fetches_hours_apart_is_failed_for_good_and_the_fetch_complete(
     vault: FileVault, tmp_path: Path
 ) -> None:
+    from datetime import UTC, datetime, timedelta
+
     from wsp_cli.doccollections import EXIT_ALERT, EXIT_PARTIAL, fetch_exit_code
     from wsp_fetch.errors import MirrorsExhaustedError
 
     refused = f"{BUCKET}/{PREFIX}unmarked.pdf"
     answer = {"why": "HTTP 403"}
+    ledger = tmp_path / "work" / "test-pubs" / "failed-for-good.json"
 
     class Refusing(FakeFetcher):
         def download(self, remote: RemoteFile, dest: Path) -> FetchResult:
@@ -1510,15 +1527,23 @@ def test_a_document_refused_on_two_fetches_in_a_row_is_failed_for_good_and_the_f
         )
         return fetcher.run(spec(OBJECTS), version="2026-10-10")
 
+    def three_hours_ago() -> None:
+        seen = json.loads(ledger.read_text())
+        for e in seen.values():
+            e["first"] = (datetime.now(UTC) - timedelta(hours=3)).isoformat(timespec="seconds")
+        ledger.write_text(json.dumps(seen))
+
     first = fetch()
     assert [k for k, _ in first.failed] == ["test:unmarked.pdf"]
     assert first.given_up == []
     assert fetch_exit_code(first) == EXIT_PARTIAL
+    assert fetch().given_up == []  # again at once: not yet
+    three_hours_ago()
     second = fetch()
     assert second.failed == []
     assert [k for k, _ in second.given_up] == ["test:unmarked.pdf"]
     assert fetch_exit_code(second) == EXIT_ALERT  # complete (the restricted document's alert stands)
-    assert second.given_up_ledger == str(tmp_path / "work" / "test-pubs" / "failed-for-good.json")
+    assert second.given_up_ledger == str(ledger)
     answer["why"] = "HTTP 503"  # the server fails now: transient, the run is partial again
     third = fetch()
     assert [k for k, _ in third.failed] == ["test:unmarked.pdf"]
