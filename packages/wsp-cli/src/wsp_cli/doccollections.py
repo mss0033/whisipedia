@@ -91,6 +91,7 @@ from wsp_core.model import Checksum, FetchResult, RemoteFile, SourceSpec, Source
 from wsp_core.partitions import PartitionError, check_partition, partition_generation_id, partition_of
 from wsp_core.ports import Ctx, Fetcher, SupportsHead
 from wsp_core.versions import is_newer, newest
+from wsp_fetch.errors import UnverifiableError
 from wsp_vault.manifest import ManifestEntry
 from wsp_vault.vault import STAGING_DIR, VaultError, read_staging, staged_entry
 
@@ -162,11 +163,13 @@ def api_keys(cfg: Mapping[str, Any]) -> dict[str, str]:
 # uncaught error exits 1 (Python's traceback exit) and a kill exits 128+signal (137, 143): neither is
 # ever complete. Only 0, 7 and 8 are complete; a lane marks an item done only after one of them AND a
 # successful `wsp ingest --source S --version V` (where, after 7 or 8, "nothing planned" is expected).
-EXIT_COMPLETE = 0  # every listed document fetched, unchanged, rejected or held; the plan is written
+EXIT_COMPLETE = 0  # every listed document fetched, unchanged, rejected or held (or failed for good,
+# the same way on PERMANENT_TRIES runs in a row: settle_permanent); the plan is written
 EXIT_REFUSED = 2  # not fetched at all: excluded source, no legal basis, wrong or missing --partition
 EXIT_LISTING_INCOMPLETE = 4  # a listing failed; nothing fetched, retry later (same cycle)
 EXIT_INGEST_PENDING = 5  # refused: an earlier fetch of the source awaits `wsp ingest`; nothing fetched
-EXIT_PARTIAL = 6  # some or all downloads failed (or another fetch held them); the rest is planned
+EXIT_PARTIAL = 6  # some or all downloads failed (or another fetch held them), at least one of them
+# perhaps transient or failing so for the first run; the rest is planned
 EXIT_ALERT = 7  # complete, but the issuer lists restricted documents (deleted, never kept): read them
 EXIT_NOTHING_NEW = 8  # complete, and nothing changed upstream: no plan, nothing to ingest
 
@@ -424,6 +427,14 @@ class FetchReport:
     # Documents screened from a copy already here, not downloaded: staged or downloaded by an earlier
     # run of this cycle, or held for review by an earlier run (2026-11-05 deep dive).
     reused: int = 0
+    # This run's failures that another download would answer the same way (:func:`permanent_kind`):
+    # key -> kind. Those that failed the same way on the run before too move from ``failed`` to
+    # ``given_up`` (:func:`settle_permanent`): listed in the report, tried again next run, but no longer
+    # keeping the cycle from being complete.
+    permanent: dict[str, str] = field(default_factory=dict[str, str])
+    given_up: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
+    given_up_ledger: str = ""  # where every document failing for good is listed, with its count
+    permanent_over: int = 0  # more failed for good than PERMANENT_SHARE allows: kept as failures
 
 
 def fetch_exit_code(report: FetchReport) -> int:
@@ -453,7 +464,7 @@ def settle_wrong_bodies(report: FetchReport, ledger: Path, now: datetime) -> Non
         ledger,
         now,
         tries=WRONG_BODY_GONE_TRIES,
-        days=WRONG_BODY_GONE_DAYS,
+        age=timedelta(days=WRONG_BODY_GONE_DAYS),
     )
 
 
@@ -471,13 +482,83 @@ def settle_stale_checksums(report: FetchReport, ledger: Path, now: datetime) -> 
     one past both limits from ``report.failed`` to ``report.gone``, with an alert naming it: its bytes
     were never taken, and the owner decides whether the listing or the file is wrong."""
     gone = _settle_repeats(
-        report, report.mismatched, ledger, now, tries=STALE_CHECKSUM_TRIES, days=STALE_CHECKSUM_DAYS
+        report,
+        report.mismatched,
+        ledger,
+        now,
+        tries=STALE_CHECKSUM_TRIES,
+        age=timedelta(days=STALE_CHECKSUM_DAYS),
     )
     for key, e in sorted(gone.items()):
         report.alerts.append(
             f"{key}: the listing's checksum never matches what the issuer serves ({e['sig']}, on "
             f"{e['tries']} tries since {e['first']}); not taken, check the listing or the file"
         )
+
+
+# Failures another download answers the same way: the document is refused to us (HTTP 401, 403 or 451
+# for it alone), is never the file it claims (a web page or error body in its place), or can never be
+# verified (no checksum published and every second download differs). Each lane pass sealed another
+# cycle for them and never finished its item: NTRS materials (one not-a-PDF), USMC MCPEL (archive.org
+# 401 and 403), CRS reports (three 403s) cycled r2, r3, ... until the lane gave up (2026-11-09). One
+# that failed the same way on PERMANENT_TRIES runs in a row no longer keeps the run from being
+# complete; it is listed as failed for good, in the run's report and its ledger, and tried again on
+# every run (so a document the issuer fixes is fetched). A timeout, a 5xx, a 429, a refused connection,
+# a share that did not answer is never permanent: it keeps the run partial, retried as before.
+PERMANENT_TRIES = 2
+# More such documents in one run than this share of the listing (or PERMANENT_FLOOR) is a site-wide
+# refusal (a WAF, a login wall in front of every file), not single documents: they stay failures.
+PERMANENT_SHARE = 0.02
+PERMANENT_FLOOR = 25
+_TRANSIENT = re.compile(
+    r"\bHTTP (?:408|425|429|5\d\d)\b|timed? ?out|Timeout|Connect(?:Error|Timeout)|RemoteProtocolError|"
+    r"ReadError|WriteError|NetworkError|ProxyError|Temporary failure|Name or service not known|"
+    r"\[Errno|reset by peer|\bEOF\b|disconnected|did not answer|took no connection|Too Many Requests",
+    re.IGNORECASE,
+)
+_REFUSED = re.compile(r"\bHTTP (401|403|451)\b")
+
+
+def permanent_kind(exc: BaseException) -> str | None:
+    """What a download failure is when another try would get the same answer (its signature in the
+    ledger), or ``None`` when it may be transient. Any sign of a network or server fault anywhere in
+    the message (a mirror that timed out beside one that refused) makes it transient."""
+    if isinstance(exc, WrongBodyError):
+        return f"not the file: {exc}"
+    if isinstance(exc, RobotsDisallowedError):  # gone already, or (unreachable) a host's fault
+        return None
+    text = str(exc)
+    if _TRANSIENT.search(text) is not None:
+        return None
+    if isinstance(exc, UnverifiableError):
+        return "unverifiable: no checksum published and no second download the same"
+    if isinstance(exc, FetchError) and (m := _REFUSED.search(text)) is not None:
+        return f"refused: HTTP {m.group(1)}"
+    return None
+
+
+def settle_permanent(report: FetchReport, ledger: Path, now: datetime, *, listed: int) -> None:
+    """Count each document's consecutive failures of one permanent kind (``report.permanent``) in
+    ``ledger`` and move one seen on PERMANENT_TRIES runs in a row from ``report.failed`` to
+    ``report.given_up``, unless more failed so than PERMANENT_SHARE of the ``listed`` documents."""
+    failing = {key for key, _ in report.failed}
+    seen_now = {key: kind for key, kind in report.permanent.items() if key in failing}
+    cap = max(PERMANENT_FLOOR, int(listed * PERMANENT_SHARE))
+    over = len(seen_now) > cap
+    settled = _settle_repeats(
+        report,
+        seen_now,
+        ledger,
+        now,
+        tries=PERMANENT_TRIES,
+        age=timedelta(0),
+        into=report.given_up,
+        move=not over,
+    )
+    if over:
+        report.permanent_over = len(seen_now)
+    if settled or report.given_up:
+        report.given_up_ledger = str(ledger)
 
 
 def _settle_repeats(
@@ -487,11 +568,14 @@ def _settle_repeats(
     now: datetime,
     *,
     tries: int,
-    days: int,
+    age: timedelta,
+    into: list[tuple[str, str]] | None = None,
+    move: bool = True,
 ) -> dict[str, dict[str, Any]]:
     """Count each key's consecutive tries in ``ledger``, where ``seen_now`` maps this run's keys to what
     they failed with (another signature, or any other outcome, starts the count over); move a key past
-    both limits from ``report.failed`` to ``report.gone`` and return those keys' entries."""
+    both limits (``tries``, and ``age`` since its first) from ``report.failed`` to ``into`` (by default
+    ``report.gone``; with ``move`` false, only count) and return the keys moved."""
     try:
         seen = cast(dict[str, dict[str, Any]], json.loads(ledger.read_text(encoding="utf-8")))
     except (OSError, ValueError):
@@ -508,13 +592,16 @@ def _settle_repeats(
     gone = {
         key: e
         for key, e in kept.items()
-        if e["tries"] >= tries and now - datetime.fromisoformat(e["first"]) >= timedelta(days=days)
+        if e["tries"] >= tries and now - datetime.fromisoformat(e["first"]) >= age
     }
+    if not move:
+        gone = {}
+    target = report.gone if into is None else into
     still: list[tuple[str, str]] = []
     for key, why in report.failed:
         if key in gone:
             e = gone[key]
-            report.gone.append((key, f"{why}, on every one of {e['tries']} tries since {e['first']}"))
+            target.append((key, f"{why}, on every one of {e['tries']} tries since {e['first']}"))
         else:
             still.append((key, why))
     report.failed = still
@@ -798,6 +885,8 @@ class CollectionFetcher:
                 return
             hosts.failed(cand.url, why)
             report.failed.append((cand.key, why))
+            if (kind := permanent_kind(exc)) is not None:
+                report.permanent[cand.key] = kind
 
         def drain(keep: int) -> None:
             while len(inflight) > keep:
@@ -861,6 +950,13 @@ class CollectionFetcher:
         settle_stale_checksums(
             report, self.workdir / spec.id / f"stale-checksum{part}.json", datetime.now(UTC)
         )
+        if self.manual_dir is None:  # the owner's own files fail for the owner to fix, never for good
+            settle_permanent(
+                report,
+                self.workdir / spec.id / f"failed-for-good{part}.json",
+                datetime.now(UTC),
+                listed=len(docs),
+            )
         self._finish(spec, coll, report, prev_gen, prev_catalog, survey, dest_dir)
         return report
 
@@ -1284,6 +1380,7 @@ class CollectionFetcher:
             except WrongBodyError as exc:
                 report.failed.append((cand.key, str(exc)))
                 report.wrong_body.add(cand.key)
+                report.permanent[cand.key] = permanent_kind(exc) or ""
                 path.unlink(missing_ok=True)
                 return
             except nasretry.TRANSIENT as exc:
@@ -1908,6 +2005,7 @@ def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
         f"{spec.id}/{version}: fetched {len(report.fetched)}, skipped {report.skipped}, "
         f"rejected {len(report.rejected)}, held {len(report.held)}, review {len(report.review)}, "
         f"failed {len(report.failed)}, gone {len(report.gone)}"
+        + (f", failed for good {len(report.given_up)}" if report.given_up else "")
         + (f", reused {report.reused} (not downloaded again)" if report.reused else "")
         + "\n"
     )
@@ -1919,6 +2017,18 @@ def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
         out.write(f"failed: {key}: {why}\n")
     for key, why in report.gone[:20]:
         out.write(f"gone (listed, but the issuer has no file): {key}: {why}\n")
+    for key, why in report.given_up[:20]:
+        out.write(f"failed for good (the same answer every run; tried again next run): {key}: {why}\n")
+    if report.given_up:
+        # One line lane-run.sh reads (tools/lanes/lane-run.sh: an info alert once the item is done).
+        out.write(
+            f"failed for good: {len(report.given_up)} document(s), listed in {report.given_up_ledger}\n"
+        )
+    if report.permanent_over:
+        out.write(
+            f"{report.permanent_over} documents failed the same way as on the run before, too many to be "
+            "single documents (a site-wide refusal?): they stay failures, retried next run\n"
+        )
     if proposal is not None:
         out.write(f"review proposal: {proposal} (wsp proposals list)\n")
     elif rows and not args.dry_run:
@@ -1935,6 +2045,8 @@ def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
         EXIT_ALERT: "complete, with alerts",
         EXIT_NOTHING_NEW: "complete, nothing new",
     }[code]
+    if report.given_up and code != EXIT_PARTIAL:
+        outcome += f" ({len(report.given_up)} failed for good)"
     out.write(f"outcome: {outcome} (exit {code})\n")
     if report.planned:
         out.write(f"next: wsp ingest --source {spec.id} --version {version}\n")

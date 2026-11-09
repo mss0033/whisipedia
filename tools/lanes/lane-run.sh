@@ -16,7 +16,10 @@
 # 2026-10-12 C1: the old lane marked an item done whenever `wsp ingest --source` exited 0, even after
 # a killed, crashed or refused fetch, or one whose every download failed. Exit codes of the commands:
 # docs/runbooks/document-collections.md, "Exit codes". Per fetch outcome:
-#   0, 7, 8   complete: ingest this cycle; done when it is in
+#   0, 7, 8   complete: ingest this cycle; done when it is in. Complete also when documents failed
+#             for good (the same permanent failure on two fetches in a row: HTTP 401/403 for that
+#             file, a web page in its place, never verifiable; wsp_cli.doccollections.settle_permanent):
+#             once the item is done, the info alert lane-failed-for-good:NAME:ITEM names their ledger
 #   4         a listing failed, nothing fetched: retry the same cycle after LANE_LISTING_WAIT seconds
 #   5         an earlier fetch of the source is not ingested yet: ingest it (`wsp ingest --source`), then
 #             fetch again
@@ -83,6 +86,12 @@ alert() {
   "$ALERT_CMD" alerts raise --key "lane:$NAME:$item" --severity "$1" --message "lane $NAME, $item: $2" >> "$LOG" 2>&1 || true
 }
 clear_alert() { "$ALERT_CMD" alerts resolve --key "lane:$NAME:$item" >> "$LOG" 2>&1 || true; }
+# A done item whose fetch left documents failed for good: one info alert (the digest shows it), its
+# own kind, so clear_alert leaves it for the owner to read.
+note_given_up() {
+  "$ALERT_CMD" alerts raise --key "lane-failed-for-good:$NAME:$item" --severity info \
+    --message "lane $NAME, $item: done; $1 (the same failure on every try, retried on later runs)" >> "$LOG" 2>&1 || true
+}
 # The last error line of the item's own log since this step began (for the alert's message).
 last_error() { tail -c +"$((${1:-0} + 1))" "$out" 2>/dev/null | grep -E 'Error|error:' | tail -n 1 | cut -c1-300; }
 
@@ -210,7 +219,7 @@ for item in "$@"; do
     fi
   fi
 
-  listing=0 partial=0 pending=0 done_item=0
+  listing=0 partial=0 pending=0 done_item=0 gave_up=""
   while :; do
     frc=$(fetched_code "$item" "$cyc")
     case $frc in
@@ -222,6 +231,7 @@ for item in "$@"; do
         run "$out" "$WSP" collections fetch --source "$src" $part --version "$cyc"
         frc=$?
         say "fetch exit $frc"
+        gave_up=$(tail -c +"$((start + 1))" "$out" | sed -n 's/^failed for good: \(.*\)$/\1/p' | tail -n 1)
         # "<v> is already sealed; fetching as <v'>": follow the cycle the fetch used (partition suffix off).
         moved=$(tail -c +"$((start + 1))" "$out" | sed -n 's/.* is already sealed; fetching as \([^ ]*\)$/\1/p' | tail -n 1)
         if [ -n "$moved" ]; then
@@ -289,6 +299,10 @@ for item in "$@"; do
     echo "$item" >> "$DONE"
     say "$item: done (cycle $cyc)"
     clear_alert
+    if [ -n "$gave_up" ]; then
+      say "$item: failed for good: $gave_up"
+      note_given_up "$gave_up"
+    fi
   else
     left=1
   fi

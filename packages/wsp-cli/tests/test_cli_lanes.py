@@ -180,6 +180,38 @@ def test_downloads_that_keep_failing_leave_the_item_for_later(lane: Lane) -> Non
     assert cycles == [base, f"{base}r2", f"{base}r2"], "a new cycle only after one was sealed"
 
 
+GIVEN_UP = "failed for good: 2 document(s), listed in /w/usmc-mcpel/failed-for-good.json"
+
+
+def test_a_cycle_whose_only_failures_failed_for_good_is_done_and_the_owner_told(lane: Lane) -> None:
+    """2026-11-09: USMC MCPEL (two archive.org files refused, 401 and 403, on every run) sealed r2,
+    r3, ... and was never done. The fetch's second partial with the same failures is complete (exit 8,
+    `failed for good`); the item is done, and an info alert names the documents' ledger."""
+    lane.script(fetch=[6, f"8:{GIVEN_UP}"], ingest=[0, 8])
+    assert lane.run("usmc-mcpel") == 0
+    assert lane.done() == ["usmc-mcpel"]
+    cycles = [c.split("--version ")[1] for c in lane.calls() if c.startswith("collections")]
+    assert cycles == [cycles[0], f"{cycles[0]}r2"]  # no r3
+    alerts = lane.alerts()
+    assert "alerts resolve --key lane:lane-t:usmc-mcpel" in alerts
+    info = [a for a in alerts if a.startswith("alerts raise --key lane-failed-for-good:lane-t:usmc-mcpel")]
+    assert len(info) == 1
+    assert "--severity info" in info[0]
+    assert "2 document(s), listed in /w/usmc-mcpel/failed-for-good.json" in info[0]
+    log = (lane.state / "lane-t.log").read_text()
+    assert f"usmc-mcpel: {GIVEN_UP}" in log
+
+
+def test_failed_for_good_beside_other_failures_is_still_partial_and_tells_no_one(lane: Lane) -> None:
+    lane.script(fetch=[f"6:{GIVEN_UP}", 6], ingest=[0, 8])
+    assert lane.run("crs-reports", LANE_PARTIAL_TRIES="2") == 1
+    assert lane.done() == []
+    assert not [a for a in lane.alerts() if "lane-failed-for-good" in a]
+    lane.script(fetch=[0], ingest=[0])  # a later run: complete, nothing failed for good any more
+    assert lane.run("crs-reports") == 0
+    assert not [a for a in lane.alerts() if "lane-failed-for-good" in a]
+
+
 def test_an_incomplete_listing_is_retried_in_the_same_cycle(lane: Lane) -> None:
     lane.script(fetch=[4, 4, 0], ingest=[0])
     assert lane.run("osti-doe-reports") == 0

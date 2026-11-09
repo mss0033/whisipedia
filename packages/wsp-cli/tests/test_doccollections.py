@@ -1390,6 +1390,142 @@ def test_a_document_that_is_always_a_web_page_is_gone_after_a_week_of_tries(tmp_
     assert run(20, wrong=True).gone == []
 
 
+def test_failures_another_download_answers_the_same_way_are_permanent_the_rest_transient() -> None:
+    from wsp_adapters.doccollection.adapter import WrongBodyError
+    from wsp_cli.doccollections import permanent_kind
+    from wsp_core.errors import FetchError, NotFoundError
+    from wsp_fetch.errors import MirrorsExhaustedError, UnverifiableError
+
+    url = "https://archive.org/download/mcrp0002unse/mcrp0002unse.pdf"
+
+    def exhausted(why: str) -> MirrorsExhaustedError:
+        return MirrorsExhaustedError(f"no usable source for {url}: {url}: probe {url} failed after {why}")
+
+    assert permanent_kind(exhausted("1 attempt(s): HTTP 401")) == "refused: HTTP 401"
+    assert permanent_kind(exhausted("1 attempt(s): HTTP 403")) == "refused: HTTP 403"
+    assert permanent_kind(WrongBodyError("not a PDF (missing %PDF- header)")) == (
+        "not the file: not a PDF (missing %PDF- header)"
+    )
+    unverifiable = UnverifiableError(
+        f"{url}: upstream publishes no checksum and no second download succeeded ({url}: corroborate "
+        f"{url} failed after 6 attempt(s): more than the 11510 bytes expected); first copy kept as x"
+    )
+    assert permanent_kind(unverifiable) is not None
+    for transient in (
+        exhausted("6 attempt(s): HTTP 500"),
+        exhausted("6 attempt(s): HTTP 503"),
+        exhausted("6 attempt(s): HTTP 429"),
+        exhausted("6 attempt(s): ConnectTimeout: timed out"),
+        exhausted("6 attempt(s): ReadTimeout: The read operation timed out"),
+        exhausted("1 attempt(s): HTTP 403; https://mirror/x: failed after 6 attempt(s): ConnectError"),
+        UnverifiableError(
+            f"{url}: no second download succeeded ({url}: failed after 6 attempt(s): HTTP 502)"
+        ),
+        FetchError("HostUnreachable: x took no connection 5 times in a row"),
+        OSError(11, "Resource temporarily unavailable"),
+        NotFoundError(url),  # gone already: never counted here
+    ):
+        assert permanent_kind(transient) is None, transient
+
+
+def test_a_failure_seen_the_same_way_on_two_runs_in_a_row_no_longer_makes_the_run_partial(
+    tmp_path: Path,
+) -> None:
+    """2026-11-09: NTRS materials (one not-a-PDF), USMC MCPEL (archive.org 401 and 403) and CRS reports
+    (three 403s) sealed cycle after cycle and their lanes never finished. The second run in a row that
+    fails a document the same permanent way is complete; anything else keeps it partial."""
+    from collections.abc import Mapping
+    from datetime import UTC, datetime, timedelta
+
+    from wsp_cli import doccollections as dc
+
+    ledger = tmp_path / "failed-for-good.json"
+    now = datetime(2026, 11, 9, tzinfo=UTC)
+
+    def run(hour: float, failures: Mapping[str, str | None], *, listed: int = 15_000) -> dc.FetchReport:
+        report = dc.FetchReport("ntrs", "v", planned=True)
+        for key, kind in failures.items():
+            report.failed.append((key, f"why {key}"))
+            if kind is not None:
+                report.permanent[key] = kind
+        dc.settle_permanent(report, ledger, now + timedelta(hours=hour), listed=listed)
+        return report
+
+    first = run(0, {"a": "refused: HTTP 403", "b": "not the file: x"})
+    assert first.given_up == []
+    assert dc.fetch_exit_code(first) == dc.EXIT_PARTIAL
+    second = run(0.25, {"a": "refused: HTTP 403", "b": "not the file: x", "t": None})
+    assert [k for k, _ in second.given_up] == ["a", "b"]
+    assert "on every one of 2 tries since 2026-11-09T00:00:00+00:00" in second.given_up[0][1]
+    assert second.failed == [("t", "why t")]  # a transient failure keeps the run partial
+    assert dc.fetch_exit_code(second) == dc.EXIT_PARTIAL
+    third = run(0.5, {"a": "refused: HTTP 403", "b": "refused: HTTP 401"})  # b fails otherwise now
+    assert [k for k, _ in third.given_up] == ["a"]
+    assert third.failed == [("b", "why b")]
+    fourth = run(0.75, {"a": "refused: HTTP 403", "b": "refused: HTTP 401"})
+    assert fourth.failed == []
+    assert dc.fetch_exit_code(fourth) == dc.EXIT_COMPLETE
+    assert fourth.given_up_ledger == str(ledger)
+    assert json.loads(ledger.read_text())["a"]["tries"] == 4  # every document, with its count
+    run(1, {})  # a run without them (fetched, or not tried): the counts start over
+    assert run(1.25, {"a": "refused: HTTP 403"}).given_up == []
+
+    # A site-wide refusal is not single documents: more than 2% of the listing (at least 25) stay
+    # failures.
+    many = {f"k{i}": "refused: HTTP 403" for i in range(30)}
+    run(2, many, listed=1_000)
+    over = run(2.25, many, listed=1_000)
+    assert over.given_up == []
+    assert len(over.failed) == 30
+    assert over.permanent_over == 30
+    assert sorted(k for k, _ in run(2.5, many, listed=10_000).given_up) == sorted(many)
+
+
+def test_a_document_refused_on_two_fetches_in_a_row_is_failed_for_good_and_the_fetch_complete(
+    vault: FileVault, tmp_path: Path
+) -> None:
+    from wsp_cli.doccollections import EXIT_ALERT, EXIT_PARTIAL, fetch_exit_code
+    from wsp_fetch.errors import MirrorsExhaustedError
+
+    refused = f"{BUCKET}/{PREFIX}unmarked.pdf"
+    answer = {"why": "HTTP 403"}
+
+    class Refusing(FakeFetcher):
+        def download(self, remote: RemoteFile, dest: Path) -> FetchResult:
+            if remote.url == refused:
+                raise MirrorsExhaustedError(
+                    f"no usable source for {refused}: failed after 1 attempt(s): {answer['why']}"
+                )
+            return super().download(remote, dest)
+
+    def fetch() -> Any:
+        fetcher = CollectionFetcher(
+            vault.root,
+            Refusing(routes(OBJECTS)),
+            keys={},
+            user_agent="test",
+            workdir=tmp_path / "work",
+            out=io.StringIO(),
+            throttle=False,
+        )
+        return fetcher.run(spec(OBJECTS), version="2026-10-10")
+
+    first = fetch()
+    assert [k for k, _ in first.failed] == ["test:unmarked.pdf"]
+    assert first.given_up == []
+    assert fetch_exit_code(first) == EXIT_PARTIAL
+    second = fetch()
+    assert second.failed == []
+    assert [k for k, _ in second.given_up] == ["test:unmarked.pdf"]
+    assert fetch_exit_code(second) == EXIT_ALERT  # complete (the restricted document's alert stands)
+    assert second.given_up_ledger == str(tmp_path / "work" / "test-pubs" / "failed-for-good.json")
+    answer["why"] = "HTTP 503"  # the server fails now: transient, the run is partial again
+    third = fetch()
+    assert [k for k, _ in third.failed] == ["test:unmarked.pdf"]
+    assert third.given_up == []
+    assert fetch_exit_code(third) == EXIT_PARTIAL
+
+
 def test_a_zipped_pdf_download_keeps_the_pdf_it_holds(tmp_path: Path) -> None:
     """ITU-R's !!ZPF-E.zip: the document is the one PDF inside (2026-11-02)."""
     import zipfile

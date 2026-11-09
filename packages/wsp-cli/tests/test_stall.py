@@ -248,7 +248,56 @@ def test_a_lane_sleeping_between_rounds_is_not_idle(tmp_path: Path) -> None:
     _run(env, 0)
     assert not [e for e in _run(env, 3.5) if "job-idle" in e]
     (tmp_path / "proc" / "77" / "comm").write_text("python3\n")  # a worker, not a pause
-    assert [e for e in _run(env, 3.6) if "RAISED job-idle" in e]
+    assert not [e for e in _run(env, 3.6) if "job-idle" in e]  # just out of its pause
+    assert [e for e in _run(env, 6.6) if "RAISED job-idle" in e]  # idle as long on its own
+
+
+def test_a_job_just_out_of_the_queue_is_not_idle_and_an_open_alert_clears_once_it_queues(
+    tmp_path: Path,
+) -> None:
+    """2026-11-08/09: 43 "job-idle ... it may be waiting on the ingest lock" alerts, most of them lanes
+    a few minutes out of the ingest queue (3 hours in it), starting their next fetch. A job seen with
+    a ticket is not idle until IDLE_H after it was last seen so; one quiet that long on its own is."""
+    env = _world(tmp_path, usage=5_000_000)
+    queue = tmp_path / "locks" / "ingest.queue"
+    queue.mkdir()
+    (tmp_path / "proc" / "76").mkdir(parents=True)  # the lane's ingest, alive
+    ticket = queue / f"{T0 * 10**9:020d}-76"
+    _run(env, 0)
+    assert [e for e in _run(env, 3.5) if "RAISED job-idle" in e]  # no ticket, no wait: a hang
+    ticket.touch()  # now queued for the ingest lock: the open alert ends
+    os.utime(ticket, (T0 + 3.5 * 3600, T0 + 3.5 * 3600))
+    assert [e for e in _run(env, 3.6) if "CLEARED job-idle:whisipedia-job-lane.service" in e]
+    assert not [e for e in _run(env, 6.5) if "job-idle" in e]  # 3 hours in the queue
+    ticket.unlink()  # its turn came and went; the lane starts its next fetch
+    assert not [e for e in _run(env, 6.6) if "job-idle" in e]
+    assert not [e for e in _run(env, 9.4) if "job-idle" in e]  # under 3 h since it was seen waiting
+    raised = [e for e in _run(env, 9.6) if "RAISED job-idle" in e]  # 3.1 h quiet on its own
+    assert raised
+    assert "queue" not in raised[0]
+
+
+def test_a_lane_waiting_for_another_lanes_source_lock_is_not_idle(tmp_path: Path) -> None:
+    """tools/lanes/lane-run.sh waits up to 6 hours in `flock --wait` for a source another lane holds:
+    a wait, not a hang. A process blocked on a lock of another kind still is reported."""
+    env = _world(tmp_path, usage=5_000_000)
+    lane_locks = tmp_path / "lane-locks"
+    lane_locks.mkdir()
+    src = lane_locks / "dla-assist.lock"
+    src.touch()
+    st = src.stat()
+    key = f"{os.major(st.st_dev):02x}:{os.minor(st.st_dev):02x}:{st.st_ino}"
+    proc_locks = tmp_path / "proc" / "locks"
+    base = proc_locks.read_text()
+    proc_locks.write_text(
+        base + f"7: FLOCK  ADVISORY  WRITE 5 {key} 0 EOF\n7: -> FLOCK  ADVISORY  WRITE 76 {key} 0 EOF\n"
+    )
+    env["WSP_STALL_LANE_LOCKS"] = str(lane_locks)
+    _run(env, 0)
+    assert not [e for e in _run(env, 3.5) if "job-idle" in e]
+    proc_locks.write_text(base)  # it got the source; quiet for 3 hours more on its own: a hang
+    assert not [e for e in _run(env, 3.6) if "job-idle" in e]
+    assert [e for e in _run(env, 6.6) if "RAISED job-idle" in e]
 
 
 def test_a_job_that_just_took_the_lock_after_its_wait_is_not_idle(tmp_path: Path) -> None:

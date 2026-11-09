@@ -22,7 +22,12 @@ failed nightly index and five API outages among them, reached nobody without a C
 * ``job-idle:<unit>``         a background job (whisipedia-job-*) used under IDLE_CPU_S of CPU in the
                               last WSP_STALL_IDLE_H hours (default 3): stuck, or waiting on something
                               (the message names a long-held lock, or a frozen background slice); not
-                              the jobs named by WSP_STALL_IDLE_OK (default whisipedia-job-*-watch.service)
+                              the jobs named by WSP_STALL_IDLE_OK (default whisipedia-job-*-watch.service).
+                              A job seen waiting its turn (a ticket in a lock's queue, under
+                              WSP_STALL_QUEUE_IDLE_H), waiting for another lane's source lock, or
+                              pausing between rounds is not idle, nor for IDLE_H after it was last seen
+                              so: its quiet hours were the wait, not a hang (2026-11-08/09: 43 alerts
+                              "may be waiting on the ingest lock" were lanes minutes out of the queue)
 * ``lock-held:<lock>``        a lock (ingest, heavy, index...) held by one process over WSP_STALL_LOCK_H
                               hours (8), counted from the first run that saw it held (the scrub lock
                               is the orchestrator's for its whole life, and is not counted). The nightly
@@ -98,6 +103,8 @@ REPO = Path(__file__).resolve().parent.parent
 STATE = Path(os.environ.get("WSP_STALL_STATE", HOME / ".local/share/whisipedia/state"))
 WATCH = STATE / "watch"
 LOCKS = Path(os.environ.get("WSP_STALL_LOCKS", HOME / ".local/share/whisipedia/locks"))
+# The collection lanes' own per-source locks (tools/lanes/lane-run.sh: one lane per source at a time).
+LANE_LOCKS = Path(os.environ.get("WSP_STALL_LANE_LOCKS", HOME / ".local/state/whisipedia/collections/locks"))
 JOBS = Path(os.environ.get("WSP_STALL_JOBS", HOME / ".local/state/whisipedia"))  # tools/wsp-bg's state
 HALTED = JOBS / "halted"  # tools/wsp-shutdown's marker; tools/wsp-start removes it
 PROC = Path(os.environ.get("WSP_STALL_PROC", "/proc"))
@@ -202,6 +209,7 @@ class State:
     inactive: dict[str, float] = field(default_factory=dict[str, float])  # RUNNING unit -> first seen down
     saved: dict[str, str] = field(default_factory=dict[str, str])  # unit-failed key -> its saved journal
     pushed: dict[str, float] = field(default_factory=dict[str, float])  # key raised as a watch: alert
+    waited: dict[str, float] = field(default_factory=dict[str, float])  # job unit -> last seen waiting
 
     @classmethod
     def load(cls, path: Path) -> State:
@@ -218,6 +226,7 @@ class State:
                 inactive={k: float(v) for k, v in raw.get("inactive", {}).items()},
                 saved={k: str(v) for k, v in raw.get("saved", {}).items()},
                 pushed={k: float(v) for k, v in raw.get("pushed", {}).items()},
+                waited={k: float(v) for k, v in raw.get("waited", {}).items()},
             )
         except (OSError, ValueError, TypeError, AttributeError, IndexError):
             return cls()
@@ -330,8 +339,9 @@ def process(pid: str) -> tuple[str, float | None]:
 
 
 def lock_waiters() -> dict[str, str]:
-    """``pid -> lock name`` of every process blocked waiting for a lock file in LOCKS (``->`` lines)."""
-    by_inode = _lock_inodes()
+    """``pid -> lock name`` of every process blocked waiting for a lock file in LOCKS (``->`` lines);
+    a lane's source lock in LANE_LOCKS is named ``lane:<source>``."""
+    by_inode = {**_lock_inodes(LANE_LOCKS, "lane:"), **_lock_inodes()}
     out: dict[str, str] = {}
     try:
         lines = (PROC / "locks").read_text().splitlines()
@@ -373,16 +383,16 @@ def queued(now: float) -> dict[str, tuple[str, int, float]]:
     return out
 
 
-def _lock_inodes() -> dict[str, str]:
+def _lock_inodes(folder: Path = LOCKS, prefix: str = "") -> dict[str, str]:
     """``"MAJ:MIN:INODE" -> lock name`` as /proc/locks names files: the device too, since a file on the
     NAS can have the same inode number as a local lock file (2026-10-26 review)."""
     by_inode: dict[str, str] = {}
-    for p in LOCKS.glob("*.lock"):
+    for p in folder.glob("*.lock"):
         try:
             st = p.stat()
         except OSError:
             continue
-        by_inode[f"{os.major(st.st_dev):02x}:{os.minor(st.st_dev):02x}:{st.st_ino}"] = p.stem
+        by_inode[f"{os.major(st.st_dev):02x}:{os.minor(st.st_dev):02x}:{st.st_ino}"] = prefix + p.stem
     return by_inode
 
 
@@ -668,18 +678,27 @@ def check(state: State, t: float) -> tuple[dict[str, str], list[str], list[str]]
         hist = [s for s in samples.get(unit, []) if t - s[0] <= KEEP_SAMPLES_S and s[1] <= use]
         hist.append((t, use))
         samples[unit] = hist
+        # Waiting, seen on every run (not only once idle): a lane out of the queue a minute ago, now
+        # starting its fetch, still has 3 quiet hours behind it, all of them its turn being waited for.
+        pids = cgroup_pids(cg)
+        turn = next((in_queue[p] for p in pids if p in in_queue), None)
+        lane_wait = any(waiters.get(p, "").startswith("lane:") for p in pids)  # another lane's source
+        if (turn is not None and turn[2] < QUEUE_IDLE_H * 3600) or lane_wait or pausing(pids):
+            state.waited[unit] = t
         window = [s for s in hist if t - s[0] >= IDLE_H * 3600]
         if not window:
             continue  # not watched long enough yet
         since, base = window[-1]  # the newest sample at least IDLE_H old
         if (use - base) / 1e6 < IDLE_CPU_S:
             why = ""
-            pids = cgroup_pids(cg)
-            turn = next((in_queue[p] for p in pids if p in in_queue), None)
             if turn is not None and turn[2] < QUEUE_IDLE_H * 3600:
                 continue  # waiting its turn, not stalled
-            if pausing(pids):
-                continue  # a lane between rounds: a shell and its sleep
+            if lane_wait or pausing(pids):
+                continue  # waiting for another lane's source, or a lane between rounds (a shell, a sleep)
+            # Waiting until less than IDLE_H ago: not quiet that long on its own. A turn waited for over
+            # QUEUE_IDLE_H is reported at once, never hidden by the waits before it.
+            if turn is None and t - state.waited.get(unit, -1e18) < IDLE_H * 3600:
+                continue
             if any(pid in pids and age < IDLE_H * 3600 for pid, _, age in held.values()):
                 continue  # its turn just came: it holds a lock it took after the quiet hours of waiting
             if turn is not None:
@@ -690,7 +709,7 @@ def check(state: State, t: float) -> tuple[dict[str, str], list[str], list[str]]
                 # The lock the job is blocked on, when one of its processes waits in flock (2026-10-19:
                 # the job waited for the heavy lock, and the message named the ingest lock); else the
                 # likeliest one.
-                waits = [waiters[p] for p in cgroup_pids(cg) if p in waiters and waiters[p] in held]
+                waits = [waiters[p] for p in pids if p in waiters and waiters[p] in held]
                 name = (
                     waits[0]
                     if waits
@@ -711,6 +730,12 @@ def check(state: State, t: float) -> tuple[dict[str, str], list[str], list[str]]
         del state.inactive[unit]
     for unit in [u for u in state.runs if u not in seen and listed is not None]:
         del state.runs[unit]
+    for unit in [
+        u
+        for u in state.waited
+        if (u not in seen and listed is not None) or t - state.waited[u] > KEEP_SAMPLES_S
+    ]:
+        del state.waited[unit]
 
     owed = JOBS / "jobs" / "yield-stopped"
     try:
