@@ -22,6 +22,7 @@ FAKE_WSP = """#!/bin/sh
 # fake wsp: pops the next exit code for this command from $FAKE/<command>.codes
 echo "$*" >> "$FAKE/calls"
 case $1 in collections) kind=fetch ;; ingest) kind=ingest ;; *) exit 99 ;; esac
+if [ "$2" = given-up ]; then cat "$FAKE/given-up" 2>/dev/null; exit 0; fi  # the refresh's due list
 code=$(head -n 1 "$FAKE/$kind.codes")
 tail -n +2 "$FAKE/$kind.codes" > "$FAKE/$kind.rest" && mv "$FAKE/$kind.rest" "$FAKE/$kind.codes"
 if [ "$code" = hang ]; then
@@ -194,7 +195,7 @@ def test_a_cycle_whose_only_failures_failed_for_good_is_done_and_the_owner_told(
     assert cycles == [cycles[0], f"{cycles[0]}r2"]  # no r3
     alerts = lane.alerts()
     assert "alerts resolve --key lane:lane-t:usmc-mcpel" in alerts
-    info = [a for a in alerts if a.startswith("alerts raise --key lane-failed-for-good:lane-t:usmc-mcpel")]
+    info = [a for a in alerts if a.startswith("alerts raise --key failed-for-good:usmc-mcpel ")]
     assert len(info) == 1
     assert "--severity info" in info[0]
     assert "2 document(s), listed in /w/usmc-mcpel/failed-for-good.json" in info[0]
@@ -206,11 +207,11 @@ def test_failed_for_good_reaches_the_owner_when_a_later_run_finishes_the_ingest(
     """The ingest waited past the lane's patience (exit 3); the next run ingests without fetching."""
     lane.script(fetch=[f"8:{GIVEN_UP}"], ingest=[3])
     assert lane.run("usmc-mcpel", LANE_BUSY_TRIES="1") == 1
-    assert not [a for a in lane.alerts() if "lane-failed-for-good" in a]
+    assert not [a for a in lane.alerts() if "raise --key failed-for-good" in a]
     lane.script(fetch=[], ingest=[8])
     assert lane.run("usmc-mcpel") == 0
     assert lane.done() == ["usmc-mcpel"]
-    info = [a for a in lane.alerts() if "lane-failed-for-good:lane-t:usmc-mcpel" in a]
+    info = [a for a in lane.alerts() if a.startswith("alerts raise --key failed-for-good:usmc-mcpel ")]
     assert len(info) == 1
     assert "2 document(s), listed in /w/usmc-mcpel/failed-for-good.json" in info[0]
 
@@ -219,10 +220,10 @@ def test_failed_for_good_beside_other_failures_is_still_partial_and_tells_no_one
     lane.script(fetch=[f"6:{GIVEN_UP}", 6], ingest=[0, 8])
     assert lane.run("crs-reports", LANE_PARTIAL_TRIES="2") == 1
     assert lane.done() == []
-    assert not [a for a in lane.alerts() if "lane-failed-for-good" in a]
+    assert not [a for a in lane.alerts() if "raise --key failed-for-good" in a]
     lane.script(fetch=[0], ingest=[0])  # a later run: complete, nothing failed for good any more
     assert lane.run("crs-reports") == 0
-    assert not [a for a in lane.alerts() if "lane-failed-for-good" in a]
+    assert not [a for a in lane.alerts() if "raise --key failed-for-good" in a]
 
 
 def test_an_incomplete_listing_is_retried_in_the_same_cycle(lane: Lane) -> None:
@@ -585,7 +586,7 @@ def test_the_weekly_refresh_reopens_a_done_source_and_seals_nothing_when_nothing
     today = time.strftime("%Y-%m-%d", time.gmtime())
     lane.script(fetch=[8, 8], ingest=[8, 8])  # a week on: nothing new anywhere
     assert refresh() == 0
-    fetches = [c for c in lane.calls() if c.startswith("collections")]
+    fetches = [c for c in lane.calls() if c.startswith("collections fetch")]
     assert fetches[2:] == [
         f"collections fetch --source crs-reports --version {today}",
         f"collections fetch --source nist-csrc --version {today}",
@@ -599,7 +600,7 @@ def test_the_weekly_refresh_reopens_a_done_source_and_seals_nothing_when_nothing
     assert cycles[-1] == f"crs-reports {today}r2"
     lane.script(fetch=[8, 8], ingest=[8, 8])
     assert refresh() == 0
-    fetches = [c for c in lane.calls() if c.startswith("collections")]
+    fetches = [c for c in lane.calls() if c.startswith("collections fetch")]
     assert fetches[-2:] == [
         f"collections fetch --source crs-reports --version {today}r2",  # resumed on its cycle
         f"collections fetch --source nist-csrc --version {today}",  # reopened
@@ -632,3 +633,36 @@ def test_the_refresh_timer_starts_one_capped_background_job(tmp_path: Path) -> N
     assert "ExecStart=@REPO@/tools/lanes/refresh.sh" in service
     assert 'Environment="WSP_REFRESH_SOURCES=crs-reports nist-csrc"' in service
     assert "OnCalendar=Sun" in (units / "whisipedia-refresh.timer").read_text()
+
+
+def test_a_later_done_item_without_failures_resolves_the_failed_for_good_alert(lane: Lane) -> None:
+    lane.script(fetch=[f"8:{GIVEN_UP}"], ingest=[8])
+    assert lane.run("usmc-mcpel") == 0
+    assert not (lane.state / "lane-t.gaveup").read_text().strip()  # the done item's lines go with it
+    (lane.state / "lane-t.done").write_text("")  # fetched again (as a refresh would)
+    lane.script(fetch=[0], ingest=[0])  # the issuer fixed them: fetched
+    assert lane.run("usmc-mcpel") == 0
+    assert lane.alerts()[-2:] == [
+        "alerts resolve --key failed-for-good:usmc-mcpel",
+        "alerts resolve --key lane:lane-t:usmc-mcpel",
+    ]
+    assert not (lane.state / "lane-t.gaveup").read_text().strip()
+
+
+def test_the_refresh_takes_sources_whose_documents_were_given_up_a_month_ago(lane: Lane) -> None:
+    """A lane's done item is never fetched again: documents given up for good on any source get
+    another try once a month with the weekly refresh, a partitioned source by its partitions."""
+    (lane.fake / "given-up").write_text("usmc-mcpel\ncia-reading-room b0003\ncrs-reports\n")
+    lane.script(fetch=[8, 8, 8], ingest=[8, 8, 8])
+    env = {**lane.env, "LANE_ROUNDS": "1"}
+    argv = [str(REFRESH), "--run", "crs-reports"]
+    assert subprocess.run(argv, env=env, capture_output=True, text=True, timeout=60).returncode == 0
+    fetches = [c.split(" --version")[0] for c in lane.calls() if c.startswith("collections fetch")]
+    assert fetches == [
+        "collections fetch --source crs-reports",
+        "collections fetch --source usmc-mcpel",
+        "collections fetch --source cia-reading-room --partition b0003",
+    ]
+    assert "collections given-up --mark" in lane.calls()
+    assert (lane.state / "refresh-crs-reports.log").exists()  # its own log, not the lane's
+    assert not (lane.state / "crs-reports.log").exists()

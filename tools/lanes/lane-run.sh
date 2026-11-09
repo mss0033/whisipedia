@@ -19,7 +19,8 @@
 #   0, 7, 8   complete: ingest this cycle; done when it is in. Complete also when documents failed
 #             for good (the same permanent failure on two fetches in a row: HTTP 401/403 for that
 #             file, a web page in its place, never verifiable; wsp_cli.doccollections.settle_permanent):
-#             once the item is done, the info alert lane-failed-for-good:NAME:ITEM names their ledger
+#             once the item is done, the info alert failed-for-good:SOURCE[:PARTITION] names their
+#             ledger; a later done item of that source with none resolves it (any lane: a refresh)
 #   4         a listing failed, nothing fetched: retry the same cycle after LANE_LISTING_WAIT seconds
 #   5         an earlier fetch of the source is not ingested yet: ingest it (`wsp ingest --source`), then
 #             fetch again
@@ -47,6 +48,7 @@ shift 2
 REPO=$(cd "$(dirname "$0")/../.." && pwd)
 WSP=${WSP:-$REPO/.venv/bin/wsp}
 ALERT_CMD=${LANE_ALERT_CMD:-$WSP}
+ITEM_LOG=${LANE_ITEM_LOG_PREFIX:-}  # "-" lanes: <prefix><source>.log (the refresh: its own logs)
 STATE=${WSP_LANE_STATE:-${XDG_STATE_HOME:-$HOME/.local/state}/whisipedia/collections}
 LISTING_TRIES=${LANE_LISTING_TRIES:-8}     # fetch attempts while the listing is incomplete (exit 4)
 LISTING_WAIT=${LANE_LISTING_WAIT:-900}
@@ -76,7 +78,9 @@ MAX_SLICES=${LANE_MAX_SLICES:-48}  # one-hour ingest slices of one version in a 
 if [ "$SRC" = - ]; then LOCK_WAIT=${LANE_LOCK_WAIT:-0}; else LOCK_WAIT=${LANE_LOCK_WAIT:-21600}; fi
 mkdir -p "$STATE/locks"
 DONE=$STATE/$NAME.done CYCLES=$STATE/$NAME.cycles FETCHED=$STATE/$NAME.fetched LOG=$STATE/$NAME.log
-GAVEUP=$STATE/$NAME.gaveup  # "ITEM CYCLE TEXT": a fetch's documents failed for good (the last wins)
+# "ITEM CYCLE TEXT": a fetch's documents failed for good (the last wins), until the item is done; kept
+# so an ingest a later run finishes still tells the owner. Written only when there is something to say.
+GAVEUP=$STATE/$NAME.gaveup
 touch "$DONE" "$CYCLES" "$FETCHED"
 cd "$REPO" || exit 1
 
@@ -87,12 +91,15 @@ alert() {
   "$ALERT_CMD" alerts raise --key "lane:$NAME:$item" --severity "$1" --message "lane $NAME, $item: $2" >> "$LOG" 2>&1 || true
 }
 clear_alert() { "$ALERT_CMD" alerts resolve --key "lane:$NAME:$item" >> "$LOG" 2>&1 || true; }
-# A done item whose fetch left documents failed for good: one info alert (the digest shows it), its
-# own kind, so clear_alert leaves it for the owner to read.
+# A done item whose fetch left documents failed for good: one info alert per source (partition), the
+# digest shows it; its own kind, so clear_alert leaves it for the owner. A done item without any
+# resolves it: the documents came after all (a refresh fetched them).
+given_up_key() { if [ -n "$part" ]; then echo "failed-for-good:$src:$item"; else echo "failed-for-good:$src"; fi; }
 note_given_up() {
-  "$ALERT_CMD" alerts raise --key "lane-failed-for-good:$NAME:$item" --severity info \
-    --message "lane $NAME, $item: done; $1 (the same failure on every try, retried on later runs)" >> "$LOG" 2>&1 || true
+  "$ALERT_CMD" alerts raise --key "$(given_up_key)" --severity info \
+    --message "$src${part:+ $item} (lane $NAME): done; $1 (the same failure on every try; tried again by a later fetch)" >> "$LOG" 2>&1 || true
 }
+clear_given_up() { "$ALERT_CMD" alerts resolve --key "$(given_up_key)" >> "$LOG" 2>&1 || true; }
 # The last error line of the item's own log since this step began (for the alert's message).
 last_error() { tail -c +"$((${1:-0} + 1))" "$out" 2>/dev/null | grep -E 'Error|error:' | tail -n 1 | cut -c1-300; }
 
@@ -194,7 +201,7 @@ left=0
 item=""
 for item in "$@"; do
   grep -qxF "$item" "$DONE" && continue
-  if [ "$SRC" = - ]; then src=$item part="" out=$STATE/$item.log
+  if [ "$SRC" = - ]; then src=$item part="" out=$STATE/$ITEM_LOG$item.log
   else src=$SRC part="--partition $item" out=$STATE/$NAME-$item.log; fi
   cyc=$(cycle_of "$item")
   [ -n "$cyc" ] || { cyc=$(date -u +%F); set_cycle "$item" "$cyc"; }
@@ -220,7 +227,7 @@ for item in "$@"; do
     fi
   fi
 
-  listing=0 partial=0 pending=0 done_item=0 gave_up=""
+  listing=0 partial=0 pending=0 done_item=0 gave_up="" fetched_now=0
   while :; do
     frc=$(fetched_code "$item" "$cyc")
     case $frc in
@@ -233,6 +240,7 @@ for item in "$@"; do
         frc=$?
         say "fetch exit $frc"
         gave_up=$(tail -c +"$((start + 1))" "$out" | sed -n 's/^failed for good: \(.*\)$/\1/p' | tail -n 1)
+        fetched_now=1
         # "<v> is already sealed; fetching as <v'>": follow the cycle the fetch used (partition suffix off).
         moved=$(tail -c +"$((start + 1))" "$out" | sed -n 's/.* is already sealed; fetching as \([^ ]*\)$/\1/p' | tail -n 1)
         if [ -n "$moved" ]; then
@@ -242,7 +250,9 @@ for item in "$@"; do
           set_cycle "$item" "$cyc"
         fi
         # Kept with the cycle: an ingest left waiting is finished by a later run, which does not fetch.
-        echo "$item $cyc ${gave_up:--}" >> "$GAVEUP"
+        if [ -n "$gave_up" ] || awk -v i="$item" '$1 == i { f = 1 } END { exit !f }' "$GAVEUP" 2>/dev/null; then
+          echo "$item $cyc ${gave_up:--}" >> "$GAVEUP"
+        fi
         ;;
     esac
     case $frc in
@@ -301,13 +311,20 @@ for item in "$@"; do
   if [ "$done_item" = 1 ]; then
     echo "$item" >> "$DONE"
     say "$item: done (cycle $cyc)"
-    clear_alert
-    [ -n "$gave_up" ] || gave_up=$(awk -v i="$item" -v c="$cyc" '$1 == i && $2 == c { $1 = $2 = ""; r = substr($0, 3) } END { print r }' "$GAVEUP" 2>/dev/null)
-    [ "$gave_up" = - ] && gave_up=""
+    if [ "$fetched_now" = 0 ]; then  # ingested what an earlier run fetched: its word on them
+      gave_up=$(awk -v i="$item" -v c="$cyc" '$1 == i && $2 == c { $1 = $2 = ""; r = substr($0, 3) } END { print r }' "$GAVEUP" 2>/dev/null)
+      [ "$gave_up" = - ] && gave_up=""
+    fi
+    if [ -s "$GAVEUP" ]; then  # the item's lines go with it
+      awk -v i="$item" '$1 != i' "$GAVEUP" > "$GAVEUP.tmp" && mv "$GAVEUP.tmp" "$GAVEUP"
+    fi
     if [ -n "$gave_up" ]; then
       say "$item: failed for good: $gave_up"
       note_given_up "$gave_up"
+    else
+      clear_given_up
     fi
+    clear_alert
   else
     left=1
   fi

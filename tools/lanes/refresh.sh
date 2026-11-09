@@ -9,7 +9,10 @@
 # This runs the lane "refresh" over SOURCE... (default $WSP_REFRESH_SOURCES, else crs-reports) as the
 # background job whisipedia-job-collections-refresh (tools/wsp-bg --fetch: the download lanes' slice,
 # capped at 1G). Each run first opens the items the last refresh finished: out of refresh.done, on a
-# new cycle (today's date); an item a refresh left undone keeps its cycle and resumes.
+# new cycle (today's date); an item a refresh left undone keeps its cycle and resumes. It also takes
+# every source (partition) with documents given up for good over 30 days ago and not retried since
+# (`wsp collections given-up --mark`): a lane marks such an item done and never fetches it again.
+# Its items' logs are refresh-<source>.log, apart from the lanes' own.
 #
 # What a refresh costs: the fetch lists the source and downloads only what the library does not hold
 # (a held document the listing calls unchanged is skipped; one already downloaded this cycle is
@@ -23,21 +26,52 @@ JOB=collections-refresh
 NAME=refresh
 if [ "${1:-}" = --run ]; then
   shift
-  [ $# -ge 1 ] || { echo "refresh.sh --run: no sources" >&2; exit 2; }
+  WSP=${WSP:-$REPO/.venv/bin/wsp}
   STATE=${WSP_LANE_STATE:-${XDG_STATE_HOME:-$HOME/.local/state}/whisipedia/collections}
   mkdir -p "$STATE"
-  touch "$STATE/$NAME.done" "$STATE/$NAME.cycles" "$STATE/$NAME.fetched"
   today=$(date -u +%F)
-  for src in "$@"; do
-    if grep -qxF "$src" "$STATE/$NAME.done"; then
-      grep -vxF "$src" "$STATE/$NAME.done" > "$STATE/$NAME.done.tmp" || true
-      mv "$STATE/$NAME.done.tmp" "$STATE/$NAME.done"
-      echo "$src $today" >> "$STATE/$NAME.cycles"  # a new cycle (the last line wins)
-      echo "$src $today -" >> "$STATE/$NAME.fetched"  # not fetched yet (a second refresh in a day)
+  # reopen LANE ITEM...: items LANE finished last time go out of its .done, on a new cycle (today).
+  reopen() {
+    lane=$1
+    shift
+    touch "$STATE/$lane.done" "$STATE/$lane.cycles" "$STATE/$lane.fetched"
+    for it in "$@"; do
+      grep -qxF "$it" "$STATE/$lane.done" || continue
+      grep -vxF "$it" "$STATE/$lane.done" > "$STATE/$lane.done.tmp" || true
+      mv "$STATE/$lane.done.tmp" "$STATE/$lane.done"
+      echo "$it $today" >> "$STATE/$lane.cycles"  # a new cycle (the last line wins)
+      echo "$it $today -" >> "$STATE/$lane.fetched"  # not fetched yet (a second refresh in a day)
+    done
+  }
+  # Documents given up for good a month ago, on any source (its own lane done long since): fetched
+  # again with it, once a month (`wsp collections given-up`, which records the retry).
+  partitioned=""
+  due=$("$WSP" collections given-up --mark 2>> "$STATE/$NAME.log") || due=""
+  while read -r s p; do
+    [ -n "$s" ] || continue
+    if [ -n "$p" ]; then
+      partitioned="$partitioned $s:$p"
+    else
+      case " $* " in *" $s "*) ;; *) set -- "$@" "$s" ;; esac
     fi
+  done <<DUE
+$due
+DUE
+  rc=0
+  export LANE_ROUNDS="${LANE_ROUNDS:-2}" LANE_ITEM_LOG_PREFIX="${LANE_ITEM_LOG_PREFIX:-refresh-}"
+  if [ $# -ge 1 ]; then
+    reopen "$NAME" "$@"
+    "$REPO/tools/lanes/lane-run.sh" "$NAME" - "$@" || rc=1
+  fi
+  # A partitioned source's partitions: one lane per source (refresh-<source>), its own logs.
+  for s in $(printf '%s\n' $partitioned | cut -d: -f1 | sort -u); do
+    parts=$(printf '%s\n' $partitioned | awk -F: -v s="$s" '$1 == s { print $2 }')
+    # shellcheck disable=SC2086  # partition names hold no spaces
+    reopen "$NAME-$s" $parts
+    # shellcheck disable=SC2086
+    "$REPO/tools/lanes/lane-run.sh" "$NAME-$s" "$s" $parts || rc=1
   done
-  # Two passes an hour apart at most: next week's run takes up what is left.
-  LANE_ROUNDS=${LANE_ROUNDS:-2} exec "$REPO/tools/lanes/lane-run.sh" "$NAME" - "$@"
+  exit "$rc"
 fi
 # shellcheck disable=SC2086  # the list is split on purpose
 [ $# -ge 1 ] || set -- ${WSP_REFRESH_SOURCES:-crs-reports}

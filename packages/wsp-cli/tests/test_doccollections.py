@@ -1440,9 +1440,9 @@ def test_a_failure_seen_the_same_way_on_runs_in_a_row_no_longer_makes_the_run_pa
 ) -> None:
     """2026-11-09: NTRS materials (one not-a-PDF), USMC MCPEL (archive.org 401 and 403) and CRS reports
     (three 403s) sealed cycle after cycle and their lanes never finished. A refusal on two runs in a
-    row, a wrong body on three, the first at least 2 hours before, no longer keeps the run partial;
-    anything else does."""
-    from collections.abc import Mapping
+    row, a wrong body on three, the first at least 2 hours before, from a host that serves good files,
+    no longer keeps the run partial; anything else does."""
+    from collections.abc import Callable, Mapping
     from datetime import UTC, datetime, timedelta
 
     from wsp_cli import doccollections as dc
@@ -1450,13 +1450,28 @@ def test_a_failure_seen_the_same_way_on_runs_in_a_row_no_longer_makes_the_run_pa
     ledger = tmp_path / "failed-for-good.json"
     now = datetime(2026, 11, 9, tzinfo=UTC)
 
-    def run(hour: float, failures: Mapping[str, str | None], *, tried: int = 10) -> dc.FetchReport:
+    def run(
+        hour: float,
+        failures: Mapping[str, str | None],
+        *,
+        tried: int = 10,
+        good: int = 100,
+        probe: Callable[[str, int], int] | None = None,
+    ) -> dc.FetchReport:
         report = dc.FetchReport("ntrs", "v", planned=True)
         for key, kind in failures.items():
             report.failed.append((key, f"why {key}"))
             if kind is not None:
                 report.permanent[key] = kind
-        dc.settle_permanent(report, ledger, now + timedelta(hours=hour), tried=tried)
+        dc.settle_permanent(
+            report,
+            ledger,
+            now + timedelta(hours=hour),
+            tried=tried,
+            good={"h": good},
+            host_of=dict.fromkeys(failures, "h"),
+            probe=probe,
+        )
         return report
 
     both = {"a": "refused: HTTP 403", "b": "not the file: x"}
@@ -1474,7 +1489,9 @@ def test_a_failure_seen_the_same_way_on_runs_in_a_row_no_longer_makes_the_run_pa
     assert third.failed == []
     assert dc.fetch_exit_code(third) == dc.EXIT_COMPLETE
     assert third.given_up_ledger == str(ledger)
-    assert json.loads(ledger.read_text())["a"]["tries"] == 4  # every document, with its count
+    seen = json.loads(ledger.read_text())
+    assert seen["a"]["tries"] == 4  # every document, with its count
+    assert seen["a"]["given_up"] == "2026-11-09T02:00:00+00:00"  # kept from the first time
     other = run(3, {"a": "refused: HTTP 403", "b": "refused: HTTP 401"})  # b fails otherwise now
     assert [k for k, _ in other.given_up] == ["a"]
     run(4, {})  # a run without them (fetched, or not tried): the counts start over
@@ -1492,7 +1509,102 @@ def test_a_failure_seen_the_same_way_on_runs_in_a_row_no_longer_makes_the_run_pa
     assert over.given_up == []
     assert len(over.failed) == 11
     assert over.permanent_over == 11
-    assert sorted(k for k, _ in run(24, many, tried=1_000).given_up) == sorted(many)
+    assert run(24, many, tried=1_000).given_up == []  # blocked runs were not counted: from 1 again
+    assert sorted(k for k, _ in run(26, many, tried=1_000).given_up) == sorted(many)
+
+
+def test_nothing_is_given_up_while_its_host_serves_nothing_good(tmp_path: Path) -> None:
+    """Review of 2026-11-09: a resume pass holds every document but the failing ones, so it tried
+    only those; a WAF or a rate-limit page over a lane's rounds gave up the last ten at once. A host
+    that served no good file this run (nor, downloaded again, a held one) gives up nothing, and its
+    documents' counts start over; a block that shrinks to a few documents gives up none at once."""
+    from datetime import UTC, datetime, timedelta
+
+    from wsp_cli import doccollections as dc
+
+    ledger = tmp_path / "failed-for-good.json"
+    now = datetime(2026, 11, 9, tzinfo=UTC)
+    asked: list[tuple[str, int]] = []
+
+    def run(hour: float, keys: list[str], *, good: int, same: int = 0) -> dc.FetchReport:
+        report = dc.FetchReport("crs", "v")
+        for key in keys:
+            report.failed.append((key, "HTTP 403"))
+            report.permanent[key] = "refused: HTTP 403"
+
+        def probe(host: str, want: int) -> int:
+            asked.append((host, want))
+            return min(same, want)
+
+        dc.settle_permanent(
+            report,
+            ledger,
+            now + timedelta(hours=hour),
+            tried=len(keys) + good,
+            good={"www.everycrsreport.com": good} if good else {},
+            host_of=dict.fromkeys(keys, "www.everycrsreport.com"),
+            probe=probe,
+        )
+        return report
+
+    three = ["95-602", "94-459", "93-931"]
+    host = "www.everycrsreport.com"
+    for hour in (0, 1, 2, 3, 5):  # every download refused, held ones too: an all-failed resume pass
+        r = run(hour, three, good=0)
+        assert r.given_up == []
+        assert dc.fetch_exit_code(r) == dc.EXIT_PARTIAL
+    assert r.permanent_over == 3
+    assert asked == [(host, 4), (host, 4)]  # due at 2 and 5 h: held ones downloaded again, refused
+    assert json.loads(ledger.read_text()) == {}  # each time the count started over
+
+    # A site-wide refusal of 11 that shrinks to 3 documents: their count starts there.
+    eleven = [f"k{i}" for i in range(8)] + three
+    run(10, eleven, good=0)
+    run(12, eleven, good=0)
+    run(14, three, good=50)
+    assert run(14.5, three, good=50).given_up == []  # two tries, not yet 2 hours
+    assert sorted(k for k, _ in run(16, three, good=50).given_up) == sorted(three)
+
+    # A pass that downloads nothing new: held documents downloaded again show the host is well.
+    ledger.unlink()
+    run(20, three, good=0)
+    asked.clear()
+    assert run(22, three, good=0, same=0).given_up == []  # due, but the probe got other bytes
+    assert asked == [(host, 4)]
+    run(23, three, good=0)
+    assert sorted(k for k, _ in run(25, three, good=0, same=4).given_up) == sorted(three)
+    assert run(25.5, three, good=2, same=1).given_up == []  # 2 + 1 good for 3 failing: not more
+
+
+def test_given_up_documents_are_due_for_another_try_once_a_month(tmp_path: Path) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from wsp_cli import doccollections as dc
+
+    now = datetime(2026, 12, 20, tzinfo=UTC)
+    old = (now - timedelta(days=40)).isoformat(timespec="seconds")
+    new = (now - timedelta(days=3)).isoformat(timespec="seconds")
+    for name, entries in (
+        ("usmc-mcpel/failed-for-good.json", {"a": {"given_up": old, "tries": 9, "sig": "s", "first": old}}),
+        (
+            "cia-reading-room/failed-for-good-b0003.json",
+            {"b": {"given_up": old, "tries": 5, "sig": "s", "first": old}},
+        ),
+        ("crs-reports/failed-for-good.json", {"c": {"given_up": new, "tries": 3, "sig": "s", "first": new}}),
+        ("ntrs/failed-for-good.json", {"d": {"tries": 1, "sig": "s", "first": old}}),  # never given up
+    ):
+        path = tmp_path / name
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps(entries))
+    due = [("cia-reading-room", "b0003"), ("usmc-mcpel", "")]
+    assert dc.due_for_retry(tmp_path, now) == due
+    assert dc.due_for_retry(tmp_path, now, mark=True) == due
+    assert dc.due_for_retry(tmp_path, now + timedelta(days=7)) == []  # retried: not again for a month
+    assert dc.due_for_retry(tmp_path, now + timedelta(days=31)) == [
+        ("cia-reading-room", "b0003"),
+        ("crs-reports", ""),
+        ("usmc-mcpel", ""),
+    ]
 
 
 def test_a_document_refused_on_two_fetches_hours_apart_is_failed_for_good_and_the_fetch_complete(
@@ -1506,6 +1618,7 @@ def test_a_document_refused_on_two_fetches_hours_apart_is_failed_for_good_and_th
     refused = f"{BUCKET}/{PREFIX}unmarked.pdf"
     answer = {"why": "HTTP 403"}
     ledger = tmp_path / "work" / "test-pubs" / "failed-for-good.json"
+    s = spec(OBJECTS)
 
     class Refusing(FakeFetcher):
         def download(self, remote: RemoteFile, dest: Path) -> FetchResult:
@@ -1515,7 +1628,7 @@ def test_a_document_refused_on_two_fetches_hours_apart_is_failed_for_good_and_th
                 )
             return super().download(remote, dest)
 
-    def fetch() -> Any:
+    def fetch(version: str) -> Any:
         fetcher = CollectionFetcher(
             vault.root,
             Refusing(routes(OBJECTS)),
@@ -1525,7 +1638,7 @@ def test_a_document_refused_on_two_fetches_hours_apart_is_failed_for_good_and_th
             out=io.StringIO(),
             throttle=False,
         )
-        return fetcher.run(spec(OBJECTS), version="2026-10-10")
+        return fetcher.run(s, version=version)
 
     def three_hours_ago() -> None:
         seen = json.loads(ledger.read_text())
@@ -1533,19 +1646,21 @@ def test_a_document_refused_on_two_fetches_hours_apart_is_failed_for_good_and_th
             e["first"] = (datetime.now(UTC) - timedelta(hours=3)).isoformat(timespec="seconds")
         ledger.write_text(json.dumps(seen))
 
-    first = fetch()
+    first = fetch("2026-10-10")
     assert [k for k, _ in first.failed] == ["test:unmarked.pdf"]
     assert first.given_up == []
     assert fetch_exit_code(first) == EXIT_PARTIAL
-    assert fetch().given_up == []  # again at once: not yet
+    ingest(vault, s)
     three_hours_ago()
-    second = fetch()
+    # A pass over what is held: FM-5-0 is not downloaded, only downloaded again to show the host is
+    # well (the restricted document, refused by the screen, is a good download too).
+    second = fetch("2026-10-10")
     assert second.failed == []
     assert [k for k, _ in second.given_up] == ["test:unmarked.pdf"]
     assert fetch_exit_code(second) == EXIT_ALERT  # complete (the restricted document's alert stands)
     assert second.given_up_ledger == str(ledger)
     answer["why"] = "HTTP 503"  # the server fails now: transient, the run is partial again
-    third = fetch()
+    third = fetch("2026-10-10")
     assert [k for k, _ in third.failed] == ["test:unmarked.pdf"]
     assert third.given_up == []
     assert fetch_exit_code(third) == EXIT_PARTIAL

@@ -69,11 +69,16 @@ timeout, a 5xx, a 429, a refused connection, a short read or a share that did no
 counts. Each run lists them (`failed for good ...: KEY: WHY`, and one line
 `failed for good: N document(s), listed in <ledger>`; the ledger is
 `<workdir>/collections/<source>/failed-for-good[-<partition>].json`, with each document's count and
-first failure); the lane raises the info alert `lane-failed-for-good:<lane>:<item>` once the item is
-done, for the owner. Every later fetch of the source tries them again, so one the issuer fixes is
-fetched; but a lane's done item is not fetched again by that lane: a source that keeps publishing
-needs a new lane or a scheduled refresh. More of them in one run than 10 (or 2% of the downloads
-tried) is a site-wide refusal: they stay failures.
+first failure and when it was given up); the lane raises the info alert
+`failed-for-good:<source>[:<partition>]` once the item is done, for the owner, and any lane resolves
+it when the item is done again without any (a retry fetched them). Every later fetch of the source
+tries them again; a lane's done item is not fetched again by that lane, so the weekly refresh (below)
+takes every source whose documents were given up over 30 days ago and not retried since (`wsp
+collections given-up`). Only single documents of a host that serves good files are given up: the
+host's good downloads this run must outnumber them (on a pass that downloads nothing new, held
+documents of that host are downloaded again, at most 12 and the smallest first, and count when they
+are the same bytes). Otherwise, or with more than 10 of them (or 2% of the downloads tried), they stay
+failures and their count starts over: a site-wide refusal, a WAF, a rate-limit page.
 
 `wsp ingest` (for every planned version; with `--source S --version V [--partition P]`, for that
 version only):
@@ -135,7 +140,9 @@ was done. `whisipedia-refresh.timer` (Sundays 13:00, installed by `wsp service i
 default `crs-reports nist-csrc`; `~/.config/whisipedia/refresh.env` may set another list) as the
 background job `whisipedia-job-collections-refresh` (`tools/wsp-bg --fetch`, 1G, two rounds). Each
 run reopens the items the last refresh finished, on today's cycle; one it left undone resumes on its
-cycle. A refresh still running when the timer fires is left alone.
+cycle. A refresh still running when the timer fires is left alone. It also takes the sources (by partition, one lane `refresh-<source>`
+each) whose documents failed for good over 30 days ago (`wsp collections given-up --mark`). Its items
+log to `refresh-<source>.log`, apart from the lanes' own logs.
 
 * Cost: the fetch lists the source and downloads only documents the library does not hold (a held
   document the listing calls unchanged is skipped; one already downloaded this cycle is reused).

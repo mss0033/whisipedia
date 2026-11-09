@@ -434,7 +434,9 @@ class FetchReport:
     permanent: dict[str, str] = field(default_factory=dict[str, str])
     given_up: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
     given_up_ledger: str = ""  # where every document failing for good is listed, with its count
-    permanent_over: int = 0  # more failed for good than PERMANENT_MAX allows: kept as failures
+    permanent_over: int = (
+        0  # failing for good, but kept as failures: too many, or their host serves nothing good
+    )
     tried: int = 0  # documents downloaded (or tried) this run: not held unchanged, not reused
 
 
@@ -557,28 +559,138 @@ def _permanent_tries(kind: str) -> int:
     return PERMANENT_TRIES if kind.startswith("refused:") else PERMANENT_TRIES_CONTENT
 
 
-def settle_permanent(report: FetchReport, ledger: Path, now: datetime, *, tried: int) -> None:
+# Held documents downloaded again, at most, to show that a host still serves good files when this run
+# downloaded none from it (a pass that holds every document but the failing ones), and the largest.
+PROBE_MAX = PERMANENT_MAX + 2
+PROBE_MAX_BYTES = 32 << 20
+# A document given up this long ago is due for another try even when nothing fetches its source
+# (``wsp collections given-up``; the weekly refresh runs those sources again).
+GIVEN_UP_RETRY_DAYS = 30
+
+
+def settle_permanent(
+    report: FetchReport,
+    ledger: Path,
+    now: datetime,
+    *,
+    tried: int,
+    good: Mapping[str, int],
+    host_of: Mapping[str, str],
+    probe: Callable[[str, int], int] | None = None,
+) -> None:
     """Count each document's consecutive failures of one permanent kind (``report.permanent``) in
     ``ledger`` and move one seen on enough runs in a row (:func:`_permanent_tries`), the first at
-    least PERMANENT_MIN_AGE ago, from ``report.failed`` to ``report.given_up``; unless more failed so
-    than PERMANENT_MAX and PERMANENT_SHARE of the ``tried`` downloads (a site-wide refusal)."""
+    least PERMANENT_MIN_AGE ago, from ``report.failed`` to ``report.given_up``.
+
+    Only single documents of a host that serves good files: the host's good downloads this run
+    (``good``, by host; ``host_of`` maps each key to its host) must outnumber its documents failing
+    so, and ``probe(host, n)`` (n held documents downloaded again and found the same, at most) makes
+    up the difference on a pass that downloaded nothing new (asked only once one is due). No more of
+    them than PERMANENT_MAX and PERMANENT_SHARE of the ``tried`` downloads either. A blocked document's
+    count starts over, so a site-wide refusal that shrinks to a few documents never gives them up at
+    once, and a host refusing everything is asked again only after the full count (review of
+    2026-11-09)."""
     failing = {key for key, _ in report.failed}
     seen_now = {key: kind for key, kind in report.permanent.items() if key in failing}
+    try:
+        seen = cast(dict[str, dict[str, Any]], json.loads(ledger.read_text(encoding="utf-8")))
+    except (OSError, ValueError):
+        seen = {}
+    stamp = now.isoformat(timespec="seconds")
+    entries: dict[str, dict[str, Any]] = {}
+    for key, sig in sorted(seen_now.items()):
+        old = seen.get(key)
+        entry = (
+            dict(old) if old is not None and str(old.get("sig", "")) == sig else {"first": stamp, "tries": 0}
+        )
+        entry["sig"] = sig
+        entry["tries"] = int(entry["tries"]) + 1
+        entries[key] = entry
+    due = {
+        key
+        for key, e in entries.items()
+        if e["tries"] >= _permanent_tries(str(e["sig"]))
+        and now - datetime.fromisoformat(e["first"]) >= PERMANENT_MIN_AGE
+    }
     over = len(seen_now) > max(PERMANENT_MAX, int(tried * PERMANENT_SHARE))
-    _settle_repeats(
-        report,
-        seen_now,
-        ledger,
-        now,
-        tries=_permanent_tries,
-        age=PERMANENT_MIN_AGE,
-        into=report.given_up,
-        move=not over,
-    )
-    if over:
-        report.permanent_over = len(seen_now)
+    blocked: set[str] = set(seen_now) if over else set()
+    if not over:
+        for host in sorted({host_of.get(key, "") for key in seen_now}):
+            keys = {key for key in seen_now if host_of.get(key, "") == host}
+            ok = good.get(host, 0)
+            if ok > len(keys) or not keys & due:
+                continue  # well, or nothing due yet: counted
+            if probe is not None:
+                ok += probe(host, len(keys) + 1 - ok)
+            if ok <= len(keys):
+                blocked |= keys  # due, but the host serves nothing good: the count starts over
+    moved: dict[str, dict[str, Any]] = {}
+    for key in sorted(due - blocked):
+        e = entries[key]
+        e.setdefault("given_up", stamp)
+        moved[key] = e
+    still: list[tuple[str, str]] = []
+    for key, why in report.failed:
+        if key in moved:
+            e = moved[key]
+            report.given_up.append((key, f"{why}, on every one of {e['tries']} tries since {e['first']}"))
+        else:
+            still.append((key, why))
+    report.failed = still
+    kept = {key: e for key, e in entries.items() if key not in blocked}
+    if kept or seen:
+        ledger.parent.mkdir(parents=True, exist_ok=True)
+        tmp = ledger.with_name(f".{ledger.name}.{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(kept, indent=1, sort_keys=True), encoding="utf-8")
+        tmp.replace(ledger)
+    report.permanent_over = len(blocked)
     if report.given_up:
         report.given_up_ledger = str(ledger)
+
+
+def due_for_retry(
+    workdir: Path, now: datetime, *, days: int = GIVEN_UP_RETRY_DAYS, mark: bool = False
+) -> list[tuple[str, str]]:
+    """``(source, partition or "")`` of every ledger (``<workdir>/<source>/failed-for-good[-<part>].json``)
+    holding a document given up over ``days`` ago and not retried in as long; ``mark`` records the
+    retry. A lane's done item is never fetched again: this is how its documents get another try."""
+    out: list[tuple[str, str]] = []
+    cutoff = now - timedelta(days=days)
+    for ledger in sorted(workdir.glob("*/failed-for-good*.json")):
+        try:
+            seen = cast(dict[str, dict[str, Any]], json.loads(ledger.read_text(encoding="utf-8")))
+        except (OSError, ValueError):
+            continue
+
+        def old(e: Mapping[str, Any], name: str) -> bool:
+            try:
+                return datetime.fromisoformat(str(e[name])) <= cutoff
+            except (KeyError, ValueError):
+                return name == "retried"  # never retried: due
+
+        due = [k for k, e in seen.items() if "given_up" in e and old(e, "given_up") and old(e, "retried")]
+        if not due:
+            continue
+        part = ledger.stem.removeprefix("failed-for-good").removeprefix("-")
+        out.append((ledger.parent.name, part))
+        if mark:
+            for key in due:
+                seen[key]["retried"] = now.isoformat(timespec="seconds")
+            tmp = ledger.with_name(f".{ledger.name}.{os.getpid()}.tmp")
+            tmp.write_text(json.dumps(seen, indent=1, sort_keys=True), encoding="utf-8")
+            tmp.replace(ledger)
+    return out
+
+
+def cmd_given_up(args: argparse.Namespace, out: TextIO) -> int:
+    """``wsp collections given-up``: the sources (and partitions) whose documents failed for good over
+    ``--days`` ago, one per line, for the weekly refresh to fetch again (tools/lanes/refresh.sh)."""
+    lay = bootstrap.layout(args.config_dir)
+    paths = bootstrap.paths(bootstrap.load(lay))
+    workdir = (paths.workdir or state_dir()) / "collections"
+    for source, part in due_for_retry(workdir, datetime.now(UTC), days=args.days, mark=args.mark):
+        out.write(f"{source} {part}".rstrip() + "\n")
+    return 0
 
 
 def _settle_repeats(
@@ -887,6 +999,43 @@ class CollectionFetcher:
         inflight: deque[tuple[Candidate, Future[Path]]] = deque()
         fetch_errors = (FetchError, OSError, ValueError, subprocess.CalledProcessError)
         hosts = HostBreaker()
+        good: dict[str, int] = {}  # host -> documents downloaded and screened this run (not failed)
+        host_of: dict[str, str] = {}  # key -> host, of the documents failing for good
+        held_by_host: dict[str, list[Candidate]] = {}  # some held, unchanged documents of each host
+
+        def host(url: str) -> str:
+            return (urlsplit(url).hostname or "").lower()
+
+        def screened(cand: Candidate, path: Path, screen: Screen | None) -> None:
+            self._screen(cand, path, cfg.rules, report, held_sha, screen=screen)
+            if not (report.failed and report.failed[-1][0] == cand.key):
+                good[host(cand.url)] = good.get(host(cand.url), 0) + 1
+
+        def probe(name: str, want: int) -> int:
+            """Held documents of host ``name`` downloaded again (smallest first) and found the same."""
+            same = tries = 0
+            picks = sorted(held_by_host.get(name, []), key=lambda c: (c.size is None, c.size or 0))
+            self.workdir.mkdir(parents=True, exist_ok=True)
+            with tempfile.TemporaryDirectory(dir=self.workdir, prefix=".probe-") as tmp:
+                for cand in picks:
+                    if same >= want or tries >= PROBE_MAX:
+                        break
+                    tries += 1
+                    try:
+                        got = Path(
+                            download_from_origins(
+                                throttle, remote_for(cand), Path(tmp) / cand.file_name, cfg.origins
+                            ).path
+                        )
+                        digest = hashlib.sha256()
+                        with got.open("rb") as fh:
+                            while chunk := fh.read(8 << 20):
+                                digest.update(chunk)
+                        got.unlink(missing_ok=True)
+                    except fetch_errors:
+                        continue
+                    same += digest.hexdigest() == held_sha.get(cand.key)
+            return same
 
         def failed(cand: Candidate, exc: BaseException) -> None:
             why = f"{type(exc).__name__}: {exc}"
@@ -908,6 +1057,7 @@ class CollectionFetcher:
             report.failed.append((cand.key, why))
             if (kind := permanent_kind(exc)) is not None:
                 report.permanent[cand.key] = kind
+                host_of[cand.key] = host(cand.url)
 
         def drain(keep: int) -> None:
             while len(inflight) > keep:
@@ -918,7 +1068,7 @@ class CollectionFetcher:
                     failed(cand, exc)
                     continue
                 hosts.answered(cand.url)
-                self._screen(cand, path, cfg.rules, report, held_sha, screen=None)
+                screened(cand, path, None)
 
         earlier = (
             self._earlier_copies(spec, version, dest_dir, {c.file_name for c in docs})
@@ -929,6 +1079,15 @@ class CollectionFetcher:
             for cand in docs:
                 if cand.key not in refetch and unchanged(cand, held_meta.get(cand.key)):
                     report.skipped += 1  # held, and the listing says the same bytes: not downloaded again
+                    some = held_by_host.setdefault(host(cand.url), [])
+                    if (
+                        len(some) < 4 * PROBE_MAX
+                        and cand.resolve != "git"
+                        and not cand.extra.get("unzip")
+                        and (cand.size or 0) <= PROBE_MAX_BYTES
+                        and cand.key in held_sha
+                    ):
+                        some.append(cand)
                     continue
                 if (
                     earlier is not None
@@ -958,7 +1117,7 @@ class CollectionFetcher:
                     failed(cand, exc)
                     continue
                 hosts.answered(cand.url)
-                self._screen(cand, path, cfg.rules, report, held_sha, screen=screen)
+                screened(cand, path, screen)
             drain(0)
         finally:
             if pool is not None:
@@ -978,6 +1137,9 @@ class CollectionFetcher:
                 self.workdir / spec.id / f"failed-for-good{part}.json",
                 datetime.now(UTC),
                 tried=report.tried,
+                good=good,
+                host_of=host_of,
+                probe=probe,
             )
         self._finish(spec, coll, report, prev_gen, prev_catalog, survey, dest_dir)
         return report
@@ -2050,8 +2212,8 @@ def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
         )
     if report.permanent_over:
         out.write(
-            f"{report.permanent_over} documents failed the same way as on the run before, too many to be "
-            "single documents (a site-wide refusal?): they stay failures, retried next run\n"
+            f"{report.permanent_over} documents failed the same way as on the run before, but too many, or "
+            "their host served nothing good this run (a site-wide refusal?): they stay failures\n"
         )
     if proposal is not None:
         out.write(f"review proposal: {proposal} (wsp proposals list)\n")
@@ -2132,6 +2294,15 @@ def register(sub: Any, add: Any) -> None:
         default=None,
         help="partitioned sets: one state (usgs-historical-topo) or batch b0001 (cycle <date>.<partition>)",
     )
+    s = add(
+        "given-up",
+        cmd_given_up,
+        "Sources (and partitions) holding documents that failed for good over --days ago and were not "
+        "retried since: one per line, for the weekly refresh (tools/lanes/refresh.sh) to fetch again.",
+        co_sub,
+    )
+    s.add_argument("--days", type=int, default=GIVEN_UP_RETRY_DAYS)
+    s.add_argument("--mark", action="store_true", help="record the retry (the refresh does)")
     s = add(
         "manual",
         cmd_manual,
