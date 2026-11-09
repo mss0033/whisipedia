@@ -563,3 +563,72 @@ def test_items_left_for_later_are_tried_again_in_a_later_round(lane: Lane) -> No
     lane.script(fetch=[1, 1, 1], ingest=[])
     assert lane.run("rg-25", source="nara", LANE_ROUNDS="2") == 1  # still failing after its rounds
     assert sum("rg-25" in c for c in lane.calls()) == 2
+
+
+REFRESH = ROOT / "tools" / "lanes" / "refresh.sh"
+
+
+def test_the_weekly_refresh_reopens_a_done_source_and_seals_nothing_when_nothing_is_new(lane: Lane) -> None:
+    """2026-11-09: a lane's done item is never fetched again, so CRS reports published after its lane
+    finished never arrived. The refresh lane reopens what it finished last time on today's cycle; a
+    fetch that finds nothing new (exit 8) writes no plan and opens no further cycle."""
+    env = {**lane.env, "LANE_ROUNDS": "1", "LANE_PARTIAL_TRIES": "1"}
+
+    def refresh() -> int:
+        argv = [str(REFRESH), "--run", "crs-reports", "nist-csrc"]
+        return subprocess.run(argv, env=env, capture_output=True, text=True, timeout=60).returncode
+
+    lane.script(fetch=[0, 8], ingest=[0, 8])  # crs: new reports; nist: nothing new
+    assert refresh() == 0
+    done = (lane.state / "refresh.done").read_text().split()
+    assert done == ["crs-reports", "nist-csrc"]
+    today = time.strftime("%Y-%m-%d", time.gmtime())
+    lane.script(fetch=[8, 8], ingest=[8, 8])  # a week on: nothing new anywhere
+    assert refresh() == 0
+    fetches = [c for c in lane.calls() if c.startswith("collections")]
+    assert fetches[2:] == [
+        f"collections fetch --source crs-reports --version {today}",
+        f"collections fetch --source nist-csrc --version {today}",
+    ]
+    assert "r2" not in " ".join(lane.calls())  # nothing sealed, no new cycle opened
+    assert (lane.state / "refresh.done").read_text().split() == ["crs-reports", "nist-csrc"]
+    lane.script(fetch=[6, 8], ingest=[0, 8])  # crs left partial: kept on its cycle for next week
+    assert refresh() == 1
+    assert (lane.state / "refresh.done").read_text().split() == ["nist-csrc"]
+    cycles = (lane.state / "refresh.cycles").read_text().splitlines()
+    assert cycles[-1] == f"crs-reports {today}r2"
+    lane.script(fetch=[8, 8], ingest=[8, 8])
+    assert refresh() == 0
+    fetches = [c for c in lane.calls() if c.startswith("collections")]
+    assert fetches[-2:] == [
+        f"collections fetch --source crs-reports --version {today}r2",  # resumed on its cycle
+        f"collections fetch --source nist-csrc --version {today}",  # reopened
+    ]
+
+
+def test_the_refresh_timer_starts_one_capped_background_job(tmp_path: Path) -> None:
+    fakebin = tmp_path / "bin"
+    fakebin.mkdir()
+    state = tmp_path / "active"
+    (fakebin / "systemctl").write_text(f"#!/bin/sh\ncat {state} 2>/dev/null || echo inactive\n")
+    (fakebin / "wsp-bg").write_text(f'#!/bin/sh\nprintf "%s\\n" "$*" >> {tmp_path}/started\n')
+    for f in fakebin.iterdir():
+        f.chmod(0o755)
+    env = {
+        "PATH": f"{fakebin}:/usr/bin:/bin",
+        "HOME": str(tmp_path),
+        "WSP_BG": str(fakebin / "wsp-bg"),
+        "WSP_REFRESH_SOURCES": "crs-reports nist-csrc",
+    }
+    subprocess.run([str(REFRESH)], env=env, check=True, timeout=30)
+    assert (tmp_path / "started").read_text().splitlines() == [
+        f"--fetch collections-refresh 1G -- {REFRESH} --run crs-reports nist-csrc"
+    ]
+    state.write_text("active\n")  # last week's refresh still runs: left to it, not a failure
+    subprocess.run([str(REFRESH)], env=env, check=True, timeout=30)
+    assert len((tmp_path / "started").read_text().splitlines()) == 1
+    units = ROOT / "deploy" / "systemd"
+    service = (units / "whisipedia-refresh.service").read_text()
+    assert "ExecStart=@REPO@/tools/lanes/refresh.sh" in service
+    assert 'Environment="WSP_REFRESH_SOURCES=crs-reports nist-csrc"' in service
+    assert "OnCalendar=Sun" in (units / "whisipedia-refresh.timer").read_text()

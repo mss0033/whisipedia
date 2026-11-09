@@ -127,6 +127,27 @@ Run sources one after another (or in separate shells per host); long ones belong
 tools/wsp-bg --no-heavy-lock fetch-cia-csi 2G -- .venv/bin/wsp collections fetch --source cia-csi
 ```
 
+### Sources that keep publishing: the weekly refresh
+
+A lane marks an item done for good, so a source that keeps publishing took nothing new once its lane
+was done. `whisipedia-refresh.timer` (Sundays 13:00, installed by `wsp service install`) starts
+`tools/lanes/refresh.sh`, which runs the lane `refresh` over `WSP_REFRESH_SOURCES` (the service's
+default `crs-reports nist-csrc`; `~/.config/whisipedia/refresh.env` may set another list) as the
+background job `whisipedia-job-collections-refresh` (`tools/wsp-bg --fetch`, 1G, two rounds). Each
+run reopens the items the last refresh finished, on today's cycle; one it left undone resumes on its
+cycle. A refresh still running when the timer fires is left alone.
+
+* Cost: the fetch lists the source and downloads only documents the library does not hold (a held
+  document the listing calls unchanged is skipped; one already downloaded this cycle is reused).
+* Nothing new and an unchanged catalog: exit 8, no plan, nothing sealed. New documents or changed
+  catalog metadata (a withdrawal): one new generation, as any fetch.
+* A source another lane is fetching: the per-source lock (`<lane state>/locks/<source>.lock`) leaves
+  it for the refresh's next round, or next week.
+* Weekly: CRS publishes several reports a week, NIST CSRC drafts and finals most weeks; a listing pass
+  is cheap (CSV, 283 documents). Not on it: `usmc-mcpel` (a closed archive.org collection), the ITU
+  and ETSI sets (a few new documents a month, a 4-hour listing pass: monthly at most, the owner's call),
+  OSTI (very large), and active sources the orchestrator schedules (`rfc`).
+
 ## 3. Owner review
 
 Documents the rules do not clearly allow are never fetched into the library. Each fetch files one

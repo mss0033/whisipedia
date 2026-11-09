@@ -1,0 +1,20 @@
+# Starts the weekly refresh lane of the collection sources that keep publishing (tools/lanes/refresh.sh):
+# a lane marks an item done for good, so new CRS reports never reached the library once its lane was
+# done (2026-11-09). The lane runs as the background job whisipedia-job-collections-refresh (tools/wsp-bg
+# --fetch: the download lanes' slice, 1G); this unit only starts it and returns. Started by
+# whisipedia-refresh.timer.
+#
+# The sources: WSP_REFRESH_SOURCES below; %h/.config/whisipedia/refresh.env may set another list.
+# Template: `wsp service install` renders @REPO@ and @CONFIG_DIR@ (docs/runbooks/install-services.md).
+
+[Unit]
+Description=Whisipedia refresh of collection sources that keep publishing
+
+[Service]
+Type=oneshot
+WorkingDirectory=@REPO@
+Environment=WSP_CONFIG_DIR=@CONFIG_DIR@
+Environment="WSP_REFRESH_SOURCES=crs-reports nist-csrc"
+EnvironmentFile=-%h/.config/whisipedia/refresh.env
+ExecStart=@REPO@/tools/lanes/refresh.sh
+TimeoutStartSec=5min

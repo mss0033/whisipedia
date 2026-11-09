@@ -1,0 +1,15 @@
+# Refresh the collection sources that keep publishing once a week (CRS publishes several reports a
+# week; a weekly pass fetches only what is new: held documents the listing calls unchanged are not
+# downloaded again). See whisipedia-refresh.service.
+
+[Unit]
+Description=Whisipedia refresh of updating collection sources every week
+
+[Timer]
+# Sunday morning: the lanes' quietest day, and after the nightly index build has usually finished.
+OnCalendar=Sun *-*-* 13:00:00
+RandomizedDelaySec=30min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

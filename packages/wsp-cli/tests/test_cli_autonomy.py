@@ -132,6 +132,9 @@ def test_service_install_status_uninstall(tmp_path: Path) -> None:
         assert "@REPO@" not in text
         assert "@CONFIG_DIR@" not in text
     assert "%h/.config/whisipedia/whisipedia.env" in (tmp_path / "units" / UNITS[0]).read_text()
+    refresh = (tmp_path / "units" / "whisipedia-refresh.service").read_text()
+    assert f"ExecStart={ROOT}/tools/lanes/refresh.sh" in refresh
+    assert f"WSP_CONFIG_DIR={ROOT / 'config'}" in refresh
     assert ["daemon-reload"] in fake.calls
     assert any(c[0] == "enable" and "--now" not in c for c in fake.calls)
     assert mgr.status(out) == 0

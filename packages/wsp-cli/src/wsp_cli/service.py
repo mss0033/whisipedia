@@ -35,6 +35,8 @@ UNITS = (
     "whisipedia-weather.timer",
     "whisipedia-manual.service",  # the owner's downloads by hand: daily list and import (wsp_cli.manual)
     "whisipedia-manual.timer",
+    "whisipedia-refresh.service",  # the weekly refresh lane of updating collections (tools/lanes/refresh.sh)
+    "whisipedia-refresh.timer",
     "whisipedia-background.slice",  # shared memory/CPU/IO budget of the background units
     "whisipedia-background-fetch.slice",  # the download lanes' share of it (tools/wsp-bg --fetch)
 )
@@ -50,6 +52,7 @@ ENABLE = (
     "whisipedia-quality.timer",
     "whisipedia-weather.timer",
     "whisipedia-manual.timer",
+    "whisipedia-refresh.timer",
 )
 MARKER = "# Rendered by `wsp service install` from deploy/systemd/"
 
