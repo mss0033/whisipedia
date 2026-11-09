@@ -1442,7 +1442,7 @@ def test_a_failure_seen_the_same_way_on_runs_in_a_row_no_longer_makes_the_run_pa
     (three 403s) sealed cycle after cycle and their lanes never finished. A refusal on two runs in a
     row, a wrong body on three, the first at least 2 hours before, from a host that serves good files,
     no longer keeps the run partial; anything else does."""
-    from collections.abc import Callable, Mapping
+    from collections.abc import Mapping
     from datetime import UTC, datetime, timedelta
 
     from wsp_cli import doccollections as dc
@@ -1455,9 +1455,9 @@ def test_a_failure_seen_the_same_way_on_runs_in_a_row_no_longer_makes_the_run_pa
         failures: Mapping[str, str | None],
         *,
         tried: int = 10,
-        good: int = 100,
-        probe: Callable[[str], tuple[int, int]] | None = None,
+        good: int = 1,
     ) -> dc.FetchReport:
+        at = now + timedelta(hours=hour)
         report = dc.FetchReport("ntrs", "v", planned=True)
         for key, kind in failures.items():
             report.failed.append((key, f"why {key}"))
@@ -1466,11 +1466,11 @@ def test_a_failure_seen_the_same_way_on_runs_in_a_row_no_longer_makes_the_run_pa
         dc.settle_permanent(
             report,
             ledger,
-            now + timedelta(hours=hour),
+            at,
             tried=tried,
-            good={"h": good},
             host_of=dict.fromkeys(failures, "h"),
-            probe=probe,
+            fail_at={key: (at, i) for i, key in enumerate(failures)},
+            clean_at={"h": [(at, 1000)] * good},  # a clean take after every failure of the run
         )
         return report
 
@@ -1519,44 +1519,62 @@ SIBLINGS = [
     ("b-1991.pdf", make_pdf([PUBLIC_A, ["Fatigue"]])),
     ("c-1992.pdf", make_pdf([PUBLIC_A, ["Fracture"]])),
 ]
+NEW = [(f"n{i}-2026.pdf", make_pdf([PUBLIC_A, [f"Report {i}"]])) for i in range(1, 6)]
 
 
 class _Timeline:
-    """An NTRS-shaped source over a lane's passes: a plain list of URLs, no size, no MD5 (held
-    documents are not downloaded again for REFETCH_AFTER), one document always an HTML page, and a
-    site-wide block (every download a challenge page) while ``blocked``."""
+    """A source over a lane's passes (tools/lanes/lane-run.sh: retries 15 minutes apart, rounds an
+    hour apart), on the clock each pass gives: a plain list of URLs with no size and no MD5, like
+    NTRS and CRS (held documents are not downloaded again for REFETCH_AFTER). A document whose bytes
+    are None is always an HTML page; ``blocked`` serves a challenge page for every request (probes
+    too), and ``block_after`` starts the block in the middle of a pass, after that many downloads."""
 
-    def __init__(self, vault: FileVault, tmp_path: Path) -> None:
+    def __init__(self, vault: FileVault, tmp_path: Path, docs: list[tuple[str, bytes | None]]) -> None:
         from datetime import UTC, datetime
 
         self.vault, self.tmp = vault, tmp_path
+        self.docs = docs
         self.blocked = False
+        self.block_after: int | None = None
         self.t0 = datetime(2026, 11, 9, 6, tzinfo=UTC)
-        self.bad = f"{BUCKET}/{PREFIX}html-1989.pdf"
-        names = [n for n, _ in SIBLINGS] + ["html-1989.pdf"]
+
+    def spec(self) -> SourceSpec:
         s = spec(OBJECTS)
+        items = [{"url": f"{BUCKET}/{PREFIX}{n}"} for n, _ in self.docs]
         access: dict[str, Any] = {
             **cast(dict[str, Any], s.raw["access"]),
-            "discovery": [{"kind": "list", "items": [{"url": f"{BUCKET}/{PREFIX}{n}"} for n in names]}],
+            "discovery": [{"kind": "list", "items": items}],
         }
-        self.spec = replace(s, raw={**s.raw, "access": access})
+        return replace(s, raw={**s.raw, "access": access})
 
     def fetch(self, hour: float) -> Any:
         from datetime import timedelta
 
         timeline = self
+        served = [0]
+        body = {f"{BUCKET}/{PREFIX}{n}": b for n, b in self.docs}
+
+        def page() -> bool:
+            return timeline.blocked or (
+                timeline.block_after is not None and served[0] >= timeline.block_after
+            )
 
         class Site(FakeFetcher):
             def download(self, remote: RemoteFile, dest: Path) -> FetchResult:
-                if timeline.blocked or remote.url == timeline.bad:
+                good = body.get(remote.url)
+                if page() or good is None:
                     dest.parent.mkdir(parents=True, exist_ok=True)
                     dest.write_bytes(PAGE)
                     return FetchResult(dest, len(PAGE), "0" * 64, "0" * 64)
+                served[0] += 1
                 return super().download(remote, dest)
+
+            def get_bytes(self, url: str, *, max_bytes: int = 64 * 1024 * 1024) -> bytes:
+                return PAGE if page() else super().get_bytes(url, max_bytes=max_bytes)
 
         fetcher = CollectionFetcher(
             self.vault.root,
-            Site({f"{BUCKET}/{PREFIX}{n}": b for n, b in SIBLINGS}),
+            Site({u: b for u, b in body.items() if b is not None}),
             keys={},
             user_agent="test",
             workdir=self.tmp / "work",
@@ -1564,50 +1582,79 @@ class _Timeline:
             throttle=False,
         )
         fetcher.clock = lambda: self.t0 + timedelta(hours=hour)
-        report = fetcher.run(self.spec, version="2026-11-09")
+        s = self.spec()
+        report = fetcher.run(s, version="2026-11-09")
         if report.planned:
-            ingest(self.vault, self.spec)
+            ingest(self.vault, s)
         return report
 
 
-def test_a_web_page_in_place_of_a_pdf_on_a_listing_without_sizes_is_given_up_on_later_passes(
+def test_a_web_page_last_on_a_listing_without_sizes_is_given_up_through_a_probe(
     vault: FileVault, tmp_path: Path
 ) -> None:
-    """Review of 2026-11-09, round 3: NTRS and CRS list no size or MD5, so a later pass downloads only
-    the failing document and proves nothing about its host. The clean takes of the first pass, kept
-    per source, prove it: the third pass over 2 hours gives the document up."""
+    """Review of 2026-11-09, rounds 3 and 4: NTRS lists no size or MD5, so a later pass downloads
+    only the failing document, last on the list. Once it is due, one held document of its host is
+    downloaded again and found the same, after the failure: the host is well, the document is given
+    up (lane-run.sh's passes: 0, 15 and 30 minutes, then the next round)."""
     from wsp_cli.doccollections import EXIT_PARTIAL, fetch_exit_code
 
-    site = _Timeline(vault, tmp_path)
-    first = site.fetch(0)  # the siblings download; the page fails
+    site = _Timeline(vault, tmp_path, [*SIBLINGS, ("html-1989.pdf", None)])
+    first = site.fetch(0)  # the siblings download, then the page fails
     assert len(first.fetched) == 3
     [(bad, _)] = first.failed
-    assert "html-1989" in bad
-    second = site.fetch(1)  # a resume pass: nothing downloaded but the page
-    assert second.fetched == []
-    assert second.reused == 0
-    assert [k for k, _ in second.failed] == [bad]
-    assert fetch_exit_code(second) == EXIT_PARTIAL
-    third = site.fetch(2.5)
-    assert [k for k, _ in third.given_up] == [bad]
-    assert third.failed == []
-    assert fetch_exit_code(third) != EXIT_PARTIAL
-    fourth = site.fetch(30)  # still failing: stays given up, its record kept, retried stamped
-    assert [k for k, _ in fourth.given_up] == [bad]
+    assert first.permanent_hosts == {bad: "bucket.example.gov"}
+    for hour in (0.25, 0.5, 1.5):  # passes that download only the page
+        report = site.fetch(hour)
+        assert report.fetched == []
+        assert [k for k, _ in report.failed] == [bad]
+        assert fetch_exit_code(report) == EXIT_PARTIAL
+    given = site.fetch(2.5)  # 5 tries over 2.5 h: due; a sibling downloaded again is the same
+    assert [k for k, _ in given.given_up] == [bad]
+    assert given.failed == []
+    assert fetch_exit_code(given) != EXIT_PARTIAL
+    later = site.fetch(30)  # still failing: stays given up, its record kept, retried stamped
+    assert [k for k, _ in later.given_up] == [bad]
     seen = json.loads((tmp_path / "work" / "test-pubs" / "failed-for-good.json").read_text())
     assert seen[bad]["given_up"] == "2026-11-09T08:30:00+00:00"
     assert seen[bad]["retried"] == "2026-11-10T12:00:00+00:00"
 
 
-def test_a_block_from_before_the_first_failure_gives_up_nothing_and_one_that_clears_proves_the_rest(
+def test_a_block_that_starts_mid_pass_after_clean_takes_gives_up_nothing(
     vault: FileVault, tmp_path: Path
 ) -> None:
-    """A site-wide block (a challenge page for every file) from the first pass on: every document
-    fails the same way on every pass and none is given up. Once the block clears and the siblings
-    download, the document still failing is proven and given up."""
+    """Review round 4: a CRS refresh took two new reports, then Cloudflare blocked for three hours;
+    the clean takes before the block proved the three reports after it, given up two hours later. A
+    take before a failure proves nothing, and the probe after it meets the block: nothing is given
+    up, and once the block lifts every report is fetched."""
+    site = _Timeline(vault, tmp_path, list(SIBLINGS))
+    assert len(site.fetch(0).fetched) == 3  # held from an earlier week
+    more: list[tuple[str, bytes | None]] = [*SIBLINGS, *NEW]
+    site.docs = more
+    site.block_after = 2
+    first = site.fetch(10)
+    assert len(first.fetched) == 2
+    assert len(first.failed) == 3
+    site.block_after = 0  # the block goes on
+    for hour in (10.25, 10.5, 11.5, 12.5, 12.75, 13):
+        report = site.fetch(hour)
+        assert report.given_up == [], hour
+        assert len(report.failed) == 3
+    site.block_after = None
+    lifted = site.fetch(13.5)
+    assert len(lifted.fetched) == 3
+    assert lifted.failed == []
+    assert lifted.given_up == []
+
+
+def test_a_block_from_before_the_first_failure_gives_up_nothing_until_the_host_serves_again(
+    vault: FileVault, tmp_path: Path
+) -> None:
+    """Every request a challenge page from the first pass on: every document fails the same way on
+    every pass, counted, none given up (nothing held to probe). Once the block lifts the siblings
+    download (before the page on the list: no proof yet); the next pass's probe proves the host."""
     from wsp_cli.doccollections import EXIT_PARTIAL, fetch_exit_code
 
-    site = _Timeline(vault, tmp_path)
+    site = _Timeline(vault, tmp_path, [*SIBLINGS, ("html-1989.pdf", None)])
     site.blocked = True
     for hour in (0, 0.25, 0.5, 1.5, 2.5, 3.5, 6, 12, 24):
         report = site.fetch(hour)
@@ -1620,8 +1667,9 @@ def test_a_block_from_before_the_first_failure_gives_up_nothing_and_one_that_cle
     site.blocked = False
     cleared = site.fetch(25)
     assert len(cleared.fetched) == 3
-    assert [k for k, _ in cleared.given_up] == [bad]
-    assert cleared.failed == []
+    assert cleared.given_up == []  # the siblings came before the page: no take after it yet
+    proven = site.fetch(25.25)
+    assert [k for k, _ in proven.given_up] == [bad]
 
 
 def test_given_up_documents_are_due_for_another_try_once_a_month(tmp_path: Path) -> None:

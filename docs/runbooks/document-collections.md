@@ -75,15 +75,16 @@ it when the item is done again without any (a retry fetched them). Every later f
 tries them again; a lane's done item is not fetched again by that lane, so the weekly refresh (below)
 takes every source whose documents were given up over 30 days ago and not retried since (`wsp
 collections given-up`). Only single documents of a host that serves good files are given up: the host
-must have made a clean take (fetched, or the same bytes as held; never a document the screen refused
-or held), in some run at or after the document's first such failure (`clean-hosts.json` beside the
-ledger keeps each host's last). So a document that failed beside siblings that downloaded is given up
-on later passes that download nothing (NTRS and CRS list no size: held documents are not downloaded
-again), and one that first failed inside a site-wide block (a WAF, a challenge or rate-limit page)
-waits, counted, until the host serves cleanly again. A run whose clean takes from the host are no more
-than its failing documents gives none up; more than 10 of them in one run (or 2% of the downloads
-tried), or held documents downloaded again that fail too, start their count over. A document given
-up stays given up while it fails (a monthly retry that fails again only records the try).
+must make a clean take (a document fetched, or held bytes downloaded again and found the same; never
+a document the screen refused or held) strictly after the document's latest failure, within the hour.
+A take before the failure proves nothing (a block may have begun between them). On a pass that
+downloads only the failing documents (NTRS and CRS list no size: held documents are not downloaded
+again), one held document of the host, two at most, is downloaded again through the same fetcher
+(robots, pace, user agent), aborted past 32 MB. A probe that gets nothing good is a block (a WAF, a
+challenge or rate-limit page): the host's counts start over; with nothing held to probe the count is
+kept. More than 10 of them in one run (or 2% of the downloads tried) also start over. Wrong bodies and
+clean takes count for the host that sent the bytes. A document given up stays given up while it fails
+(a monthly retry that fails again only records the try).
 
 `wsp ingest` (for every planned version; with `--source S --version V [--partition P]`, for that
 version only):
