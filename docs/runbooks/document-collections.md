@@ -76,8 +76,9 @@ tries them again; a lane's done item is not fetched again by that lane, so the w
 takes every source whose documents were given up over 30 days ago and not retried since (`wsp
 collections given-up`). Only single documents of a host that serves good files are given up: the
 host's good downloads this run must outnumber them (on a pass that downloads nothing new, held
-documents of that host are downloaded again, at most 12 and the smallest first, and count when they
-are the same bytes). Otherwise, or with more than 10 of them (or 2% of the downloads tried), they stay
+documents of that host whose listing gives their size are downloaded again, at most 12 and the
+smallest first, and count when they are the same bytes; a document refused or held by the screen is
+no proof, and a download counts for the host that sent it). Otherwise, or with more than 10 of them (or 2% of the downloads tried), they stay
 failures and their count starts over: a site-wide refusal, a WAF, a rate-limit page.
 
 `wsp ingest` (for every planned version; with `--source S --version V [--partition P]`, for that
@@ -141,7 +142,8 @@ default `crs-reports nist-csrc`; `~/.config/whisipedia/refresh.env` may set anot
 background job `whisipedia-job-collections-refresh` (`tools/wsp-bg --fetch`, 1G, two rounds). Each
 run reopens the items the last refresh finished, on today's cycle; one it left undone resumes on its
 cycle. A refresh still running when the timer fires is left alone. It also takes the sources (by partition, one lane `refresh-<source>`
-each) whose documents failed for good over 30 days ago (`wsp collections given-up --mark`). Its items
+each) whose documents failed for good over 30 days ago (`wsp collections given-up`; a fetch that tries them again records it, so a refresh that never
+fetched them leaves them due next week). Its items
 log to `refresh-<source>.log`, apart from the lanes' own logs.
 
 * Cost: the fetch lists the source and downloads only documents the library does not hold (a held

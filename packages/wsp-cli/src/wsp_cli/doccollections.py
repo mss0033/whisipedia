@@ -432,6 +432,7 @@ class FetchReport:
     # ``given_up`` (:func:`settle_permanent`): listed in the report, tried again next run, but no longer
     # keeping the cycle from being complete.
     permanent: dict[str, str] = field(default_factory=dict[str, str])
+    permanent_hosts: dict[str, str] = field(default_factory=dict[str, str])  # their listed URL's host
     given_up: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
     given_up_ledger: str = ""  # where every document failing for good is listed, with its count
     permanent_over: int = (
@@ -568,6 +569,15 @@ PROBE_MAX_BYTES = 32 << 20
 GIVEN_UP_RETRY_DAYS = 30
 
 
+def served_host(result: object, url: str) -> str:
+    """The host that sent a download's bytes: the source (mirror) that sent the most of them, by
+    ``wsp_fetch``'s ``per_mirror_bytes``; else ``url``'s (a fetcher without that record)."""
+    sent = getattr(result, "per_mirror_bytes", None)
+    if isinstance(sent, Mapping) and sent:
+        url = str(max(cast(Mapping[str, int], sent).items(), key=lambda kv: kv[1])[0])
+    return (urlsplit(url).hostname or "").lower()
+
+
 def settle_permanent(
     report: FetchReport,
     ledger: Path,
@@ -628,6 +638,7 @@ def settle_permanent(
     for key in sorted(due - blocked):
         e = entries[key]
         e.setdefault("given_up", stamp)
+        e["retried"] = stamp  # tried, by a fetch that ran to its end (due_for_retry)
         moved[key] = e
     still: list[tuple[str, str]] = []
     for key, why in report.failed:
@@ -648,12 +659,12 @@ def settle_permanent(
         report.given_up_ledger = str(ledger)
 
 
-def due_for_retry(
-    workdir: Path, now: datetime, *, days: int = GIVEN_UP_RETRY_DAYS, mark: bool = False
-) -> list[tuple[str, str]]:
+def due_for_retry(workdir: Path, now: datetime, *, days: int = GIVEN_UP_RETRY_DAYS) -> list[tuple[str, str]]:
     """``(source, partition or "")`` of every ledger (``<workdir>/<source>/failed-for-good[-<part>].json``)
-    holding a document given up over ``days`` ago and not retried in as long; ``mark`` records the
-    retry. A lane's done item is never fetched again: this is how its documents get another try."""
+    holding a document given up and not tried for ``days``. A fetch that runs to its end and fails it
+    again stamps ``retried`` (:func:`settle_permanent`); one that never ran (a lock held, a crash)
+    stamps nothing, so the source is due again next week. A lane's done item is never fetched again:
+    this is how its documents get another try."""
     out: list[tuple[str, str]] = []
     cutoff = now - timedelta(days=days)
     for ledger in sorted(workdir.glob("*/failed-for-good*.json")):
@@ -662,23 +673,15 @@ def due_for_retry(
         except (OSError, ValueError):
             continue
 
-        def old(e: Mapping[str, Any], name: str) -> bool:
+        def stale(e: Mapping[str, Any]) -> bool:
             try:
-                return datetime.fromisoformat(str(e[name])) <= cutoff
+                return datetime.fromisoformat(str(e.get("retried") or e["given_up"])) <= cutoff
             except (KeyError, ValueError):
-                return name == "retried"  # never retried: due
+                return False
 
-        due = [k for k, e in seen.items() if "given_up" in e and old(e, "given_up") and old(e, "retried")]
-        if not due:
-            continue
-        part = ledger.stem.removeprefix("failed-for-good").removeprefix("-")
-        out.append((ledger.parent.name, part))
-        if mark:
-            for key in due:
-                seen[key]["retried"] = now.isoformat(timespec="seconds")
-            tmp = ledger.with_name(f".{ledger.name}.{os.getpid()}.tmp")
-            tmp.write_text(json.dumps(seen, indent=1, sort_keys=True), encoding="utf-8")
-            tmp.replace(ledger)
+        if any("given_up" in e and stale(e) for e in seen.values()):
+            part = ledger.stem.removeprefix("failed-for-good").removeprefix("-")
+            out.append((ledger.parent.name, part))
     return out
 
 
@@ -688,7 +691,7 @@ def cmd_given_up(args: argparse.Namespace, out: TextIO) -> int:
     lay = bootstrap.layout(args.config_dir)
     paths = bootstrap.paths(bootstrap.load(lay))
     workdir = (paths.workdir or state_dir()) / "collections"
-    for source, part in due_for_retry(workdir, datetime.now(UTC), days=args.days, mark=args.mark):
+    for source, part in due_for_retry(workdir, datetime.now(UTC), days=args.days):
         out.write(f"{source} {part}".rstrip() + "\n")
     return 0
 
@@ -919,6 +922,9 @@ class CollectionFetcher:
         self.manual_dir = manual_dir
         self.adopt_kept = frozenset(adopt_kept)
         self.offline = offline
+        # key -> host that served this run's download of it (the origin that sent the bytes; written
+        # from the download threads, read after each is screened). A copy already here is not in it.
+        self._served: dict[str, str] = {}
         self.vault_root = vault_root
         self.incoming = vault_root / "_incoming"
         self.fetcher = fetcher
@@ -1000,21 +1006,24 @@ class CollectionFetcher:
         fetch_errors = (FetchError, OSError, ValueError, subprocess.CalledProcessError)
         hosts = HostBreaker()
         good: dict[str, int] = {}  # host -> documents downloaded and screened this run (not failed)
-        host_of: dict[str, str] = {}  # key -> host, of the documents failing for good
         held_by_host: dict[str, list[Candidate]] = {}  # some held, unchanged documents of each host
 
         def host(url: str) -> str:
             return (urlsplit(url).hostname or "").lower()
 
         def screened(cand: Candidate, path: Path, screen: Screen | None) -> None:
+            before = (len(report.fetched), report.skipped)
             self._screen(cand, path, cfg.rules, report, held_sha, screen=screen)
-            if not (report.failed and report.failed[-1][0] == cand.key):
-                good[host(cand.url)] = good.get(host(cand.url), 0) + 1
+            # Proof that a host serves good files: a clean take (fetched, or the same bytes as held),
+            # never a document refused or held by the screen, counted for the host that sent it.
+            sent = self._served.pop(cand.key, None) or (host(cand.url) if cand.resolve == "git" else None)
+            if sent is not None and (len(report.fetched), report.skipped) != before:
+                good[sent] = good.get(sent, 0) + 1
 
         def probe(name: str, want: int) -> int:
             """Held documents of host ``name`` downloaded again (smallest first) and found the same."""
             same = tries = 0
-            picks = sorted(held_by_host.get(name, []), key=lambda c: (c.size is None, c.size or 0))
+            picks = sorted(held_by_host.get(name, []), key=lambda c: c.size or 0)
             self.workdir.mkdir(parents=True, exist_ok=True)
             with tempfile.TemporaryDirectory(dir=self.workdir, prefix=".probe-") as tmp:
                 for cand in picks:
@@ -1057,7 +1066,7 @@ class CollectionFetcher:
             report.failed.append((cand.key, why))
             if (kind := permanent_kind(exc)) is not None:
                 report.permanent[cand.key] = kind
-                host_of[cand.key] = host(cand.url)
+                report.permanent_hosts[cand.key] = host(cand.url)
 
         def drain(keep: int) -> None:
             while len(inflight) > keep:
@@ -1084,7 +1093,8 @@ class CollectionFetcher:
                         len(some) < 4 * PROBE_MAX
                         and cand.resolve != "git"
                         and not cand.extra.get("unzip")
-                        and (cand.size or 0) <= PROBE_MAX_BYTES
+                        and cand.size is not None  # a size known: the probe is bounded
+                        and cand.size <= PROBE_MAX_BYTES
                         and cand.key in held_sha
                     ):
                         some.append(cand)
@@ -1138,7 +1148,7 @@ class CollectionFetcher:
                 datetime.now(UTC),
                 tried=report.tried,
                 good=good,
-                host_of=host_of,
+                host_of=report.permanent_hosts,
                 probe=probe,
             )
         self._finish(spec, coll, report, prev_gen, prev_catalog, survey, dest_dir)
@@ -1381,7 +1391,9 @@ class CollectionFetcher:
         # second download that doubled the transfer and never compared the published MD5 (2026-11-04
         # trawl). A file that does not match them fails (ChecksumMismatchError), never sealed.
         remote = remote_for(cand)
-        path = Path(download_from_origins(fetcher, remote, dest_dir / cand.file_name, origins).path)
+        result = download_from_origins(fetcher, remote, dest_dir / cand.file_name, origins)
+        self._served[cand.key] = served_host(result, remote.url)
+        path = Path(result.path)
         if cand.extra.get("unzip") == "pdf":
             unzip_pdf(path, match=cand.extra.get("unzip_match") or "")
         return path
@@ -1565,6 +1577,7 @@ class CollectionFetcher:
                 report.failed.append((cand.key, str(exc)))
                 report.wrong_body.add(cand.key)
                 report.permanent[cand.key] = permanent_kind(exc) or ""
+                report.permanent_hosts[cand.key] = (urlsplit(cand.url).hostname or "").lower()
                 path.unlink(missing_ok=True)
                 return
             except nasretry.TRANSIENT as exc:
@@ -2302,7 +2315,6 @@ def register(sub: Any, add: Any) -> None:
         co_sub,
     )
     s.add_argument("--days", type=int, default=GIVEN_UP_RETRY_DAYS)
-    s.add_argument("--mark", action="store_true", help="record the retry (the refresh does)")
     s = add(
         "manual",
         cmd_manual,

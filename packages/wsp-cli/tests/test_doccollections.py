@@ -1577,6 +1577,8 @@ def test_nothing_is_given_up_while_its_host_serves_nothing_good(tmp_path: Path) 
 
 
 def test_given_up_documents_are_due_for_another_try_once_a_month(tmp_path: Path) -> None:
+    """A fetch that tries them again stamps ``retried``; a refresh that never fetched them (the
+    source's lock held, a crash) stamps nothing, so they stay due."""
     from datetime import UTC, datetime, timedelta
 
     from wsp_cli import doccollections as dc
@@ -1584,86 +1586,131 @@ def test_given_up_documents_are_due_for_another_try_once_a_month(tmp_path: Path)
     now = datetime(2026, 12, 20, tzinfo=UTC)
     old = (now - timedelta(days=40)).isoformat(timespec="seconds")
     new = (now - timedelta(days=3)).isoformat(timespec="seconds")
-    for name, entries in (
-        ("usmc-mcpel/failed-for-good.json", {"a": {"given_up": old, "tries": 9, "sig": "s", "first": old}}),
-        (
-            "cia-reading-room/failed-for-good-b0003.json",
-            {"b": {"given_up": old, "tries": 5, "sig": "s", "first": old}},
-        ),
-        ("crs-reports/failed-for-good.json", {"c": {"given_up": new, "tries": 3, "sig": "s", "first": new}}),
-        ("ntrs/failed-for-good.json", {"d": {"tries": 1, "sig": "s", "first": old}}),  # never given up
-    ):
+    ledgers = {
+        "usmc-mcpel/failed-for-good.json": {"a": {"given_up": old, "tries": 9, "sig": "s", "first": old}},
+        "cia-reading-room/failed-for-good-b0003.json": {
+            "b": {"given_up": old, "retried": old, "tries": 5, "sig": "s", "first": old}
+        },
+        "nist-csrc/failed-for-good.json": {
+            "e": {"given_up": old, "retried": new, "tries": 7, "sig": "s", "first": old}
+        },
+        "crs-reports/failed-for-good.json": {"c": {"given_up": new, "tries": 3, "sig": "s", "first": new}},
+        "ntrs/failed-for-good.json": {"d": {"tries": 1, "sig": "s", "first": old}},  # never given up
+    }
+    for name, entries in ledgers.items():
         path = tmp_path / name
         path.parent.mkdir(parents=True)
         path.write_text(json.dumps(entries))
-    due = [("cia-reading-room", "b0003"), ("usmc-mcpel", "")]
-    assert dc.due_for_retry(tmp_path, now) == due
-    assert dc.due_for_retry(tmp_path, now, mark=True) == due
-    assert dc.due_for_retry(tmp_path, now + timedelta(days=7)) == []  # retried: not again for a month
+    assert dc.due_for_retry(tmp_path, now) == [("cia-reading-room", "b0003"), ("usmc-mcpel", "")]
+    assert dc.due_for_retry(tmp_path, now) == [("cia-reading-room", "b0003"), ("usmc-mcpel", "")]  # unchanged
     assert dc.due_for_retry(tmp_path, now + timedelta(days=31)) == [
         ("cia-reading-room", "b0003"),
         ("crs-reports", ""),
+        ("nist-csrc", ""),
         ("usmc-mcpel", ""),
     ]
 
 
-def test_a_document_refused_on_two_fetches_hours_apart_is_failed_for_good_and_the_fetch_complete(
-    vault: FileVault, tmp_path: Path
-) -> None:
+EXTRA = ("FM-6-0_2022.pdf", make_pdf([PUBLIC_A, ["Chapter 2"]]))
+
+
+def _failing_fetches(vault: FileVault, tmp_path: Path, bad: str, body: Any) -> tuple[Any, Any]:
+    """``fetch(version)`` of [*OBJECTS, EXTRA] where ``bad`` fails as ``body()`` says (an exception to
+    raise, or bytes served in its place), and ``backdate()`` of its failed-for-good ledger by 3 h."""
     from datetime import UTC, datetime, timedelta
 
-    from wsp_cli.doccollections import EXIT_ALERT, EXIT_PARTIAL, fetch_exit_code
-    from wsp_fetch.errors import MirrorsExhaustedError
-
-    refused = f"{BUCKET}/{PREFIX}unmarked.pdf"
-    answer = {"why": "HTTP 403"}
+    objects = [*OBJECTS, EXTRA]
+    url = f"{BUCKET}/{PREFIX}{bad}"
     ledger = tmp_path / "work" / "test-pubs" / "failed-for-good.json"
-    s = spec(OBJECTS)
 
-    class Refusing(FakeFetcher):
+    class Failing(FakeFetcher):
         def download(self, remote: RemoteFile, dest: Path) -> FetchResult:
-            if remote.url == refused:
-                raise MirrorsExhaustedError(
-                    f"no usable source for {refused}: failed after 1 attempt(s): {answer['why']}"
-                )
+            if remote.url == url:
+                got = body()
+                if isinstance(got, BaseException):
+                    raise got
+                dest.write_bytes(got)
+                return FetchResult(dest, len(got), "0" * 64, "0" * 64)
             return super().download(remote, dest)
 
     def fetch(version: str) -> Any:
         fetcher = CollectionFetcher(
             vault.root,
-            Refusing(routes(OBJECTS)),
+            Failing(routes(objects)),
             keys={},
             user_agent="test",
             workdir=tmp_path / "work",
             out=io.StringIO(),
             throttle=False,
         )
-        return fetcher.run(s, version=version)
+        return fetcher.run(spec(objects), version=version)
 
-    def three_hours_ago() -> None:
+    def backdate() -> None:
         seen = json.loads(ledger.read_text())
         for e in seen.values():
             e["first"] = (datetime.now(UTC) - timedelta(hours=3)).isoformat(timespec="seconds")
         ledger.write_text(json.dumps(seen))
 
+    return fetch, backdate
+
+
+def test_a_document_refused_on_two_fetches_hours_apart_is_failed_for_good_and_the_fetch_complete(
+    vault: FileVault, tmp_path: Path
+) -> None:
+    from wsp_cli.doccollections import EXIT_ALERT, EXIT_PARTIAL, fetch_exit_code
+    from wsp_fetch.errors import MirrorsExhaustedError
+
+    answer = {"why": "HTTP 403"}
+    fetch, backdate = _failing_fetches(
+        vault,
+        tmp_path,
+        "unmarked.pdf",
+        lambda: MirrorsExhaustedError(f"no usable source: failed after 1 attempt(s): {answer['why']}"),
+    )
     first = fetch("2026-10-10")
     assert [k for k, _ in first.failed] == ["test:unmarked.pdf"]
     assert first.given_up == []
     assert fetch_exit_code(first) == EXIT_PARTIAL
-    ingest(vault, s)
-    three_hours_ago()
-    # A pass over what is held: FM-5-0 is not downloaded, only downloaded again to show the host is
-    # well (the restricted document, refused by the screen, is a good download too).
+    ingest(vault, spec([*OBJECTS, EXTRA]))
+    backdate()
+    # A pass over what is held: nothing downloaded but the failing document and the restricted one
+    # (refused by the screen: no proof); two held documents downloaded again show the host is well.
     second = fetch("2026-10-10")
     assert second.failed == []
     assert [k for k, _ in second.given_up] == ["test:unmarked.pdf"]
     assert fetch_exit_code(second) == EXIT_ALERT  # complete (the restricted document's alert stands)
-    assert second.given_up_ledger == str(ledger)
+    assert second.given_up_ledger == str(tmp_path / "work" / "test-pubs" / "failed-for-good.json")
     answer["why"] = "HTTP 503"  # the server fails now: transient, the run is partial again
     third = fetch("2026-10-10")
     assert [k for k, _ in third.failed] == ["test:unmarked.pdf"]
     assert third.given_up == []
     assert fetch_exit_code(third) == EXIT_PARTIAL
+
+
+def test_a_web_page_in_place_of_a_pdf_is_failed_for_good_after_three_fetches(
+    vault: FileVault, tmp_path: Path
+) -> None:
+    """2026-11-09 (NTRS materials): one listed PDF is always an HTML page. Its wrong body is counted
+    for the host listed for it, and the third fetch over 2 hours gives it up."""
+    from wsp_cli.doccollections import EXIT_ALERT, EXIT_PARTIAL, fetch_exit_code
+
+    page = b"<!DOCTYPE html><html><head><title>NTRS</title></head><body>Document</body></html>"
+    fetch, backdate = _failing_fetches(vault, tmp_path, "unmarked.pdf", lambda: page)
+    first = fetch("2026-10-10")
+    assert [k for k, _ in first.failed] == ["test:unmarked.pdf"]
+    assert first.permanent_hosts == {"test:unmarked.pdf": "bucket.example.gov"}
+    ingest(vault, spec([*OBJECTS, EXTRA]))
+    second = fetch("2026-10-10")
+    assert second.given_up == []
+    assert fetch_exit_code(second) == EXIT_PARTIAL
+    backdate()
+    third = fetch("2026-10-10")
+    assert [k for k, _ in third.given_up] == ["test:unmarked.pdf"]
+    assert third.failed == []
+    assert fetch_exit_code(third) == EXIT_ALERT
+    seen = json.loads((tmp_path / "work" / "test-pubs" / "failed-for-good.json").read_text())
+    assert seen["test:unmarked.pdf"]["tries"] == 3
+    assert seen["test:unmarked.pdf"]["sig"].startswith("not the file: ")
 
 
 def test_a_zipped_pdf_download_keeps_the_pdf_it_holds(tmp_path: Path) -> None:

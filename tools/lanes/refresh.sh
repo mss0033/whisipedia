@@ -11,7 +11,7 @@
 # capped at 1G). Each run first opens the items the last refresh finished: out of refresh.done, on a
 # new cycle (today's date); an item a refresh left undone keeps its cycle and resumes. It also takes
 # every source (partition) with documents given up for good over 30 days ago and not retried since
-# (`wsp collections given-up --mark`): a lane marks such an item done and never fetches it again.
+# (`wsp collections given-up`; a refresh that never fetched them leaves them due next week): a lane marks such an item done and never fetches it again.
 # Its items' logs are refresh-<source>.log, apart from the lanes' own.
 #
 # What a refresh costs: the fetch lists the source and downloads only what the library does not hold
@@ -44,9 +44,9 @@ if [ "${1:-}" = --run ]; then
     done
   }
   # Documents given up for good a month ago, on any source (its own lane done long since): fetched
-  # again with it, once a month (`wsp collections given-up`, which records the retry).
+  # again with it, once a month (`wsp collections given-up`; the fetch that tries them records it).
   partitioned=""
-  due=$("$WSP" collections given-up --mark 2>> "$STATE/$NAME.log") || due=""
+  due=$("$WSP" collections given-up 2>> "$STATE/$NAME.log") || due=""
   while read -r s p; do
     [ -n "$s" ] || continue
     if [ -n "$p" ]; then

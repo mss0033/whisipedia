@@ -293,11 +293,43 @@ def test_a_lane_waiting_for_another_lanes_source_lock_is_not_idle(tmp_path: Path
         base + f"7: FLOCK  ADVISORY  WRITE 5 {key} 0 EOF\n7: -> FLOCK  ADVISORY  WRITE 76 {key} 0 EOF\n"
     )
     env["WSP_STALL_LANE_LOCKS"] = str(lane_locks)
+    waiter = tmp_path / "proc" / "76"
+    waiter.mkdir(parents=True)
+    (waiter / "cmdline").write_bytes(b"flock\0--wait\x0021600\x008\0")
+
+    def started(hours_ago: float) -> None:  # uptime is 90,000 s; ticks of 1/100 s
+        ticks = int((90_000 - hours_ago * 3600) * 100)
+        (waiter / "stat").write_text("76 (flock) S " + " ".join(["0"] * 18) + f" {ticks} 0 0\n")
+
+    started(1)
     _run(env, 0)
     assert not [e for e in _run(env, 3.5) if "job-idle" in e]
     proc_locks.write_text(base)  # it got the source; quiet for 3 hours more on its own: a hang
     assert not [e for e in _run(env, 3.6) if "job-idle" in e]
     assert [e for e in _run(env, 6.6) if "RAISED job-idle" in e]
+
+
+def test_a_source_lock_waited_for_over_twelve_hours_is_reported(tmp_path: Path) -> None:
+    env = _world(tmp_path, usage=5_000_000)
+    lane_locks = tmp_path / "lane-locks"
+    lane_locks.mkdir()
+    src = lane_locks / "dla-assist.lock"
+    src.touch()
+    st = src.stat()
+    key = f"{os.major(st.st_dev):02x}:{os.minor(st.st_dev):02x}:{st.st_ino}"
+    proc_locks = tmp_path / "proc" / "locks"
+    proc_locks.write_text(proc_locks.read_text() + f"7: -> FLOCK  ADVISORY  WRITE 76 {key} 0 EOF\n")
+    env["WSP_STALL_LANE_LOCKS"] = str(lane_locks)
+    waiter = tmp_path / "proc" / "76"
+    waiter.mkdir(parents=True)
+    (waiter / "cmdline").write_bytes(b"flock\0--wait\0")
+    (waiter / "stat").write_text(
+        "76 (flock) S " + " ".join(["0"] * 18) + f" {(90_000 - 13 * 3600) * 100} 0 0\n"
+    )
+    _run(env, 0)
+    raised = [e for e in _run(env, 3.5) if "RAISED job-idle" in e]
+    assert raised
+    assert "it waits for another lane's dla-assist source lock (13.0 h)" in raised[0]
 
 
 def test_a_job_that_just_took_the_lock_after_its_wait_is_not_idle(tmp_path: Path) -> None:

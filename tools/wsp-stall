@@ -689,7 +689,10 @@ def check(state: State, t: float) -> tuple[dict[str, str], list[str], list[str]]
         # starting its fetch, still has 3 quiet hours behind it, all of them its turn being waited for.
         pids = cgroup_pids(cg)
         turn = next((in_queue[p] for p in pids if p in in_queue), None)
-        lane_wait = any(waiters.get(p, "").startswith("lane:") for p in pids)  # another lane's source
+        # Another lane's source lock (`flock --wait`), counted from the waiter's start; over QUEUE_IDLE_H
+        # it is reported, as a queue ticket is.
+        lane_waits = [(waiters[p][5:], process(p)[1]) for p in pids if waiters.get(p, "").startswith("lane:")]
+        lane_wait = any(age is not None and age < QUEUE_IDLE_H * 3600 for _, age in lane_waits)
         if (turn is not None and turn[2] < QUEUE_IDLE_H * 3600) or lane_wait or pausing(pids):
             state.waited[unit] = t
         window = [s for s in hist if t - s[0] >= IDLE_H * 3600]
@@ -704,12 +707,15 @@ def check(state: State, t: float) -> tuple[dict[str, str], list[str], list[str]]
                 continue  # waiting for another lane's source, or a lane between rounds (a shell, a sleep)
             # Waiting until less than IDLE_H ago: not quiet that long on its own. A turn waited for over
             # QUEUE_IDLE_H is reported at once, never hidden by the waits before it.
-            if turn is None and t - state.waited.get(unit, -1e18) < IDLE_H * 3600:
+            if turn is None and not lane_waits and t - state.waited.get(unit, -1e18) < IDLE_H * 3600:
                 continue
             if any(pid in pids and age < IDLE_H * 3600 for pid, _, age in held.values()):
                 continue  # its turn just came: it holds a lock it took after the quiet hours of waiting
             if turn is not None:
                 why = f"; it is number {turn[1]} in the {turn[0]} lock's queue, waiting {hours(turn[2])}"
+            elif lane_waits:
+                src, age = lane_waits[0]
+                why = f"; it waits for another lane's {src} source lock" + (f" ({hours(age)})" if age else "")
             elif frozen(cg):
                 why = "; its slice is frozen (tools/wsp-yield: the machine is short of memory)"
             elif held:

@@ -663,6 +663,6 @@ def test_the_refresh_takes_sources_whose_documents_were_given_up_a_month_ago(lan
         "collections fetch --source usmc-mcpel",
         "collections fetch --source cia-reading-room --partition b0003",
     ]
-    assert "collections given-up --mark" in lane.calls()
+    assert "collections given-up" in lane.calls()
     assert (lane.state / "refresh-crs-reports.log").exists()  # its own log, not the lane's
     assert not (lane.state / "crs-reports.log").exists()
