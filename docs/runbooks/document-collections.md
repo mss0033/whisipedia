@@ -143,7 +143,7 @@ tools/wsp-bg --no-heavy-lock fetch-cia-csi 2G -- .venv/bin/wsp collections fetch
 A lane marks an item done for good, so a source that keeps publishing took nothing new once its lane
 was done. `whisipedia-refresh.timer` (Sundays 13:00, installed by `wsp service install`) starts
 `tools/lanes/refresh.sh`, which runs the lane `refresh` over `WSP_REFRESH_SOURCES` (the service's
-default `crs-reports nist-csrc`; `~/.config/whisipedia/refresh.env` may set another list) as the
+default `crs-reports nist-csrc usmc-mcpel`; `~/.config/whisipedia/refresh.env` may set another list) as the
 background job `whisipedia-job-collections-refresh` (`tools/wsp-bg --fetch`, 1G, two rounds). Each
 run reopens the items the last refresh finished, on today's cycle; one it left undone resumes on its
 cycle. A refresh still running when the timer fires is left alone. It also takes the sources (by partition, one lane `refresh-<source>`

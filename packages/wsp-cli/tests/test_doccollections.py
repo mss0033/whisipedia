@@ -1392,7 +1392,7 @@ def test_a_document_that_is_always_a_web_page_is_gone_after_a_week_of_tries(tmp_
 
 def test_failures_another_download_answers_the_same_way_are_permanent_the_rest_transient() -> None:
     from wsp_adapters.doccollection.adapter import WrongBodyError
-    from wsp_cli.doccollections import permanent_kind
+    from wsp_cli.doccollections import permanent_class, permanent_kind
     from wsp_core.errors import FetchError, NotFoundError
     from wsp_fetch.errors import MirrorsExhaustedError, UnverifiableError
 
@@ -1403,6 +1403,12 @@ def test_failures_another_download_answers_the_same_way_are_permanent_the_rest_t
 
     assert permanent_kind(exhausted("1 attempt(s): HTTP 401")) == "refused: HTTP 401"
     assert permanent_kind(exhausted("1 attempt(s): HTTP 403")) == "refused: HTTP 403"
+    # Counted by class: 401, 403 and 451 are one refusal; every wrong body is one "not the file".
+    assert {permanent_class(f"refused: HTTP {c}") for c in (401, 403, 451)} == {"refused"}
+    assert {
+        permanent_class(permanent_kind(WrongBodyError(why)) or "")
+        for why in ("expected a PDF, got html", "not a document: a login or error page ('Sign in')")
+    } == {"not the file"}
     assert permanent_kind(WrongBodyError("not a PDF (missing %PDF- header)")) == (
         "not the file: not a PDF (missing %PDF- header)"
     )
@@ -1782,6 +1788,38 @@ def test_a_document_refused_on_two_fetches_hours_apart_is_failed_for_good_and_th
     assert [k for k, _ in third.failed] == ["test:unmarked.pdf"]
     assert third.given_up == []
     assert fetch_exit_code(third) == EXIT_PARTIAL
+
+
+def test_a_document_refused_401_and_403_by_turns_is_failed_for_good(vault: FileVault, tmp_path: Path) -> None:
+    """2026-11-10: archive.org answers ``usmc:mcrp0002unse`` 401 on most tries and 403 on some. Counted
+    by the exact code, each change started the count over and it never reached given up; one refusal
+    class counts every try, and the ledger shows the latest code."""
+    from wsp_cli.doccollections import EXIT_PARTIAL, fetch_exit_code
+    from wsp_fetch.errors import MirrorsExhaustedError
+
+    codes = iter(["HTTP 401", "HTTP 403", "HTTP 401"])
+    fetch, backdate = _failing_fetches(
+        vault,
+        tmp_path,
+        "unmarked.pdf",
+        lambda: MirrorsExhaustedError(f"no usable source: failed after 1 attempt(s): {next(codes)}"),
+    )
+    ledger = tmp_path / "work" / "test-pubs" / "failed-for-good.json"
+    first = fetch("2026-10-10")  # 401
+    assert [k for k, _ in first.failed] == ["test:unmarked.pdf"]
+    ingest(vault, spec([*OBJECTS, EXTRA]))
+    second = fetch("2026-10-10")  # 403: too soon after the first, but counted with it
+    assert second.given_up == []
+    assert fetch_exit_code(second) == EXIT_PARTIAL
+    assert json.loads(ledger.read_text())["test:unmarked.pdf"]["tries"] == 2
+    backdate()
+    third = fetch("2026-10-10")  # 401 again, hours after the first
+    assert third.failed == []
+    assert [k for k, _ in third.given_up] == ["test:unmarked.pdf"]
+    assert fetch_exit_code(third) != EXIT_PARTIAL
+    seen = json.loads(ledger.read_text())["test:unmarked.pdf"]
+    assert seen["tries"] == 3
+    assert seen["sig"] == "refused: HTTP 401"  # the exact code, for display
 
 
 def test_a_web_page_in_place_of_a_pdf_is_failed_for_good_after_three_fetches(

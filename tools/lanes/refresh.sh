@@ -6,9 +6,9 @@
 #
 # A lane marks an item done for good (tools/lanes/lane-run.sh, NAME.done), so a source that keeps
 # publishing (CRS reports: several a week) took no new document once its lane was done (2026-11-09).
-# This runs the lane "refresh" over SOURCE... (default $WSP_REFRESH_SOURCES, else crs-reports) as the
-# background job whisipedia-job-collections-refresh (tools/wsp-bg --fetch: the download lanes' slice,
-# capped at 1G). Each run first opens the items the last refresh finished: out of refresh.done, on a
+# This runs the lane "refresh" over SOURCE... (default $WSP_REFRESH_SOURCES, else the service's list:
+# crs-reports nist-csrc usmc-mcpel) as the background job whisipedia-job-collections-refresh
+# (tools/wsp-bg --fetch: the download lanes' slice, capped at 1G). Each run first opens the items the last refresh finished: out of refresh.done, on a
 # new cycle (today's date); an item a refresh left undone keeps its cycle and resumes. It also takes
 # every source (partition) with documents given up for good over 30 days ago and not retried since
 # (`wsp collections given-up`; a refresh that never fetched them leaves them due next week): a lane marks such an item done and never fetches it again.
@@ -75,7 +75,7 @@ DUE
   exit "$rc"
 fi
 # shellcheck disable=SC2086  # the list is split on purpose
-[ $# -ge 1 ] || set -- ${WSP_REFRESH_SOURCES:-crs-reports}
+[ $# -ge 1 ] || set -- ${WSP_REFRESH_SOURCES:-crs-reports nist-csrc usmc-mcpel}
 case $(systemctl --user show "whisipedia-job-$JOB" -p ActiveState --value 2>/dev/null) in
   active | activating | reloading | deactivating)
     echo "refresh.sh: whisipedia-job-$JOB is still running; this week's refresh is left to it"

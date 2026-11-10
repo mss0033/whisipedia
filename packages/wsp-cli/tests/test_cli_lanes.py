@@ -607,6 +607,20 @@ def test_the_weekly_refresh_reopens_a_done_source_and_seals_nothing_when_nothing
     ]
 
 
+def test_the_refresh_fetches_usmc_mcpel_by_its_source_id(lane: Lane) -> None:
+    """MCPEL publishes new manuals (2026-11-10); its own lane (collections-mirrors, lane-mirrors2) is
+    done for good. The refresh lane's item is the source id, fetched whole on today's cycle."""
+    env = {**lane.env, "LANE_ROUNDS": "1", "LANE_PARTIAL_TRIES": "1"}
+    lane.script(fetch=[0], ingest=[0])
+    argv = [str(REFRESH), "--run", "usmc-mcpel"]
+    assert subprocess.run(argv, env=env, capture_output=True, text=True, timeout=60).returncode == 0
+    today = time.strftime("%Y-%m-%d", time.gmtime())
+    assert [c for c in lane.calls() if c.startswith("collections fetch")] == [
+        f"collections fetch --source usmc-mcpel --version {today}"
+    ]
+    assert (lane.state / "refresh.done").read_text().split() == ["usmc-mcpel"]
+
+
 def test_the_refresh_timer_starts_one_capped_background_job(tmp_path: Path) -> None:
     fakebin = tmp_path / "bin"
     fakebin.mkdir()
@@ -631,7 +645,15 @@ def test_the_refresh_timer_starts_one_capped_background_job(tmp_path: Path) -> N
     units = ROOT / "deploy" / "systemd"
     service = (units / "whisipedia-refresh.service").read_text()
     assert "ExecStart=@REPO@/tools/lanes/refresh.sh" in service
-    assert 'Environment="WSP_REFRESH_SOURCES=crs-reports nist-csrc"' in service
+    assert 'Environment="WSP_REFRESH_SOURCES=crs-reports nist-csrc usmc-mcpel"' in service
+    # Without the service's list (run by hand): the same sources.
+    (tmp_path / "started").unlink()
+    state.unlink()
+    del env["WSP_REFRESH_SOURCES"]
+    subprocess.run([str(REFRESH)], env=env, check=True, timeout=30)
+    assert (tmp_path / "started").read_text().splitlines() == [
+        f"--fetch collections-refresh 1G -- {REFRESH} --run crs-reports nist-csrc usmc-mcpel"
+    ]
     assert "OnCalendar=Sun" in (units / "whisipedia-refresh.timer").read_text()
 
 

@@ -4,7 +4,8 @@
 # --fetch: the download lanes' slice, 1G); this unit only starts it and returns. Started by
 # whisipedia-refresh.timer.
 #
-# The sources: WSP_REFRESH_SOURCES below; %h/.config/whisipedia/refresh.env may set another list.
+# The sources: WSP_REFRESH_SOURCES below (USMC MCPEL publishes new manuals too);
+# %h/.config/whisipedia/refresh.env may set another list.
 # Template: `wsp service install` renders @REPO@ and @CONFIG_DIR@ (docs/runbooks/install-services.md).
 
 [Unit]
@@ -14,7 +15,7 @@ Description=Whisipedia refresh of collection sources that keep publishing
 Type=oneshot
 WorkingDirectory=@REPO@
 Environment=WSP_CONFIG_DIR=@CONFIG_DIR@
-Environment="WSP_REFRESH_SOURCES=crs-reports nist-csrc"
+Environment="WSP_REFRESH_SOURCES=crs-reports nist-csrc usmc-mcpel"
 EnvironmentFile=-%h/.config/whisipedia/refresh.env
 ExecStart=@REPO@/tools/lanes/refresh.sh
 TimeoutStartSec=5min

@@ -559,6 +559,15 @@ def permanent_kind(exc: BaseException) -> str | None:
     return None
 
 
+def permanent_class(kind: str) -> str:
+    """The failure class a ledger counts a permanent failure by: ``refused`` (HTTP 401, 403 and 451
+    alike), ``not the file`` (any wrong body: a login page, a challenge page, an error message) or
+    ``unverifiable``. The exact kind is kept in the record to show; a count starts over only when the
+    class changes. archive.org answers ``usmc:mcrp0002unse`` 401 on most tries and 403 on some: counted
+    by the exact code it never reached given up, and the MCPEL lane stopped each time (2026-11-10)."""
+    return kind.split(":", 1)[0].strip()
+
+
 def _permanent_tries(kind: str) -> int:
     return PERMANENT_TRIES if kind.startswith("refused:") else PERMANENT_TRIES_CONTENT
 
@@ -612,7 +621,8 @@ def settle_permanent(
     clean_at: Mapping[str, Sequence[Event]],
     probe: Callable[[str], tuple[int, Event | None]] | None = None,
 ) -> None:
-    """Count each document's consecutive failures of one permanent kind (``report.permanent``) in
+    """Count each document's consecutive failures of one permanent class (``report.permanent``,
+    :func:`permanent_class`) in
     ``ledger`` and move one from ``report.failed`` to ``report.given_up`` only when
 
     * it failed so on enough runs in a row (:func:`_permanent_tries`), the first at least
@@ -636,13 +646,13 @@ def settle_permanent(
     entries: dict[str, dict[str, Any]] = {}
     for key, sig in sorted(seen_now.items()):
         old = seen.get(key)
-        if old is not None and str(old.get("sig", "")) == sig:
+        if old is not None and permanent_class(str(old.get("sig", ""))) == permanent_class(sig):
             entry = dict(old)
         else:
             entry = {"first": stamp, "tries": 0}
             if old is not None and "given_up" in old:
                 entry["given_up"] = old["given_up"]  # another permanent failure: still given up
-        entry["sig"] = sig
+        entry["sig"] = sig  # the latest exact kind, to show; counted by its class
         entry["tries"] = int(entry["tries"]) + 1
         entries[key] = entry
     due = {
