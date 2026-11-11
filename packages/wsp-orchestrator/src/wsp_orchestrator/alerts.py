@@ -55,6 +55,11 @@ class Alerter:
                 log.exception("alert sink failed", extra={"fields": {"alert": alert.key}})
         return True
 
+    def refresh(self, alert: Alert) -> bool:
+        """Rewrite the text of an alert that is open (it describes something that moved on). Not
+        delivered to the sinks and not a new alert: the date it was raised stays."""
+        return self.store.refresh_alert(alert.key, alert.message, alert.data)
+
     def resolve(self, key: str) -> bool:
         return self.store.resolve_alert(key, self.clock.now())
 

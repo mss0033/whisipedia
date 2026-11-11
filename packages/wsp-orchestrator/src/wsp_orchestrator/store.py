@@ -528,6 +528,17 @@ class StateStore:
             )
             return True
 
+    def refresh_alert(self, key: str, message: str, data: Mapping[str, object]) -> bool:
+        """Give an open alert another text. ``raised_at`` and the severity stay (it is the same
+        alert, not a new one). True if a row changed: not for a resolved or unknown key, nor for
+        the text it has already."""
+        with self.tx() as c:
+            cur = c.execute(
+                "UPDATE alerts SET message=?, data_json=? WHERE key=? AND resolved_at IS NULL AND message<>?",
+                (message, _dumps(data), key, message),
+            )
+            return cur.rowcount == 1
+
     def resolve_alert(self, key: str, now: datetime) -> bool:
         if not self.alert_is_open(key):
             return False

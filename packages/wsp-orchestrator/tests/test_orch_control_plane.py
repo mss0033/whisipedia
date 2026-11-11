@@ -10,6 +10,7 @@ import sqlite3
 import threading
 import time
 from collections.abc import Callable, Mapping
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -22,10 +23,10 @@ from wsp_orchestrator.daemon import _install_signals  # pyright: ignore[reportPr
 from wsp_orchestrator.errors import ResourceBusyError
 from wsp_orchestrator.jobs import JobKind, JobQueue, JobStatus
 from wsp_orchestrator.orchestrator import DaemonLockedError, Orchestrator
-from wsp_orchestrator.pipeline import RefineResult
+from wsp_orchestrator.pipeline import CRASHES_TO_HOLD, HELD_FOR, RefineResult
 from wsp_orchestrator.policy import Candidate, CandidateKind, Decision, GateConfig, Proposal
 from wsp_orchestrator.settings import OrchestratorSettings, capped_workers
-from wsp_orchestrator.store import StateStore
+from wsp_orchestrator.store import ReleaseRecord, StateStore
 from wsp_orchestrator.testing import FakeWorld, make_settings, make_spec, record_promotions
 from wsp_orchestrator.versions import is_newer, newest, version_key
 
@@ -342,6 +343,166 @@ def test_stuck_release_alert(tmp_path: Path) -> None:
     orch.run_pending()
     orch.check_stuck_releases()
     assert "stuck:a/2026-10-01" not in orch.alerter.open_keys()
+    orch.close()
+
+
+STUCK = "stuck:a/2026-10-01"
+
+
+def _stuck_world(tmp_path: Path) -> tuple[Orchestrator, FakeWorld, ManualClock]:
+    """Release a/2026-10-01 waiting for a busy lock for three days, its ``stuck:`` alert raised."""
+    clock = ManualClock(T0)
+    orch, world = build(tmp_path, [make_spec("a")], clock=clock, stuck_after=timedelta(days=2))
+    world.adapters["a"].add_release("2026-10-01", FILES)
+    world.adapters["a"].failures["plan"] = [ResourceBusyError("another 'profile' is running (pid 1087836)")]
+    orch.start()
+    orch.run_pending()
+    clock.advance(timedelta(days=3))
+    assert orch.check_stuck_releases() == [STUCK]
+    return orch, world, clock
+
+
+def _release(orch: Orchestrator) -> ReleaseRecord:
+    rec = orch.store.get_release("a", "2026-10-01")
+    assert rec is not None
+    return rec
+
+
+def _write(orch: Orchestrator, **changes: Any) -> ReleaseRecord:
+    """Change the release's row as a step of the pipeline would."""
+    with orch.store.tx() as c:
+        orch.store.update_release(replace(_release(orch), **changes), orch.clock.now(), c)
+    return _release(orch)
+
+
+def _alert(orch: Orchestrator, key: str = STUCK) -> dict[str, Any]:
+    [row] = [dict(r) for r in orch.store.open_alerts() if r["key"] == key]
+    return row
+
+
+def test_a_stuck_alert_says_what_the_release_is_doing_now(tmp_path: Path) -> None:
+    orch, _, clock = _stuck_world(tmp_path)
+    rec = _release(orch)
+    assert rec.state_since is not None
+    head = f"a/2026-10-01 has been {rec.state.value} since {rec.state_since:%Y-%m-%d %H:%M} UTC; now: "
+    state = rec.state.value
+    waiting = (
+        "waiting to try again; last error: deferred (busy): ResourceBusyError: another 'profile' is"
+        " running (pid 1087836)"
+    )
+    assert _alert(orch)["message"] == head + waiting
+
+    def now_says(**changes: Any) -> str:
+        _write(orch, **changes)
+        assert orch.check_stuck_releases() == [], "the alert is open: nothing is raised anew"
+        message = str(_alert(orch)["message"])
+        assert message.startswith(head), message
+        return message[len(head) :]
+
+    started = clock.now() - timedelta(minutes=6)
+    running = dict(step_token="t1", step_state=rec.state, step_started_at=started, next_attempt_at=None)
+    assert now_says(**running, last_error=None) == (
+        f"its step has been running since {started:%Y-%m-%d %H:%M} UTC; last error: none"
+    )
+    idle = dict(step_token=None, step_state=None, step_started_at=None)
+    assert now_says(**idle, last_error="crashed in x: killed", crash_count=1, crash_state=rec.state) == (
+        f"queued (crashed once in {state}); last error: crashed in x: killed"
+    )
+    assert now_says(crash_count=0, crash_state=None, last_error=None) == "queued; last error: none"
+    # A step that has just started may be one more try for the lock: the text waits for it.
+    young = dict(step_token="t2", step_state=rec.state, step_started_at=clock.now() - timedelta(minutes=4))
+    assert now_says(**young) == "queued; last error: none"
+    clock.advance(timedelta(minutes=1))
+    assert now_says() == (
+        f"its step has been running since {young['step_started_at']:%Y-%m-%d %H:%M} UTC; last error: none"
+    )
+    orch.close()
+
+
+def test_a_stuck_alert_names_the_owner_when_the_release_waits_for_a_retry(tmp_path: Path) -> None:
+    """A FAILED release that crashed too often waits ten years on paper: it is not "trying again"."""
+    orch, _, clock = _stuck_world(tmp_path)
+    state = _release(orch).state
+    hold_at = orch.pipeline.crashes_to_fail + CRASHES_TO_HOLD
+    failed = dict(state=ReleaseState.FAILED, crash_state=state, last_error="crashed in x 9 times")
+    _write(orch, **failed, crash_count=hold_at - 1, next_attempt_at=clock.now() + timedelta(hours=8))
+    clock.advance(timedelta(days=3))  # FAILED is a new state: stuck again only after stuck_after
+    orch.check_stuck_releases()
+    assert str(_alert(orch)["message"]).endswith(
+        f"; now: waiting to try again (crashed {hold_at - 1} times in {state.value});"
+        " last error: crashed in x 9 times"
+    )
+    _write(orch, crash_count=hold_at, next_attempt_at=clock.now() + HELD_FOR)
+    assert orch.check_stuck_releases() == []
+    assert str(_alert(orch)["message"]).endswith(
+        f"; now: waiting for `wsp retry a 2026-10-01` (crashed {hold_at} times in {state.value});"
+        " last error: crashed in x 9 times"
+    )
+    # ... and so does one whose last attempt failed on the current generation (no crash on the row)
+    _write(orch, crash_count=0, crash_state=None, last_error="ValueError: bad index")
+    assert orch.check_stuck_releases() == []
+    assert str(_alert(orch)["message"]).endswith(
+        "; now: waiting for `wsp retry a 2026-10-01`; last error: ValueError: bad index"
+    )
+    orch.close()
+
+
+def test_an_open_stuck_alert_is_rewritten_when_its_row_changes_and_keeps_its_date(tmp_path: Path) -> None:
+    """2026-11-10: `stuck:fr` (raised 11-01) still said "deferred (busy) ... pid 1087836" while its
+    row said "crashed in refined"."""
+    orch, world, clock = _stuck_world(tmp_path)
+    raised = _alert(orch)
+    assert "pid 1087836" in raised["message"]
+    assert world.sink.alert_keys().count(STUCK) == 1
+    clock.advance(timedelta(days=9))
+    _write(orch, next_attempt_at=None, last_error="crashed in refined: the daemon stopped during this step")
+    assert orch.check_stuck_releases() == []
+    now = _alert(orch)
+    assert now["message"].endswith(
+        "; now: queued; last error: crashed in refined: the daemon stopped during this step"
+    )
+    assert "pid 1087836" not in now["message"]
+    assert (now["raised_at"], now["severity"]) == (raised["raised_at"], raised["severity"])
+    assert world.sink.alert_keys().count(STUCK) == 1, "the same alert: nobody is notified twice"
+    orch.close()
+
+
+def test_a_release_waiting_for_a_lock_does_not_rewrite_its_stuck_alert_at_every_try(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every ten minutes the release starts a step, finds the lock busy and waits again. Whenever the
+    check looks (during the try, after it, after the wait is over), the alert stays as it is: an
+    unchanged alert costs no write (audit H6), for as long as the wait lasts."""
+    orch, world, clock = _stuck_world(tmp_path)
+    during: list[tuple[bool, list[str]]] = []
+
+    def plan(*args: object, **kwargs: object) -> object:
+        during.append((_release(orch).step_token is not None, orch.check_stuck_releases()))
+        raise ResourceBusyError("another 'profile' is running (pid 1087836)")
+
+    monkeypatch.setattr(world.adapters["a"], "plan", plan)
+    refreshed: list[str] = []
+    refresh_alert = orch.store.refresh_alert
+
+    def counting(key: str, message: str, data: Mapping[str, object]) -> bool:
+        refreshed.append(message)
+        return refresh_alert(key, message, data)
+
+    monkeypatch.setattr(orch.store, "refresh_alert", counting)
+    before = _alert(orch)
+    for _ in range(6):
+        clock.advance(timedelta(minutes=11))
+        assert orch.check_stuck_releases() == []  # the wait is over, the next try has not begun
+        orch.run_pending()  # the try: the check runs inside it too
+        assert orch.check_stuck_releases() == []
+    assert during == [(True, [])] * 6, "the check did look while each step ran"
+    assert refreshed == []
+    assert _alert(orch) == before
+    # the check of the test itself: a change of the row is seen
+    _write(orch, last_error="deferred (busy): another 'profile' is running (pid 7)")
+    orch.check_stuck_releases()
+    assert len(refreshed) == 1
+    assert "(pid 7)" in _alert(orch)["message"]
     orch.close()
 
 

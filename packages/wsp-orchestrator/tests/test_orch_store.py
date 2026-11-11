@@ -1,6 +1,7 @@
 """State store schema migrations."""
 
 import sqlite3
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from wsp_orchestrator.store import StateStore
@@ -48,4 +49,32 @@ def test_offers_and_proposal_status(tmp_path: Path) -> None:
     assert store.set_proposal_status(pid, "rejected")
     assert store.proposals() == []
     assert len(store.proposals(status=None)) == 1
+    store.close()
+
+
+def test_refresh_alert_touches_only_an_open_alert_with_another_text(tmp_path: Path) -> None:
+    store = StateStore(tmp_path / "state.sqlite3", check_local=False)
+    t0 = datetime(2026, 11, 1, 12, tzinfo=UTC)
+
+    def row(key: str) -> tuple[str, str, str, str, str | None]:
+        [r] = store.query("SELECT * FROM alerts WHERE key=?", (key,))
+        return (r["severity"], r["message"], r["data_json"], r["raised_at"], r["resolved_at"])
+
+    assert store.open_alert("stuck:a/1", "warning", "old text", {"state": "refined"}, t0)
+    assert store.open_alert("stuck:b/1", "warning", "other", {}, t0)
+    before = row("stuck:a/1")
+    assert not store.refresh_alert("stuck:a/1", "old text", {"state": "refined"}), "the same text: no change"
+    assert row("stuck:a/1") == before
+    assert store.refresh_alert("stuck:a/1", "new text", {"state": "indexed"})
+    severity, message, data, raised_at, resolved_at = row("stuck:a/1")
+    assert (severity, message, resolved_at) == ("warning", "new text", None)
+    assert "indexed" in data
+    assert raised_at == before[3], "the same alert: the day it was raised stays"
+    assert row("stuck:b/1")[1] == "other", "only the alert asked for"
+    assert not store.refresh_alert("stuck:none/1", "text", {}), "an unknown key opens nothing"
+    assert store.query("SELECT 1 FROM alerts WHERE key='stuck:none/1'") == []
+    assert store.resolve_alert("stuck:a/1", t0 + timedelta(days=1))
+    resolved = row("stuck:a/1")
+    assert not store.refresh_alert("stuck:a/1", "later text", {}), "a resolved alert is history"
+    assert row("stuck:a/1") == resolved
     store.close()

@@ -74,7 +74,7 @@ from wsp_orchestrator.retention import (
 )
 from wsp_orchestrator.scheduler import GLOBAL_KEY, PARITY_KEY, Scheduler
 from wsp_orchestrator.settings import OrchestratorSettings
-from wsp_orchestrator.store import StateStore, parse_ts, ts
+from wsp_orchestrator.store import ReleaseRecord, StateStore, parse_ts, ts
 from wsp_orchestrator.versions import version_key
 
 log = logging.getLogger("wsp.orchestrator")
@@ -199,6 +199,9 @@ def _host(ref: ReleaseRef) -> str | None:
 
 
 _STUCK_PREFIX = "job-stuck:"
+STEP_SETTLES = timedelta(minutes=5)
+"""A step younger than this is not yet "running" for a ``stuck:`` alert: it may be a try for a busy
+lock, over in seconds (see ``check_stuck_releases``)."""
 
 
 def _stuck_key(kind: JobKind, key: str) -> str:
@@ -313,6 +316,7 @@ class Orchestrator:
             self.store.set_meta(_BOOT_ID, boot)
         recovered = self.queue.recover(now, all_running=True)
         crashed = self.pipeline.recover_crashes(machine_restarted=restarted)
+        cleared = self.pipeline.clear_stale_errors()
         swept = self.pipeline.sweep_workdir()
         flushed = self.pipeline.flush_ledger()
         unpaused = sum(
@@ -342,6 +346,7 @@ class Orchestrator:
                     "ledger_flushed": flushed,
                     "resumed_releases": resumed,
                     "stale_pauses_cleared": unpaused,
+                    "stale_errors_cleared": cleared,
                     "unclean_previous_stop": unclean,
                     "machine_restarted": restarted,
                 }
@@ -1146,9 +1151,20 @@ class Orchestrator:
         self._check_rss()
 
     def check_stuck_releases(self, now: datetime | None = None) -> list[str]:
-        """``stuck:<release>`` for a release that has not left its state for ``stuck_after``."""
+        """``stuck:<release>`` for a release that has not left its state for ``stuck_after``.
+
+        An open alert follows its row: when the row says something else than the alert, the alert's
+        text is rewritten (same alert, same date, no delivery). ``stuck:fr`` said "deferred (busy)
+        ... pid 1087836" for ten days while its row said "crashed in refined" (2026-11-10). A row
+        that did not change costs no write. Returns the keys newly raised.
+        """
         now = now or self.clock.now()
         raised: list[str] = []
+        open_now = {
+            str(r["key"]): str(r["message"])
+            for r in self.store.open_alerts()
+            if str(r["key"]).startswith("stuck:")
+        }
         for rec in self.store.releases():
             key = f"stuck:{rec.subject}"
             since = rec.state_since
@@ -1160,19 +1176,48 @@ class Orchestrator:
                 and not self.store.source_health(rec.source_id).paused
             )
             if stuck and since is not None:
-                if self.alerter.raise_(
-                    Alert(
-                        key,
-                        Severity.WARNING,
-                        f"{rec.subject} has been {rec.state.value} since {since:%Y-%m-%d %H:%M} UTC"
-                        f" (last error: {rec.last_error or 'none'})",
-                        {"source_id": rec.source_id, "version": rec.version, "state": rec.state.value},
-                    )
-                ):
-                    raised.append(key)
-            elif self.store.alert_is_open(key):
+                started = rec.step_started_at
+                if rec.step_token is not None and started is not None and now - started < STEP_SETTLES:
+                    # A step that has just started may only be asking for a lock: a release waiting
+                    # for a busy one starts a step every `defer_delay` and is back to waiting within
+                    # seconds. Its alert is left as it is until the step has lasted (or ended), so
+                    # the text does not go back and forth with every try.
+                    continue
+                alert = Alert(
+                    key,
+                    Severity.WARNING,
+                    self._stuck_message(rec, since),
+                    {"source_id": rec.source_id, "version": rec.version, "state": rec.state.value},
+                )
+                if key not in open_now:
+                    if self.alerter.raise_(alert):
+                        raised.append(key)
+                elif open_now[key] != alert.message:
+                    self.alerter.refresh(alert)
+            elif key in open_now:
                 self.alerter.resolve(key)
         return raised
+
+    def _stuck_message(self, rec: ReleaseRecord, since: datetime) -> str:
+        """What a stuck release is doing, from its row alone: no "for N hours", no time of the next
+        try, nothing that differs between two checks of an unchanged row."""
+        if rec.step_token is not None:
+            what = "its step is running"
+            if rec.step_started_at is not None:
+                what = f"its step has been running since {rec.step_started_at:%Y-%m-%d %H:%M} UTC"
+        elif self.pipeline.held_for_owner(rec):
+            what = f"waiting for `wsp retry {rec.source_id} {rec.version}`"
+        elif rec.next_attempt_at is not None:
+            what = "waiting to try again"
+        else:
+            what = "queued"
+        if rec.crash_state is not None and rec.crash_count:
+            times = "once" if rec.crash_count == 1 else f"{rec.crash_count} times"
+            what += f" (crashed {times} in {rec.crash_state.value})"
+        return (
+            f"{rec.subject} has been {rec.state.value} since {since:%Y-%m-%d %H:%M} UTC; now: {what};"
+            f" last error: {rec.last_error or 'none'}"
+        )
 
     def _check_rss(self) -> None:
         rss = _rss_bytes()

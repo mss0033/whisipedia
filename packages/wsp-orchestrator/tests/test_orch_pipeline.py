@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
 
@@ -5,14 +6,17 @@ import pytest
 
 from wsp_core.model import FetchPlan, FetchResult, ReleaseState, allowed_transitions
 from wsp_core.ports import Ctx
+from wsp_orchestrator.errors import ResourceBusyError, ResourceExhaustedError
 from wsp_orchestrator.pipeline import (
     IllegalTransitionError,
     Outcome,
+    RefineResult,
     RetryPolicy,
     StepError,
     UnknownReleaseError,
     resume_source,
 )
+from wsp_orchestrator.store import ReleaseRecord
 from wsp_orchestrator.testing import PipelineHarness, ScreeningAdapter, SimulatedCrash, fetch_result
 
 S = ReleaseState
@@ -346,3 +350,183 @@ def test_a_source_marked_index_false_is_promoted_without_refining_or_indexing(tm
     current = h.vault.current("src")
     assert current is not None
     assert current.generation_id == "2026-10-01"
+
+
+# --- a release row says what is true now (trawl 2026-11-10: rows named the pid of a lock holder ------
+# --- gone for days, promoted rows still said "deferred (busy)") --------------------------------------
+
+
+def _row(h: PipelineHarness) -> ReleaseRecord:
+    rec = h.store.get_release("src", "2026-10-01")
+    assert rec is not None
+    return rec
+
+
+def test_a_deferral_text_is_gone_once_the_step_runs_again(tmp_path: Path) -> None:
+    h = PipelineHarness(tmp_path)
+    busy = [True]
+    during: list[tuple[bool, str | None]] = []
+
+    def index(source: object, generation: object) -> None:
+        rec = _row(h)
+        during.append((rec.step_token is not None, rec.last_error))
+        if busy[0]:
+            raise ResourceBusyError("another 'index' is running (pid 1087836)")
+
+    h.pipeline.index = index
+    h.pipeline.register(h.adapter.add_release("2026-10-01", FILES))
+    assert h.pipeline.run("src", "2026-10-01").outcome is Outcome.DEFERRED
+    waiting = _row(h).last_error or ""
+    assert waiting.startswith("deferred (busy): ")
+    assert "pid 1087836" in waiting
+    h.clock.advance(timedelta(minutes=10))
+    assert h.pipeline.run("src", "2026-10-01").outcome is Outcome.DEFERRED
+    assert during == [(True, None), (True, None)], "while the step runs, the wait is over: no text"
+    assert _row(h).last_error == waiting, "deferred again: it waits again, and says so"
+    busy[0] = False
+    h.clock.advance(timedelta(minutes=10))
+    assert h.pipeline.run("src", "2026-10-01").outcome is Outcome.PROMOTED
+    assert during[-1] == (True, None)
+    assert _row(h).last_error is None
+
+
+def test_a_crash_text_stays_until_the_step_succeeds_then_is_cleared(tmp_path: Path) -> None:
+    """A release that crashed keeps saying so on its way back to the state it crashed in (through
+    PLANNED and FETCHING: a multi-day profile would read "last error: none" otherwise, with its
+    crash count and its CRITICAL alert still open), and stops saying so when it gets past it."""
+    h = PipelineHarness(tmp_path, retry=RetryPolicy(max_attempts=3, base_delay=timedelta(minutes=10)))
+    crashes = [3]
+    in_refine: list[ReleaseRecord] = []
+    in_index: list[ReleaseRecord] = []
+
+    def refine(source: object, generation: object, generation_dir: Path) -> RefineResult:
+        in_refine.append(_row(h))
+        if crashes[0]:
+            crashes[0] -= 1
+            raise ResourceExhaustedError("refine was OOM-killed")
+        return RefineResult(1000)
+
+    def index(source: object, generation: object) -> None:
+        in_index.append(_row(h))
+
+    h.pipeline.refine = refine
+    h.pipeline.index = index
+    h.pipeline.register(h.adapter.add_release("2026-10-01", FILES))
+    first = h.pipeline.run("src", "2026-10-01")  # crashes twice: retried at once, then FAILED
+    assert first.outcome is Outcome.BACKOFF
+    assert (first.record.state, first.record.crash_count, first.record.crash_state) == (S.FAILED, 2, S.SEALED)
+    failed_text = first.record.last_error or ""
+    assert failed_text.startswith("crashed in sealed 2 times")
+    assert [r.last_error for r in in_refine] == [
+        None,
+        "crashed in sealed: ResourceExhaustedError: refine was OOM-killed",
+    ]
+
+    h.clock.advance(timedelta(hours=1))
+    second = h.pipeline.run("src", "2026-10-01")  # back through PLANNED..SEALED, crashes a third time
+    assert second.outcome is Outcome.BACKOFF
+    assert (S.FAILED, S.PLANNED) in transitions(h, "src/2026-10-01")
+    assert transitions(h, "src/2026-10-01").count((S.PLANNED, S.FETCHING)) == 2
+    back = in_refine[2]
+    assert (back.state, back.crash_state, back.crash_count) == (S.SEALED, S.SEALED, 2)
+    assert back.last_error == failed_text, "PLANNED -> FETCHING -> ... -> SEALED did not remove it"
+    assert "crashed:src/2026-10-01" in h.alerter.open_keys()
+
+    h.clock.advance(timedelta(days=1))
+    assert h.pipeline.run("src", "2026-10-01").outcome is Outcome.PROMOTED
+    assert (in_refine[3].last_error or "").startswith("crashed in sealed 3 times")
+    past = in_index[0]
+    assert (past.state, past.crash_state, past.crash_count) == (S.REFINED, None, 0)
+    assert past.last_error is None, "it left the state it crashed in: the crash is over"
+    assert _row(h).last_error is None
+    assert "crashed:src/2026-10-01" not in h.alerter.open_keys()
+
+
+def test_a_promoted_release_has_no_last_error(tmp_path: Path) -> None:
+    h = PipelineHarness(tmp_path)
+    h.adapter.failures["fetch"] = [OSError("connection reset")]
+    h.pipeline.register(h.adapter.add_release("2026-10-01", FILES))
+    assert h.pipeline.run("src", "2026-10-01").outcome is Outcome.BACKOFF
+    assert "connection reset" in (_row(h).last_error or "")
+    h.clock.advance(timedelta(days=1))
+    result = h.pipeline.run("src", "2026-10-01")
+    assert result.outcome is Outcome.PROMOTED
+    assert result.record.attempts == 1, "the failure is still counted"
+    assert result.record.last_error is None
+    # ... and rows promoted before this rule lose theirs once (the daemon does it at each start)
+    with h.store.tx() as c:
+        h.store.update_release(replace(_row(h), last_error="deferred (busy): pid 1087836"), h.clock.now(), c)
+    events = len(h.ledger.of_kind("release.state", "src/2026-10-01"))
+    assert h.pipeline.clear_stale_errors() == 1
+    assert _row(h).last_error is None
+    assert _row(h).state is S.PROMOTED
+    assert h.pipeline.clear_stale_errors() == 0
+    assert len(h.ledger.of_kind("release.state", "src/2026-10-01")) == events, "not a transition"
+    assert h.store.outbox() == []
+
+
+def test_a_retried_failure_stays_visible_until_the_release_moves_on(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    h = PipelineHarness(tmp_path)
+    h.adapter.failures["fetch"] = [OSError("connection reset")]
+    seen: dict[str, ReleaseRecord] = {}
+    stage = h.vault.stage
+
+    def staging(source_id: str, generation_id: str) -> Path:  # called in PLANNED and again at the seal
+        rec = _row(h)
+        if rec.attempts and rec.state is S.PLANNED:  # the retry, not the first pass
+            seen["planned"] = rec
+        return stage(source_id, generation_id)
+
+    def refine(source: object, generation: object, generation_dir: Path) -> RefineResult:
+        seen["sealed"] = _row(h)
+        return RefineResult(1000)
+
+    monkeypatch.setattr(h.vault, "stage", staging)
+    h.pipeline.refine = refine
+    h.pipeline.register(h.adapter.add_release("2026-10-01", FILES))
+    assert h.pipeline.run("src", "2026-10-01").outcome is Outcome.BACKOFF
+    h.clock.advance(timedelta(days=1))
+    assert h.pipeline.run("src", "2026-10-01").outcome is Outcome.PROMOTED
+    assert seen["planned"].state is S.PLANNED
+    assert "connection reset" in (seen["planned"].last_error or ""), "the retry hop itself removes nothing"
+    assert seen["sealed"].state is S.SEALED
+    assert seen["sealed"].last_error is None, "it moved on: fetched, verified, sealed"
+
+
+def test_which_transitions_end_a_last_error(tmp_path: Path) -> None:
+    from wsp_orchestrator.pipeline import _error_is_over  # pyright: ignore[reportPrivateUsage]
+
+    h = PipelineHarness(tmp_path)
+    h.pipeline.register(h.adapter.add_release("2026-10-01", FILES))
+    base = replace(_row(h), last_error="something")
+
+    def over(state: S, to: S, crash_state: S | None = None) -> bool:
+        rec = replace(base, state=state, crash_state=crash_state, crash_count=2 if crash_state else 0)
+        survived = crash_state is state and to is not S.FAILED  # as _transition computes it
+        return _error_is_over(rec, to, survived_crash=survived)
+
+    # forward, no crash on the row: over
+    assert over(S.PLANNED, S.FETCHING)
+    assert over(S.SEALED, S.REFINED)
+    # into or within the failed states: the reason stays (and FAILED -> QUARANTINED carries it)
+    assert not over(S.SEALED, S.FAILED)
+    assert not over(S.FAILED, S.QUARANTINED)
+    assert not over(S.REFINED, S.QUARANTINED)
+    # the retry hop
+    assert not over(S.FAILED, S.PLANNED)
+    assert not over(S.FAILED, S.PLANNED, crash_state=S.REFINED)
+    # a crash in REFINED: not over on the way back, over on leaving REFINED
+    for state, to in (
+        (S.PLANNED, S.FETCHING),
+        (S.FETCHING, S.FETCHED),
+        (S.VERIFIED, S.SEALED),
+        (S.SEALED, S.REFINED),
+    ):
+        assert not over(state, to, crash_state=S.REFINED), (state, to)
+    assert over(S.REFINED, S.INDEXED, crash_state=S.REFINED)
+    assert not over(S.REFINED, S.FAILED, crash_state=S.REFINED)
+    # promoted: always
+    assert over(S.INDEXED, S.PROMOTED)
+    assert over(S.INDEXED, S.PROMOTED, crash_state=S.REFINED)

@@ -1,6 +1,7 @@
 import json
 import os
 from collections.abc import Iterable, Mapping
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -413,3 +414,48 @@ def test_an_unknown_boot_id_keeps_the_old_counting(tmp_path: Path, monkeypatch: 
         assert len(json.loads(orch.store.get_meta("daemon:unclean_starts") or "[]")) == expected
         _kill(orch)
         clock.advance(timedelta(minutes=5))
+
+
+def test_start_clears_old_errors_on_promoted_releases(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """2026-11-10: seven promoted rows still said "deferred (busy) ... pid N" or named a timeout."""
+    specs = [make_spec("src"), make_spec("other")]
+    orch, world, clock = build(tmp_path, specs)
+    world.adapters["src"].add_release("2026-10-01", FILES)
+    world.adapters["other"].add_release("2026-10-01", FILES)
+    world.adapters["other"].failures["fetch"] = [OSError("connection reset")]
+    orch.start()
+    orch.run_pending()
+    promoted = orch.store.get_release("src", "2026-10-01")
+    assert promoted is not None
+    assert promoted.state is ReleaseState.PROMOTED
+    with orch.store.tx() as c:  # as the code before this rule left it
+        stale = replace(promoted, last_error="deferred (busy): another 'profile' is running (pid 1087836)")
+        orch.store.update_release(stale, clock.now(), c)
+    failed = orch.store.get_release("other", "2026-10-01")
+    assert failed is not None
+    assert failed.state is ReleaseState.FAILED
+    assert "connection reset" in (failed.last_error or "")
+    orch.close()
+
+    def start_again() -> tuple[Orchestrator, int]:
+        again, _, _ = build(tmp_path, specs, clock=clock, world=world)
+        caplog.clear()
+        with caplog.at_level("INFO", logger="wsp.orchestrator"):
+            again.start()
+        [started] = [r for r in caplog.records if r.getMessage() == "orchestrator started"]
+        return again, int(vars(started)["fields"]["stale_errors_cleared"])
+
+    orch, cleared = start_again()
+    assert cleared == 1
+    after = orch.store.get_release("src", "2026-10-01")
+    assert after is not None
+    assert (after.state, after.last_error) == (ReleaseState.PROMOTED, None)
+    still = orch.store.get_release("other", "2026-10-01")
+    assert still is not None
+    assert "connection reset" in (still.last_error or ""), "only promoted rows: this one is still failing"
+    orch.close()
+    orch, cleared = start_again()
+    assert cleared == 0, "once"
+    orch.close()

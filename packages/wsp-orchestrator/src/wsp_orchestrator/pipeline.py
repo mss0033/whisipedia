@@ -144,6 +144,28 @@ _SEALED_STATES = (ReleaseState.SEALED, ReleaseState.REFINED, ReleaseState.INDEXE
 
 CRASHES_TO_HOLD = 4  # crashes after the first FAILED one before the release waits for the owner
 HELD_FOR = timedelta(days=3650)  # "until `wsp retry`": retry_release clears next_attempt_at
+DEFERRED_PREFIX = "deferred ("  # how a release's last_error starts while it waits (ReleasePipeline._defer)
+
+
+def _error_is_over(rec: ReleaseRecord, to: ReleaseState, *, survived_crash: bool) -> bool:
+    """Whether a transition of ``rec`` to ``to`` ends what its ``last_error`` says.
+
+    * To FAILED or QUARANTINED: never. The caller passes the reason, and the hop FAILED ->
+      QUARANTINED keeps it ("integrity: ...", "superseded: ...", "rejected: ..." are read there).
+    * The retry hop FAILED -> PLANNED: no, the release has not got anywhere yet.
+    * While the release carries a crash (``crash_state``): only the transition out of the state it
+      crashed in (``survived_crash``). On its way back there (PLANNED, FETCHING, ...) the crash
+      count and the ``crashed:`` alert are still open, and so is the text.
+    * Any other forward step: yes. A plain failure (an exception, not a crash) records no state on
+      the row, so its text goes with the first step after the retry, PLANNED -> FETCHING, even when
+      it failed later than that; ``attempts`` and the ledger (``error``, ``failed_in``) keep it.
+    * To PROMOTED: always.
+    """
+    if to is ReleaseState.PROMOTED:
+        return True
+    if to in (ReleaseState.FAILED, ReleaseState.QUARANTINED) or rec.state is ReleaseState.FAILED:
+        return False
+    return rec.crash_state is None or survived_crash
 
 
 def crash_cause(reason: str) -> str:
@@ -717,6 +739,29 @@ class ReleasePipeline:
             for key in (f"quarantined:{rec.subject}", f"crashed:{rec.subject}", f"stuck:{rec.subject}"):
                 self.alerter.resolve(key)
         return self._get(source_id, version)
+
+    def held_for_owner(self, rec: ReleaseRecord) -> bool:
+        """A FAILED release that waits for ``wsp retry``: its next try was put ``HELD_FOR`` away,
+        after too many crashes (:meth:`_crashed`) or a last failed attempt on the current
+        generation (:meth:`_fail`). Told from the row alone, not from the clock."""
+        return (
+            rec.state is ReleaseState.FAILED
+            and rec.next_attempt_at is not None
+            and rec.state_since is not None
+            and rec.next_attempt_at - rec.state_since > HELD_FOR / 2
+        )
+
+    def clear_stale_errors(self) -> int:
+        """Remove the ``last_error`` of every PROMOTED release: whatever it says is over. For the
+        rows written before a transition did this itself (seven promoted rows still said "deferred
+        (busy) ... pid N" on 2026-11-10). No ledger event; returns how many rows were changed."""
+        n = 0
+        for rec in self.store.releases():
+            if rec.state is ReleaseState.PROMOTED and rec.last_error is not None:
+                with contextlib.suppress(ConcurrentUpdateError):
+                    self._persist(replace(rec, last_error=None), event=None)
+                    n += 1
+        return n
 
     def flush_ledger(self) -> int:
         """Deliver pending outbox events to the ledger exactly once (idempotent appends keyed by
@@ -1297,10 +1342,21 @@ class ReleasePipeline:
     # --- failures, deferrals, crashes -----------------------------------------------------------
 
     def _begin_step(self, rec: ReleaseRecord) -> ReleaseRecord:
-        """Commit the step token before any side effect of the step (crash accounting, C1)."""
+        """Commit the step token before any side effect of the step (crash accounting, C1).
+
+        A "deferred (...)" text goes with the same write: the wait it described is over, the step
+        runs (a row used to name the pid of a lock holder gone for days). Any other text stays.
+        """
         token = uuid.uuid4().hex
+        waited = (rec.last_error or "").startswith(DEFERRED_PREFIX)
         self._persist(
-            replace(rec, step_token=token, step_state=rec.state, step_started_at=self.clock.now()),
+            replace(
+                rec,
+                step_token=token,
+                step_state=rec.state,
+                step_started_at=self.clock.now(),
+                last_error=None if waited else rec.last_error,
+            ),
             event=None,
         )
         self.checkpoint(f"step:{rec.state.value}:token")
@@ -1339,7 +1395,7 @@ class ReleasePipeline:
                 step_state=None,
                 step_started_at=None,
                 next_attempt_at=until,
-                last_error=f"deferred ({kind.value}): {type(exc).__name__}: {exc}",
+                last_error=f"{DEFERRED_PREFIX}{kind.value}): {type(exc).__name__}: {exc}",
             ),
             event=None,
         )
@@ -1505,6 +1561,8 @@ class ReleasePipeline:
         survived_crash = rec.crash_state is rec.state and to is not ReleaseState.FAILED
         if survived_crash:
             changes.update(crash_count=0, crash_state=None)
+        if _error_is_over(rec, to, survived_crash=survived_crash):
+            changes.setdefault("last_error", None)
         new = replace(rec, state=to, step_token=None, step_state=None, step_started_at=None, **changes)
         data: dict[str, object] = {"from": rec.state.value, "to": to.value, "attempt": new.attempts}
         if extra:
