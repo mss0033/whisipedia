@@ -83,8 +83,16 @@ export function linkify(text: string): DocumentFragment {
   return f;
 }
 
-/** Fixed-width sources keep their layout; prose is reflowed into paragraphs. */
-export function renderPlainText(text: string, preformatted: boolean): HTMLElement {
+/**
+ * Fixed-width sources keep their layout; prose is reflowed into paragraphs. With `autoDir` each
+ * paragraph takes its direction from its own characters (`dir="auto"`): for a text whose language
+ * tag says nothing (a Hebrew text a source tagged "en", `core/dir.ts`).
+ */
+export function renderPlainText(
+  text: string,
+  preformatted: boolean,
+  opts: { autoDir?: boolean } = {},
+): HTMLElement {
   if (preformatted) {
     const pre = document.createElement('pre');
     pre.className = 'doc-text';
@@ -103,6 +111,7 @@ export function renderPlainText(text: string, preformatted: boolean): HTMLElemen
     if (!t) continue;
     const isHeading = t.length < 60 && t === t.toUpperCase() && /[A-Z]/.test(t);
     const el = document.createElement(isHeading ? 'h2' : 'p');
+    if (opts.autoDir) el.dir = 'auto';
     el.appendChild(linkify(t));
     div.appendChild(el);
   }

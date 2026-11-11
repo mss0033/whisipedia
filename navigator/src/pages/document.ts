@@ -7,13 +7,16 @@ import { ApiRequestError } from '../api/client.ts';
 import type { DocumentResponse, SearchResults, SourceInfo } from '../api/types.ts';
 import { docIdToAddress, makeAddress, searchAddress } from '../core/address.ts';
 import { diffLines, diffStats } from '../core/diff.ts';
+import { dirOf, isDefaultLanguage, ownDir } from '../core/dir.ts';
 import { type Child, h } from '../core/dom.ts';
 import { formatDate, formatNumber } from '../core/format.ts';
 import {
   allowedImagePath,
   findAnchor,
+  type PageSeen,
   replaceBrokenImages,
   sanitizeDocumentHtml,
+  watchTableScroll,
 } from '../core/links.ts';
 import {
   formatLabel,
@@ -173,6 +176,17 @@ export function isPreformatted(doc: Pick<DocumentResponse, 'source_id' | 'kind'>
   return doc.source_id === 'rfc' || doc.source_id === 'linux-kernel-docs' || doc.kind === 'data';
 }
 
+/** The `dir` of a stored page's `<body>`, else of its `<html>`, read from its markup. */
+export function storedDir(html: string): 'rtl' | 'ltr' | 'auto' | undefined {
+  const of = (tag: string) =>
+    ownDir(
+      new RegExp(`<${tag}\\b[^>]*?\\sdir\\s*=\\s*["']?([a-z]+)`, 'i').exec(
+        html.slice(0, 20_000),
+      )?.[1],
+    );
+  return of('body') ?? of('html');
+}
+
 /** The page heading already shows the title: drop a first line that only repeats it. */
 export function withoutTitleLine(text: string, title: string): string {
   const m = /^\s*([^\n]*)\n?/.exec(text);
@@ -183,20 +197,31 @@ export function withoutTitleLine(text: string, title: string): string {
 export function renderBody(
   doc: DocumentResponse,
   reader?: ReaderContext,
-): { node: HTMLElement; broken: number } {
+): { node: HTMLElement; broken: number; seen?: PageSeen } {
   if (reader && isBook(doc) && doc.text?.trim()) {
     return { node: renderBook(doc, withoutTitleLine(doc.text, doc.title), reader), broken: 0 };
   }
   const wrap = h('div', { class: 'doc-body', lang: doc.lang });
   if (doc.format === 'html' && doc.html) {
-    const { fragment, stats } = sanitizeDocumentHtml(rewritePage(doc.html, doc.source_id), {
+    const page = rewritePage(doc.html, doc.source_id);
+    const { fragment, stats, dir, seen } = sanitizeDocumentHtml(page, {
       sourceId: doc.source_id,
       nativeId: doc.native_id,
       docId: doc.doc_id,
       links: doc.links,
     });
+    // The page's own direction is the authority; else its language's, when that runs right to left.
+    // Never "ltr" from a language tag: tags are often a source's default (core/dir.ts).
+    // A page rewritten for its view (a thread, a comic, a man page) is its body only by then, and
+    // holds words the view added: its direction is read from the page as stored, and the count for
+    // the "empty page" notice is not the sanitiser's (the notice parses the stored page instead).
+    const rewritten = page !== doc.html;
+    const way = dir ?? (rewritten ? storedDir(doc.html) : undefined) ?? dirOf(doc.lang);
+    if (way) wrap.dir = way;
     wrap.appendChild(fragment);
-    return { node: wrap, broken: stats.broken };
+    return rewritten
+      ? { node: wrap, broken: stats.broken }
+      : { node: wrap, broken: stats.broken, seen };
   }
   // A crystal structure (COD): its summary, a drawing of its cell and its CIF (pages/crystal.ts).
   // Only a COD structure's document: not any text with a CIF file's line (2026-11-06 review).
@@ -221,7 +246,17 @@ export function renderBody(
   }
   // Court opinions: a caption and paragraphs (pages/legal.ts), not raw text.
   const opinion = doc.kind === 'law' ? parseCase(doc.text ?? '', doc.title) : null;
-  wrap.appendChild(opinion ? renderCase(opinion) : renderPlainText(text, isPreformatted(doc)));
+  // A text in a right-to-left language runs that way as a whole; one whose language tag says
+  // nothing (a source's default) lets each paragraph run by its own characters.
+  const rtl = dirOf(doc.lang);
+  if (rtl) wrap.dir = rtl;
+  wrap.appendChild(
+    opinion
+      ? renderCase(opinion)
+      : renderPlainText(text, isPreformatted(doc), {
+          autoDir: !rtl && isDefaultLanguage(doc.lang),
+        }),
+  );
   if (doc.source_id === 'us-code') linkCodeSections(wrap, doc.doc_id, doc.links);
   return { node: wrap, broken: wrap.querySelectorAll('.broken-link').length };
 }
@@ -1101,7 +1136,8 @@ function footer(app: AppServices, doc: DocumentResponse, address: string): HTMLE
           'p',
           { class: 'fineprint' },
           'Original address (not fetched, offline): ',
-          h('code', null, doc.url_native),
+          // A long address breaks anywhere: at phone width it pushed the page sideways.
+          h('code', { class: 'wrap' }, doc.url_native),
         )
       : null,
     h('p', { class: 'doc-actions' }, vsd, ' ', bookmark),
@@ -1146,6 +1182,21 @@ export function titleHeading(root: ParentNode): HTMLHeadingElement | null {
   return null;
 }
 
+/** A page's words, pictures, frames and canvases, for a caller with no sanitised copy at hand. */
+function seenByParsing(html: string): PageSeen {
+  const page = new DOMParser().parseFromString(html, 'text/html');
+  for (const el of page.querySelectorAll('script, style, noscript, template, title, h1'))
+    el.remove();
+  return {
+    text: (page.body?.textContent ?? '').replace(/\s+/g, ' ').trim(),
+    frames: page.querySelectorAll('iframe').length,
+    images: [...page.querySelectorAll('img')].filter((i) =>
+      allowedImagePath(i.getAttribute('src') ?? ''),
+    ).length,
+    canvas: page.querySelectorAll('canvas').length,
+  };
+}
+
 /** A page whose archived HTML holds no text of its own: the crawler saved a script that would have
  * loaded it (LibreTexts' empty "Exercises"), or a bot check in place of the page (an AWS WAF
  * challenge saved as the FAS medical handbook, a Cloudflare challenge). Said so, with the address it
@@ -1154,23 +1205,22 @@ export function emptyPageNotice(
   html: string,
   title: string,
   original: string | null,
+  /** What the sanitiser counted while it walked the page: the page is not parsed a second time. */
+  counted?: PageSeen,
 ): HTMLElement | null {
-  const page = new DOMParser().parseFromString(html, 'text/html');
+  // The bot check is told from the page as it was stored: its markers are in scripts and ids.
   const challenge = /awswaf\.com|challenge-platform|cf-challenge|id="challenge-container"/i.test(
     html,
   );
-  for (const el of page.querySelectorAll('script, style, noscript, template, title, h1'))
-    el.remove();
-  const words = (page.body?.textContent ?? '').replace(/\s+/g, ' ').trim();
+  const seen = counted ?? seenByParsing(html);
+  const words = seen.text;
   // Only what the reader shows counts: it drops video, audio, svg, object and embed, and pictures not
   // in the library (Ghost's admin shell, only its loading animation; Instagram's, only a data: splash
   // logo, 2026-10-21).
-  const media =
-    !!page.querySelector('iframe') ||
-    [...page.querySelectorAll('img')].some((i) => allowedImagePath(i.getAttribute('src') ?? ''));
+  const media = seen.frames > 0 || seen.images > 0;
   // A page that is only a canvas and its scripts is a program (ncase.me's polygon games): nothing of
   // it shows here, where page scripts never run.
-  const program = !media && !!page.querySelector('canvas');
+  const program = !media && seen.canvas > 0;
   if (!challenge && !program && (words.replace(title, '').trim().length >= 40 || media))
     return null;
   return h(
@@ -1267,6 +1317,17 @@ export function originalWebAddress(nativeId: string): string | null {
 }
 
 /**
+ * The Navigator's heading for a document that brings none: the title in its own direction, right
+ * to left for a language written so, else by its characters (a Hebrew title of a text tagged "en").
+ */
+function docHeading(doc: Pick<DocumentResponse, 'title' | 'lang'>): HTMLHeadingElement {
+  const heading = pageHeading(doc.title);
+  heading.dir = dirOf(doc.lang) ?? 'auto';
+  if (doc.lang) heading.lang = doc.lang;
+  return heading;
+}
+
+/**
  * The id of the element an address's `#section` (or a section redirect's section) names on the page:
  * the Time Machine box is the Navigator's own, every other place is one of the page's, whose ids
  * the sanitiser keeps under its prefix (`core/links.ts`). Undefined when the page has no such place.
@@ -1320,6 +1381,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
 
   let content: HTMLElement;
   let broken = 0;
+  let seen: PageSeen | undefined;
   let tmBanner: HTMLElement | null = null;
   const here = makeAddress(doc.source_id, doc.native_id);
   if (route.at) {
@@ -1352,6 +1414,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
     });
     content = r.node;
     broken = r.broken;
+    seen = r.seen;
   }
   const uncapturedNote = h('p', { class: 'fineprint uncaptured-note', hidden: true });
   // English machine translation on request (ADR-0013): the current page only, not a diff or a code page.
@@ -1379,7 +1442,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
     }),
     practiceNotice(doc),
     doc.format === 'html' && doc.html && !route.at
-      ? emptyPageNotice(doc.html, doc.title, doc.url_native ?? null)
+      ? emptyPageNotice(doc.html, doc.title, doc.url_native ?? null, seen)
       : null,
     replayStubNotice(doc),
     route.at ? null : deadEndNotice(doc, source, content),
@@ -1389,7 +1452,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
       ? comicBar(doc.source_id, doc.native_id, (a) => ctx.app.navigate(a))
       : null,
     // Original pages (ZIM HTML) carry their own <h1>; don't print the title twice.
-    content instanceof Element && titleHeading(content) ? null : pageHeading(doc.title),
+    content instanceof Element && titleHeading(content) ? null : docHeading(doc),
     partsNav(doc),
     route.at
       ? null
@@ -1417,6 +1480,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
   else void markUncaptured(ctx, content, uncapturedNote);
   if (doc.format === 'html' && doc.html && hasTex(doc.html)) typesetSoon(content);
   replaceBrokenImages(content);
+  watchTableScroll(content, ctx.life);
   pdfLinks(content, (path) => ctx.app.api.url(path));
   titleOf = () => titleHeading(body);
   const title = titleHeading(body);

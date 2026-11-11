@@ -7,6 +7,7 @@
 import type { DocumentResponse } from '../api/types.ts';
 import { makeAddress } from '../core/address.ts';
 import { type Chapter, pages, positionOf, rememberPosition, splitChapters } from '../core/book.ts';
+import { dirOf, isDefaultLanguage } from '../core/dir.ts';
 import { h } from '../core/dom.ts';
 import { wspLink } from '../ui/components.ts';
 import type { AppServices } from './types.ts';
@@ -22,6 +23,9 @@ export interface ReaderContext {
 
 /** Id of the paragraph to resume at; the page result scrolls to it once the page is in place. */
 export const RESUME_ID = 'reader-resume';
+
+/** How a book's own text runs: right to left, by each paragraph's characters, or unsaid. */
+type TextDir = 'rtl' | 'auto' | undefined;
 
 const SAVE_EVERY_MS = 1500;
 
@@ -45,8 +49,11 @@ export function renderBook(doc: DocumentResponse, text: string, ctx: ReaderConte
   const book = splitChapters(text, doc.title);
   const chapters = pages(book);
   const wrap = h('div', { class: 'doc-body reader', lang: doc.lang });
+  // The book's own words run their way (a Hebrew book right to left); the reader's contents list,
+  // "Chapter 3 of 12" and "Next chapter" are the Navigator's and stay as they are.
+  const dir: TextDir = dirOf(doc.lang) ?? (isDefaultLanguage(doc.lang) ? 'auto' : undefined);
   if (chapters.length < 2) {
-    wrap.append(chapterBody(chapters[0]!, false));
+    wrap.append(chapterBody(chapters[0]!, false, dir));
     return wrap;
   }
   const saved = positionOf(ctx.app.storage, doc.doc_id);
@@ -54,11 +61,11 @@ export function renderBook(doc: DocumentResponse, text: string, ctx: ReaderConte
   const here = (ch: number | 'all') => makeAddress(doc.source_id, doc.native_id, { ch });
   wrap.append(tableOfContents(chapters, open, here));
   if (open === 'all') {
-    for (const [i, c] of book.entries()) wrap.append(chapterNode(c, i, false));
+    for (const [i, c] of book.entries()) wrap.append(chapterNode(c, i, false, dir));
     return wrap;
   }
   const chapter = chapters[open]!;
-  const body = chapterNode(chapter, open, true);
+  const body = chapterNode(chapter, open, true, dir);
   const number = chapterNumbers(chapters);
   const page = chapter.page;
   // The front matter (before the first heading) is chapter 0 of the split, not "Chapter 1": CHAPTER I
@@ -115,11 +122,14 @@ function opening(c: Chapter): string {
 }
 
 /** Paragraphs of a chapter: folded headings as subheadings, verse with its lines. */
-function chapterBody(chapter: Chapter, numbered: boolean): HTMLElement {
-  const box = h('div', { class: 'reader-text' });
+function chapterBody(chapter: Chapter, numbered: boolean, dir?: TextDir): HTMLElement {
+  // Right to left for the whole text when its language says so; else each paragraph by its own
+  // characters when the language tag says nothing.
+  const box = h('div', { class: 'reader-text', dir: dir === 'rtl' ? 'rtl' : undefined });
   const subheads = new Set(chapter.subheads ?? []);
   for (const [i, p] of chapter.paragraphs.entries()) {
     const attrs: Record<string, string> = {};
+    if (dir === 'auto') attrs.dir = 'auto';
     if (numbered) attrs['data-paragraph'] = String(i);
     if (p.includes('\n')) attrs.class = 'verse';
     box.append(h(subheads.has(i) ? 'h3' : 'p', attrs, p));
@@ -127,13 +137,13 @@ function chapterBody(chapter: Chapter, numbered: boolean): HTMLElement {
   return box;
 }
 
-function chapterNode(chapter: Chapter, index: number, single: boolean): HTMLElement {
+function chapterNode(chapter: Chapter, index: number, single: boolean, dir?: TextDir): HTMLElement {
   const continued = chapter.page && chapter.page.index > 0;
   return h(
     'section',
     { class: 'reader-chapter', id: `chapter-${index + 1}` },
-    h('h2', null, continued ? `${chapter.title} (continued)` : chapter.title),
-    chapterBody(chapter, single),
+    h('h2', { dir: dir ?? undefined }, continued ? `${chapter.title} (continued)` : chapter.title),
+    chapterBody(chapter, single, dir),
   );
 }
 

@@ -246,6 +246,8 @@ interface Translated {
   text: BlockText;
   english: string | null;
   showing: 'original' | 'translation';
+  /** The block's own `dir` attribute (null: none), given back with the original. */
+  dir: string | null;
   toggle: HTMLButtonElement;
   note?: HTMLElement; // "part of this passage is not translated"
 }
@@ -470,15 +472,34 @@ export function applyToBlock(block: Element, text: BlockText, english: string): 
     },
     '⇄',
   );
-  const t: Translated = { block, original, text, english, showing: 'translation', toggle };
+  const t: Translated = {
+    block,
+    original,
+    text,
+    english,
+    showing: 'translation',
+    dir: block.getAttribute('dir'),
+    toggle,
+  };
   toggle.addEventListener('click', (e) => {
     e.preventDefault();
     e.stopPropagation();
     show(t, t.showing === 'translation' ? 'original' : 'translation');
   });
   block.setAttribute('data-mt', 'translated');
+  direct(t, 'translation');
   block.replaceChildren(...built, toggle);
   return t;
+}
+
+/**
+ * English runs left to right: a translated passage of an Arabic or Hebrew page says so itself (the
+ * page around it stays right to left), and gets its own direction back with its original.
+ */
+function direct(t: Translated, which: 'original' | 'translation'): void {
+  if (which === 'translation') t.block.setAttribute('dir', 'ltr');
+  else if (t.dir === null) t.block.removeAttribute('dir');
+  else t.block.setAttribute('dir', t.dir);
 }
 
 /** A translation that grew (the next pieces of a long block came): shown when it is on view. */
@@ -500,6 +521,7 @@ function show(t: Translated, which: 'original' | 'translation'): void {
     t.block.replaceChildren(...built, ...(t.note ? [t.note] : []), t.toggle);
     t.block.setAttribute('data-mt', 'translated');
   }
+  direct(t, which);
   t.showing = which;
   t.toggle.title =
     which === 'translation'
@@ -510,6 +532,11 @@ function show(t: Translated, which: 'original' | 'translation'): void {
 function addTitle(heading: HTMLElement | null, english: string): void {
   if (!heading || heading.nextElementSibling?.classList.contains('mt-title')) return;
   heading.after(
-    h('p', { class: 'mt-title' }, h('span', { lang: 'en' }, english), ' (machine translation)'),
+    h(
+      'p',
+      { class: 'mt-title', dir: 'ltr' },
+      h('span', { lang: 'en' }, english),
+      ' (machine translation)',
+    ),
   );
 }

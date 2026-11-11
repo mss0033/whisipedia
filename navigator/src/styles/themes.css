@@ -37,6 +37,9 @@
   --field-fg: #000;
   --page-bg: #fff;
   --page-fg: #000;
+  /* How a one-ink drawing on no background (a formula image) is drawn: as it is on a light page,
+     inverted on a dark one. Every dark palette block sets it (pages.css img[data-wsp-role="ink"]). */
+  --ink-filter: none;
   --page-muted: #555;
   --link: #0000ee;
   --visited: #551a8b;
@@ -148,6 +151,7 @@
   --field-fg: #1a1030;
   --page-bg: #1b1546;
   --page-fg: #f3ecd2;
+  --ink-filter: invert(1) hue-rotate(180deg);
   --page-muted: #c9bd94;
   --link: #8fd3ff;
   --visited: #d5a6ff;
@@ -216,6 +220,7 @@
   --field-fg: var(--phos);
   --page-bg: #050300;
   --page-fg: var(--phos);
+  --ink-filter: invert(1) hue-rotate(180deg);
   --page-muted: var(--phos-dim);
   --link: var(--phos-bright);
   --visited: var(--phos-dim);
@@ -423,6 +428,7 @@
   --field-fg: #ececec;
   --page-bg: #1c1c1f;
   --page-fg: #e4e4e4;
+  --ink-filter: invert(1) hue-rotate(180deg);
   --page-muted: #a9a9ae;
   --link: #8ab4ff;
   --visited: #c7a2ff;
@@ -589,6 +595,7 @@
   --field-fg: #fff;
   --page-bg: #000;
   --page-fg: #fff;
+  --ink-filter: invert(1) hue-rotate(180deg);
   --page-muted: #fff;
   --link: #ffff00;
   --visited: #00ffff;

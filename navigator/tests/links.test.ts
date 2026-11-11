@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   anchorCandidates,
   anchorName,
+  copyMath,
   findAnchor,
   resolveHref,
   sanitizeDocumentHtml,
+  updateTableScroll,
 } from '../src/core/links.ts';
 import { linkify, renderPlainText } from '../src/core/text.ts';
 
@@ -464,5 +466,160 @@ describe('places in a page (views-documents-fragment-scroll)', () => {
       'The end',
     );
     expect(findAnchor(div, 'nowhere')).toBeNull();
+  });
+});
+
+describe('one-ink drawings in dark palettes (views-documents-dark-math-images)', () => {
+  const clean = (html: string, more: object = {}) => {
+    const div = document.createElement('div');
+    div.append(sanitizeDocumentHtml(html, { ...ctx, ...more }).fragment);
+    return div;
+  };
+  const formula = (mathml: string) =>
+    `<p><span class="mwe-math-element"><span class="mwe-math-mathml-inline mwe-math-mathml-a11y"><math xmlns="http://www.w3.org/1998/Math/MathML" alttext="{\\displaystyle x}">${mathml}</math></span><img src="/v1/assets/w/1/f.svg" class="mwe-math-fallback-image-inline mw-invert skin-invert" alt="{\\displaystyle x}"></span></p>`;
+  const SIMPLE =
+    '<semantics><mrow class="MJX-TeXAtom-ORD"><mfrac><mi>a</mi><mn>2</mn></mfrac></mrow><annotation encoding="application/x-tex">a/2</annotation></semantics>';
+
+  it('marks a formula image as ink, and what a wiki marks for inverting, on the image or a wrapper', () => {
+    const div = clean(
+      `${formula(SIMPLE)}
+       <figure class="skin-invert-image"><a href="./File:Graph.svg"><img src="/v1/assets/w/1/graph.svg" alt="graph"></a></figure>
+       <div class="skin-invert"><p><img src="/v1/assets/w/1/diagram.png" alt="diagram"></p></div>
+       <p><img src="/v1/assets/w/1/sign.svg" class="mw-invert" alt="sign"></p>
+       <p><img src="/v1/assets/w/1/photo.jpg" class="mw-file-element" alt="photo"></p>`,
+    );
+    const role = (alt: string) =>
+      div.querySelector(`img[alt="${alt}"]`)?.getAttribute('data-wsp-role');
+    expect(div.querySelector('img[src$="f.svg"]')?.getAttribute('data-wsp-role')).toBe('ink');
+    expect(role('graph')).toBe('ink');
+    expect(role('diagram')).toBe('ink');
+    expect(role('sign')).toBe('ink');
+    expect(role('photo')).toBeNull(); // photographs are never inverted
+    // The image is the formula on screen: the hidden MathML copy is not shown beside it.
+    expect(div.querySelectorAll('math').length).toBe(0);
+  });
+
+  it('copyMath says whether the copy shows all the source did', () => {
+    const math = (inner: string) => {
+      const d = document.createElement('div');
+      d.innerHTML = `<math>${inner}</math>`;
+      return copyMath(d.querySelector('math')!);
+    };
+    expect(math(SIMPLE).lossless).toBe(true);
+    expect(math('<mi mathvariant="normal">x</mi>').lossless).toBe(true);
+    // Kept, but MathML Core draws no other variant (a double-struck R would be an italic R) and
+    // no alignment of columns or rows.
+    expect(math('<mi mathvariant="double-struck">R</mi>').lossless).toBe(false);
+    expect(
+      math('<mtable columnalign="left"><mtr><mtd><mi>x</mi></mtd></mtr></mtable>').lossless,
+    ).toBe(false);
+    // Dropped with its whole subtree: a term would go missing with nothing to compare against.
+    const tensor = math(
+      '<mrow><mi>R</mi><mmultiscripts><mi>T</mi><mi>a</mi><mi>b</mi></mmultiscripts></mrow>',
+    );
+    expect(tensor.lossless).toBe(false);
+    expect(tensor.math?.textContent).toBe('R');
+    expect(math('<mlabeledtr><mtd><mi>x</mi></mtd></mlabeledtr>').lossless).toBe(false);
+    expect(math('<maction><mi>x</mi></maction>').lossless).toBe(false);
+    // Kept, but not drawn by MathML Core: no brackets, no strike.
+    expect(math('<mfenced><mi>x</mi></mfenced>').lossless).toBe(false);
+    expect(math('<menclose notation="updiagonalstrike"><mi>x</mi></menclose>').lossless).toBe(
+      false,
+    );
+    // Attributes that change the drawing.
+    expect(math('<mi mathcolor="red">x</mi>').lossless).toBe(false);
+    expect(
+      math('<mtable columnspacing="1em"><mtr><mtd><mi>x</mi></mtd></mtr></mtable>').lossless,
+    ).toBe(false);
+    // A second presentation child of <semantics> is lost; an annotation is not.
+    expect(math('<semantics><mi>x</mi><mi>y</mi></semantics>').lossless).toBe(false);
+    expect(
+      math(
+        '<semantics><mi>x</mi><annotation-xml encoding="MathML-Content"><ci>x</ci></annotation-xml></semantics>',
+      ).lossless,
+    ).toBe(true);
+  });
+
+  it('shows the MathML in place of the image only when asked and only when it loses nothing', () => {
+    const LOSSY =
+      '<semantics><mrow><mi>R</mi><mmultiscripts><mi>T</mi><mi>a</mi></mmultiscripts></mrow></semantics>';
+    // Off (the default, until the formula fixtures pass their screenshot comparison): image, as ink.
+    const off = clean(formula(SIMPLE));
+    expect(off.querySelectorAll('math').length).toBe(0);
+    expect(off.querySelectorAll('img[data-wsp-role="ink"]').length).toBe(1);
+
+    const on = clean(formula(SIMPLE) + formula(LOSSY), { mathSwap: true });
+    const [good, lossy] = [...on.querySelectorAll('p')];
+    expect(good?.querySelectorAll('math').length).toBe(1);
+    expect(good?.querySelector('math')?.textContent).toBe('a2');
+    expect(good?.querySelector('img')).toBeNull();
+    expect(good?.innerHTML).not.toMatch(/annotation|class=/);
+    // The lossy one keeps its image (as ink) and shows no half formula.
+    expect(lossy?.querySelectorAll('math').length).toBe(0);
+    expect(lossy?.querySelector('img')?.getAttribute('data-wsp-role')).toBe('ink');
+
+    // A hidden copy with no image after it is never shown: nothing would say it is a formula's twin.
+    const alone = clean(
+      '<p><span class="mwe-math-mathml-a11y"><math><mi>q</mi></math></span></p>',
+      { mathSwap: true },
+    );
+    expect(alone.querySelectorAll('math').length).toBe(0);
+  });
+});
+
+describe('wide tables at phone width (views-documents-mobile-overflow)', () => {
+  const clean = (html: string) => {
+    const div = document.createElement('div');
+    div.append(sanitizeDocumentHtml(html, ctx).fragment);
+    return div;
+  };
+  const BOX = '[data-wsp-role="table-scroll"]';
+
+  it('puts each outer table in a scroll box that is not a tab stop', () => {
+    const div = clean(
+      `<table><caption>Rivers</caption><tr><td>a <table><tr><td>inner</td></tr></table></td></tr></table>
+       <p>Text.</p><table><tr><td>b</td></tr></table>
+       <table class="navbox"><tr><th>Voting</th></tr><tr><td><table><tr><td>n</td></tr></table></td></tr></table>`,
+    );
+    const boxes = [...div.querySelectorAll(BOX)];
+    expect(boxes.length).toBe(2);
+    for (const box of boxes) {
+      expect(box.localName).toBe('div');
+      expect(box.children.length).toBe(1);
+      expect(box.firstElementChild?.localName).toBe('table');
+      // No tab stop and no unnamed region per table: dozens on an article otherwise.
+      expect(box.hasAttribute('tabindex')).toBe(false);
+      expect(box.hasAttribute('role')).toBe(false);
+    }
+    expect(div.querySelectorAll('table').length).toBe(5);
+    // Not a table inside a table, nor one in a folded navigation box.
+    expect(div.querySelector(`${BOX} ${BOX}`)).toBeNull();
+    expect(div.querySelector(`details ${BOX}`)).toBeNull();
+    expect(div.querySelector('[tabindex]')).toBeNull();
+  });
+
+  it('makes the box a named tab stop only while its table is wider than it', () => {
+    const div = clean(
+      '<table><caption> Longest  rivers </caption><tr><td>a</td></tr></table><table><tr><td>b</td></tr></table>',
+    );
+    const [named, bare] = [...div.querySelectorAll<HTMLElement>(BOX)] as [HTMLElement, HTMLElement];
+    const size = (el: HTMLElement, scrollWidth: number, clientWidth: number) => {
+      Object.defineProperty(el, 'scrollWidth', { value: scrollWidth, configurable: true });
+      Object.defineProperty(el, 'clientWidth', { value: clientWidth, configurable: true });
+    };
+    size(named, 900, 390);
+    size(bare, 900, 390);
+    updateTableScroll(named);
+    updateTableScroll(bare);
+    expect(named.getAttribute('tabindex')).toBe('0');
+    expect(named.getAttribute('role')).toBe('region');
+    expect(named.getAttribute('aria-label')).toBe('Table: Longest rivers');
+    expect(bare.getAttribute('aria-label')).toBe('Table');
+    // The window got wider: it fits, and is no stop any more.
+    size(named, 390, 900);
+    updateTableScroll(named);
+    expect(named.hasAttribute('tabindex')).toBe(false);
+    expect(named.hasAttribute('role')).toBe(false);
+    expect(named.hasAttribute('aria-label')).toBe(false);
   });
 });

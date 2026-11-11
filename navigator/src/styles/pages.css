@@ -197,7 +197,21 @@
 .doc-body td {
   border: 1px solid var(--rule);
   padding: 3px 8px;
-  text-align: left;
+  text-align: start;
+}
+/* A table wider than the page scrolls in its own box (core/links.ts wraps every outer table); the
+   box is a tab stop only while it overflows (updateTableScroll). */
+.doc-body [data-wsp-role="table-scroll"] {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.doc-body [data-wsp-role="table-scroll"]:focus-visible {
+  outline: 2px dotted var(--focus);
+  outline-offset: -2px;
+}
+.doc-body pre {
+  max-width: 100%;
+  overflow-x: auto;
 }
 
 /* -------------------------------- portal ----------------------------- */
@@ -615,6 +629,30 @@
   max-width: 100%;
   height: auto;
 }
+/* A drawing in one ink on no background (a formula image, a diagram the wiki marks for its night
+   mode) is drawn in the page's ink: black on a dark page was invisible. Each palette says whether
+   it is dark (--ink-filter, themes.css); photographs are never marked. */
+.doc-body img[data-wsp-role="ink"] {
+  filter: var(--ink-filter, none);
+}
+@media print {
+  /* Paper is light whatever the palette on screen. */
+  .doc-body img[data-wsp-role="ink"] {
+    filter: none;
+  }
+  /* Nothing scrolls on paper: a wide table or line prints as far as the sheet goes. */
+  .doc-body [data-wsp-role="table-scroll"],
+  .doc-body pre {
+    overflow: visible;
+  }
+}
+/* In a right-to-left page, code and fixed-width text still run left to right, from the left;
+   a block the page itself gives a direction keeps it. */
+.doc-body :is(pre, code, kbd, samp, .doc-text):dir(rtl):not([dir]) {
+  direction: ltr;
+  text-align: start;
+  unicode-bidi: isolate;
+}
 .doc-footer p {
   margin: 4px 0;
   font-size: 0.875rem;
@@ -664,7 +702,7 @@
   font-style: italic;
 }
 .mt-toggle {
-  margin-left: 0.4em;
+  margin-inline-start: 0.4em;
   padding: 0 3px;
   font-size: 0.75em;
   line-height: 1.2;
@@ -1129,7 +1167,8 @@
   font-weight: bold;
 }
 .reader-toc ol {
-  margin: 0.4em 0 0.4em 1.5em;
+  margin-block: 0.4em;
+  margin-inline: 1.5em 0;
   padding: 0;
   columns: 2;
   column-gap: 2em;
@@ -1145,7 +1184,7 @@
   margin: 0 0 0.6em;
 }
 .reader-where .badge {
-  margin-left: 0.5em;
+  margin-inline-start: 0.5em;
 }
 .reader-chapter p {
   line-height: 1.55;
@@ -1195,10 +1234,11 @@
 }
 @media (min-width: 900px) {
   .doc-body details[data-wsp-role="navigation"] {
-    float: right;
-    clear: right;
+    float: inline-end;
+    clear: inline-end;
     max-width: 22rem;
-    margin: 0 0 8px 16px;
+    margin-block: 0 8px;
+    margin-inline: 16px 0;
   }
 }
 .doc-body small[data-wsp-role^="thread-"] {

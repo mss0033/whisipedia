@@ -9,6 +9,7 @@
  */
 import type { DocumentLink } from '../api/types.ts';
 import { docIdToAddress, encodePath, makeAddress, normalizeAddress } from './address.ts';
+import { ownDir } from './dir.ts';
 import { interwikiAddress } from './interwiki.ts';
 
 export type LinkTarget =
@@ -30,6 +31,13 @@ export interface LinkContext {
   docId?: string | undefined;
   /** Resolution table from the API (`DocumentResponse.links`). */
   links?: readonly DocumentLink[] | undefined;
+  /**
+   * Show Wikipedia's own MathML in place of its formula image, where the copy loses nothing
+   * (`copyMath`). Off: Chromium draws MathML Core only and no math font is bundled, so the swap
+   * waits for the screenshot comparison of the formula fixtures (review of plan B, F2 items 1-2).
+   * Until then the image stays and is drawn as ink.
+   */
+  mathSwap?: boolean | undefined;
 }
 
 const SCHEME_RE = /^([a-z][a-z0-9+.-]*):/i;
@@ -340,6 +348,32 @@ export interface SanitizeStats {
   removed: number;
 }
 
+/**
+ * What the page held, counted in the sanitiser's one walk for the "this page is empty" notice
+ * (`emptyPageNotice`): the page's own words (not the ones the sanitiser adds, not its `<h1>`),
+ * the pictures the library holds, frames and canvases. Elements the reader drops are counted too,
+ * as the notice always did; scripts, styles, `noscript` and templates never were.
+ */
+export interface PageSeen {
+  /** The page's text, whitespace collapsed, up to `SEEN_TEXT_CAP` characters. */
+  text: string;
+  images: number;
+  frames: number;
+  canvas: number;
+}
+const SEEN_TEXT_CAP = 4000;
+const SEEN_RAW_CAP = 40_000; // before whitespace is collapsed
+const UNSEEN = new Set(['script', 'style', 'noscript', 'template', 'title', 'head']);
+
+/** A drawing in one ink on no background: a formula image, a diagram a wiki marks for inverting.
+ * Drawn in the page's ink in dark palettes (`--ink-filter`, styles/themes.css). */
+export const INK_ROLE = 'ink';
+/** The box around a table, which scrolls sideways when the table is wider than the page. */
+export const TABLE_SCROLL_ROLE = 'table-scroll';
+const MATH_FALLBACK = /(?:^|\s)mwe-math-fallback-image-/;
+/** Wikipedia marks what to invert in its night mode mostly on a wrapper, not on the image. */
+const INVERT_WRAPPERS = '.mw-invert, .skin-invert, .skin-invert-image';
+
 const MATHML_NS = 'http://www.w3.org/1998/Math/MathML';
 /** Presentation MathML kept (rebuilt in the MathML namespace): PlanetMath's formulas are MathML only,
  * and dropping `math` left "Let be a complete metric space" (2026-10-16 field exam). */
@@ -402,30 +436,77 @@ const MATH_ATTRS = new Set([
   'alttext',
 ]);
 
-/** A formula as MathML (allowlisted elements and attributes, no links), or null to drop it. */
-export function sanitizeMath(el: Element): Element | null {
-  // Wikipedia's hidden accessible copy: its fallback image is the formula on screen.
-  if (el.closest('[class*="mwe-math-mathml"]')) return null;
+/** Elements whose loss changes nothing a reader sees. */
+const MATH_ANNOTATIONS = new Set(['annotation', 'annotation-xml']);
+/** Attributes whose loss changes nothing a reader sees. */
+const MATH_NEUTRAL_ATTR = /^(?:xmlns(?::.*)?|class|id|xref|data-.*)$/;
+/** Kept, but MathML Core (Chromium) draws no brackets for `mfenced` and no strike or box for `menclose`. */
+const MATH_NOT_CORE = new Set(['mfenced', 'menclose']);
+
+/**
+ * A formula as MathML (allowlisted elements and attributes, no links). An element not on the list
+ * goes with everything in it, so `lossless` says whether the copy shows all the source did: false
+ * when anything but an annotation was dropped (`mmultiscripts`, `mlabeledtr`, …), when an attribute
+ * that changes the drawing was (`mathcolor`, `columnspacing`), or when the formula needs what
+ * MathML Core does not draw. Only a lossless copy may stand in for the formula's image.
+ */
+export function copyMath(el: Element): { math: Element | null; lossless: boolean } {
+  let lossless = true;
   const copy = (src: Element): Element | null => {
     const tag = src.localName.toLowerCase();
-    if (!MATH_TAGS.has(tag)) return null; // annotation, annotation-xml, maction, unknown
+    if (!MATH_TAGS.has(tag)) {
+      if (!MATH_ANNOTATIONS.has(tag)) lossless = false; // maction, mmultiscripts, unknown
+      return null;
+    }
+    if (MATH_NOT_CORE.has(tag)) lossless = false;
     const out = document.createElementNS(MATHML_NS, tag);
     for (const attr of Array.from(src.attributes)) {
       const name = attr.name.toLowerCase();
-      if (MATH_ATTRS.has(name)) out.setAttribute(name, attr.value);
+      if (MATH_ATTRS.has(name)) {
+        out.setAttribute(name, attr.value);
+        // Kept, but MathML Core draws neither: `mathvariant` only as "normal" (a double-struck R
+        // would show as an italic R), and no column or row alignment.
+        if (
+          (name === 'mathvariant' && attr.value.trim().toLowerCase() !== 'normal') ||
+          name === 'columnalign' ||
+          name === 'rowalign'
+        )
+          lossless = false;
+      } else if (!MATH_NEUTRAL_ATTR.test(name)) lossless = false;
     }
+    let first = true;
     for (const child of Array.from(src.childNodes)) {
       if (child.nodeType === Node.TEXT_NODE)
         out.appendChild(document.createTextNode(child.textContent ?? ''));
       else if (child.nodeType === Node.ELEMENT_NODE) {
+        if (tag === 'semantics' && !first) {
+          // Its first child is the presentation; the rest are annotations, and anything else is lost.
+          if (!MATH_ANNOTATIONS.has((child as Element).localName.toLowerCase())) lossless = false;
+          continue;
+        }
+        first = false;
         const c = copy(child as Element);
         if (c) out.appendChild(c);
-        if (tag === 'semantics') break; // its first child is the presentation; the rest are annotations
       }
     }
     return out;
   };
-  return copy(el);
+  const math = copy(el);
+  return { math, lossless: lossless && math !== null };
+}
+
+/** A formula as MathML, or null to drop it. */
+export function sanitizeMath(el: Element): Element | null {
+  // Wikipedia's hidden accessible copy: its fallback image is the formula on screen.
+  if (el.closest('[class*="mwe-math-mathml"]')) return null;
+  return copyMath(el).math;
+}
+
+/** The formula image of Wikipedia's hidden MathML copy `el`, when it follows it in the same formula. */
+function fallbackImageOf(el: Element): Element | null {
+  const formula = el.closest('.mwe-math-element');
+  const img = formula?.querySelector('img[class*="mwe-math-fallback-image-"]') ?? null;
+  return img && el.compareDocumentPosition(img) & Node.DOCUMENT_POSITION_FOLLOWING ? img : null;
 }
 
 /** Notes a wiki's own stylesheet hides, which show once it is gone: Wikipedia's citation maintenance
@@ -567,10 +648,40 @@ function navigationTitle(el: Element): string {
 export function sanitizeDocumentHtml(
   html: string,
   ctx: LinkContext,
-): { fragment: DocumentFragment; stats: SanitizeStats } {
+): {
+  fragment: DocumentFragment;
+  stats: SanitizeStats;
+  /** The page's own direction (`<body dir>`, else `<html dir>`): the authority, above its language tag. */
+  dir: 'rtl' | 'ltr' | 'auto' | undefined;
+  seen: PageSeen;
+} {
   const parsed = new DOMParser().parseFromString(html, 'text/html');
   const out = document.createDocumentFragment();
   const stats: SanitizeStats = { links: 0, broken: 0, removed: 0 };
+  const seen: PageSeen = { text: '', images: 0, frames: 0, canvas: 0 };
+  const see = (text: string | null): void => {
+    // Kept as written and collapsed once at the end, as the text of the whole page was: collapsed
+    // node by node, the indentation of pretty-printed markup counted as words.
+    if (!text || seen.text.length >= SEEN_RAW_CAP) return;
+    if (/\S/.test(text)) seen.text += text;
+    else if (!/\s$/.test(seen.text)) seen.text += ' ';
+  };
+  /** An element the reader drops whole still counted for what it held. */
+  const seeDropped = (el: Element, tag: string): void => {
+    if (UNSEEN.has(tag)) return;
+    const hidden = el.cloneNode(true) as Element;
+    for (const x of hidden.querySelectorAll('script, style, noscript, template, title, h1'))
+      x.remove();
+    if (!inHeading) see(hidden.textContent);
+    seen.frames += (tag === 'iframe' ? 1 : 0) + hidden.querySelectorAll('iframe').length;
+    seen.canvas += (tag === 'canvas' ? 1 : 0) + hidden.querySelectorAll('canvas').length;
+    for (const img of hidden.querySelectorAll('img'))
+      if (allowedImagePath(img.getAttribute('src') ?? '')) seen.images += 1;
+  };
+  let inHeading = 0; // inside the page's <h1>: its title, not its words
+  let inTable = 0;
+  /** Formula images whose MathML is shown in their place (`mathSwap`). */
+  const swapped = new Set<Element>();
   // Navigation blocks, folded: expanded in place, a field's sidebar filled the first screen before
   // the lead (Gibbs free energy, Arrow's theorem: 2026-10-16 field exam). Inner ones stay as they are.
   let inNavigation = 0;
@@ -581,6 +692,7 @@ export function sanitizeDocumentHtml(
     for (const child of Array.from(src.childNodes)) {
       if (child.nodeType === Node.TEXT_NODE) {
         const text = child.textContent ?? '';
+        if (!inHeading) see(text);
         const clean = inCode ? text : withoutTemplateLeftovers(text);
         if (clean !== text && !clean.trim()) emptied += 1;
         dest.appendChild(document.createTextNode(clean));
@@ -598,6 +710,7 @@ export function sanitizeDocumentHtml(
       if ((tag === 'frame' || tag === 'iframe') && framePage(el)) {
         // A frame is never loaded here: a link to the page it showed, when the archive holds it.
         const { address, name } = framePage(el)!;
+        if (tag === 'iframe') seen.frames += 1;
         const p = document.createElement('p');
         const a = document.createElement('a');
         a.setAttribute('href', `#${address}`);
@@ -609,11 +722,22 @@ export function sanitizeDocumentHtml(
         continue;
       }
       if (DROP.has(tag) || HIDDEN_CLASSES.some((c) => el.classList.contains(c))) {
+        seeDropped(el, tag);
         stats.removed += 1;
         continue;
       }
       if (tag === 'math') {
-        const math = sanitizeMath(el);
+        if (!inHeading) see(el.textContent);
+        let math = sanitizeMath(el);
+        if (!math && ctx.mathSwap) {
+          // Wikipedia's hidden copy stands in for its image only when it shows all the image does.
+          const img = fallbackImageOf(el);
+          const own = img ? copyMath(el) : null;
+          if (img && own?.lossless) {
+            math = own.math;
+            swapped.add(img);
+          }
+        }
         if (math) dest.appendChild(math);
         else stats.removed += 1;
         continue;
@@ -640,6 +764,8 @@ export function sanitizeDocumentHtml(
         continue;
       }
       if (tag === 'img') {
+        if (!inHeading && allowedImagePath(el.getAttribute('src') ?? '')) seen.images += 1;
+        if (swapped.has(el)) continue; // its MathML is on the page
         dest.appendChild(sanitizeImage(el, stats));
         continue;
       }
@@ -667,9 +793,13 @@ export function sanitizeDocumentHtml(
       }
       const code = CODE_TAGS.has(tag);
       if (code) inCode += 1;
+      if (tag === 'h1') inHeading += 1;
+      if (tag === 'table') inTable += 1;
       const emptiedBefore = emptied;
       walk(el, copy);
       if (code) inCode -= 1;
+      if (tag === 'h1') inHeading -= 1;
+      if (tag === 'table') inTable -= 1;
       if (
         tag === 'li' &&
         emptied > emptiedBefore &&
@@ -701,6 +831,16 @@ export function sanitizeDocumentHtml(
           continue;
         }
         copy.textContent = label;
+      }
+      if (tag === 'table' && inTable === 0 && inNavigation === 0) {
+        // A table wider than the page scrolls in its own box, not the page (a phone showed a third
+        // of a wide table and the whole page slid sideways). Not a table inside a table, nor one in
+        // a folded navigation box.
+        const box = document.createElement('div');
+        box.setAttribute(ROLE_ATTR, TABLE_SCROLL_ROLE);
+        box.appendChild(copy);
+        dest.appendChild(box);
+        continue;
       }
       dest.appendChild(copy);
     }
@@ -737,7 +877,50 @@ export function sanitizeDocumentHtml(
       delete a.dataset.anchor;
     }
   }
-  return { fragment: out, stats };
+  seen.text = seen.text.replace(/\s+/g, ' ').trim().slice(0, SEEN_TEXT_CAP);
+  const dir =
+    ownDir(parsed.body?.getAttribute('dir')) ?? ownDir(parsed.documentElement?.getAttribute('dir'));
+  return { fragment: out, stats, dir, seen };
+}
+
+/**
+ * A table's scroll box is a tab stop and a named region only while its table is wider than it:
+ * a stop on every table would be dozens on an article, and the whole page on a site laid out as one
+ * table. Named from the table's caption.
+ */
+export function updateTableScroll(box: HTMLElement): void {
+  if (box.scrollWidth > box.clientWidth + 1) {
+    const caption = (box.querySelector('caption')?.textContent ?? '').replace(/\s+/g, ' ').trim();
+    box.setAttribute('tabindex', '0');
+    box.setAttribute('role', 'region');
+    box.setAttribute('aria-label', caption ? `Table: ${caption.slice(0, 80)}` : 'Table');
+  } else {
+    box.removeAttribute('tabindex');
+    box.removeAttribute('role');
+    box.removeAttribute('aria-label');
+  }
+}
+
+/** Keeps every table scroll box under `root` right as the layout changes, for the page's life. */
+export function watchTableScroll(root: ParentNode, life: AbortSignal): void {
+  if (typeof ResizeObserver !== 'function' || life.aborted) return;
+  const boxes = root.querySelectorAll<HTMLElement>(`[${ROLE_ATTR}="${TABLE_SCROLL_ROLE}"]`);
+  if (!boxes.length) return;
+  const watcher = new ResizeObserver((entries) => {
+    const changed = new Set<HTMLElement>();
+    for (const e of entries) {
+      const box = (e.target as Element).closest<HTMLElement>(
+        `[${ROLE_ATTR}="${TABLE_SCROLL_ROLE}"]`,
+      );
+      if (box) changed.add(box);
+    }
+    for (const box of changed) updateTableScroll(box);
+  });
+  for (const box of boxes) {
+    watcher.observe(box); // the page got narrower
+    if (box.firstElementChild) watcher.observe(box.firstElementChild); // the table got wider
+  }
+  life.addEventListener('abort', () => watcher.disconnect(), { once: true });
 }
 
 /** "wsp://site/a/b_c%20d" -> "b c d": a name for a link that has none. */
@@ -765,6 +948,8 @@ function sanitizeImage(el: Element, stats: SanitizeStats): Node {
     const img = document.createElement('img');
     img.src = path;
     img.alt = alt;
+    if (MATH_FALLBACK.test(el.getAttribute('class') ?? '') || el.closest(INVERT_WRAPPERS))
+      img.setAttribute(ROLE_ATTR, INK_ROLE);
     img.loading = 'lazy';
     img.decoding = 'async';
     for (const a of ['width', 'height']) {
