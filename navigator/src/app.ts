@@ -2,7 +2,7 @@
  * The Navigator application: window chrome, navigation controller, keyboard
  * shortcuts. Pages render into <main>; everything else lives here.
  */
-import { ApiRequestError, WspClient } from './api/client.ts';
+import { ApiRequestError, ApiUnreachableError, WspClient } from './api/client.ts';
 import type { DocumentResponse, SourceInfo } from './api/types.ts';
 import { showDialog, sourceDataDialog } from './chrome/dialogs.ts';
 import { type IconName, icon, throbberSvg } from './chrome/icons.ts';
@@ -14,12 +14,14 @@ import {
   interpretInput,
   isBuiltinHost,
   makeAddress,
+  normalizeAddress,
   parseAddress,
   searchAddress,
   setReadableHosts,
 } from './core/address.ts';
 import { h } from './core/dom.ts';
-import { GlobalHistory, Hotlist, SessionStack } from './core/history.ts';
+import { GlobalHistory, Hotlist, SessionStack, type StackEntry } from './core/history.ts';
+import { anchorName, findAnchor } from './core/links.ts';
 import { PLACES } from './core/places.ts';
 import { type Route, resolveRoute } from './core/router.ts';
 import { SafeStorage } from './core/storage.ts';
@@ -124,7 +126,14 @@ export class App implements AppServices {
   private menu!: MenuBar;
   private buttons = new Map<string, HTMLButtonElement>();
 
+  /** Ends the listeners outside the root (`dispose`). */
+  private readonly disposed = new AbortController();
+  /** The load in progress: aborted when it is superseded or stopped. */
   private controller: AbortController | null = null;
+  /** The life of the page on screen: aborted when the page after it is shown. */
+  private shownLife: AbortController | null = null;
+  /** The stack entry of the page on screen, set when a page is shown: where its scroll is saved. */
+  private shown: StackEntry | undefined;
   private seq = 0;
   /** Automatic retries of a page whose last load failed transiently (503 while warming up). */
   private readonly transientTries = new Map<string, number>();
@@ -200,6 +209,10 @@ export class App implements AppServices {
   }
 
   replaceAddress(address: string): void {
+    // Only for the page whose entry the stack is at: after Back is pressed and stopped, the stack
+    // is at the entry asked for while the map on screen is still alive, and its moves would write
+    // its address over that entry.
+    if (this.shown !== this.stack.current) return;
     const title = this.currentTitle;
     this.stack.replace(address, title);
     history.replaceState({ pos: this.stack.position }, '', `#${address}`);
@@ -210,9 +223,22 @@ export class App implements AppServices {
 
   start(): void {
     const initial = hashToAddress(location.hash) ?? HOME_ADDRESS;
-    window.addEventListener('popstate', (ev) => this.onPopState(ev));
-    document.addEventListener('keydown', (ev) => this.onKey(ev));
+    const signal = this.disposed.signal;
+    window.addEventListener('popstate', (ev) => this.onPopState(ev), { signal });
+    document.addEventListener('keydown', (ev) => this.onKey(ev), { signal });
     void this.load(initial, 'replace', {}, { focus: false });
+  }
+
+  /**
+   * Take the application down: its listeners on the window and the document, the load in progress
+   * and the page on screen. For a host that replaces it (the tests start many in one window, and a
+   * stale one answered the next one's Back).
+   */
+  dispose(): void {
+    this.disposed.abort();
+    this.seq += 1;
+    this.controller?.abort();
+    this.shownLife?.abort();
   }
 
   back(): void {
@@ -261,13 +287,19 @@ export class App implements AppServices {
   }
 
   private onPopState(ev: PopStateEvent): void {
+    // The page on screen is left: its place is kept in its own entry, before the stack moves (and
+    // however many times Back is pressed before the next page shows).
+    this.saveScroll();
     const pos = (ev.state as { pos?: number } | null)?.pos;
-    const entry = typeof pos === 'number' ? this.stack.go(pos) : undefined;
-    if (entry) {
-      void this.load(entry.address, 'none', {}, { scrollY: entry.scrollY });
+    const addr = hashToAddress(location.hash);
+    // A position is trusted only when that entry is the address the browser shows: after a reload
+    // the stack starts again, and an old entry's position may name another page.
+    const there = typeof pos === 'number' ? this.stack.list()[pos] : undefined;
+    if (there && typeof pos === 'number' && normalizeAddress(there.address) === addr) {
+      this.stack.go(pos);
+      void this.load(there.address, 'none', {}, { scrollY: there.scrollY });
       return;
     }
-    const addr = hashToAddress(location.hash);
     if (addr) void this.load(addr, 'push', {}, { pushState: false });
   }
 
@@ -279,10 +311,14 @@ export class App implements AppServices {
     opts: NavOptions,
     extra: { scrollY?: number; focus?: boolean; redirects?: number; pushState?: boolean } = {},
   ): Promise<void> {
-    if (this.stack.current) this.stack.setScroll(this.main.scrollTop);
+    this.saveScroll();
     this.controller?.abort();
     const ac = new AbortController();
     this.controller = ac;
+    // The page's own life: handed to the page on screen when this load is shown, ended here when it
+    // is not (superseded, stopped, redirected, failed), so nothing an abandoned page started lives on.
+    const life = new AbortController();
+    let shown = false;
     const seq = ++this.seq;
     const started = performance.now();
     const parsed = parseAddress(address);
@@ -290,45 +326,85 @@ export class App implements AppServices {
     this.pendingDoc = null;
 
     const route = resolveRoute(address);
-    const ctx: PageContext = { route, address, app: this, signal: ac.signal, opts };
-    let result: PageResult;
+    const ctx: PageContext = {
+      route,
+      address,
+      app: this,
+      signal: ac.signal,
+      life: life.signal,
+      opts,
+    };
     try {
+      let result: PageResult;
       const waiting = setTimeout(() => {
         if (seq === this.seq) this.setProgress('Host contacted. Waiting for reply…', 40);
       }, 120);
-      result = await RENDERERS[route.page](ctx);
-      clearTimeout(waiting);
-    } catch (err) {
-      if (ac.signal.aborted || seq !== this.seq) return;
-      result = this.failurePage(err, address, seq);
-    }
-    if (seq !== this.seq) return;
-
-    if ('redirect' in result) {
-      const n = (extra.redirects ?? 0) + 1;
-      if (n <= MAX_REDIRECTS) {
-        void this.load(result.redirect, mode === 'none' ? 'replace' : mode, opts, {
-          ...extra,
-          redirects: n,
-          scrollY: 0,
-        });
-        return;
+      try {
+        result = await RENDERERS[route.page](ctx);
+      } catch (err) {
+        if (ac.signal.aborted || seq !== this.seq) return;
+        life.abort(); // whatever the failed page had started; the error page starts nothing
+        result = this.failurePage(err, address, seq);
+      } finally {
+        clearTimeout(waiting);
       }
-      result = {
-        status: 'error',
-        title: 'Too many redirects',
-        body: errorPage({
-          title: 'Redirect loop',
-          heading: 'Redirect loop',
-          message: 'This address redirects too many times.',
-          address,
-        }),
-      };
+      if (seq !== this.seq) return;
+
+      if ('redirect' in result) {
+        const n = (extra.redirects ?? 0) + 1;
+        if (n <= MAX_REDIRECTS) {
+          // The page redirected to is a new visit: a place kept for the address that redirects is
+          // not a place on it, and its own `#section` applies.
+          const { scrollY: _left, ...rest } = extra;
+          void this.load(result.redirect, mode === 'none' ? 'replace' : mode, opts, {
+            ...rest,
+            redirects: n,
+          });
+          return;
+        }
+        result = {
+          status: 'error',
+          title: 'Too many redirects',
+          body: errorPage({
+            title: 'Redirect loop',
+            heading: 'Redirect loop',
+            message: 'This address redirects too many times.',
+            address,
+          }),
+        };
+      }
+
+      this.setProgress(`Transferring data from ${parsed?.host ?? 'library'}…`, 80);
+      let done = 'Document: Done, with an error.';
+      try {
+        this.commit(result, address, mode, extra, life);
+        done = `Document: Done. (${((performance.now() - started) / 1000).toFixed(2)} secs)`;
+        this.live.textContent = `Loaded: ${result.title}`;
+      } catch (err) {
+        console.error(err); // a bug of the Navigator's: said, not swallowed
+      } finally {
+        // Whatever showing the page threw, the load is over: the throbber stops and Stop is off.
+        if (seq === this.seq) this.endLoading(done);
+        shown = this.shownLife === life; // false when showing it failed before it was the page
+      }
+    } finally {
+      if (!shown) life.abort();
     }
+  }
 
-    this.setProgress(`Transferring data from ${parsed?.host ?? 'library'}…`, 80);
+  /** The place the reader is at, kept in the entry of the page on screen. */
+  private saveScroll(): void {
+    if (this.shown) this.shown.scrollY = this.main.scrollTop;
+  }
 
-    // Commit
+  /** Show a rendered page: history, the page itself, its scroll position and focus. */
+  private commit(
+    result: Exclude<PageResult, { redirect: string }>,
+    address: string,
+    mode: Mode,
+    extra: { scrollY?: number; focus?: boolean; pushState?: boolean },
+    life: AbortController,
+  ): void {
     const title = result.title;
     if (mode === 'push') {
       // The same address again (Home twice) is no new entry: the stack keeps one, and so must the
@@ -349,33 +425,40 @@ export class App implements AppServices {
     this.currentTitle = title;
     if (!result.status) this.history.record(address, title); // error pages are not places visited
 
+    // The page before this one ends here, and not before: until now it was the page on screen.
+    this.shownLife?.abort();
+    this.shownLife = life;
+    this.shown = this.stack.current;
     this.main.replaceChildren(result.body);
     this.markVisited();
     this.setTitle(title);
     this.setLocation(address);
     this.updateButtons();
 
-    if (result.scrollTo) {
-      const el = document.getElementById(result.scrollTo);
-      if (el) el.scrollIntoView?.();
-      else this.main.scrollTop = 0;
+    // Back and Forward return to where the reader was, also on an address with a `#section`; the
+    // section (or a book's bookmark) is where a new visit opens.
+    let section: HTMLElement | null = null;
+    if (extra.scrollY !== undefined) {
+      this.main.scrollTop = extra.scrollY;
     } else {
-      this.main.scrollTop = extra.scrollY ?? 0;
+      section = result.scrollTo ? document.getElementById(result.scrollTo) : null;
+      if (section) section.scrollIntoView?.();
+      else this.main.scrollTop = 0;
     }
     if (extra.focus !== false) {
-      const target = result.focus ?? this.main.querySelector<HTMLElement>('h1');
+      // At a section, focus goes there too: the next Tab and a screen reader start from it, not
+      // from the top of the page.
+      const target = result.focus ?? section ?? this.main.querySelector<HTMLElement>('h1');
       if (target) {
         if (
           !target.hasAttribute('tabindex') &&
-          !/^(INPUT|BUTTON|A|TEXTAREA|SELECT)$/.test(target.tagName)
+          !/^(INPUT|BUTTON|TEXTAREA|SELECT)$/.test(target.tagName) &&
+          !(target.tagName === 'A' && target.hasAttribute('href')) // `<a name>` takes no focus by itself
         )
           target.setAttribute('tabindex', '-1');
-        target.focus({ preventScroll: !!result.scrollTo || (extra.scrollY ?? 0) > 0 });
+        target.focus({ preventScroll: !!section || (extra.scrollY ?? 0) > 0 });
       }
     }
-    const secs = ((performance.now() - started) / 1000).toFixed(2);
-    this.endLoading(`Document: Done. (${secs} secs)`);
-    this.live.textContent = `Loaded: ${title}`;
   }
 
   private failurePage(err: unknown, address: string, seq: number): PageResult {
@@ -423,13 +506,28 @@ export class App implements AppServices {
         }),
       };
     }
+    if (err instanceof ApiUnreachableError) {
+      return {
+        status: 'error',
+        title: 'Unable to locate the server',
+        body: errorPage({
+          title: 'Unable to locate the server',
+          heading: 'Unable to locate the server',
+          message: `${APP_NAME} is unable to reach the Whisipedia daemon on this computer. It may not be running. (${err.message})`,
+          address,
+          suggestions: [retry],
+        }),
+      };
+    }
+    // Anything else is the Navigator's own fault (a page it could not draw), not the library's:
+    // saying "server not reachable" sent readers to restart a daemon that was running.
     return {
       status: 'error',
-      title: 'Unable to locate the server',
+      title: 'Page could not be shown',
       body: errorPage({
-        title: 'Unable to locate the server',
-        heading: 'Unable to locate the server',
-        message: `${APP_NAME} is unable to reach the Whisipedia daemon on this computer. It may not be running. (${String(err)})`,
+        title: 'Page could not be shown',
+        heading: 'The Navigator hit an error showing this page',
+        message: `The library answered, but ${APP_NAME} failed while drawing the page. (${String(err)})`,
         address,
         suggestions: [retry],
       }),
@@ -495,30 +593,37 @@ export class App implements AppServices {
     const t = ev.target as HTMLElement | null;
     const typing =
       !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
-    const ctrl = ev.ctrlKey || ev.metaKey;
+    // AltGr (Ctrl+Alt on Windows) types a character: `[`, `]`, `{`, `@` on most European layouts.
+    // It is never one of the Navigator's Ctrl shortcuts.
+    const altGr = ev.getModifierState?.('AltGraph') || (ev.ctrlKey && ev.altKey);
+    const held = ev.ctrlKey || ev.metaKey;
+    const ctrl = held && !altGr;
+    const alt = ev.altKey && !altGr;
+    const plain = !ev.shiftKey && !ev.altKey; // Ctrl+Shift+B, Ctrl+Alt+H are the browser's or the system's
     const key = ev.key;
     let handled = true;
 
-    if (ev.altKey && !ctrl && key === 'ArrowLeft') this.back();
-    else if (ev.altKey && !ctrl && key === 'ArrowRight') this.forward();
-    else if (ev.altKey && !ctrl && key === 'Home') this.home();
+    if (alt && !held && key === 'ArrowLeft') this.back();
+    else if (alt && !held && key === 'ArrowRight') this.forward();
+    else if (alt && !held && key === 'Home') this.home();
     else if (
       (ctrl && key.toLowerCase() === 'l') ||
-      (ev.altKey && key.toLowerCase() === 'd') ||
+      (alt && key.toLowerCase() === 'd') ||
       key === 'F6'
     )
       this.focusLocation();
     else if (ctrl && !ev.shiftKey && key.toLowerCase() === 'd') this.bookmarkCurrent();
-    else if (ctrl && key.toLowerCase() === 'h') this.navigate(makeAddress('history'));
-    else if (ctrl && key.toLowerCase() === 'b') this.navigate(makeAddress('hotlist'));
-    else if (ctrl && key.toLowerCase() === 'u') this.viewSourceData();
+    else if (ctrl && plain && key.toLowerCase() === 'h') this.navigate(makeAddress('history'));
+    else if (ctrl && plain && key.toLowerCase() === 'b') this.navigate(makeAddress('hotlist'));
+    else if (ctrl && plain && key.toLowerCase() === 'u') this.viewSourceData();
     else if ((ctrl && key.toLowerCase() === 'r' && !ev.shiftKey) || key === 'F5') this.reload();
-    else if (ctrl && key === ']') this.theme.zoom(1);
-    else if (ctrl && key === '[') this.theme.zoom(-1);
+    // Not while typing: a bracket belongs to the text being written.
+    else if (ctrl && !typing && key === ']') this.theme.zoom(1);
+    else if (ctrl && !typing && key === '[') this.theme.zoom(-1);
     else if (ctrl && key === '0') this.theme.zoom(0);
     else if (key === 'F10' && !ev.shiftKey) this.menu.focusFirst();
     else if (key === 'Escape' && this.loading) this.stop();
-    else if (key === '/' && !typing && !ctrl && !ev.altKey) {
+    else if (key === '/' && !typing && !held && !ev.altKey) {
       const box = this.main.querySelector<HTMLInputElement>('input[data-search-box]');
       if (box) {
         box.focus();
@@ -992,7 +1097,10 @@ export class App implements AppServices {
       this.navigate(a.dataset.wsp);
     } else if (a.dataset.anchor) {
       ev.preventDefault();
-      const el = document.getElementById(a.dataset.anchor);
+      // The same lookup as an address's `#section`: the id as written, decoded, or encoded.
+      const el =
+        findAnchor(this.main, anchorName(a.dataset.anchor)) ??
+        document.getElementById(a.dataset.anchor);
       if (el) {
         el.scrollIntoView?.();
         if (!el.hasAttribute('tabindex')) el.setAttribute('tabindex', '-1');

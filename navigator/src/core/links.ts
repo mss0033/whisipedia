@@ -57,6 +57,52 @@ export function anchorId(id: string): string {
 }
 
 /**
+ * The ways one place in a page is written: an address carries a fragment decoded (`Café`,
+ * `Early life`), a link carries it as its page wrote it (`#Caf%C3%A9`), and the id in the page is
+ * either. In order: as given, decoded, each with spaces as `_` (wiki headings), percent-encoded.
+ */
+export function anchorCandidates(fragment: string): string[] {
+  const out = [fragment];
+  let decoded = fragment;
+  try {
+    decoded = decodeURIComponent(fragment);
+  } catch {
+    /* not percent-encoded: a plain `%` */
+  }
+  out.push(decoded, fragment.replace(/ /g, '_'), decoded.replace(/ /g, '_'));
+  out.push(encodeURIComponent(decoded), encodeURIComponent(decoded.replace(/ /g, '_')));
+  return [...new Set(out)].filter((id) => id !== '');
+}
+
+/** The id a page's fragment lands on, among the ids present (`has`), or null: the one lookup for
+ * an address's `#section`, a link inside the page and the check that a link has a target. */
+export function resolveAnchor(fragment: string, has: (id: string) => boolean): string | null {
+  for (const c of anchorCandidates(fragment)) if (has(anchorId(c))) return anchorId(c);
+  return null;
+}
+
+/** The page's own name for a place, from the id a rewritten link carries (`data-anchor`). */
+export function anchorName(id: string): string {
+  return id.startsWith(ANCHOR_PREFIX) ? id.slice(ANCHOR_PREFIX.length) : id;
+}
+
+/** The element of a sanitised page (under `root`) that a fragment of the page names. `fragment`
+ * is the page's own name for it, never a prefixed id: Gutenberg's pages have `id="pg-footer"`. */
+export function findAnchor(root: ParentNode, fragment: string): HTMLElement | null {
+  const name = fragment;
+  const byId = (id: string): HTMLElement | null =>
+    /[\n\r\f]/.test(id)
+      ? null
+      : root.querySelector<HTMLElement>(`[id="${id.replace(/["\\]/g, '\\$&')}"]`);
+  let found: HTMLElement | null = null;
+  resolveAnchor(name, (id) => {
+    found = byId(id);
+    return found !== null;
+  });
+  return found;
+}
+
+/**
  * The Atlas address of a `geo:` URI (RFC 5870: `geo:46.6833,7.85`, `geo:46.68,7.85,560;u=30`; the
  * common `?z=12` zoom too), pinned, or null when it holds no coordinates.
  */
@@ -612,6 +658,10 @@ export function sanitizeDocumentHtml(
         else copy.setAttribute(name, attr.value);
       }
       if (tag === 'a') {
+        // `<a name="x">` is a place to land, the usual form on old sites, man pages and Gutenberg
+        // HTML: kept as an id when the element has none.
+        const name = el.getAttribute('name');
+        if (name && !copy.hasAttribute('id')) copy.setAttribute('id', anchorId(name));
         const href = el.getAttribute('href');
         if (href !== null) rewriteAnchor(copy as HTMLAnchorElement, href, ctx, stats);
       }
@@ -676,7 +726,13 @@ export function sanitizeDocumentHtml(
   // A link to a place in the page that is not there (a dropped navigation bar) is plain text.
   const ids = new Set([...out.querySelectorAll('[id]')].map((e) => e.id));
   for (const a of out.querySelectorAll<HTMLAnchorElement>('a[data-anchor]')) {
-    if (!ids.has(a.dataset.anchor!)) {
+    // The link names its target as its page wrote it (`#Caf%C3%A9` for id="Café"): it is given
+    // the id that is there.
+    const id = resolveAnchor(anchorName(a.dataset.anchor!), (x) => ids.has(x));
+    if (id) {
+      a.dataset.anchor = id;
+      a.setAttribute('href', `#${id}`);
+    } else {
       a.removeAttribute('href');
       delete a.dataset.anchor;
     }

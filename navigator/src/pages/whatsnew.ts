@@ -95,7 +95,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
     more.disabled = true;
     limit = Math.min(MAX, limit * 2);
     ctx.app.api
-      .recentChanges(limit, undefined, ctx.signal)
+      .recentChanges(limit, undefined, ctx.life)
       .then((r) => {
         changes = [...r.items];
         renderGroups(list, changes, sources);
@@ -112,12 +112,12 @@ export async function render(ctx: PageContext): Promise<PageResult> {
   const scheduleRender = () => {
     pending ??= setTimeout(() => {
       pending = undefined;
-      if (!ctx.signal.aborted) renderGroups(list, changes, sources);
+      if (!ctx.life.aborted) renderGroups(list, changes, sources);
     }, RENDER_MS);
   };
   const reload = () => {
     ctx.app.api
-      .recentChanges(limit, undefined, ctx.signal)
+      .recentChanges(limit, undefined, ctx.life)
       .then((r) => {
         changes = [...r.items];
         live.textContent = 'Many changes just landed; showing the newest.';
@@ -141,8 +141,11 @@ export async function render(ctx: PageContext): Promise<PageResult> {
     },
     { onSkipped: reload },
   );
-  ctx.signal.addEventListener('abort', () => clearTimeout(pending), { once: true });
-  ctx.signal.addEventListener('abort', () => watcher.close(), { once: true });
+  // With the page (`life`), not with the load: the stream stayed open for a load never shown, and
+  // closed under the page on screen when the next navigation was stopped.
+  ctx.life.addEventListener('abort', () => clearTimeout(pending), { once: true });
+  ctx.life.addEventListener('abort', () => watcher.close(), { once: true });
+  if (ctx.life.aborted) watcher.close();
 
   const body = h(
     'div',

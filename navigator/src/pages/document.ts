@@ -9,7 +9,12 @@ import { docIdToAddress, makeAddress, searchAddress } from '../core/address.ts';
 import { diffLines, diffStats } from '../core/diff.ts';
 import { type Child, h } from '../core/dom.ts';
 import { formatDate, formatNumber } from '../core/format.ts';
-import { allowedImagePath, replaceBrokenImages, sanitizeDocumentHtml } from '../core/links.ts';
+import {
+  allowedImagePath,
+  findAnchor,
+  replaceBrokenImages,
+  sanitizeDocumentHtml,
+} from '../core/links.ts';
 import {
   formatLabel,
   mediaKindOf,
@@ -197,7 +202,7 @@ export function renderBody(
   // Only a COD structure's document: not any text with a CIF file's line (2026-11-06 review).
   const structure = structureOf(doc);
   if (structure) {
-    wrap.appendChild(structureView(doc, structure));
+    wrap.appendChild(structureView(doc, structure, reader?.signal));
     return { node: wrap, broken: 0 };
   }
   const text = withoutTitleLine(doc.text ?? '', doc.title);
@@ -960,7 +965,7 @@ function timeMachine(ctx: PageContext, doc: DocumentResponse, route: DocRoute): 
     if (loaded) return;
     loaded = true;
     ctx.app.api
-      .history(doc.doc_id, ctx.signal)
+      .history(doc.doc_id, ctx.life)
       .then((hist) => {
         const here = makeAddress(doc.source_id, doc.native_id);
         list.replaceChildren(
@@ -1204,7 +1209,7 @@ function pause(ms: number, signal: AbortSignal): Promise<boolean> {
 }
 
 export async function markUncaptured(
-  ctx: Pick<PageContext, 'app' | 'signal'>,
+  ctx: Pick<PageContext, 'app' | 'life'>,
   content: HTMLElement,
   note: HTMLElement,
 ): Promise<void> {
@@ -1223,12 +1228,12 @@ export async function markUncaptured(
   let pending = [...byAddress.keys()].slice(0, LINK_CHECK_MAX);
   let marked = 0;
   for (let round = 0; pending.length && round < LINK_CHECK_ROUNDS; round++) {
-    if (round > 1 && !(await pause(LINK_CHECK_PAUSE_MS * (round - 1), ctx.signal))) return;
+    if (round > 1 && !(await pause(LINK_CHECK_PAUSE_MS * (round - 1), ctx.life))) return;
     const later: string[] = [];
     for (let i = 0; i < pending.length; i += LINK_CHECK_BATCH) {
       const batch = pending.slice(i, i + LINK_CHECK_BATCH);
-      const { missing, unchecked } = await ctx.app.api.missingLinks(batch, ctx.signal);
-      if (ctx.signal.aborted) return;
+      const { missing, unchecked } = await ctx.app.api.missingLinks(batch, ctx.life);
+      if (ctx.life.aborted) return;
       later.push(...unchecked);
       for (const at of missing) {
         for (const a of byAddress.get(at) ?? []) {
@@ -1259,6 +1264,16 @@ export function originalWebAddress(nativeId: string): string | null {
   return /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(host) && /[a-z]/i.test(host.split('.').pop() ?? '')
     ? `https://${nativeId}`
     : null;
+}
+
+/**
+ * The id of the element an address's `#section` (or a section redirect's section) names on the page:
+ * the Time Machine box is the Navigator's own, every other place is one of the page's, whose ids
+ * the sanitiser keeps under its prefix (`core/links.ts`). Undefined when the page has no such place.
+ */
+export function sectionId(body: ParentNode, section: string): string | undefined {
+  if (section === TIME_MACHINE) return `doc-${TIME_MACHINE}`;
+  return findAnchor(body, section)?.id;
 }
 
 export async function render(ctx: PageContext): Promise<PageResult> {
@@ -1333,7 +1348,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
       app: ctx.app,
       chapter: route.chapter,
       address: here,
-      signal: ctx.signal,
+      signal: ctx.life, // what the page does once shown ends with the page, not with the load
     });
     content = r.node;
     broken = r.broken;
@@ -1347,7 +1362,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
       : translationBar(ctx.app.api, doc, content, {
           legal: source?.domain.includes('law') ?? false,
           heading: () => titleOf(),
-          signal: ctx.signal,
+          signal: ctx.life,
         });
 
   const body = h(
@@ -1382,7 +1397,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
           doc,
           (path) => ctx.app.api.url(path),
           { app: ctx.app, docId: doc.doc_id, address: here },
-          { api: ctx.app.api, docId: doc.doc_id, signal: ctx.signal },
+          { api: ctx.app.api, docId: doc.doc_id, signal: ctx.life },
         ),
     content,
     partsNav(doc, 'bottom'),
@@ -1411,15 +1426,15 @@ export async function render(ctx: PageContext): Promise<PageResult> {
     if (title.id && title.id !== 'doc-title') title.before(h('span', { id: title.id }));
     title.setAttribute('id', 'doc-title');
   }
+  const section = route.fragment || doc.section;
   return {
     title: route.at ? `${doc.title} (as of ${asOfText(doc)})` : doc.title,
     body,
     // A section redirect (IPv6_stateless_address_autoconfiguration) is served as its page: open at the section.
-    scrollTo:
-      route.fragment || doc.section
-        ? `doc-${route.fragment || doc.section}`
-        : body.querySelector(`#${RESUME_ID}`)
-          ? RESUME_ID
-          : undefined,
+    scrollTo: section
+      ? sectionId(body, section)
+      : body.querySelector(`#${RESUME_ID}`)
+        ? RESUME_ID
+        : undefined,
   };
 }

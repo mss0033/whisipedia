@@ -36,6 +36,18 @@ import type {
   WeatherStatus,
 } from './types.ts';
 
+/**
+ * The request never got an answer: the daemon is not running, the connection was refused or cut.
+ * Thrown by the client's one way out to the network, so "server not reachable" is told by class,
+ * never by `TypeError` (which a rendering bug throws too) or by a message's words.
+ */
+export class ApiUnreachableError extends Error {
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause });
+    this.name = 'ApiUnreachableError';
+  }
+}
+
 export class ApiRequestError extends Error {
   readonly status: number;
   readonly code: string;
@@ -126,7 +138,17 @@ export class WspClient {
 
   constructor(opts: ClientOptions = {}) {
     this.base = opts.base ?? '';
-    this.fetchImpl = opts.fetch ?? ((input, init) => fetch(input, init));
+    const send: FetchLike = opts.fetch ?? ((input, init) => fetch(input, init));
+    this.fetchImpl = async (input, init) => {
+      try {
+        return await send(input, init);
+      } catch (err) {
+        // A request the caller ended is not a failure of the network.
+        if (init?.signal?.aborted || (err as { name?: unknown } | null)?.name === 'AbortError')
+          throw err;
+        throw new ApiUnreachableError(err);
+      }
+    };
   }
 
   /** Base URL, for EventSource (which cannot use the injected fetch). */
@@ -163,7 +185,15 @@ export class WspClient {
       throw new ApiRequestError(res.status, code, message);
     }
     if (res.status === 204) return null;
-    return res.json();
+    try {
+      return await res.json();
+    } catch (err) {
+      // The connection was cut while the answer was being read (the daemon restarted under a large
+      // page): no answer either. An answer that is not JSON stays what it is.
+      if ((err as { name?: unknown } | null)?.name === 'AbortError' || err instanceof SyntaxError)
+        throw err;
+      throw new ApiUnreachableError(err);
+    }
   }
 
   search(params: SearchParams, signal?: AbortSignal): Promise<SearchResults> {

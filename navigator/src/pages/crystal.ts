@@ -421,7 +421,7 @@ const START: Mat = rotate(
 );
 
 /** The drawing of a cell: canvas, controls and a line saying what is shown. */
-export function structureViewer(uc: UnitCell, title: string): HTMLElement {
+export function structureViewer(uc: UnitCell, title: string, life?: AbortSignal): HTMLElement {
   const toCart = cartesian(uc.cell);
   const points = uc.atoms.map((a) => toCart(a.frac));
   const links = bonds(uc.atoms, points);
@@ -592,7 +592,12 @@ export function structureViewer(uc: UnitCell, title: string): HTMLElement {
     '. Drag to turn it, or use the arrow keys; + and − zoom, and the wheel once it is selected (or with Ctrl).',
   );
   // Drawn again at its new size when the window (or the text size) changes the canvas's width.
-  if (typeof ResizeObserver === 'function') new ResizeObserver(redraw).observe(canvas);
+  // The observer ends with the page (`life`): it held the canvas and its atoms after the page was left.
+  if (typeof ResizeObserver === 'function' && !life?.aborted) {
+    const watcher = new ResizeObserver(redraw);
+    watcher.observe(canvas);
+    life?.addEventListener('abort', () => watcher.disconnect(), { once: true });
+  }
   redraw();
   return h('figure', { class: 'crystal-viewer' }, canvas, controls, h('figcaption', null, note));
 }
@@ -646,6 +651,7 @@ export function downloadButton(st: StructureText): HTMLButtonElement {
 export function structureView(
   doc: { title: string; source_id: string; native_id: string },
   st: StructureText,
+  life?: AbortSignal,
 ): HTMLElement {
   const block = parseCif(st.cif);
   const uc = block ? unitCell(block) : null;
@@ -654,7 +660,7 @@ export function structureView(
     { class: 'crystal' },
     summaryTable(st.summary, doc.source_id, doc.native_id),
     uc?.atoms.length
-      ? structureViewer(uc, doc.title)
+      ? structureViewer(uc, doc.title, life)
       : h(
           'p',
           { class: 'notice' },

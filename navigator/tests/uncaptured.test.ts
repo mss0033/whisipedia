@@ -17,7 +17,7 @@ describe('links to pages the site archive never captured (2026-10-19 audit)', ()
   it('are marked once the library has said which, with a note', async () => {
     const asked: string[][] = [];
     const ctx = {
-      signal: new AbortController().signal,
+      life: new AbortController().signal,
       app: {
         api: {
           missingLinks: async (a: string[]) => {
@@ -29,7 +29,7 @@ describe('links to pages the site archive never captured (2026-10-19 audit)', ()
           },
         },
       },
-    } as unknown as Pick<PageContext, 'app' | 'signal'>;
+    } as unknown as Pick<PageContext, 'app' | 'life'>;
     const body = page();
     const note = document.createElement('p');
     note.hidden = true;
@@ -54,7 +54,7 @@ describe('links to pages the site archive never captured (2026-10-19 audit)', ()
     try {
       let calls = 0;
       const ctx = {
-        signal: new AbortController().signal,
+        life: new AbortController().signal,
         app: {
           api: {
             missingLinks: async (a: string[]) => {
@@ -66,7 +66,7 @@ describe('links to pages the site archive never captured (2026-10-19 audit)', ()
             },
           },
         },
-      } as unknown as Pick<PageContext, 'app' | 'signal'>;
+      } as unknown as Pick<PageContext, 'app' | 'life'>;
       const body = page();
       const note = document.createElement('p');
       const done = markUncaptured(ctx, body, note);
@@ -86,9 +86,9 @@ describe('links to pages the site archive never captured (2026-10-19 audit)', ()
     vi.useFakeTimers();
     try {
       const ctx = {
-        signal: new AbortController().signal,
+        life: new AbortController().signal,
         app: { api: { missingLinks: async (a: string[]) => ({ missing: [], unchecked: a }) } },
-      } as unknown as Pick<PageContext, 'app' | 'signal'>;
+      } as unknown as Pick<PageContext, 'app' | 'life'>;
       const body = page();
       const note = document.createElement('p');
       note.hidden = true;

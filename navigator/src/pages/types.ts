@@ -38,7 +38,18 @@ export interface PageContext {
   route: Route;
   address: string;
   app: AppServices;
+  /**
+   * The load: aborted when another navigation supersedes it or the reader presses Stop. Only for
+   * work awaited before the renderer returns.
+   */
   signal: AbortSignal;
+  /**
+   * The page's life: aborted when the page that follows it is shown, or when this load ends without
+   * being shown (superseded, stopped, a redirect, an error). Everything that runs after the
+   * renderer returns (timers, streams, observers, maps, later requests) ends on this, never on
+   * `signal`: a navigation the reader stops must not take the page on screen apart.
+   */
+  life: AbortSignal;
   opts: NavOptions;
 }
 

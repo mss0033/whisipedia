@@ -37,7 +37,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
       audio,
       'No audiobook, radio or music collections are on the shelves yet; the programme (LibriVox, old-time radio, public-domain recordings) is planned and waits for the owner’s go.',
     ),
-    projectionTest(ctx.app),
+    projectionTest(ctx.app, ctx.life),
   );
   return { title: 'The Screening Room', body };
 }
@@ -107,7 +107,7 @@ const REEL_SECONDS = 8;
  * A test reel made here: colour bars and a countdown drawn on a canvas, a tone from Web Audio,
  * recorded with the browser's own recorder into a WebM the players stream like any file.
  */
-function projectionTest(app: AppServices): HTMLElement {
+function projectionTest(app: AppServices, life: AbortSignal): HTMLElement {
   const stage = h('div', { class: 'screening-stage' });
   const status = h('p', { class: 'fineprint', 'aria-live': 'polite' });
   const run = h('button', { type: 'button', class: 'btn-like' }, 'Run the projection test');
@@ -129,6 +129,16 @@ function projectionTest(app: AppServices): HTMLElement {
     status.textContent = 'Recording the reel…';
     try {
       const { video, audio } = await makeReel();
+      // The reels are memory until released: with the page, or at once when it was left meanwhile.
+      const release = () => {
+        URL.revokeObjectURL(video.url);
+        URL.revokeObjectURL(audio.url);
+      };
+      if (life.aborted) {
+        release();
+        return;
+      }
+      life.addEventListener('abort', release, { once: true });
       stage.replaceChildren();
       const skin = readSkin(app.storage, app.theme.current.theme);
       const mount = (p: Player, note: string) => {

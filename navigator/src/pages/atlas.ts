@@ -37,13 +37,15 @@ export async function render(ctx: PageContext): Promise<PageResult> {
   );
   const view = await import('../atlas/atlas-map.ts');
   if (ctx.signal.aborted) return { title: 'Atlas', body: holder };
+  // The map lives as long as the page (`life`), not as long as the load that made it: a link
+  // followed and then stopped left a dead map on screen.
   view.mount(holder, {
     api: ctx.app.api,
     storage: ctx.app.storage,
     theme: ctx.app.theme,
     sets,
     route,
-    signal: ctx.signal,
+    signal: ctx.life,
     onAddress: (address) => ctx.app.replaceAddress(address),
     navigate: (address) => ctx.app.navigate(address),
     status: (text) => ctx.app.status(text),
@@ -93,12 +95,13 @@ export async function upgradeMiniMaps(root: HTMLElement, ctx: PageContext): Prom
   if (!boxes.length) return;
   let sets: Tilesets;
   try {
-    sets = await ctx.app.api.tilesets(ctx.signal);
+    sets = await ctx.app.api.tilesets(ctx.life);
   } catch {
     return;
   }
-  if (!sets.tilesets.some((t) => t.id === 'basemap') || ctx.signal.aborted) return;
+  if (!sets.tilesets.some((t) => t.id === 'basemap') || ctx.life.aborted) return;
   const { miniMap } = await import('../atlas/atlas-map.ts');
+  if (ctx.life.aborted) return; // the page was left while the map module loaded
   for (const box of boxes) {
     const lat = Number(box.dataset.lat);
     const lon = Number(box.dataset.lon);
@@ -107,7 +110,7 @@ export async function upgradeMiniMaps(root: HTMLElement, ctx: PageContext): Prom
     miniMap(box, {
       sets,
       theme: ctx.app.theme,
-      signal: ctx.signal,
+      signal: ctx.life,
       lat,
       lon,
       zoom: Number.isFinite(zoom) ? zoom : 11,

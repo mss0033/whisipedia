@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { resolveHref, sanitizeDocumentHtml } from '../src/core/links.ts';
+import {
+  anchorCandidates,
+  anchorName,
+  findAnchor,
+  resolveHref,
+  sanitizeDocumentHtml,
+} from '../src/core/links.ts';
 import { linkify, renderPlainText } from '../src/core/text.ts';
 
 const ctx = {
@@ -397,5 +403,66 @@ describe('an image the archive holds as an empty file (2026-10-24 audit: MDWiki)
     } finally {
       globalThis.fetch = realFetch;
     }
+  });
+});
+
+describe('places in a page (views-documents-fragment-scroll)', () => {
+  const clean = (html: string) => {
+    const div = document.createElement('div');
+    div.append(sanitizeDocumentHtml(html, ctx).fragment);
+    return div;
+  };
+
+  it('a link inside the page finds its target however the two are written', () => {
+    const div = clean(
+      `<p><a href="#Caf%C3%A9">one</a> <a href="#Early life">two</a> <a href="#R%C3%A9sum%C3%A9">three</a> <a href="#gone">four</a></p>
+       <h2 id="Café">Café</h2><h2 id="Early_life">Early life</h2><h2 id="R%C3%A9sum%C3%A9">Résumé</h2>`,
+    );
+    const [one, two, three, four] = [...div.querySelectorAll('a')];
+    expect(one?.dataset.anchor).toBe('pg-Café');
+    expect(one?.getAttribute('href')).toBe('#pg-Café');
+    expect(two?.dataset.anchor).toBe('pg-Early_life');
+    expect(three?.dataset.anchor).toBe('pg-R%C3%A9sum%C3%A9');
+    // A target that is not on the page: plain text, as before.
+    expect(four?.hasAttribute('href')).toBe(false);
+    expect(four?.dataset.anchor).toBeUndefined();
+  });
+
+  it('keeps <a name> as a place to land (old sites, man pages, Gutenberg HTML)', () => {
+    const div = clean(
+      `<p><a href="#notes">Notes</a> <a href="#both">Both</a></p><p><a name="notes"></a>The notes.</p>
+       <p><a name="other" id="both">x</a></p>`,
+    );
+    expect(div.querySelector('#pg-notes')?.localName).toBe('a');
+    expect(div.querySelector<HTMLAnchorElement>('a[href="#pg-notes"]')?.dataset.anchor).toBe(
+      'pg-notes',
+    );
+    // An id wins over a name; the name attribute itself is not kept.
+    expect(div.querySelector('#pg-both')).not.toBeNull();
+    expect(div.querySelector('#pg-other')).toBeNull();
+    expect(div.querySelector('[name]')).toBeNull();
+  });
+
+  it('one lookup: as given, decoded, spaces as underscores, percent-encoded', () => {
+    expect(anchorCandidates('Early life')).toEqual(['Early life', 'Early_life', 'Early%20life']);
+    expect(anchorCandidates('Caf%C3%A9')).toContain('Café');
+    expect(anchorCandidates('Café')).toContain('Caf%C3%A9');
+    expect(anchorCandidates('100%')).toContain('100%'); // not an encoding: kept as written
+    const div = clean(
+      `<h2 id="Early_life">a</h2><h2 id="Caf%C3%A9">b</h2><h2 id='say "hi"'>c</h2><a name="top"></a>`,
+    );
+    expect(findAnchor(div, 'Early life')?.textContent).toBe('a');
+    expect(findAnchor(div, 'Café')?.textContent).toBe('b'); // an address's fragment is decoded
+    expect(findAnchor(div, 'say "hi"')?.textContent).toBe('c');
+    expect(findAnchor(div, 'top')?.localName).toBe('a');
+    // A page's own id may start with the sanitiser's prefix (Gutenberg: id="pg-footer").
+    const pg = clean(
+      '<p><a href="#pg-footer">End</a></p><div id="pg-footer">The end</div><div id="footer">x</div>',
+    );
+    expect(findAnchor(pg, 'pg-footer')?.textContent).toBe('The end');
+    expect(findAnchor(pg, anchorName(pg.querySelector('a')!.dataset.anchor!))?.textContent).toBe(
+      'The end',
+    );
+    expect(findAnchor(div, 'nowhere')).toBeNull();
   });
 });

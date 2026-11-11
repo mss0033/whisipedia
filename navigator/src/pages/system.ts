@@ -269,7 +269,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
   const timer = setInterval(() => {
     if (document.hidden) return;
     ctx.app.api
-      .system(ctx.signal)
+      .system(ctx.life)
       .then((next) => {
         holder.replaceChildren(renderSystem(next, names));
         stamp.textContent = `Updated ${formatDateTime(Date.now())} · refreshes every ${REFRESH_MS / 1000} s`;
@@ -278,7 +278,8 @@ export async function render(ctx: PageContext): Promise<PageResult> {
         stamp.textContent = 'Lost contact with the daemon; retrying…';
       });
   }, REFRESH_MS);
-  ctx.signal.addEventListener('abort', () => clearInterval(timer), { once: true });
+  ctx.life.addEventListener('abort', () => clearInterval(timer), { once: true });
+  if (ctx.life.aborted) clearInterval(timer);
 
   const body = h(
     'div',

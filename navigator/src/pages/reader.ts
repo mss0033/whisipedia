@@ -219,7 +219,9 @@ export function trackScroll(
   };
   const onScroll = () => {
     if (!body.isConnected) {
-      stop();
+      // With a signal the page's end stops it; a scroll of the page before this one is shown (the
+      // chapter not yet in the document) must not.
+      if (!signal) stop();
       return;
     }
     if (timer) clearTimeout(timer);

@@ -58,7 +58,7 @@ export async function render(ctx: PageContext): Promise<PageResult> {
     sets,
     status,
     route,
-    signal: ctx.signal,
+    signal: ctx.life, // the view lives with the page, not with the load
     onAddress: (address) => ctx.app.replaceAddress(address),
     navigate: (address) => ctx.app.navigate(address),
     say: (text) => ctx.app.status(text),
