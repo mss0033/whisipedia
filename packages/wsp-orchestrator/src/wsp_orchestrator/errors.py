@@ -9,7 +9,9 @@ quarantine. :func:`classify` sorts an exception into one of:
 * ``UNAVAILABLE`` - storage the step needs is not there (the NAS soft mount is down). Deferred.
 * ``RESOURCE`` - the step ran out of memory or was killed (an ``oom-kill`` of its transient unit,
   ``MemoryError``, ``ENOMEM``/``ENOSPC``). Counted as a *crash* of that state, never as an attempt:
-  the second one in the same state backs off and alerts ("probably OOM").
+  the second one in the same state backs off and alerts, naming the cause as far as it is known.
+  A child that ends without a result while the system shuts down is not one of these: it is
+  cancelled (``BUSY``).
 * ``PERMANENT`` - retrying soon cannot help: the host's robots.txt refused the URL or a redirect, a
   checksum only the owner can save is missing, upstream lists nothing. Like ``CONTENT`` for a
   release step; a scheduled job dies at once instead of being retried with backoff, and the
@@ -68,7 +70,8 @@ class StorageUnavailableError(TransientError):
 
 
 class ResourceExhaustedError(TransientError):
-    """The step was killed for memory (or died without a result): a crash, not a content failure."""
+    """The step was killed for memory, stopped at a limit or died without a result: a crash, not a
+    content failure."""
 
     kind = FailureKind.RESOURCE
 

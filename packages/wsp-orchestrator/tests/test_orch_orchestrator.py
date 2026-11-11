@@ -1,3 +1,5 @@
+import json
+import os
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -9,6 +11,7 @@ from wsp_core.model import Generation, ReleaseState, SourceSpec
 from wsp_orchestrator.clock import ManualClock
 from wsp_orchestrator.jobs import JobKind, JobStatus
 from wsp_orchestrator.orchestrator import Orchestrator
+from wsp_orchestrator.pipeline import RefineResult
 from wsp_orchestrator.policy import Candidate, CandidateKind, Decision, GateConfig, Proposal
 from wsp_orchestrator.testing import FakeWorld, SimulatedCrash, make_settings, make_spec, record_promotions
 
@@ -344,3 +347,69 @@ def test_resuming_a_source_requeues_its_releases_still_in_flight(tmp_path: Path)
     assert orch.queue.active(JobKind.FETCH_RELEASE, "src/2026-11-01") is None
     orch.resume_source("src")
     assert orch.queue.active(JobKind.FETCH_RELEASE, "src/2026-11-01") is not None
+
+
+def _kill(orch: Orchestrator) -> None:
+    """The daemon is gone without a clean stop: the kernel drops its flock, the running mark stays."""
+    assert orch._daemon_lock is not None  # pyright: ignore[reportPrivateUsage]
+    os.close(orch._daemon_lock)  # pyright: ignore[reportPrivateUsage]
+    orch._daemon_lock = None  # pyright: ignore[reportPrivateUsage]
+    orch.store.close()
+    orch.waker.close()
+
+
+def test_start_after_a_reboot_is_not_an_unclean_stop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """2026-11-10: a hard stop of the machine (wsl --shutdown, power loss) sends no SIGTERM. The next
+    start counted an unclean stop (towards the CRITICAL crash-loop) and a crash for every running
+    step; two such restarts sent a release to FAILED."""
+    from wsp_orchestrator import orchestrator as module
+
+    boot = tmp_path / "boot_id"
+    monkeypatch.setattr(module, "BOOT_ID_PATH", boot)
+
+    def cut(source: SourceSpec, generation: Generation, generation_dir: Path) -> RefineResult:
+        raise SimulatedCrash("the machine stops during the refine")
+
+    clock = ManualClock(T0)
+    world = FakeWorld.build(tmp_path, clock, [make_spec("src")])
+    world.adapters["src"].add_release("2026-10-01", FILES)
+    for n in range(4):  # four boots; the machine is cut down in a step each time
+        boot.write_text(f"boot-{n}\n")
+        orch, _, _ = build(tmp_path, [make_spec("src")], clock=clock, world=world)
+        orch.pipeline.refine = cut
+        orch.start()
+        assert "crash-loop" not in orch.alerter.open_keys()
+        assert json.loads(orch.store.get_meta("daemon:unclean_starts") or "[]") == []
+        rec = orch.store.get_release("src", "2026-10-01")
+        if rec is not None:
+            assert (rec.crash_count, rec.step_token) == (0, None)
+        with pytest.raises(SimulatedCrash):
+            orch.run_pending()
+        rec = orch.store.get_release("src", "2026-10-01")
+        assert rec is not None
+        assert (rec.state, rec.step_token is not None) == (ReleaseState.SEALED, True)
+        _kill(orch)
+        clock.advance(timedelta(minutes=5))
+    # the same boot: the daemon alone died, which still counts (one unclean stop, one crash)
+    orch, _, _ = build(tmp_path, [make_spec("src")], clock=clock, world=world)
+    orch.start()
+    assert len(json.loads(orch.store.get_meta("daemon:unclean_starts") or "[]")) == 1
+    rec = orch.store.get_release("src", "2026-10-01")
+    assert rec is not None
+    assert (rec.state, rec.crash_count) == (ReleaseState.SEALED, 1)
+    orch.close()
+
+
+def test_an_unknown_boot_id_keeps_the_old_counting(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A guard (it passes on the code before 2026-11-11 too, bar the patched name)."""
+    from wsp_orchestrator import orchestrator as module
+
+    monkeypatch.setattr(module, "BOOT_ID_PATH", tmp_path / "missing")
+    clock = ManualClock(T0)
+    world = FakeWorld.build(tmp_path, clock, [make_spec("src")])
+    for expected in (0, 1, 2):
+        orch, _, _ = build(tmp_path, [make_spec("src")], clock=clock, world=world)
+        orch.start()
+        assert len(json.loads(orch.store.get_meta("daemon:unclean_starts") or "[]")) == expected
+        _kill(orch)
+        clock.advance(timedelta(minutes=5))

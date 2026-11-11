@@ -14,6 +14,8 @@ and reads how it ended:
   kind is raised here (a held lock stays ``BUSY``: the step is deferred, no attempt counted);
 * ``oom-kill``, a signal, a core dump, or no result at all: :class:`ResourceExhaustedError`, which
   the pipeline counts as a crash of that state (alert after two), never as a content failure;
+  but no usable result (:class:`NoResultError`: not an OOM kill) while the daemon or the system is
+  shutting down is a cancelled step (:class:`StepCancelledError`), not a crash;
 * held at its memory ceiling with almost no CPU progress for ``stall_seconds`` (30 min): stopped,
   :class:`ResourceExhaustedError` (a stall is a visible failure, not a silent hang);
 * the unit could not start (e.g. a unit of that name from before a restart is still stopping):
@@ -58,6 +60,12 @@ RESULT = "result.json"
 # Environment handed to the child: a transient unit starts from systemd's environment, not ours.
 PASS_ENV_PREFIXES = ("WSP_", "OMP_", "MKL_", "TOKENIZERS_", "XDG_", "HF_")
 PASS_ENV = ("HOME", "LANG", "LC_ALL", "TZ", "PATH")
+
+
+class NoResultError(ResourceExhaustedError):
+    """The child ended (or never started) and left no usable result, and systemd did not say it was
+    an OOM kill. A counted crash, unless a shutdown is found to be the reason
+    (:meth:`IsolatedRunner.call`)."""
 
 
 class ChildStepError(RuntimeError):
@@ -223,6 +231,39 @@ def parse_systemd_run(stderr: str, returncode: int) -> ChildExit:
     if result is None:
         return ChildExit("start-failed", returncode, None, None, stderr.strip()[-2000:])
     return ChildExit(result, code, status, peak, stderr.strip()[-2000:])
+
+
+SHUTDOWN_GRACE_SECONDS = 2.0  # how long a shutdown may take to show after a child ended without a result
+SHUTDOWN_FIRST_LOOK_SECONDS = 0.3  # of that grace: wait for our own SIGTERM before asking systemd
+
+
+def system_stopping(run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run) -> bool:
+    """True while the machine or this user's service manager is shutting down.
+
+    Asks ``systemctl is-system-running`` and its ``--user`` form; either answering ``stopping`` is
+    enough. No ``systemctl``, an error or a timeout is False: not knowing is not a shutdown.
+    """
+    systemctl = shutil.which("systemctl")
+    if systemctl is None:
+        return False
+    for scope in ((), ("--user",)):
+        try:
+            done = run(
+                [systemctl, *scope, "is-system-running"],
+                capture_output=True,
+                text=True,
+                timeout=2,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if (done.stdout or "").strip() == "stopping":
+            return True
+    return False
+
+
+def _system_stopping_now() -> bool:
+    return system_stopping()  # the module's name, looked up at each call
 
 
 class _SystemdChild:
@@ -486,8 +527,14 @@ class IsolatedRunner:
         stall_seconds: float = STALL_SECONDS,
         sample_seconds: float = 60.0,
         clock: Callable[[], float] = time.monotonic,
+        shutdown_grace_seconds: float | None = None,
+        system_stopping: Callable[[], bool] | None = None,
     ) -> None:
-        """``stall_seconds``: a step held at its memory ceiling that long while using under
+        """``shutdown_grace_seconds`` and ``system_stopping`` (None: the module's
+        :data:`SHUTDOWN_GRACE_SECONDS` and :func:`system_stopping`, looked up now so that tests can
+        patch them): see :meth:`_ended_by_shutdown`.
+
+        ``stall_seconds``: a step held at its memory ceiling that long while using under
         :data:`STALL_CPU_SHARE` of a CPU is stopped as exhausted (0 = never). On 2026-10-14 an index
         step sat throttled at MemoryHigh for ten hours (12 min of CPU), holding the heavy lock, and
         nothing said so."""
@@ -503,6 +550,13 @@ class IsolatedRunner:
         self.stall_seconds = stall_seconds
         self.sample_seconds = sample_seconds
         self.clock = clock
+        # both read now, not as default arguments (those are bound when the class is defined)
+        self.shutdown_grace_seconds = (
+            SHUTDOWN_GRACE_SECONDS if shutdown_grace_seconds is None else shutdown_grace_seconds
+        )
+        self.system_stopping: Callable[[], bool] = (
+            _system_stopping_now if system_stopping is None else system_stopping
+        )
 
     def call(
         self,
@@ -551,7 +605,20 @@ class IsolatedRunner:
                     }
                 },
             )
-            return self._value(step, unit, outcome, result, lim)
+            try:
+                return self._value(step, unit, outcome, result, lim)
+            except NoResultError as exc:
+                # systemd stops the child and the daemon in one go at a shutdown, and the child can
+                # lose by milliseconds: on 2026-11-10 it ended 35 ms before the daemon handled its
+                # own SIGTERM, and a step that was stopped on purpose was counted as a crash
+                # ("probably killed for memory"). An OOM kill never comes here.
+                if outcome.result != "oom-kill" and self._ended_by_shutdown():
+                    log.info(
+                        "heavy step was ended by a shutdown, not a crash",
+                        extra={"fields": {"step": step, "unit": unit, "error": str(exc)}},
+                    )
+                    raise StepCancelledError(f"{step} ({unit}) was stopped by a shutdown") from exc
+                raise
         finally:
             shutil.rmtree(box, ignore_errors=True)
 
@@ -586,6 +653,36 @@ class IsolatedRunner:
                 raise StepCancelledError(f"{step} ({unit}) stopped for shutdown")
             raise ResourceExhaustedError(f"{step} ({unit}) stopped: {reason}")
 
+    def _ended_by_shutdown(self) -> bool:
+        """Did a shutdown end the child that has just left no result?
+
+        Our own stop flag is the cheap sign and usually follows the child's end within milliseconds,
+        so it is watched first for :data:`SHUTDOWN_FIRST_LOOK_SECONDS`; only then is systemd asked
+        (two calls of up to 2 s each, in a VM that may have 5 s left), the flag is watched for the
+        rest of ``shutdown_grace_seconds``, and systemd and the flag are read a last time: the
+        background slice can be frozen for the whole grace, so the wait alone proves nothing. A
+        genuine crash with no result costs this grace once.
+        """
+        if self.should_stop():
+            return True
+        began = time.monotonic()
+        deadline = began + max(0.0, self.shutdown_grace_seconds)
+        first_look = min(deadline, began + SHUTDOWN_FIRST_LOOK_SECONDS)
+        asked = False
+        while True:
+            now = time.monotonic()
+            if not asked and now >= first_look:
+                asked = True
+                if self.system_stopping() or self.should_stop():  # the ask can take seconds
+                    return True
+                continue
+            if now >= deadline:
+                break
+            time.sleep(min(0.05, deadline - now))
+            if self.should_stop():
+                return True
+        return self.should_stop() or self.system_stopping()
+
     @staticmethod
     def _value(step: str, unit: str, outcome: ChildExit, result: Path, limits: UnitLimits) -> Any:
         doc: Mapping[str, Any] | None = None
@@ -603,14 +700,26 @@ class IsolatedRunner:
                 raise ResourceBusyError(f"{step}: {unit} is still running: {detail}")
             # anything else (a property systemd refuses, no user manager) is counted like a crash:
             # retried, then backed off with an alert that carries systemd's message
-            raise ResourceExhaustedError(f"{step}: could not start {unit}: {detail}")
+            raise NoResultError(f"{step}: could not start {unit}: {detail}")
         if doc is not None and doc.get("ok") is True and outcome.result == "success":
             return doc.get("value")
         if doc is not None and doc.get("ok") is False:
             _raise_for(str(doc.get("kind", "")), f"{step}: {doc.get('error', 'failed')}")
-        raise ResourceExhaustedError(
+        # Say what is known, not "probably killed for memory" (2026-11-10: a shutdown was reported
+        # so). Still a counted crash when no shutdown is seen: a step that something keeps stopping
+        # must not repeat for ever without an alert.
+        if outcome.status == "KILL":  # a signal name: "9" would be an exit code
+            raise NoResultError(
+                f"{step} was killed without a result (SIGKILL: a forced stop, or the kernel's OOM "
+                "killer outside the unit's own ceiling)"
+            )
+        if outcome.result == "success" or outcome.status == "TERM":
+            raise NoResultError(
+                f"{step} was stopped from outside without a result (SIGTERM: systemctl stop or a shutdown)"
+            )
+        raise NoResultError(
             f"{step} died without a result ({outcome.result}"
-            f"{', status ' + outcome.status if outcome.status else ''}); probably killed for memory"
+            f"{', status ' + outcome.status if outcome.status else ''})"
         )
 
 

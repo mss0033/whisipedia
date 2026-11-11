@@ -19,8 +19,10 @@ Guarantees:
 * **Crash accounting** (audit C1): a step token is committed before the step's side effects. A token
   found at startup (:meth:`ReleasePipeline.recover_crashes`) means the daemon died inside that step;
   an OOM kill of a step's child unit counts the same. The first crash retries at once; the second in
-  the same state goes to FAILED with backoff and raises ``crashed:<release>`` ("probably OOM").
-  Crashes never count as attempts and never quarantine.
+  the same state goes to FAILED with backoff and raises ``crashed:<release>`` (with the cause as far
+  as it is known, :func:`crash_cause`). Crashes never count as attempts and never quarantine. A step
+  cut by a shutdown or by a restart of the machine is not a crash: it starts again, and after
+  :data:`INTERRUPTIONS_TO_ALERT` machine restarts in a row ``interrupted:<release>`` says so.
 * **Failure taxonomy** (:mod:`wsp_orchestrator.errors`, audit M1/H1): a busy lock or an unreachable NAS
   *defers* the step (same state, no attempt, retried after ``defer_delay``); out-of-memory is a
   crash; only content failures count attempts, and ``max_attempts`` of them quarantine the release
@@ -128,6 +130,11 @@ LEDGER_KIND_RETRY = "release.retry"
 # next start ends those steps without counting a crash (2026-10-26 review #35: two restarts to deploy
 # fixes sent a 100 GB seal to FAILED with a CRITICAL "probably OOM").
 ABANDONED_STEPS_META = "abandoned_steps"
+# JSON {release subject: {"state": ..., "count": n}}: how many times in a row a restart of the
+# machine cut the release's step in that state. Forgiven (no crash), but a step that every restart
+# cuts would repeat for ever in silence: at INTERRUPTIONS_TO_ALERT a WARNING says so.
+INTERRUPTED_STEPS_META = "interrupted_steps"
+INTERRUPTIONS_TO_ALERT = 3
 OWNER_ACTION_META = "last_owner_action"  # JSON {at, what}: the newest retry, approve or reject
 QUARANTINE_DIR = "_quarantine"
 _UNSAFE_GEN_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
@@ -146,7 +153,17 @@ def crash_cause(reason: str) -> str:
         return "stopped at its time limit"
     if "no space left" in low or "enospc" in low or "errno 28" in low:
         return "the disk is full"
-    return "probably OOM (out of memory)"
+    if "oom-killed" in low or "memoryerror" in low or "errno 12" in low:
+        return "out of memory (OOM-killed)" if "oom-killed" in low else "out of memory"
+    if "at its memory ceiling" in low:
+        return "held at its memory ceiling without progress"
+    if "stopped from outside" in low:
+        return "stopped from outside (systemctl stop or a shutdown)"
+    if "killed without a result" in low:
+        return "killed (a forced stop, or the kernel's OOM killer)"
+    if "the daemon stopped during this step" in low:
+        return "the daemon crashed or was killed"
+    return "cause unknown"
 
 
 class IllegalTransitionError(RuntimeError):
@@ -341,6 +358,9 @@ class ReleasePipeline:
         self.workdir = workdir
         self.user_agent = user_agent
         self.alerter = alerter
+        # subjects in INTERRUPTED_STEPS_META (None: not read yet), so a step's end costs no query
+        self._interrupted: set[str] | None = None
+        self._interrupted_lock = threading.Lock()
         self.retry = retry
         self.sanity = sanity
         self.checksum_failures_to_pause = checksum_failures_to_pause
@@ -423,7 +443,10 @@ class ReleasePipeline:
             return self._get(source_id, version)
         step = _Step(source_id, version, rec.state, rec.step_token)
         try:
-            return self._advance(rec)
+            moved = self._advance(rec)
+            if moved.state is not step.state:
+                self._step_ended(rec.subject)
+            return moved
         except ConcurrentUpdateError as exc:
             log.info(
                 "release changed during its step; the step's result is dropped",
@@ -443,10 +466,18 @@ class ReleasePipeline:
                 return self._crashed(step, f"{type(exc).__name__}: {exc}")
             return self._fail(step, exc)
 
-    def recover_crashes(self) -> list[ReleaseRecord]:
+    def recover_crashes(self, *, machine_restarted: bool = False) -> list[ReleaseRecord]:
         """At daemon start: every release whose step token is still set crashed in that step.
 
         Must only be called while no step can be running (the daemon holds the state DB lock).
+
+        ``machine_restarted``: the previous daemon ran in another boot of the machine and never
+        stopped cleanly (``wsl --shutdown``, a power loss, the VM killed). Its steps were cut by
+        that, so they start again without a crash count; with ``crashes_to_fail = 2`` two reboots
+        sent a multi-day profile to FAILED (2026-11-10). This also forgives a step that itself
+        brought the machine down (memory outside its unit's ceiling); the unit ceilings make that
+        unlikely, and ``interrupted:<release>`` is raised when it happens
+        :data:`INTERRUPTIONS_TO_ALERT` times in a row.
         """
         out: list[ReleaseRecord] = []
         abandoned = set(json.loads(self.store.get_meta(ABANDONED_STEPS_META) or "[]"))
@@ -464,6 +495,14 @@ class ReleasePipeline:
                 )
                 self._end_step(step)
                 continue
+            if machine_restarted:
+                log.info(
+                    "release step was interrupted by a restart of the machine; it starts again",
+                    extra={"fields": {"release": rec.subject, "state": rec.state.value}},
+                )
+                self._end_step(step)
+                self._note_interruption(rec)
+                continue
             log.warning(
                 "release step did not finish: the daemon crashed or was killed",
                 extra={"fields": {"release": rec.subject, "state": rec.state.value}},
@@ -473,8 +512,72 @@ class ReleasePipeline:
             self.store.set_meta(ABANDONED_STEPS_META, "[]")
         return out
 
+    def _interruptions(self) -> dict[str, dict[str, object]]:
+        try:
+            doc = json.loads(self.store.get_meta(INTERRUPTED_STEPS_META) or "{}")
+        except ValueError:
+            return {}
+        if not isinstance(doc, dict):
+            return {}
+        entries = cast(dict[object, object], doc)
+        return {str(k): cast(dict[str, object], v) for k, v in entries.items() if isinstance(v, dict)}
+
+    def _note_interruption(self, rec: ReleaseRecord) -> None:
+        """A restart of the machine cut this release's step: count it, and say so at the third in a
+        row in the same state (no crash count, no FAILED: only the owner can tell why)."""
+        doc = self._interruptions()
+        entry = doc.get(rec.subject, {})
+        before = entry.get("count")
+        same = entry.get("state") == rec.state.value and isinstance(before, int)
+        count = (before if isinstance(before, int) and same else 0) + 1
+        doc[rec.subject] = {"state": rec.state.value, "count": count}
+        self.store.set_meta(INTERRUPTED_STEPS_META, json.dumps(doc, sort_keys=True))
+        self._interrupted = set(doc)
+        if count >= INTERRUPTIONS_TO_ALERT and self.alerter is not None:
+            self.alerter.raise_(
+                Alert(
+                    key=f"interrupted:{rec.subject}",
+                    severity=Severity.WARNING,
+                    message=(
+                        f"{rec.subject}: a restart of the machine cut its {rec.state.value} step "
+                        f"{count} times in a row; no crash is counted and it starts again each time. "
+                        "If the step cannot finish between restarts, or brings the machine down "
+                        "itself, it will not finish: see journalctl --user -u whisipedia-orchestrator"
+                    ),
+                    data={
+                        "source_id": rec.source_id,
+                        "version": rec.version,
+                        "state": rec.state.value,
+                        "interruptions": count,
+                    },
+                )
+            )
+
+    def _step_ended(self, subject: str) -> None:
+        """The release's step ended by itself (it moved on, failed or crashed): a series of
+        machine-restart interruptions is over. Costs nothing unless the release is in one. Never
+        raises: it is bookkeeping beside the step's own result."""
+        try:
+            self._forget_interruptions(subject)
+        except Exception:
+            log.exception("could not clear the interruption count", extra={"fields": {"release": subject}})
+
+    def _forget_interruptions(self, subject: str) -> None:
+        with self._interrupted_lock:
+            if self._interrupted is None:
+                self._interrupted = set(self._interruptions())
+            if subject not in self._interrupted:
+                return
+            doc = self._interruptions()
+            doc.pop(subject, None)
+            self.store.set_meta(INTERRUPTED_STEPS_META, json.dumps(doc, sort_keys=True))
+            self._interrupted = set(doc)
+        if self.alerter is not None:
+            self.alerter.resolve(f"interrupted:{subject}")
+
     def note_abandoned_steps(self) -> int:
-        """At a clean shutdown whose grace ran out: the steps left running were stopped on purpose."""
+        """At a shutdown: the steps running now are being stopped on purpose (written at the
+        request, and again with what is left once the grace ran out)."""
         tokens = [r.step_token for r in self.store.releases() if r.step_token is not None]
         self.store.set_meta(ABANDONED_STEPS_META, json.dumps(tokens))
         return len(tokens)
@@ -569,6 +672,7 @@ class ReleasePipeline:
             )
         rec = self._transition(rec, ReleaseState.QUARANTINED, extra={"reason": f"rejected: {reason}"})
         self._cleanup_workdir(rec)
+        self._step_ended(rec.subject)
         if self.alerter is not None:
             self.alerter.resolve(f"held:{rec.subject}")
         return rec
@@ -608,6 +712,7 @@ class ReleasePipeline:
             step_started_at=None,
         )
         self._persist(fresh, event=(LEDGER_KIND_RETRY, {"from": rec.state.value, "note": note}))
+        self._step_ended(rec.subject)
         if self.alerter is not None:
             for key in (f"quarantined:{rec.subject}", f"crashed:{rec.subject}", f"stuck:{rec.subject}"):
                 self.alerter.resolve(key)
@@ -1241,7 +1346,8 @@ class ReleasePipeline:
         return self._get(fresh.source_id, fresh.version)
 
     def _crashed(self, step: _Step, reason: str) -> ReleaseRecord:
-        """The step crashed (the daemon died, or its child was OOM-killed). Never an attempt.
+        """The step crashed (the daemon died; its child was OOM-killed, stopped at a limit, or ended
+        without a result and no shutdown explains it). Never an attempt.
 
         The first crash in a state retries at once; from the ``crashes_to_fail``-th on the release
         goes to FAILED with growing backoff and a ``crashed:<release>`` alert.
@@ -1249,6 +1355,7 @@ class ReleasePipeline:
         fresh = self._owned(step)
         if fresh is None:
             return self._get(step.source_id, step.version)
+        self._step_ended(fresh.subject)
         state = step.state
         count = fresh.crash_count + 1 if fresh.crash_state is state else 1
         base = replace(
@@ -1306,6 +1413,7 @@ class ReleasePipeline:
         fresh = self._owned(step)
         if fresh is None:  # someone else moved the release meanwhile: their state wins
             return self._get(step.source_id, step.version)
+        self._step_ended(fresh.subject)
         state = step.state
         attempts = fresh.attempts + 1
         now = self.clock.now()

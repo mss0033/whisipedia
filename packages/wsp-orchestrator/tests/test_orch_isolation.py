@@ -6,13 +6,17 @@ and by checking the ``systemd-run`` command line; the plain-subprocess fallback 
 
 from __future__ import annotations
 
+import subprocess
 import sys
 import threading
 import time
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 import pytest
 
+from wsp_orchestrator import isolation
+from wsp_orchestrator.child import run as run_child
 from wsp_orchestrator.errors import (
     FailureKind,
     ResourceBusyError,
@@ -25,6 +29,7 @@ from wsp_orchestrator.isolation import (
     ChildExit,
     ChildStepError,
     IsolatedRunner,
+    NoResultError,
     SubprocessLauncher,
     SystemdRunLauncher,
     UnitLimits,
@@ -33,6 +38,9 @@ from wsp_orchestrator.isolation import (
     unit_name,
 )
 from wsp_orchestrator.testing import FakeLauncher
+
+# bound here, at import: the repository conftest replaces the module's name in every test
+real_system_stopping = isolation.system_stopping
 
 
 def runner(tmp_path: Path, launcher: object, **kw: object) -> IsolatedRunner:
@@ -149,8 +157,186 @@ def test_plain_subprocess_killed_by_a_signal_is_a_crash(tmp_path: Path) -> None:
     script = tmp_path / "py"
     script.write_text("#!/bin/sh\nkill -KILL $$\n")
     script.chmod(0o755)
-    with pytest.raises(ResourceExhaustedError, match="died without a result"):
+    with pytest.raises(ResourceExhaustedError, match="killed without a result"):
         r.call("refine", "wsp_orchestrator.testing:child_echo", {}, key="s/1")
+
+
+# --- a shutdown is not a crash (2026-11-10) ----------------------------------------------------------
+# systemd stopped a profile's child 35 ms before the daemon handled its own SIGTERM: the child had
+# ended "success" with no result, and the step was counted as a crash, "probably killed for memory".
+
+NO_RESULT = ChildExit("success", None, None)
+
+
+class _Ended:
+    def __init__(self, outcome: ChildExit) -> None:
+        self.outcome = outcome
+
+    def wait(self, timeout: float) -> ChildExit | None:
+        return self.outcome
+
+    def stop(self) -> None:
+        pass
+
+
+class _ShutdownFollows:
+    """A launcher whose child has ended as ``outcome`` by the time it is looked at; the daemon's stop
+    flag follows ``after`` seconds later (None: never). ``run=True`` lets the child write its result
+    first."""
+
+    def __init__(self, outcome: ChildExit, *, after: float | None = 0.05, run: bool = False) -> None:
+        self.outcome = outcome
+        self.after = after
+        self.run = run
+        self.stop = threading.Event()
+
+    def start(
+        self, unit: str, argv: Sequence[str], *, env: Mapping[str, str], cwd: Path, limits: UnitLimits
+    ) -> _Ended:
+        if self.run:
+            target, request, result = argv[-3:]
+            run_child(target, Path(request), Path(result))
+        if self.after is not None:
+            timer = threading.Timer(self.after, self.stop.set)
+            timer.daemon = True
+            timer.start()
+        return _Ended(self.outcome)
+
+
+def _call(r: IsolatedRunner, target: str = "child_echo", **payload: object) -> object:
+    return r.call("profile", f"wsp_orchestrator.testing:{target}", payload or {"value": 1}, key="s/1")
+
+
+def test_a_child_ended_just_before_the_shutdown_signal_is_cancelled_not_crashed(tmp_path: Path) -> None:
+    launcher = _ShutdownFollows(NO_RESULT, after=0.02)
+    asked: list[int] = []
+    r = runner(
+        tmp_path,
+        launcher,
+        should_stop=launcher.stop.is_set,
+        shutdown_grace_seconds=5.0,
+        system_stopping=lambda: bool(asked.append(1)),
+    )
+    t0 = time.monotonic()
+    with pytest.raises(StepCancelledError, match="stopped by a shutdown") as info:
+        _call(r)
+    assert classify(info.value) is FailureKind.BUSY  # deferred: no crash and no attempt
+    assert time.monotonic() - t0 < 2, "the grace ends as soon as the stop flag is seen"
+    assert asked == [], "our own stop flag is watched first; systemd is asked only after 0.3 s"
+
+
+def test_a_child_ended_while_systemd_is_stopping_is_cancelled(tmp_path: Path) -> None:
+    r = runner(tmp_path, FakeLauncher(exits=[NO_RESULT]), system_stopping=lambda: True)
+    with pytest.raises(StepCancelledError, match="stopped by a shutdown"):
+        _call(r)
+
+
+def test_a_shutdown_that_shows_only_after_the_grace_still_cancels(tmp_path: Path) -> None:
+    # the background slice can be frozen for the whole grace: systemd is asked once more at its end
+    answers = iter([False, True])
+    r = runner(tmp_path, FakeLauncher(exits=[NO_RESULT]), system_stopping=lambda: next(answers))
+    with pytest.raises(StepCancelledError):
+        _call(r)
+    assert list(answers) == []
+
+
+def test_a_unit_that_could_not_start_during_a_shutdown_is_cancelled(tmp_path: Path) -> None:
+    # systemd-run that lost its manager prints no result line: "start-failed"
+    lost = ChildExit("start-failed", 1, None, None, "Failed to connect to bus: Connection refused")
+    r = runner(tmp_path, FakeLauncher(exits=[lost]), system_stopping=lambda: True)
+    with pytest.raises(StepCancelledError):
+        _call(r)
+    r = runner(tmp_path, FakeLauncher(exits=[lost]))  # no shutdown: counted, as before
+    with pytest.raises(NoResultError, match="could not start") as info:
+        _call(r)
+    assert classify(info.value) is FailureKind.RESOURCE
+
+
+def test_a_child_signalled_after_it_wrote_its_result_at_a_shutdown_is_cancelled(tmp_path: Path) -> None:
+    launcher = _ShutdownFollows(ChildExit("signal", None, "TERM"), run=True)
+    r = runner(tmp_path, launcher, should_stop=launcher.stop.is_set, shutdown_grace_seconds=5.0)
+    with pytest.raises(StepCancelledError, match="stopped by a shutdown"):
+        _call(r)
+
+
+def test_a_child_stopped_from_outside_with_no_shutdown_is_still_a_crash_and_says_so(tmp_path: Path) -> None:
+    r = runner(tmp_path, FakeLauncher(exits=[NO_RESULT, ChildExit("signal", None, "TERM")]))
+    for _ in range(2):
+        with pytest.raises(ResourceExhaustedError, match="stopped from outside") as info:
+            _call(r)
+        assert classify(info.value) is FailureKind.RESOURCE
+        assert "memory" not in str(info.value)
+    r = runner(tmp_path, FakeLauncher(exits=[ChildExit("exit-code", 9, "9")]))
+    with pytest.raises(ResourceExhaustedError, match=r"died without a result \(exit-code, status 9\)$"):
+        _call(r)  # exit code 9 is not SIGKILL
+
+
+def test_an_oom_kill_is_never_taken_for_a_shutdown(tmp_path: Path) -> None:
+    """A guard (it passes on the code before 2026-11-11 too)."""
+    launcher = _ShutdownFollows(ChildExit("oom-kill", None, "KILL", "6.0G"), after=0)
+    r = runner(tmp_path, launcher, should_stop=launcher.stop.is_set, system_stopping=lambda: True)
+    with pytest.raises(ResourceExhaustedError, match="OOM-killed") as info:
+        _call(r)
+    assert not isinstance(info.value, NoResultError)
+    assert classify(info.value) is FailureKind.RESOURCE
+
+
+def test_a_child_that_reported_its_own_memory_error_is_a_crash_even_at_a_shutdown(tmp_path: Path) -> None:
+    """A guard (it passes on the code before 2026-11-11 too)."""
+    launcher = _ShutdownFollows(ChildExit("exit-code", 1, "1"), after=0, run=True)
+    r = runner(tmp_path, launcher, should_stop=launcher.stop.is_set, system_stopping=lambda: True)
+    with pytest.raises(ResourceExhaustedError) as info:
+        _call(r, "child_raise", error="memory")
+    assert not isinstance(info.value, NoResultError | StepCancelledError)
+
+
+def test_the_default_shutdown_probe_is_looked_up_when_the_runner_is_built(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # a default argument would be bound at import: no test (and no conftest) could replace it
+    monkeypatch.setattr(isolation, "system_stopping", lambda: True)
+    monkeypatch.setattr(isolation, "SHUTDOWN_GRACE_SECONDS", 0.01)
+    r = IsolatedRunner(tmp_path / "work", launcher=FakeLauncher(exits=[NO_RESULT]), cwd=tmp_path)
+    assert r.shutdown_grace_seconds == 0.01
+    with pytest.raises(StepCancelledError):
+        _call(r)
+
+
+def test_system_stopping_reads_both_managers(monkeypatch: pytest.MonkeyPatch) -> None:
+    def found(name: str) -> str | None:
+        return f"/usr/bin/{name}"
+
+    def missing(name: str) -> str | None:
+        return None
+
+    monkeypatch.setattr("shutil.which", found)
+    calls: list[list[str]] = []
+
+    def answers(system: str, user: str) -> bool:
+        calls.clear()
+
+        def run(argv: list[str], **kw: object) -> subprocess.CompletedProcess[str]:
+            calls.append(argv)
+            assert kw == {"capture_output": True, "text": True, "timeout": 2, "check": False}
+            out = user if "--user" in argv else system
+            if out == "timeout":
+                raise subprocess.TimeoutExpired(argv, 2)
+            return subprocess.CompletedProcess(argv, 0 if out == "running" else 1, out + "\n", "")
+
+        return real_system_stopping(run)
+
+    assert answers("running", "running") is False
+    assert calls == [
+        ["/usr/bin/systemctl", "is-system-running"],
+        ["/usr/bin/systemctl", "--user", "is-system-running"],
+    ]
+    assert answers("running", "stopping") is True
+    assert answers("stopping", "running") is True
+    assert answers("degraded", "timeout") is False
+    assert answers("timeout", "stopping") is True
+    monkeypatch.setattr("shutil.which", missing)
+    assert answers("stopping", "stopping") is False, "no systemctl: not known to be a shutdown"
+    assert calls == []
 
 
 def test_systemd_run_command_caps_memory_in_the_background_slice(tmp_path: Path) -> None:

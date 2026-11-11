@@ -16,9 +16,11 @@ from typing import Any
 
 import pytest
 
+from wsp_core.model import Generation, ReleaseState, SourceSpec
 from wsp_orchestrator.clock import ManualClock
 from wsp_orchestrator.jobs import JobKind
 from wsp_orchestrator.orchestrator import Orchestrator
+from wsp_orchestrator.pipeline import ABANDONED_STEPS_META, RefineResult
 from wsp_orchestrator.settings import OrchestratorSettings
 from wsp_orchestrator.testing import FakeFetcher, FakeWorld, make_settings, make_spec
 
@@ -127,3 +129,104 @@ def test_daemon_exits_within_15s_of_sigterm_even_with_a_stubborn_job(tmp_path: P
     log = proc.stderr.read().decode()
     assert "shutdown grace expired" in log
     assert "non-daemon threads still running" in log
+
+
+# --- the stop is recorded at the request, not after the grace (2026-11-10) ---------------------------
+# The VM was gone 5 s after SIGTERM, inside the 10 s grace: the running mark was still set and the
+# steps left running were not written down, so the next start saw an unclean stop and counted a
+# crash for each of them.
+
+
+class _Killed(BaseException):
+    """The process is gone (the VM stopped) at this point."""
+
+
+def _stuck_in_refine(tmp_path: Path) -> tuple[Orchestrator, FakeWorld, threading.Event]:
+    """A started daemon whose one release sits in a refine that ignores cancellation."""
+    clock = ManualClock(datetime(2026, 11, 10, tzinfo=UTC))
+    world = FakeWorld.build(tmp_path, clock, [make_spec("src")])
+    world.adapters["src"].add_release("2026-10-01", {"a.zim": b"a" * 1000})
+    orch = Orchestrator(
+        make_settings(tmp_path, scrub_slices=1), world.wiring(), clock=clock, check_local=False
+    )
+    started, release = threading.Event(), threading.Event()
+
+    def refine(source: SourceSpec, generation: Generation, generation_dir: Path) -> RefineResult:
+        started.set()
+        release.wait(3600)
+        return world.refinery.refine(source, generation, generation_dir)
+
+    orch.pipeline.refine = refine
+    orch.start()
+    deadline = time.monotonic() + 20
+    while not started.is_set() and time.monotonic() < deadline:
+        orch.scheduler.tick()
+        orch.dispatch()
+        started.wait(0.02)
+    assert started.is_set(), "the release never reached its refine step"
+    return orch, world, release
+
+
+def _step_token(orch: Orchestrator) -> str:
+    rec = orch.store.get_release("src", "2026-10-01")
+    assert rec is not None
+    assert rec.step_token is not None
+    return rec.step_token
+
+
+def test_a_shutdown_request_is_recorded_before_the_grace(tmp_path: Path) -> None:
+    orch, _, release = _stuck_in_refine(tmp_path)
+    token = _step_token(orch)
+    assert orch.store.get_meta("daemon:running") is not None
+    stopper = threading.Thread(target=orch.shutdown, kwargs={"grace_seconds": 30}, daemon=True)
+    stopper.start()
+
+    def recorded() -> bool:
+        return orch.store.get_meta("daemon:running") is None and token in json.loads(
+            orch.store.get_meta(ABANDONED_STEPS_META) or "[]"
+        )
+
+    deadline = time.monotonic() + 5
+    while not recorded() and time.monotonic() < deadline:
+        time.sleep(0.02)
+    assert recorded(), "nothing was recorded within 5 s of the request"
+    assert stopper.is_alive(), "recorded during the grace, not after it"
+    release.set()
+    stopper.join(20)
+    assert not stopper.is_alive()
+    orch.close()
+
+
+def test_a_daemon_killed_during_its_grace_starts_clean(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    orch, world, _ = _stuck_in_refine(tmp_path)
+
+    def gone() -> int:
+        raise _Killed
+
+    orch.running_jobs = gone  # type: ignore[method-assign] - the first thing the grace loop asks
+    with pytest.raises(_Killed):
+        orch.shutdown(grace_seconds=30)
+    # the kernel drops the dead process's flock; its job thread never gets to write anything
+    assert orch._daemon_lock is not None  # pyright: ignore[reportPrivateUsage]
+    os.close(orch._daemon_lock)  # pyright: ignore[reportPrivateUsage]
+    orch._daemon_lock = None  # pyright: ignore[reportPrivateUsage]
+    orch.store.close()
+    orch.waker.close()
+
+    again = Orchestrator(
+        make_settings(tmp_path, scrub_slices=1), world.wiring(), clock=orch.clock, check_local=False
+    )
+    with caplog.at_level("INFO", logger="wsp.orchestrator"):
+        again.start()
+    [started] = [r for r in caplog.records if r.getMessage() == "orchestrator started"]
+    fields: dict[str, Any] = started.fields  # type: ignore[attr-defined]
+    assert fields["unclean_previous_stop"] is False
+    assert fields["crashed_steps"] == 0
+    assert json.loads(again.store.get_meta("daemon:unclean_starts") or "[]") == []
+    rec = again.store.get_release("src", "2026-10-01")
+    assert rec is not None
+    assert (rec.state, rec.crash_count, rec.step_token) == (ReleaseState.SEALED, 0, None)
+    assert "crashed:src/2026-10-01" not in again.alerter.open_keys()
+    again.close()

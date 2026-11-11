@@ -154,11 +154,12 @@ def test_crashes_are_counted_and_back_off_without_quarantine(tmp_path: Path) -> 
     rec = h.store.get_release("src", "2026-10-01")
     assert rec is not None
     assert (rec.state, rec.crash_count, rec.attempts) == (S.FAILED, 2, 0)
-    assert "probably OOM" in (rec.last_error or "")
+    assert "the daemon crashed or was killed" in (rec.last_error or "")
+    assert "OOM" not in (rec.last_error or ""), "nothing says this was memory"
     assert rec.next_attempt_at == h.clock.now() + timedelta(minutes=10)
     assert "crashed:src/2026-10-01" in h.alerter.open_keys()
     alert = next(a for a in h.sink.delivered if a.key == "crashed:src/2026-10-01")
-    assert "crashed in sealed 2 times, probably OOM" in alert.message
+    assert "crashed in sealed 2 times, the daemon crashed or was killed" in alert.message
 
     for _ in range(10):  # a crash loop never quarantines; backoff grows, then it waits for the owner
         h.clock.advance(timedelta(days=2))
@@ -223,6 +224,7 @@ def test_an_oom_killed_step_unit_counts_as_a_crash_not_an_attempt(tmp_path: Path
     assert first.outcome is Outcome.BACKOFF  # retried once at once, the second OOM backs off
     assert (first.record.attempts, first.record.crash_count) == (0, 2)
     assert "OOM-killed" in (first.record.last_error or "")
+    assert "2 times, out of memory (OOM-killed): " in (first.record.last_error or "")
     assert "crashed:src/2026-10-01" in h.alerter.open_keys()
     h.clock.advance(timedelta(hours=1))
     assert h.pipeline.run("src", "2026-10-01").outcome is Outcome.PROMOTED
@@ -637,6 +639,90 @@ def test_steps_a_clean_shutdown_left_running_are_not_crashes(tmp_path: Path) -> 
     assert h.pipeline.run("src", "2026-10-01").outcome is Outcome.PROMOTED
 
 
+def test_a_step_cut_by_a_machine_restart_is_not_a_crash(tmp_path: Path) -> None:
+    """2026-11-10: with crashes_to_fail = 2, two restarts of the machine during a multi-day profile
+    would send the release to FAILED with a CRITICAL alert."""
+    h = PipelineHarness(tmp_path, retry=RetryPolicy(max_attempts=3, base_delay=timedelta(minutes=10)))
+    killer = _Killer(h, times=2)
+    h.pipeline.refine = killer
+    h.pipeline.register(h.adapter.add_release("2026-10-01", FILES))
+    for _ in range(2):  # no SIGTERM at all (wsl --shutdown, power loss): nothing was written down
+        with contextlib.suppress(SimulatedCrash):
+            h.pipeline.run("src", "2026-10-01")
+        h.restart(machine_restarted=True)
+        h.pipeline.refine = killer
+    rec = h.store.get_release("src", "2026-10-01")
+    assert rec is not None
+    assert (rec.state, rec.crash_count, rec.crash_state, rec.step_token) == (S.SEALED, 0, None, None)
+    assert not [k for k in h.alerter.open_keys() if k.startswith(("crashed:", "interrupted:"))]
+    assert h.pipeline.run("src", "2026-10-01").outcome is Outcome.PROMOTED
+
+
+def test_a_daemon_killed_within_the_same_boot_still_counts(tmp_path: Path) -> None:
+    """A guard (it passes on the code before 2026-11-11 too): only another boot forgives."""
+    h = PipelineHarness(tmp_path, retry=RetryPolicy(max_attempts=3, base_delay=timedelta(minutes=10)))
+    h.pipeline.refine = _Killer(h, times=1)
+    h.pipeline.register(h.adapter.add_release("2026-10-01", FILES))
+    with contextlib.suppress(SimulatedCrash):
+        h.pipeline.run("src", "2026-10-01")
+    h.restart(machine_restarted=False)
+    rec = h.store.get_release("src", "2026-10-01")
+    assert rec is not None
+    assert (rec.state, rec.crash_count, rec.crash_state) == (S.SEALED, 1, S.SEALED)
+
+
+def test_a_step_cut_by_every_machine_restart_raises_its_own_alert(tmp_path: Path) -> None:
+    """Forgiven is not silent: the third restart in a row that cuts the same step says so (the
+    ``stuck:`` alert says nothing new about a step that takes days anyway)."""
+    from wsp_orchestrator.alerts import Severity
+    from wsp_orchestrator.pipeline import INTERRUPTED_STEPS_META
+
+    key = "interrupted:src/2026-10-01"
+    h = PipelineHarness(tmp_path, retry=RetryPolicy(max_attempts=3, base_delay=timedelta(minutes=10)))
+    killer = _Killer(h, times=3)
+    h.pipeline.refine = killer
+    h.pipeline.register(h.adapter.add_release("2026-10-01", FILES))
+    for n in (1, 2, 3):
+        with contextlib.suppress(SimulatedCrash):
+            h.pipeline.run("src", "2026-10-01")
+        h.restart(machine_restarted=True)
+        h.pipeline.refine = killer
+        assert (key in h.alerter.open_keys()) is (n == 3), n
+    [alert] = [a for a in h.sink.delivered if a.key == key]
+    assert alert.severity is Severity.WARNING
+    assert "cut its sealed step 3 times in a row" in alert.message
+    rec = h.store.get_release("src", "2026-10-01")
+    assert rec is not None
+    assert (rec.state, rec.crash_count) == (S.SEALED, 0), "no crash count and no FAILED"
+    assert h.pipeline.run("src", "2026-10-01").outcome is Outcome.PROMOTED
+    assert key not in h.alerter.open_keys(), "resolved when the step ends"
+    assert h.store.get_meta(INTERRUPTED_STEPS_META) == "{}"
+
+
+def test_a_step_that_ends_between_machine_restarts_starts_the_count_again(tmp_path: Path) -> None:
+    from wsp_orchestrator.pipeline import INTERRUPTED_STEPS_META
+
+    h = PipelineHarness(tmp_path, retry=RetryPolicy(max_attempts=3, base_delay=timedelta(minutes=10)))
+    h.pipeline.register(h.adapter.add_release("2026-10-01", FILES))
+
+    def cut(times: int) -> None:
+        killer = _Killer(h, times=times)
+        for _ in range(times):
+            h.pipeline.refine = killer
+            with contextlib.suppress(SimulatedCrash):
+                h.pipeline.run("src", "2026-10-01")
+            h.restart(machine_restarted=True)
+
+    cut(2)
+    h.refinery.failures.append(ValueError("bad record"))  # the step ends by itself: a counted failure
+    h.pipeline.refine = h.refinery.refine
+    h.pipeline.run("src", "2026-10-01")
+    assert h.store.get_meta(INTERRUPTED_STEPS_META) == "{}"
+    h.clock.advance(timedelta(hours=1))
+    cut(2)  # 2 + 2 restarts, but never 3 in a row
+    assert "interrupted:src/2026-10-01" not in h.alerter.open_keys()
+
+
 def test_the_sweep_keeps_a_file_a_later_release_of_the_source_downloaded_again(tmp_path: Path) -> None:
     """2026-10-26 review #33: a constant upstream name (cwec_latest.xml.zip) is the same local path
     for every release; the sweep for a promoted one deleted the next one's download."""
@@ -691,7 +777,20 @@ def test_a_crash_says_what_most_likely_stopped_it() -> None:
 
     assert crash_cause("refine (x) stopped: timeout after 86400s") == "stopped at its time limit"
     assert crash_cause("OSError: [Errno 28] No space left on device") == "the disk is full"
-    assert crash_cause("killed by SIGKILL") == "probably OOM (out of memory)"
+    # 2026-11-10: a shutdown read "probably OOM" too. Memory is named only when it is known.
+    oom = "ResourceExhaustedError: refine was OOM-killed (MemoryMax=6G, peak 6.0G)"
+    assert crash_cause(oom) == "out of memory (OOM-killed)"
+    assert crash_cause("ResourceExhaustedError: refine: MemoryError: no memory") == "out of memory"
+    stall = "profile (unit) stopped: stalled at its memory ceiling for 30 min (CPU 12 s)"
+    assert crash_cause(stall) == "held at its memory ceiling without progress"
+    outside = "profile was stopped from outside without a result (SIGTERM: systemctl stop or a shutdown)"
+    assert crash_cause(outside) == "stopped from outside (systemctl stop or a shutdown)"
+    killed = "profile was killed without a result (SIGKILL: a forced stop, or the kernel's OOM killer ...)"
+    assert crash_cause(killed) == "killed (a forced stop, or the kernel's OOM killer)"
+    daemon = "the daemon stopped during this step (crash or kill)"
+    assert crash_cause(daemon) == "the daemon crashed or was killed"
+    assert crash_cause("profile died without a result (core-dump, status SEGV)") == "cause unknown"
+    assert crash_cause("killed by SIGKILL") == "cause unknown"
 
 
 def test_an_index_step_failing_after_promotion_holds_the_release_instead_of_quarantining(

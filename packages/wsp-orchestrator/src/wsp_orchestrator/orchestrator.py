@@ -26,6 +26,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from enum import StrEnum
+from pathlib import Path
 from typing import cast
 from urllib.parse import urlparse
 
@@ -303,8 +304,15 @@ class Orchestrator:
         now = self.clock.now()
         unclean = self.store.get_meta(_RUNNING_MARK) is not None
         self.store.set_meta(_RUNNING_MARK, ts(now))
+        # A daemon that never stopped cleanly and ran in another boot of the machine was cut by the
+        # restart (wsl --shutdown, a power loss): neither an unclean stop of its own nor a crash of
+        # its steps. An unknown boot id on either side keeps the old counting.
+        before, boot = self.store.get_meta(_BOOT_ID), _boot_id()
+        restarted = unclean and before is not None and boot is not None and before != boot
+        if boot is not None and boot != before:
+            self.store.set_meta(_BOOT_ID, boot)
         recovered = self.queue.recover(now, all_running=True)
-        crashed = self.pipeline.recover_crashes()
+        crashed = self.pipeline.recover_crashes(machine_restarted=restarted)
         swept = self.pipeline.sweep_workdir()
         flushed = self.pipeline.flush_ledger()
         unpaused = sum(
@@ -323,7 +331,7 @@ class Orchestrator:
                 self._enqueue_fetch(rec.source_id, rec.version, now)
                 key = f"{rec.source_id}/{rec.version}"
                 resumed += self.queue.active(JobKind.FETCH_RELEASE, key) is not None
-        self._note_start(now, unclean=unclean)
+        self._note_start(now, unclean=unclean and not restarted)
         log.info(
             "orchestrator started",
             extra={
@@ -335,6 +343,7 @@ class Orchestrator:
                     "resumed_releases": resumed,
                     "stale_pauses_cleared": unpaused,
                     "unclean_previous_stop": unclean,
+                    "machine_restarted": restarted,
                 }
             },
         )
@@ -367,7 +376,8 @@ class Orchestrator:
                     "crash-loop",
                     Severity.CRITICAL,
                     f"the orchestrator stopped uncleanly {len(starts)} times within an hour "
-                    "(probably OOM-killed); see journalctl --user -u whisipedia-orchestrator",
+                    "(killed or crashed; the journal says which); see "
+                    "journalctl --user -u whisipedia-orchestrator",
                     {"starts": [t.isoformat() for t in starts]},
                 )
             )
@@ -494,9 +504,17 @@ class Orchestrator:
         the next start, so the process always exits promptly.
         """
         self.stopping.set()
-        self._cancel_work()
+        self._cancel_work()  # flags only: never behind a wait for the state DB
         grace = self.settings.shutdown_grace_seconds if grace_seconds is None else grace_seconds
-        deadline = time.monotonic() + grace
+        deadline = time.monotonic() + grace  # the record below is part of the grace, not before it
+        # Recorded now, while there is still time: on 2026-11-10 the VM was gone 5 s after SIGTERM,
+        # inside the grace, so the next start saw an unclean stop and a crash for each running step.
+        try:
+            self.pipeline.note_abandoned_steps()
+            if self._daemon_lock is not None:
+                self.store.delete_meta(_RUNNING_MARK)
+        except Exception:  # the next start then counts as before
+            log.exception("could not record the shutdown request")
         while self.running_jobs() and time.monotonic() < deadline:
             time.sleep(0.05)
         finished = not self.running_jobs()
@@ -1218,6 +1236,18 @@ class Orchestrator:
 
 _RUNNING_MARK = "daemon:running"  # set while a daemon runs; still set at start = unclean stop
 _UNCLEAN_STARTS = "daemon:unclean_starts"
+_BOOT_ID = "daemon:boot_id"  # the machine boot the last daemon started in
+BOOT_ID_PATH = Path("/proc/sys/kernel/random/boot_id")
+
+
+def _boot_id() -> str | None:
+    """The kernel's id of this boot (new at every start of the machine, WSL included), or None."""
+    try:
+        return BOOT_ID_PATH.read_text(encoding="ascii").strip() or None
+    except (OSError, ValueError):
+        return None
+
+
 CRASH_LOOP_STARTS = 3
 CRASH_LOOP_WINDOW = timedelta(hours=1)
 WATCHDOG_INTERVAL = 60.0  # seconds between watchdog passes in the daemon loop

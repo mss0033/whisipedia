@@ -750,12 +750,13 @@ class PipelineHarness:
             storage_available=self.storage_available,
         )
 
-    def restart(self, *, crash_at: int | None = None) -> None:
-        """A daemon restart: reopen the state DB and run the startup crash accounting."""
+    def restart(self, *, crash_at: int | None = None, machine_restarted: bool = False) -> None:
+        """A daemon restart: reopen the state DB and run the startup crash accounting
+        (``machine_restarted``: the daemon was cut by a restart of the machine)."""
         self.store.close()
         self.injector = CrashInjector(crash_at)
         self._open()
-        self.pipeline.recover_crashes()
+        self.pipeline.recover_crashes(machine_restarted=machine_restarted)
 
 
 def record_promotions(store: StateStore, source_id: str, generation_ids: Sequence[str], at: datetime) -> None:
