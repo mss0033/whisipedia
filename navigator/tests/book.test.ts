@@ -11,6 +11,7 @@ import {
   rememberPosition,
   runLengths,
   splitChapters,
+  titledHeadings,
   unfinishedBooks,
 } from '../src/core/book.ts';
 import { MemoryStore, SafeStorage } from '../src/core/storage.ts';
@@ -509,6 +510,87 @@ describe("a book's own contents list (2026-10-21 audit)", () => {
       'CHAPTER I',
       'CHAPTER II',
       'CHAPTER III',
+    ]);
+  });
+});
+
+describe('chapters headed "numeral: title" (Standard Ebooks, The Lost World: trawl 2026-11-10)', () => {
+  const TITLES = [
+    'There Are Heroisms All Round Us',
+    'Try Your Luck with Professor Challenger',
+    'He Is a Perfectly Impossible Person',
+    'It’s Just the Very Biggest Thing in the World',
+    'Question!',
+  ];
+  const NUMERALS = ['I', 'II', 'III', 'IV', 'V'];
+  const prose = (n: number) =>
+    `This is the text of part ${n}, which goes on for a good while and ends as sentences do. `.repeat(
+      14,
+    );
+
+  it('reads them as chapters and drops the title line each one repeats', () => {
+    const text = [
+      'The Lost World',
+      'By Arthur Conan Doyle.',
+      prose(0),
+      ...TITLES.flatMap((t, i) => [`${NUMERALS[i]}: ${t}`, t, prose(i + 1), prose(i + 10)]),
+    ].join('\n\n');
+    const book = splitChapters(text, 'The Lost World');
+    expect(book.map((c) => c.title)).toEqual([
+      'The Lost World',
+      ...TITLES.map((t, i) => `${NUMERALS[i]}: ${t}`),
+    ]);
+    for (const [i, c] of book.slice(1).entries()) {
+      expect(c.paragraphs).toHaveLength(2); // the repeated title is not the chapter's first paragraph
+      expect(c.paragraphs[0]).not.toBe(TITLES[i]);
+    }
+  });
+
+  it('does not take an interview or a dialogue for a book: "I:", "R:", "C:" never count up', () => {
+    const talk = [
+      'Oral history, tape 4.',
+      prose(0),
+      'I: So when did you first come to the valley?',
+      'R: In the spring of 1931, with my father.',
+      'I: And the mill was already there?',
+      `R: It was. ${prose(1)}`,
+      'I: Tell me about the flood.',
+      'C: May I add something here?',
+      'CIVIL: The engineer spoke next.',
+      'I: Go on.',
+      prose(2),
+    ];
+    expect(titledHeadings(talk).some(Boolean)).toBe(false);
+    const book = splitChapters(talk.join('\n\n'), 'Tape 4');
+    expect(book).toHaveLength(1);
+    expect(book[0]?.paragraphs).toHaveLength(talk.length);
+  });
+
+  it('wants the numerals in running order, three at least; a second part may start again at I', () => {
+    const f = (ps: string[]) => titledHeadings(ps);
+    expect(f(['I: One', 'x', 'II: Two', 'III: Three'])).toEqual([true, false, true, true]);
+    expect(f(['I: One', 'II: Two'])).toEqual([false, false]);
+    expect(f(['I: One', 'III: Three', 'II: Two', 'IV: Four'])).toEqual([
+      false,
+      false,
+      false,
+      false,
+    ]);
+    expect(f(['I: A', 'II: B', 'III: C', 'I: A', 'II: B', 'III: C'])).toEqual(
+      new Array(6).fill(true),
+    );
+    // A title longer than a heading line usually is still counts: the chapters after it are found.
+    expect(f(['I: A', `II: ${'Long Title '.repeat(10)}`, 'III: C', 'IV: D'])).toEqual([
+      true,
+      true,
+      true,
+      true,
+    ]);
+    expect(f(['I: A', 'II: B', 'III: C', 'I: So when did you come?'])).toEqual([
+      true,
+      true,
+      true,
+      false,
     ]);
   });
 });

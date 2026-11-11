@@ -32,6 +32,59 @@ const HEADING_WORD =
  * chapter too (The Filigree Ball: three BOOKs of numbered chapters); it does not make a book one.
  */
 const NUMBERED = /^(?:[IVXLC]+\.|(?:[IVXLC]+|\d{1,3})\.\s+[^a-z]+)$/;
+/**
+ * "I: There Are Heroisms All Round Us": a numeral, a colon and the chapter's title, as Standard
+ * Ebooks heads its titled chapters (The Lost World had no chapter list: trawl 2026-11-10).
+ */
+const TITLED = /^([IVXLC]+): (\S.*)$/;
+const ROMAN = /^C{0,3}(?:XC|XL|L?X{0,3})(?:IX|IV|V?I{0,3})$/;
+const ROMAN_DIGITS: Record<string, number> = { I: 1, V: 5, X: 10, L: 50, C: 100 };
+
+function romanValue(numeral: string): number {
+  if (!ROMAN.test(numeral)) return 0; // "CIVIL", "IC": letters, not a number
+  let n = 0;
+  for (let i = 0; i < numeral.length; i++) {
+    const v = ROMAN_DIGITS[numeral[i]!]!;
+    n += v < (ROMAN_DIGITS[numeral[i + 1] ?? ''] ?? 0) ? -v : v;
+  }
+  return n;
+}
+
+/** The title of a "numeral: title" heading line, or null. */
+export function titledNumeral(para: string): { n: number; title: string } | null {
+  const m = TITLED.exec(flat(para));
+  const n = m ? romanValue(m[1]!) : 0;
+  // Long titles too ("XII: In Which …"): the running order is what tells a heading, and one
+  // heading left out would end the count for every chapter after it.
+  return m && n > 0 && para.length <= MAX_CAPS_HEADING_CHARS ? { n, title: m[2]! } : null;
+}
+
+/**
+ * Which paragraphs are "numeral: title" chapter headings: only those that count up in order (I, II,
+ * III, …; a second part may start again at I), at least three of them. The speaker's letter of an
+ * interview or a dialogue ("I: So when did you…", "R: …", "C: …") is the same shape and never
+ * counts up, so a transcript is not a book of chapters.
+ */
+export function titledHeadings(ps: readonly string[]): boolean[] {
+  const flags = new Array<boolean>(ps.length).fill(false);
+  let run: number[] = [];
+  const close = () => {
+    if (run.length >= MIN_HEADINGS) for (const i of run) flags[i] = true;
+    run = [];
+  };
+  for (const [i, p] of ps.entries()) {
+    const t = titledNumeral(p);
+    if (!t) continue;
+    if (t.n === run.length + 1) run.push(i);
+    else if (t.n === 1) {
+      close();
+      run.push(i);
+    }
+  }
+  close();
+  return flags;
+}
+
 /** A keyword heading; "SCENE: Partly in France" is a stage note (it made Shakespeare's ACT I SCENE I a contents list). */
 const keywordHeading = (p: string) => HEADING_WORD.test(p) && !/^\p{L}+:/u.test(p);
 const strong = (p: string) => keywordHeading(p) || NUMBERED.test(p);
@@ -163,7 +216,9 @@ export function headingFlags(ps: readonly string[]): boolean[] {
   // "[Illustration:" … "PROLOGUE.]": a caption split by a blank line holds no heading. Only a short
   // opening is a caption, and it ends within two paragraphs (an editor's note may never close).
   let open = 0;
+  const titled = titledHeadings(ps);
   const any = ps.map((p, i) => {
+    if (titled[i]) return true;
     const inside = open > 0;
     open = inside && p.endsWith(']') ? 0 : Math.max(0, open - 1);
     if (p.length < 100 && p.lastIndexOf('[') > p.lastIndexOf(']')) open = 2;
@@ -171,8 +226,9 @@ export function headingFlags(ps: readonly string[]): boolean[] {
     if (inside) return keywordHeading(p); // "[Illustration: ·PRIDE AND PREJUDICE·" … "Chapter I.]"
     return keywordHeading(p) || i === 0 || !unfinished(ps[i - 1]!);
   });
-  if (ps.filter((p, i) => any[i]! && keywordHeading(p)).length < MIN_HEADINGS) return any;
-  const keyword = ps.map((p, i) => any[i]! && strong(p));
+  if (ps.filter((p, i) => any[i]! && (keywordHeading(p) || titled[i]!)).length < MIN_HEADINGS)
+    return any;
+  const keyword = ps.map((p, i) => any[i]! && (strong(p) || titled[i]!));
   return ps.map((_, i) => keyword[i]! || (any[i]! && i > 0 && keyword[i - 1]!));
 }
 
@@ -257,6 +313,12 @@ export function splitChapters(text: string, bookTitle = ''): Chapter[] {
         ...(volume ? { volume } : {}),
       };
     } else {
+      // "I: There Are Heroisms All Round Us" and then the title again on a line of its own: the
+      // heading already says it.
+      const own = current.paragraphs.length === 0 ? titledNumeral(current.title) : null;
+      // The same words exactly: a chapter "V: Question!" may well open on a quoted “Question!”.
+      const same = (x: string) => x.replace(/\s+/g, ' ').trim().toLowerCase();
+      if (own && headings > 0 && same(own.title) === same(flat(p))) continue;
       current.paragraphs.push(p);
       if (!heads[i]) started = true;
     }
