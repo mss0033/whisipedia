@@ -11,6 +11,7 @@ import sys
 import time
 from collections import Counter
 from collections.abc import Generator, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TextIO, cast
@@ -227,49 +228,135 @@ def open_indexer(
 def cmd_index_build(args: argparse.Namespace, out: TextIO) -> int:
     lay, cfg, specs = _context(args)
     try:
-        with _index_writer(cfg), open_indexer(cfg, lay, specs, out) as ix:
-            ix.defer_suggest = bool(getattr(args, "no_suggest", False))
-            # The suggest trie is rebuilt once, after the rank (its priors), not also before it.
-            if getattr(args, "reindex", False):
-                if not args.source:
-                    out.write("--reindex needs --source\n")
-                    return 2
-                reports = [ix.reindex(args.source)]
-            elif getattr(args, "refine_again", False):
-                if not args.source:
-                    out.write("--refine-again needs --source\n")
-                    return 2
-                swap = bool(getattr(args, "swap", False))
-                reports = [ix.refine_again(args.source, swap=swap, finish=False)]
-            else:
-                reports = ix.build([args.source] if args.source else None, finish=False)
-            if any(r.error for r in reports):
-                # A source failed: the rank, the suggest trie's rebuild and spell read every indexed
-                # generation, and would be rebuilt without what that source holds (or from what a
-                # sick share still let them read). The files of the last good run are kept; what was
-                # indexed is committed and searchable; the next run rebuilds them (2026-11-06 review).
-                out.write("rank, suggest and spell left as they were: a source failed\n")
-                if _full_build(args):
-                    _shared_phases_skipped(cfg, ix.root, [r.source_id for r in reports if r.error], out)
-                return _index_build_summary(reports, out)
-            try:
-                if not getattr(args, "no_rank", False):
-                    ix.rank_if_due()  # kept unless the link graph can have changed (or a week passed)
-            except Exception:
-                ix.finish()  # rank did not rebuild the trie: what was indexed still reaches it
-                raise
-            ix.finish()  # nothing to do when rank just rebuilt the trie
-            # Built again only when the generations it reads changed since it was built (a refine
-            # that changed nothing ran spell for an hour, 2026-11-05 deep dive), compared with what it
-            # was built from, not with this run: a failed spell run is tried again the next night
-            # (2026-11-06 review).
-            if not getattr(args, "no_spell", False):
-                ix.spell_if_due()
-            if _full_build(args):  # rank, suggest and spell all ran (or were not due): fresh again
-                _shared_phases_ran(cfg, ix.root)
+        with _index_writer(cfg):
+            if not _full_build(args):
+                with open_indexer(cfg, lay, specs, out) as ix:
+                    return _index_build(args, cfg, ix, out)
+            # Marked only once the locks are held (a busy run marks nothing), and around the indexer:
+            # a close that fails (the share gone) must not leave a mark that says "ended cleanly".
+            with _full_build_marked(cfg) as mark, open_indexer(cfg, lay, specs, out) as ix:
+                mark.exit = _index_build(args, cfg, ix, out)
+            return mark.exit
     except LockHeldError as exc:
         return _busy(exc)
+
+
+def _index_build(args: argparse.Namespace, cfg: Mapping[str, Any], ix: Indexer, out: TextIO) -> int:
+    """``index build`` under its locks; returns the exit code."""
+    ix.defer_suggest = bool(getattr(args, "no_suggest", False))
+    # The suggest trie is rebuilt once, after the rank (its priors), not also before it.
+    if getattr(args, "reindex", False):
+        if not args.source:
+            out.write("--reindex needs --source\n")
+            return 2
+        reports = [ix.reindex(args.source)]
+    elif getattr(args, "refine_again", False):
+        if not args.source:
+            out.write("--refine-again needs --source\n")
+            return 2
+        swap = bool(getattr(args, "swap", False))
+        reports = [ix.refine_again(args.source, swap=swap, finish=False)]
+    else:
+        reports = ix.build([args.source] if args.source else None, finish=False)
+    if any(r.error for r in reports):
+        # A source failed: the rank, the suggest trie's rebuild and spell read every indexed
+        # generation, and would be rebuilt without what that source holds (or from what a
+        # sick share still let them read). The files of the last good run are kept; what was
+        # indexed is committed and searchable; the next run rebuilds them (2026-11-06 review).
+        out.write("rank, suggest and spell left as they were: a source failed\n")
+        if _full_build(args):
+            _shared_phases_skipped(cfg, ix.root, [r.source_id for r in reports if r.error], out)
+        return _index_build_summary(reports, out)
+    try:
+        if not getattr(args, "no_rank", False):
+            ix.rank_if_due()  # kept unless the link graph can have changed (or a week passed)
+    except Exception:
+        ix.finish()  # rank did not rebuild the trie: what was indexed still reaches it
+        raise
+    ix.finish()  # nothing to do when rank just rebuilt the trie
+    # Built again only when the generations it reads changed since it was built (a refine
+    # that changed nothing ran spell for an hour, 2026-11-05 deep dive), compared with what it
+    # was built from, not with this run: a failed spell run is tried again the next night
+    # (2026-11-06 review).
+    if not getattr(args, "no_spell", False):
+        ix.spell_if_due()
+    if _full_build(args):  # rank, suggest and spell all ran (or were not due): fresh again
+        _shared_phases_ran(cfg, ix.root)
     return _index_build_summary(reports, out)
+
+
+FULL_BUILD_MARK = "index-full-build.json"
+"""``<state_dir>/index-full-build.json`` (local disk): the last nightly build, written by the build.
+
+``started`` and ``pid`` when it has its locks; ``ended`` and ``exit`` (the exit code, or the exception's
+class name) on every way out that Python sees. A build that was killed (a shutdown, SIGTERM, an OOM
+kill, a power loss) writes nothing more, so ``started`` without ``ended`` means "cut short":
+``tools/lanes/resume-after-reboot.sh`` starts such a build again, once, instead of leaving it to the
+next night (2026-11-10: killed at 04:59 by a shutdown, nothing ran until 04:43 the next day; the
+timer's ``Persistent=true`` only replays a run that never started). One that failed by itself has
+``ended`` and is not started again: a failure that repeats must not loop. ``last_ok`` is the end of
+the last build that exited 0 and ``since`` the first time a build was marked at all; ``tools/wsp-stall``
+raises ``index-missed`` from them when no build finished cleanly for 36 hours."""
+
+
+@dataclass
+class _BuildMark:
+    exit: int = 0
+
+
+def _utc_now() -> str:
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _mark_full_build(path: Path, doc: Mapping[str, object]) -> None:
+    """Replace the mark in one step. It must never fail a build: an error is only reported."""
+    tmp = path.with_name(path.name + ".partial")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with tmp.open("w", encoding="utf-8") as fh:
+            json.dump(dict(doc), fh, sort_keys=True)
+            fh.write("\n")
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+    except OSError as exc:
+        print(f"warning: {path.name} not written ({type(exc).__name__}: {exc})", file=sys.stderr)
+        with contextlib.suppress(OSError):
+            tmp.unlink(missing_ok=True)
+
+
+@contextlib.contextmanager
+def _full_build_marked(cfg: Mapping[str, Any]) -> Generator[_BuildMark]:
+    """Mark the nightly build's start now and its end on the way out (:data:`FULL_BUILD_MARK`)."""
+    mark = _BuildMark()
+    state_dir = bootstrap.paths(cfg).state_dir
+    if state_dir is None:
+        yield mark
+        return
+    path = state_dir / FULL_BUILD_MARK
+    before: dict[str, object] = {}
+    with contextlib.suppress(OSError, ValueError):
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            before = cast(dict[str, object], loaded)
+    doc: dict[str, object] = {"started": _utc_now(), "pid": os.getpid()}
+    doc["since"] = before["since"] if isinstance(before.get("since"), str) else doc["started"]
+    if isinstance(before.get("last_ok"), str):
+        doc["last_ok"] = before["last_ok"]
+    _mark_full_build(path, doc)
+    result: int | str = "BaseException"
+    try:
+        yield mark
+        result = mark.exit
+    except BaseException as exc:
+        result = type(exc).__name__
+        raise
+    finally:
+        doc["ended"] = _utc_now()
+        doc["exit"] = result
+        if result == 0:
+            doc["last_ok"] = doc["ended"]
+        _mark_full_build(path, doc)
 
 
 SHARED_SKIPPED_FILE = "shared-phases-skipped.json"

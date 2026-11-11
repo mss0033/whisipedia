@@ -39,6 +39,13 @@ failed nightly index and five API outages among them, reached nobody without a C
                               hours (6; a normal build's longest quiet step is under 5): hung, which the
                               lock's age cannot tell (2026-11-02 and 11-03: builds that stopped writing
                               hours before they died looked like healthy ones)
+* ``index-missed``            no nightly ``index build`` finished cleanly (exit 0) for
+                              WSP_STALL_INDEX_MISSED_H hours (36), from the mark the build itself keeps
+                              (``<state>/index-full-build.json``: wsp_cli.ops.FULL_BUILD_MARK). A build cut
+                              short is started again once by whisipedia-resume.service; this is the
+                              signal for one that dies or fails every night. Not while a build runs,
+                              the nightly timer is disabled (a lexical rebuild) or the library is
+                              halted; it can show for a while after either ends, until a build finishes
 * ``jobs-owed``               jobs tools/wsp-yield stopped for memory (``jobs/yield-stopped``) not started
                               again after WSP_STALL_OWED_MIN minutes (30): 2026-10-22, every lane stood
                               still for 10 hours and nothing here said so
@@ -149,6 +156,8 @@ UNIT_DOWN_MIN = float(os.environ.get("WSP_STALL_UNIT_DOWN_MIN", "20"))  # a rest
 # dive: 4 of 7 good builds passed the general 8 h); its silence in its run log is what tells a hung one.
 INDEX_LOCK_H = float(os.environ.get("WSP_STALL_INDEX_LOCK_H", "14"))
 INDEX_SILENT_H = float(os.environ.get("WSP_STALL_INDEX_SILENT_H", "6"))
+INDEX_MISSED_H = float(os.environ.get("WSP_STALL_INDEX_MISSED_H", "36"))
+FULL_BUILD_MARK = STATE / "index-full-build.json"  # = wsp_cli.ops.FULL_BUILD_MARK, in the state dir
 # A failed unit's journal, saved when it is seen (the journal kept ~14 hours, 2026-11-05): the newest kept.
 FAILURES_KEEP = 200
 JOURNAL_LINES = 80
@@ -160,6 +169,7 @@ PUSHED = {
     "nas-missing:": "critical",
     "disk-low:": "critical",
     "index-silent": "critical",
+    "index-missed": "warning",
     "unit-failed:": "warning",  # critical for a RUNNING unit (push_severity)
     "mem-stall:": "warning",
     "jobs-owed": "warning",
@@ -531,6 +541,39 @@ def index_silence(pid: str, t: float) -> str | None:
     )
 
 
+def index_missed(t: float) -> str | None:
+    """The message when no nightly build has finished cleanly for INDEX_MISSED_H hours, from the
+    build's own mark: counted from ``last_ok`` (the end of the last build that exited 0) or, when
+    there is none yet, from ``since`` (the first build that was marked). No mark: nothing is known."""
+    try:
+        loaded = json.loads(FULL_BUILD_MARK.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(loaded, dict):
+        return None
+    doc = cast(dict[str, Any], loaded)
+
+    def at(key: str) -> float | None:
+        try:
+            return datetime.fromisoformat(str(doc[key]).replace("Z", "+00:00")).timestamp()
+        except (KeyError, ValueError):
+            return None
+
+    last_ok = at("last_ok")
+    ref = last_ok if last_ok is not None else at("since")
+    if ref is None or t - ref < INDEX_MISSED_H * 3600:
+        return None
+    if "ended" in doc:
+        last = f"started {doc.get('started')}, ended {doc.get('ended')} with exit {doc.get('exit')}"
+    else:
+        last = f"started {doc.get('started')} and was cut short or still runs (no end recorded)"
+    clean = f"the last clean one ended {doc['last_ok']}" if last_ok is not None else "none is recorded"
+    return (
+        f"no nightly index build has finished cleanly for {hours(t - ref)} ({clean}; the last run "
+        f"{last}): see {STATE}/logs/index-build/ and journalctl --user -u whisipedia-index"
+    )
+
+
 def owed_by_yield() -> set[str]:
     """The units tools/wsp-yield stopped for memory and owes a start (``jobs/yield-stopped``)."""
     try:
@@ -644,6 +687,16 @@ def check(state: State, t: float) -> tuple[dict[str, str], list[str], list[str]]
         cond["halted"] = (
             f"the library is halted (tools/wsp-shutdown, {HALTED}): tools/wsp-start starts it again"
         )
+    # Not while a build runs (a long one, or the rerun after a cut, is about to end it; lock-held and
+    # index-silent watch that build), nor while the library is halted.
+    building = index_pid is not None and index_build(holders["index"][1])
+    missed = None if halted or building else index_missed(t)
+    if missed is not None:
+        timer = systemctl("is-enabled", "whisipedia-index.timer")
+        if timer is None:
+            unknown.append("index-missed")
+        elif not timer.strip().startswith(("disabled", "masked", "not-found")):  # a lexical rebuild
+            cond["index-missed"] = missed
     for unit, active, sub in rows:
         if active == "failed":
             cond[f"unit-failed:{unit}"] = f"{unit} failed ({sub})" + failure_pointers(state, unit, t)

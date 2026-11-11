@@ -18,6 +18,9 @@
 #                       tools/lanes/rebuild-resume.sh unless index/rebuild.paused exists. Memory:
 #                       $REBUILD_MEMORY_MAX (default 6G: stop the lanes, see the slice's budget).
 #
+# A nightly index build that was cut short (a shutdown, a kill) is started again here, at most once
+# in 20 hours: see "the nightly build" below. $WSP_INDEX_MARK names the build's mark (for tests).
+#
 # The NAS is polled for up to $WSP_NAS_WAIT seconds (default 900). If it never mounts, the script logs
 # a critical message to the journal and fails the unit (`systemctl --user --failed` shows it); start
 # it again once the share is there: systemctl --user restart whisipedia-resume (audit 2026-10-12, M6).
@@ -96,6 +99,43 @@ if [ -f "$S/jobs.conf" ]; then
     [ -z "$name" ] || start_saved "$name"
   done
 fi
+# The nightly build: cut short (a shutdown, a kill), it runs again now, not next night. 2026-11-10:
+# killed at 04:59 by a shutdown, nothing built until 04:43 the next day (the timer's Persistent=true
+# only replays a run that never started). The build keeps a mark (wsp_cli.ops.FULL_BUILD_MARK) with
+# "started", and "ended" on every way out it sees itself; killed, it leaves no "ended".
+#   - only a mark younger than 14 hours: later, the 04:30 timer is nearer, and a rerun would run
+#     through it;
+#   - only while the nightly timer is enabled (a lexical rebuild disables it) and no build runs;
+#   - at most once in 20 hours (index/rerun.stamp): a build that dies every time it runs, or that
+#     the owner stopped by hand, also leaves an open mark, and must not be started at every resume;
+#   - one that tools/wsp-yield stopped for memory waits for its timer, as before: the stamp is
+#     touched for it too, so it still waits after the list below is gone.
+# A build that failed by itself has "ended" and is left to the next night (tools/wsp-stall raises
+# index-missed when none finished cleanly for 36 hours).
+MARK=${WSP_INDEX_MARK:-${XDG_DATA_HOME:-$HOME/.local/share}/whisipedia/state/index-full-build.json}
+STAMP="$S/index/rerun.stamp"
+if [ -f "$MARK" ] && ! grep -q '"ended"' "$MARK" &&
+   [ -n "$(find "$MARK" -mmin -840 2>/dev/null)" ] &&
+   systemctl --user is-enabled -q whisipedia-index.timer 2>/dev/null; then
+  case $(systemctl --user is-active whisipedia-index.service 2>/dev/null) in
+    active | activating | deactivating | reloading)
+      echo "the nightly index build is running: left alone" ;;
+    *)
+      if grep -qx 'whisipedia-index.service' "$S/jobs/yield-stopped" 2>/dev/null; then
+        mkdir -p "$S/index" && touch "$STAMP"
+        echo "the nightly index build was stopped for memory: it waits for its timer"
+      elif [ -n "$(find "$STAMP" -mmin -1200 2>/dev/null)" ]; then
+        echo "the nightly index build was interrupted again within 20 hours of a rerun" \
+          "(or was stopped for memory): it waits for its timer"
+      elif mkdir -p "$S/index" && touch "$STAMP"; then
+        echo "the nightly index build was interrupted: starting it again"
+        systemctl --user start --no-block whisipedia-index.service ||
+          echo "<4>whisipedia-index.service not started" >&2
+      else
+        echo "<4>$STAMP cannot be written: the interrupted index build is left to its timer" >&2
+      fi ;;
+  esac
+fi
 # Jobs tools/wsp-yield stopped when the machine ran short of memory.
 # Those that could not be started stay listed for the next resume (removed with the rest, the list
 # lost them: 2026-10-26 review).
@@ -104,7 +144,7 @@ if [ -f "$S/jobs/yield-stopped" ]; then
   sort -u "$S/jobs/yield-stopped.resuming" | while read -r unit; do
     case $unit in
       whisipedia-job-*.service) ;;
-      *) continue ;;  # not a tools/wsp-bg job (the index waits for its timer)
+      *) continue ;;  # not a tools/wsp-bg job (the index waits for its timer: see the nightly build above)
     esac
     name=${unit#whisipedia-job-}
     name=${name%.service}

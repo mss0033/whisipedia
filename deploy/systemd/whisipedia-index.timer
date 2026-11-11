@@ -1,4 +1,6 @@
 # Nightly index refresh; Persistent=true catches up after the machine (WSL) was off (PLAN §6.5).
+# It only replays a run that never started. A run that started and was cut short (a shutdown, a kill)
+# is started again by whisipedia-resume.service (tools/lanes/resume-after-reboot.sh), not by this.
 
 [Unit]
 Description=Nightly Whisipedia index refresh

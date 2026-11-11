@@ -67,6 +67,9 @@ export default defineConfig({
     timezoneId: 'UTC',
     // The app is offline by design: no service workers, nothing to cache across tests.
     serviceWorkers: 'block',
+    // Against the live library this run is automation, not the owner reading: unmarked, its requests
+    // froze the background jobs for as long as it ran (the API's reading pause, wsp_core.activity).
+    ...(LIVE_URL ? { extraHTTPHeaders: { 'X-Whisipedia-Probe': 'e2e' } } : {}),
   },
   projects: [
     {

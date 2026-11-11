@@ -54,7 +54,10 @@ The mock target tests the **production bundle** (`dist/`), not the dev server,
 so the CSP meta tag and header are the real ones.
 
 The live target is **read-only**. It only sends GETs, plus `POST /v1/gaps` when a
-journey opens a missing page (harmless: it logs a gap for the gap miner). A
+journey opens a missing page (harmless: it logs a gap for the gap miner). Every
+request of the live target carries `X-Whisipedia-Probe: e2e`, so the run does not
+count as the owner reading and does not freeze the background jobs
+([automation must mark itself](../components/api.md#automation-must-mark-itself)). A
 global setup (`e2e/support/warm-up.ts`) wakes the library first, and timeouts
 are longer (30 s per assertion, 2 min per test), because first loads from the NAS
 can be slow.

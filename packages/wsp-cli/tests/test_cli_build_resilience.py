@@ -468,3 +468,203 @@ def test_a_generation_promoted_during_the_refine_is_left_to_the_next_run(tmp_pat
         assert is_sealed(generation_dir(ix.refinery, GOOD, f"{GID}r2"))
     finally:
         ix.close()
+
+
+# --- the nightly build marks its start and its end (2026-11-10) ------------------------------------------
+# Killed at 04:59 by a shutdown, the build did not run again until 04:43 the next day: nothing on disk
+# said that the last full build had not finished.
+
+FULL = argparse.Namespace(source=None)
+
+
+class _MarkedIx:
+    """The indexer `index build` drives, reduced to what the command calls."""
+
+    defer_suggest = False
+
+    def __init__(self, root: Path, mark: Path) -> None:
+        self.root = root
+        self.mark = mark
+        self.error: str | None = None
+        self.fail: BaseException | None = None
+        self.during: dict[str, Any] | None = None  # the mark as the running build saw it
+
+    def build(self, *_a: object, **_k: object) -> list[SourceReport]:
+        self.during = json.loads(self.mark.read_text()) if self.mark.is_file() else None
+        if self.fail is not None:
+            raise self.fail
+        return [SourceReport(GOOD, indexed=GID, error=self.error)]
+
+    def reindex(self, source_id: str) -> SourceReport:
+        return self.build()[0]
+
+    def rank_if_due(self) -> bool:
+        return False
+
+    def finish(self) -> None:
+        pass
+
+    def spell_if_due(self) -> bool:
+        return False
+
+
+@pytest.fixture
+def marked(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> _MarkedIx:
+    state = tmp_path / "state"
+    ix = _MarkedIx(tmp_path / "index", state / ops.FULL_BUILD_MARK)
+    ix.root.mkdir()
+    cfg = {"orchestrator": {"state_db": str(state / "orchestrator.sqlite3")}}
+
+    @contextlib.contextmanager
+    def fake_indexer(*_a: object) -> Generator[_MarkedIx]:
+        yield ix
+
+    def context(_args: object) -> tuple[None, dict[str, Any], tuple[SourceSpec, ...]]:
+        return None, cfg, ()
+
+    def writer(_cfg: object) -> contextlib.AbstractContextManager[None]:
+        return contextlib.nullcontext()
+
+    def alert(_cfg: object, _key: str, _message: str | None) -> None:
+        pass
+
+    monkeypatch.setattr(ops, "_context", context)
+    monkeypatch.setattr(ops, "_index_writer", writer)
+    monkeypatch.setattr(ops, "open_indexer", fake_indexer)
+    monkeypatch.setattr(ops, "_alert", alert)
+    return ix
+
+
+def test_a_full_build_marks_its_start_and_its_end(marked: _MarkedIx) -> None:
+    assert ops.cmd_index_build(FULL, io.StringIO()) == 0
+    during = marked.during
+    assert during is not None, "the start is marked before the build does anything"
+    assert sorted(during) == ["pid", "since", "started"]  # no "ended": cut here, it reads "interrupted"
+    assert during["pid"] == os.getpid()
+    after = json.loads(marked.mark.read_text())
+    assert sorted(after) == ["ended", "exit", "last_ok", "pid", "since", "started"]
+    assert (after["exit"], after["started"], after["since"]) == (0, during["started"], during["started"])
+    assert after["last_ok"] == after["ended"] >= after["started"]
+    assert not list(marked.mark.parent.glob("*.partial"))
+
+
+def test_a_build_with_a_failed_source_is_marked_ended(marked: _MarkedIx) -> None:
+    assert ops.cmd_index_build(FULL, io.StringIO()) == 0
+    clean = json.loads(marked.mark.read_text())
+    marked.error = "InvalidDocIdError: bad id"
+    assert ops.cmd_index_build(FULL, io.StringIO()) == 1
+    failed = json.loads(marked.mark.read_text())
+    assert failed["exit"] == 1
+    assert "ended" in failed, "failed by itself: not started again automatically"
+    # what tools/wsp-stall counts from: the last clean end, and the first mark
+    assert (failed["last_ok"], failed["since"]) == (clean["ended"], clean["since"])
+    assert marked.during is not None
+    assert marked.during["last_ok"] == clean["ended"], "kept while the next build runs, and if it is cut"
+
+
+def test_a_build_that_raises_is_marked_ended_with_what_it_raised(marked: _MarkedIx) -> None:
+    marked.fail = MountUnavailableError("the share is gone")
+    with pytest.raises(MountUnavailableError):
+        ops.cmd_index_build(FULL, io.StringIO())
+    doc = json.loads(marked.mark.read_text())
+    assert doc["exit"] == "MountUnavailableError"
+    assert "ended" in doc
+    assert "last_ok" not in doc
+
+
+def test_a_per_source_build_writes_no_marker(marked: _MarkedIx) -> None:
+    for partial in (
+        argparse.Namespace(source=GOOD),
+        argparse.Namespace(source=None, no_rank=True),
+        argparse.Namespace(source=GOOD, reindex=True),
+    ):
+        assert ops.cmd_index_build(partial, io.StringIO()) == 0
+    assert not marked.mark.exists()
+    assert marked.during is None
+
+
+def test_a_busy_lock_writes_no_marker(marked: _MarkedIx, monkeypatch: pytest.MonkeyPatch) -> None:
+    marked.mark.parent.mkdir(parents=True)
+    interrupted = '{"pid": 7, "since": "2026-11-09T09:30:00Z", "started": "2026-11-10T09:33:00Z"}\n'
+    marked.mark.write_text(interrupted)
+
+    @contextlib.contextmanager
+    def busy(_cfg: object) -> Generator[None]:
+        raise LockHeldError("another 'heavy' is running (pid 7)")
+        yield
+
+    monkeypatch.setattr(ops, "_index_writer", busy)
+    assert ops.cmd_index_build(FULL, io.StringIO()) == 3
+    assert marked.mark.read_text() == interrupted, "the interrupted build's mark is left for the resume"
+
+
+def test_a_mark_that_cannot_be_written_never_fails_the_build(
+    marked: _MarkedIx, capsys: pytest.CaptureFixture[str]
+) -> None:
+    marked.mark.parent.mkdir(parents=True)
+    marked.mark.mkdir()  # os.replace onto a directory fails
+    assert ops.cmd_index_build(FULL, io.StringIO()) == 0
+    assert "index-full-build.json not written" in capsys.readouterr().err
+    assert [p.name for p in marked.mark.parent.iterdir()] == [ops.FULL_BUILD_MARK]
+
+
+KILLED_BUILD = """
+import contextlib, sys, time
+from pathlib import Path
+from wsp_cli import main, ops
+
+tmp = Path(sys.argv[1])
+
+class Ix:
+    defer_suggest = False
+    root = tmp / "index"
+    def build(self, *a, **k):
+        (tmp / "building").touch()
+        time.sleep(600)  # the hook: an indexer that never returns; the test kills the process here
+        return []
+
+@contextlib.contextmanager
+def fake_indexer(*a):
+    yield Ix()
+
+cfg = {"orchestrator": {"state_db": str(tmp / "state" / "orchestrator.sqlite3")}}
+ops._context = lambda args: (None, cfg, ())
+ops._index_writer = lambda cfg: contextlib.nullcontext()
+ops.open_indexer = fake_indexer
+sys.exit(main.main(["--config-dir", str(tmp / "config"), "index", "build"]))
+"""
+
+
+def test_a_killed_build_leaves_the_marker_open(tmp_path: Path) -> None:
+    """The real command (`wsp index build` through wsp_cli.main) with an indexer that blocks: systemd's
+    SIGTERM at a shutdown must not reach Python as an exception, or the mark would be closed and the
+    build never started again. This fails the day someone installs a SIGTERM handler in the CLI."""
+    import signal
+    import subprocess
+    import sys
+    import time
+
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "default.toml").write_text("")
+    proc = subprocess.Popen(
+        [sys.executable, "-c", KILLED_BUILD, str(tmp_path)],
+        env={**{k: v for k, v in os.environ.items() if not k.startswith("WSP_")}, "WSP_NO_LOCAL_CONFIG": "1"},
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        deadline = time.monotonic() + 60
+        while not (tmp_path / "building").exists() and proc.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert (tmp_path / "building").exists(), "the build never started"
+        proc.send_signal(signal.SIGTERM)
+        code = proc.wait(timeout=30)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+        _, err = proc.communicate()
+    assert code == -signal.SIGTERM, err
+    doc = json.loads((tmp_path / "state" / ops.FULL_BUILD_MARK).read_text())
+    assert sorted(doc) == ["pid", "since", "started"]
+    assert doc["pid"] == proc.pid

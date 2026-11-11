@@ -729,8 +729,23 @@ def test_yield_freezes_the_background_while_the_owner_reads_and_thaws_it_after(t
     15 s while the owner might be reading."""
     out, calls = _yield(tmp_path, [CALM] * 5, reader=[False, True, True, False, False])
     assert calls == ["--user freeze whisipedia-background.slice", "--user thaw whisipedia-background.slice"]
-    assert "the owner is reading" in out
-    assert "no use for 300 s" in out
+    assert "the owner is reading (last client: unknown): froze" in out  # an API that names nobody
+    assert "no use for 300 s (last client: unknown): thawed" in out
+
+
+def test_yield_names_the_client_that_started_the_reading_pause(tmp_path: Path) -> None:
+    """2026-11-10 and 11-11: scripts calling the API froze the background for hours, and the journal
+    said only "the owner is reading"."""
+    (tmp_path / "last-interactive.client").write_text("curl/8.5.0\n")
+    out, calls = _yield(tmp_path, [CALM] * 5, reader=[False, True, True, False, False])
+    assert calls == ["--user freeze whisipedia-background.slice", "--user thaw whisipedia-background.slice"]
+    assert "the owner is reading (last client: curl/8.5.0): froze whisipedia-background.slice" in out
+    assert "no use for 300 s (last client: curl/8.5.0): thawed whisipedia-background.slice" in out
+    (tmp_path / "long").mkdir()
+    (tmp_path / "long" / "last-interactive.client").write_text("a" * 300 + "\nsecond line\n")
+    out, _ = _yield(tmp_path / "long", [CALM] * 3, reader=[False, True, False])
+    assert f"(last client: {'a' * 80}): froze" in out, "its first line, cut to 80 characters"
+    assert "second" not in out
 
 
 def test_yield_keeps_the_background_frozen_for_a_reader_when_memory_comes_back(tmp_path: Path) -> None:

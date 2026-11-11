@@ -91,6 +91,27 @@ and needs an ADR.
 - **Document HTML** is the original (ZIM) HTML with relative images rewritten to `/v1/assets/…` and
   relative links to `wsp://` addresses. It is untrusted: clients sanitize it.
 
+### Automation must mark itself
+
+The API takes every request for the owner reading, unless it is under a polling prefix
+(`/v1/health`, `/v1/system`, `/v1/events`, `/v1/changes`, `/v1/openapi.json`, `/favicon`). It then
+touches `<state>/last-interactive`, and `tools/wsp-yield` freezes the background jobs (downloads,
+the nightly index build, the orchestrator's steps) while that mark is younger than five minutes. A
+script that calls the API without saying what it is therefore stops the library's own work for as
+long as it runs (`wsp_core.activity`). Any automated client must do one of:
+
+- send the header `X-Whisipedia-Probe: <name>` (any value; `curl -H 'X-Whisipedia-Probe: verify'`);
+- put `whisipedia-probe` in its `User-Agent` (any case), when it can set no other header;
+- for `wsp ... --url` or `WSP_API_URL` from a script: set `WSP_API_PROBE=1` in that script's
+  environment. Never set it in `whisipedia.env` or a shell profile: the owner typing `wsp search`
+  is the owner.
+
+An unknown client still counts as reading. So that an unmarked script can be found,
+`<state>/last-interactive.client` holds the `User-Agent` (80 characters, no path, no query) of the
+client whose request last set the mark, and the freeze and thaw lines of `whisipedia-yield` print it
+(`the owner is reading (last client: curl/8.5.0)`). The mark is set at most once in 30 seconds, so
+this names the client that started the pause, not every client that kept it going.
+
 ## Security and offline guarantees
 
 - `wsp serve` binds `127.0.0.1:8737` and refuses any non-loopback address unless `--allow-remote`

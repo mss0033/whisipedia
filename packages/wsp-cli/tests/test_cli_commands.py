@@ -136,3 +136,33 @@ def test_layout_outside_checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     assert lay.root is None
     services = bootstrap.build_services({}, lay)
     assert {s.id for s in services.sources} == {"wikipedia-en-zim", "rfc", "gutenberg"}
+
+
+def test_wsp_api_probe_marks_cli_requests(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A script that drives `wsp --url` says so, and its requests do not count as the owner reading."""
+    import argparse
+
+    from wsp_cli.main import _client  # pyright: ignore[reportPrivateUsage]
+
+    args = argparse.Namespace(url="http://127.0.0.1:9", config_dir=None)
+
+    def headers() -> dict[str, str]:
+        client = _client(args)
+        http = client._http  # pyright: ignore[reportPrivateUsage]
+        try:
+            assert str(http.base_url).rstrip("/") == "http://127.0.0.1:9"
+            return {k.lower(): v for k, v in http.headers.items()}
+        finally:
+            http.close()
+
+    monkeypatch.delenv("WSP_API_PROBE", raising=False)
+    assert "x-whisipedia-probe" not in headers()  # the owner typing `wsp search --url` is the owner
+    monkeypatch.setenv("WSP_API_PROBE", "0")
+    assert "x-whisipedia-probe" not in headers()
+    monkeypatch.setenv("WSP_API_PROBE", "1")
+    assert headers()["x-whisipedia-probe"] == "cli"
+    monkeypatch.delenv("WSP_API_PROBE")
+    monkeypatch.setenv("WSP_API_URL", "http://127.0.0.1:9")
+    args.url = None
+    monkeypatch.setenv("WSP_API_PROBE", "yes")
+    assert headers()["x-whisipedia-probe"] == "cli"

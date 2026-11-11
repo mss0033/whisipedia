@@ -565,3 +565,64 @@ def test_the_watched_services_are_the_long_running_ones_service_install_enables(
     assert module.push_severity("unit-failed:whisipedia-weather.service") == "warning"
     assert module.push_severity("lock-held:index") is None
     assert module.push_severity("job-idle:whisipedia-job-x.service") is None
+
+
+# --- index-missed: no nightly build finished cleanly for 36 hours ----------------------------------------
+
+
+def _mark(tmp: Path, **fields: object) -> None:
+    (tmp / "state").mkdir(exist_ok=True)
+    (tmp / "state" / "index-full-build.json").write_text(json.dumps(fields))
+
+
+def _at(hours: float) -> str:
+    from datetime import UTC, datetime
+
+    return datetime.fromtimestamp(T0 + hours * 3600, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def test_no_clean_nightly_build_for_36_hours_is_raised_and_reaches_the_owner(tmp_path: Path) -> None:
+    """A build cut short is started again only once (whisipedia-resume.service); one that dies or fails
+    every night would otherwise be noticed by nobody."""
+    env = _world(tmp_path, usage=5_000_000)
+    assert "index-missed" not in " ".join(_run(env, 0)), "no mark yet (before the first build): nothing known"
+    # the last clean build ended at hour 0; the next night's was cut short and never ended
+    _mark(tmp_path, since=_at(-240), last_ok=_at(0), started=_at(20), pid=7)
+    assert "index-missed" not in " ".join(_run(env, 35))
+    [raised] = [line for line in _run(env, 37) if "index-missed" in line]
+    assert "RAISED index-missed: no nightly index build has finished cleanly for 37.0 h" in raised
+    assert f"the last clean one ended {_at(0)}" in raised
+    assert f"started {_at(20)} and was cut short or still runs" in raised
+    assert any(
+        a.startswith("alerts raise --key watch:index-missed --severity warning") for a in _alerts(tmp_path)
+    )
+    assert "index-missed" not in " ".join(_run(env, 38)), "raised once"
+    # a build that failed by itself does not end it either, and says how it ended
+    _mark(tmp_path, since=_at(-240), last_ok=_at(0), started=_at(44), ended=_at(45), exit=1, pid=8)
+    assert "index-missed" not in " ".join(_run(env, 46))
+    _mark(tmp_path, since=_at(-240), last_ok=_at(54), started=_at(44.5), ended=_at(54), exit=0, pid=9)
+    assert any("CLEARED index-missed" in line for line in _run(env, 55))
+    assert "alerts resolve --key watch:index-missed" in _alerts(tmp_path)
+
+
+def test_a_library_whose_marked_builds_never_finished_cleanly_counts_from_the_first_mark(
+    tmp_path: Path,
+) -> None:
+    env = _world(tmp_path, usage=5_000_000)
+    _mark(tmp_path, since=_at(-30), started=_at(-6), ended=_at(-5), exit="MountUnavailableError", pid=7)
+    assert "index-missed" not in " ".join(_run(env, 0))
+    [raised] = [line for line in _run(env, 7) if "index-missed" in line]
+    assert "for 37.0 h (none is recorded; the last run started" in raised
+    assert "with exit MountUnavailableError" in raised
+
+
+def test_no_index_missed_while_the_nightly_timer_is_disabled(tmp_path: Path) -> None:
+    """A lexical rebuild disables the timer for days: its missed nights are meant."""
+    env = _world(tmp_path, usage=5_000_000)
+    fake = tmp_path / "bin" / "systemctl"
+    text = fake.read_text()
+    fake.write_text(text.replace('case "$*" in ', 'case "$*" in *is-enabled*) echo disabled ;; ', 1))
+    _mark(tmp_path, since=_at(-240), last_ok=_at(-48), started=_at(-48), ended=_at(-48), exit=0, pid=7)
+    assert "index-missed" not in " ".join(_run(env, 0))
+    fake.write_text(text)  # enabled again
+    assert "RAISED index-missed" in " ".join(_run(env, 0.2))

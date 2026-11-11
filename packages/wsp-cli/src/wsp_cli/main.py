@@ -110,9 +110,19 @@ def _is_loopback(host: str) -> bool:
         return False
 
 
+API_PROBE_ENV = "WSP_API_PROBE"
+"""Set (to anything but ``0``) by a script that calls the API through ``wsp ... --url``: its requests
+carry ``X-Whisipedia-Probe`` and do not count as the owner reading, which freezes the background jobs.
+Never set it in ``whisipedia.env`` or a shell profile: the owner typing ``wsp search`` is the owner."""
+
+
 def _client(args: argparse.Namespace) -> WspClient:
     url: str | None = args.url or os.environ.get("WSP_API_URL")
     if url:
+        if os.environ.get(API_PROBE_ENV, "") not in ("", "0"):
+            # a script's requests: the API must not take them for the owner reading (wsp_core.activity)
+            probe = httpx.Client(base_url=url, timeout=30.0, headers={"X-Whisipedia-Probe": "cli"})
+            return WspClient(http=probe)
         return WspClient(url)
     from wsp_api import create_app
     from wsp_api.inprocess import InProcessTransport

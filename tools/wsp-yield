@@ -28,8 +28,12 @@
 #
 # The owner reading comes first too (2026-10-22: the nightly index build and the download lanes kept
 # the NAS so busy that a Wikipedia page took 15 s). The API marks interactive use in
-# WSP_YIELD_MARKER (its mtime; the audit, trawler and health checks send X-Whisipedia-Probe and do
-# not count): while it is younger than WSP_YIELD_READER_SECONDS (default 300; 0 turns this off), the
+# WSP_YIELD_MARKER (its mtime). Automation marks itself and does not count: the audit, the trawler,
+# the health checks and the live e2e run send the header X-Whisipedia-Probe; a client that can only
+# set its User-Agent puts "whisipedia-probe" in it. The API writes the User-Agent of the client that
+# set the mark next to it (<marker>.client, one line), and the freeze and thaw lines below name it: the client
+# that started the pause, not every client that kept it going (2026-11-10 and 11-11: unmarked
+# scripts froze the background for hours and nothing said who). While the mark is younger than WSP_YIELD_READER_SECONDS (default 300; 0 turns this off), the
 # background slice is frozen; once the owner has been idle that long, it is thawed. A shortage of
 # memory while reading is handled as above; memory coming back does not thaw while someone reads.
 #
@@ -99,6 +103,13 @@ reader_now() {
   return 0
 }
 
+# The User-Agent of the client whose request last set the mark (the API writes it, at most 80
+# characters on one line); "unknown" when there is none (an older API, or nothing readable).
+last_client() {
+  who=$(head -n 1 "$MARKER.client" 2>/dev/null | head -c 200 | tr -cd '[:print:]' | cut -c 1-80)
+  printf '%s' "${who:-unknown}"
+}
+
 thaw() {
   systemctl --user thaw "$SLICE" 2>/dev/null || true
 }
@@ -142,7 +153,8 @@ while :; do
         state=frozen since=0
       elif [ -n "$reader" ]; then
         systemctl --user freeze "$SLICE" 2>/dev/null || true
-        echo "the owner is reading: froze $SLICE until ${READER_SECONDS} s without use"
+        # printf: the client's name is a stranger's text, and dash's echo would interpret its backslashes
+        printf '%s\n' "the owner is reading (last client: $(last_client)): froze $SLICE until ${READER_SECONDS} s without use"
         state=reading
       fi ;;
     reading)
@@ -151,7 +163,7 @@ while :; do
         state=frozen since=0  # already frozen; the memory rules take over
       elif [ -z "$reader" ]; then
         thaw
-        echo "no use for ${READER_SECONDS} s: thawed $SLICE"
+        printf '%s\n' "no use for ${READER_SECONDS} s (last client: $(last_client)): thawed $SLICE"
         state=calm
       fi ;;
     frozen)

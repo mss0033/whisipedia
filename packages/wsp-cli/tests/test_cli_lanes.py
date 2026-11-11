@@ -688,3 +688,134 @@ def test_the_refresh_takes_sources_whose_documents_were_given_up_a_month_ago(lan
     assert "collections given-up" in lane.calls()
     assert (lane.state / "refresh-crs-reports.log").exists()  # its own log, not the lane's
     assert not (lane.state / "crs-reports.log").exists()
+
+
+# --- a nightly index build cut short runs again at the resume (2026-11-10) -------------------------------
+# Killed at 04:59 by a shutdown, the build did not run again until 04:43 the next day.
+
+OPEN_MARK = '{"pid": 4242, "since": "2026-11-01T09:30:00Z", "started": "2026-11-10T09:33:00Z"}\n'
+ENDED_MARK = OPEN_MARK.replace("}", ', "ended": "2026-11-10T09:59:00Z", "exit": 1}')
+START_INDEX = "--user start --no-block whisipedia-index.service"
+
+
+class _Resume:
+    """resume-after-reboot.sh with nothing to resume but the nightly build, and a fake systemctl."""
+
+    def __init__(self, tmp_path: Path, mark: str | None = OPEN_MARK) -> None:
+        self.tmp = tmp_path
+        self.state = tmp_path / "state"
+        self.mark = tmp_path / "data" / "index-full-build.json"
+        self.stamp = self.state / "index" / "rerun.stamp"
+        self.calls = tmp_path / "calls"
+        (tmp_path / "bin").mkdir()
+        (self.state / "jobs").mkdir(parents=True)
+        self.mark.parent.mkdir()
+        if mark is not None:
+            self.mark.write_text(mark)
+        self.systemctl()
+
+    def systemctl(self, *, timer_enabled: bool = True, index: str = "inactive") -> None:
+        fake = self.tmp / "bin" / "systemctl"
+        fake.write_text(
+            f'#!/bin/sh\necho "$*" >> {self.calls}\ncase "$*" in\n'
+            f'  *"is-enabled -q whisipedia-index.timer"*) exit {0 if timer_enabled else 1} ;;\n'
+            f'  *"is-active whisipedia-index.service"*) echo {index}; [ {index} = active ] ;;\n'
+            "esac\n"
+        )
+        fake.chmod(0o755)
+
+    def age(self, path: Path, hours: float) -> None:
+        then = time.time() - hours * 3600
+        os.utime(path, (then, then))
+
+    def run(self) -> tuple[str, bool]:
+        """The script's output, and whether it started the index build."""
+        self.calls.write_text("")
+        env = {
+            "PATH": f"{self.tmp / 'bin'}:/usr/bin:/bin",
+            "HOME": str(self.tmp),
+            "WSP_STATE": str(self.state),
+            "WSP_INDEX_MARK": str(self.mark),
+            "WSP_NAS_MOUNT": "/",
+            "WSP_RESUME_SETTLE": "0",
+        }
+        script = ROOT / "tools" / "lanes" / "resume-after-reboot.sh"
+        done = subprocess.run([str(script)], env=env, capture_output=True, text=True, timeout=60)
+        assert done.returncode == 0, done.stderr
+        calls = self.calls.read_text().splitlines()
+        assert not [c for c in calls if " start " in f" {c} " and c != START_INDEX], calls
+        return done.stdout + done.stderr, START_INDEX in calls
+
+
+def test_resume_starts_an_interrupted_nightly_build(tmp_path: Path) -> None:
+    r = _Resume(tmp_path)
+    r.age(r.mark, 5)  # cut at 04:59, the machine is back at 10:00
+    out, started = r.run()
+    assert started
+    assert "the nightly index build was interrupted: starting it again" in out
+    assert r.stamp.exists()
+    assert r.mark.read_text() == OPEN_MARK, "the mark is the build's to write"
+
+
+def test_resume_starts_an_interrupted_build_at_most_once_in_20_hours(tmp_path: Path) -> None:
+    """A build that is OOM-killed every time, or that the owner stopped by hand, leaves the same open
+    mark as one cut by a shutdown, and every start writes a fresh one: without a bound each resume
+    (wsp-yield starts one after every memory stop) would start it again."""
+    r = _Resume(tmp_path)
+    assert r.run()[1]
+    r.mark.write_text(OPEN_MARK)  # the rerun started, and died the same way
+    out, started = r.run()
+    assert not started
+    assert "it waits for its timer" in out
+    r.age(r.stamp, 19)
+    assert not r.run()[1]
+    r.age(r.stamp, 21)
+    assert r.run()[1]
+    assert time.time() - r.stamp.stat().st_mtime < 60, "the new rerun is stamped"
+
+
+def test_resume_leaves_a_build_stopped_for_memory_to_its_timer(tmp_path: Path) -> None:
+    r = _Resume(tmp_path)
+    stopped = r.state / "jobs" / "yield-stopped"
+    stopped.write_text("whisipedia-index.service\n")
+    out, started = r.run()
+    assert not started
+    assert "stopped for memory: it waits for its timer" in out
+    assert not stopped.exists(), "the list is used up by this resume"
+    # ... and the next resume within 20 hours, with the list gone, still leaves it to the timer
+    assert r.stamp.exists()
+    assert not r.run()[1]
+
+
+def test_resume_leaves_a_finished_or_failed_build_alone(tmp_path: Path) -> None:
+    """A guard (it passes without the rerun too): a build that failed by itself must not loop."""
+    r = _Resume(tmp_path, ENDED_MARK)
+    assert not r.run()[1]
+    assert not r.stamp.exists()
+    r.mark.unlink()  # no nightly build has run since the deploy
+    assert not r.run()[1]
+
+
+def test_resume_leaves_an_old_interrupted_build_to_the_timer(tmp_path: Path) -> None:
+    """A guard (it passes without the rerun too): after 14 hours the 04:30 timer is nearer."""
+    r = _Resume(tmp_path)
+    r.age(r.mark, 15)
+    assert not r.run()[1]
+    assert not r.stamp.exists()
+    r.age(r.mark, 13)
+    assert r.run()[1]
+
+
+def test_resume_starts_no_build_while_the_timer_is_disabled_or_a_build_runs(tmp_path: Path) -> None:
+    """A guard (it passes without the rerun too): a lexical rebuild disables the nightly timer; a
+    running build's mark is open too."""
+    r = _Resume(tmp_path)
+    r.systemctl(timer_enabled=False)
+    assert not r.run()[1]
+    r.systemctl(index="activating")
+    out, started = r.run()
+    assert not started
+    assert "is running: left alone" in out
+    assert not r.stamp.exists(), "neither spends the one rerun"
+    r.systemctl()
+    assert r.run()[1]

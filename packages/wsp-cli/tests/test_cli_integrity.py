@@ -17,7 +17,7 @@ from libzim.writer import Creator, Hint, Item, StringProvider
 
 from wsp_cli.integrity import Profiler, ReadPacer, channel_summary, read_integrity_state, zim_entries
 from wsp_cli.monitor import LibraryMonitor
-from wsp_core.activity import ActivityMiddleware, recently_active, seconds_since
+from wsp_core.activity import ActivityMiddleware, client_path, recently_active, seconds_since
 from wsp_core.model import Artifact, Generation, GenerationStatus
 from wsp_orchestrator.integrity import ProfileBuilder, compare_profiles
 from wsp_orchestrator.store import StateStore
@@ -135,6 +135,53 @@ def test_integrity_state_and_monitor(tmp_path: Path) -> None:
         "origin-drift:wp:origin-issuer-changed:download.kiwix.org",
         "integrity:osm/2026-10-01",
     }
+
+
+def _request(marker: Path, *headers: tuple[bytes, bytes], path: str = "/v1/search") -> None:
+    """One HTTP request through a fresh ActivityMiddleware that marks every request it counts."""
+
+    async def app(scope: MutableMapping[str, Any], receive: Any, send: Any) -> None:
+        pass
+
+    mw = ActivityMiddleware(app, path=marker, min_interval=0.0)
+    scope = {"type": "http", "path": path, "headers": list(headers)}
+    asyncio.run(mw(scope, None, None))  # type: ignore[arg-type]
+
+
+def test_a_probe_user_agent_does_not_count(tmp_path: Path) -> None:
+    """For a client that can set its User-Agent and nothing else (2026-11-10 and 11-11: scripts that
+    did not mark themselves froze the background jobs for hours)."""
+    marker = tmp_path / "state" / "last-interactive"
+    _request(marker, (b"user-agent", b"Mozilla/5.0 (X11; Linux x86_64) Whisipedia-Probe/trawl"))
+    _request(marker, (b"accept", b"*/*"), (b"user-agent", b"whisipedia-probe"))
+    assert not marker.exists()
+    assert not client_path(marker).exists()
+    _request(marker, (b"user-agent", b"Mozilla/5.0 (X11; Linux x86_64) Firefox/131.0"))
+    assert marker.exists(), "a browser still counts"
+
+
+def test_the_marker_names_the_client_that_counted(tmp_path: Path) -> None:
+    marker = tmp_path / "state" / "last-interactive"
+    _request(marker, (b"user-agent", b"curl/8.5.0"))
+    assert marker.read_bytes() == b"", "the marker itself stays empty: its mtime is the signal"
+    assert client_path(marker) == tmp_path / "state" / "last-interactive.client"
+    assert client_path(marker).read_text() == "curl/8.5.0\n"
+    # one printable line of 80 characters, whatever was sent; no path and no query
+    _request(marker, (b"user-agent", b"agent\r\nX: y \xff\x00" + b"a" * 300), path="/v1/search?q=secret")
+    text = client_path(marker).read_text()
+    assert text == "agent??X: y ??" + "a" * 66 + "\n"
+    assert len(text) == 81
+    # a probe changes neither file
+    before = (marker.stat().st_mtime_ns, text)
+    _request(marker, (b"user-agent", b"python-httpx/0.27"), (b"x-whisipedia-probe", b"verify"))
+    assert (marker.stat().st_mtime_ns, client_path(marker).read_text()) == before
+
+
+def test_an_unknown_client_still_counts(tmp_path: Path) -> None:
+    marker = tmp_path / "state" / "last-interactive"
+    _request(marker)
+    assert recently_active(marker, 60)
+    assert client_path(marker).read_text() == "(no user agent)\n"
 
 
 def test_activity_marker_counts_interactive_requests_only(tmp_path: Path) -> None:

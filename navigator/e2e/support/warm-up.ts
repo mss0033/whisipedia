@@ -12,7 +12,10 @@ export default async function warmUp(config: FullConfig): Promise<void> {
   for (const path of PATHS) {
     const started = Date.now();
     try {
-      const res = await fetch(new URL(path, base), { signal: AbortSignal.timeout(180_000) });
+      const res = await fetch(new URL(path, base), {
+        signal: AbortSignal.timeout(180_000),
+        headers: { 'X-Whisipedia-Probe': 'e2e' }, // automation, not the owner reading
+      });
       await res.arrayBuffer();
       console.log(
         `warm-up ${path}: ${res.status} in ${((Date.now() - started) / 1000).toFixed(1)} s`,
