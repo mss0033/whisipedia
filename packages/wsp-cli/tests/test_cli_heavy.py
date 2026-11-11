@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import dataclasses
 import io
+import os
+import time
 from collections.abc import Mapping
 from pathlib import Path, PurePosixPath
 from typing import Any, cast
@@ -127,6 +129,57 @@ def test_profile_reads_the_partition_refinery_in_a_child(library: dict[str, Any]
     remote = isolated(spec(), gen, gen_path)
     assert remote.doc_count == 1
     assert library["launcher"].started[-1][1][-3] == "wsp_cli.integrity:profile_child"
+
+
+def test_profile_child_keeps_its_checkpoint_and_sweeps_old_ones(
+    library: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The child's progress lives next to its result, on local disk; a restart of the machine no
+    longer costs the whole profile (58 hours on 2026-11-10)."""
+    hooks: IndexHooks = library["hooks"]
+    gen: Generation = library["gen"]
+    gen_path = library["vault"].generation_path(SID, gen.generation_id)
+    hooks.refine(spec(), gen, gen_path)
+    profiles = library["root"] / "w" / "_profiles"
+    day = 86400.0
+
+    def old_checkpoint(source: str, generation: str, days: float) -> Path:
+        d = profiles / source / f"{generation}.ckpt"
+        d.mkdir(parents=True)
+        (d / "meta.json").write_text("{}")
+        (d / "unit-000.done.json.gz").write_bytes(b"x")
+        for f in (d / "unit-000.done.json.gz", d / "meta.json", d):
+            os.utime(f, (time.time() - days * day, time.time() - days * day))
+        return d
+
+    stale = old_checkpoint(SID, "2026-01-01.ak", 31)
+    stale_elsewhere = old_checkpoint("another-source", "2026-02", 45)
+    recent = old_checkpoint(SID, "2026-09-01.ak", 5)
+    written_lately = old_checkpoint("another-source", "2026-03", 45)
+    os.utime(written_lately / "meta.json", None)  # one file of it was written today: it is in use
+    isolated = IsolatedProfiler(library["cfg"], hooks.runner)
+    first = isolated(spec(), gen, gen_path)
+    assert first.doc_count == 1
+    own = profiles / SID / f"{gen.generation_id}.ckpt"
+    assert sorted(f.name for f in own.iterdir()) == ["meta.json", "unit-000.done.json.gz"]
+    assert not (profiles / SID / f"{gen.generation_id}.json.gz").exists(), "the result file is the daemon's"
+    assert not stale.exists()
+    assert not stale_elsewhere.exists(), "every source's old checkpoints go, not this one's only"
+    assert recent.is_dir()
+    assert written_lately.is_dir()
+    # The daemon died before it stored the result: the next run reads nothing again.
+    from wsp_cli import integrity
+
+    def read_again(*args: object, **kwargs: object) -> int:
+        raise AssertionError("the Refinery was read again")
+
+    monkeypatch.setattr(integrity, "refinery_documents", read_again)
+    assert isolated(spec(), gen, gen_path) == first
+    # Its own checkpoint is not swept by its own run, however old.
+    for f in (*own.iterdir(), own):
+        os.utime(f, (time.time() - 40 * day, time.time() - 40 * day))
+    assert isolated(spec(), gen, gen_path) == first
+    assert own.is_dir()
 
 
 # --- document policy screen (H3) ---------------------------------------------------------------------

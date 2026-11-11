@@ -451,6 +451,37 @@ def test_profile_round_trip_and_merge(tmp_path: Path) -> None:
     assert merged.namespaces["A"] == 300
 
 
+def test_a_builder_restored_from_a_profile_builds_the_same_profile() -> None:
+    """A profile in progress is saved as a profile and continued from it (wsp_cli.integrity)."""
+
+    def more(b: ProfileBuilder) -> None:
+        b.add(
+            "A/doc3", namespace="A", mimetype="text/html", size=9, title="Doc 3 again", content=b"<p>new</p>"
+        )
+        b.add("B/new", namespace="B", mimetype="text/plain", size=None, title="New", content=b"MZ\x90")
+        b.add("C/unsized", namespace="C", size=None)
+        b.add_blob("I/x.js", mimetype="Text/HTML; charset=utf-8", content=b"<script>a()</script>\x00")
+
+    whole = ProfileBuilder(sample_rate=0.5)
+    for i in range(200):
+        body = b"<p>doc %d</p><script>x()</script>" % i
+        whole.add(
+            f"A/doc{i}", namespace="A", mimetype="text/html", size=len(body), title=f"Doc {i}", content=body
+        )
+    half = whole.build()
+    assert half.sample, "some keys are sampled"
+    assert len(half.sample) < 200, "and some are not"
+    restored = ProfileBuilder.from_profile(half)
+    assert restored.build() == half
+    assert restored.build().to_json() == half.to_json()
+    more(whole)
+    more(restored)
+    assert restored.build() == whole.build()
+    assert whole.build() != half
+    assert half.doc_count == 200, "the profile it was restored from is not changed by it"
+    assert "B" not in half.namespaces
+
+
 def test_anomalous_generation_is_held_then_approved(tmp_path: Path) -> None:
     profiles = Profiles()
     h, attest = setup(tmp_path, profiles=profiles)

@@ -77,7 +77,14 @@ def _is_binary(content: bytes) -> bool:
 
 @dataclass
 class ProfileBuilder:
-    """Accumulates a :class:`ContentProfile` from documents in any order."""
+    """Accumulates a :class:`ContentProfile` from documents in any order.
+
+    A profile in progress is saved and resumed (``wsp_cli.integrity.ProfileCheckpoint``), and its
+    parts are put together with :func:`merge_profiles`. A change to what :meth:`add`,
+    :meth:`add_blob` or :meth:`_scan` count (or to ``_bucket``, ``sample_key``, ``short_hash``) must
+    come with a new ``wsp_cli.integrity.CHECKPOINT_FORMAT``: a saved half made by the old rule and
+    a second half made by the new one would be merged otherwise.
+    """
 
     sample_rate: float = 1 / 16
     doc_count: int = 0
@@ -91,6 +98,24 @@ class ProfileBuilder:
     binary_html: int = 0
     executables: int = 0
     html_sampled: int = 0
+
+    @classmethod
+    def from_profile(cls, profile: ContentProfile) -> ProfileBuilder:
+        """The builder that :meth:`build` made ``profile`` from: adding to it continues the count."""
+        return cls(
+            sample_rate=profile.sample_rate,
+            doc_count=profile.doc_count,
+            total_bytes=profile.total_bytes,
+            namespaces=Counter(profile.namespaces),
+            mimetypes=Counter(profile.mimetypes),
+            histogram=Counter(profile.size_histogram),
+            sample={k: [v[0], v[1], v[2]] for k, v in profile.sample.items()},
+            html_bytes=profile.html_bytes,
+            script_tags=profile.script_tags,
+            binary_html=profile.binary_html,
+            executables=profile.executables,
+            html_sampled=profile.html_sampled,
+        )
 
     def wants(self, key: str) -> bool:
         return sample_key(key) < self.sample_rate
