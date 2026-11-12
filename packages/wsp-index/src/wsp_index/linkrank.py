@@ -56,8 +56,9 @@ import json
 import math
 import mmap
 import os
+import re
 import time
-from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Iterator, Mapping, Sequence
 from contextlib import ExitStack
 from dataclasses import asdict, dataclass, field
 from functools import cache
@@ -282,6 +283,15 @@ class RankStats:
     (:func:`rank_due` compares them)."""
     computed_at: float = 0.0
     """Wall-clock time (epoch seconds) the rank was computed: its age across days and reboots."""
+    link_targets: Mapping[str, int] | None = None
+    """``wsp:`` links, from any source and resolved or not, by the source their target id names
+    (:func:`_target_sources`): a source no link names cannot gain or lose an edge, whatever aliases it
+    has. ``None``: not recorded (a rank computed before 2026-11-11, or more names than
+    :data:`MAX_LINK_TARGETS`), and :func:`rank_due` then goes by the aliases, as before."""
+    links_scanned_at: float = 0.0
+    """Wall-clock time of the last rank that read the links of every source: ``computed_at`` unless
+    this rank skipped the sources believed link-free (:func:`link_free_sources`), which carries the
+    earlier time over. 0: unknown, so the next rank reads them all."""
 
     def line(self) -> str:
         return (
@@ -522,6 +532,10 @@ class LinkGraph:
     """Library (``wsp:``) links read from each source's documents, resolved or not."""
     source_aliases: dict[str, int] = field(default_factory=dict[str, int])
     """Aliases (redirects) whose target is a document of each source."""
+    link_targets: dict[str, int] | None = None
+    """Library links read, by the source their target id names (:attr:`RankStats.link_targets`)."""
+    scan_skipped: tuple[str, ...] = ()
+    """Sources whose links were not read (``link_free``): their ``source_links`` is 0 by belief."""
 
     def _array(self, name: str, dtype: npt.DTypeLike) -> npt.NDArray[Any]:
         path = graph_file(self.workdir, name)
@@ -632,6 +646,39 @@ def _groups_of(
     return table[pos.to_numpy(zero_copy_only=False).astype(np.int64)]
 
 
+MAX_LINK_TARGETS = 4096
+"""Distinct source names :attr:`RankStats.link_targets` holds. A library whose links name more (the
+registry has a few hundred sources) is not recorded at all: a name left out would read as "no link"."""
+
+_TARGET_SOURCE = re.compile(r"[a-z0-9][a-z0-9.-]{0,63}")
+"""The source ids :attr:`RankStats.link_targets` can speak for: a registry id
+(:mod:`wsp_core.ids`), no longer than 64 characters. For any other id :func:`rank_due` keeps the
+older rule (aliases count)."""
+
+_TARGET_HEAD = "(?s)^" + re.escape(LIBRARY_LINK) + "([^/]*).*$"
+
+
+def _target_sources(links: pa.Array[Any]) -> dict[str, int]:
+    """Library links (each starts with ``wsp:``) counted by the source their target id names: the text
+    between ``wsp:`` and the first ``/``, lower case.
+
+    A link resolves to a document by its exact id, its loose id (:func:`loose_ids`) or an alias, whose
+    id starts with its target's ``wsp:<source>/`` (:func:`alias_doc_id`). A source id has no ``/``,
+    ``#``, ``_`` or upper case, so in all three the link's own text up to the first ``/`` is the
+    source's id once lower-cased (by the function :func:`loose_ids` uses), and a link counted under
+    another name can never reach a document of this source. Names no source can have are left out.
+    """
+    heads = pc.utf8_lower(pc.replace_substring_regex(links, pattern=_TARGET_HEAD, replacement=r"\1"))
+    # Before they are counted: links without a "/" (a bare title) would be one name each.
+    heads = heads.filter(pc.match_substring_regex(heads, pattern="^" + _TARGET_SOURCE.pattern + "$"))
+    out: dict[str, int] = {}
+    for row in cast(list[dict[str, Any]], pc.value_counts(heads).to_pylist()):  # small: one per name
+        name = row["values"]
+        if isinstance(name, str) and _TARGET_SOURCE.fullmatch(name):
+            out[name] = int(row["counts"])
+    return out
+
+
 def build_graph(
     readers: Sequence[tuple[str, RefineryReader]],
     workdir: Path,
@@ -639,6 +686,7 @@ def build_graph(
     aliases: Iterable[tuple[str, str]] = (),
     config: RankConfig = RankConfig(),  # noqa: B008 - immutable
     progress: Callable[[str], None] | None = None,
+    link_free: Collection[str] = (),
 ) -> LinkGraph:
     """Resolve every ``wsp:`` link of every document to a node and write the CSR edge lists.
 
@@ -647,6 +695,9 @@ def build_graph(
     Everything node- or link-sized goes to files under ``workdir`` (local disk); memory holds chunks
     of ``config``'s sizes, plus 4 bytes a node while the edge buckets are sorted and the out-degrees
     counted.
+
+    ``link_free``: sources whose ``links`` column is not read, because the caller knows it holds no
+    library link (:func:`link_free_sources`); their documents are still nodes.
     """
     t0 = time.monotonic()
     workdir.mkdir(parents=True, exist_ok=True)
@@ -727,8 +778,18 @@ def build_graph(
     # 3. links, by the exact key of their target ------------------------------------------------
     links = _Spill(workdir, "links", _LINK if resolve else _MISS, limit)
     source_links = dict.fromkeys(sources, 0)
+    link_targets: dict[str, int] | None = {}
+    skipped: list[str] = []
+    skipped_docs = 0
     base = batches = 0
     for sid, reader in readers:
+        if sid in link_free:
+            # Most of the link scan was spent in sources that hold none (48 of 69 minutes over the
+            # NAS, 2026-11-10): their rows are counted from the seal, not read.
+            skipped.append(sid)
+            skipped_docs += len(reader)
+            base += len(reader)
+            continue
         for batch in reader.scan(["links"], batch_size=config.batch_size):
             column = cast("pa.Array[Any]", batch.column(0))
             rows = len(column)
@@ -742,6 +803,13 @@ def build_graph(
                 flat = flat.filter(local)
                 source_links[sid] += len(flat)
                 if len(flat):
+                    # Counted for every link read, before anything is resolved or dropped: a resolved
+                    # one matters when its document leaves, an unresolved one when one arrives.
+                    if link_targets is not None:
+                        for name, count in _target_sources(flat).items():
+                            link_targets[name] = link_targets.get(name, 0) + count
+                        if len(link_targets) > MAX_LINK_TARGETS:
+                            link_targets = None
                     target = key64(flat)
                     rec = np.empty(len(flat), dtype=links.dtype)
                     rec["key"] = target
@@ -758,6 +826,8 @@ def build_graph(
     links.flush()
     if base != n:
         raise RuntimeError(f"link scan saw {base} rows but the id scan saw {n}; Refinery changed?")
+    if skipped:
+        say(f"rank: link scan skipped for {len(skipped)} link-free source(s), {skipped_docs:,} documents")
     _release()
 
     # 4. resolve by exact id, partition by partition; write the key-sorted id table -------------
@@ -889,6 +959,8 @@ def build_graph(
         aliases=n_alias,
         source_links=source_links,
         source_aliases=source_aliases,
+        link_targets=link_targets,
+        scan_skipped=tuple(skipped),
     )
 
 
@@ -1414,14 +1486,24 @@ def compute_static_rank(
     aliases: Iterable[tuple[str, str]] = (),
     config: RankConfig = RankConfig(),  # noqa: B008 - immutable
     progress: Callable[[str], None] | None = None,
+    link_free: Collection[str] = (),
 ) -> RankStats:
     """Build the graph, run PageRank, write the sidecar (``out_path``) and its stats next to it.
 
     ``workdir`` holds the scratch files (local disk; removed at the end). Memory peaks at about 8
     bytes a node (the two weight vectors of the power iteration, then the percentile sort and the
     feature) plus the chunks of ``config``.
+
+    ``link_free``: sources whose links are not read, from :func:`link_free_sources` of the stats next
+    to ``out_path`` (the kept rank's). The time every source's links were last read is carried over
+    from those stats, so the belief runs out (:data:`LINK_SCAN_MAX_AGE_DAYS`).
     """
-    graph = build_graph(readers, workdir, aliases=aliases, config=config, progress=progress)
+    stats_path = out_path.with_name(STATS_FILE)
+    # Read before anything is written: the kept rank's, which the skip was decided from.
+    scanned_before = _links_scanned_at(stats_path) if link_free else None
+    graph = build_graph(
+        readers, workdir, aliases=aliases, config=config, progress=progress, link_free=link_free
+    )
     try:
         if progress:
             progress(f"rank: graph built; {memory_line()}")
@@ -1450,6 +1532,7 @@ def compute_static_rank(
     by_source: dict[str, int] = {}
     for (sid, _), c in zip(graph.groups, graph.group_sizes, strict=True):
         by_source[sid] = by_source.get(sid, 0) + c
+    computed_at = time.time()  # wall clock: compared across days by rank_due, never a duration here
     stats = RankStats(
         nodes=graph.n,
         edges=graph.edges,
@@ -1478,9 +1561,12 @@ def compute_static_rank(
             }
             for sid, reader in readers
         },
-        computed_at=time.time(),  # wall clock: compared across days by rank_due, never a duration here
+        computed_at=computed_at,
+        link_targets=graph.link_targets,
+        # Every source read: now. Some skipped: when they were last all read (unknown: 0, so the
+        # next rank reads them all).
+        links_scanned_at=(scanned_before or 0.0) if graph.scan_skipped else computed_at,
     )
-    stats_path = out_path.with_name(STATS_FILE)
     tmp = stats_path.with_name(STATS_FILE + ".partial")
     tmp.write_text(json.dumps(asdict(stats), indent=1) + "\n", encoding="utf-8")
     os.replace(tmp, stats_path)
@@ -1496,6 +1582,12 @@ RANK_REFRESH_DAYS = 7.0
 documents may resolve a few links that pointed outside the library (8 edges in 13 days, 2026-11-05),
 and the global percentiles move with the node count."""
 
+LINK_SCAN_MAX_AGE_DAYS = 28.0
+"""How long a rank may go on not reading the links of the sources it believes link-free
+(:func:`link_free_sources`). The belief rests on what an earlier rank read and on the seals; a rank
+that skips a source records 0 links for it again, so a wrong belief would confirm itself at every
+rank. Once every source's links were last read this long ago, the next rank reads them all."""
+
 
 @dataclass(frozen=True, slots=True)
 class RankInput:
@@ -1508,16 +1600,56 @@ class RankInput:
     """``wsp:`` links its seal records (:func:`~wsp_index.refinery.library_links`), or a set
     generation's members' seals."""
     aliases: bool
-    """Its redirect tables (a set's: its members') hold rows: aliases resolve links to other names."""
+    """Its redirect tables (a set's: its members') hold rows. Aliases resolve links to other names of
+    this source's documents, so they matter only when some link names this source
+    (:attr:`RankStats.link_targets`), or when the kept rank does not record which sources links name."""
     unknown: tuple[str, ...] = ()
     """The generation, or the set members, whose seal does not record its links (sealed before
     2026-11-05): they may carry any, unless the rank read them in a source that brought none."""
+    members: tuple[str, ...] = ()
+    """A set generation's members (empty for any other generation)."""
 
 
 @dataclass(frozen=True, slots=True)
 class RankDecision:
     due: bool
     reason: str
+
+
+def _plain_int(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _ranked_members(old: Mapping[str, Any] | None) -> set[str]:
+    """The set members the kept rank read in this source (none: no record, or not a set)."""
+    members = old.get("members") if old is not None else None
+    if not isinstance(members, list):
+        return set()
+    return {m for m in cast(list[object], members) if isinstance(m, str)}
+
+
+def _recorded_targets(data: Mapping[str, Any]) -> dict[str, int] | None:
+    """:attr:`RankStats.link_targets` of a kept rank, or None when it is absent or not what this code
+    writes (then nothing is concluded from it)."""
+    raw = data.get("link_targets")
+    if not isinstance(raw, dict):
+        return None
+    targets = cast(dict[object, object], raw)
+    if not all(isinstance(k, str) and _plain_int(v) and cast(int, v) >= 0 for k, v in targets.items()):
+        return None
+    return cast(dict[str, int], targets)
+
+
+def _links_scanned_at(stats_path: Path) -> float | None:
+    """:attr:`RankStats.links_scanned_at` of the kept rank; None when unknown."""
+    try:
+        data = cast(dict[str, Any], json.loads(stats_path.read_text(encoding="utf-8")))
+        value = data.get("links_scanned_at")
+    except (OSError, ValueError, AttributeError):
+        return None
+    if isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value):
+        return None
+    return float(value) if value > 0 else None
 
 
 def rank_due(
@@ -1531,14 +1663,27 @@ def rank_due(
     """Whether the rank at ``stats_path`` (``static_rank.json``) must be computed again for the sources
     ``current`` would rank now.
 
-    It is kept while every source that changed since brings no link and no alias to the graph, before
-    or after (PubMed, newspapers, most data sources): their new documents get the feature of an
-    unlinked page (0) from the missing key, as a recount would give them. Due when there is no record
-    of the inputs, the settings differ, a source with links or aliases changed, came or left, a new
-    generation does not record its links, or link-free changes are pending and the rank is
-    ``max_age_days`` old. 2026-11-05 deep dive: the nightly build ran PageRank whenever anything was
-    indexed, 4-12 h on the NAS a night, while the graph went from 774,222,210 to 774,222,218 edges
-    in 13 days."""
+    It is kept while every source that changed since brings no link to the graph, before or after, and
+    no link of any source names it (PubMed, newspapers, most data sources): their new documents get
+    the feature of an unlinked page (0) from the missing key, as a recount would give them. Due when
+    there is no record of the inputs, the settings differ, a source with links changed, came or left,
+    a source that links name changed, came or left, a new generation does not record its links, or
+    link-free changes are pending and the rank is ``max_age_days`` old, a set with members whose seal
+    does not count links lost a member, or the kept rank skipped the link scan of some sources and all
+    links were last read :data:`LINK_SCAN_MAX_AGE_DAYS` ago.
+
+    Why a kept rank is the rank a recount would give: every source that carries links is unchanged, so
+    the links are the ones the kept rank counted by the source they name
+    (:attr:`RankStats.link_targets`); a link reaches a document only of the source it names
+    (:func:`_target_sources`), so a changed source no link names cannot gain or lose an edge, with or
+    without aliases. A kept rank that does not record the names (computed before 2026-11-11), or a
+    source id they cannot speak for, falls back to the older rule: an alias row makes the source's
+    change due.
+
+    2026-11-05 deep dive: the nightly build ran PageRank whenever anything was indexed, 4-12 h on the
+    NAS a night, while the graph went from 774,222,210 to 774,222,218 edges in 13 days. 2026-11-10:
+    125 of 235 sources carry alias rows and no link (cia-reading-room: 0 links, 1,100 aliases), so the
+    older rule still ranked on most nights."""
     try:
         data = cast(dict[str, Any], json.loads(stats_path.read_text(encoding="utf-8")))
         recorded = cast(dict[str, object], data["inputs"])
@@ -1550,25 +1695,56 @@ def rank_due(
         return RankDecision(True, "the kept rank records no inputs")
     if data.get("format") != 2 or data.get("damping") != config.damping or data.get("mix") != config.mix:
         return RankDecision(True, "the rank settings changed")
+    targets = _recorded_targets(data)
+    clock = time.time() if now is None else now  # wall clock: days, across runs
+    if "links_scanned_at" in data and data["links_scanned_at"] != data["computed_at"]:
+        # The kept rank did not read the links of the sources it believed link-free. The belief runs
+        # out by the calendar, not only when some other reason computes a rank (review 2026-11-11).
+        scanned_at = _links_scanned_at(stats_path)
+        scan_age = None if scanned_at is None else (clock - scanned_at) / 86400
+        if scan_age is None or not 0 <= scan_age < LINK_SCAN_MAX_AGE_DAYS:
+            when = "at an unknown time" if scan_age is None else f"{scan_age:.1f} days ago"
+            return RankDecision(True, f"the links of every source were last read {when}")
+
+    def named(sid: str) -> int | None:
+        """Links that name ``sid``; None: not known (the older rule applies)."""
+        if targets is None or not _TARGET_SOURCE.fullmatch(sid):
+            return None
+        return targets.get(sid, 0)
+
     for sid in sorted(set(inputs) - set(current)):
-        if inputs[sid].get("links") or inputs[sid].get("aliases"):
+        links = named(sid)
+        if inputs[sid].get("links") or (links is None and inputs[sid].get("aliases")):
             return RankDecision(True, f"{sid} left with links or aliases")
+        if links:
+            return RankDecision(True, f"{sid} left and {links:,} link(s) name it")
     stale: list[str] = []
     for sid, cur in sorted(current.items()):
         old = inputs.get(sid)
         if old is not None and old.get("generation") == cur.generation and old.get("seal") == cur.seal:
             continue
-        if old is not None and (old.get("links") or old.get("aliases")):
+        links = named(sid)
+        if old is not None and (old.get("links") or (links is None and old.get("aliases"))):
             return RankDecision(True, f"{sid} changed and had links or aliases")
+        if links:
+            what = "changed" if old is not None else "is new"
+            return RankDecision(True, f"{sid} {what} and {links:,} link(s) name it")
         # A member sealed before the count is known to carry none when the rank read it, in a source
         # that brought none (nara-catalog adds a partition a night to dozens sealed before).
-        ranked = set(cast(list[str], old.get("members") or [])) if old is not None else set[str]()
+        ranked = _ranked_members(old)
         if not set(cur.unknown) <= ranked:
             return RankDecision(True, f"{sid}/{cur.generation} does not record its library links")
-        if cur.links or cur.aliases:
+        # A member that left un-hides the rows it shadowed in the uncounted members before it (a doc
+        # id in several members keeps the last one's row): the rank never read those, links and all.
+        if cur.unknown and not ranked <= set(cur.members):
+            return RankDecision(
+                True, f"{sid}/{cur.generation} lost a member that may have hidden rows with library links"
+            )
+        # Its own links always count, whatever names it: a link-free source that starts to link.
+        if cur.links or (links is None and cur.aliases):
             return RankDecision(True, f"{sid}/{cur.generation} brings links or aliases")
         stale.append(sid)
-    age = ((time.time() if now is None else now) - computed_at) / 86400  # wall clock: days, across runs
+    age = (clock - computed_at) / 86400
     if not stale:
         return RankDecision(False, "no source changed since it was computed")
     if age < 0 or age >= max_age_days:
@@ -1579,6 +1755,71 @@ def rank_due(
         False,
         f"only link-free sources changed ({', '.join(stale)}); kept, {age:.1f} of {max_age_days:g} days old",
     )
+
+
+def link_free_sources(
+    stats_path: Path,
+    current: Mapping[str, RankInput],
+    *,
+    max_age_days: float = LINK_SCAN_MAX_AGE_DAYS,
+    now: float | None = None,
+) -> frozenset[str]:
+    """The sources of ``current`` whose links the next rank need not read (``link_free`` of
+    :func:`compute_static_rank`), judged from the kept rank's stats at ``stats_path``.
+
+    A source qualifies when its documents are known to carry no library link:
+
+    (a) the kept rank read (or skipped, see below) this same generation and seal and recorded 0
+        links: the same files, in which none was found; or
+    (b) every seal that counts its links says 0, and each one that does not (a set member sealed
+        before 2026-11-05) is a member the kept rank read in this source when it recorded 0 links,
+        with no member of that set gone since. A member that leaves un-hides the rows it shadowed in
+        the members before it (a doc id in several members keeps the last one's row), and the kept
+        rank never read those: such a set is read again.
+
+    Nothing qualifies (the empty set: read them all) when the stats cannot be read or are not of
+    this format, or when every source's links were last read ``max_age_days`` or longer ago, at an
+    unknown time, or in the future (:attr:`RankStats.links_scanned_at`). A skipped source is recorded
+    with 0 links again, so without that limit a wrong belief would be confirmed for good.
+    """
+    try:
+        data = cast(dict[str, Any], json.loads(stats_path.read_text(encoding="utf-8")))
+        recorded = data["inputs"]
+        if data.get("format") != 2 or not isinstance(recorded, dict):
+            return frozenset()
+        inputs = cast(dict[str, object], recorded)
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return frozenset()
+    scanned_at = _links_scanned_at(stats_path)
+    if scanned_at is None:
+        return frozenset()
+    age = ((time.time() if now is None else now) - scanned_at) / 86400  # wall clock: days, across runs
+    if not 0 <= age < max_age_days:
+        return frozenset()
+    free: set[str] = set()
+    for sid, cur in current.items():
+        raw = inputs.get(sid)
+        old = cast(dict[str, Any], raw) if isinstance(raw, dict) else None
+        none_before = old is not None and _plain_int(old.get("links")) and old.get("links") == 0
+        if (
+            old is not None
+            and none_before
+            and old.get("generation") == cur.generation
+            and old.get("seal") == cur.seal
+        ):
+            free.add(sid)  # (a)
+            continue
+        if old is not None and old.get("generation") == cur.generation and old.get("seal") == cur.seal:
+            continue  # the kept rank read these very files and did not record 0: its word over the seal's
+        if cur.links != 0:
+            continue
+        if not cur.unknown:
+            free.add(sid)  # (b): every seal counts its links, and none has any
+            continue
+        ranked = _ranked_members(old) if none_before else set[str]()
+        if set(cur.unknown) <= ranked <= set(cur.members):
+            free.add(sid)  # (b): the uncounted members were read, and nothing they hide is back
+    return frozenset(free)
 
 
 def top_documents(reader: RefineryReader, rank: StaticRank, k: int) -> list[tuple[str, float]]:

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import random
+import re
 import time
 from collections import Counter
 from datetime import date
@@ -338,3 +340,53 @@ def test_a_small_change_patches_the_catalog_without_a_scan(
     assert patch_source_catalog(refinery, "kiwix-bundle", "2026-08", cat_root, 0) is None
     path.unlink()
     assert patch_source_catalog(refinery, "kiwix-bundle", "2026-08", cat_root, 0) is None
+
+
+def test_refresh_featured_reports_its_two_costs(tmp_path: Path) -> None:
+    """2026-11-10: the featured re-pick after a rank took 49-172 minutes for two sources and nothing
+    said whether the scan or the text lookups took them. One line per source, on the rank's path and
+    on the path without one; the pick itself does not depend on being watched."""
+    from wsp_index.linkrank import RANK_FILE, StaticRank, compute_static_rank
+    from wsp_index.refinery import RefineryReader, generation_dir
+
+    refinery = tmp_path / "refinery"
+    _wiki(refinery)
+    sid, gen = "wikipedia-en-zim", "2026-08"
+    reader = RefineryReader(generation_dir(refinery, sid, gen))
+    compute_static_rank([(sid, reader)], tmp_path / RANK_FILE, tmp_path / "work")
+    line = re.compile(rf"featured {sid}: ranked in \d+\.\ds, ([\d,]+) lookups in \d+\.\ds(.*)")
+    for rank, how in ((StaticRank(tmp_path / RANK_FILE), ""), (None, " (no rank)")):
+        cfg = CatalogConfig(featured=True, featured_candidates=10, min_featured_chars=100, rank=rank)
+        path = build_source_catalog(refinery, sid, gen, tmp_path / "catalog", cfg)
+        said: list[str] = []
+        assert refresh_featured(refinery, sid, gen, tmp_path / "catalog", cfg, progress=said.append)
+        watched = path.read_bytes()
+        assert len(said) == 1
+        found = line.fullmatch(said[0])
+        assert found is not None, said
+        picked = sum(len(ids) for ids in json.loads(watched)["featured_by_lang"].values())
+        assert int(found.group(1).replace(",", "")) >= picked > 0  # each one it picked was read
+        assert found.group(2) == how
+        assert refresh_featured(refinery, sid, gen, tmp_path / "catalog", cfg)
+        assert path.read_bytes() == watched
+    # A rank that knows none of the source's documents: the fallback says so, once.
+    other = tmp_path / "other"
+    with RefineryWriter(other, "elsewhere", "g1") as w:
+        w.write([doc("elsewhere", "1", "One")])
+    compute_static_rank(
+        [("elsewhere", RefineryReader(generation_dir(other, "elsewhere", "g1")))],
+        tmp_path / "empty" / RANK_FILE,
+        tmp_path / "work",
+    )
+    cfg = CatalogConfig(
+        featured=True,
+        featured_candidates=10,
+        min_featured_chars=100,
+        rank=StaticRank(tmp_path / "empty" / RANK_FILE),
+    )
+    said = []
+    assert refresh_featured(refinery, sid, gen, tmp_path / "catalog", cfg, progress=said.append)
+    assert len(said) == 1
+    found = line.fullmatch(said[0])
+    assert found is not None, said
+    assert found.group(2) == " (by links or length: the rank picked nothing)"

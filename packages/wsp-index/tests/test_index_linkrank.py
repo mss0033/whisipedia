@@ -7,7 +7,7 @@ import dataclasses
 import json
 import os
 import re
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import Any, cast
 
@@ -28,6 +28,7 @@ from wsp_index import (
 )
 from wsp_index.catalog import CatalogConfig, build_source_catalog, refresh_featured
 from wsp_index.linkrank import (
+    LINK_SCAN_MAX_AGE_DAYS,
     RANK_FILE,
     LinkGraph,
     RankConfig,
@@ -39,13 +40,22 @@ from wsp_index.linkrank import (
     compute_static_rank,
     key64,
     key64_one,
+    link_free_sources,
     pagerank,
     percentiles,
     rank_due,
     top_documents,
     write_rank_file,
 )
-from wsp_index.refinery import SUCCESS_FILE, compose_set, generation_dir, library_links, part_dir, seal_stamp
+from wsp_index.refinery import (
+    SUCCESS_FILE,
+    compose_set,
+    generation_dir,
+    library_links,
+    part_dir,
+    seal_stamp,
+    set_members,
+)
 from wsp_index_helpers import doc
 
 SMALL = TantivyConfig(writer_heap_bytes=20_000_000, writer_threads=1)
@@ -718,9 +728,11 @@ def test_a_rank_is_kept_while_only_link_free_sources_change(tmp_path: Path) -> N
     assert rank_due(stats_path, update, now=stats.computed_at + 7 * 86400).due  # the weekly refresh
     assert rank_due(stats_path, update, now=stats.computed_at - 60).due  # a clock set back: recount
     assert rank_due(stats_path, update, config=RankConfig(mix=0.3), now=now).due
-    # It brings aliases, or its seal does not say whether it carries links (sealed before the count).
+    # Alias rows alone change nothing while no link names the source (the kept rank records which
+    # sources links name); test_a_link_free_source_that_links_name_makes_the_rank_due has the others.
     aliased = dataclasses.replace(update["pubmed"], aliases=True)
-    assert rank_due(stats_path, {**update, "pubmed": aliased}, now=now).due
+    assert not rank_due(stats_path, {**update, "pubmed": aliased}, now=now).due
+    # Its seal does not say whether it carries links (sealed before the count).
     unknown = rank_due(
         stats_path, {**update, "pubmed": dataclasses.replace(update["pubmed"], unknown=("g2",))}, now=now
     )
@@ -785,10 +797,387 @@ def test_a_set_keeps_the_rank_when_only_a_new_link_free_partition_joins(tmp_path
     later = compose_set(root, "s", [part_dir(root, "s", g) for g in ("2026.a", "2026.b", "2026.c")])
     seal = seal_stamp(generation_dir(root, "s", later))
     now = stats.computed_at + 60
-    old_members = RankInput(later, seal, links=0, aliases=False, unknown=("2026.a", "2026.b"))
+    parts = ("2026.a", "2026.b", "2026.c")
+    old_members = RankInput(later, seal, links=0, aliases=False, unknown=("2026.a", "2026.b"), members=parts)
     assert not rank_due(stats_path, {"s": old_members}, now=now).due
     # A member the rank never read whose seal does not count: it may carry links.
-    stranger = RankInput(later, seal, links=0, aliases=False, unknown=("2026.a", "2026.x"))
+    stranger = RankInput(later, seal, links=0, aliases=False, unknown=("2026.a", "2026.x"), members=parts)
     assert rank_due(stats_path, {"s": stranger}, now=now).due
     # The new member brings links: due.
-    assert rank_due(stats_path, {"s": RankInput(later, seal, 3, False, ("2026.a", "2026.b"))}, now=now).due
+    assert rank_due(
+        stats_path, {"s": RankInput(later, seal, 3, False, ("2026.a", "2026.b"), parts)}, now=now
+    ).due
+
+
+# --- alias rows without a link that names the source (2026-11-10 trawl, search-index-01) ---------------
+
+
+def _lanes_library(tmp_path: Path) -> tuple[list[tuple[str, RefineryReader]], Path, float]:
+    """A wiki that links to itself, to ``named`` and to a source that is not there; ``lane`` carries
+    alias rows and nothing links to it (cia-reading-room: 0 links, 1,100 aliases)."""
+    wiki = [doc("w", f"en/P{i}", f"P{i}", links=("wsp:w/en/Hub", "wsp:Named/1#top")) for i in range(3)]
+    wiki.append(doc("w", "en/Hub", "Hub", links=("wsp:gone/x", "https://example.org/wsp:lane/1")))
+    lane = [doc("lane", str(i), f"Report {i}") for i in range(3)]
+    named = [doc("named", str(i), f"Named {i}") for i in range(2)]
+    readers = write(tmp_path / "ref", [*wiki, *lane, *named])
+    out = tmp_path / RANK_FILE
+    aliases = [("wsp:lane/1", "First report"), ("wsp:named/1", "One")]
+    stats = compute_static_rank(readers, out, tmp_path / "work", aliases=aliases)
+    return readers, out.with_name("static_rank.json"), stats.computed_at
+
+
+def test_the_rank_records_which_sources_links_name(tmp_path: Path) -> None:
+    """Every library link is counted by the source its target id names, lower case as loose ids are,
+    resolved or not, and from every source."""
+    _, stats_path, _ = _lanes_library(tmp_path)
+    recorded = json.loads(stats_path.read_text())
+    assert recorded["link_targets"] == {"w": 3, "named": 3, "gone": 1}
+    assert recorded["inputs"]["lane"]["aliases"] == 1  # alias rows, and no link names it
+    assert recorded["links_scanned_at"] == recorded["computed_at"]
+
+
+def test_link_targets_count_what_the_rank_would_resolve(tmp_path: Path) -> None:
+    """The name is cut the way the links resolve: an id with a newline, a head without a ``/``, a name
+    no source can have. A link that reaches a document is always counted under that document's source."""
+    docs = [
+        doc("a", "1", "One", links=("wsp:B/x\ny", "wsp:b", "wsp:not_a_source/1", "wsp:/1", "wsp:B.c-1/z")),
+        # The Kelvin sign lower-cases to "k", as it does in a loose id; a "#" before the "/" cuts the
+        # loose id short of any document; bare titles are not one name each.
+        doc("a", "2", "Two", links=("wsp:\u212a/Page", "wsp:b#top/x", "wsp:Some_Title", "wsp:Other Title")),
+        doc("b", "x\ny", "Odd"),
+        doc("k", "page", "Page"),
+    ]
+    readers = write(tmp_path / "ref", docs)
+    graph = build_graph(readers, tmp_path / "work", config=RankConfig(batch_size=1))
+    assert graph.link_targets == {"b": 2, "b.c-1": 1, "k": 1}
+    # wsp:B/x\ny reached wsp:b/x\ny and the Kelvin link wsp:k/page: each counted under its source.
+    assert graph.resolved["loose"] == 2
+    assert graph.edges == 2
+
+
+def test_too_many_named_sources_are_not_recorded_at_all(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A name left out would read as "no link names it": past the bound nothing is recorded, and
+    rank_due keeps the older rule."""
+    from wsp_index import linkrank
+
+    monkeypatch.setattr(linkrank, "MAX_LINK_TARGETS", 2)
+    docs = [doc("a", str(i), str(i), links=(f"wsp:s{i}/x",)) for i in range(3)]
+    readers = write(tmp_path / "ref", docs)
+    out = tmp_path / RANK_FILE
+    stats = compute_static_rank(readers, out, tmp_path / "work", config=RankConfig(batch_size=1))
+    assert stats.link_targets is None
+    assert json.loads(out.with_name("static_rank.json").read_text())["link_targets"] is None
+
+
+def test_an_alias_only_source_no_link_names_keeps_the_rank(tmp_path: Path) -> None:
+    """2026-11-10: 125 of 235 sources carry alias rows and no link; each lane release made the nightly
+    build compute PageRank (6-8 h) although an alias can only resolve a link that names its source."""
+    readers, stats_path, at = _lanes_library(tmp_path)
+    current = {
+        sid: dataclasses.replace(i, aliases=sid in ("lane", "named")) for sid, i in _inputs(readers).items()
+    }
+    now = at + 3600
+    assert not rank_due(stats_path, current, now=now).due
+    (lane2,) = write(tmp_path / "ref", [doc("lane", str(i), f"Report {i}") for i in range(5)], gen="g2")
+    update = {**current, "lane": dataclasses.replace(_inputs([lane2])["lane"], aliases=True)}
+    kept = rank_due(stats_path, update, now=now)
+    assert not kept.due
+    assert "only link-free sources changed (lane)" in kept.reason
+    assert rank_due(stats_path, update, now=at + 7 * 86400).due  # the weekly refresh still counts it
+    # It left, with its aliases: nothing named it, nothing changes.
+    assert not rank_due(stats_path, {k: v for k, v in current.items() if k != "lane"}, now=now).due
+    # A new source with alias rows that no link names.
+    (new,) = write(tmp_path / "ref", [doc("fresh", "1", "Fresh")])
+    fresh = dataclasses.replace(_inputs([new])["fresh"], aliases=True)
+    assert not rank_due(stats_path, {**current, "fresh": fresh}, now=now).due
+    # What still makes it due: links of its own, a seal that does not count them.
+    linking = dataclasses.replace(update["lane"], links=1)
+    assert "brings links" in rank_due(stats_path, {**current, "lane": linking}, now=now).reason
+    uncounted = dataclasses.replace(update["lane"], unknown=("g2",))
+    assert "does not record" in rank_due(stats_path, {**current, "lane": uncounted}, now=now).reason
+
+
+def test_a_link_free_source_that_links_name_makes_the_rank_due(tmp_path: Path) -> None:
+    """A source some link names can gain or lose an edge with every document and alias: changed, gone
+    or new, the rank is computed again, with or without alias rows."""
+    readers, stats_path, at = _lanes_library(tmp_path)
+    current = _inputs(readers)
+    now = at + 3600
+    assert not rank_due(stats_path, current, now=now).due
+    (named2,) = write(tmp_path / "ref", [doc("named", "7", "Seven")], gen="g2")
+    changed = rank_due(stats_path, {**current, **_inputs([named2])}, now=now)
+    assert changed.due
+    assert changed.reason == "named changed and 3 link(s) name it"
+    left = rank_due(stats_path, {k: v for k, v in current.items() if k != "named"}, now=now)
+    assert left.due
+    assert left.reason == "named left and 3 link(s) name it"
+    # A link pointed at a source that was not in the library: it arrives.
+    (gone,) = write(tmp_path / "ref", [doc("gone", "x", "Back")])
+    arrived = rank_due(stats_path, {**current, **_inputs([gone])}, now=now)
+    assert arrived.due
+    assert arrived.reason == "gone is new and 1 link(s) name it"
+
+
+def test_a_rank_without_link_targets_uses_the_older_rule(tmp_path: Path) -> None:
+    """A guard, true before the change too: a kept rank that does not record which sources links name
+    (computed before 2026-11-11), one whose record is not what this code writes, and a source id the
+    record cannot speak for all leave an aliased change due."""
+    readers, stats_path, at = _lanes_library(tmp_path)
+    current = _inputs(readers)
+    now = at + 3600
+    (lane2,) = write(tmp_path / "ref", [doc("lane", "9", "Report 9")], gen="g2")
+    aliased = {**current, "lane": dataclasses.replace(_inputs([lane2])["lane"], aliases=True)}
+    recorded = json.loads(stats_path.read_text())
+    wrong: list[object] = ["absent", None, [], {"w": "3"}, {"w": -1}, {"w": True}, {"w": 1.5}]
+    for broken in wrong:
+        if broken == "absent":
+            recorded.pop("link_targets", None)
+        else:
+            recorded["link_targets"] = broken
+        stats_path.write_text(json.dumps(recorded))
+        assert rank_due(stats_path, aliased, now=now).due, broken
+        gone = {k: v for k, v in current.items() if k != "lane"}
+        assert rank_due(stats_path, gone, now=now).due, broken  # it left with aliases
+    # An id that is not a registry id (or longer than the record's names): the older rule for it alone.
+    recorded["link_targets"] = {"w": 3}
+    recorded["inputs"]["Odd_Id"] = {"generation": "g0", "seal": "0", "links": 0, "aliases": 2, "members": []}
+    stats_path.write_text(json.dumps(recorded))
+    odd = dataclasses.replace(aliased["lane"], aliases=True)
+    assert rank_due(stats_path, {**current, "Odd_Id": odd}, now=now).reason.startswith("Odd_Id changed")
+    assert rank_due(stats_path, current, now=now).reason == "Odd_Id left with links or aliases"
+    del recorded["inputs"]["Odd_Id"]
+    stats_path.write_text(json.dumps(recorded))
+    long_id = "x" * 65
+    assert "brings links or aliases" in rank_due(stats_path, {**current, long_id: odd}, now=now).reason
+
+
+# --- the link scan of sources that hold no link (search-index-03a) --------------------------------------
+
+
+class _NoLinkScan(RefineryReader):
+    """A reader whose ``links`` column must not be read."""
+
+    def scan(
+        self, columns: Sequence[str] = ("doc_id",), *, batch_size: int = 4096
+    ) -> Iterator[pa.RecordBatch]:
+        if "links" in columns:
+            raise AssertionError(f"the links of {self.dir} were read")
+        return super().scan(columns, batch_size=batch_size)
+
+
+def _guarded(
+    readers: Sequence[tuple[str, RefineryReader]], free: frozenset[str]
+) -> list[tuple[str, RefineryReader]]:
+    return [(sid, _NoLinkScan(r.dir) if sid in free else r) for sid, r in readers]
+
+
+def test_the_link_scan_skips_sources_the_kept_rank_found_link_free(tmp_path: Path) -> None:
+    """The rank read the ``links`` column of every source over the NAS, 48 of 69 minutes in sources
+    that hold none: a source the kept rank found link-free, unchanged since, is not read again, and
+    the rank is the same to the byte."""
+    readers, stats_path, at = _lanes_library(tmp_path)
+    out = tmp_path / RANK_FILE
+    first = out.read_bytes()
+    before = json.loads(stats_path.read_text())
+    free = link_free_sources(stats_path, _inputs(readers), now=at + 7 * 86400)
+    assert free == {"lane", "named"}
+    said: list[str] = []
+    aliases = [("wsp:lane/1", "First report"), ("wsp:named/1", "One")]
+    stats = compute_static_rank(
+        _guarded(readers, free), out, tmp_path / "work", aliases=aliases, link_free=free, progress=said.append
+    )
+    assert out.read_bytes() == first
+    assert "rank: link scan skipped for 2 link-free source(s), 5 documents" in said
+    after = json.loads(stats_path.read_text())
+    assert after["inputs"] == before["inputs"]
+    assert after["inputs"]["lane"]["links"] == 0
+    assert after["link_targets"] == before["link_targets"]
+    assert (after["edges"], after["nodes"]) == (before["edges"], before["nodes"])
+    assert not rank_due(stats_path, _inputs(readers), now=at + 27 * 86400).due
+    # When every source was last read is carried over, not renewed: the belief runs out.
+    assert after["links_scanned_at"] == before["links_scanned_at"] == at
+    assert stats.computed_at >= at
+    # A rank that reads them all (nothing skipped) renews it.
+    full = compute_static_rank(readers, out, tmp_path / "work", aliases=aliases)
+    assert full.links_scanned_at == full.computed_at
+    assert out.read_bytes() == first
+
+
+def test_a_link_free_belief_runs_out(tmp_path: Path) -> None:
+    """A rank that skips a source records 0 links for it again, so a wrong belief would confirm itself
+    at every rank: once every source's links were last read 28 days ago, they are all read."""
+    readers, stats_path, at = _lanes_library(tmp_path)
+    current = _inputs(readers)
+    day = 86400
+    assert link_free_sources(stats_path, current, now=at + (LINK_SCAN_MAX_AGE_DAYS - 0.1) * day)
+    assert link_free_sources(stats_path, current, now=at + LINK_SCAN_MAX_AGE_DAYS * day) == frozenset()
+    assert link_free_sources(stats_path, current, now=at - 60) == frozenset()  # a clock set back
+    # Three weekly ranks skip, the fourth reads everything: the time is carried through each skip.
+    out = tmp_path / RANK_FILE
+    for week in (1, 2, 3):
+        free = link_free_sources(stats_path, current, now=at + week * 7 * day)
+        assert free == {"lane", "named"}
+        compute_static_rank(readers, out, tmp_path / "work", link_free=free)
+    assert link_free_sources(stats_path, current, now=at + 28 * day) == frozenset()
+    # ...and by the calendar: a rank that skipped is due once the links were last all read 28 days
+    # ago, with no source changed (a rank that read them all is kept however old).
+    assert not rank_due(stats_path, current, now=at + 27.9 * day).due
+    late = rank_due(stats_path, current, now=at + 28 * day)
+    assert late.due
+    assert late.reason == "the links of every source were last read 28.0 days ago"
+    assert rank_due(stats_path, current, now=at - 60).due  # a clock set back
+    # A rank that does not say when the links were last all read (before 2026-11-11), or says nonsense.
+    recorded = json.loads(stats_path.read_text())
+    for broken in ("absent", 0, -5.0, None, "yesterday", True, float("nan")):
+        if broken == "absent":
+            recorded.pop("links_scanned_at")
+        else:
+            recorded["links_scanned_at"] = broken
+        stats_path.write_text(json.dumps(recorded))
+        assert link_free_sources(stats_path, current, now=at + 60) == frozenset(), broken
+    # A skip decided from such a record leaves the time unknown: the rank is due, and reads them all.
+    compute_static_rank(readers, out, tmp_path / "work", link_free={"lane"})
+    assert json.loads(stats_path.read_text())["links_scanned_at"] == 0.0
+    unknown = rank_due(stats_path, current, now=at + 60)
+    assert unknown.due
+    assert "at an unknown time" in unknown.reason
+    full = compute_static_rank(readers, out, tmp_path / "work")
+    assert not rank_due(stats_path, current, now=full.computed_at + 400 * day).due
+
+
+def test_a_changed_generation_is_scanned_unless_its_seals_say_zero(tmp_path: Path) -> None:
+    readers, stats_path, at = _lanes_library(tmp_path)
+    current = _inputs(readers)
+    now = at + 60
+
+    def free(**changed: RankInput) -> frozenset[str]:
+        return link_free_sources(stats_path, {**current, **changed}, now=now)
+
+    assert free() == {"lane", "named"}  # "w" has links: always read
+    # A new generation whose seal counts 0 links: skipped. One that counts some, or does not count: read.
+    (lane2,) = write(tmp_path / "ref", [doc("lane", "9", "Report 9")], gen="g2")
+    new = _inputs([lane2])["lane"]
+    assert (new.links, new.unknown) == (0, ())
+    assert "lane" in free(lane=new)
+    assert "lane" not in free(lane=dataclasses.replace(new, links=2))
+    assert "lane" not in free(lane=dataclasses.replace(new, unknown=("g2",)))
+    # The linking source under a new seal that says 0: skipped (the seal counts every row written).
+    assert "w" in free(w=dataclasses.replace(current["w"], seal="another", links=0))
+    assert "w" not in free(w=dataclasses.replace(current["w"], seal="another"))
+    # A source the kept rank never saw: by its seals alone.
+    (fresh,) = write(tmp_path / "ref", [doc("fresh", "1", "Fresh")])
+    assert "fresh" in free(fresh=_inputs([fresh])["fresh"])
+    assert "fresh" not in free(fresh=dataclasses.replace(_inputs([fresh])["fresh"], unknown=("g1",)))
+    # The kept record is not a count of 0: nothing is concluded from it.
+    recorded = json.loads(stats_path.read_text())
+    uncounted = dataclasses.replace(current["lane"], unknown=("g1",))
+    assert "lane" in free(lane=uncounted)  # the kept rank read these very files and found none
+    recorded = json.loads(stats_path.read_text())
+    for broken in (None, False, "0", 3):
+        recorded["inputs"]["lane"]["links"] = broken
+        stats_path.write_text(json.dumps(recorded))
+        assert "lane" not in free(lane=uncounted), broken
+        # The kept rank read these very files and did not record 0: its word over the seal's 0.
+        assert "lane" not in free(), broken
+
+
+def _uncounted(member: Path) -> None:
+    """A member as sealed before 2026-11-05: its seal does not count its links."""
+    seal = member / SUCCESS_FILE
+    meta = json.loads(seal.read_text())
+    del meta["library_links"]
+    seal.write_text(json.dumps(meta))
+
+
+def _set_input(root: Path, sid: str, set_id: str) -> RankInput:
+    """As Indexer._rank_inputs builds it for a set generation."""
+    gen_dir = generation_dir(root, sid, set_id)
+    members = set_members(gen_dir) or ()
+    counts = [(m, library_links(part_dir(root, sid, m))) for m in members]
+    return RankInput(
+        set_id,
+        seal_stamp(gen_dir),
+        links=sum(n for _, n in counts if n is not None),
+        aliases=False,
+        unknown=tuple(m for m, n in counts if n is None),
+        members=members,
+    )
+
+
+def test_a_member_that_left_a_set_has_its_links_read_again(tmp_path: Path) -> None:
+    """Review 2026-11-11: the scan skips rows a later member shadows. When that member leaves, the rows
+    it hid are live again, links and all, and the kept rank never read them: "the rank read these
+    members in a source that brought none" says nothing about them."""
+    root = tmp_path / "ref"
+    with RefineryWriter(root, "s", "2026.a", directory=part_dir(root, "s", "2026.a")) as w:
+        w.write([doc("s", "page", "Page", links=("wsp:s/other",)), doc("s", "other", "Other")])
+    with RefineryWriter(root, "s", "2026.b", directory=part_dir(root, "s", "2026.b")) as w:
+        w.write([doc("s", "page", "Page")])  # the newer row of the same document: no link
+    a, b = (part_dir(root, "s", g) for g in ("2026.a", "2026.b"))
+    _uncounted(a)
+    _uncounted(b)
+    both = compose_set(root, "s", [a, b])
+    out = tmp_path / RANK_FILE
+    stats = compute_static_rank(
+        [("s", RefineryReader(generation_dir(root, "s", both)))], out, tmp_path / "work"
+    )
+    stats_path = out.with_name("static_rank.json")
+    assert json.loads(stats_path.read_text())["inputs"]["s"]["links"] == 0  # the linking row is shadowed
+    now = stats.computed_at + 60
+    assert link_free_sources(stats_path, {"s": _set_input(root, "s", both)}, now=now) == {"s"}
+    # A third member joins: what was hidden stays hidden, the set is still link-free.
+    with RefineryWriter(root, "s", "2026.c", directory=part_dir(root, "s", "2026.c")) as w:
+        w.write([doc("s", "third", "Third")])
+    three = compose_set(root, "s", [a, b, part_dir(root, "s", "2026.c")])
+    assert link_free_sources(stats_path, {"s": _set_input(root, "s", three)}, now=now) == {"s"}
+    # 2026.b leaves: the linking row of 2026.a is live again.
+    alone = compose_set(root, "s", [a])
+    current = {"s": _set_input(root, "s", alone)}
+    assert current["s"].unknown == ("2026.a",)
+    free = link_free_sources(stats_path, current, now=now)
+    assert free == frozenset()
+    # The rank is due at once, not at the weekly refresh: the graph has an edge it never had.
+    assert not rank_due(stats_path, {"s": _set_input(root, "s", three)}, now=now).due
+    lost = rank_due(stats_path, current, now=now)
+    assert lost.due
+    assert "lost a member" in lost.reason
+    reader = RefineryReader(generation_dir(root, "s", alone))
+    again = compute_static_rank([("s", reader)], out, tmp_path / "work", link_free=free)
+    assert json.loads(stats_path.read_text())["inputs"]["s"]["links"] == 1
+    assert again.edges == 1
+
+
+def test_no_kept_rank_skips_nothing(tmp_path: Path) -> None:
+    readers, stats_path, at = _lanes_library(tmp_path)
+    current = _inputs(readers)
+    assert link_free_sources(stats_path, current, now=at + 60)
+    recorded = stats_path.read_text()
+    for text in ("", "[]", "{not json", json.dumps({**json.loads(recorded), "format": 3})):
+        stats_path.write_text(text)
+        assert link_free_sources(stats_path, current, now=at + 60) == frozenset(), text[:20]
+    no_inputs = json.loads(recorded)
+    no_inputs["inputs"] = ["lane"]
+    stats_path.write_text(json.dumps(no_inputs))
+    assert link_free_sources(stats_path, current, now=at + 60) == frozenset()
+    stats_path.unlink()
+    assert link_free_sources(stats_path, current, now=at + 60) == frozenset()
+
+
+def test_a_source_reached_only_through_an_alias_is_named(tmp_path: Path) -> None:
+    """The edge exists only because of an alias row of a source without links: the link that uses the
+    alias names that source, so its change (the alias may be gone) makes the rank due."""
+    docs = [doc("w", "en/A", "A", links=("wsp:lane/First_report",)), doc("lane", "1", "Report 1")]
+    readers = write(tmp_path / "ref", docs)
+    out = tmp_path / RANK_FILE
+    stats = compute_static_rank(readers, out, tmp_path / "work", aliases=[("wsp:lane/1", "First report")])
+    assert (stats.edges, stats.resolved_alias) == (1, 1)
+    assert stats.link_targets == {"lane": 1}
+    current = _inputs(readers)
+    now = stats.computed_at + 60
+    assert not rank_due(out.with_name("static_rank.json"), current, now=now).due
+    (lane2,) = write(tmp_path / "ref", [doc("lane", "1", "Report 1")], gen="g2")  # without the alias row
+    changed = rank_due(out.with_name("static_rank.json"), {**current, **_inputs([lane2])}, now=now)
+    assert changed.due
+    assert changed.reason == "lane changed and 1 link(s) name it"

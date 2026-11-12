@@ -73,6 +73,7 @@ from wsp_index.linkrank import (
     RankStats,
     compute_static_rank,
     fence_path,
+    link_free_sources,
     rank_due,
     write_fence,
 )
@@ -674,30 +675,51 @@ class Indexer:
         from the seals and redirect tables of the current generations, not from their documents."""
         if not self.index.rank_path.is_file():
             return RankDecision(True, "no rank yet")
-        current: dict[str, RankInput] = {}
         try:
-            for sid, reader in self._current_readers():
-                gen_dir = reader.dir
-                members = set_members(gen_dir) or ()
-                # A set's own seal knows its links only when every member's does: counted per member,
-                # the ones sealed before the count are named instead.
-                seals = [(m, part_dir(self.refinery, sid, m)) for m in members] or [
-                    (reader.generation_id, gen_dir)
-                ]
-                counts = [(name, library_links(d)) for name, d in seals]
-                current[sid] = RankInput(
-                    generation=reader.generation_id,
-                    seal=seal_stamp(gen_dir),
-                    links=sum(n for _, n in counts if n is not None),
-                    aliases=any(
-                        _has_rows(p) for p in self._redirect_tables(sid, (reader.generation_id, *members))
-                    ),
-                    unknown=tuple(name for name, n in counts if n is None),
-                )
+            current = self._rank_inputs(self._current_readers())
         except (OSError, ValueError) as exc:  # a seal the share refused for a moment: rank, as before
             return RankDecision(True, f"the current seals could not be read ({type(exc).__name__}: {exc})")
         stats = self.index.rank_path.with_name(STATS_FILE)
         return rank_due(stats, current, config=config or RankConfig(), now=now)
+
+    def _rank_inputs(self, readers: Sequence[tuple[str, RefineryReader]]) -> dict[str, RankInput]:
+        """What each of ``readers`` would bring to the link graph, from its seals and redirect tables
+        (``OSError``/``ValueError`` when the share refuses one: the caller decides)."""
+        current: dict[str, RankInput] = {}
+        for sid, reader in readers:
+            gen_dir = reader.dir
+            members = set_members(gen_dir) or ()
+            # A set's own seal knows its links only when every member's does: counted per member,
+            # the ones sealed before the count are named instead.
+            seals = [(m, part_dir(self.refinery, sid, m)) for m in members] or [
+                (reader.generation_id, gen_dir)
+            ]
+            counts = [(name, library_links(d)) for name, d in seals]
+            current[sid] = RankInput(
+                generation=reader.generation_id,
+                seal=seal_stamp(gen_dir),
+                links=sum(n for _, n in counts if n is not None),
+                aliases=any(
+                    _has_rows(p) for p in self._redirect_tables(sid, (reader.generation_id, *members))
+                ),
+                unknown=tuple(name for name, n in counts if n is None),
+                members=tuple(members),
+            )
+        return current
+
+    def _link_free(self, readers: Sequence[tuple[str, RefineryReader]]) -> frozenset[str]:
+        """The sources among ``readers`` whose links :meth:`rank` need not read
+        (:func:`wsp_index.linkrank.link_free_sources`), judged for these very readers: the same list
+        the rank then scans, so the rule is never applied to one generation and the scan to another.
+        Anything unreadable: none (every source is read)."""
+        try:
+            inputs = self._rank_inputs(readers)
+            free = link_free_sources(self.index.rank_path.with_name(STATS_FILE), inputs)
+        except (OSError, ValueError):
+            return frozenset()
+        return frozenset(
+            sid for sid, reader in readers if sid in free and inputs[sid].generation == reader.generation_id
+        )
 
     def rank_if_due(self, config: RankConfig | None = None) -> bool:
         """:meth:`rank` when :meth:`rank_due` says so (the nightly build); returns whether it ran.
@@ -711,11 +733,16 @@ class Indexer:
         return True
 
     @_timed("rank")
-    def rank(self, config: RankConfig | None = None, *, reuse: bool = False) -> RankStats | None:
+    def rank(
+        self, config: RankConfig | None = None, *, reuse: bool = False, full_scan: bool = False
+    ) -> RankStats | None:
         """PageRank over every indexed source's current generation (``wsp index rank``).
 
         Writes ``lexical/static_rank.bin``, then uses it for suggest priors and the portal's
         featured articles. Re-runnable on its own; it reads only the Refinery and the index's aliases.
+
+        The links of the sources the kept rank found link-free are not read again (:meth:`_link_free`),
+        unless ``full_scan`` (``wsp index rank --full-scan``): the way to distrust that record.
         """
         readers = self._current_readers()
         if not readers:
@@ -735,6 +762,7 @@ class Indexer:
                 aliases=self.title_sources().iter_aliases(),
                 config=config or RankConfig(),
                 progress=self._say,
+                link_free=frozenset() if full_scan else self._link_free(readers),
             )
             self._say(f"rank: {stats.line()}")
         rank = self.index.reload_static_rank()
@@ -756,6 +784,7 @@ class Indexer:
                         self.root / CATALOG_DIR,
                         cfg,
                         map_root=self.map_root,
+                        progress=self._say,
                     )
         self._say(f"rank: done in {self.clock() - started:.1f}s")
         return stats

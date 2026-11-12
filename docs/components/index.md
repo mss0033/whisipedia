@@ -113,14 +113,24 @@ build` runs it after indexing when the link graph can have changed (`--no-rank` 
 
 * **When.** `static_rank.json` records each source's generation, seal stamp, and the `wsp:` links and
   aliases it brought to the graph; every new seal records the `wsp:` links its documents carry
-  (`library_links`). The build computes the rank again when a source with links or aliases changed,
-  came or left, a new generation brings links or aliases (or does not record them: sealed before
-  2026-11-05, except set members the rank read in a source that brought none), the settings changed, or link-free sources changed and the rank is 7 days old. Otherwise
+  (`library_links`), and since 2026-11-11 `link_targets`: every `wsp:` link read, counted by the source
+  its target id names. The build computes the rank again when a source with links changed, came or left,
+  a source that some link names changed, came or left, a new generation brings links (or does not record
+  them: sealed before 2026-11-05, except set members the rank read in a source that brought none), the
+  settings changed, or link-free sources changed and the rank is 7 days old. Alias rows alone no longer
+  make a change due (125 of 235 sources carry them and no link, so the rank still ran most nights): an
+  alias resolves only links that name its source. A kept rank without `link_targets` uses the older
+  rule (aliases count). Otherwise
   it is kept: a new document of a link-free source (PubMed, newspapers) gets the feature of an unlinked
   page, 0, from the missing key, which is what a recount gives it. Until 2026-11-05 it ran whenever
   anything was indexed, 4-12 h on the NAS a night, for 8 new edges in 13 days.
 * **Suggest.** The trie is rebuilt once a night: by the rank when it runs (its priors), else in
   `finish()`. Both rebuilt it on the same night before, 50-115 min of NAS reads wasted.
+* **Link scan.** A rank does not read the `links` column of a source known to hold no library link:
+  the kept rank recorded 0 for the same generation and seal, or every seal says 0 (uncounted set
+  members only when the kept rank read them and no member left the set since). The log says
+  `rank: link scan skipped for N link-free source(s)`. `links_scanned_at` records when every source was
+  last read; after 28 days the next rank reads them all, and `wsp index rank --full-scan` does at once.
 
 * **Graph.** Nodes are the documents of every source's current Refinery generation; edges are
   `DocRecord.links` that start with `wsp:`. Targets resolve with `pyarrow.compute.index_in` (C++): the

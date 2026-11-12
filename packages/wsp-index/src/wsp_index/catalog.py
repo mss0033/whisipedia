@@ -515,38 +515,74 @@ def rank_by_language(reader: RefineryReader, rank: StaticRank, k: int) -> dict[s
     return {lang: [(d, f) for f, d in sorted(heap, reverse=True)] for lang, heap in best.items()}
 
 
-def _featurable(reader: RefineryReader, doc_id: str, cfg: CatalogConfig) -> str | None:
-    """The document's language when it may be featured (long enough, not a list or date page)."""
+def _featurable(
+    reader: RefineryReader, doc_id: str, cfg: CatalogConfig, lookups: list[int] | None = None
+) -> str | None:
+    """The document's language when it may be featured (long enough, not a list or date page).
+    ``lookups``: a one-item counter of the documents read for it."""
     native = doc_id.split("/", 1)[1] if "/" in doc_id else doc_id
     leaf = native.rsplit("/", 1)[-1]
     if _NOT_FEATURED.search(leaf) or _DATE_PAGE.match(leaf):
         return None
+    if lookups is not None:
+        lookups[0] += 1
     row = reader.lookup(doc_id, ("text", "lang"))
     if row is None or len(cast(str, row["text"])) < cfg.min_featured_chars:
         return None
     return primary_lang(cast(str, row["lang"]))
 
 
-def _featured(reader: RefineryReader, source_id: str, cfg: CatalogConfig) -> dict[str, list[str]]:
-    """Featured candidates per language, best first."""
+def _featured(
+    reader: RefineryReader,
+    source_id: str,
+    cfg: CatalogConfig,
+    progress: Callable[[str], None] | None = None,
+) -> dict[str, list[str]]:
+    """Featured candidates per language, best first.
+
+    ``progress`` is told once what the pick cost, in its two parts: ranking the candidates (a scan of
+    every doc id and language) and reading the candidates' text. The re-pick after a rank took 49-172
+    minutes for the two Wikipedia sources and nothing said which part (2026-11-10)."""
     want = cfg.featured_candidates
     out: dict[str, list[str]] = {}
+    lookups = [0]
+    ranking_seconds = lookup_seconds = 0.0
+
+    def report(how: str = "") -> None:
+        if progress is not None:
+            progress(
+                f"featured {source_id}: ranked in {ranking_seconds:.1f}s, "
+                f"{lookups[0]:,} lookups in {lookup_seconds:.1f}s{how}"
+            )
+
     if cfg.rank is not None:  # PageRank inside each language
-        for lang, ranked in rank_by_language(reader, cfg.rank, want * 4).items():
+        started = time.monotonic()
+        by_language = rank_by_language(reader, cfg.rank, want * 4)
+        ranking_seconds += time.monotonic() - started
+        started = time.monotonic()
+        for lang, ranked in by_language.items():
             for doc_id, _ in ranked:
-                if _featurable(reader, doc_id, cfg) is not None:
+                if _featurable(reader, doc_id, cfg, lookups) is not None:
                     out.setdefault(lang, []).append(doc_id)
                     if len(out[lang]) >= want:
                         break
+        lookup_seconds += time.monotonic() - started
         if out:
+            report()
             return out
+    started = time.monotonic()
     ranking: Sequence[tuple[str, float]] = _inlink_ranking(reader, source_id, cfg.max_link_docs)
     if not ranking:
         ranking = _length_ranking(reader, want * 4)
+    ranking_seconds += time.monotonic() - started
+    started = time.monotonic()
     for doc_id, _ in ranking:
-        lang = _featurable(reader, doc_id, cfg)
+        lang = _featurable(reader, doc_id, cfg, lookups)
         if lang is not None and len(out.setdefault(lang, [])) < want:
             out[lang].append(doc_id)
+    lookup_seconds += time.monotonic() - started
+    # Both parts hold the rank's attempt too when it picked nothing.
+    report(" (by links or length: the rank picked nothing)" if cfg.rank is not None else " (no rank)")
     return {lang: ids for lang, ids in out.items() if ids}
 
 
@@ -707,8 +743,10 @@ def refresh_featured(
     out_root: Path,
     cfg: CatalogConfig,
     map_root: Path | None = None,
+    progress: Callable[[str], None] | None = None,
 ) -> bool:
-    """Recompute only the ``featured`` list of an existing catalog file (after ``wsp index rank``)."""
+    """Recompute only the ``featured`` list of an existing catalog file (after ``wsp index rank``).
+    ``progress``: told what the pick cost (:func:`_featured`); the result does not depend on it."""
     path = out_root / f"{source_id}.json"
     if not path.is_file():
         return False
@@ -716,7 +754,7 @@ def refresh_featured(
     if payload.get("generation_id") != generation_id:
         return False
     reader = _job_reader(refinery_root, source_id, generation_id, map_root)
-    by_lang = _featured(reader, source_id, cfg)
+    by_lang = _featured(reader, source_id, cfg, progress)
     payload["featured"] = _default_featured(by_lang)
     payload["featured_by_lang"] = by_lang
     _write_payload(path, payload)

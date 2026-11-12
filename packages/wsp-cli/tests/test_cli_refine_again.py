@@ -485,3 +485,124 @@ def test_refine_again_indexes_a_title_it_repaired_from_a_copy_without_fingerprin
         assert ix.build([SID])[0].upserted == 0
     finally:
         ix.close()
+
+
+# --- the rank's link scan (2026-11-10 trawl, batch 3) ---------------------------------------------------
+
+
+def test_a_rank_does_not_read_the_links_of_a_source_the_kept_rank_found_link_free(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The weekly rank read every source's ``links`` over the NAS, 48 of 69 minutes in sources with
+    none. The skip is judged for the readers the rank then scans (one list, review 2026-11-11), and
+    ``full_scan`` and ``--reuse`` never use it."""
+    import io
+    import json
+
+    from wsp_cli import indexer as indexer_module
+    from wsp_index.linkrank import STATS_FILE
+
+    skipped = "rank: link scan skipped for 1 link-free source(s), 2 documents"
+    out = io.StringIO()
+    ix = indexer(tmp_path, Adapter())
+    ix.out = out
+    lists: list[int] = []
+    real_readers = ix._current_readers  # pyright: ignore[reportPrivateUsage]
+
+    def readers() -> list[tuple[str, Any]]:
+        lists.append(1)
+        return real_readers()
+
+    monkeypatch.setattr(ix, "_current_readers", readers)
+
+    def said() -> str:
+        text = out.getvalue()
+        out.seek(0)
+        out.truncate()
+        return text
+
+    try:
+        ix.build([SID])
+        stats_path = ix.index.rank_path.with_name(STATS_FILE)
+        first = ix.rank()
+        assert first is not None
+        assert skipped not in said()  # no kept rank: everything is read
+        assert first.links_scanned_at == first.computed_at
+        ranked = ix.index.rank_path.read_bytes()
+        lists.clear()
+        second = ix.rank()
+        assert second is not None
+        assert skipped in said()
+        assert lists == [1]  # the list the skip was judged for is the list that was scanned
+        assert ix.index.rank_path.read_bytes() == ranked
+        assert second.links_scanned_at == first.links_scanned_at  # carried over: the belief runs out
+        assert json.loads(stats_path.read_text())["inputs"][SID]["links"] == 0
+        # --full-scan distrusts the record.
+        third = ix.rank(full_scan=True)
+        assert third is not None
+        assert skipped not in said()
+        assert third.links_scanned_at == third.computed_at
+        # Every source's links were last read four weeks ago: all are read again.
+        recorded = json.loads(stats_path.read_text())
+        recorded["links_scanned_at"] -= 28 * 86400
+        stats_path.write_text(json.dumps(recorded))
+        fourth = ix.rank()
+        assert fourth is not None
+        assert skipped not in said()
+        assert fourth.links_scanned_at == fourth.computed_at
+        assert ix.rank() is not None
+        assert skipped in said()
+
+        # A reader of another generation than the one the rule was asked about is read.
+        real_inputs = ix._rank_inputs  # pyright: ignore[reportPrivateUsage]
+
+        def moved(readers: Any) -> dict[str, Any]:
+            return {sid: replace(i, generation="2026-02") for sid, i in real_inputs(readers).items()}
+
+        monkeypatch.setattr(ix, "_rank_inputs", moved)
+        ix.rank()
+        assert skipped not in said()
+
+        # Seals that cannot be read: every source is read, the rank is still computed.
+        def refused(_readers: Any) -> dict[str, Any]:
+            raise OSError(5, "the share refused")
+
+        monkeypatch.setattr(ix, "_rank_inputs", refused)
+        assert ix.rank() is not None
+        assert skipped not in said()
+
+        # --reuse computes nothing and asks nothing.
+        def never(*_a: object, **_k: object) -> frozenset[str]:
+            raise AssertionError("link_free_sources was asked with --reuse")
+
+        monkeypatch.setattr(indexer_module, "link_free_sources", never)
+        assert ix.rank(reuse=True) is None
+    finally:
+        ix.close()
+
+
+def test_wsp_index_rank_has_a_full_scan_flag(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Review 2026-11-11: the flag has to be declared in the parser, not only read by the command."""
+    import io
+
+    from wsp_cli import ops
+    from wsp_cli.main import build_parser
+
+    parser = build_parser()
+    asked: list[dict[str, Any]] = []
+
+    def make() -> Indexer:
+        ix = indexer(tmp_path, Adapter())
+
+        def rank(_config: object = None, **kwargs: Any) -> None:
+            asked.append(kwargs)
+
+        ix.rank = rank  # type: ignore[method-assign]
+        return ix
+
+    _wire(monkeypatch, make)
+    for argv, want in ((["index", "rank"], False), (["index", "rank", "--full-scan"], True)):
+        args = parser.parse_args(argv)
+        assert args.full_scan is want
+        assert ops.cmd_index_rank(args, io.StringIO()) == 0
+        assert asked[-1] == {"reuse": False, "full_scan": want}

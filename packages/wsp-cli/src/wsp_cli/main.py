@@ -505,6 +505,12 @@ def build_parser(argv: Sequence[str] | None = None) -> argparse.ArgumentParser:
         action="store_true",
         help="keep the existing static rank file; only redo suggest priors and featured articles",
     )
+    s.add_argument(
+        "--full-scan",
+        action="store_true",
+        help="read the links of every source, also of those the kept rank found link-free "
+        "(done by itself every 4 weeks)",
+    )
     s = add(
         "spell",
         _ops("cmd_index_spell"),
