@@ -48,12 +48,18 @@ test('an address with a #section opens at the section, with focus there', async 
   await expect(heading).toBeInViewport();
   expect(await scrollTop(page)).toBeGreaterThan(0);
   expect(Math.abs(await offsetInMain(page, '#pg-Legacy'))).toBeLessThan(40);
-  await expect(heading).toBeFocused();
+  // The first page of a session takes no focus (App.start: the reader has not acted yet).
+  await expect(heading).not.toBeFocused();
 
   // An <a name> target takes focus too, though a link without href takes none by itself.
   await nav.go(`${ARTICLE}#notes`);
   expect(Math.abs(await offsetInMain(page, '#pg-notes'))).toBeLessThan(40);
   await expect(nav.main.locator('#pg-notes')).toBeFocused();
+
+  // A visit the reader asked for: the view and the focus are both at the section.
+  await nav.go(`${ARTICLE}#Legacy`);
+  expect(Math.abs(await offsetInMain(page, '#pg-Legacy'))).toBeLessThan(40);
+  await expect(heading).toBeFocused();
 });
 
 test('Back to an address with a #section returns to where the reader was, not to the section', async ({
