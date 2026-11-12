@@ -554,19 +554,27 @@
   color: inherit !important;
   text-decoration: none !important;
 }
+/* the palette's focus colour is chosen for the page, not for a box title */
+.site-banner a:focus-visible {
+  outline-color: currentColor;
+}
 /* Historical / superseded edition notice (PLAN D13): a period "caution" box. */
 .doc-warning {
   margin: 8px 0 10px;
   padding: 6px 10px;
-  border: 2px solid #000;
-  background: #ffffcc;
-  color: #000;
+  border: 2px solid var(--warn-box-fg);
+  background: var(--warn-box-bg);
+  color: var(--warn-box-fg);
   font-family: var(--ui-font);
-  box-shadow: 2px 2px 0 #808080;
+  box-shadow: 2px 2px 0 var(--chrome-shadow);
 }
 .doc-warning-historical,
 .doc-warning-rescinded {
-  background: repeating-linear-gradient(45deg, #ffff66 0 10px, #ffffcc 10px 20px);
+  background: repeating-linear-gradient(
+    45deg,
+    var(--warn-box-stripe) 0 10px,
+    var(--warn-box-bg) 10px 20px
+  );
 }
 .doc-warning-icon {
   font-weight: bold;
@@ -855,7 +863,7 @@
   height: 80vh;
   min-height: 420px;
   border: 2px inset var(--rule);
-  background: #fff;
+  background: var(--frame-bg);
 }
 .original-frame-slot {
   margin: 4px 0 2px;

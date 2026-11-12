@@ -157,7 +157,8 @@
 .atlas-profile-chart {
   width: 100%;
   height: auto;
-  background: var(--field-bg);
+  /* the page colour: the accent line is measured against it in every palette */
+  background: var(--page-bg);
   box-shadow: var(--bevel-in-thin);
 }
 .atlas-profile-fill {

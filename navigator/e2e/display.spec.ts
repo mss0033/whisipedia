@@ -178,3 +178,50 @@ test.describe('motion', () => {
     expect(await blink(page)).not.toBe('none');
   });
 });
+
+/** WCAG contrast of two computed `rgb()` colours. */
+function ratio(a: string, b: string): number {
+  const lum = (c: string) => {
+    const [r, g, bl] = (c.match(/[\d.]+/g) ?? []).slice(0, 3).map((v) => {
+      const x = Number(v) / 255;
+      return x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * (r ?? 0) + 0.7152 * (g ?? 0) + 0.0722 * (bl ?? 0);
+  };
+  const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x) as [number, number];
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+test.describe('printing from a dark palette', () => {
+  // The default theme passes without the reset: print from the palettes that are dark on screen.
+  for (const look of ['Phosphor (Green)', "Encarta '95", 'High Contrast']) {
+    test(`${look}: paper is light, links can be read, nothing glows`, async ({ page, nav }) => {
+      await nav.open('wsp://home');
+      await nav.menu('View', look);
+      const onScreen = await nav.main.evaluate((m) => getComputedStyle(m).backgroundColor);
+      expect(onScreen, 'dark on screen').not.toBe('rgb(255, 255, 255)');
+      await page.emulateMedia({ media: 'print' });
+      const seen = await nav.main.evaluate((m) => {
+        const link = m.querySelector('a[href]');
+        const s = getComputedStyle(m);
+        return {
+          bg: s.backgroundColor,
+          fg: s.color,
+          shadow: s.textShadow,
+          link: link ? getComputedStyle(link).color : '',
+          overlay: getComputedStyle(document.querySelector('.window')!, '::after').display,
+          chrome: getComputedStyle(document.querySelector('.chrome-top')!).display,
+        };
+      });
+      expect(seen.bg).toBe('rgb(255, 255, 255)');
+      expect(ratio(seen.fg, seen.bg)).toBeGreaterThanOrEqual(4.5);
+      expect(seen.link, 'the Start Page has a link').not.toBe('');
+      expect(ratio(seen.link, seen.bg)).toBeGreaterThanOrEqual(4.5);
+      expect(seen.shadow).toBe('none');
+      expect(seen.overlay).toBe('none');
+      expect(seen.chrome).toBe('none');
+      await page.emulateMedia({ media: 'screen' });
+      expect(await nav.main.evaluate((m) => getComputedStyle(m).backgroundColor)).toBe(onScreen);
+    });
+  }
+});

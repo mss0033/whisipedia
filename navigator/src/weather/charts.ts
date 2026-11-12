@@ -229,7 +229,7 @@ export function timeChart(opts: ChartOptions): HTMLElement {
           l !== undefined && l !== null
             ? `${l.toFixed(digits)}–${v.toFixed(digits)}`
             : v.toFixed(digits);
-        return h('span', { class: `wx-key ${se.cls}` }, `${se.label} ${text}`);
+        return h('span', { class: `${keyClass(se)}` }, `${se.label} ${text}`);
       })
       .filter((p): p is HTMLElement => p !== null);
     readout.replaceChildren(
@@ -249,11 +249,17 @@ export function timeChart(opts: ChartOptions): HTMLElement {
     'p',
     { class: 'wx-legend-keys' },
     ...opts.series.map((se) =>
-      h('span', { class: `wx-key ${se.cls}${se.dashed ? ' wx-key-dashed' : ''}` }, se.label),
+      h('span', { class: `${keyClass(se)}${se.dashed ? ' wx-key-dashed' : ''}` }, se.label),
     ),
   );
   fig.append(svg, legend, readout);
   return fig;
+}
+
+/** A key's classes: its series colour, and for a line that it is one (one-ink palettes then draw
+ * the key in the line's pattern; a bar or a band has none). */
+export function keyClass(se: Pick<Series, 'cls' | 'kind'>): string {
+  return `wx-key${se.kind === 'line' ? ' wx-key-line' : ''} ${se.cls}`;
 }
 
 function nearest(times: number[], t: number): number {

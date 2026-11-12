@@ -1,6 +1,7 @@
 /** Formatting helpers (dates, sizes, numbers) in a fixed locale for stable output. */
 
-const LOCALE = 'en-US';
+/** Numbers and library dates are written this way everywhere; a reader's own clock is not. */
+export const LOCALE = 'en-US';
 
 const dateFmt = new Intl.DateTimeFormat(LOCALE, {
   year: 'numeric',

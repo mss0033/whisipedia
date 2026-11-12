@@ -53,8 +53,8 @@ body {
   z-index: 100;
   padding: 6px 10px;
   background: var(--field-bg);
-  color: var(--link);
-  border: 2px solid var(--focus);
+  color: var(--field-fg);
+  border: 2px solid var(--field-fg);
 }
 .skip-link:focus {
   top: 8px;
@@ -610,7 +610,14 @@ code.wrap {
   .skip-link,
   .doc-actions,
   .time-machine,
-  .webring {
+  .webring,
+  .original-frame-slot,
+  .player,
+  .crystal-controls,
+  .parts-nav,
+  .mt-offer,
+  .mt-controls,
+  .mt-toggle {
     display: none !important;
   }
   .app,
@@ -623,7 +630,8 @@ code.wrap {
   .viewport {
     overflow: visible;
     box-shadow: none;
-    background: #fff;
-    color: #000;
+    /* the palette is light on paper: the print block at the end of themes.css */
+    background: var(--page-bg);
+    color: var(--page-fg);
   }
 }

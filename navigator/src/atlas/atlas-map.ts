@@ -28,6 +28,7 @@ import type { WspClient } from '../api/client.ts';
 import { ApiRequestError } from '../api/client.ts';
 import type { PlaceHit, Tilesets } from '../api/types.ts';
 import { h, s } from '../core/dom.ts';
+import { LOCALE } from '../core/format.ts';
 import {
   COORD_FORMATS,
   type CoordFormat,
@@ -738,7 +739,7 @@ export class Atlas {
         pl.name,
       );
       const facts = [kindLabel(pl.kind)];
-      if (pl.population) facts.push(`pop. ${pl.population.toLocaleString()}`);
+      if (pl.population) facts.push(`pop. ${pl.population.toLocaleString(LOCALE)}`);
       if (withDistance && pl.distance_m !== null)
         facts.push(formatDistance(pl.distance_m, this.prefs.imperial));
       const article = h('span', { class: 'atlas-article' });

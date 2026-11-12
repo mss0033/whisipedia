@@ -31,29 +31,26 @@
 }
 
 /* the three kinds of availability (docs/components/weather.md §1) */
-.badge-avail-offline {
-  background: #1f6f3f;
-  color: #fff;
-  border-color: #134a29;
+.badge-avail-offline,
+.badge-avail-online {
+  background: var(--ok);
+  color: var(--page-bg);
+  border-color: var(--ok);
 }
 .badge-avail-kept {
-  background: #1d4f91;
-  color: #fff;
-  border-color: #12345f;
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
 }
 .badge-avail-live {
-  background: #8a5a00;
-  color: #fff;
-  border-color: #5c3c00;
-}
-.badge-avail-online {
-  background: #1f6f3f;
-  color: #fff;
+  background: var(--warn);
+  color: var(--page-bg);
+  border-color: var(--warn);
 }
 .badge-avail-stale {
-  background: #9b2c1f;
-  color: #fff;
-  border-color: #6b1d14;
+  background: var(--bad);
+  color: var(--page-bg);
+  border-color: var(--bad);
 }
 
 /* controls */
@@ -104,13 +101,17 @@
   list-style: none;
   background: var(--field-bg);
   color: var(--field-fg);
-  box-shadow: var(--menu-drop, 2px 2px 0 #000);
+  box-shadow: var(--menu-drop);
   min-width: 18rem;
 }
 .wx-find-results button {
   display: block;
   width: 100%;
   text-align: left;
+}
+.wx-find-results button:focus-visible {
+  outline-color: var(--field-fg);
+  outline-offset: -2px;
 }
 
 /* the map */
@@ -129,9 +130,9 @@
   bottom: 22px;
   z-index: 2;
   padding: 4px 6px 0;
-  background: rgba(255, 255, 255, 0.86);
-  color: #111;
-  border: 1px solid rgba(0, 0, 0, 0.3);
+  background: color-mix(in srgb, var(--field-bg) 86%, transparent);
+  color: var(--field-fg);
+  border: 1px solid var(--box-border);
   pointer-events: none;
 }
 .wx-legend-title {
@@ -141,10 +142,10 @@
 .wx-legend-tick {
   font-size: 10px;
   text-anchor: middle;
-  fill: #111;
+  fill: var(--field-fg);
 }
 .wx-legend-bar {
-  stroke: rgba(0, 0, 0, 0.35);
+  stroke: var(--box-border);
 }
 .wx-under {
   position: absolute;
@@ -152,9 +153,9 @@
   top: 8px;
   z-index: 2;
   padding: 2px 6px;
-  background: rgba(255, 255, 255, 0.86);
-  color: #111;
-  border: 1px solid rgba(0, 0, 0, 0.3);
+  background: color-mix(in srgb, var(--field-bg) 86%, transparent);
+  color: var(--field-fg);
+  border: 1px solid var(--box-border);
   pointer-events: none;
   max-width: 60%;
 }
@@ -263,7 +264,7 @@
   text-anchor: middle;
 }
 .wx-now {
-  stroke: #c0392b;
+  stroke: var(--bad);
   stroke-width: 1;
   stroke-dasharray: 3 2;
 }
@@ -308,31 +309,32 @@
   background: repeating-linear-gradient(90deg, currentColor 0 4px, transparent 4px 7px);
 }
 
-/* model and series colours: lines and bars take them; keys show them as text */
+/* Series colours come from the palette (themes.css --series-N): lines and bars take them, keys
+   show them as words. They follow the theme and View > Light or Dark, never the operating system. */
 .wx-c-0 {
-  color: #c0392b;
-  stroke: #c0392b;
-  fill: #c0392b;
+  color: var(--series-0);
+  stroke: var(--series-0);
+  fill: var(--series-0);
 }
 .wx-c-1 {
-  color: #1f5fae;
-  stroke: #1f5fae;
-  fill: #1f5fae;
+  color: var(--series-1);
+  stroke: var(--series-1);
+  fill: var(--series-1);
 }
 .wx-c-2 {
-  color: #2e8b57;
-  stroke: #2e8b57;
-  fill: #2e8b57;
+  color: var(--series-2);
+  stroke: var(--series-2);
+  fill: var(--series-2);
 }
 .wx-c-3 {
-  color: #7d3c98;
-  stroke: #7d3c98;
-  fill: #7d3c98;
+  color: var(--series-3);
+  stroke: var(--series-3);
+  fill: var(--series-3);
 }
 .wx-normal {
-  color: #666;
-  stroke: #666;
-  fill: #666;
+  color: var(--series-muted);
+  stroke: var(--series-muted);
+  fill: var(--series-muted);
 }
 .wx-line.wx-c-0,
 .wx-line.wx-c-1,
@@ -340,6 +342,68 @@
 .wx-line.wx-c-3,
 .wx-line.wx-normal {
   fill: none;
+}
+
+/* Palettes of one ink (Phosphor, System 7) cannot tell series apart by colour: there the pattern of
+   the line names the series (solid, dashes, dots, dash-dot; fine dots for normals), on the line and
+   on its key (a line's key only: bars and bands keep a full swatch), and a second line of the same
+   series (gusts) is the thin one. A new one-ink theme
+   must be added here; tests/contrast.test.ts fails until it is. */
+:root[data-theme^="phosphor"] .wx-line.wx-c-0,
+:root[data-theme="system7"] .wx-line.wx-c-0 {
+  stroke-dasharray: none;
+}
+:root[data-theme^="phosphor"] .wx-line.wx-c-1,
+:root[data-theme="system7"] .wx-line.wx-c-1 {
+  stroke-dasharray: 9 3;
+}
+:root[data-theme^="phosphor"] .wx-line.wx-c-2,
+:root[data-theme="system7"] .wx-line.wx-c-2 {
+  stroke-dasharray: 2 3;
+}
+:root[data-theme^="phosphor"] .wx-line.wx-c-3,
+:root[data-theme="system7"] .wx-line.wx-c-3 {
+  stroke-dasharray: 9 3 2 3;
+}
+:root[data-theme^="phosphor"] .wx-line.wx-normal,
+:root[data-theme="system7"] .wx-line.wx-normal {
+  stroke-dasharray: 1 4;
+}
+:root[data-theme^="phosphor"] .wx-line.wx-dashed,
+:root[data-theme="system7"] .wx-line.wx-dashed {
+  stroke-width: 0.7;
+}
+:root[data-theme^="phosphor"] .wx-key-line.wx-c-0::before,
+:root[data-theme="system7"] .wx-key-line.wx-c-0::before {
+  background: currentColor;
+}
+:root[data-theme^="phosphor"] .wx-key-line.wx-c-1::before,
+:root[data-theme="system7"] .wx-key-line.wx-c-1::before {
+  background: linear-gradient(90deg, currentColor 0 6px, transparent 6px 8px, currentColor 8px);
+}
+:root[data-theme^="phosphor"] .wx-key-line.wx-c-2::before,
+:root[data-theme="system7"] .wx-key-line.wx-c-2::before {
+  background: repeating-linear-gradient(90deg, currentColor 0 2px, transparent 2px 4px);
+}
+:root[data-theme^="phosphor"] .wx-key-line.wx-c-3::before,
+:root[data-theme="system7"] .wx-key-line.wx-c-3::before {
+  background: linear-gradient(
+    90deg,
+    currentColor 0 7px,
+    transparent 7px 9px,
+    currentColor 9px 11px,
+    transparent 11px 13px,
+    currentColor 13px
+  );
+}
+:root[data-theme^="phosphor"] .wx-key-line.wx-normal::before,
+:root[data-theme="system7"] .wx-key-line.wx-normal::before {
+  background: repeating-linear-gradient(90deg, currentColor 0 1px, transparent 1px 4px);
+}
+:root[data-theme^="phosphor"] .wx-key-dashed::before,
+:root[data-theme="system7"] .wx-key-dashed::before {
+  height: 1px;
+  margin-bottom: 4px;
 }
 
 /* stations */
@@ -362,17 +426,4 @@
 .wx-station-chart h4 {
   grid-column: 1 / -1;
   margin: 6px 0 0;
-}
-
-@media (prefers-color-scheme: dark) {
-  .wx-c-1 {
-    color: #6fa8ff;
-    stroke: #6fa8ff;
-    fill: #6fa8ff;
-  }
-  .wx-normal {
-    color: #aaa;
-    stroke: #aaa;
-    fill: #aaa;
-  }
 }

@@ -11,8 +11,12 @@
   user-select: none;
   outline: none;
 }
+/* The ring round a focused player is drawn outside it, on the page, in the page's text colour: it
+   shows in every palette whatever the skin (the skins' own shadows used to replace a box-shadow
+   ring). Controls inside take the skin's --focus, a colour that stands out from that skin. */
 .player:focus-visible {
-  box-shadow: 0 0 0 3px var(--link);
+  outline: 3px solid var(--page-fg);
+  outline-offset: 2px;
 }
 .player .pl-title {
   display: flex;
@@ -120,6 +124,7 @@
 
 /* Theater 98: bevelled charcoal, gold glyphs. */
 .player.sk-theater {
+  --focus: #e6c46a;
   background: #2b2b33;
   border: 2px solid #55555f;
   border-radius: 10px 10px 4px 4px;
@@ -165,6 +170,7 @@
 
 /* Brushed Steel: metal case, lozenge buttons. */
 .player.sk-steel {
+  --focus: #22252b;
   background: repeating-linear-gradient(90deg, #c9ccd1 0 2px, #bfc2c8 2px 3px, #d3d6da 3px 5px);
   border: 1px solid #8a8e96;
   border-radius: 14px;
@@ -199,6 +205,7 @@
 
 /* Desktop 95: grey bevels, title bar, LED timecode. */
 .player.sk-desk {
+  --focus: #000;
   background: #c0c0c0;
   border: 2px outset #e8e8e8;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
@@ -243,6 +250,7 @@
    a quality badge and a fill-the-screen button at the right. An original look in the spirit of the
    web video players of the late 2000s. */
 .player.sk-tube {
+  --focus: #333;
   background: #fff;
   border: 1px solid #a9a9a9;
   color: #333;
@@ -323,11 +331,16 @@
   cursor: pointer;
 }
 
-/* Full screen takes the whole player: the video has no native controls. */
+/* Full screen takes the whole player: the video has no native controls. The skin keeps its own
+   surface there (the picture's box is black already): its words and its --focus are made for it. */
 .player:fullscreen {
   display: flex;
   flex-direction: column;
-  background: #000;
+}
+/* No page round it in full screen: the ring goes inside the edge, in the skin's focus colour. */
+.player:fullscreen:focus-visible {
+  outline-color: var(--focus);
+  outline-offset: -3px;
 }
 .player:fullscreen .pl-screen {
   flex: 1;

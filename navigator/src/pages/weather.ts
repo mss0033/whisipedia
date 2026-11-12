@@ -6,6 +6,7 @@
 import { ApiRequestError } from '../api/client.ts';
 import type { Tilesets, WeatherStatus } from '../api/types.ts';
 import { h } from '../core/dom.ts';
+import { LOCALE } from '../core/format.ts';
 import { age, availabilityBadge, errorPage, pageHeading, wspLink } from '../ui/components.ts';
 import type { PageContext, PageResult } from './types.ts';
 
@@ -106,7 +107,7 @@ function strip(st: WeatherStatus): HTMLElement {
     availabilityBadge(st.stations.availability),
     ' ',
     st.stations.stations
-      ? `${st.stations.stations.toLocaleString()} GHCN-Daily stations`
+      ? `${st.stations.stations.toLocaleString(LOCALE)} GHCN-Daily stations`
       : st.stations.availability.note,
   );
   const c = st.connection;

@@ -41,7 +41,8 @@ describe('--ink-filter', () => {
       if (isDark(b.body)) {
         if (refinesNight) expect(own, b.selector).toBeUndefined();
         else expect(own, b.selector).toBe('invert(1) hue-rotate(180deg)');
-      } else if (b.selector.startsWith(':root,')) expect(own, b.selector).toBe('none');
+      } else if (b.selector.startsWith(':root,') || b.selector === ':root:root:root')
+        expect(own, b.selector).toBe('none'); // the default, and the reset for paper
       else expect(own, b.selector).toBeUndefined(); // light themes take the default
     }
   });
