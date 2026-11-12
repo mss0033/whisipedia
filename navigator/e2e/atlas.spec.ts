@@ -177,11 +177,11 @@ test('a "where is" answer shows a live map and opens the Atlas pinned', async ({
   await expect(page.locator('.atlas-panel-title')).toHaveText("What's here");
 });
 
-// WRITTEN 2026-11-11, NOT YET RUN (no browser run was allowed in that sitting): expect first-run
-// corrections. Mock only: the routes below stand in for a library that cannot read its archive.
+// Mock only: the routes below stand in for a library that cannot read its archive.
 test.describe('when the map cannot be read', () => {
-  // The browser logs each failed request itself; nothing else may reach the console.
-  test.use({ allowConsole: [/status of 404/, /status of 503/] });
+  // The browser logs each failed request itself; nothing else may reach the console. One pattern:
+  // Playwright reads a two-item array whose second item is an object as [value, options].
+  test.use({ allowConsole: [/status of (404|503)/] });
 
   test('a 503 on the tiles is said, "Try again" reloads, and the notice goes once they load', async ({
     page,
