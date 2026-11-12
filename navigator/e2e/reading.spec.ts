@@ -95,6 +95,19 @@ test('a right-to-left page runs right to left: by its language, or by its own di
 }) => {
   const body = `<h1>בראשית</h1><p>${HEBREW}</p><pre>ls -la /usr/share</pre><p>קוד: <code>x = 1</code></p>`;
   await patchArticle(page, body, { lang: 'he' });
+  // A page in another language asks whether the library can translate it; the mock has no translator.
+  await page.route('**/v1/translate', (route) =>
+    route.fulfill({
+      json: {
+        available: false,
+        reason: 'off',
+        model: null,
+        state: 'off',
+        error: null,
+        languages: [],
+      },
+    }),
+  );
   await nav.open(ARTICLE);
   const direction = (sel: string) =>
     page.evaluate((s) => getComputedStyle(document.querySelector(s)!).direction, sel);
