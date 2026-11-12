@@ -28,6 +28,7 @@ import type {
   WeatherStatus,
 } from '../api/types.ts';
 import { BASEMAP, buildStyle, type Look } from '../atlas/style.ts';
+import { TileTrouble } from '../atlas/tile-trouble.ts';
 import { h, s } from '../core/dom.ts';
 import type { SafeStorage } from '../core/storage.ts';
 import type { ThemeManager } from '../core/theme.ts';
@@ -216,12 +217,18 @@ export class WeatherView {
       hidden: true,
       'aria-label': 'The weather at a place',
     });
+    // Says so when the base map cannot be read; "Try again" loads the style and its tiles afresh.
+    const trouble = new TileTrouble({
+      retry: () => this.map.setStyle(this.style(), { diff: false }),
+      say: o.say,
+    });
     this.root = h(
       'div',
       { class: 'wx-view' },
       controls,
       this.timeBox,
       h('div', { class: 'wx-mapbox' }, mapEl, this.legend, this.under),
+      trouble.element,
       this.panel,
     );
     container.replaceChildren(this.root);
@@ -235,6 +242,10 @@ export class WeatherView {
       renderWorldCopies: false,
       attributionControl: { compact: true },
     });
+    this.map.on('error', (e) => trouble.error(e));
+    this.map.on('movestart', () => trouble.moved());
+    this.map.on('idle', () => trouble.idle());
+    this.map.on('style.load', () => trouble.moved());
     this.map.on('style.load', () => this.addFieldLayer());
     this.map.on('mousemove', (e) => this.pointAt(e.lngLat.lat, e.lngLat.lng));
     this.map.on('click', (e) => this.choose(e.lngLat.lat, e.lngLat.lng, undefined));

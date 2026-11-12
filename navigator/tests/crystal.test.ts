@@ -4,8 +4,10 @@ import {
   bonds,
   cartesian,
   cifNumber,
+  colorOf,
   column,
   elementOf,
+  legendOf,
   MAX_ATOMS,
   parseCif,
   parseSymop,
@@ -134,6 +136,105 @@ describe('a structure document', () => {
     expect(few.truncated).toBe(true);
     expect(MAX_ATOMS).toBeGreaterThan(1000);
     expect(unitCell(parseCif('data_x\n_cell_length_a 1\n')!)).toBeNull(); // nothing to draw
+  });
+
+  // A silver-gold-copper-palladium alloy: four elements share the one site of a face-centred cell.
+  const ALLOY = `data_alloy
+_cell_length_a 4
+_cell_length_b 4
+_cell_length_c 4
+loop_
+_space_group_symop_operation_xyz
+x,y,z
+x,y+1/2,z+1/2
+x+1/2,y,z+1/2
+x+1/2,y+1/2,z
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+_atom_site_occupancy
+Cu1 Cu 0 0 0 0.2
+Ag1 Ag 0 0 0 0.4(1)
+Au1 Au 0 0 0 0.3
+Pd1 Pd 0 0 0 0.1
+`;
+
+  it('draws a site that several elements share once, as the one with the largest share', () => {
+    const uc = unitCell(parseCif(ALLOY)!)!;
+    expect(uc.atoms).toHaveLength(14); // 8 corners and 6 faces, not four atoms on each
+    expect(new Set(uc.atoms.map((a) => a.element))).toEqual(new Set(['Ag']));
+    expect(uc.atoms[0]!.shares).toEqual([
+      { element: 'Ag', occupancy: 0.4 },
+      { element: 'Au', occupancy: 0.3 },
+      { element: 'Cu', occupancy: 0.2 },
+      { element: 'Pd', occupancy: 0.1 },
+    ]);
+    expect(legendOf(uc.atoms)).toEqual({
+      elements: [{ element: 'Ag', count: 14 }],
+      shared: [{ mix: 'Ag 0.4, Au 0.3, Cu 0.2, Pd 0.1', count: 14 }],
+    });
+    // Equal shares: the element listed first. No occupancy given: a whole atom, nothing shared.
+    const even = unitCell(parseCif(ALLOY.replace('0.4(1)', '0.2').replace('0.3', '0.2'))!)!;
+    expect(even.atoms[0]!.element).toBe('Cu');
+    expect(even.atoms[0]!.label).toBe('Cu1');
+    expect(uc.atoms[0]!.label).toBe('Ag1'); // the label of the element drawn, not of the first row
+    // Equal to a rounding: gold on two rows (0.1 + 0.2) does not outweigh copper's 0.3 listed first.
+    const split = ALLOY.replace('Cu1 Cu 0 0 0 0.2', 'Cu1 Cu 0 0 0 0.3')
+      .replace('Ag1 Ag 0 0 0 0.4(1)', 'Au2 Au 0 0 0 0.1')
+      .replace('Au1 Au 0 0 0 0.3', 'Au1 Au 0 0 0 0.2')
+      .replace('Pd1 Pd 0 0 0 0.1\n', '');
+    expect(unitCell(parseCif(split)!)!.atoms[0]!.element).toBe('Cu');
+    const salt = unitCell(parseCif(CIF)!)!;
+    expect(salt.atoms.every((a) => a.shares === undefined)).toBe(true);
+    expect(legendOf(salt.atoms)).toEqual({
+      elements: [
+        { element: 'Na', count: 8 },
+        { element: 'Cl', count: 2 },
+      ],
+      shared: [],
+    });
+    // The limit counts atoms drawn, as before.
+    const few = unitCell(parseCif(ALLOY)!, 5)!;
+    expect(few.atoms).toHaveLength(5);
+    expect(few.truncated).toBe(true);
+  });
+
+  it('has a colour for every element up to lawrencium; only an unknown symbol is pink', () => {
+    expect(colorOf('Ag')).toBe('#c0c0c0');
+    expect(colorOf('Au')).toBe('#ffd123');
+    expect(colorOf('Pb')).toBe('#575961');
+    expect(colorOf('Sn')).toBe('#668080');
+    expect(colorOf('O')).toBe('#ff0d0d');
+    const all =
+      'H He Li Be B C N O F Ne Na Mg Al Si P S Cl Ar K Ca Sc Ti V Cr Mn Fe Co Ni Cu Zn Ga Ge As Se ' +
+      'Br Kr Rb Sr Y Zr Nb Mo Tc Ru Rh Pd Ag Cd In Sn Sb Te I Xe Cs Ba La Ce Pr Nd Pm Sm Eu Gd Tb ' +
+      'Dy Ho Er Tm Yb Lu Hf Ta W Re Os Ir Pt Au Hg Tl Pb Bi Po At Rn Fr Ra Ac Th Pa U Np Pu Am Cm ' +
+      'Bk Cf Es Fm Md No Lr';
+    const symbols = all.split(' ');
+    expect(symbols).toHaveLength(103);
+    for (const el of symbols) {
+      expect(colorOf(el), el).toMatch(/^#[0-9a-f]{6}$/);
+      expect(colorOf(el), el).not.toBe('#ff1493');
+    }
+    expect(colorOf('?')).toBe('#ff1493');
+    // Radii too: gold and lead bond at their own lengths, not the 1.5 Å of an unknown.
+    const cubic = cartesian({ a: 10, b: 10, c: 10, alpha: 90, beta: 90, gamma: 90 });
+    const pair = (el: string, d: number) => {
+      const atoms = [0, d / 10].map((x) => ({
+        label: el,
+        element: el,
+        frac: [x, 0, 0] as [number, number, number],
+      }));
+      return bonds(
+        atoms,
+        atoms.map((a) => cubic(a.frac)),
+      ).length;
+    };
+    expect(pair('Rb', 4.7)).toBe(1); // 2.2 + 2.2 + 0.45
+    expect(pair('Kr', 2.9)).toBe(0); // 1.16 + 1.16 + 0.45: was 1.5 + 1.5 + 0.45
   });
 
   it('turns fractional coordinates into ångströms and finds bonds', () => {
@@ -265,6 +366,12 @@ describe('a structure document', () => {
       'fillText:b',
       'fillText:c',
     ]);
+    // What the colours mean, under the drawing, from the atoms drawn.
+    expect(
+      [...el.querySelectorAll('.crystal-legend li')].map((li) => li.textContent?.trim()),
+    ).toEqual(['Na × 8', 'Cl × 2']);
+    expect(el.querySelector('.crystal-legend circle')?.getAttribute('fill')).toBe('#ab5cf2');
+    expect(el.querySelector('.crystal-legend [style]')).toBeNull(); // no inline style (CSP)
     const first = arcs();
     calls.length = 0;
     const canvas = el.querySelector('canvas')!;
@@ -298,5 +405,45 @@ describe('a structure document', () => {
     } finally {
       el.remove();
     }
+  });
+
+  it('paints again when the palette changes, until the page is left', () => {
+    const g = new Proxy(
+      {},
+      {
+        get: (_t, name: string) =>
+          name === 'createRadialGradient'
+            ? () => ({ addColorStop: () => undefined })
+            : () => undefined,
+        set: () => true,
+      },
+    );
+    const context = vi
+      .spyOn(HTMLCanvasElement.prototype, 'getContext')
+      .mockReturnValue(g as CanvasRenderingContext2D);
+    vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((cb) => {
+      cb(0);
+      return 0;
+    });
+    const listeners = new Set<() => void>();
+    const theme = {
+      onChange(l: () => void) {
+        listeners.add(l);
+        return () => listeners.delete(l);
+      },
+    };
+    const life = new AbortController();
+    structureView(
+      { title: 'Test salt', source_id: 'cod-full-archive', native_id: 'cod:x/1000000' },
+      splitStructure(TEXT)!,
+      life.signal,
+      theme,
+    );
+    expect(listeners.size).toBe(1);
+    const before = context.mock.calls.length;
+    for (const l of listeners) l(); // View > Always Dark
+    expect(context.mock.calls.length).toBe(before + 1);
+    life.abort();
+    expect(listeners.size).toBe(0); // nothing holds the canvas after the page
   });
 });

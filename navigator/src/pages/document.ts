@@ -227,7 +227,7 @@ export function renderBody(
   // Only a COD structure's document: not any text with a CIF file's line (2026-11-06 review).
   const structure = structureOf(doc);
   if (structure) {
-    wrap.appendChild(structureView(doc, structure, reader?.signal));
+    wrap.appendChild(structureView(doc, structure, reader?.signal, reader?.app.theme));
     return { node: wrap, broken: 0 };
   }
   const text = withoutTitleLine(doc.text ?? '', doc.title);

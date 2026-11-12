@@ -626,6 +626,27 @@
   cursor: grab;
   touch-action: none;
 }
+.crystal-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+  margin: 4px 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--ui-font);
+  font-size: 0.875rem;
+}
+.crystal-swatch {
+  width: 0.8em;
+  height: 0.8em;
+  /* a ring in the text colour: hydrogen is white and would vanish on a white page */
+  stroke: currentColor;
+  stroke-width: 1;
+  overflow: visible;
+}
+.crystal-shared {
+  margin: 2px 0;
+}
 .crystal-canvas:focus-visible {
   outline: 2px dotted var(--focus);
 }

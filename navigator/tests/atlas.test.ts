@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Tilesets } from '../src/api/types.ts';
 import { parseOverlay } from '../src/atlas/overlay.ts';
+import { kindLabel, placeFacts } from '../src/atlas/places.ts';
 import { absolute, availableModes, buildStyle, flavorFor } from '../src/atlas/style.ts';
 import { atlasAddress, formatView, parseAtlas, parseView } from '../src/atlas/view-state.ts';
 import { resolveRoute } from '../src/core/router.ts';
@@ -116,6 +117,75 @@ describe('the Atlas styles', () => {
     const hc = flavorFor({ theme: 'navigator96', dark: false, highContrast: true });
     expect(hc.earth).toBe('#000000');
     expect(hc.city_label).toBe('#ffffff');
+  });
+});
+
+describe('a place-search row', () => {
+  it('names the kind of place, and says nothing when there is nothing to say', () => {
+    expect(kindLabel('place=town')).toBe('town');
+    expect(kindLabel('natural=peak')).toBe('peak (natural)');
+    expect(kindLabel('place=isolated_dwelling')).toBe('isolated dwelling');
+    expect(kindLabel('node')).toBe(''); // how OpenStreetMap stores it: not a kind
+    expect(kindLabel('place=')).toBe('');
+    expect(kindLabel('=')).toBe('');
+    expect(kindLabel('')).toBe('');
+    expect(kindLabel('node=peak')).toBe('peak');
+    expect(kindLabel('tourism')).toBe('tourism');
+  });
+
+  it('carries the coordinates, so two places of one name can be told apart', () => {
+    const opts = { format: 'decimal', imperial: false, withDistance: false } as const;
+    const il = placeFacts(
+      { kind: 'place=city', population: 114394, distance_m: null, lat: 39.7817, lon: -89.6501 },
+      opts,
+    );
+    const mo = placeFacts(
+      { kind: 'place=city', population: 169176, distance_m: null, lat: 37.209, lon: -93.2923 },
+      opts,
+    );
+    expect(il[0]).toBe('city');
+    expect(il[1]).toBe('pop. 114,394');
+    expect(il.at(-1)).toMatch(/39\.78/);
+    expect(mo.at(-1)).toMatch(/37\.20|37\.21/);
+    expect(il.at(-1)).not.toBe(mo.at(-1));
+    // No kind: no empty first fact (the row read "Name ·  (node) ·").
+    const bare = placeFacts(
+      { kind: 'node', population: null, distance_m: 1200, lat: 1, lon: 2 },
+      {
+        ...opts,
+        withDistance: true,
+      },
+    );
+    expect(bare).toHaveLength(2);
+    expect(bare.every((f) => f.trim() !== '' && !f.includes('(node)'))).toBe(true);
+  });
+});
+
+describe('map credits in the style', () => {
+  it('name a publisher of two tile sets once', () => {
+    const sets: Tilesets = {
+      ...SETS,
+      tilesets: SETS.tilesets.map((t) =>
+        t.id === 'terrain'
+          ? {
+              ...t,
+              attribution: '© Mapterhorn (m): world models · © Mapterhorn (m): national models',
+            }
+          : t,
+      ),
+    };
+    const style = buildStyle(sets, 'terrain', {
+      theme: 'navigator96',
+      dark: false,
+      highContrast: false,
+    });
+    const credits = Object.values(style.sources).map(
+      (s) => (s as { attribution?: string }).attribution,
+    );
+    expect(credits).toContain('© Mapterhorn (m): world models; national models');
+    expect(credits.join(' ').match(/© Mapterhorn/g)?.length).toBeLessThanOrEqual(
+      credits.filter((c) => c?.includes('Mapterhorn')).length,
+    );
   });
 });
 

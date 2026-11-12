@@ -13,7 +13,8 @@ import { wspLink } from '../ui/components.ts';
 import type { AppServices } from './types.ts';
 
 export interface ReaderContext {
-  app: Pick<AppServices, 'storage'>;
+  /** `theme` only where a drawing must be painted again when the palette changes (a crystal). */
+  app: Pick<AppServices, 'storage'> & Partial<Pick<AppServices, 'theme'>>;
   /** Chapter asked for: a number, 'all', or undefined (resume, else the first). */
   chapter: number | 'all' | undefined;
   address: string;

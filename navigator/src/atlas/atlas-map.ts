@@ -28,7 +28,6 @@ import type { WspClient } from '../api/client.ts';
 import { ApiRequestError } from '../api/client.ts';
 import type { PlaceHit, Tilesets } from '../api/types.ts';
 import { h, s } from '../core/dom.ts';
-import { LOCALE } from '../core/format.ts';
 import {
   COORD_FORMATS,
   type CoordFormat,
@@ -45,6 +44,7 @@ import {
 import type { SafeStorage } from '../core/storage.ts';
 import type { ThemeManager } from '../core/theme.ts';
 import { type Feature, type Overlay, bounds as overlayBounds, parseOverlay } from './overlay.ts';
+import { NARROW_MAP, placeFacts } from './places.ts';
 import {
   absolute,
   availableModes,
@@ -55,6 +55,7 @@ import {
   type Look,
   markColors,
 } from './style.ts';
+import { TileTrouble } from './tile-trouble.ts';
 import { type AtlasRoute, type AtlasView, atlasAddress, WORLD_VIEW } from './view-state.ts';
 
 /** From this zoom on, a place search favours the places around the map's centre. */
@@ -134,12 +135,6 @@ function zoomFor(kind: string): number {
       locality: 15,
     }[k] ?? 15.5
   );
-}
-
-function kindLabel(kind: string): string {
-  const [key, value = ''] = kind.split('=');
-  const v = value.replace(/_/g, ' ');
-  return key === 'place' ? v : `${v} (${(key ?? '').replace(/_/g, ' ')})`;
 }
 
 // --- elevation from the terrain tiles -------------------------------------------------------------
@@ -230,6 +225,8 @@ export class Atlas {
   private readonly toolButtons = new Map<string, HTMLButtonElement>();
   private addressTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly cleanups: (() => void)[] = [];
+  /** Says so when tiles cannot be read; "Try again" loads the style and its sources afresh. */
+  private readonly trouble: TileTrouble;
 
   constructor(container: HTMLElement, opts: AtlasOptions) {
     this.opts = opts;
@@ -388,11 +385,13 @@ export class Atlas {
     this.statusCoords = h('span', { class: 'atlas-status-coords' }, 'Point at the map');
     this.statusExtra = h('span', { class: 'atlas-status-extra' });
     const status = h('div', { class: 'atlas-status' }, this.statusCoords, this.statusExtra);
+    this.trouble = new TileTrouble({ retry: () => this.restyle(), say: opts.status });
     this.root = h(
       'div',
       { class: 'atlas' },
       bar,
-      h('div', { class: 'atlas-body' }, mapEl, this.panel),
+      // over the map, not beside it: a notice that resized the map would move it
+      h('div', { class: 'atlas-body' }, mapEl, this.trouble.element, this.panel),
       status,
     );
     container.replaceChildren(this.root);
@@ -425,7 +424,20 @@ export class Atlas {
       new AttributionControl({ compact: true, customAttribution: 'Whisipedia Atlas' }),
       'bottom-right',
     );
+    // On a narrow map the credits start folded behind their button: unfolded they are a band of
+    // several lines across it. (MapLibre itself folds them only after the first drag.)
+    // Decided once the map is in the page and drawn (the Atlas is built before it is shown).
+    this.map.once('load', () => {
+      if (mapEl.clientWidth >= NARROW_MAP) return;
+      const credits = mapEl.querySelector('.maplibregl-ctrl-attrib');
+      credits?.classList.remove('maplibregl-compact-show');
+      credits?.removeAttribute('open');
+    });
 
+    this.map.on('error', (e) => this.trouble.error(e));
+    this.map.on('movestart', () => this.trouble.moved());
+    this.map.on('idle', () => this.trouble.idle());
+    this.map.on('style.load', () => this.trouble.moved());
     this.map.on('style.load', () => this.restoreOwnLayers());
     this.map.on('mousemove', (e) => this.onMove(e));
     this.map.on('click', (e) => void this.onClick(e));
@@ -485,6 +497,7 @@ export class Atlas {
 
   private restyle(): void {
     this.map.setStyle(buildStyle(this.opts.sets, this.mode, this.look()), { diff: false });
+    this.drawPin(); // the pin is not part of the style: it takes the new palette's colour here
   }
 
   /** Our own sources and layers (pin, measure, overlays, terrain, projection) after a new style. */
@@ -616,9 +629,18 @@ export class Atlas {
 
   private setPin(p: LatLon): void {
     this.pinAt = p;
-    if (!this.pin) this.pin = new Marker({ color: markColors(this.look()).line });
-    this.pin.setLngLat([p.lon, p.lat]).addTo(this.map);
+    if (this.pin) this.pin.setLngLat([p.lon, p.lat]);
+    else this.drawPin();
     this.keepAddress();
+  }
+
+  /** The pin as a new marker in the current palette's colour (a marker's colour is set once). */
+  private drawPin(): void {
+    if (!this.pinAt) return;
+    this.pin?.remove();
+    this.pin = new Marker({ color: markColors(this.look()).line })
+      .setLngLat([this.pinAt.lon, this.pinAt.lat])
+      .addTo(this.map);
   }
 
   private async whatsHere(
@@ -738,10 +760,11 @@ export class Atlas {
         },
         pl.name,
       );
-      const facts = [kindLabel(pl.kind)];
-      if (pl.population) facts.push(`pop. ${pl.population.toLocaleString(LOCALE)}`);
-      if (withDistance && pl.distance_m !== null)
-        facts.push(formatDistance(pl.distance_m, this.prefs.imperial));
+      const facts = placeFacts(pl, {
+        format: this.prefs.format,
+        imperial: this.prefs.imperial,
+        withDistance,
+      });
       const article = h('span', { class: 'atlas-article' });
       const item = h('li', null, go, ` · ${facts.join(' · ')} `, article);
       if (pl.wikipedia) void this.articleLink(pl.wikipedia, article);
@@ -814,7 +837,11 @@ export class Atlas {
       }
       results.replaceChildren(this.placeList(found.places, false));
       const best = found.places[0];
-      if (best) this.flyTo({ lat: best.lat, lon: best.lon }, zoomFor(best.kind));
+      if (best) {
+        // The best match is marked on the map; the list stays open to choose another.
+        this.setPin({ lat: best.lat, lon: best.lon });
+        this.flyTo({ lat: best.lat, lon: best.lon }, zoomFor(best.kind));
+      }
     } catch (err) {
       results.replaceChildren(h('p', null, this.placeIndexProblem(err)));
     }
@@ -1234,6 +1261,12 @@ export function miniMap(box: HTMLElement, opts: MiniMapOptions): void {
   new Marker({ color: markColors(look).line, scale: 0.7 })
     .setLngLat([opts.lon, opts.lat])
     .addTo(map);
+  // A still map: no button to try again, only the words (they go when it comes to rest unfailed).
+  const trouble = new TileTrouble();
+  box.append(trouble.element);
+  map.on('error', (e) => trouble.error(e));
+  map.on('style.load', () => trouble.moved()); // a new palette loads the map afresh
+  map.on('idle', () => trouble.idle());
   const off = opts.theme.onChange(() => {
     const q = opts.theme.current;
     map.setStyle(

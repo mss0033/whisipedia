@@ -171,6 +171,33 @@
   stroke-width: 1.5;
 }
 
+/* a map that could not be read in part (atlas/tile-trouble.ts): Atlas, weather map, small maps.
+   The element is always in the page (an empty live region); it only looks like a notice when on. */
+.map-trouble {
+  margin: 0;
+  font: 0.8125rem var(--ui-font);
+}
+.map-trouble.is-on {
+  padding: 2px 6px;
+  background: var(--notice-warn-bg);
+  color: var(--page-fg);
+  border: 1px solid var(--rule);
+}
+/* Over the Atlas map, clear of the buttons at its right edge. */
+.atlas-body > .map-trouble {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 3;
+  max-width: calc(100% - 70px);
+}
+.minimap-live .map-trouble {
+  position: absolute;
+  inset: auto 0 0 0;
+  z-index: 2;
+  font-size: 0.6875rem;
+}
+
 /* status line */
 .atlas-status {
   display: flex;
@@ -211,6 +238,10 @@
   color: var(--chrome-fg);
   font-family: var(--ui-font);
 }
+/* The credits never reach the scale bar (bottom left, at most 140px wide) and stay a few lines. */
+.atlas .maplibregl-ctrl-bottom-right {
+  max-width: calc(100% - 170px);
+}
 .atlas .maplibregl-ctrl-attrib a {
   color: var(--link);
 }
@@ -241,6 +272,7 @@
 
 /* small maps (search answers, documents) */
 .minimap-live {
+  position: relative;
   width: 240px;
   height: 160px;
   flex: none;

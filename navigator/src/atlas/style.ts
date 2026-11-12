@@ -9,6 +9,7 @@
 import { BLACK, DARK, type Flavor, GRAYSCALE, LIGHT, layers, WHITE } from '@protomaps/basemaps';
 import type { LayerSpecification, SourceSpecification, StyleSpecification } from 'maplibre-gl';
 import type { Tileset, Tilesets } from '../api/types.ts';
+import { mergeCredits } from './places.ts';
 
 export type LayerMode = 'map' | 'terrain' | 'satellite' | 'hybrid';
 
@@ -201,7 +202,7 @@ function source(t: Tileset, kind: 'vector' | 'raster' | 'raster-dem'): SourceSpe
       tiles,
       minzoom: t.min_zoom,
       maxzoom: t.held_max_zoom,
-      attribution: t.attribution,
+      attribution: mergeCredits(t.attribution),
       bounds,
     };
   }
@@ -213,7 +214,7 @@ function source(t: Tileset, kind: 'vector' | 'raster' | 'raster-dem'): SourceSpe
       minzoom: t.min_zoom,
       maxzoom: t.max_zoom,
       encoding: t.encoding === 'mapbox' ? 'mapbox' : 'terrarium',
-      attribution: t.attribution,
+      attribution: mergeCredits(t.attribution),
     };
   }
   return {
@@ -222,7 +223,7 @@ function source(t: Tileset, kind: 'vector' | 'raster' | 'raster-dem'): SourceSpe
     tileSize: t.tile_size,
     minzoom: t.min_zoom,
     maxzoom: t.max_zoom,
-    attribution: t.attribution,
+    attribution: mergeCredits(t.attribution),
   };
 }
 

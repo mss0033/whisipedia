@@ -176,3 +176,54 @@ test('a "where is" answer shows a live map and opens the Atlas pinned', async ({
   await nav.expectAddress(/^wsp:\/\/atlas\/@38\.7\d*,-9\.1\d*,1[12]z/);
   await expect(page.locator('.atlas-panel-title')).toHaveText("What's here");
 });
+
+// WRITTEN 2026-11-11, NOT YET RUN (no browser run was allowed in that sitting): expect first-run
+// corrections. Mock only: the routes below stand in for a library that cannot read its archive.
+test.describe('when the map cannot be read', () => {
+  // The browser logs each failed request itself; nothing else may reach the console.
+  test.use({ allowConsole: [/status of 404/, /status of 503/] });
+
+  test('a 503 on the tiles is said, "Try again" reloads, and the notice goes once they load', async ({
+    page,
+    nav,
+    target,
+  }) => {
+    test.skip(target !== 'mock', 'routes a failing archive: mock only');
+    let failing = true;
+    await page.route('**/v1/maps/tiles/**', (route) =>
+      failing ? route.fulfill({ status: 503, body: 'busy' }) : route.continue(),
+    );
+    await nav.open(START);
+    const notice = page.locator('.atlas .map-trouble');
+    await expect(notice).toHaveClass(/is-on/);
+    await expect(notice.getByRole('status')).toContainText('could not be read');
+    await expect(notice).not.toContainText(/tried again/i);
+    // A resize (the notice itself, the window) must not clear it while the tiles are still missing.
+    await page.setViewportSize({ width: 1100, height: 700 });
+    await page.waitForTimeout(800);
+    await expect(notice).toHaveClass(/is-on/);
+    failing = false;
+    await notice.getByRole('button', { name: 'Try again' }).click();
+    await expect(notice).not.toHaveClass(/is-on/, { timeout: 15_000 });
+    await expect(notice.getByRole('status')).toBeEmpty();
+    await mapReady(page);
+  });
+
+  test('a glyph range the library does not hold (404) raises no notice', async ({
+    page,
+    nav,
+    target,
+  }) => {
+    test.skip(target !== 'mock', 'routes a missing glyph range: mock only');
+    await page.route('**/v1/maps/glyphs/**', (route) =>
+      route.fulfill({ status: 404, body: 'not held' }),
+    );
+    await nav.open(START);
+    await mapReady(page);
+    // MapLibre 6.11 only warns of a missing glyph range; whatever a version does, no notice.
+    const notice = page.locator('.atlas .map-trouble');
+    await expect(notice).toHaveCount(1);
+    await expect(notice).not.toHaveClass(/is-on/);
+    await expect(notice.getByRole('status')).toBeEmpty();
+  });
+});

@@ -75,6 +75,28 @@ describe('WspClient', () => {
     expect(recent.cursor).not.toBeNull();
   });
 
+  it('follows next_cursor until the last page of sources', async () => {
+    const asked: string[] = [];
+    const pages: Record<string, { items: { id: string }[]; next_cursor: string | null }> = {
+      '': { items: [{ id: 'a' }, { id: 'b' }], next_cursor: 'c1' },
+      c1: { items: [{ id: 'c' }], next_cursor: 'c2' },
+      c2: { items: [{ id: 'd' }], next_cursor: null },
+    };
+    const paged = new WspClient({
+      fetch: (async (input: RequestInfo | URL) => {
+        const url = new URL(String(input), 'http://x');
+        asked.push(url.search);
+        const page = pages[url.searchParams.get('cursor') ?? ''];
+        return new Response(JSON.stringify(page), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }) as typeof fetch,
+    });
+    expect((await paged.sources()).map((s) => s.id)).toEqual(['a', 'b', 'c', 'd']);
+    expect(asked).toEqual(['?limit=200', '?cursor=c1&limit=200', '?cursor=c2&limit=200']);
+  });
+
   it('raises ApiRequestError with the server error envelope', async () => {
     const err = await api.document('wsp:rfc/0').catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ApiRequestError);

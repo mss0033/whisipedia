@@ -11,7 +11,8 @@
  * fill the cell.
  */
 import { makeAddress } from '../core/address.ts';
-import { h } from '../core/dom.ts';
+import { h, s } from '../core/dom.ts';
+import { LOCALE } from '../core/format.ts';
 import { wspLink } from '../ui/components.ts';
 
 const CIF_LINE = /\n\nCrystallographic Information File (\d+)\.cif\n/;
@@ -240,9 +241,13 @@ export interface Cell {
 
 export interface Atom {
   label: string;
+  /** The element drawn: on a site shared by several, the one with the largest share. */
   element: string;
   /** Fractional coordinates, in [0, 1] (atoms on a face or an edge appear on each). */
   frac: [number, number, number];
+  /** Only on a site several elements share (a solid solution, a disordered site): each element's
+   * share of the site, largest first. */
+  shares?: { element: string; occupancy: number }[];
 }
 
 export interface UnitCell {
@@ -288,8 +293,18 @@ export function unitCell(block: CifBlock, max = MAX_ATOMS): UnitCell | null {
     .map(parseSymop)
     .filter((o): o is SymOp => o !== null);
   if (!ops.length) ops.push(parseSymop('x,y,z')!);
-  const atoms: Atom[] = [];
-  const seen = new Set<string>();
+  const occupancies = column(block, '_atom_site_occupancy');
+  // A position in the cell holds one atom, whatever lists it: a site's own images under the
+  // symmetry, or several elements sharing it (each with its occupancy; a missing one is 1). All the
+  // species of a position are gathered before one is chosen to draw.
+  interface Place {
+    frac: [number, number, number];
+    /** element -> the asymmetric-unit sites that put it here, each counted once. */
+    species: Map<string, Map<number, number>>;
+    /** element -> the label of the first site that put it here. */
+    labels: Map<string, string>;
+  }
+  const places = new Map<string, Place>();
   let truncated = false;
   const fold = (v: number) => {
     const f = v - Math.floor(v);
@@ -300,6 +315,7 @@ export function unitCell(block: CifBlock, max = MAX_ATOMS): UnitCell | null {
     if (p.some((v) => v === null)) continue;
     const label = labels[i] ?? '';
     const element = elementOf(types?.[i] || label);
+    const occupancy = Math.max(0, cifNumber(occupancies?.[i]) ?? 1);
     for (const op of ops) {
       const q = apply(op, p as number[]).map(fold);
       // A site on a face, an edge or a corner is drawn on each (the cell's eight corners).
@@ -313,16 +329,41 @@ export function unitCell(block: CifBlock, max = MAX_ATOMS): UnitCell | null {
         images.splice(0, images.length, ...next);
       }
       for (const img of images) {
-        const key = `${element}:${img.map((v) => Math.round(v * 500)).join(',')}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        if (atoms.length >= max) {
-          truncated = true;
-          break sites;
+        const key = img.map((v) => Math.round(v * 500)).join(',');
+        let place = places.get(key);
+        if (!place) {
+          if (places.size >= max) {
+            truncated = true;
+            break sites;
+          }
+          place = { frac: img as [number, number, number], species: new Map(), labels: new Map() };
+          places.set(key, place);
         }
-        atoms.push({ label, element, frac: img as [number, number, number] });
+        let from = place.species.get(element);
+        if (!from) {
+          from = new Map();
+          place.species.set(element, from);
+          place.labels.set(element, label);
+        }
+        from.set(i, occupancy);
       }
     }
+  }
+  const atoms: Atom[] = [];
+  for (const place of places.values()) {
+    const shares = [...place.species].map(([element, from]) => ({
+      element,
+      occupancy: [...from.values()].reduce((sum, o) => sum + o, 0),
+    }));
+    // The largest share; equal shares (to a rounding of the sums: 0.1 + 0.2 is not 0.3) go to the
+    // element listed first (the sort is stable).
+    shares.sort((x, y) =>
+      Math.abs(y.occupancy - x.occupancy) < 1e-6 ? 0 : y.occupancy - x.occupancy,
+    );
+    const element = shares[0]!.element;
+    const atom: Atom = { label: place.labels.get(element) ?? '', element, frac: place.frac };
+    if (shares.length > 1) atom.shares = shares;
+    atoms.push(atom);
   }
   return { cell: { a, b, c, alpha, beta, gamma }, atoms, truncated };
 }
@@ -352,12 +393,17 @@ function pairs(table: string): Map<string, string> {
   return out;
 }
 
-/** Covalent radii (Å, Cordero 2008) of the common elements; others 1.5. */
+/** Covalent radii (Å, Cordero et al. 2008), hydrogen to curium; heavier elements and unknowns 1.5. */
 const RADIUS = pairs(
-  'H 0.31 B 0.84 C 0.76 N 0.71 O 0.66 F 0.57 Na 1.66 Mg 1.41 Al 1.21 Si 1.11 P 1.07 S 1.05 Cl 1.02 ' +
-    'K 2.03 Ca 1.76 Ti 1.6 V 1.53 Cr 1.39 Mn 1.39 Fe 1.32 Co 1.26 Ni 1.24 Cu 1.32 Zn 1.22 Ga 1.22 ' +
-    'Ge 1.2 As 1.19 Se 1.2 Br 1.2 Zr 1.75 Mo 1.54 Ru 1.46 Rh 1.42 Pd 1.39 Ag 1.45 Cd 1.44 Sn 1.39 ' +
-    'Sb 1.39 Te 1.38 I 1.39 Ba 2.15 La 2.07 W 1.62 Pt 1.36 Au 1.36 Hg 1.32 Pb 1.46 Bi 1.48 U 1.96',
+  'H 0.31 He 0.28 Li 1.28 Be 0.96 B 0.84 C 0.76 N 0.71 O 0.66 F 0.57 Ne 0.58 Na 1.66 Mg 1.41 ' +
+    'Al 1.21 Si 1.11 P 1.07 S 1.05 Cl 1.02 Ar 1.06 K 2.03 Ca 1.76 Sc 1.7 Ti 1.6 V 1.53 Cr 1.39 ' +
+    'Mn 1.39 Fe 1.32 Co 1.26 Ni 1.24 Cu 1.32 Zn 1.22 Ga 1.22 Ge 1.2 As 1.19 Se 1.2 Br 1.2 Kr 1.16 ' +
+    'Rb 2.2 Sr 1.95 Y 1.9 Zr 1.75 Nb 1.64 Mo 1.54 Tc 1.47 Ru 1.46 Rh 1.42 Pd 1.39 Ag 1.45 Cd 1.44 ' +
+    'In 1.42 Sn 1.39 Sb 1.39 Te 1.38 I 1.39 Xe 1.4 Cs 2.44 Ba 2.15 La 2.07 Ce 2.04 Pr 2.03 Nd 2.01 ' +
+    'Pm 1.99 Sm 1.98 Eu 1.98 Gd 1.96 Tb 1.94 Dy 1.92 Ho 1.92 Er 1.89 Tm 1.9 Yb 1.87 Lu 1.87 ' +
+    'Hf 1.75 Ta 1.7 W 1.62 Re 1.51 Os 1.44 Ir 1.41 Pt 1.36 Au 1.36 Hg 1.32 Tl 1.45 Pb 1.46 ' +
+    'Bi 1.48 Po 1.4 At 1.5 Rn 1.5 Fr 2.6 Ra 2.21 Ac 2.15 Th 2.06 Pa 2 U 1.96 Np 1.9 Pu 1.87 ' +
+    'Am 1.8 Cm 1.69',
 );
 const radius = (el: string) => Number(RADIUS.get(el) ?? 1.5);
 
@@ -377,13 +423,88 @@ export function bonds(atoms: readonly Atom[], points: readonly Vec[]): [number, 
   return out;
 }
 
-/** Colours after the CPK and Jmol conventions. */
+/**
+ * Element colours, hydrogen to lawrencium, after the CPK convention as Jmol extends it. They are the
+ * chemist's code for the elements (oxygen red, nitrogen blue), the same in every palette, so they
+ * are data and not theme tokens; an unknown symbol is Jmol's pink.
+ */
 const COLOR = pairs(
-  'H #ffffff C #909090 N #3050f8 O #ff0d0d F #90e050 Cl #1ff01f Br #a62929 I #940094 S #ffff30 ' +
-    'P #ff8000 B #ffb5b5 Si #f0c8a0 Na #ab5cf2 K #8f40d4 Mg #8aff00 Ca #3dff00 Al #bfa6a6 ' +
-    'Fe #e06633 Cu #c88033 Zn #7d80b0 Ni #50d050 Co #f090a0 Mn #9c7ac7 Ti #bfc2c7',
+  'H #ffffff He #d9ffff Li #cc80ff Be #c2ff00 B #ffb5b5 C #909090 N #3050f8 O #ff0d0d F #90e050 ' +
+    'Ne #b3e3f5 Na #ab5cf2 Mg #8aff00 Al #bfa6a6 Si #f0c8a0 P #ff8000 S #ffff30 Cl #1ff01f ' +
+    'Ar #80d1e3 K #8f40d4 Ca #3dff00 Sc #e6e6e6 Ti #bfc2c7 V #a6a6ab Cr #8a99c7 Mn #9c7ac7 ' +
+    'Fe #e06633 Co #f090a0 Ni #50d050 Cu #c88033 Zn #7d80b0 Ga #c28f8f Ge #668f8f As #bd80e3 ' +
+    'Se #ffa100 Br #a62929 Kr #5cb8d1 Rb #702eb0 Sr #00ff00 Y #94ffff Zr #94e0e0 Nb #73c2c9 ' +
+    'Mo #54b5b5 Tc #3b9e9e Ru #248f8f Rh #0a7d8c Pd #006985 Ag #c0c0c0 Cd #ffd98f In #a67573 ' +
+    'Sn #668080 Sb #9e63b5 Te #d47a00 I #940094 Xe #429eb0 Cs #57178f Ba #00c900 La #70d4ff ' +
+    'Ce #ffffc7 Pr #d9ffc7 Nd #c7ffc7 Pm #a3ffc7 Sm #8fffc7 Eu #61ffc7 Gd #45ffc7 Tb #30ffc7 ' +
+    'Dy #1fffc7 Ho #00ff9c Er #00e675 Tm #00d452 Yb #00bf38 Lu #00ab24 Hf #4dc2ff Ta #4da6ff ' +
+    'W #2194d6 Re #267dab Os #266696 Ir #175487 Pt #d0d0e0 Au #ffd123 Hg #b8b8d0 Tl #a6544d ' +
+    'Pb #575961 Bi #9e4fb5 Po #ab5c00 At #754f45 Rn #428296 Fr #420066 Ra #007d00 Ac #70abfa ' +
+    'Th #00baff Pa #00a1ff U #008fff Np #0080ff Pu #006bff Am #545cf2 Cm #785ce3 Bk #8a4fe3 ' +
+    'Cf #a136d4 Es #b31fd4 Fm #b31fba Md #b30da6 No #bd0d87 Lr #c70066',
 );
-export const colorOf = (el: string) => COLOR.get(el) ?? '#ff1493';
+const UNKNOWN_COLOR = '#ff1493';
+export const colorOf = (el: string) => COLOR.get(el) ?? UNKNOWN_COLOR;
+
+/** The elements drawn, most atoms first, and the sites several elements share (their make-up as
+ * `Cu 0.5, Au 0.5`, with how many atoms have it). */
+export function legendOf(atoms: readonly Atom[]): {
+  elements: { element: string; count: number }[];
+  shared: { mix: string; count: number }[];
+} {
+  const counts = new Map<string, number>();
+  const mixes = new Map<string, number>();
+  for (const a of atoms) {
+    counts.set(a.element, (counts.get(a.element) ?? 0) + 1);
+    if (a.shares) {
+      const mix = a.shares
+        .map((sh) => `${sh.element} ${Number(sh.occupancy.toFixed(3))}`)
+        .join(', ');
+      mixes.set(mix, (mixes.get(mix) ?? 0) + 1);
+    }
+  }
+  return {
+    elements: [...counts]
+      .map(([element, count]) => ({ element, count }))
+      .sort((x, y) => y.count - x.count),
+    shared: [...mixes].map(([mix, count]) => ({ mix, count })),
+  };
+}
+
+/** What the colours mean, under the drawing: one entry per element drawn, and what a shared site holds. */
+function legend(atoms: readonly Atom[]): HTMLElement {
+  const { elements, shared } = legendOf(atoms);
+  const n = (v: number) => v.toLocaleString(LOCALE);
+  const list = h(
+    'ul',
+    { class: 'crystal-legend', 'aria-label': 'Elements drawn' },
+    ...elements.map(({ element, count }) =>
+      h(
+        'li',
+        null,
+        // The colour is an attribute of the drawing, not a style: allowed under the page's policy.
+        s(
+          'svg',
+          { class: 'crystal-swatch', viewBox: '0 0 12 12', 'aria-hidden': 'true' },
+          s('circle', { cx: 6, cy: 6, r: 5, fill: colorOf(element) }),
+        ),
+        ` ${element === '?' ? 'unknown element' : element} × ${n(count)}`,
+      ),
+    ),
+  );
+  if (!shared.length) return list;
+  const shown = shared.slice(0, 4).map(({ mix, count }) => `${mix} (${n(count)})`);
+  return h(
+    'div',
+    null,
+    list,
+    h(
+      'p',
+      { class: 'fineprint crystal-shared' },
+      `Sites that several elements share are drawn once, as the element with the largest share: ${shown.join('; ')}${shared.length > shown.length ? '; and others' : ''}.`,
+    ),
+  );
+}
 
 // --- the viewer -----------------------------------------------------------------------------------
 
@@ -420,8 +541,18 @@ const START: Mat = rotate(
   0.6,
 );
 
-/** The drawing of a cell: canvas, controls and a line saying what is shown. */
-export function structureViewer(uc: UnitCell, title: string, life?: AbortSignal): HTMLElement {
+/** Told when the palette changes; answers with how to stop being told (ThemeManager.onChange). */
+export interface PaletteWatch {
+  onChange(listener: () => void): () => void;
+}
+
+/** The drawing of a cell: canvas, controls, what the colours mean and a line saying what is shown. */
+export function structureViewer(
+  uc: UnitCell,
+  title: string,
+  life?: AbortSignal,
+  theme?: PaletteWatch,
+): HTMLElement {
   const toCart = cartesian(uc.cell);
   const points = uc.atoms.map((a) => toCart(a.frac));
   const links = bonds(uc.atoms, points);
@@ -457,7 +588,7 @@ export function structureViewer(uc: UnitCell, title: string, life?: AbortSignal)
     if (canvas.height !== Math.round(hgt * ratio)) canvas.height = Math.round(hgt * ratio);
     g.setTransform(ratio, 0, 0, ratio, 0, 0);
     const style = getComputedStyle(canvas);
-    g.fillStyle = style.backgroundColor || '#fff';
+    g.fillStyle = style.backgroundColor || 'Canvas';
     g.fillRect(0, 0, w, hgt);
     const scale = (zoom * 0.45 * Math.min(w, hgt)) / Math.max(extent, 1);
     const project = (p: Vec): Vec => {
@@ -465,7 +596,7 @@ export function structureViewer(uc: UnitCell, title: string, life?: AbortSignal)
       const r = view.map((row) => row[0] * d[0] + row[1] * d[1] + row[2] * d[2]) as Vec;
       return [w / 2 + r[0] * scale, hgt / 2 - r[1] * scale, r[2]];
     };
-    const ink = style.color || '#000';
+    const ink = style.color || 'CanvasText';
     const at = points.map(project);
     const box = corners.map(project);
     g.lineWidth = 1;
@@ -487,7 +618,8 @@ export function structureViewer(uc: UnitCell, title: string, life?: AbortSignal)
     ] as const)
       g.fillText(name, box[k]![0] + 4, box[k]![1] - 4);
     g.lineWidth = Math.max(1.5, scale * 0.12);
-    g.strokeStyle = '#7f7f7f';
+    // Bonds in the page's quiet colour (read from the palette; the canvas takes no CSS itself).
+    g.strokeStyle = style.getPropertyValue('--page-muted').trim() || ink;
     for (const [i, j] of links) {
       g.beginPath();
       g.moveTo(at[i]![0], at[i]![1]);
@@ -586,9 +718,9 @@ export function structureViewer(uc: UnitCell, title: string, life?: AbortSignal)
   const note = h(
     'p',
     { class: 'fineprint' },
-    `The unit cell (a, b and c marked) with ${uc.atoms.length.toLocaleString('en-US')} atoms`,
-    uc.truncated ? ` (the first ${MAX_ATOMS.toLocaleString('en-US')} only)` : '',
-    links.length ? ` and ${links.length.toLocaleString('en-US')} bonds` : '',
+    `The unit cell (a, b and c marked) with ${uc.atoms.length.toLocaleString(LOCALE)} atoms`,
+    uc.truncated ? ` (the first ${MAX_ATOMS.toLocaleString(LOCALE)} only)` : '',
+    links.length ? ` and ${links.length.toLocaleString(LOCALE)} bonds` : '',
     '. Drag to turn it, or use the arrow keys; + and − zoom, and the wheel once it is selected (or with Ctrl).',
   );
   // Drawn again at its new size when the window (or the text size) changes the canvas's width.
@@ -598,8 +730,31 @@ export function structureViewer(uc: UnitCell, title: string, life?: AbortSignal)
     watcher.observe(canvas);
     life?.addEventListener('abort', () => watcher.disconnect(), { once: true });
   }
+  // The canvas is painted from the palette's colours: a new theme, Light or Dark, or High Contrast
+  // paints it again. The listeners end with the page (`life`); without one they are not set, as
+  // nothing would ever release them.
+  if (theme && life && !life.aborted) {
+    const off = theme.onChange(redraw);
+    life.addEventListener('abort', off, { once: true });
+  }
+  // Paper is light whatever the palette (themes.css): the canvas is a picture, so it is painted
+  // again, at once, when the page turns to print and when it turns back.
+  const paper = globalThis.matchMedia?.('print');
+  if (paper?.addEventListener && life && !life.aborted) {
+    paper.addEventListener('change', draw);
+    life.addEventListener('abort', () => paper.removeEventListener('change', draw), {
+      once: true,
+    });
+  }
   redraw();
-  return h('figure', { class: 'crystal-viewer' }, canvas, controls, h('figcaption', null, note));
+  return h(
+    'figure',
+    { class: 'crystal-viewer' },
+    canvas,
+    controls,
+    legend(uc.atoms),
+    h('figcaption', null, note),
+  );
 }
 
 // --- the page -------------------------------------------------------------------------------------
@@ -652,6 +807,7 @@ export function structureView(
   doc: { title: string; source_id: string; native_id: string },
   st: StructureText,
   life?: AbortSignal,
+  theme?: PaletteWatch,
 ): HTMLElement {
   const block = parseCif(st.cif);
   const uc = block ? unitCell(block) : null;
@@ -660,7 +816,7 @@ export function structureView(
     { class: 'crystal' },
     summaryTable(st.summary, doc.source_id, doc.native_id),
     uc?.atoms.length
-      ? structureViewer(uc, doc.title, life)
+      ? structureViewer(uc, doc.title, life, theme)
       : h(
           'p',
           { class: 'notice' },
