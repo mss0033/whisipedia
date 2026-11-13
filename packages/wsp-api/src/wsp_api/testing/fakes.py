@@ -38,6 +38,7 @@ from wsp_core.model import (
     Tier,
     UpdateStrategy,
 )
+from wsp_core.versions import version_key
 
 _WORD = re.compile(r"\w+", re.UNICODE)
 _GENESIS = "0" * 64
@@ -175,7 +176,7 @@ class InMemoryDocumentStore:
         versions = self._versions.setdefault(doc_id, [])
         versions[:] = [v for v in versions if v[0] != generation_id]
         versions.append((generation_id, doc))
-        versions.sort(key=lambda v: v[0])
+        versions.sort(key=lambda v: version_key(v[0]))  # as the real store: by number
 
     def put(self, generation_id: str, doc: DocRecord) -> None:
         if not doc.content_hash:
@@ -189,7 +190,7 @@ class InMemoryDocumentStore:
     def get(self, doc_id: DocId, *, at_generation: str | None = None) -> DocRecord | None:
         versions = self._versions.get(doc_id, [])
         if at_generation is not None:
-            versions = [v for v in versions if v[0] <= at_generation]
+            versions = [v for v in versions if version_key(v[0]) <= version_key(at_generation)]
         return versions[-1][1] if versions else None
 
     def history(self, doc_id: DocId) -> Sequence[tuple[str, str]]:

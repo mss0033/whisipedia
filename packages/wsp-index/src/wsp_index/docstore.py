@@ -14,6 +14,7 @@ from typing import cast
 
 from wsp_core.ids import DocId, InvalidDocIdError, parse_doc_id
 from wsp_core.model import DocRecord
+from wsp_core.versions import version_key
 from wsp_index.refinery import (
     RefineryReader,
     current_generation,
@@ -149,8 +150,11 @@ class ParquetDocumentStore:
         if at_generation is None:
             gen = self.current(source_id)
         else:
+            # In number order, as the list is (r10 is after r9): the API picks the generation whose
+            # files it serves the same way, and as text the record of "as of the next day" came from
+            # r9 while the page came from r11 (trawl 2026-11-10, verification of 5a-2).
             gens = self.generations(source_id)
-            i = bisect.bisect_right(gens, at_generation)
+            i = bisect.bisect_right(gens, version_key(at_generation), key=version_key)
             gen = gens[i - 1] if i else None
         if gen is None:
             return None

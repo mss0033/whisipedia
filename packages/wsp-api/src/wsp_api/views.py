@@ -534,7 +534,7 @@ class Library:
     def generation_of(versions: Sequence[tuple[str, str]], content_hash: str, at: str | None) -> str | None:
         """The generation that introduced this content version: the earliest one, not after ``at``,
         from which the content stayed the same. Ordered by number here (r10 is after r9), whatever
-        order the store lists same-day cycles in (it still sorts them as text: a follow-up)."""
+        order a store lists same-day cycles in (the Parquet store lists them by number too)."""
         found: str | None = None
         upto = None if at is None else version_key(at)
         for gen, h in sorted(versions, key=lambda v: version_key(v[0])):

@@ -308,6 +308,10 @@ class WikimediaDumpsAdapter:
         max_releases = int_option(spec, "max_releases", 1)
         runs = sorted(run_dates(ctx, self.base_url, ENTITIES_PATH), reverse=True)[:max_runs]
         reasons: list[str] = []
+        # Runs that could not be read (a timeout, a 503: not "not there yet"). An older dump is offered
+        # in place of a newer one only when the newer one is known not to be ready: with the newest run
+        # unread, the previous Monday's 104 GB would be fetched and the newest one the day after.
+        unread: list[str] = []
         found: dict[str, tuple[str, dict[str, int]]] = {}  # file date -> (run directory, listed sizes)
         for run in runs:  # newest directory first: it keeps a file date that two directories list
             try:
@@ -316,6 +320,8 @@ class WikimediaDumpsAdapter:
                 raise  # a robots refusal is reported as itself, never as "no release"
             except Exception as exc:
                 reasons.append(f"{run}: listing not read: {type(exc).__name__}: {exc}")
+                if not isinstance(exc, NotFoundError):  # a 404: the directory is not filled yet
+                    unread.append(run)
                 continue
             sizes = {
                 name: int(size) for name, size in _LISTING_RE.findall(listing.decode("utf-8", "replace"))
@@ -334,7 +340,10 @@ class WikimediaDumpsAdapter:
             if len(releases) >= max_releases:
                 break
             run, sizes = found[file_date]
-            release = self._entity_release(ctx, spec, run, file_date, sizes, kinds, mirrors, reasons)
+            if any(r >= run for r in unread):
+                reasons.append(f"{run}: {file_date} not offered: a newer run or dump could not be read")
+                break
+            release = self._entity_release(ctx, spec, run, file_date, sizes, kinds, mirrors, reasons, unread)
             if release is not None:
                 releases.append(release)
         if not releases:
@@ -358,8 +367,10 @@ class WikimediaDumpsAdapter:
         kinds: Sequence[str],
         mirrors: Sequence[str],
         reasons: list[str],
+        unread: list[str],
     ) -> ReleaseRef | None:
-        """The release of one dated file set in run directory ``run``; None (and a reason) if not ready.
+        """The release of one dated file set in run directory ``run``; None (and a reason) if not ready,
+        and ``run`` added to ``unread`` if its sums could not be read (which is not "not ready").
 
         ``sizes`` (the listing) is not the readiness test: a file still being written is listed with the
         size it has so far. A file is whole once the sha1sums file names it, so the sums are read after
@@ -379,6 +390,7 @@ class WikimediaDumpsAdapter:
             return None
         except Exception as exc:
             reasons.append(f"{run}: sums of {file_date} not read: {type(exc).__name__}: {exc}")
+            unread.append(run)
             return None
         files: list[RemoteFile] = []
         for kind in kinds:

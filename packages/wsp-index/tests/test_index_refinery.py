@@ -500,3 +500,33 @@ def test_reads_the_share_refuses_for_a_moment_are_read_again_and_no_row_twice(
     batches = list(plain.scan(("doc_id", "title"), batch_size=10))
     assert [b.num_rows for b in batches] == [4] * 10
     assert sorted(row["title"] for b in batches for row in b.to_pylist()) == expected["g1"]
+
+
+def test_same_day_cycles_are_read_in_number_order(tmp_path: Path) -> None:
+    """The store listed same-day cycles as text (r10, r11 before r2): a page read "as of the next day"
+    took its record from r9 while the API served r11's files, and the history showed a change at r2
+    that never was (trawl 2026-11-10, verification of 5a-2)."""
+    from wsp_index import ParquetDocumentStore
+
+    cycles = ("2026-10-21", "2026-10-21r2", "2026-10-21r9", "2026-10-21r10", "2026-10-21r11")
+    for gid in cycles:
+        text = "new words" if gid in cycles[3:] else "old words"
+        with RefineryWriter(tmp_path, "ntrs", gid) as w:
+            w.write([doc("ntrs", "a", "A", text)])
+    assert tuple(refinery.sealed_generations(tmp_path, "ntrs")) == cycles
+    (tmp_path / "ntrs" / refinery.CURRENT_FILE).unlink(missing_ok=True)
+    assert refinery.current_generation(tmp_path, "ntrs") == "2026-10-21r11"
+
+    store = ParquetDocumentStore(tmp_path)
+    did = make_doc_id("ntrs", "a")
+
+    def text_at(at: str) -> str | None:
+        found = store.get(did, at_generation=at)
+        return None if found is None else found.text
+
+    assert text_at("2026-10-22") == "new words"  # the day after: the last cycle, r11
+    assert text_at("2026-10-21r10") == "new words"
+    assert text_at("2026-10-21r9") == "old words"
+    assert text_at("2026-10-21r3") == "old words"  # between r2 and r9
+    assert text_at("2026-10-20") is None
+    assert [g for g, _ in store.history(did)] == ["2026-10-21", "2026-10-21r10"]

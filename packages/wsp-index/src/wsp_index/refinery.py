@@ -55,6 +55,7 @@ from wsp_core.ids import DocId, content_hash
 from wsp_core.memory import drop_file_cache
 from wsp_core.model import BYLINE_META, SEARCH_CHARS_META, ChangeRecord, DocRecord
 from wsp_core.nasretry import is_blip, is_transient, retrying
+from wsp_core.versions import version_key
 from wsp_index.localfs import REMOTE_FS_TYPES, filesystem_type
 
 log = logging.getLogger(__name__)
@@ -241,11 +242,13 @@ def configured_root(index_root: Path, value: object) -> Path:
 
 
 def sealed_generations(root: Path, source_id: str) -> list[str]:
-    """Sealed generation ids of a source, oldest first (generation ids must sort chronologically)."""
+    """Sealed generation ids of a source, oldest first: in the order of
+    :func:`wsp_core.versions.version_key` (digit runs as numbers), the one order the vault, the
+    orchestrator and the API use. As text a same-day cycle ``2026-10-21r10`` came before ``r9``."""
     src = root / source_id
     if not src.is_dir():
         return []
-    return sorted(p.name for p in src.iterdir() if p.is_dir() and is_sealed(p))
+    return sorted((p.name for p in src.iterdir() if p.is_dir() and is_sealed(p)), key=version_key)
 
 
 def current_generation(root: Path, source_id: str) -> str | None:

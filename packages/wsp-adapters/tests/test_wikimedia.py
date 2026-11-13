@@ -388,10 +388,34 @@ def test_wikidata_robots_refusal_is_raised_not_swallowed(tmp_path: Path, part: s
     }
     with pytest.raises(RobotsDisallowedError):
         list(WikimediaDumpsAdapter().discover(make_ctx(WIKIDATA, _Refusing(routes, part, error), tmp_path)))
-    # Any other failure on one directory is a reason, and the next directory is read.
-    other = _Refusing(routes, "/20261109/", FetchError("HTTP 503"))
-    (release,) = WikimediaDumpsAdapter().discover(make_ctx(WIKIDATA, other, tmp_path))
-    assert release.version == "2026-11-05"
+
+
+@pytest.mark.parametrize("part", ["/20261109/", "20261109-sha1sums.txt", "20261109-md5sums.txt"])
+def test_wikidata_an_older_dump_is_not_offered_while_the_newer_run_cannot_be_read(
+    tmp_path: Path, part: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A timeout or a 503 on the newest run is not "not ready yet": offering the previous Monday's dump
+    then starts a 104 GB download that the next discovery makes again for the newest one. Nothing is
+    offered and the warning says why (verification of 5a-2). A 404 is "not there yet" and still falls
+    back (the test of the dump being written)."""
+    routes = {
+        ENTITIES: dumps_listing(["20261102", "20261109"]),
+        f"{ENTITIES}20261102/": _rows("20261105", "all.json.bz2").encode(),
+        f"{ENTITIES}20261109/": _rows("20261109", "all.json.bz2").encode(),
+        **_sums("20261102", "20261105", "all.json.bz2"),
+        **_sums("20261109", "20261109", "all.json.bz2"),
+    }
+    ctx = make_ctx(WIKIDATA, _Refusing(routes, part, FetchError("HTTP 503")), tmp_path)
+    with caplog.at_level("WARNING", logger="wsp_adapters.wikimedia"):
+        assert list(WikimediaDumpsAdapter().discover(ctx)) == []
+    message = caplog.records[-1].getMessage()
+    assert "20261109: " in message
+    assert "HTTP 503" in message
+    assert "20261102: 20261105 not offered: a newer run or dump could not be read" in message
+    # The older run unread does not hold back the newer dump.
+    older = make_ctx(WIKIDATA, _Refusing(routes, "/20261102/", FetchError("HTTP 503")), tmp_path)
+    (release,) = WikimediaDumpsAdapter().discover(older)
+    assert release.version == "2026-11-09"
 
 
 def test_index_and_ranges(dump: tuple[Path, Path]) -> None:
