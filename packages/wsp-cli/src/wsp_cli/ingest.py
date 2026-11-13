@@ -512,11 +512,8 @@ class Ingestor:
                 # Sealed by a run that failed after the seal (a ledger write the share refused): its
                 # promotion never came, and a rerun saw only "sealed" (2026-10-29 spot check).
                 try:
-                    if vp.source_id in unread:  # not waited for again per sealed version, under the lock
-                        raise unread[vp.source_id]
-                    never = not self._promoted_before(vp.source_id, vp.generation_id, promoted)
+                    never = not self._promoted_before(vp.source_id, vp.generation_id, promoted, unread)
                 except OSError as exc:  # the share refused the ledger past the retries: this one waits
-                    unread[vp.source_id] = exc
                     vp.status, vp.reason = (
                         VersionStatus.FAILED,
                         f"ledger not read: {type(exc).__name__}: {exc}",
@@ -543,7 +540,9 @@ class Ingestor:
             write_library_docs(self.vault, list(self.specs.values()))
         return report
 
-    def _promoted_before(self, sid: str, gid: str, seen: dict[str, set[str]]) -> bool:
+    def _promoted_before(
+        self, sid: str, gid: str, seen: dict[str, set[str]], unread: dict[str, OSError]
+    ) -> bool:
         """Whether ``gid`` was ever current (a rollback stands: it is not promoted again). The current
         pointers and :data:`PROMOTED_NAME` first; the whole ledger only when they do not name it, read
         once per source and run, tried again when the share refuses. Every sealed version a run
@@ -553,9 +552,17 @@ class Ingestor:
         if gid in self.vault.promoted_before(sid, ledger=False):
             return True
         if sid not in seen:
-            seen[sid] = nasretry.retrying(
-                f"read the ledger for {sid}", lambda: self.vault.promoted_before(sid)
-            )
+            # A ledger refused past its retries is not waited for again per sealed version, under the
+            # lock; the cheap pointer check above is still made for each (it may answer).
+            if sid in unread:
+                raise unread[sid]
+            try:
+                seen[sid] = nasretry.retrying(
+                    f"read the ledger for {sid}", lambda: self.vault.promoted_before(sid)
+                )
+            except OSError as exc:
+                unread[sid] = exc
+                raise
         return gid in seen[sid]
 
     def _ingest(self, vp: VersionPlan) -> bool:

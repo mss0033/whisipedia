@@ -453,10 +453,12 @@ def test_a_pubmed_take_the_share_refuses_is_finished_by_the_next_run(
 def test_a_take_the_share_did_and_then_refused_is_not_made_again(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A CIFS reconnect: the server moved the file, the client got ESTALE. The retry's ``shutil.move``
-    found the source gone (FileNotFoundError, not transient) and the command ended."""
+    """A CIFS reconnect: the server moved the file, the client got ESTALE. ``shutil.move`` answers a
+    refused rename by copying, found the source gone (FileNotFoundError, not transient) and the command
+    ended. The refusal is made where the share makes it, in ``os.rename``: a ``shutil.move`` patched to
+    raise ESTALE itself passed while the real one still failed (verification of 5a-1)."""
     import errno
-    import shutil
+    import os
 
     vault = tmp_path / "vault"
     folder = tmp_path / "manual"
@@ -481,20 +483,21 @@ def test_a_take_the_share_did_and_then_refused_is_not_made_again(
 
     monkeypatch.setattr(wsp_cli, "ops", FakeOps, raising=False)
     monkeypatch.setitem(__import__("sys").modules, "wsp_cli.ops", FakeOps)
-    real_move = shutil.move
+    real_rename = os.rename
     moves: list[str] = []
 
-    def done_then_refused(src: Any, dst: Any) -> Any:
+    def done_then_refused(src: Any, dst: Any, **kw: Any) -> None:
+        if Path(src).name not in names:
+            return real_rename(src, dst, **kw)
         moves.append(Path(src).name)
-        done = real_move(src, dst)
+        real_rename(src, dst, **kw)
         if Path(src).name == names[1] and moves.count(names[1]) == 1:
             raise OSError(errno.ESTALE, "Stale file handle")
-        return done
 
     def no_wait(_s: float) -> None:
         return None
 
-    monkeypatch.setattr(shutil, "move", done_then_refused)
+    monkeypatch.setattr(os, "rename", done_then_refused)
     monkeypatch.setattr(
         nasretry.retrying, "__kwdefaults__", {"sleep": no_wait, "transient": nasretry.is_transient}
     )
@@ -503,6 +506,7 @@ def test_a_take_the_share_did_and_then_refused_is_not_made_again(
     args = argparse.Namespace(config_dir=None)
     out = io.StringIO()
     assert manual.import_pubmed(args, spec, q, folder, "pubmed26-u1682", vault, out) == 0, out.getvalue()
+    monkeypatch.setattr(os, "rename", real_rename)
     assert moves == names  # the refused move was not made again: it had been carried out
     assert ingested == [names]
 
@@ -513,6 +517,11 @@ def test_a_take_the_share_did_and_then_refused_is_not_made_again(
     with pytest.raises(FileNotFoundError):
         manual._take(tmp_path / "never.gz", stale, [])  # pyright: ignore[reportPrivateUsage]
     assert stale.read_bytes() == b"an earlier run's"
+    # The retry after a refusal that came with the move done (the copy across devices: its unlink).
+    done = tmp_path / "done.gz"
+    done.write_bytes(b"moved")
+    manual._take(tmp_path / "gone.gz", done, [True])  # pyright: ignore[reportPrivateUsage]
+    assert done.read_bytes() == b"moved"
 
 
 def test_the_newest_sealed_pubmed_generation_is_found_current_or_not(

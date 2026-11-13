@@ -1105,7 +1105,16 @@ def _take(src: Path, dest: Path, tried: list[bool]) -> None:
     if tried and not src.exists() and dest.exists():
         return
     tried.append(True)
-    shutil.move(src, dest)
+    there_before = dest.exists()
+    try:
+        shutil.move(src, dest)
+    except FileNotFoundError:
+        # ``shutil.move`` answers a refused rename of a file by copying it: when the share did the
+        # rename and then refused it, that copy finds ``src`` gone, in this same attempt. ``dest`` was
+        # not there before this attempt and is now, so it is this move (a same-named file an earlier
+        # run left proves nothing).
+        if there_before or src.exists() or not dest.exists():
+            raise
 
 
 def _ingest(args: argparse.Namespace, source: str, version: str | None, out: TextIO, ops: Any) -> int:

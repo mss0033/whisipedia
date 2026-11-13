@@ -100,8 +100,12 @@ def test_serve_refuses_non_loopback(capsys: pytest.CaptureFixture[str]) -> None:
 def test_serve_runs_uvicorn_on_loopback(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     import uvicorn
 
+    from wsp_index import refinery
+
     calls: list[dict[str, Any]] = []
     monkeypatch.setattr(uvicorn, "run", lambda app, **kw: calls.append(kw))  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]
+    # `wsp serve` narrows the Refinery's patience for the whole process: put back after this test.
+    monkeypatch.setattr(refinery, "_patience", list(refinery._patience))  # pyright: ignore[reportPrivateUsage]
     code, text = run("serve", "--port", "9999", "--static-dir", str(tmp_path))
     assert code == 0
     assert calls == [
