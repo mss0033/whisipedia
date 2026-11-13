@@ -33,6 +33,7 @@ class _Index:
     found: int = 8
     holding: int = 100
     titles: frozenset[str] = frozenset()
+    redirects: dict[str, str] = field(default_factory=dict[str, str])  # a redirect's name -> the title
     counts: list[tuple[str, int, tuple[str, ...] | None]] = field(default_factory=list[tuple[str, int, Any]])
     hit_searches: list[str] = field(default_factory=list[str])
     named_asked: list[str] = field(default_factory=list[str])
@@ -61,6 +62,8 @@ class _Index:
 
     def named(self, text: str, *, limit: int = 16) -> Sequence[tuple[str, str]]:
         self.named_asked.append(text)
+        if text.casefold() in self.redirects:
+            return [("wsp:w/target", self.redirects[text.casefold()])]
         return [("wsp:w/x", text)] if text.casefold() in self.titles else []
 
     def suggest(self, prefix: str, *, limit: int = 10) -> Sequence[str]:
@@ -179,6 +182,20 @@ def test_only_a_result_near_the_top_answers_the_query() -> None:
     assert past.index("Alan Turring") == ANSWERED_DEPTH
     assert searcher.correction("alan turring", len(last), last) is None
     assert searcher.correction("alan turring", len(past), past) == "alan turing"
+
+
+def test_a_correction_that_is_only_a_redirect_gives_way_to_the_title_it_leads_to() -> None:
+    # The live library: "Alan Turning" is a redirect to Alan Turing, so the commoner word was "a title".
+    index = _Index(titles=frozenset({"alan turing"}), redirects={"alan turning": "Alan Turing"})
+    assert _ask(index, "alan turring").did_you_mean == "alan turing"
+    assert index.named_asked == ["alan turning"]  # the redirect says where it leads: nothing more is asked
+    assert index.counts == []
+    # a redirect that leads elsewhere stands: the page it names is not what was typed one letter off
+    far = _Index(titles=frozenset({"alan turing"}), redirects={"alan turning": "Turning (woodwork)"})
+    assert _ask(far, "alan turring").did_you_mean == "alan turning"
+    assert far.counts == []  # a page is named so
+    # and with a corrector that offers no rivals
+    assert _ask(index, "alan turring", _Speller(rivals=False)).did_you_mean == "alan turning"
 
 
 def test_one_word_is_never_swapped_for_a_title() -> None:

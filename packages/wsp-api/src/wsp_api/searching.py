@@ -38,6 +38,7 @@ SLOW_SEARCH_MS = 3000.0  # a search slower than this is logged with its stages
 WINDOW = 200  # hits ranked per query: the page, total and facets are all counted in them
 HIT_FIELD_WORKERS = 6  # header-field reads of one search page run side by side
 SPARSE = 5  # fewer results than this: "did you mean" may correct any unknown or rare word
+NAMED_READ = 8  # pages asked of the title list for one text: is any titled so, or only named so
 ANSWERED_DEPTH = 10  # a result titled as the query this near the top is its answer: no correction
 
 
@@ -274,19 +275,24 @@ class Searcher:
             return None, False
         return self._titled_correction(q, fixed)
 
-    def _is_title(self, text: str) -> bool:
-        """A page is titled or named exactly ``text``, by the index's suggest trie: the keys equal to
-        it are read (up to some thousands for a title every edition shares) and no document. Any page
-        of the library: the trie knows no source filter. A trie that cannot be read just now (being
-        replaced) answers no: the search goes on with the speller's own choice."""
+    def _titles_named(self, text: str) -> list[str]:
+        """The titles of the pages titled or named (a redirect) exactly ``text``, by the index's
+        suggest trie: the keys equal to it are read (up to some thousands for a title every edition
+        shares) and no document. Any page of the library: the trie knows no source filter. A trie that
+        cannot be read just now (being replaced) answers none: the search goes on with the speller's
+        own choice."""
         named = getattr(self.lib.s.index, "named", None)
         if not callable(named):
-            return False
+            return []
         try:
-            return bool(named(text, limit=1))
+            return [title for _, title in cast(Sequence[tuple[str, str]], named(text, limit=NAMED_READ))]
         except Exception:
             log.warning("did you mean: the title list could not be asked", exc_info=True)
-            return False
+            return []
+
+    def _is_title(self, text: str) -> bool:
+        """A page is titled or named exactly ``text`` (:meth:`_titles_named`)."""
+        return bool(self._titles_named(text))
 
     def _titled_correction(self, q: str, fixed: str) -> tuple[str, bool]:
         """``fixed``, or the correction of the same word that makes a title when ``fixed`` makes none;
@@ -297,22 +303,35 @@ class Searcher:
         (2026-11-10 trawl, search-index-11). When one word of two or more changed and the result is no
         title, the other candidates no further away are tried (``speller.rivals``, which answers
         nothing for a one-word query: at most ``TITLE_CANDIDATES`` phrases, each one lookup in the
-        title list), and the first that is a title wins. Titles of the whole library: a ``sources`` or
-        ``kind`` filter is not applied to this choice (the count that follows in :meth:`did_you_mean`
-        is filtered). Also the correction :meth:`correction_pin` pins, which is wanted: "Isaac
-        Newtonn". The cost is in the ``did_you_mean.spell`` stage."""
-        if self._is_title(fixed):
-            return fixed, True
+        title list), and the first that is a title wins.
+
+        A correction that is only a redirect's name gives way to the title of the page it leads to
+        when that title is one of those candidates: the English Wikipedia redirects "Alan Turning" to
+        Alan Turing, so the live library still offered "alan turning" (verification, 2026-11-13). Any
+        other redirect's name stands ("heart atack": "heart attack", not "Myocardial infarction").
+
+        Titles of the whole library: a ``sources`` or ``kind`` filter is not applied to this choice
+        (the count that follows in :meth:`did_you_mean` is filtered). Also the correction
+        :meth:`correction_pin` pins, which is wanted: "Isaac Newtonn". The cost is in the
+        ``did_you_mean.spell`` stage."""
+        held = self._titles_named(fixed)
+        key = _title_key(fixed)
+        if any(_title_key(t) == key for t in held):
+            return fixed, True  # a page is titled so
         rivals = getattr(self.lib.s.speller, "rivals", None)  # optional: a corrector may offer none
         if not callable(rivals):
-            return fixed, False
+            return fixed, bool(held)
         try:
             phrases = cast(Sequence[str], rivals(q, fixed))
         except Exception:  # the speller's choice stands: a correction is best-effort, the search is not
             log.warning("did you mean: no other candidates", exc_info=True)
-            return fixed, False
+            return fixed, bool(held)
+        phrases = [p for p in phrases if p.casefold() != q.casefold()]
+        if held:  # a redirect's name: the page it leads to, if that is as near to what was typed
+            targets = {_title_key(t) for t in held}
+            return next((p for p in phrases if _title_key(p) in targets), fixed), True
         for phrase in phrases:
-            if phrase.casefold() != q.casefold() and self._is_title(phrase):
+            if self._is_title(phrase):
                 return phrase, True
         return fixed, False
 
