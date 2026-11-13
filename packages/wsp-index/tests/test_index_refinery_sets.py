@@ -95,7 +95,9 @@ def test_a_copy_the_share_refuses_for_a_moment_is_made_again(
         return None
 
     monkeypatch.setattr(time, "sleep", no_wait)
-    monkeypatch.setattr(nasretry.retrying, "__kwdefaults__", {"sleep": no_wait})
+    monkeypatch.setattr(
+        nasretry.retrying, "__kwdefaults__", {"sleep": no_wait, "transient": nasretry.is_transient}
+    )
     ak = write_part(
         tmp_path, "2026-10-01.ak", [doc("src", "a1", "A1"), doc("src", "a2", "A2")], docs_per_file=1
     )

@@ -1088,9 +1088,24 @@ def _finish_takes(incoming: Path, spec: SourceSpec, folder: Path) -> int:
             dest = incoming / spec.id / version / src.name
             if src.is_file() and not dest.exists():
                 dest.parent.mkdir(parents=True, exist_ok=True)
-                nasretry.retrying(f"take {src.name}", lambda src=src, dest=dest: shutil.move(src, dest))
+                tried: list[bool] = []
+                nasretry.retrying(
+                    f"take {src.name}", lambda src=src, dest=dest, tried=tried: _take(src, dest, tried)
+                )
                 moved += 1
     return moved
+
+
+def _take(src: Path, dest: Path, tried: list[bool]) -> None:
+    """Move ``src`` to ``dest``; safe to do again within one retried call (``tried`` is that call's
+    memory). A move the share carried out and then answered with an error (a CIFS reconnect) leaves
+    ``src`` gone and ``dest`` in place: the retry has nothing left to do, where ``shutil.move`` raised
+    FileNotFoundError and ended the command. Believed only after an attempt of this call was refused;
+    a copy across devices cut short leaves ``src``, and is made again."""
+    if tried and not src.exists() and dest.exists():
+        return
+    tried.append(True)
+    shutil.move(src, dest)
 
 
 def _ingest(args: argparse.Namespace, source: str, version: str | None, out: TextIO, ops: Any) -> int:

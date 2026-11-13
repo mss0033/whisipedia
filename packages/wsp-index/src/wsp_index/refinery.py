@@ -54,15 +54,25 @@ import pyarrow.parquet as pq
 from wsp_core.ids import DocId, content_hash
 from wsp_core.memory import drop_file_cache
 from wsp_core.model import BYLINE_META, SEARCH_CHARS_META, ChangeRecord, DocRecord
-from wsp_core.nasretry import retrying
+from wsp_core.nasretry import is_blip, is_transient, retrying
 from wsp_index.localfs import REMOTE_FS_TYPES, filesystem_type
 
 log = logging.getLogger(__name__)
 
 # The Refinery sits on the NAS, which refuses an open for a moment when it is saturated (EAGAIN):
 # the nightly build died on one part of 1,300 (2026-10-28). Opening again a few times costs nothing.
+# What "for a moment" means is ``wsp_core.nasretry.is_transient`` (EHOSTDOWN, EIO, ESTALE, EFAULT as
+# well as EAGAIN), with no outage extension. A process that answers readers calls
+# :func:`serve_requests` and keeps the narrow test (EAGAIN, a dropped connection): with the NAS away,
+# every request would otherwise hold its worker thread for 30 s before it failed.
 OPEN_TRIES = 5
-_SHARE_TRANSIENT: tuple[type[OSError], ...] = (BlockingIOError, ConnectionError, TimeoutError)
+_patience: list[Callable[[BaseException], bool]] = [is_transient]
+
+
+def serve_requests() -> None:
+    """This process reads the Refinery in request threads (the API): a NAS that is away (EIO, ESTALE,
+    EHOSTDOWN) fails the read at once instead of being waited for."""
+    _patience[0] = is_blip
 
 
 def open_parquet(path: Path | str) -> pq.ParquetFile:
@@ -70,8 +80,8 @@ def open_parquet(path: Path | str) -> pq.ParquetFile:
     for attempt in range(1, OPEN_TRIES + 1):
         try:
             return pq.ParquetFile(path)
-        except _SHARE_TRANSIENT as exc:
-            if attempt == OPEN_TRIES:
+        except OSError as exc:
+            if attempt == OPEN_TRIES or not _patience[0](exc):
                 raise
             log.warning("%s: %s; opening again (%d of %d)", path, exc, attempt + 1, OPEN_TRIES)
             time.sleep(2.0**attempt)
@@ -94,8 +104,8 @@ def read_parquet[T](
             if pf is None:
                 pf = pq.ParquetFile(path)
             return pf, read(pf)
-        except _SHARE_TRANSIENT as exc:
-            if attempt == OPEN_TRIES:
+        except OSError as exc:
+            if attempt == OPEN_TRIES or not _patience[0](exc):
                 raise
             log.warning("%s: %s; reading again (%d of %d)", path, exc, attempt + 1, OPEN_TRIES)
             time.sleep(2.0**attempt)
@@ -342,9 +352,16 @@ def _meta(raw: object) -> dict[str, str]:
     )
 
 
-def _atomic_replace(partial: Path, final: Path) -> None:
-    with partial.open("rb") as fh:
+def _fsync_file(path: Path) -> None:
+    with path.open("rb") as fh:
         os.fsync(fh.fileno())
+
+
+def _atomic_replace(partial: Path, final: Path) -> None:
+    """Sync ``partial``, then rename it to ``final``. A caller that retries this must write ``partial``
+    again first (every ``write``/``copy`` here does): a refused fsync has already dropped the pages it
+    could not write, so syncing again would publish a torn file (``wsp_core.nasretry``)."""
+    _fsync_file(partial)
     os.replace(partial, final)
     _fsync_dir(final.parent)
 
@@ -472,11 +489,15 @@ class RefineryWriter:
             )
             return open_parquet(partial).metadata
 
+        def group_rows(meta: Any) -> list[int]:
+            return [meta.row_group(i).num_rows for i in range(meta.num_row_groups)]
+
         meta = retrying(f"write {name}", write)
         if meta.num_rows != len(self._buf):
             raise RefineryError(f"read-back mismatch in {partial}")
         # Row -> (row group, offset) from the actual row-group sizes written.
-        rg_sizes = np.array([meta.row_group(i).num_rows for i in range(meta.num_row_groups)], dtype=np.int64)
+        written = group_rows(meta)
+        rg_sizes = np.array(written, dtype=np.int64)
         rg_of_row = np.repeat(np.arange(len(rg_sizes), dtype=np.uint32), rg_sizes)
         starts = np.concatenate(([0], np.cumsum(rg_sizes)[:-1]))
         row_in_rg = (np.arange(len(self._buf), dtype=np.int64) - starts[rg_of_row]).astype(np.uint32)
@@ -488,15 +509,23 @@ class RefineryWriter:
         self._idx_loc.append(loc)
 
         def publish() -> None:
-            """Repeatable: a refused directory fsync comes after the rename, so a retry finds the
+            """Repeatable. A refused directory fsync comes after the rename, so a retry finds the
             ``.partial`` gone and the part already in place. Opening the gone ``.partial`` raised
             FileNotFoundError, which no retry catches: the refine died unsealed and the next run
             refined it all again from the first document (2026-11-04 trawl)."""
             if partial.exists() or not final.exists():
-                _atomic_replace(partial, final)
-            else:
-                _fsync_dir(final.parent)
+                # After a refused fsync of the ``.partial`` the kernel has reported the lost write-back
+                # once and marked the pages clean: syncing again would succeed and a torn part would
+                # be published under its final name. So the part is written again first.
+                if unsynced[0] and group_rows(write()) != written:
+                    raise RefineryError(f"read-back mismatch in {partial} (written again)")
+                unsynced[0] = True
+                _fsync_file(partial)
+                unsynced[0] = False
+                os.replace(partial, final)
+            _fsync_dir(final.parent)
 
+        unsynced = [False]  # an fsync of the .partial was started and did not come back whole
         retrying(f"publish {name}", publish)
         drop_file_cache(final)  # written once, read later: its pages are cache charged to the job
         self._bytes += retrying(f"size {name}", lambda: final.stat().st_size)

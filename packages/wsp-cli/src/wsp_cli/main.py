@@ -162,7 +162,9 @@ def cmd_serve(args: argparse.Namespace, out: TextIO) -> int:
     faulthandler.register(signal.SIGUSR1, all_threads=True)
 
     from wsp_api import create_app
+    from wsp_index import refinery
 
+    refinery.serve_requests()  # request threads do not wait for a NAS that is away
     lay = bootstrap.layout(args.config_dir)
     cfg = bootstrap.load(lay)
     settings = bootstrap.serve_settings(cfg, lay, static_dir=args.static_dir)

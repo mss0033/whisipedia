@@ -70,7 +70,7 @@ import httpx
 
 from wsp_core.errors import RedirectRefusedError, RobotsDisallowedError, RobotsUnreachableError
 from wsp_core.model import RemoteFile, RemoteHead
-from wsp_core.nasretry import retrying
+from wsp_core.nasretry import is_blip, retrying
 from wsp_core.redirects import current_guard, unguarded
 from wsp_core.robots import Robots, reachable, unreachable_long
 from wsp_core.robots import parse as parse_robots
@@ -1362,9 +1362,11 @@ class _SegmentedDownload:
             self._checkpoint(force=True)
             os.close(self.fd)
             raise self.error
-        retrying(
-            f"fsync {self.partial.name}", lambda: os.fsync(self.fd)
-        )  # the share refused one (idempotent)
+        # The share refused one. Only the fsync is repeated here, nothing is written again, so the
+        # test stays the narrow one (``is_blip``): after a failed fsync the kernel reports the lost
+        # write-back once and marks the pages clean, and a second fsync would succeed with bytes
+        # missing. EIO must fail the download (it resumes from its checkpoint), never be retried here.
+        retrying(f"fsync {self.partial.name}", lambda: os.fsync(self.fd), transient=is_blip)
         try:
             self._spot_check()  # before publishing, from the fsynced partial, at random offsets
         finally:

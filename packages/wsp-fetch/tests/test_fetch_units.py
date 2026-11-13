@@ -194,7 +194,13 @@ def test_a_refused_read_of_the_state_file_does_not_pass_for_no_state(
     def no_sleep(_s: float) -> None:
         return None
 
-    monkeypatch.setattr(time, "sleep", no_sleep)  # retrying's 2, 4, 8 s pauses
+    from wsp_core import nasretry
+
+    # retrying's 2, 4, 8 s pauses; it bound time.sleep when it was defined, so its default is replaced
+    monkeypatch.setattr(time, "sleep", no_sleep)
+    monkeypatch.setattr(
+        nasretry.retrying, "__kwdefaults__", {"sleep": no_sleep, "transient": nasretry.is_transient}
+    )
     assert load_state(tmp_path / "none.json") is None
     path = tmp_path / "x.partial.state.json"
     save_state(path, PartialState("u", 10, 4, "blake3", {"sha256": "ab"}, None, {0: "x"}))

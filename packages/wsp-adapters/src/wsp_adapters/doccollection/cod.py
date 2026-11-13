@@ -26,7 +26,6 @@ at: :func:`trim_cif` replaces each with a comment that says so (the archive keep
 from __future__ import annotations
 
 import contextlib
-import errno
 import io
 import logging
 import os
@@ -478,29 +477,17 @@ READ_WAITS = (2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 120.0)
 """Seconds before each new try of a refused read: about four minutes in all, long enough for the
 CIFS client to reconnect after a NAS hiccup (2026-11-06 review)."""
 DROP_EVERY = 64 << 20
-TRANSIENT_ERRNOS = frozenset(
-    {
-        errno.EIO,  # a ``soft`` CIFS mount turns a server timeout or reconnect into EIO
-        errno.EAGAIN,
-        errno.ETIMEDOUT,
-        errno.ESTALE,
-        errno.ECONNRESET,
-        errno.ECONNABORTED,
-        errno.EHOSTDOWN,
-        errno.EHOSTUNREACH,
-        errno.ENETDOWN,
-        errno.ENETUNREACH,
-        errno.ENETRESET,
-    }
-)
-"""Errors of a read on the share that a moment later may succeed (as ``wsp_vault.atomic``'s)."""
+TRANSIENT_ERRNOS = nasretry.TRANSIENT_ERRNOS
+"""Errors of a read on the share that a moment later may succeed: the one set of
+:mod:`wsp_core.nasretry` (so this reader also retries EFAULT, which CIFS answered under load on
+2026-10-13)."""
 
 
 def transient(exc: OSError) -> bool:
-    """Whether a refused read is worth making again: :data:`wsp_core.nasretry.TRANSIENT` or an errno
-    of :data:`TRANSIENT_ERRNOS` (EIO above all: the 2026-11-06 review found one EIO 20 GB into the
-    26.6 GB archive would have ended the refine and thrown away hours of reading)."""
-    return isinstance(exc, nasretry.TRANSIENT) or exc.errno in TRANSIENT_ERRNOS
+    """Whether a refused read is worth making again: :func:`wsp_core.nasretry.is_transient` (EIO above
+    all: the 2026-11-06 review found one EIO 20 GB into the 26.6 GB archive would have ended the
+    refine and thrown away hours of reading)."""
+    return nasretry.is_transient(exc)
 
 
 class ShareReader(io.RawIOBase):

@@ -44,28 +44,13 @@ from contextlib import suppress
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from wsp_core import nasretry
 from wsp_vault.hashing import BUFSIZE, Digests, MultiHasher, ProgressFn, hash_bytes
 
 PARTIAL_SUFFIX = ".partial"
 
-TRANSIENT_ERRNOS = frozenset(
-    {
-        errno.EIO,
-        # CIFS answered preadv with EFAULT ("Bad address") under load on 2026-10-13; the next attempt
-        # read the same chunk fine. Three releases were quarantined after five attempts each.
-        errno.EFAULT,
-        errno.ETIMEDOUT,
-        errno.EAGAIN,
-        errno.ESTALE,
-        errno.ECONNRESET,
-        errno.ECONNABORTED,
-        errno.EHOSTDOWN,
-        errno.EHOSTUNREACH,
-        errno.ENETDOWN,
-        errno.ENETUNREACH,
-        errno.ENETRESET,
-    }
-)
+# One set for every package (``wsp_core.nasretry``); the name stays importable from here.
+TRANSIENT_ERRNOS = nasretry.TRANSIENT_ERRNOS
 
 # A share or kernel that cannot do an atomic no-replace publish answers with one of these.
 _NOREPLACE_UNSUPPORTED = frozenset({errno.EINVAL, errno.ENOSYS, errno.EOPNOTSUPP, errno.ENOTSUP, errno.EPERM})

@@ -16,6 +16,8 @@ from typing import Any
 
 from wsp_core.nasretry import TRANSIENT as TRANSIENT
 from wsp_core.nasretry import TRIES as TRIES
+from wsp_core.nasretry import is_blip as is_blip
+from wsp_core.nasretry import is_transient as is_transient
 from wsp_core.nasretry import retrying as retrying
 
 COPY_CHUNK = 8 << 20
@@ -158,7 +160,9 @@ def copy_hashed(
     while True:
         try:
             return once()
-        except TRANSIENT as exc:
+        except OSError as exc:
+            if not is_transient(exc):
+                raise
             if synced.at > seen:
                 stalls, seen = 0, synced.at
             stalls += 1

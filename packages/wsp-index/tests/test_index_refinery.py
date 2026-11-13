@@ -5,6 +5,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 import pyarrow.parquet as pq
 import pytest
@@ -255,7 +256,9 @@ def _no_waits(monkeypatch: pytest.MonkeyPatch) -> None:
         return None
 
     monkeypatch.setattr(time, "sleep", no_wait)
-    monkeypatch.setattr(nasretry.retrying, "__kwdefaults__", {"sleep": no_wait})
+    monkeypatch.setattr(
+        nasretry.retrying, "__kwdefaults__", {"sleep": no_wait, "transient": nasretry.is_transient}
+    )
 
 
 def test_a_seal_the_share_refuses_for_a_moment_is_written_again(
@@ -334,6 +337,118 @@ def test_a_part_renamed_before_the_share_refused_its_directory_fsync_is_not_publ
     assert got is not None
     assert got.title == "B"
     assert not list(r.dir.glob("*.partial"))
+
+
+def test_an_eio_at_publish_rewrites_the_part(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """After a refused fsync the kernel has dropped the pages it could not write and reports the error
+    once: a second fsync succeeds with bytes missing. A retry that only synced and renamed would publish
+    a torn part, so the part is written again (trawl 2026-11-10 review, core-correctness-06)."""
+    import errno
+
+    _no_waits(monkeypatch)
+    real_fsync = os.fsync
+    real_write: Any = pq.write_table  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    refused: list[int] = []
+    written: list[str] = []
+
+    def fsync(fd: int) -> None:
+        if written == ["part-00001.parquet.partial"] and not refused:  # the first sync of part 1
+            refused.append(fd)
+            raise OSError(errno.EIO, "Input/output error")
+        real_fsync(fd)
+
+    def write_table(table: Any, where: Any, **kw: Any) -> None:
+        name = Path(where).name
+        if name.startswith("part-00001"):
+            written.append(name)
+        real_write(table, where, **kw)
+
+    monkeypatch.setattr(os, "fsync", fsync)
+    monkeypatch.setattr(pq, "write_table", write_table)
+    w = RefineryWriter(tmp_path, "src", "g1", docs_per_file=1)
+    w.write([doc("src", "a", "A"), doc("src", "b", "B"), doc("src", "c", "C")])
+    stats = w.close()
+    assert len(refused) == 1
+    assert written == ["part-00001.parquet.partial"] * 2  # written again, not just synced again
+    assert stats.parts == 3
+    assert sealed_generations(tmp_path, "src") == ["g1"]
+    r = RefineryReader(generation_dir(tmp_path, "src", "g1"))
+    got = r.get(make_doc_id("src", "b"))
+    assert got is not None
+    assert got.title == "B"
+    assert not list(r.dir.glob("*.partial"))
+
+
+def test_read_parquet_retries_eio(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The mount gives EIO, ESTALE or EHOSTDOWN as a plain OSError; a real error is raised at once."""
+    import errno
+
+    import pyarrow as pa
+
+    _no_waits(monkeypatch)
+    path = tmp_path / "part.parquet"
+    pq.write_table(pa.table({"x": [1, 2]}), path)  # pyright: ignore[reportUnknownMemberType]
+    failures = [OSError(errno.EIO, "Input/output error"), OSError(errno.ESTALE, "Stale file handle")]
+    reads: list[int] = []
+
+    def read(pf: pq.ParquetFile) -> int:
+        reads.append(1)
+        if failures:
+            raise failures.pop(0)
+        return pf.metadata.num_rows
+
+    assert refinery.read_parquet(path, read)[1] == 2
+    assert len(reads) == 3
+
+    def denied(pf: pq.ParquetFile) -> int:
+        reads.append(1)
+        raise OSError(errno.EACCES, "Permission denied")
+
+    reads.clear()
+    with pytest.raises(OSError, match="Permission denied"):
+        refinery.read_parquet(path, denied)
+    assert reads == [1]
+
+    real = pq.ParquetFile
+    opens: list[int] = []
+
+    def flaky_open(p: object) -> pq.ParquetFile:
+        opens.append(1)
+        if len(opens) == 1:
+            raise OSError(errno.EHOSTDOWN, "Host is down")
+        return real(p)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(pq, "ParquetFile", flaky_open)
+    assert refinery.open_parquet(path).metadata.num_rows == 2
+    assert len(opens) == 2
+
+    def away(p: object) -> pq.ParquetFile:
+        opens.append(1)
+        raise OSError(errno.EHOSTDOWN, "Host is down")
+
+    monkeypatch.setattr(pq, "ParquetFile", away)
+    for attempt in (lambda: refinery.open_parquet(path), lambda: refinery.read_parquet(path, read)):
+        opens.clear()
+        with pytest.raises(OSError, match="Host is down"):
+            attempt()
+        assert len(opens) == 5  # the usual five tries: no outage extension in the Refinery's reads
+
+    # A process that answers readers does not wait for a NAS that is away; EAGAIN is still tried again.
+    monkeypatch.setattr(refinery, "_patience", list(refinery._patience))  # pyright: ignore[reportPrivateUsage]
+    refinery.serve_requests()
+    opens.clear()
+    with pytest.raises(OSError, match="Host is down"):
+        refinery.open_parquet(path)
+    assert len(opens) == 1
+    busy = [BlockingIOError(11, "Resource temporarily unavailable")]
+
+    def busy_once(p: object) -> pq.ParquetFile:
+        if busy:
+            raise busy.pop()
+        return real(p)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(pq, "ParquetFile", busy_once)
+    assert refinery.open_parquet(path).metadata.num_rows == 2
 
 
 def test_reads_the_share_refuses_for_a_moment_are_read_again_and_no_row_twice(

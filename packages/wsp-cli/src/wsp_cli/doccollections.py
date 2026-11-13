@@ -1638,7 +1638,9 @@ class CollectionFetcher:
                 report.permanent_hosts[cand.key] = (urlsplit(cand.url).hostname or "").lower()
                 path.unlink(missing_ok=True)
                 return
-            except nasretry.TRANSIENT as exc:
+            except OSError as exc:
+                if not nasretry.is_transient(exc):
+                    raise
                 report.failed.append((cand.key, f"the share did not answer: {exc}"))
                 return
         elif screen is None:  # a bundle is never kept unscreened
@@ -1648,7 +1650,14 @@ class CollectionFetcher:
             was_held and decided.decision.verdict is Verdict.DENY and decided.decision.rule != "owner=deny"
         )
 
-        def keep() -> None:  # each step is safe to do again after a refusal (unlink, replace, hash)
+        hashed: list[FetchedDoc] = []
+        refused: list[bool] = []  # an earlier attempt of this call tried the move
+
+        def keep() -> None:
+            """Each step is safe to do again after a refusal, including one that was carried out and
+            then answered with an error (a CIFS reconnect: the server did the rename or the unlink, the
+            client got ESTALE or EIO). The retry then finds the file already moved or gone, which used
+            to raise FileNotFoundError and end the whole fetch (trawl 2026-11-10, core-correctness-06)."""
             if decided.decision.verdict is Verdict.DENY and not rehold:
                 path.unlink(missing_ok=True)  # restricted or out-of-scope bytes are not kept anywhere
                 report.rejected.append((cand.key, str(decided.decision)))
@@ -1659,7 +1668,11 @@ class CollectionFetcher:
                 qdir = self.incoming / "_quarantine" / report.source_id
                 qdir.mkdir(parents=True, exist_ok=True)
                 target = qdir / path.name
-                path.replace(target)
+                # "Already moved" is believed only after an attempt of this call was refused: a
+                # same-named copy an earlier run left in the quarantine proves nothing.
+                if not (refused and not path.exists() and target.exists()):
+                    refused.append(True)
+                    path.replace(target)
                 why = str(decided.decision)
                 if rehold:
                     why = f"{why} (held before; kept for the owner to decide)"
@@ -1670,9 +1683,11 @@ class CollectionFetcher:
                 row["quarantined"] = str(target)
                 report.held.append(row)
                 return
-            doc = fetched_doc(cand, path, decided, file=f"upstream/{path.name}")
+            if not hashed:  # hashed once: after a refused unlink the file may be gone already
+                hashed.append(fetched_doc(cand, path, decided, file=f"upstream/{path.name}"))
+            doc = hashed[0]
             if held_sha.get(cand.key) == doc.sha256:
-                path.unlink()  # byte-identical to the stored edition: nothing new
+                path.unlink(missing_ok=True)  # byte-identical to the stored edition: nothing new
                 report.skipped += 1
                 return
             report.fetched.append(doc)
@@ -1682,7 +1697,9 @@ class CollectionFetcher:
         # retried screen; 2026-10-29 spot check).
         try:
             nasretry.retrying(f"keep {path.name}", keep)
-        except nasretry.TRANSIENT as exc:
+        except OSError as exc:
+            if not nasretry.is_transient(exc):
+                raise
             report.failed.append((cand.key, f"the share did not answer: {exc}"))
 
     def _finish(

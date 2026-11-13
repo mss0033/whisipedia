@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import dataclasses
 import io
 import json
 import subprocess
 import zipfile
+from collections.abc import Generator
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, cast
@@ -1244,6 +1246,19 @@ def test_files_received_from_the_daily_list_stand_for_the_listing_and_withdraw_n
     assert report.failed == []  # nothing else was offered as a document of this run
 
 
+@contextlib.contextmanager
+def _no_share_waits() -> Generator[list[float]]:
+    """Retries on the share without their pauses, which are collected instead. ``retrying`` binds
+    ``time.sleep`` as a default when it is defined, so patching ``time.sleep`` later changes nothing
+    (the test below really waited 30 s)."""
+    from wsp_core import nasretry
+
+    pauses: list[float] = []
+    defaults = {"sleep": pauses.append, "transient": nasretry.is_transient}
+    with patch.object(nasretry.retrying, "__kwdefaults__", defaults):
+        yield pauses
+
+
 def test_share_trouble_while_screening_fails_one_document_not_the_fetch(
     vault: FileVault, tmp_path: Path
 ) -> None:
@@ -1262,13 +1277,114 @@ def test_share_trouble_while_screening_fails_one_document_not_the_fetch(
             raise BlockingIOError(11, "Resource temporarily unavailable", str(path))  # once only
         return real(path, rules, **kw)
 
-    with patch.object(dc, "screen_document", flaky), patch("wsp_cli.nasretry.time.sleep"):
+    with patch.object(dc, "screen_document", flaky), _no_share_waits():
         report = runner(vault, OBJECTS, tmp_path).run(spec(OBJECTS), version="2026-10-10")
     assert [d.cand.title for d in report.fetched] == ["FM 5 0 2022"]  # second try went through
     (failed,) = report.failed
     assert failed[0] == "test:restricted.pdf"
     assert "the share did not answer" in failed[1]
     assert len(report.held) == 1  # the third document was screened as usual
+
+
+def test_screen_fails_one_document_on_host_down_not_the_run(vault: FileVault, tmp_path: Path) -> None:
+    """Trawl 2026-11-10: the CIFS mount reports the NAS away as a plain OSError (EHOSTDOWN, EIO), which
+    escaped ``_screen`` and ended the whole fetch."""
+    import errno
+
+    import wsp_cli.doccollections as dc
+
+    real = dc.screen_document  # pyright: ignore[reportPrivateImportUsage]
+    calls: list[str] = []
+
+    def flaky(path: Path, rules: Rules, **kw: Any) -> Any:
+        calls.append(path.name)
+        if "restricted" in path.name:
+            raise OSError(errno.EHOSTDOWN, "Host is down", str(path))
+        if "FM-5" in path.name and calls.count(path.name) == 1:
+            raise OSError(errno.EIO, "Input/output error", str(path))  # once only
+        return real(path, rules, **kw)
+
+    with patch.object(dc, "screen_document", flaky), _no_share_waits() as pauses:
+        report = runner(vault, OBJECTS, tmp_path).run(spec(OBJECTS), version="2026-10-10")
+    assert [d.cand.title for d in report.fetched] == ["FM 5 0 2022"]  # second try went through
+    (failed,) = report.failed
+    assert failed[0] == "test:restricted.pdf"
+    assert "the share did not answer" in failed[1]
+    assert "Host is down" in failed[1]
+    assert len(report.held) == 1
+    assert (
+        sum("restricted" in name for name in calls) == 8
+    )  # an outage gets the longer wait, then the document fails
+    assert sorted(pauses) == sorted([2.0, 2.0, 4.0, 8.0, 16.0, 32.0, 60.0, 60.0])  # one EIO, one outage
+
+
+def test_a_rename_the_share_did_and_then_refused_still_files_the_document(
+    vault: FileVault, tmp_path: Path
+) -> None:
+    """A CIFS reconnect: the server moved the copy into the quarantine, the client got ESTALE. The retry
+    found the file gone (FileNotFoundError, not transient) and the whole fetch ended."""
+    import errno
+
+    real = Path.replace
+    refused: list[str] = []
+
+    def done_then_refused(self: Path, target: Any) -> Any:
+        if "unmarked" in self.name and not refused:
+            refused.append("unmarked")
+            real(self, target)
+            raise OSError(errno.ESTALE, "Stale file handle", str(self))
+        return real(self, target)
+
+    with patch.object(Path, "replace", done_then_refused), _no_share_waits():
+        report = runner(vault, OBJECTS, tmp_path).run(spec(OBJECTS), version="2026-10-10")
+    assert refused == ["unmarked"]
+    assert report.failed == []
+    (held,) = report.held
+    assert Path(held["quarantined"]).is_file()
+    assert [d.cand.title for d in report.fetched] == ["FM 5 0 2022"]  # the run went on
+
+
+def test_an_unlink_the_share_did_and_then_refused_skips_the_document_once(
+    vault: FileVault, tmp_path: Path
+) -> None:
+    """The byte-identical branch: the copy is deleted, the share answers ESTALE, the retry finds it gone.
+    It is counted as skipped once and not hashed again."""
+    import errno
+
+    import wsp_cli.doccollections as dc
+
+    first = runner(vault, OBJECTS, tmp_path).run(spec(OBJECTS), version="2026-10-10")
+    held_sha = {d.cand.key: d.sha256 for d in first.fetched}
+    (kept,) = first.fetched
+    path = tmp_path / "again.pdf"
+    path.write_bytes(GOOD)
+    real_unlink, real_hash = Path.unlink, dc.fetched_doc  # pyright: ignore[reportPrivateImportUsage]
+    unlinks: list[str] = []
+    hashes: list[str] = []
+
+    def done_then_refused(self: Path, missing_ok: bool = False) -> None:
+        real_unlink(self, missing_ok=missing_ok)
+        if self == path:
+            unlinks.append(self.name)
+            if len(unlinks) == 1:
+                raise OSError(errno.ESTALE, "Stale file handle", str(self))
+
+    def counted(*a: Any, **k: Any) -> Any:
+        hashes.append("hash")
+        return real_hash(*a, **k)
+
+    report = dc.FetchReport("test-pubs", "2026-10-11")
+    fetch = runner(vault, OBJECTS, tmp_path)
+    with (
+        patch.object(Path, "unlink", done_then_refused),
+        patch.object(dc, "fetched_doc", counted),
+        _no_share_waits(),
+    ):
+        fetch._screen(kept.cand, path, load_rules(None), report, held_sha)  # pyright: ignore[reportPrivateUsage]
+    assert (report.skipped, report.failed, report.fetched) == (1, [], [])
+    assert len(unlinks) == 2
+    assert hashes == ["hash"]
+    assert not path.exists()
 
 
 def test_a_listing_that_drops_most_held_documents_is_not_believed() -> None:

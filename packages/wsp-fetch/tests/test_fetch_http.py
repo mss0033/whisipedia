@@ -401,3 +401,33 @@ def test_a_mirror_ignoring_range_never_erases_a_resumable_partial(servers: Serve
     with HttpFetcher(CFG) as f:
         f.download(remote_for(data, url), dest)
     assert dest.read_bytes() == data
+
+
+def test_an_eio_at_the_last_fsync_fails_the_download_and_is_not_synced_again(
+    servers: Servers, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The end of a ranged download repeats only the fsync, nothing is written again. After a failed
+    fsync the kernel has dropped the pages it could not write and reports the error once: a second
+    fsync would succeed with bytes missing. So EIO there is not retried (``nasretry.is_blip``), though
+    every retry that writes its file again now is (trawl 2026-11-10, core-correctness-06)."""
+    import errno
+    import os
+
+    data = payload(300_000, seed=77)
+    a = servers()
+    a.add("f.bin", data)
+    real = os.fsync
+    partial_syncs: list[str] = []
+
+    def fsync(fd: int) -> None:
+        name = os.readlink(f"/proc/self/fd/{fd}")
+        if name.endswith(".partial"):
+            partial_syncs.append(name)
+            raise OSError(errno.EIO, "Input/output error")
+        real(fd)
+
+    monkeypatch.setattr(os, "fsync", fsync)
+    with HttpFetcher(CFG) as f, pytest.raises(OSError, match="Input/output error"):
+        f.fetch(remote_for(data, a.url("f.bin")), tmp_path / "f.bin")
+    assert len(partial_syncs) == 1
+    assert not (tmp_path / "f.bin").exists()

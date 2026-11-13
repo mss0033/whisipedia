@@ -504,6 +504,7 @@ class Ingestor:
         report.dry_run = dry_run
         changed = False
         promoted: dict[str, set[str]] = {}  # per source: generations ever promoted (ledger read once)
+        unread: dict[str, OSError] = {}  # per source: the ledger was refused past its retries this run
         for vp in report.versions:
             if any(v.status is VersionStatus.YIELDED for v in report.versions):
                 break  # out of time: the rest waits for the next run
@@ -511,8 +512,11 @@ class Ingestor:
                 # Sealed by a run that failed after the seal (a ledger write the share refused): its
                 # promotion never came, and a rerun saw only "sealed" (2026-10-29 spot check).
                 try:
+                    if vp.source_id in unread:  # not waited for again per sealed version, under the lock
+                        raise unread[vp.source_id]
                     never = not self._promoted_before(vp.source_id, vp.generation_id, promoted)
                 except OSError as exc:  # the share refused the ledger past the retries: this one waits
+                    unread[vp.source_id] = exc
                     vp.status, vp.reason = (
                         VersionStatus.FAILED,
                         f"ledger not read: {type(exc).__name__}: {exc}",

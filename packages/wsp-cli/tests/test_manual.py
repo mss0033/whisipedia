@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-from wsp_cli import manual
+from wsp_cli import manual, nasretry
 from wsp_cli.manual import Item, Queue, SavedPages, render_today, todays_offer
 from wsp_core.errors import NotFoundError
 from wsp_core.model import SourceSpec, SourceStatus, Tier
@@ -428,6 +428,13 @@ def test_a_pubmed_take_the_share_refuses_is_finished_by_the_next_run(
         return real_move(src, dst)
 
     monkeypatch.setattr(shutil, "move", refused)
+
+    def no_wait(_s: float) -> None:  # EIO from the share is tried again now: without the waits
+        return None
+
+    monkeypatch.setattr(
+        nasretry.retrying, "__kwdefaults__", {"sleep": no_wait, "transient": nasretry.is_transient}
+    )
     spec = _spec("pubmed", {"adapter": "pubmed"})
     assert spec.vault_domain == "reference"
     q = Queue("pubmed", items=manual._pubmed_items("pubmed26-u1682", 3))  # pyright: ignore[reportPrivateUsage]
@@ -441,6 +448,71 @@ def test_a_pubmed_take_the_share_refuses_is_finished_by_the_next_run(
     assert manual.import_pubmed(args, spec, q, folder, "pubmed26-u1682", vault, out) == 0, out.getvalue()
     assert ingested == [names]
     assert not any((folder / n).exists() for n in names)
+
+
+def test_a_take_the_share_did_and_then_refused_is_not_made_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A CIFS reconnect: the server moved the file, the client got ESTALE. The retry's ``shutil.move``
+    found the source gone (FileNotFoundError, not transient) and the command ended."""
+    import errno
+    import shutil
+
+    vault = tmp_path / "vault"
+    folder = tmp_path / "manual"
+    folder.mkdir()
+    names = [f"pubmed26n{n}.xml.gz" for n in (1683, 1684, 1685)]
+    for name in names:
+        (folder / name).write_bytes(_gz(b"<PubmedArticleSet/>"))
+    version = "pubmed26-u1685"
+    dest = vault / "_incoming" / "pubmed" / version
+    ingested: list[list[str]] = []
+
+    class FakeOps:
+        @staticmethod
+        def cmd_ingest(args: argparse.Namespace, out: Any) -> int:
+            ingested.append(sorted(p.name for p in dest.iterdir()))
+            sealed = vault / "library" / "reference" / "pubmed" / version
+            sealed.mkdir(parents=True)
+            (sealed / "MANIFEST.json").write_text("{}")
+            return 0
+
+    import wsp_cli
+
+    monkeypatch.setattr(wsp_cli, "ops", FakeOps, raising=False)
+    monkeypatch.setitem(__import__("sys").modules, "wsp_cli.ops", FakeOps)
+    real_move = shutil.move
+    moves: list[str] = []
+
+    def done_then_refused(src: Any, dst: Any) -> Any:
+        moves.append(Path(src).name)
+        done = real_move(src, dst)
+        if Path(src).name == names[1] and moves.count(names[1]) == 1:
+            raise OSError(errno.ESTALE, "Stale file handle")
+        return done
+
+    def no_wait(_s: float) -> None:
+        return None
+
+    monkeypatch.setattr(shutil, "move", done_then_refused)
+    monkeypatch.setattr(
+        nasretry.retrying, "__kwdefaults__", {"sleep": no_wait, "transient": nasretry.is_transient}
+    )
+    spec = _spec("pubmed", {"adapter": "pubmed"})
+    q = Queue("pubmed", items=manual._pubmed_items("pubmed26-u1682", 3))  # pyright: ignore[reportPrivateUsage]
+    args = argparse.Namespace(config_dir=None)
+    out = io.StringIO()
+    assert manual.import_pubmed(args, spec, q, folder, "pubmed26-u1682", vault, out) == 0, out.getvalue()
+    assert moves == names  # the refused move was not made again: it had been carried out
+    assert ingested == [names]
+
+    # Only a refused attempt of the same call is believed: a file that was never there is an error,
+    # even with a same-named file already at the destination.
+    stale = tmp_path / "stale.gz"
+    stale.write_bytes(b"an earlier run's")
+    with pytest.raises(FileNotFoundError):
+        manual._take(tmp_path / "never.gz", stale, [])  # pyright: ignore[reportPrivateUsage]
+    assert stale.read_bytes() == b"an earlier run's"
 
 
 def test_the_newest_sealed_pubmed_generation_is_found_current_or_not(

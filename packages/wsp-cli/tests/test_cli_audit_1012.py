@@ -527,6 +527,14 @@ def test_a_ledger_the_share_refuses_fails_that_version_not_the_run(
     (vault.source_dir(SID) / "PROMOTED.txt").unlink()
     (vault.source_dir(SID) / "CURRENT.txt").write_text("2026-10-30\n")
     _counted_ledger(vault, monkeypatch, fail=OSError(5, "Input/output error"))
+    from wsp_core import nasretry
+
+    def no_wait(_s: float) -> None:  # EIO from the share is tried again (five times) before it fails
+        return None
+
+    monkeypatch.setattr(
+        nasretry.retrying, "__kwdefaults__", {"sleep": no_wait, "transient": nasretry.is_transient}
+    )
     fetch(vault, tmp_path, [*OBJECTS, ("FM-6-0_2022.pdf", GOOD)], "2026-10-13")
     # Before: the OSError ended the run (exit 1) before it reached the pending version.
     got = ingest(vault)
