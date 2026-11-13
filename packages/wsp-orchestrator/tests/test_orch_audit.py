@@ -619,6 +619,25 @@ def test_a_plan_sees_the_files_carried_from_earlier_generations(tmp_path: Path) 
     ]
 
 
+def test_the_carried_file_comes_from_the_highest_same_day_cycle(tmp_path: Path) -> None:
+    """Newest first as text put 2026-10-21r9 before r10: r9's older copy of a file was the one carried."""
+    from pathlib import PurePosixPath
+
+    from wsp_core.model import Artifact, Generation, GenerationStatus
+
+    h = PipelineHarness(tmp_path)
+    for gid, name in (("2026-10-21r9", "a.zim"), ("2026-10-21r10", "a.zim"), ("2026-10-21r11", "b.zim")):
+        art = Artifact("src", gid, PurePosixPath("upstream") / name, 1, "0" * 64, "")
+        h.vault._gens[("src", gid)] = Generation("src", gid, GenerationStatus.SEALED, (art,))  # pyright: ignore[reportPrivateUsage]
+    h.vault._current["src"] = "2026-10-21r11"  # pyright: ignore[reportPrivateUsage]
+    held = h.pipeline._held(h.sources[0])  # pyright: ignore[reportPrivateUsage]
+    assert held is not None
+    assert sorted((a.relpath.name, a.version) for a in held.artifacts) == [
+        ("a.zim", "2026-10-21r10"),
+        ("b.zim", "2026-10-21r11"),
+    ]
+
+
 def test_steps_a_clean_shutdown_left_running_are_not_crashes(tmp_path: Path) -> None:
     """2026-10-26 review #35: two restarts to deploy fixes during a long seal sent the release to
     FAILED with a CRITICAL 'probably OOM'."""

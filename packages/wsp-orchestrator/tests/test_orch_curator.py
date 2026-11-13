@@ -347,6 +347,22 @@ def test_adapter_smoke_reports_contract_problems(tmp_path: Path) -> None:
     assert good.resolved == ["adapter-contract:src"]
 
 
+def test_adapter_smoke_inspects_the_newest_release_by_number(tmp_path: Path) -> None:
+    """As text pubmed26-u999 is newer than pubmed26-u1000: the smoke test inspected the old release."""
+    world = FakeWorld.build(tmp_path, ManualClock(T0), [make_spec("src")])
+    adapter = world.adapters["src"]
+    adapter.add_release("pubmed26-u999", {})  # a release without files fails the shape check
+    adapter.add_release("pubmed26-u1000", FILES)
+
+    def adapter_for(spec: SourceSpec) -> Any:
+        return adapter
+
+    result = AdapterSmokeBot().run(
+        _ctx(tmp_path, world.sources, {}, adapter_for=adapter_for, ctx_for=_no_ctx)
+    )
+    assert result.resolved == ["adapter-contract:src"], result.notes
+
+
 def test_gap_miner_groups_broken_links_and_empty_searches(tmp_path: Path) -> None:
     gaps, queries = tmp_path / "gaps.jsonl", tmp_path / "queries.jsonl"
     at = T0.isoformat()

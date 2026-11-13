@@ -57,6 +57,7 @@ from wsp_core.errors import FetchError, NotFoundError
 from wsp_core.model import Checksum, ReleaseRef, RemoteFile, SourceSpec
 from wsp_core.partitions import partition_of
 from wsp_core.ports import Ctx
+from wsp_core.versions import version_key
 from wsp_orchestrator.durations import DurationError, IsoDuration
 from wsp_vault.vault import ADOPTING_SUFFIX, STAGING_DIR, VaultError, read_staging, staged_entry
 
@@ -194,7 +195,7 @@ def cmd_fetch(args: argparse.Namespace, out: TextIO) -> int:
     if not releases:
         print(f"error: {spec.id}: discovery found no release", file=sys.stderr)
         return EXIT_FAILED
-    release = max(releases, key=lambda r: r.version)
+    release = max(releases, key=lambda r: version_key(r.version))  # r10 is newer than r9; not so as text
     if (vault_root / "library" / spec.vault_domain / spec.id / release.version / "MANIFEST.json").is_file():
         out.write(f"{spec.id}/{release.version}: already sealed; nothing new\n")
         return EXIT_NOTHING_NEW

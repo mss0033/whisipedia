@@ -63,8 +63,11 @@ redirects to detect page moves.
   when it is done (one `.xml.bz2` plus index per wiki), else from the per-part job; `access.layout: parts`
   forces parts. SHA-1 and MD5 come from `dumpstatus.json`, falling back to `<wiki>-<date>-sha1sums.txt`.
   `version` is the run date (`YYYY-MM-DD`).
-- **Wikidata**: lists `wikidatawiki/entities/`; a dated run is ready when `wikidata-<date>-sha1sums.txt`
-  lists every wanted file (`access.entity_files`, default `all.json.bz2`). Sizes come from the directory listing.
+- **Wikidata**: lists `wikidatawiki/entities/` and the newest `access.max_runs` (4) run directories. Files are
+  named by the day they were written, not by the directory (`20261102/` held `wikidata-20261105-*`): the file
+  dates come from the `wikidata-<date>-sha1sums.txt` names in each listing. A dated set is ready when its
+  sha1sums file lists every wanted file (`access.entity_files`, default `all.json.bz2`); `version` is the file
+  date. Sizes come from the directory listing. When nothing is ready, one warning gives the reason per run.
 - **Mirrors**: `access.mirrors`, default `ftp.acc.umu.se/mirror/wikimedia.org/dumps/` and
   `dumps.wikimedia.your.org/`, same layout as the primary. Mirrors can lag; checksums always come from the primary.
 - **Documents**: namespace 0 by default (`access.namespaces`). `native_id` is the title in URL form

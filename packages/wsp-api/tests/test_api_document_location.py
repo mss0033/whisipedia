@@ -8,6 +8,7 @@ from pathlib import PurePosixPath
 
 import pytest
 
+from wsp_api.errors import ApiError
 from wsp_api.testing.fakes import InMemoryDocumentStore, InMemoryVault, sample_services
 from wsp_api.views import Library
 from wsp_api.zimread import ZimUnavailable
@@ -114,3 +115,41 @@ def test_text_links_resolve_to_held_zim_pages_and_busy_is_not_absent() -> None:
     with pytest.raises(ZimUnavailable):
         lib.exists(make_doc_id(zim_source.id, "Held"))  # a 503 the client retries, not "not in the library"
     assert [link.target for link in lib.links(rec("gutenberg", "84", None, (held,)))] == [None]
+
+
+def test_same_day_cycles_serve_a_version_in_number_order() -> None:
+    """Which generation's files hold a version was decided as text: 2026-10-21r10 sorted before r9, so a
+    version introduced in r9 and read as of r10 had no generation, and one introduced in r10 was served
+    from r9 (trawl 2026-11-10; nasa-ntrs-materials-mechanical has r10+ cycles)."""
+    lib, vault, _ = library()
+    for gid in ("2026-10-21", "2026-10-21r2", "2026-10-21r9", "2026-10-21r10", "2026-10-21r11"):
+        vault.add(gen("ntrs", gid))
+
+    def serving(introduced: str | None, at: str | None) -> str | None:
+        found = lib.serving_generation("ntrs", introduced, at)
+        return found.generation_id if found else None
+
+    assert serving("2026-10-21r9", "2026-10-21r10") == "2026-10-21r10"
+    assert serving("2026-10-21r10", None) == "2026-10-21r11"
+    assert serving("2026-10-21r2", "2026-10-21r9") == "2026-10-21r9"
+    assert serving(None, "2026-10-21r10") == "2026-10-21r10"
+    assert serving("2026-10-21r11", "2026-10-21r10") is None
+
+    # The generation that introduced a version, read as of r10: r10 is not "before r9".
+    # as the document store lists them today: same-day cycles in text order
+    history = [
+        ("2026-10-21r10", "h3"),
+        ("2026-10-21r11", "h4"),
+        ("2026-10-21r2", "h1"),
+        ("2026-10-21r9", "h2"),
+    ]
+    assert lib.generation_of(history, "h3", "2026-10-21r10") == "2026-10-21r10"
+    assert lib.generation_of(history, "h2", "2026-10-21r10") == "2026-10-21r9"
+    assert lib.generation_of(history, "h4", "2026-10-21r10") is None
+    assert lib.generation_of(history, "h1", "2026-10-21r9") == "2026-10-21r2"
+
+    # `at` comes from the query string: a label no generation could have is "not held", not a crash
+    # (int() refuses a run of 4,300+ digits).
+    with pytest.raises(ApiError) as refused:
+        lib.document(make_doc_id("ntrs", "x"), "2026" + "9" * 4400)
+    assert refused.value.status == 404

@@ -35,6 +35,7 @@ from datetime import date
 
 from wsp_core.model import Generation, GenerationStatus
 from wsp_core.partitions import group_by_partition
+from wsp_orchestrator.versions import version_key
 
 # The day must end there: a Kiwix bundle release is "<YYYY-MM>-<8 hex digest>" ("2026-10-70d64628" is
 # not 70 October; pruning the bundle failed on it from 2026-10-16), and a digest may start with digits.
@@ -148,9 +149,11 @@ def plan_retention(
     def keep(gid: str, why: str) -> None:
         reasons.setdefault(gid, []).append(why)
 
+    # Same-day cycles (2026-10-21r9, r10: tools/lanes/lane-run.sh) tie on the date; the id decides, by
+    # number. As text r9 was "newest" and r10, r11 were planned for pruning (trawl 2026-11-10).
     sealed = sorted(
         (g for g in generations if g.status is GenerationStatus.SEALED),
-        key=lambda g: (g.taken, g.generation_id),
+        key=lambda g: (g.taken, version_key(g.generation_id)),
         reverse=True,
     )
     for g in generations:
@@ -209,7 +212,7 @@ def plan_partitioned_retention(
     for group in group_by_partition(generations, lambda g: g.generation_id).values():
         ids = {g.generation_id for g in group}
         cur = [gid for gid in current if gid in ids]
-        sub = plan_retention(group, policy, current=max(cur) if cur else None)
+        sub = plan_retention(group, policy, current=max(cur, key=version_key) if cur else None)
         extra = {gid: ("current",) for gid in cur if gid not in sub.reasons}  # several current: keep all
         keep += [*sub.keep, *extra]
         prune += [gid for gid in sub.prune if gid not in extra]

@@ -280,6 +280,30 @@ def test_a_packed_partition_lands_in_incoming_as_one_zip(
     assert fetcher.downloaded == []
 
 
+class SameDay(Adapter):
+    """Two cycles of one day, as a lane names them."""
+
+    def discover(self, ctx: Ctx) -> Iterable[ReleaseRef]:
+        return [replace(RELEASE, version=f"2026-10-21r{n}") for n in (9, 10)]
+
+
+def test_the_highest_same_day_cycle_is_the_release_taken(
+    vault: tuple[Path, Downloads], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """As text r9 is newer than r10, and the lane fetched the older cycle."""
+    root, _ = vault
+    adapters = {"big": SameDay()}
+
+    def load_adapters(*args: object, **kwargs: object) -> object:
+        return adapters
+
+    monkeypatch.setattr(bootstrap, "load_adapters", load_adapters)
+    rc, text = run()
+    assert rc == bulk.EXIT_OK, text
+    assert (root / "_incoming/big/2026-10-21r10/a.tar.gz").read_bytes() == A
+    assert not (root / "_incoming/big/2026-10-21r9").exists()
+
+
 class Two(Adapter):
     """A partition of both files."""
 

@@ -23,6 +23,7 @@ from wsp_core.ports import SupportsHead, SupportsProbeUrls
 from wsp_orchestrator.alerts import Alert, Severity
 from wsp_orchestrator.bots import BotContext, BotResult
 from wsp_orchestrator.policy import Candidate, CandidateKind
+from wsp_orchestrator.versions import version_key
 
 
 def endpoints(spec: SourceSpec) -> list[str]:
@@ -175,7 +176,8 @@ class AdapterSmokeBot:
             refs = list(adapter.discover(sctx))
             if not refs:
                 return "discover() offered no release"
-            newest = max(refs, key=lambda r: r.version)
+            # By number: as text pubmed26-u999 is "newer" than pubmed26-u1000, and the older was inspected.
+            newest = max(refs, key=lambda r: version_key(r.version))
             problems = _release_problems(newest.version, [(f.url, f.name) for f in newest.files])
             if problems:
                 return "; ".join(problems)

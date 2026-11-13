@@ -117,7 +117,7 @@ from wsp_orchestrator.store import (
     SourceHealth,
     StateStore,
 )
-from wsp_orchestrator.versions import is_newer, newest
+from wsp_orchestrator.versions import is_newer, newest, version_key
 
 log = logging.getLogger("wsp.orchestrator.pipeline")
 
@@ -912,7 +912,11 @@ class ReleasePipeline:
             return have
         names = {a.relpath.name for a in have.artifacts}
         carried: list[Artifact] = []
-        for g in sorted(self.vault.generations(spec.id), key=lambda g: g.generation_id, reverse=True):
+        # Newest first by number: as text 2026-10-21r9 came before r10 and its older copy was carried.
+        generations = sorted(
+            self.vault.generations(spec.id), key=lambda g: version_key(g.generation_id), reverse=True
+        )
+        for g in generations:
             if g.generation_id == have.generation_id or g.status is not GenerationStatus.SEALED:
                 continue
             for art in g.artifacts:

@@ -9,8 +9,10 @@ from wsp_orchestrator.retention import (
     GenerationInfo,
     GfsPolicy,
     generation_date,
+    plan_partitioned_retention,
     plan_retention,
 )
+from wsp_orchestrator.versions import version_key
 
 SEALED = GenerationStatus.SEALED
 
@@ -42,6 +44,29 @@ def test_weekly_generations_in_one_month() -> None:
     assert plan.prune == ("2026-10-01", "2026-10-08")
     assert "last 3" in plan.reasons["2026-10-29"]
     assert "newest" in plan.reasons["2026-10-29"]
+
+
+def test_same_day_cycles_are_ordered_by_number() -> None:
+    """A lane's cycles of one day are 2026-10-21, 2026-10-21r2 ... r12 (tools/lanes/lane-run.sh). As text
+    r9 was the newest and r10, r11 were planned for pruning (trawl 2026-11-10)."""
+    day = date(2026, 10, 21)
+    ids = ["2026-10-21", *(f"2026-10-21r{n}" for n in range(2, 13))]
+    gens = [GenerationInfo(gid, day) for gid in ids]
+    plan = plan_retention(gens, GfsPolicy(last=3, monthly=0, yearly=0), current="2026-10-21r12")
+    assert plan.keep == ("2026-10-21r10", "2026-10-21r11", "2026-10-21r12")
+    assert "newest" in plan.reasons["2026-10-21r12"]
+    assert plan.prune == tuple(ids[:9]), "oldest first, r9 after r8"
+
+
+def test_partitioned_current_is_the_highest_cycle_not_the_last_as_text() -> None:
+    day = date(2026, 10, 21)
+    gens = [GenerationInfo("2026-10-21r9.ak", day), GenerationInfo("2026-10-21r10.ak", day)]
+    plan = plan_partitioned_retention(
+        gens, GfsPolicy(last=1, monthly=0, yearly=0), current={"2026-10-21r9.ak", "2026-10-21r10.ak"}
+    )
+    assert plan.reasons["2026-10-21r10.ak"] == ("newest", "current", "last 1")
+    assert plan.reasons["2026-10-21r9.ak"] == ("current",)  # several current: all kept
+    assert plan.prune == ()
 
 
 def test_current_last_copy_and_unsealed_are_never_pruned() -> None:
@@ -140,7 +165,7 @@ def test_plan_invariants(gens: list[GenerationInfo], policy: GfsPolicy, data: st
     assert all(not by_id[p].holds_last_copy for p in prune)
     assert current not in prune
     if sealed:
-        newest = max(sealed, key=lambda g: (g.taken, g.generation_id))
+        newest = max(sealed, key=lambda g: (g.taken, version_key(g.generation_id)))
         assert newest.generation_id in keep
     # at least min(last, |sealed|) sealed generations survive
     assert len(keep & {g.generation_id for g in sealed}) >= min(policy.last, len(sealed))

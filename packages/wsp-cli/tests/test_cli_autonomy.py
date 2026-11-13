@@ -243,6 +243,21 @@ def test_slo_lag_and_lanes_tolerate_absence(tmp_path: Path) -> None:
     assert download_lanes(tmp_path / "missing", NOW) == []
 
 
+def test_slo_orders_same_day_cycles_by_number() -> None:
+    """As text 2026-10-21r9 is newer than r10: a source holding r10 showed r9 as upstream's newest, and a
+    lag."""
+    spec = make_spec("rfc")
+    offers = [
+        {"generation_id": "2026-10-21r9", "published": "2026-10-01T00:00:00+00:00"},
+        {"generation_id": "2026-10-21r10", "published": "2026-10-01T00:00:00+00:00"},
+    ]
+    slo = source_slo(spec, "2026-10-21r10", offers, NOW, NOW, 30.5)
+    assert slo.upstream_newest == "2026-10-21r10"
+    assert slo.lag_days == 0
+    behind = source_slo(spec, "2026-10-21r9", offers, NOW, NOW, 30.5)
+    assert behind.lag_days  # r10 is newer than the held r9
+
+
 def test_build_wiring_wires_bots_parity_and_proposals(env: Path) -> None:
     from wsp_cli.wiring import DEFAULT_BOTS, build_wiring
 

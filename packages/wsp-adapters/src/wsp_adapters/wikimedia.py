@@ -58,6 +58,7 @@ from wsp_adapters._common import (
 from wsp_adapters._streams import open_bz2
 from wsp_adapters.entries import Entry, Redirect
 from wsp_adapters.wikitext import wikitext_to_text
+from wsp_core.errors import NotFoundError, RobotsDisallowedError
 from wsp_core.ids import InvalidDocIdError, content_hash, make_doc_id
 from wsp_core.model import (
     Checksum,
@@ -102,6 +103,7 @@ _LISTING_RE = re.compile(r'<a href="([^"/]+)">[^<]*</a>\s+\S+\s+\S+\s+(\d+)')
 _MULTISTREAM_RE = re.compile(r"^(?P<wiki>[a-z0-9_]+)-(?P<date>\d{8})-pages-articles-multistream(?P<rest>.*)$")
 _INDEX_NAME_RE = re.compile(r"^(.*-pages-articles-multistream)(\d*)\.xml(.*)\.bz2$")
 _ENTITY_DUMP_RE = re.compile(r"^wikidata-\d{8}-all\.json\.bz2$")
+_ENTITY_SUMS_RE = re.compile(r"^wikidata-(\d{8})-sha1sums\.txt$")
 _PAGE_RE = re.compile(rb"<page>.*?</page>", re.DOTALL)
 _GROUP_BYTES = 8 * 1024 * 1024
 
@@ -289,46 +291,100 @@ class WikimediaDumpsAdapter:
         )
 
     def _discover_entities(self, ctx: Ctx) -> list[ReleaseRef]:
+        """Complete entity dumps in the newest run directories, newest file date first.
+
+        A dump's files are named by the day the dump was written, not by the run directory: ``20261102/``
+        held only ``wikidata-20261105-*``. Asking for ``<dir>/wikidata-<dir>-sha1sums.txt`` was a 404
+        there, read as "not ready", and discovery offered nothing for a week (trawl 2026-11-10). The file
+        dates are therefore read from the names of the sha1sums files in each directory's listing.
+        """
         spec = ctx.source
         mirrors = str_list(access(spec).get("mirrors")) or DEFAULT_MIRRORS
         kinds = str_list(access(spec).get("entity_files")) or DEFAULT_ENTITY_FILES
-        max_runs = int_option(spec, "max_runs", 3)
+        # Four, not three: runs start on Monday (all), Wednesday and Friday, and the Monday dump's sums
+        # appear about 2.5 days after its directory. Until then the three newest directories are the new
+        # Monday (no sums), Friday and Wednesday, and the last complete dump is in the fourth.
+        max_runs = int_option(spec, "max_runs", 4)
         max_releases = int_option(spec, "max_releases", 1)
+        runs = sorted(run_dates(ctx, self.base_url, ENTITIES_PATH), reverse=True)[:max_runs]
+        reasons: list[str] = []
+        found: dict[str, tuple[str, dict[str, int]]] = {}  # file date -> (run directory, listed sizes)
+        for run in runs:  # newest directory first: it keeps a file date that two directories list
+            try:
+                listing = ctx.fetcher.get_bytes(f"{self.base_url}{ENTITIES_PATH}{run}/")
+            except RobotsDisallowedError:
+                raise  # a robots refusal is reported as itself, never as "no release"
+            except Exception as exc:
+                reasons.append(f"{run}: listing not read: {type(exc).__name__}: {exc}")
+                continue
+            sizes = {
+                name: int(size) for name, size in _LISTING_RE.findall(listing.decode("utf-8", "replace"))
+            }
+            dates = [m.group(1) for name in sizes if (m := _ENTITY_SUMS_RE.match(name))]
+            if not dates:
+                reasons.append(f"{run}: no sha1sums file listed")
+            for file_date in dates:
+                missing = [n for kind in kinds if (n := f"wikidata-{file_date}-{kind}") not in sizes]
+                if missing:
+                    reasons.append(f"{run}: {missing[0]} not listed")
+                else:
+                    found.setdefault(file_date, (run, sizes))
         releases: list[ReleaseRef] = []
-        for date in sorted(run_dates(ctx, self.base_url, ENTITIES_PATH), reverse=True)[:max_runs]:
-            release = self._entity_release(ctx, spec, date, kinds, mirrors)
+        for file_date in sorted(found, reverse=True):  # newest first, also when directories disagree
+            if len(releases) >= max_releases:
+                break
+            run, sizes = found[file_date]
+            release = self._entity_release(ctx, spec, run, file_date, sizes, kinds, mirrors, reasons)
             if release is not None:
                 releases.append(release)
-                if len(releases) >= max_releases:
-                    break
+        if not releases:
+            # At WARNING: the orchestrator's log handler is on the ``wsp`` tree only, so this logger's
+            # info lines went nowhere and "no release" came without a reason.
+            log.warning(
+                "%s: no complete entity dump in the %d newest runs: %s",
+                spec.id,
+                len(runs),
+                "; ".join(reasons) or "no run directory listed",
+            )
         return releases
 
     def _entity_release(
-        self, ctx: Ctx, spec: SourceSpec, date: str, kinds: Sequence[str], mirrors: Sequence[str]
+        self,
+        ctx: Ctx,
+        spec: SourceSpec,
+        run: str,
+        file_date: str,
+        sizes: Mapping[str, int],
+        kinds: Sequence[str],
+        mirrors: Sequence[str],
+        reasons: list[str],
     ) -> ReleaseRef | None:
-        rel_dir = f"/{ENTITIES_PATH}{date}/"
+        """The release of one dated file set in run directory ``run``; None (and a reason) if not ready.
+
+        ``sizes`` (the listing) is not the readiness test: a file still being written is listed with the
+        size it has so far. A file is whole once the sha1sums file names it, so the sums are read after
+        the listing and decide. Do not drop that request because "the listing already shows the file".
+        """
+        rel_dir = f"/{ENTITIES_PATH}{run}/"
+        here = f"{self.base_url}{ENTITIES_PATH}{run}/wikidata-{file_date}-"
         try:
-            sha1 = parse_checksum_file(
-                ctx.fetcher.get_bytes(
-                    f"{self.base_url}{ENTITIES_PATH}{date}/wikidata-{date}-sha1sums.txt"
-                ).decode()
-            )
-            md5 = parse_checksum_file(
-                ctx.fetcher.get_bytes(
-                    f"{self.base_url}{ENTITIES_PATH}{date}/wikidata-{date}-md5sums.txt"
-                ).decode()
-            )
-            listing = ctx.fetcher.get_bytes(f"{self.base_url}{ENTITIES_PATH}{date}/").decode(
-                "utf-8", "replace"
-            )
-        except Exception as exc:  # checksum files appear only once the dump is complete
-            log.info("entity dump %s not ready: %s", date, exc)
+            sha1 = parse_checksum_file(ctx.fetcher.get_bytes(here + "sha1sums.txt").decode())
+            md5: dict[str, str] = {}
+            if f"wikidata-{file_date}-md5sums.txt" in sizes:
+                md5 = parse_checksum_file(ctx.fetcher.get_bytes(here + "md5sums.txt").decode())
+        except RobotsDisallowedError:
+            raise
+        except NotFoundError:
+            reasons.append(f"{run}: the sums files of {file_date} are not there yet")
             return None
-        sizes = {name: int(size) for name, size in _LISTING_RE.findall(listing)}
+        except Exception as exc:
+            reasons.append(f"{run}: sums of {file_date} not read: {type(exc).__name__}: {exc}")
+            return None
         files: list[RemoteFile] = []
         for kind in kinds:
-            name = f"wikidata-{date}-{kind}"
+            name = f"wikidata-{file_date}-{kind}"
             if name not in sha1:
+                reasons.append(f"{run}: {name} not in the sha1sums file yet")
                 return None
             checksums = (Checksum("sha1", sha1[name]),) + (
                 (Checksum("md5", md5[name]),) if name in md5 else ()
@@ -344,10 +400,10 @@ class WikimediaDumpsAdapter:
             )
         return ReleaseRef(
             source_id=spec.id,
-            version=_iso_date(date),
+            version=_iso_date(file_date),
             published=None,
             files=tuple(files),
-            meta={"run": date, "wikis": "wikidatawiki"},
+            meta={"run": run, "file_date": file_date, "wikis": "wikidatawiki"},
             format="wikidata-json",
         )
 

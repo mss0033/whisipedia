@@ -294,3 +294,61 @@ def test_a_new_baseline_still_being_uploaded_is_not_a_release(tmp_path: Path) ->
     with pytest.raises(FetchError, match="still being uploaded"):
         _check_baseline(sizes, 27, 600)
     _check_baseline(sizes, 27, 1340)  # complete: a release
+
+
+def test_baseline_sizes_are_written_whole_or_not_at_all(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A bare write_text cut short left truncated JSON under the real name (trawl 2026-11-10)."""
+    import json
+    import os
+
+    from wsp_adapters.pubmed import _check_baseline  # pyright: ignore[reportPrivateUsage]
+
+    sizes = tmp_path / "sizes.json"
+    _check_baseline(sizes, 26, 1334)
+    assert json.loads(sizes.read_text()) == {"26": 1334}
+
+    def refuse(src: object, dst: object) -> None:
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(os, "replace", refuse)
+    with pytest.raises(OSError, match="No space left"):
+        _check_baseline(sizes, 27, 1340)
+    assert json.loads(sizes.read_text()) == {"26": 1334}, "the old file is intact"
+    assert [p.name for p in tmp_path.iterdir()] == ["sizes.json"], "no temporary file is left"
+
+
+def test_a_torn_baseline_file_is_reported_not_silently_empty(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A truncated file was read as "nothing seen": the half-uploaded-baseline check then compared nothing
+    and said nothing. It still does not hold the release, but it says so."""
+    import json
+
+    from wsp_adapters.pubmed import _check_baseline  # pyright: ignore[reportPrivateUsage]
+
+    sizes = tmp_path / "sizes.json"
+    with caplog.at_level("INFO", logger="wsp_adapters.pubmed"):
+        _check_baseline(sizes, 26, 1334)  # no file yet: said at info, with the path
+    assert [(r.levelname, str(sizes) in r.getMessage()) for r in caplog.records] == [("INFO", True)]
+    caplog.clear()
+    sizes.write_text('{"26": 13')
+    with caplog.at_level("INFO", logger="wsp_adapters.pubmed"):
+        _check_baseline(sizes, 27, 600)  # not fatal
+    (record,) = caplog.records
+    assert record.levelname == "WARNING"
+    assert str(sizes) in record.getMessage()
+    assert "this listing is not compared" in record.getMessage()
+    assert json.loads(sizes.read_text()) == {"27": 600}
+
+    # A whole file that is refused for a moment is not written over: last year's count is kept.
+    sizes.write_text('{"26": 1334}')
+    sizes.chmod(0)
+    try:
+        caplog.clear()
+        _check_baseline(sizes, 27, 600)  # would be refused (600 < 0.9 * 1334) if it could be read
+        assert [r.levelname for r in caplog.records] == ["WARNING"]
+    finally:
+        sizes.chmod(0o644)
+    assert json.loads(sizes.read_text()) == {"26": 1334}

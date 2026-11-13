@@ -52,6 +52,7 @@ from wsp_adapters._common import (
     workers_for,
 )
 from wsp_adapters._streams import Bitset, Throttle, listing_links, listing_rows, open_any
+from wsp_core.atomicio import write_text_atomic
 from wsp_core.errors import FetchError
 from wsp_core.ids import content_hash, make_doc_id
 from wsp_core.model import (
@@ -303,15 +304,43 @@ BASELINE_SHARE = 0.9  # a new year's baseline smaller than this share of the las
 def _check_baseline(path: Path, year: int, count: int) -> None:
     """Refuse a new year's baseline listed while NCBI is still uploading it: files 1..600 of about 1,334
     would have become release ``pubmed<yy>`` and dropped half of PubMed (2026-10-26 review). A year's
-    baseline must reach :data:`BASELINE_SHARE` of the previous year's (as seen in earlier listings)."""
+    baseline must reach :data:`BASELINE_SHARE` of the previous year's (as seen in earlier listings).
+
+    The file is written whole or not at all: a bare ``write_text`` cut short left truncated JSON, which
+    the next run read as "nothing seen" and so compared nothing (trawl 2026-11-10). A file that cannot
+    be read still does not hold the release (it would wait until a person acts); it is reported.
+
+    Read, change and write are not locked against a second discovery (the health probe runs in the same
+    daemon). A lost update can only leave a year's count lower than the most ever listed, which makes
+    next January's check easier to pass, never harder; accepted.
+    """
+    seen: dict[int, int] = {}
     try:
-        seen = {int(k): int(v) for k, v in json.loads(path.read_text(encoding="utf-8")).items()}
-    except (OSError, ValueError, AttributeError):
-        seen = {}
+        raw = cast(dict[str, object], json.loads(path.read_text(encoding="utf-8")))
+        seen = {int(k): int(cast(int, v)) for k, v in raw.items()}
+    except FileNotFoundError:
+        log.info(
+            "%s does not exist yet: no earlier baseline size is known, this listing is not compared", path
+        )
+    except OSError as exc:
+        # The file may be whole and only refused for a moment: writing now would replace every year
+        # it holds with this one. Not compared, not recorded; the next listing tries again.
+        log.warning(
+            "%s cannot be read (%s); last year's baseline size is unknown, this listing is not compared",
+            path,
+            exc,
+        )
+        return
+    except (ValueError, TypeError, AttributeError) as exc:
+        log.warning(
+            "%s cannot be read (%s); last year's baseline size is unknown, this listing is not compared",
+            path,
+            exc,
+        )
     before = seen.get(year - 1)
     seen[year] = max(seen.get(year, 0), count)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({str(k): v for k, v in sorted(seen.items())}), encoding="utf-8")
+    write_text_atomic(path, json.dumps({str(k): v for k, v in sorted(seen.items())}))
     if before and count < BASELINE_SHARE * before:
         raise FetchError(
             f"PubMed's {2000 + year} baseline lists {count} files, the previous year's {before}: "

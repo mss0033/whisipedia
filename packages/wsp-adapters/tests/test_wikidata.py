@@ -57,7 +57,16 @@ def routes() -> dict[str, bytes]:
         BASE: dumps_listing(["20261005"]),
         f"{run}wikidata-20261005-sha1sums.txt": f"{hashlib.sha1(DUMP).hexdigest()}  {NAME}\n".encode(),
         f"{run}wikidata-20261005-md5sums.txt": f"{hashlib.md5(DUMP).hexdigest()}  {NAME}\n".encode(),
-        f"{BASE}20261005/": f'<a href="{NAME}">{NAME}</a>   06-Oct-2026 10:32   {len(DUMP)}\n'.encode(),
+        # As upstream lists a finished run: the dump and both sums files (the adapter takes the file date
+        # from the sums file names, which may differ from the directory's).
+        f"{BASE}20261005/": "".join(
+            f'<a href="{name}">{name}</a>   07-Oct-2026 02:07   {size}\n'
+            for name, size in (
+                (NAME, len(DUMP)),
+                ("wikidata-20261005-md5sums.txt", 401),
+                ("wikidata-20261005-sha1sums.txt", 449),
+            )
+        ).encode(),
         f"{BASE}20261005/{NAME}": DUMP,
     }
 

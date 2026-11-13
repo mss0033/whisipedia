@@ -45,6 +45,7 @@ from wsp_api.schemas import (
 )
 from wsp_core.model import GenerationStatus, SourceSpec, SourceStatus
 from wsp_core.ports import Vault
+from wsp_core.versions import is_newer, version_key
 
 _PROGRESS = re.compile(r"\[#\w+ [^\]]*\]")
 _COMPLETE = "Download complete: "
@@ -92,10 +93,11 @@ def source_slo(
     lag: float | None = None
     newest: str | None = None
     if offers:
-        newest = max(str(o.get("generation_id")) for o in offers)
+        # Natural order: as text a same-day cycle r9 is "newer" than r10, so a held r10 showed a lag for ever.
+        newest = max((str(o.get("generation_id")) for o in offers), key=version_key)
         newer = sorted(
-            (o for o in offers if current is None or str(o.get("generation_id")) > current),
-            key=lambda o: str(o.get("generation_id")),
+            (o for o in offers if current is None or is_newer(str(o.get("generation_id")), current)),
+            key=lambda o: version_key(str(o.get("generation_id"))),
         )
         if not newer:
             lag = 0.0

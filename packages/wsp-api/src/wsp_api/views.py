@@ -55,6 +55,7 @@ from wsp_core.model import (
 )
 from wsp_core.ports import AssetStore, Catalog
 from wsp_core.titles import repaired_title, shown_title
+from wsp_core.versions import version_key
 
 log = logging.getLogger(__name__)
 MANIFEST_NAME = "MANIFEST.json"  # same name as wsp_vault.manifest.MANIFEST_NAME
@@ -91,6 +92,8 @@ class DocumentView:
 # The contents a long PDF's whole document lists (wsp_adapters.doccollection: "Title (page N)").
 _CONTENTS_HEAD = "\n\nContents\n"
 _CONTENTS_LINE = re.compile(r"^(.+) \(page (\d+)\)$")
+# Longer than any label; `at` is ordered by number now, and int() refuses a run of 4,300+ digits.
+_GENERATION_MAX = 64
 _GENERATION_LIKE = re.compile(r"^\d{4}(-\d{2}){0,2}")  # 2026-08, 2026-10-12r5.b0001 ...
 
 DEFAULT_ZIM_MAX_OPEN = 512
@@ -529,10 +532,13 @@ class Library:
 
     @staticmethod
     def generation_of(versions: Sequence[tuple[str, str]], content_hash: str, at: str | None) -> str | None:
-        """The generation that introduced this content version (history is oldest first)."""
+        """The generation that introduced this content version: the earliest one, not after ``at``,
+        from which the content stayed the same. Ordered by number here (r10 is after r9), whatever
+        order the store lists same-day cycles in (it still sorts them as text: a follow-up)."""
         found: str | None = None
-        for gen, h in versions:
-            if at is not None and gen > at:
+        upto = None if at is None else version_key(at)
+        for gen, h in sorted(versions, key=lambda v: version_key(v[0])):
+            if upto is not None and version_key(gen) > upto:
                 break
             if h == content_hash:
                 found = gen
@@ -545,13 +551,15 @@ class Library:
             g
             for g in self.vault.generations(source_id)
             if g.status in usable
-            and (introduced is None or g.generation_id >= introduced)
-            and (at is None or g.generation_id <= at)
+            and (introduced is None or version_key(g.generation_id) >= version_key(introduced))
+            and (at is None or version_key(g.generation_id) <= version_key(at))
         ]
         current = self.vault.current(source_id)
         if at is None and current is not None and any(g.generation_id == current.generation_id for g in gens):
             return current
-        return max(gens, key=lambda g: g.generation_id, default=None)
+        # By number, not as text: a version introduced in 2026-10-21r10 was served from r9's files, or
+        # from none (r10 >= r9 is false as text). A live source has such cycles (trawl 2026-11-10).
+        return max(gens, key=lambda g: version_key(g.generation_id), default=None)
 
     # --- pages ---
 
@@ -649,12 +657,14 @@ class Library:
         A current document the library lacks is answered with the page that stands in for it
         (:meth:`stand_in`); the response then carries that page's own doc_id and address."""
         versions = self.history(did)
-        if at is not None and not _GENERATION_LIKE.match(at):
+        if at is not None and (len(at) > _GENERATION_MAX or not _GENERATION_LIKE.match(at)):
             # 'nonsense' sorts after every dated generation, so it showed the current page under a
             # Time Machine banner (2026-10-14 field exam): say what exists instead.
             held = ", ".join(g for g, _ in versions[-12:]) or "none"
             raise ApiError(
-                404, "generation_not_found", f"no generation {at!r} of {did}; versions held: {held}"
+                404,
+                "generation_not_found",
+                f"no generation {at[:_GENERATION_MAX]!r} of {did}; versions held: {held}",
             )
         doc = self.s.documents.get(did, at_generation=at)
         html: str | None = None

@@ -1,7 +1,7 @@
 """``wikidata`` adapter: compact entity documents plus a local entity lookup (PLAN §6.2, §9.1).
 
 Discovery, planning, fetching and verification are those of ``wikimedia-dumps`` for the entity
-dumps (``wikidatawiki/entities/<date>/wikidata-<date>-all.json.bz2``, SHA-1 and MD5 from the
+dumps (``wikidatawiki/entities/<run>/wikidata-<date>-all.json.bz2``, SHA-1 and MD5 from the
 published checksum files). This adapter differs in what it reads out of the dump:
 
 * **Documents.** One per entity (``native_id`` = ``Q42``/``P31``/``L7``): label, description and

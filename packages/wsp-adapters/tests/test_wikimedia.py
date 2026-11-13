@@ -30,6 +30,7 @@ from wsp_adapters.wikimedia import (
     wiki_site,
     wikis_for,
 )
+from wsp_core.errors import FetchError, RobotsDisallowedError, RobotsUnreachableError
 from wsp_core.ids import content_hash
 from wsp_core.model import Checksum, DocRecord
 from wsp_core.ports import Ctx, SourceAdapter
@@ -198,7 +199,13 @@ def test_discover_wikidata_entities(tmp_path: Path) -> None:
         base: dumps_listing(["20260930", "20261005", "20261007"]),
         f"{base}20261005/wikidata-20261005-sha1sums.txt": f"{'a' * 40}  {name}\n".encode(),
         f"{base}20261005/wikidata-20261005-md5sums.txt": f"{'b' * 32}  {name}\n".encode(),
-        f"{base}20261005/": f'<a href="{name}">{name}</a>   06-Oct-2026 10:32   103337856107\n'.encode(),
+        f"{base}20261005/": (
+            f'<a href="{name}">{name}</a>   06-Oct-2026 10:32   103337856107\n'
+            + "".join(  # the sums files are listed too, as upstream lists them
+                f'<a href="{sums}">{sums}</a>   07-Oct-2026 02:07   449\n'
+                for sums in ("wikidata-20261005-md5sums.txt", "wikidata-20261005-sha1sums.txt")
+            )
+        ).encode(),
     }  # 20261007 is still running: no checksum files yet
     spec = make_spec("wikidata", {"adapter": "wikimedia-dumps", "endpoints": [base]}, license_="CC0-1.0")
     (release,) = WikimediaDumpsAdapter().discover(make_ctx(spec, FakeFetcher(routes), tmp_path))
@@ -207,6 +214,184 @@ def test_discover_wikidata_entities(tmp_path: Path) -> None:
     assert remote.size == 103337856107
     assert remote.checksums == (Checksum("sha1", "a" * 40), Checksum("md5", "b" * 32))
     assert remote.url == f"{base}20261005/{name}"
+
+
+ENTITIES = f"{DUMPS_BASE}wikidatawiki/entities/"
+WIKIDATA = make_spec("wikidata", {"adapter": "wikimedia-dumps", "endpoints": [ENTITIES]}, license_="CC0-1.0")
+ALL_1105 = 103_681_903_084  # upstream, 2026-11-07: 20261102/ holds only wikidata-20261105-*
+ALL_1109 = 103_755_108_222
+
+
+def _rows(file_date: str, *kinds: str, sums: bool = True, size: int = 1000) -> str:
+    """Rows of a run directory's listing in upstream's format, for the files of one file date."""
+    names = [f"wikidata-{file_date}-{kind}" for kind in kinds]
+    sized = [(n, size) for n in names]
+    if sums:
+        sized += [(f"wikidata-{file_date}-md5sums.txt", 401), (f"wikidata-{file_date}-sha1sums.txt", 449)]
+    return "".join(f'<a href="{n}">{n}</a>     07-Nov-2026 02:07     {size}\r\n' for n, size in sized)
+
+
+def _sums(run: str, file_date: str, *kinds: str) -> dict[str, bytes]:
+    """The two sums files of a file date, naming ``kinds`` as complete."""
+    names = [f"wikidata-{file_date}-{kind}" for kind in kinds]
+    return {
+        f"{ENTITIES}{run}/wikidata-{file_date}-sha1sums.txt": "".join(
+            f"{'a' * 40}  {n}\n" for n in names
+        ).encode(),
+        f"{ENTITIES}{run}/wikidata-{file_date}-md5sums.txt": "".join(
+            f"{'b' * 32}  {n}\n" for n in names
+        ).encode(),
+    }
+
+
+def _wikidata(routes: dict[str, bytes], tmp_path: Path, **access: object) -> tuple[list[str], list[str]]:
+    """Discover over ``routes``: (versions offered, URLs requested)."""
+    spec = make_spec(
+        "wikidata", {"adapter": "wikimedia-dumps", "endpoints": [ENTITIES], **access}, license_="CC0-1.0"
+    )
+    fetcher = FakeFetcher(routes)
+    releases = list(WikimediaDumpsAdapter().discover(make_ctx(spec, fetcher, tmp_path)))
+    return [r.version for r in releases], fetcher.requests
+
+
+def test_wikidata_file_date_differs_from_run_directory(tmp_path: Path) -> None:
+    """Files are named by the day they were written. Run 20261102 held wikidata-20261105-*; the request
+    for 20261102/wikidata-20261102-sha1sums.txt was a 404 and no release was offered (trawl 2026-11-10)."""
+    routes = {
+        ENTITIES: dumps_listing(["20261102", "20261104", "20261106"]),
+        f"{ENTITIES}20261102/": _rows("20261105", "all.json.bz2", size=ALL_1105).encode(),
+        f"{ENTITIES}20261104/": _rows("20261104", "truthy.nt.bz2", "lexemes.json.bz2").encode(),
+        f"{ENTITIES}20261106/": _rows("20261106", "lexemes.json.bz2").encode(),
+        **_sums("20261102", "20261105", "all.json.bz2"),
+    }
+    fetcher = FakeFetcher(routes)
+    (release,) = WikimediaDumpsAdapter().discover(make_ctx(WIKIDATA, fetcher, tmp_path))
+    assert release.version == "2026-11-05"
+    assert release.meta == {"run": "20261102", "file_date": "20261105", "wikis": "wikidatawiki"}
+    (remote,) = release.files
+    assert remote.url == f"{ENTITIES}20261102/wikidata-20261105-all.json.bz2"
+    assert remote.size == ALL_1105
+    assert remote.checksums == (Checksum("sha1", "a" * 40), Checksum("md5", "b" * 32))
+    assert remote.mirrors[0].endswith("/wikidatawiki/entities/20261102/wikidata-20261105-all.json.bz2")
+    # No request by directory date, and none for sums where the wanted file is not listed.
+    assert sorted(u for u in fetcher.requests if u.endswith("sums.txt")) == sorted(
+        _sums("20261102", "20261105")
+    )
+
+
+def test_wikidata_the_previous_complete_dump_is_offered_while_the_new_one_is_written(tmp_path: Path) -> None:
+    """Monday's sums appear about 2.5 days after its directory. Until then the three newest runs are the
+    new Monday, Friday and Wednesday: the last complete dump is the fourth, hence four runs by default."""
+    routes = {
+        ENTITIES: dumps_listing(["20261102", "20261109", "20261111", "20261113", "20261116"]),
+        f"{ENTITIES}20261109/": _rows("20261109", "all.json.bz2", size=ALL_1109).encode(),
+        f"{ENTITIES}20261111/": _rows("20261111", "truthy.nt.bz2", "lexemes.json.bz2").encode(),
+        f"{ENTITIES}20261113/": _rows("20261113", "lexemes.json.bz2").encode(),
+        # still being written: listed with the size it has so far, no sums file
+        f"{ENTITIES}20261116/": _rows("20261116", "all.json.bz2", sums=False, size=31_000_000_000).encode(),
+        **_sums("20261109", "20261109", "all.json.bz2"),
+    }
+    versions, requests = _wikidata(routes, tmp_path)
+    assert versions == ["2026-11-09"]
+    assert f"{ENTITIES}20261102/" not in requests, "four runs, not every run"
+    assert _wikidata(routes, tmp_path, max_runs=3)[0] == []
+
+
+def test_wikidata_directory_with_two_dated_sets_offers_the_newer(tmp_path: Path) -> None:
+    routes = {
+        ENTITIES: dumps_listing(["20261026"]),
+        f"{ENTITIES}20261026/": (
+            _rows("20261026", "all.json.bz2") + _rows("20261029", "all.json.bz2")
+        ).encode(),
+        **_sums("20261026", "20261026", "all.json.bz2"),
+        **_sums("20261026", "20261029", "all.json.bz2"),
+    }
+    versions, requests = _wikidata(routes, tmp_path)
+    assert versions == ["2026-10-29"]
+    assert not any("wikidata-20261026-" in u for u in requests), (
+        "one release wanted: the older set is not read"
+    )
+
+
+def test_wikidata_releases_are_newest_first_when_directories_disagree(tmp_path: Path) -> None:
+    """The adapter contract is newest first; a newer directory may hold the older file date."""
+    routes = {
+        ENTITIES: dumps_listing(["20261102", "20261104"]),
+        f"{ENTITIES}20261102/": _rows("20261105", "all.json.bz2").encode(),
+        f"{ENTITIES}20261104/": _rows("20261104", "all.json.bz2").encode(),
+        **_sums("20261102", "20261105", "all.json.bz2"),
+        **_sums("20261104", "20261104", "all.json.bz2"),
+    }
+    assert _wikidata(routes, tmp_path, max_releases=2)[0] == ["2026-11-05", "2026-11-04"]
+    assert _wikidata(routes, tmp_path)[0] == ["2026-11-05"]
+
+
+def test_wikidata_a_listed_file_the_sums_do_not_name_yet_is_not_offered(tmp_path: Path) -> None:
+    """A file still being written is listed with a size; the sha1sums file naming it is the readiness test."""
+    routes = {
+        ENTITIES: dumps_listing(["20261109"]),
+        f"{ENTITIES}20261109/": _rows("20261109", "all.json.bz2", "lexemes.json.bz2").encode(),
+        **_sums("20261109", "20261109", "lexemes.json.bz2"),
+    }
+    assert _wikidata(routes, tmp_path)[0] == []
+
+
+def test_wikidata_nothing_offered_logs_each_run_reason(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """ "No release" used to come without a reason: the info lines of this logger reach no handler."""
+    routes = {
+        ENTITIES: dumps_listing(["20261104", "20261106", "20261109", "20261116"]),
+        f"{ENTITIES}20261104/": _rows("20261104", "truthy.nt.bz2").encode(),
+        f"{ENTITIES}20261106/": _rows("20261106", "all.json.bz2", sums=False).encode(),
+        f"{ENTITIES}20261109/": _rows("20261109", "all.json.bz2").encode(),
+        **_sums("20261109", "20261109", "lexemes.json.bz2"),
+    }  # 20261116: the directory is listed, its own listing is a 404
+    with caplog.at_level("WARNING", logger="wsp_adapters.wikimedia"):
+        assert _wikidata(routes, tmp_path)[0] == []
+    (record,) = [r for r in caplog.records if r.levelname == "WARNING"]
+    message = record.getMessage()
+    assert message.startswith("wikidata: no complete entity dump in the 4 newest runs: ")
+    for reason in (
+        "20261116: listing not read: NotFoundError",
+        "20261109: wikidata-20261109-all.json.bz2 not in the sha1sums file yet",
+        "20261106: no sha1sums file listed",
+        "20261104: wikidata-20261104-all.json.bz2 not listed",
+    ):
+        assert reason in message
+
+
+class _Refusing(FakeFetcher):
+    """Raises ``error`` for every URL that contains ``part``."""
+
+    def __init__(self, routes: dict[str, bytes], part: str, error: Exception) -> None:
+        super().__init__(routes)
+        self.part, self.error = part, error
+
+    def get_bytes(self, url: str, *, max_bytes: int = 64 * 1024 * 1024) -> bytes:
+        if self.part in url:
+            raise self.error
+        return super().get_bytes(url, max_bytes=max_bytes)
+
+
+@pytest.mark.parametrize("part", ["/20261109/", "sha1sums.txt"])
+@pytest.mark.parametrize(
+    "error", [RobotsDisallowedError("robots.txt disallows"), RobotsUnreachableError("503")]
+)
+def test_wikidata_robots_refusal_is_raised_not_swallowed(tmp_path: Path, part: str, error: Exception) -> None:
+    routes = {
+        ENTITIES: dumps_listing(["20261102", "20261109"]),
+        f"{ENTITIES}20261102/": _rows("20261105", "all.json.bz2").encode(),
+        f"{ENTITIES}20261109/": _rows("20261109", "all.json.bz2").encode(),
+        **_sums("20261102", "20261105", "all.json.bz2"),
+        **_sums("20261109", "20261109", "all.json.bz2"),
+    }
+    with pytest.raises(RobotsDisallowedError):
+        list(WikimediaDumpsAdapter().discover(make_ctx(WIKIDATA, _Refusing(routes, part, error), tmp_path)))
+    # Any other failure on one directory is a reason, and the next directory is read.
+    other = _Refusing(routes, "/20261109/", FetchError("HTTP 503"))
+    (release,) = WikimediaDumpsAdapter().discover(make_ctx(WIKIDATA, other, tmp_path))
+    assert release.version == "2026-11-05"
 
 
 def test_index_and_ranges(dump: tuple[Path, Path]) -> None:
