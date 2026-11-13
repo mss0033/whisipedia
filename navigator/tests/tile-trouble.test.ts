@@ -1,7 +1,7 @@
 // A map that cannot be read says so; a glyph the library does not hold says nothing (review of
 // plan B, F4 items 1-3: by HTTP status, cleared at rest, no promise of a retry that does not happen).
 import { describe, expect, it, vi } from 'vitest';
-import { mergeCredits } from '../src/atlas/places.ts';
+import { mergeCredits } from '../src/atlas/credits.ts';
 import { classifyMapError, TILE_TROUBLE_TEXT, TileTrouble } from '../src/atlas/tile-trouble.ts';
 
 /** What MapLibre hands its `error` listeners for a failed request (its AJAXError). */

@@ -88,6 +88,13 @@ for (const f of files) {
       if (/\son[a-z]+=/i.test(text)) errors.push(`${rel}: inline event handler`);
       if (rel === 'index.html' && !/Content-Security-Policy/.test(text))
         errors.push(`${rel}: missing CSP meta`);
+      // The map and TeX chunks load only with a map or a formula. If the first page names one, a
+      // module the whole app needs was bundled into it (2026-11-13: the place rows' imports went into
+      // the MapLibre chunk, and every page loaded 1.1 MB before it could start).
+      if (rel === 'index.html')
+        for (const m of text.matchAll(/(?:src|href)="\/?(assets\/[^"]+)"/g))
+          if (MAP_CHUNK.test(m[1]) || TEX_CHUNK.test(m[1]))
+            errors.push(`${rel}: the first page loads ${m[1]}, a chunk meant to load on demand`);
     }
   }
 }

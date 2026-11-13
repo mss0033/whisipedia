@@ -9,7 +9,7 @@
 import { BLACK, DARK, type Flavor, GRAYSCALE, LIGHT, layers, WHITE } from '@protomaps/basemaps';
 import type { LayerSpecification, SourceSpecification, StyleSpecification } from 'maplibre-gl';
 import type { Tileset, Tilesets } from '../api/types.ts';
-import { mergeCredits } from './places.ts';
+import { mergeCredits } from './credits.ts';
 
 export type LayerMode = 'map' | 'terrain' | 'satellite' | 'hybrid';
 
