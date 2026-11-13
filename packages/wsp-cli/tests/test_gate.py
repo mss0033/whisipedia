@@ -463,6 +463,37 @@ def test_a_failure_hidden_behind_exit_0_at_100_percent_is_a_failure(gate: Gate) 
     assert "pytest packages/wsp-b/tests (exit 0 but the log does not end with pytest's count" in line
 
 
+def test_an_expected_failure_in_the_count_is_not_a_failure(gate: Gate) -> None:
+    """`4 passed, 1 xfailed` holds the word "failed": the gate refused it (verification of 7a)."""
+    gate.answer("packages/wsp-a/tests", 0, "....x [100%]\n4 passed, 1 xfailed in 0.01s\n")
+    gate.answer("packages/wsp-b/tests", 0, "....E [100%]\n4 passed, 1 error in 0.01s\n")
+
+    code, line = gate.run()
+
+    assert code == 1
+    assert "packages/wsp-a/tests" not in line
+    assert "pytest packages/wsp-b/tests (exit 0 but the log ends with: 4 passed, 1 error" in line
+
+
+def test_the_callers_git_and_python_settings_do_not_reach_the_gate(gate: Gate, tmp_path: Path) -> None:
+    """With GIT_DIR and GIT_WORK_TREE of another repository the stamp named that repository's commit
+    while this checkout's steps ran; with PYTHONPATH the tests import another checkout's packages."""
+    head = gate.git("rev-parse", "HEAD")
+    other = tmp_path / "other"
+    other.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=other, env=gate.env, check=True)
+    subprocess.run(
+        ["git", "commit", "-q", "--allow-empty", "-m", "another"], cwd=other, env=gate.env, check=True
+    )
+    gate.hook('printf "%s|%s\\n" "${PYTHONPATH-unset}" "${GIT_DIR-unset}" >> "$FAKE/seen"\n')
+
+    code, line = gate.run(GIT_DIR=str(other / ".git"), GIT_WORK_TREE=str(other), PYTHONPATH=str(other))
+
+    assert code == 0, line
+    assert gate.stamps() == [f"{head}.ok"]
+    assert set((gate.fake / "seen").read_text().split()) == {"unset|unset"}
+
+
 def test_a_scope_that_cannot_be_started_fails_the_step(gate: Gate) -> None:
     (gate.fake / "rc" / "systemd-run").write_text("1\n")
 

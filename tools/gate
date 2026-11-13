@@ -63,7 +63,10 @@
 # GATE_MEMINFO, GATE_DIRS (replaces the directory list), WSP_STATE.
 set -u
 
-unset CDPATH VIRTUAL_ENV
+# Nothing from the caller's shell may point the tools at another tree: with PYTHONPATH the tests
+# import another checkout's packages, with GIT_DIR and GIT_WORK_TREE the stamp names another
+# repository's commit (verification of 7a).
+unset CDPATH VIRTUAL_ENV PYTHONPATH PYTHONHOME GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR
 repo=$(cd -- "$(dirname -- "$0")/.." && pwd -P) || exit 2
 cd -- "$repo" || exit 2
 
@@ -278,7 +281,7 @@ for d in $dirs; do
         fail "pytest $d (exit 0 but the log ends at ${last:-no progress mark}, log $log)"
       else
         case $end in
-          *failed* | *error*) fail "pytest $d (exit 0 but the log ends with: $end, log $log)" ;;
+          *[0-9]\ failed* | *[0-9]\ error*) fail "pytest $d (exit 0 but the log ends with: $end, log $log)" ;;
           *[0-9]\ passed*) passed=$((passed + 1)) ;;
           *) fail "pytest $d (exit 0 but the log does not end with pytest's count, log $log)" ;;
         esac
