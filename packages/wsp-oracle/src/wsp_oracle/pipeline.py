@@ -398,15 +398,13 @@ class OracleSearcher:
         if not pool:
             return None
 
-        # A language the query's words do not announce is a preference: when no page is in it, the
-        # reader's, then the default language's page comes before the other editions (as in
-        # ``_aliased``). "Paris" asked with ``lang=fi`` and no Finnish page held fell to the pool's
-        # order among the editions of one source, and could open the Cebuano page (verification).
-        order = (
-            (lang,)
-            if known
-            else tuple(dict.fromkeys(x for x in (lang, route.reader_lang, DEFAULT_LANG) if x))
-        )
+        # The reader's language is a preference: when no page is in it, the default language's page
+        # comes before the other editions. "Paris" asked with ``lang=fi`` and no Finnish page held
+        # fell to the pool's order among the editions of one source, and could open the Cebuano page
+        # (verification). Only for a language the reader sent: one the query announces or its script
+        # names orders as before (Arabic script is Persian too: the heavier page, not the English).
+        fallback = not known and bool(route.reader_lang) and lang == route.reader_lang
+        order = (lang, DEFAULT_LANG) if fallback else (lang,)
 
         def rank(item: tuple[int, SearchHit]) -> tuple[int, float, int]:
             i, h = item

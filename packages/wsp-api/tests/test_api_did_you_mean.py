@@ -143,10 +143,13 @@ class _Answered(_Index):
     """As :class:`_Index`, and the first result is titled ``first``."""
 
     first: str = ""
+    at: int = 0
 
     def _hits(self) -> tuple[SearchHit, ...]:
-        hits = super()._hits()
-        return (replace(hits[0], title=self.first), *hits[1:])
+        hits = list(super()._hits())
+        hits = (hits * (self.at + 1))[: max(len(hits), self.at + 1)]  # long enough to hold ``at``
+        hits[self.at] = replace(hits[self.at], title=self.first)
+        return tuple(hits)
 
 
 def test_a_query_that_is_a_results_title_is_offered_nothing() -> None:
@@ -157,6 +160,9 @@ def test_a_query_that_is_a_results_title_is_offered_nothing() -> None:
         assert _ask(index, "alan  turring").did_you_mean is None
         assert index.named_asked == []
         assert index.counts == []
+    # far down the list it is no answer (a forum question titled with the slip): corrected as ever
+    deep = _Answered(titles=frozenset({"alan turing"}), first="Alan Turring", at=10)
+    assert _ask(deep, "alan turring").did_you_mean == "alan turing"
     # one word that is a title may still be a slip: the speller's own choice, counted or titled
     one = _Answered(titles=frozenset({"turing"}), first="Turring")
     assert _ask(one, "turring").did_you_mean == "turning"

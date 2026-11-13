@@ -516,4 +516,12 @@ def test_a_reader_language_with_no_edition_leaves_the_default_language_page_firs
     assert best("xx") == make_doc_id("wiki", "en/Paris")
     assert best("de") == make_doc_id("wiki", "de/Paris")  # a reader language that has the page
     assert best(None) == make_doc_id("wiki", "en/Paris")
+    # a language the script names (not the reader) orders as before: no English page jumps the pool
+    arabic = [
+        SearchHit(make_doc_id("wiki", "ceb/Paris"), 1.0, "تهران", "", "wiki", "fa"),
+        SearchHit(make_doc_id("wiki", "en/Paris"), 0.9, "تهران", "", "wiki", "en"),
+    ]
+    hit = searcher._best_titled(searcher.router.route("تهران"), "تهران", arabic, None)  # pyright: ignore[reportPrivateUsage]
+    assert hit is not None
+    assert hit.doc_id == arabic[0].doc_id
     idx.close()

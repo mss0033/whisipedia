@@ -324,7 +324,9 @@ export function suggest(params: URLSearchParams): Response<'GET /v1/suggest'> {
   const boundary = /\s$/.test(raw);
   const begins = (text: string, at = 0) =>
     text.startsWith(q, at) &&
-    (!boundary || text.length === at + q.length || /[ ,\-:'’(./–—!]/.test(text[at + q.length] ?? ''));
+    (!boundary ||
+      text.length === at + q.length ||
+      /[ ,\-:'’(./–—!]/.test(text[at + q.length] ?? ''));
   const limit = Number(params.get('limit') ?? 8) || 8;
   if (!q) return { query: q, suggestions: [], items: [] };
   const item = (d: FixtureDoc, text: string) => ({

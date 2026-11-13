@@ -38,6 +38,7 @@ SLOW_SEARCH_MS = 3000.0  # a search slower than this is logged with its stages
 WINDOW = 200  # hits ranked per query: the page, total and facets are all counted in them
 HIT_FIELD_WORKERS = 6  # header-field reads of one search page run side by side
 SPARSE = 5  # fewer results than this: "did you mean" may correct any unknown or rare word
+ANSWERED_DEPTH = 10  # a result titled as the query this near the top is its answer: no correction
 
 
 def _title_key(text: str) -> str:
@@ -240,7 +241,8 @@ class Searcher:
         more than :data:`SPARSE`, only words the vocabulary does not know may change, or words it knows
         far less often than a word an edit or two away (``rare``: "einstien" is an iFixit user's name,
         and "Albert Einstien" was offered nothing; 2026-11-05 deep dive), unless a result is titled as
-        the query (a rare name that is a page: "Larry Tesler" is not "Larry Tester")."""
+        the query (a rare name that is a page: "Larry Tesler" is not "Larry Tester"). None at all for
+        a query of two words or more that one of the first :data:`ANSWERED_DEPTH` results is titled as."""
         return self._correction(q, found, titles)[0]
 
     def _correction(self, q: str, found: int, titles: Sequence[str]) -> tuple[str | None, bool]:
@@ -248,15 +250,17 @@ class Searcher:
         speller = self.lib.s.speller
         if speller is None:
             return None, False
-        # A result titled as the query is the answer: nothing is offered in its place. Since a
-        # correction that makes a title is offered without a count, a page whose title holds a word
-        # the vocabulary lacks would be "corrected" to the title one letter away (verification of the
-        # 2026-11-10 trawl). Only for a query of two words or more: one word titled so ("teh") may
-        # still be a slip, and no title is put in its place (``rivals`` answers nothing for it).
+        # A result at the head of the list titled as the query is the answer: nothing is offered in
+        # its place. Since a correction that makes a title is offered without a count, a page whose
+        # title holds a word the vocabulary lacks would be "corrected" to the title one letter away
+        # (verification of the 2026-11-10 trawl). Only the first :data:`ANSWERED_DEPTH` results (a
+        # forum question titled with the slip at rank 150 answers nothing), and only for a query of
+        # two words or more: one word titled so ("teh") may still be a slip, and no title is put in
+        # its place (``rivals`` answers nothing for it).
         key = _title_key(q)
-        titled = any(_title_key(t) == key for t in titles)
-        if titled and len(q.split()) > 1:
+        if len(key.split()) > 1 and any(_title_key(t) == key for t in titles[:ANSWERED_DEPTH]):
             return None, False
+        titled = any(_title_key(t) == key for t in titles)
         only: list[str] | None = None
         if found >= SPARSE:
             only = list(speller.unknown(q))

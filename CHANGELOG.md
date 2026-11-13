@@ -14,7 +14,8 @@ All notable changes are documented here. The format follows [Keep a Changelog](h
   `timings_ms` gains `oracle.kind.*` (the kind retrieval's stages), `did_you_mean.spell`,
   `did_you_mean.count` and the marker `oracle.cached`.
 * "Did you mean" prefers the correction that is a page's title ("alan turring": "alan turing"), is
-  counted by one every-word query, and offers nothing when a result is titled as the query.
+  counted by one every-word query, and offers nothing when a query of two words or more is the
+  title of one of the first ten results.
 ### Added: the Crystallography Open Database, one page per structure (2026-11-05)
 * `reader: cod-cif` streams COD's 26.6 GB archive once and makes each of its ~520,000 CIFs a document:
   "<name or formula> (COD <id>)", a summary (formula, space group, cell, authors, journal, year, DOI)
