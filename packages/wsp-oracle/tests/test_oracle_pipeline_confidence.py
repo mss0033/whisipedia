@@ -146,3 +146,31 @@ def test_the_older_doubt_is_told_apart_from_the_new_rule(searcher: OracleSearche
     assert (both.low_confidence, both.unmatched, both.doubted) == (True, True, True)
     held = searcher.run("alligator")
     assert (held.low_confidence, held.unmatched, held.doubted) == (True, False, True)
+
+
+def test_the_every_word_count_is_routed_like_the_search(searcher: OracleSearcher) -> None:
+    index = OracleIndex(searcher)
+    assert index.count_every_word("alan turing", at_least=5) == 2  # Alan Turing, Turing machine
+    assert index.count_every_word("alan turing", at_least=1) == 1
+    assert index.count_every_word("alan qwertyuiopasdf", at_least=5) == 0
+    assert index.count_every_word("alan turing", at_least=5, sources=["rfc"]) == 0
+    assert index.count_every_word("alan turing", at_least=5, sources=[]) == 0
+    assert index.count_every_word("rfc 9111", at_least=5) == 1  # a site and an identifier: counted there
+    assert index.count_every_word(" ", at_least=5) == 0
+    assert index.named("Alan Turing") == [("wsp:encyclo/Alan_Turing", "Alan Turing")]
+    assert index.named("no such page") == []
+
+
+def test_an_index_without_the_count_is_asked_for_hits() -> None:
+    class Plain:
+        def search(
+            self, query: str, *, limit: int = 10, offset: int = 0, sources: Sequence[str] | None = None
+        ) -> Sequence[SearchHit]:
+            from wsp_core.ids import DocId
+
+            return [SearchHit(DocId(f"wsp:a/{i}"), 1.0, "t", "", "a") for i in range(3)][:limit]
+
+    index = OracleIndex(OracleSearcher(Plain()))  # type: ignore[arg-type]
+    assert index.count_every_word("anything", at_least=2) == 2
+    assert index.count_every_word("anything", at_least=5) == 3
+    assert index.named("anything") == []

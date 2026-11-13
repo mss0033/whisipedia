@@ -1142,6 +1142,30 @@ class OracleIndex:
             return cast(Sequence[SearchHit], fast(text, limit=limit, offset=offset, sources=sources))
         return self.lexical.search(text, limit=limit, offset=offset, sources=sources)
 
+    def count_every_word(self, query: str, *, at_least: int, sources: Sequence[str] | None = None) -> int:
+        """How many documents hold every word of ``query``, up to ``at_least``, routed like
+        :meth:`search_hits` (``TantivyIndex.count_every_word``: one query, no stored document). Not a
+        total. A lexical index without it is asked for that many snippet-free hits."""
+        if at_least <= 0 or not query.strip() or (sources is not None and not sources):
+            return 0
+        route, scope = self.searcher.scoped(query, sources)
+        if scope is not None:
+            searched = scope.searched()
+            sources = None if searched is None else list(searched)
+        text = route.lexical or route.dense
+        if not text:
+            return 0
+        count = getattr(self.lexical, "count_every_word", None)
+        if callable(count):
+            return cast(int, count(text, at_least=at_least, sources=sources))
+        return len(self.search_hits(query, limit=at_least, sources=sources))
+
+    def named(self, text: str, *, limit: int = 16) -> Sequence[tuple[str, str]]:
+        """``(doc_id, title)`` of the documents titled or named exactly ``text`` (the lexical index's
+        suggest trie); nothing from an index without one."""
+        named = getattr(self.lexical, "named", None)
+        return cast(Sequence[tuple[str, str]], named(text, limit=limit)) if callable(named) else []
+
     def lookup(self, doc_id: str) -> SearchHit | None:
         find = getattr(self.lexical, "lookup", None)
         return cast(SearchHit | None, find(doc_id)) if callable(find) else None

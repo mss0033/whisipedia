@@ -8,7 +8,9 @@ Offsets beyond the list are refused (422) rather than paged deeper and inconsist
 
 Identical searches in flight share one retrieval; the Oracle also caches recent results, so the next
 page and a facet click reuse it. "Did you mean" asks the vocabulary which words are unknown (no
-search per word) and runs one cheap lexical count only when it has a correction to offer.
+search per word); a correction that is a page's title is offered as it is, and any other only when at
+least :data:`SPARSE` documents (or as many as the query found, if fewer) hold every word of it: one
+every-word count, run only when there is a correction to offer.
 """
 
 from __future__ import annotations
@@ -123,9 +125,14 @@ def retrieve(index: object, q: str, wanted: Sequence[str] | None, lang: str | No
 
 
 def _count(index: object, q: str, wanted: Sequence[str] | None, at_least: int) -> int:
-    """How many hits ``q`` has, up to ``at_least`` (snippet-free when the index can)."""
+    """How many documents hold every word of ``q``, up to ``at_least`` (``count_every_word``: one
+    query, no stored document); from an index without it, how many hits ``q`` has (snippet-free when
+    the index can)."""
     if wanted is not None and not wanted:
         return 0
+    every = getattr(index, "count_every_word", None)
+    if callable(every):
+        return cast(int, every(q, at_least=max(at_least, 1), sources=wanted))
     cheap = getattr(index, "search_hits", None)
     run = cheap if callable(cheap) else cast(Any, index).search
     return len(cast(Sequence[SearchHit], run(q, limit=max(at_least, 1), offset=0, sources=wanted)))
@@ -234,9 +241,13 @@ class Searcher:
         far less often than a word an edit or two away (``rare``: "einstien" is an iFixit user's name,
         and "Albert Einstien" was offered nothing; 2026-11-05 deep dive), unless a result is titled as
         the query (a rare name that is a page: "Larry Tesler" is not "Larry Tester")."""
+        return self._correction(q, found, titles)[0]
+
+    def _correction(self, q: str, found: int, titles: Sequence[str]) -> tuple[str | None, bool]:
+        """``(the correction, whether a page is titled or named exactly so)``."""
         speller = self.lib.s.speller
         if speller is None:
-            return None
+            return None, False
         only: list[str] | None = None
         if found >= SPARSE:
             only = list(speller.unknown(q))
@@ -245,20 +256,90 @@ class Searcher:
             if callable(rare) and not any(_title_key(t) == key for t in titles):
                 only += [w for w in cast(Sequence[str], rare(q)) if w not in only]
             if not only:
-                return None
+                return None, False
         fixed = speller.correct(q, only=only)
         if fixed is None or fixed.casefold() == q.casefold():
-            return None
-        return fixed
+            return None, False
+        return self._titled_correction(q, fixed)
+
+    def _is_title(self, text: str) -> bool:
+        """A page is titled or named exactly ``text``, by the index's suggest trie: the keys equal to
+        it are read (up to some thousands for a title every edition shares) and no document. Any page
+        of the library: the trie knows no source filter. A trie that cannot be read just now (being
+        replaced) answers no: the search goes on with the speller's own choice."""
+        named = getattr(self.lib.s.index, "named", None)
+        if not callable(named):
+            return False
+        try:
+            return bool(named(text, limit=1))
+        except Exception:
+            log.warning("did you mean: the title list could not be asked", exc_info=True)
+            return False
+
+    def _titled_correction(self, q: str, fixed: str) -> tuple[str, bool]:
+        """``fixed``, or the correction of the same word that makes a title when ``fixed`` makes none;
+        and whether what is returned is a title.
+
+        The speller picks the most frequent word near the misspelt one: "alan turring" became "alan
+        turning" (turning is five times more frequent than turing), and no page is called that
+        (2026-11-10 trawl, search-index-11). When one word of two or more changed and the result is no
+        title, the other candidates no further away are tried (``speller.rivals``, which answers
+        nothing for a one-word query: at most ``TITLE_CANDIDATES`` phrases, each one lookup in the
+        title list), and the first that is a title wins. Titles of the whole library: a ``sources`` or
+        ``kind`` filter is not applied to this choice (the count that follows in :meth:`did_you_mean`
+        is filtered). Also the correction :meth:`correction_pin` pins, which is wanted: "Isaac
+        Newtonn". The cost is in the ``did_you_mean.spell`` stage."""
+        if self._is_title(fixed):
+            return fixed, True
+        rivals = getattr(self.lib.s.speller, "rivals", None)  # optional: a corrector may offer none
+        if not callable(rivals):
+            return fixed, False
+        try:
+            phrases = cast(Sequence[str], rivals(q, fixed))
+        except Exception:  # the speller's choice stands: a correction is best-effort, the search is not
+            log.warning("did you mean: no other candidates", exc_info=True)
+            return fixed, False
+        for phrase in phrases:
+            if phrase.casefold() != q.casefold() and self._is_title(phrase):
+                return phrase, True
+        return fixed, False
 
     def did_you_mean(
-        self, q: str, wanted: Sequence[str] | None, found: int, titles: Sequence[str] = ()
+        self,
+        q: str,
+        wanted: Sequence[str] | None,
+        found: int,
+        titles: Sequence[str] = (),
+        stages: dict[str, float] | None = None,
     ) -> str | None:
-        """A correction (:meth:`correction`) offered only if it finds at least as much."""
-        fixed = self.correction(q, found, titles)
+        """A correction (:meth:`correction`) offered when it is a page's title (no count: the page
+        exists; only without a source filter, which the title list does not know), or when at least
+        ``min(found, SPARSE)`` documents hold every word of it.
+
+        Before 2026-11-13 the test was "the correction finds at least as many hits as the list shown",
+        counted by a whole lexical search of the correction ``found`` deep (some 200: the dense stage
+        fills every list): the every-word query, the any-word query and a stored document per hit,
+        seconds for every query that got a correction, and nearly always true (any common word fills
+        200). The count is now the every-word leg alone and asks for five. It is still a conjunction
+        over the index, not a constant, and how long it takes on the full library is not measured
+        yet: ``stages`` gets ``did_you_mean.spell`` and ``did_you_mean.count`` (ms, both inside the
+        caller's ``did_you_mean`` stage) so the slow-search log shows which half costs. Known cost of
+        the stricter test: a long query with one typo is offered its correction only if five documents
+        hold every word of it."""
+        t0 = time.perf_counter()
+        fixed, titled = self._correction(q, found, titles)
+        t1 = time.perf_counter()
+        if stages is not None:
+            stages["did_you_mean.spell"] = round((t1 - t0) * 1000, 1)
         if fixed is None:
             return None
-        return fixed if _count(self.lib.s.index, fixed, wanted, max(found, 1)) >= max(found, 1) else None
+        if wanted is None and titled:
+            return fixed
+        need = min(max(found, 1), SPARSE)
+        enough = _count(self.lib.s.index, fixed, wanted, need) >= need
+        if stages is not None:
+            stages["did_you_mean.count"] = round((time.perf_counter() - t1) * 1000, 1)
+        return fixed if enough else None
 
     def correction_pin(
         self, q: str, hits: Sequence[SearchHit], wanted: Sequence[str] | None, lang: str | None = None
@@ -409,7 +490,7 @@ class Searcher:
         t = lap("hit_fields", t)
         counts = Counter(kinds)
         did_you_mean = (
-            self.did_you_mean(q, self.scope_of(kind, wanted), len(shown), [h.title for h in shown])
+            self.did_you_mean(q, self.scope_of(kind, wanted), len(shown), [h.title for h in shown], stages)
             if offset == 0
             else None
         )

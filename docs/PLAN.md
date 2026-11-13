@@ -368,7 +368,7 @@ Every rung writes a ledger event.
 | Rerank top 50 | Cross-encoder on the GPU | < 50 ms |
 | **Results on screen** | | **p95 < 100 ms** |
 | Static rank (offline) | PageRank over the inter-document link graph, per source and across sources, computed at index-build time and blended into lexical scores and fusion | 0 ms at query time |
-| "Did you mean" (only for sparse or low-score results) | Noisy-channel spelling correction over the index's own vocabulary (symmetric-delete candidates) | < 5 ms |
+| "Did you mean" (only for sparse or low-score results) | Noisy-channel spelling correction over the index's own vocabulary (symmetric-delete candidates); a correction that is no title is checked with one every-word count | vocabulary lookups < 5 ms; the count is one conjunction over the index, not constant and not yet measured (stages `did_you_mean.spell`, `.count`) |
 
 **Results rules:**
 - The search engine is results-first, like a classic web search engine (§10.3). Everything on the results page is extractive: links, snippets, facets, "did you mean" and instant-answer boxes built from structured data.

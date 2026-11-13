@@ -884,6 +884,28 @@ class TantivyIndex:
         """Like :meth:`search` without snippets: much cheaper for wide windows (totals, facets)."""
         return self._search(query, limit=limit, offset=offset, sources=sources, snippets=False).hits
 
+    def count_every_word(self, query: str, *, at_least: int, sources: Sequence[str] | None = None) -> int:
+        """How many documents hold every word of ``query``, counted no further than ``at_least``: for a
+        caller that asks "are there at least this many" ("did you mean"). Never a total or a facet count.
+
+        One query: the every-word one (the word itself for a single word, the phrase for a quoted one).
+        No any-word query, no rank features and no stored document, which were the larger part of the
+        ``search_hits`` this replaces (2026-11-10 trawl, search-index-11: one whole lexical search of
+        the corrected query for some 200 hits, to compare a length). What is left is the every-word leg
+        of that search: Tantivy still scores every document of the conjunction to return the best
+        ``at_least``, so a correction made of common words costs a full intersection of their posting
+        lists. Not a constant-time count, and not measured on the full library yet.
+
+        It counts what leads :meth:`_candidates`' list, with its limits: in an index cut into passages
+        a document whose words are in different passages is not counted, and a query that mixes a
+        quoted phrase with other words is counted as the any-word query it is searched as."""
+        if at_least <= 0 or (sources is not None and not sources):
+            return 0
+        parsed = self._every_word(query) or self.parse(query)
+        if parsed is None:
+            return 0
+        return len(self._top(self._index.searcher(), parsed, at_least, sources))
+
     def search_window(
         self,
         query: str,

@@ -419,7 +419,9 @@ def test_a_search_says_where_its_time_went(browse: httpx.Client) -> None:
     res = SearchResults.model_validate(browse.get("/v1/search", params={"q": "vaccines immune"}).json())
     assert {"retrieval", "page_snippets", "hit_fields", "navigate", "did_you_mean"} <= set(res.timings_ms)
     assert all(v >= 0 for v in res.timings_ms.values())
-    assert sum(v for k, v in res.timings_ms.items() if not k.startswith("oracle.")) <= res.took_ms + 1
+    # the API's own stages add up to the whole; a dotted key is a part of one ("oracle.*" of the
+    # retrieval, "did_you_mean.spell" of "did_you_mean") and is not added again
+    assert sum(v for k, v in res.timings_ms.items() if "." not in k) <= res.took_ms + 1
 
 
 def test_recent_changes_skip_uncaptured_player_stubs_and_carry_the_seal_date() -> None:

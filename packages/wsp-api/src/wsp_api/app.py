@@ -220,6 +220,8 @@ def _warm_search(services: Services) -> None:
     with contextlib.suppress(Exception):
         services.index.search("the library", limit=10)
         services.index.suggest("a", limit=10)
+        if services.speller is not None:  # opens the vocabulary: the first search paid for it
+            services.speller.unknown("the library")
 
 
 def _etag(body: bytes) -> str:

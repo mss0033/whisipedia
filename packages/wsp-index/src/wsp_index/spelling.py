@@ -87,6 +87,8 @@ MAGIC = b"WSPSPEL2"
 MAGIC_V1 = b"WSPSPEL1"
 ANY = "any"
 RARE_RATIO = 1_000.0
+TITLE_CANDIDATES = 8  # other corrections of a word tried as a title (:meth:`Speller.rivals`)
+NEAR_SCAN = 256  # vocabulary candidates read for them, most frequent first
 """A known word this many times rarer than a word one or two edits away is a suspected typo
 (:meth:`Speller.rare`)."""
 RARE_MIN_LENGTH = 5  # shorter words have common neighbours by chance ("hume" and "home")
@@ -901,6 +903,24 @@ class Vocabulary:
                 out.append((cand, dist, int(self._count[i])))
         return out
 
+    def near(self, word: str, max_distance: int, limit: int, scan: int = NEAR_SCAN) -> list[Correction]:
+        """Up to ``limit`` words within ``max_distance`` edits of ``word`` (:func:`osa_distance`), the
+        most frequent first, ``word`` itself left out. At most ``scan`` candidates are read (each a
+        random read in the vocabulary file): the frequent ones come first, and a rare look-alike past
+        them is no correction worth offering."""
+        out: list[Correction] = []
+        cap = min(max_distance, self.limit(word))
+        for i in self._candidate_ids(word, self.limit(word)).tolist()[:scan]:
+            cand = self._word(i)
+            if cand == word:
+                continue
+            dist = osa_distance(word, cand, cap)
+            if dist <= cap:
+                out.append(Correction(word, cand, dist, int(self._count[i])))
+                if len(out) >= limit:
+                    break
+        return out
+
     def rival(self, word: str, ratio: float = RARE_RATIO) -> Correction | None:
         """The most frequent word within the edit limit, with the same first letter, that is at least
         ``ratio`` times more frequent than ``word`` (a known word); None when there is none."""
@@ -1239,6 +1259,42 @@ class Speller:
         fixed = "".join(out)
         return fixed if changed and fixed != query else None
 
+    def rivals(self, query: str, fixed: str, limit: int = TITLE_CANDIDATES) -> list[str]:
+        """``query`` with the one word :meth:`correct` changed replaced by each other candidate that is
+        no further from it than the chosen one (:func:`osa_distance`), the most frequent first, at most
+        ``limit``; nothing when ``fixed`` changed more or less than one word, or the query is one word.
+
+        For a caller that knows which phrases are titles: frequency picks "alan turning" for "alan
+        turring" (turning 1,866, turing 352 in the English sample, both one edit away), and "alan
+        turing" is the page (2026-11-10 trawl, search-index-11). The distance filter comes before the
+        cut: most of a word's frequent neighbours are two edits away."""
+        before, after = query_words(query), query_words(fixed)
+        if len(before) != len(after) or len(before) < 2:
+            return []  # one word alone: every word is some page's title, and says nothing of which
+        changed = [i for i, (a, b) in enumerate(zip(before, after, strict=True)) if a[1] != b[1]]
+        if len(changed) != 1:
+            return []
+        vocab = self.choose([w for _, w in before])  # the vocabulary that corrected it
+        if vocab is None:
+            return []
+        at = changed[0]
+        raw, word = before[at]
+        chosen = after[at][1]
+        distance = osa_distance(word, chosen, vocab.limit(word))
+        start = 0  # where the changed token is in the query: tokens are substrings, in order
+        for i, (token, _) in enumerate(before):
+            start = query.find(token, start)
+            if start < 0:
+                return []
+            if i == at:
+                break
+            start += len(token)
+        out: list[str] = []
+        for c in vocab.near(word, distance, limit + 1):
+            if c.candidate != chosen and len(out) < limit:
+                out.append(query[:start] + _display(c.candidate, raw) + query[start + len(raw) :])
+        return out
+
     def unknown(self, query: str) -> list[str]:
         """Normalized words of the query (3+ letters) that its vocabulary does not know."""
         words = [w for _, w in query_words(query)]
@@ -1294,3 +1350,7 @@ class ReloadingSpeller:
     def rare(self, query: str, ratio: float = RARE_RATIO) -> list[str]:
         s = self.current()
         return [] if s is None else s.rare(query, ratio)
+
+    def rivals(self, query: str, fixed: str, limit: int = TITLE_CANDIDATES) -> list[str]:
+        s = self.current()
+        return [] if s is None else s.rivals(query, fixed, limit)

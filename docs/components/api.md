@@ -79,8 +79,10 @@ and needs an ADR.
   on the raw path, so native ids ending in `/history` do not collide (ADR-0006,
   [addresses](../api/addresses.md)).
 - **Did you mean.** `did_you_mean` is set only on the first page, only when the results are sparse
-  (fewer than 5) or a query word matches no document, and only if the corrected query finds at
-  least as many documents. The corrector is the `SpellingCorrector` seam (`Services.speller`;
+  (fewer than 5) or a query word matches no document. A correction that is a page's title is offered
+  as it is (and when the commonest correction of one word makes no title, a rarer one that does is
+  preferred: "alan turring" is "alan turing", not "alan turning"); any other only if at least 5
+  documents (or as many as the query found, if fewer) hold every word of it. The corrector is the `SpellingCorrector` seam (`Services.speller`;
   `wsp_index.spelling.ReloadingSpeller` in the real backend).
 - **Site scope.** When the index routes a query to a named site (`rfc 9110`), `scope` reports it
   and `total`/`facets` count the same scope as `hits`. `scope.fallback` means the site had nothing

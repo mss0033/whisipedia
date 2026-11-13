@@ -641,3 +641,46 @@ def test_a_known_word_far_rarer_than_its_neighbour_is_suspect() -> None:
     assert s.rare("keplar") == []  # 225 times rarer only
     assert s.rare("zzqxv relativity") == []  # unknown words are unknown(), not rare()
     assert s.rare("") == []
+
+
+def test_the_other_corrections_of_the_one_changed_word_no_further_away() -> None:
+    """Frequency picks "turning" for "turring"; "turing", as near, makes the title "Alan Turing"
+    (2026-11-10 trawl, search-index-11)."""
+    s = Speller.from_counts(
+        {
+            "alan": 5000,
+            "turning": 1866,
+            "turing": 352,
+            "during": 90000,  # two edits: more frequent, and no nearer than the chosen one
+            "turfing": 40,
+            "herring": 700,
+            "machine": 4000,
+        }
+    )
+    assert s.correct("Alan Turring") == "Alan Turning"
+    rivals = s.rivals("Alan Turring", "Alan Turning")
+    assert rivals[0] == "Alan Turing"  # most frequent first, capitalized like the word typed
+    assert "Alan Turning" not in rivals  # the chosen one is not its own rival
+    assert "Alan During" not in rivals  # further away than the chosen correction
+    assert set(rivals) == {"Alan Turing", "Alan Turfing"}
+    assert s.rivals("alan  turring machine", "alan  turning machine")[0] == "alan  turing machine"
+    assert s.rivals("Alan Turring", "Alan Turning", limit=1) == ["Alan Turing"]
+    # more or less than one word changed, or a different number of words: nothing
+    assert s.rivals("alen turring", "alan turning") == []
+    assert s.rivals("alan turning", "alan turning") == []
+    assert s.rivals("alan turring", "alan turning machine") == []
+    assert s.rivals("", "") == []
+    assert s.rivals("turring", "turning") == []  # one word alone has no rivals
+    assert s.rivals("alan-turring", "alan-turning")[0] == "alan-turing"  # words, not spaces
+
+
+def test_near_reads_a_bounded_number_of_candidates() -> None:
+    from wsp_index.spelling import Vocabulary
+
+    s = Speller.from_counts({"turning": 1866, "turing": 352, "tuning": 300, "burning": 900, "turnip": 50})
+    vocab: Vocabulary = s.vocabs[0]
+    assert [c.candidate for c in vocab.near("turring", 1, 5)] == ["turning", "turing"]
+    assert [c.candidate for c in vocab.near("turring", 2, 5)][:2] == ["turning", "burning"]  # by count
+    assert [c.candidate for c in vocab.near("turring", 1, 1)] == ["turning"]
+    assert [c.candidate for c in vocab.near("turring", 1, 5, scan=1)] == ["turning"]  # no further read
+    assert vocab.near("turning", 1, 5)[0].candidate != "turning"  # never the word itself

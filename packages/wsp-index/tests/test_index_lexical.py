@@ -783,3 +783,60 @@ def test_leads_from_the_stored_text_or_the_document_store(tmp_path: Path) -> Non
             assert leads[make_doc_id("w", "Brown")].startswith("Brown v. Board of Education of Topeka")
             assert len(leads[make_doc_id("w", "Brown")]) <= SMALL.snippet_chars + 1
             assert idx.leads([]) == {}
+
+
+def test_count_every_word_counts_without_reading_documents(
+    index: TantivyIndex, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ "Did you mean" ran a whole search of the correction to compare a length (2026-11-10 trawl)."""
+    docs = [doc("a", f"both{i}", f"Both {i}", "alan turing wrote papers") for i in range(7)]
+    docs += [doc("b", f"one{i}", f"One {i}", "alan kay wrote programs") for i in range(4)]
+    docs += [doc("b", "t", "Turing only", "turing machines")]
+    index.upsert(docs)
+    index.commit()
+    assert index.count_every_word("alan turing", at_least=5) == 5  # no further than asked
+    assert index.count_every_word("alan turing", at_least=50) == 7  # every word, not any: 4 + 1 others
+    assert len(index.search_hits("alan turing", limit=50)) == 12  # what the old count saw
+    assert index.count_every_word("alan", at_least=50) == 11  # one word: the word
+    assert index.count_every_word("alan zzzqqq", at_least=5) == 0  # a word no document holds
+    assert index.count_every_word("zzzqqq", at_least=5) == 0
+    assert index.count_every_word("alan turing", at_least=50, sources=["b"]) == 0
+    assert index.count_every_word("alan wrote", at_least=50, sources=["b"]) == 4
+    assert index.count_every_word("alan turing", at_least=50, sources=[]) == 0
+    assert index.count_every_word("alan turing", at_least=0) == 0
+    assert index.count_every_word("", at_least=5) == 0
+    for q in ("alan turing", "alan wrote", "turing"):  # agrees with the every-word lead of a search
+        assert index.count_every_word(q, at_least=50) == sum(
+            all(w in f"{d.title} {d.text}".lower().split() for w in q.split()) for d in docs
+        ), q
+    # one query, and no stored document read
+    searches: list[int] = []
+    real = index._top  # pyright: ignore[reportPrivateUsage]
+
+    def top(*args: object, **kw: object) -> object:
+        searches.append(1)
+        return real(*args, **kw)  # type: ignore[arg-type]
+
+    class NoDocs:
+        def __init__(self, inner: object) -> None:
+            self.inner = inner
+
+        def __getattr__(self, name: str) -> object:
+            if name == "doc":
+                raise AssertionError("count_every_word read a stored document")
+            return getattr(self.inner, name)
+
+    inner = index._index  # pyright: ignore[reportPrivateUsage]
+
+    class Handle:
+        def __getattr__(self, name: str) -> object:
+            return getattr(inner, name)
+
+        def searcher(self) -> object:
+            return NoDocs(inner.searcher())
+
+    with monkeypatch.context() as patched:  # undone before the index closes
+        patched.setattr(index, "_top", top)
+        patched.setattr(index, "_index", Handle())
+        assert index.count_every_word("alan turing", at_least=5) == 5
+    assert searches == [1]
