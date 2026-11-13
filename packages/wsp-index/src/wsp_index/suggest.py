@@ -14,13 +14,23 @@ Structure (chosen by ``scripts/bench_index.py``; see ``docs/components/index.md`
 * Other prefixes have at most ``heavy_threshold`` completions, enumerated and sorted on the fly.
 * A small in-memory **overlay** absorbs incremental upserts/deletes between rebuilds.
 
-Ranking: ``score = prior + 1 / (1 + len(title))``. ``prior`` is a popularity signal in ``[0, 1]`` (the
-static rank's feature); the length term prefers "Paris" over "Paris Commune" when priors tie. An alias
-key scores :data:`ALIAS_PENALTY` lower, so a title that starts with what was typed comes before a
-document that only an alias (a redirect, another language's label) matched; an alias typed in full
-ranks with the titles again. Results in the reader's language (``lang``) come before others, and an
-alias match shows the alias, not the title: typing "pho" in the English Navigator listed 磷, 摄影 and
-音位 (their English labels matched), and picking one searched for "磷" (2026-11-05 deep dive).
+Ranking. The stored score is ``prior + 1 / (1 + len(title))``: ``prior`` is a popularity signal in
+``[0, 1]`` (the static rank's feature) and the length term prefers "Paris" over "Paris Commune" when
+priors tie. Stored, the length term decided far more than ties: well-linked pages differ in the third
+decimal of the prior, a 6- and a 9-letter title by 0.04, so "Kath" offered Kathak before Kathmandu
+(2026-11-10 trawl). At query time :func:`_rank` therefore orders by ``prior + LENGTH_WEIGHT / (1 +
+len)`` (:func:`_rank_score`), recovered from the stored score: the better-known title first, the
+shorter one between equals. Known limit: the candidates ranked are still the best by the *stored* score
+(the pool of :func:`_pool_size`, a heavy prefix's precomputed list), so a long famous title outside
+that pool is not recovered; changing the stored formula means a new ``KEY_FORMAT`` and a rebuild.
+An alias key scores :data:`ALIAS_PENALTY` lower, so a title that starts with what was typed comes
+before a document that only an alias (a redirect, another language's label) matched; an alias typed in
+full ranks with the titles again, and what was typed in full (a title, a name) leads its language.
+A prefix that ends in a space asks for the next word: "alan " offers the page "Alan" and "Alan
+Turing", not "Alans" or "Alanya". Results in the reader's
+language (``lang``) come before others, and an alias match shows the alias, not the title: typing
+"pho" in the English Navigator listed 磷, 摄影 and 音位 (their English labels matched), and picking one
+searched for "磷" (2026-11-05 deep dive).
 
 On disk each build is a version directory (``v000007/`` with both tries) named by the ``CURRENT``
 pointer, which a build replaces atomically once the version is complete: a reader never pairs a new
@@ -38,6 +48,7 @@ import re
 import shutil
 import sys
 import threading
+import unicodedata
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -65,6 +76,8 @@ DEFAULT_TOP_K = 32
 # Above any title key's score (a prior in [0, 1] plus a length term of at most 0.5): every alias key
 # ranks below every title key in the precomputed top lists and in the scan.
 ALIAS_PENALTY = 2.0
+LENGTH_WEIGHT = 0.02
+"""How much of the stored length term ranking keeps: a tie-breaker between equally known titles."""
 POOL_FACTOR = 4  # candidates read per result wanted, then ranked by language and match
 # ... at most a heavy prefix's precomputed list (unless ``limit`` is more): one more read scans
 # the prefix's first _MAX_SCAN keys, on every keystroke.
@@ -404,10 +417,11 @@ class Suggester:
     def suggest_docs(self, prefix: str, *, limit: int = 10, lang: str | None = None) -> list[Suggestion]:
         """Up to ``limit`` documents whose title or alias starts with ``prefix``: the ``limit *``
         :data:`POOL_FACTOR` best by score (:func:`_pool_size`) and the keys equal to it, ranked by
-        :func:`_rank`."""
+        :func:`_rank`. A ``prefix`` ending in a space completes at the word boundary (:func:`_probes`)."""
         norm = normalize_key(prefix)
         if not norm or limit <= 0:
             return []
+        probes = _probes(prefix, norm)
         with self._lock:
             base = self._base
             hidden = frozenset(self._hidden) if self._hidden else frozenset[str]()
@@ -415,13 +429,15 @@ class Suggester:
                 Candidate(key_score(e.prior, e.title, alias), k, e.title, alias, e.lang, e.doc_id)
                 for e, keys in self._added.values()
                 for k, alias in keys
-                if k.startswith(norm)
+                if k.startswith(probes) or k == norm
             ]
         extra.sort(key=lambda c: (-c.score, c.title))
-        streams: list[Iterator[Candidate]] = [iter(extra)]
+        # the keys equal to what was typed are in ``exact``: after a trailing space they are no completion
+        streams: list[Iterator[Candidate]] = [iter([c for c in extra if c.norm.startswith(probes)])]
         exact = [c for c in extra if c.norm == norm]
         if base is not None:
-            streams.append(c for c in base.candidates(norm) if c.doc_id not in hidden)
+            # one stream per probe: each is its own prefix (a heavy one has its precomputed list)
+            streams += [(c for c in base.candidates(p) if c.doc_id not in hidden) for p in probes]
             exact += [c for c in base.exact(norm) if c.doc_id not in hidden]
         pool = itertools.islice(heapq.merge(*streams, key=lambda c: -c.score), _pool_size(limit))
         return _rank([*pool, *exact], norm, lang, limit)
@@ -466,6 +482,31 @@ def _doc_score(c: Candidate) -> float:
     return c.score + ALIAS_PENALTY - 1.0 / (1.0 + len(c.alias)) + 1.0 / (1.0 + len(c.title))
 
 
+_WORD_ENDS = " ,-:'\u2019(./"  # what may follow a finished word in a title: "Washington, D.C.", "Spider-Man"
+_UNSPACED = ("CJK", "IDEOGRAPHIC", "HIRAGANA", "KATAKANA", "THAI", "LAO", "KHMER", "MYANMAR", "TIBETAN")
+
+
+def _probes(prefix: str, norm: str) -> tuple[str, ...]:
+    """The normalized prefixes a completion must start with one of: ``norm`` alone, or, when the text
+    typed ends in a space (the word is finished), ``norm`` followed by each character that ends a word
+    in a title (:data:`_WORD_ENDS`: "washington " still offers "Washington, D.C.", "jean " still
+    "Jean-Paul Sartre"). The keys equal to ``norm`` are looked up besides. Not for a script written
+    without spaces: a space an input method leaves after "東京" finishes no word, and 東京都 is still
+    wanted."""
+    if not prefix[-1:].isspace() or unicodedata.name(norm[-1], "").startswith(_UNSPACED):
+        return (norm,)
+    return tuple(norm + end for end in _WORD_ENDS)
+
+
+def _rank_score(c: Candidate) -> float:
+    """What :func:`_rank` orders by: the prior plus :data:`LENGTH_WEIGHT` of the length term, from a
+    key's stored score (``prior + 1 / (1 + len)`` of the title, or of the alias less
+    :data:`ALIAS_PENALTY`; a layout-1 key has no alias). The length term is then at most 0.01: a
+    tie-breaker, where stored it outweighed any difference between two well-known pages."""
+    stored = c.score + ALIAS_PENALTY if c.alias else c.score
+    return stored - (1.0 - LENGTH_WEIGHT) / (1.0 + len(c.alias or c.title))
+
+
 def _pool_size(limit: int) -> int:
     return max(limit, min(limit * POOL_FACTOR, _POOL_MAX))
 
@@ -476,15 +517,21 @@ def _foreign(doc_lang: str, want: str) -> bool:
 
 def _rank(cands: Iterable[Candidate], norm: str, lang: str | None, limit: int) -> list[Suggestion]:
     """``limit`` suggestions, one per document and per text (case-folded): documents in ``lang`` (or in
-    no language) first, then titles and aliases typed in full before aliases only begun, then by score.
-    A suggestion shows what matched: the alias when an alias did."""
-    want = primary_lang(lang) if lang and lang.strip() else None
+    no language) first; then what was typed in full (a title or a name that is exactly it), then
+    titles before aliases only begun, then by how well known the page is and, between equals, the
+    shorter text (:func:`_rank_score`). A suggestion shows what matched: the alias when an alias did.
 
-    def order(c: Candidate) -> tuple[bool, bool, float, str, str]:
+    What was typed in full leads whatever its prior: under the stored score it led for being the
+    shortest completion, and without that "Mercury" fell off the list behind nine better-known
+    "Mercury ..." titles, while two callers ask this list whether a text is a title
+    (``wsp_oracle.pipeline._named_in_query``, ``wsp_api.search``). ``lang`` that names no language
+    (``mul``, ``und``) prefers none."""
+    want = primary_lang(lang) if lang and lang.strip().lower() not in _NEUTRAL_LANGS else None
+
+    def order(c: Candidate) -> tuple[bool, bool, bool, float, str, str]:
         foreign = want is not None and _foreign(c.lang, want)
         partial_alias = bool(c.alias) and c.norm != norm
-        score = c.score + ALIAS_PENALTY if c.alias else c.score
-        return (foreign, partial_alias, -score, c.text, c.doc_id)
+        return (foreign, c.norm != norm, partial_alias, -_rank_score(c), c.text, c.doc_id)
 
     out: list[Suggestion] = []
     seen_docs: set[str] = set()
@@ -508,12 +555,14 @@ def suggest_entries_bruteforce(
     norm = normalize_key(prefix)
     if not norm or limit <= 0:
         return []
+    probes = _probes(prefix, norm)
     found = [
         Candidate(float(np.float32(key_score(e.prior, e.title, alias))), k, e.title, alias, e.lang, e.doc_id)
         for e in entries
         for k, alias in e.keyed()
-        if k.startswith(norm)
+        if k.startswith(probes) or k == norm
     ]
     found.sort(key=lambda c: (-c.score, _trie_key(c.norm, c.title, c.alias, c.lang, c.doc_id)))
     exact = [c for c in found if c.norm == norm][:_EXACT_MAX]
-    return [s.text for s in _rank([*found[: _pool_size(limit)], *exact], norm, lang, limit)]
+    pool = [c for c in found if c.norm.startswith(probes)][: _pool_size(limit)]
+    return [s.text for s in _rank([*pool, *exact], norm, lang, limit)]

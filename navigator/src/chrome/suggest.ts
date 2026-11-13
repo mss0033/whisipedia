@@ -7,6 +7,11 @@
  * (磷 for "pho", matched by its English label) and picking one searched for
  * that text (2026-11-05 deep dive). Documents in the Navigator's language come
  * first.
+ *
+ * A space typed after a word is sent (one, however many were typed): it tells
+ * the API the word is finished, so "alan " offers "Alan Turing" and not
+ * "Alans". The box's text was trimmed before it was asked, and the API's rule
+ * never reached a reader (review of the 2026-11-10 trawl).
  */
 import type { Suggestion, Suggestions } from '../api/types.ts';
 import { debounce, h, uid, uiLanguage } from '../core/dom.ts';
@@ -21,6 +26,15 @@ export interface SuggestOptions {
   /** Include matching local history entries (location bar). */
   history?: boolean;
   limit?: number;
+}
+
+/**
+ * What the suggestions are asked for: the text typed without the spaces around
+ * it, and one space after it when the reader typed any there.
+ */
+export function typedQuery(value: string): string {
+  const q = value.trim();
+  return q && /\s$/.test(value) ? `${q} ` : q;
 }
 
 /** The API's suggestions, each with the page it opens (an older API sends titles only). */
@@ -85,10 +99,12 @@ export function attachSuggest(
       return;
     }
     const ql = q.toLowerCase();
+    const word = ql.trim(); // "alan " also shows the page "Alan", typed in full
     list.replaceChildren(
       ...items.map((s, i) => {
         const text = s.text;
-        const k = text.toLowerCase().startsWith(ql) ? q.length : 0;
+        const tl = text.toLowerCase();
+        const k = tl.startsWith(ql) ? q.length : tl.startsWith(word) ? word.length : 0;
         const li = h(
           'li',
           { id: `${listId}-${i}`, role: 'option', class: 'suggest-item', 'aria-selected': 'false' },
@@ -120,14 +136,11 @@ export function attachSuggest(
     controller?.abort();
     const ac = new AbortController();
     controller = ac;
+    const typed = q.trim().toLowerCase(); // history is matched anywhere in a title: no word boundary
     const local: PickedSuggestion[] = opts.history
       ? app.history
           .list()
-          .filter(
-            (e) =>
-              e.title.toLowerCase().includes(q.toLowerCase()) ||
-              e.address.includes(q.toLowerCase()),
-          )
+          .filter((e) => e.title.toLowerCase().includes(typed) || e.address.includes(typed))
           .slice(0, 3)
           .map((e) => ({ text: e.title || e.address, address: e.address, history: true }))
       : [];
@@ -135,7 +148,7 @@ export function attachSuggest(
     app.api
       .suggest(q, limit, ac.signal, uiLanguage())
       .then((r) => {
-        if (ac.signal.aborted || input.value.trim() !== q) return;
+        if (ac.signal.aborted || typedQuery(input.value) !== q) return;
         waiting = false;
         const seen = new Set(local.map((l) => l.text.toLowerCase()));
         const remote = remoteSuggestions(r).filter((s) => !seen.has(s.text.toLowerCase()));
@@ -147,8 +160,8 @@ export function attachSuggest(
   }, SUGGEST_DEBOUNCE_MS);
 
   const onInput = () => {
-    const q = input.value.trim();
-    if (q.length < 2 || /^wsp:/i.test(q)) {
+    const q = typedQuery(input.value);
+    if (q.trim().length < 2 || /^wsp:/i.test(q)) {
       fetchSuggestions.cancel();
       controller?.abort();
       close();

@@ -92,3 +92,7 @@ class ApiSettings:
     search_queue: int = 32
     search_timeout_seconds: float = 30.0
     slow_request_seconds: float = 2.0  # requests slower than this (or failing) are logged
+    # The reader's language when ``/v1/suggest`` is sent none: its documents are suggested first. With
+    # none, nothing was foreign and the list mixed languages for every direct caller (the Navigator
+    # sends its own). ``/v1/search`` keeps the pipeline's default (``wsp_oracle.pipeline.DEFAULT_LANG``).
+    default_lang: str = "en"

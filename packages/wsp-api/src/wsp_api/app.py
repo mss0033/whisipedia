@@ -427,7 +427,11 @@ def _v1(lib: Library, settings: ApiSettings) -> APIRouter:
     def suggest(
         q: Annotated[
             str,
-            Query(max_length=200, description="Text typed so far: titles with a word that starts with it."),
+            Query(
+                max_length=200,
+                description="Text typed so far: titles with a word that starts with it. A trailing space "
+                'asks for the next word ("alan " offers "Alan Turing", not "Alans").',
+            ),
         ],
         limit: Annotated[int, Query(ge=1, le=50)] = 10,
         lang: Annotated[
@@ -435,7 +439,9 @@ def _v1(lib: Library, settings: ApiSettings) -> APIRouter:
             Query(
                 max_length=35,
                 pattern=r"^[A-Za-z]{2,8}([-_][A-Za-z0-9]{1,8})*$",
-                description="The reader's language (BCP-47): documents in it come first.",
+                description="The reader's language (BCP-47): documents in it come first. Default: "
+                "the library's language. `mul` prefers no language (the order across languages is "
+                "by how well known a page is).",
             ),
         ] = None,
     ) -> Suggestions:
@@ -448,7 +454,7 @@ def _v1(lib: Library, settings: ApiSettings) -> APIRouter:
         found: Sequence[Suggestion] | None = None
         if isinstance(s.index, DocSuggester):
             try:
-                found = s.index.suggest_docs(q, limit=limit, lang=lang)
+                found = s.index.suggest_docs(q, limit=limit, lang=lang or settings.default_lang)
             except NotImplementedError:  # a wrapper over an index without the capability
                 found = None
         if found is not None:

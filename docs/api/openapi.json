@@ -728,10 +728,10 @@
             "schema": {
               "type": "string",
               "maxLength": 200,
-              "description": "Text typed so far: titles with a word that starts with it.",
+              "description": "Text typed so far: titles with a word that starts with it. A trailing space asks for the next word (\"alan \" offers \"Alan Turing\", not \"Alans\").",
               "title": "Q"
             },
-            "description": "Text typed so far: titles with a word that starts with it."
+            "description": "Text typed so far: titles with a word that starts with it. A trailing space asks for the next word (\"alan \" offers \"Alan Turing\", not \"Alans\")."
           },
           {
             "name": "limit",
@@ -760,10 +760,10 @@
                   "type": "null"
                 }
               ],
-              "description": "The reader's language (BCP-47): documents in it come first.",
+              "description": "The reader's language (BCP-47): documents in it come first. Default: the library's language. `mul` prefers no language (the order across languages is by how well known a page is).",
               "title": "Lang"
             },
-            "description": "The reader's language (BCP-47): documents in it come first."
+            "description": "The reader's language (BCP-47): documents in it come first. Default: the library's language. `mul` prefers no language (the order across languages is by how well known a page is)."
           }
         ],
         "responses": {

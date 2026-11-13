@@ -1186,10 +1186,10 @@ export interface Routes {
   'GET /v1/suggest': {
     path: Record<string, never>;
     query: {
-      /** Text typed so far: titles with a word that starts with it. */
+      /** Text typed so far: titles with a word that starts with it. A trailing space asks for the next word ("alan " offers "Alan Turing", not "Alans"). */
       q: string;
       limit?: number | undefined;
-      /** The reader's language (BCP-47): documents in it come first. */
+      /** The reader's language (BCP-47): documents in it come first. Default: the library's language. `mul` prefers no language (the order across languages is by how well known a page is). */
       lang?: string | null | undefined;
     };
     body: null;

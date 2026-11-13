@@ -144,10 +144,12 @@ def test_suggest_priors_and_aliases(index: TantivyIndex) -> None:
     # The document's own aliases join at once, shown as themselves (2026-11-05 deep dive).
     assert [(s.text, s.title) for s in index.suggest_docs("city of")] == [("City of Light", "Paris")]
     set_rank(index, {make_doc_id("s", "pc"): 0.9})  # priors are the static rank's features
-    assert index.suggest("paris")[0] == "Paris Commune"
+    # "pari", not "paris": a title typed in full leads whatever its prior (2026-11-10 trawl, 4b-1)
+    assert index.suggest("pari")[0] == "Paris Commune"
+    assert index.suggest("paris")[:2] == ["Paris", "Paris Commune"]
     index.upsert([doc("s", "pb", "Parisbahn", lang="de")])
     index.commit()
-    assert [s.title for s in index.suggest_docs("paris", lang="de-CH")][:2] == ["Parisbahn", "Paris Commune"]
+    assert [s.title for s in index.suggest_docs("pari", lang="de-CH")][:2] == ["Parisbahn", "Paris Commune"]
 
 
 def test_suggest_rebuild_path_matches_overlay_path(tmp_path: Path) -> None:
@@ -493,7 +495,8 @@ def test_a_new_rank_replaces_every_prior(index: TantivyIndex) -> None:
     set_rank(index, {make_doc_id("s", "p"): 0.9})
     assert index.suggest("paris")[0] == "Paris"
     set_rank(index, {make_doc_id("s", "pc"): 0.5, make_doc_id("t", "ph"): 0.2})  # p has no rank now
-    assert index.suggest("paris") == ["Paris Commune", "Paris Hilton", "Paris"]
+    # "pari", not "paris": a title typed in full leads whatever its prior (2026-11-10 trawl, 4b-1)
+    assert index.suggest("pari") == ["Paris Commune", "Paris Hilton", "Paris"]
 
 
 def test_a_suggest_rebuild_is_due_only_for_a_stale_or_old_trie(tmp_path: Path) -> None:

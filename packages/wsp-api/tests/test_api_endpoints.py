@@ -1,7 +1,8 @@
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
-from typing import ClassVar
+from pathlib import Path
+from typing import Any, ClassVar, cast
 
 import httpx
 
@@ -19,6 +20,7 @@ from wsp_api.schemas import (
     Suggestions,
     SystemStatus,
 )
+from wsp_api.services import ApiSettings
 from wsp_api.testing import local_client
 from wsp_api.testing.fakes import SAMPLE_GEN_1, SAMPLE_GEN_2, InMemoryLexicalIndex, sample_services
 from wsp_core.ids import DocId
@@ -355,3 +357,59 @@ def test_routed_scope_keeps_totals_and_facets_consistent() -> None:
         assert sum(f.count for f in fb.facets) == fb.total
     with local_client(create_app(base)) as c:
         assert c.get("/v1/search", params={"q": "rfc caching"}).json()["scope"] is None
+
+
+class _Titles:
+    """A suggesting index over a trie of titles in several languages (``DocSuggester``)."""
+
+    def __init__(self, tmp_path: Path) -> None:
+        from wsp_index.suggest import SuggestEntry, Suggester, TitleTrie
+
+        entries = [
+            SuggestEntry("wsp:w/zh/磷", "磷", ("Phosphor",), prior=0.99, lang="zh"),
+            SuggestEntry("wsp:w/de/Photosynthese", "Photosynthese", prior=0.98, lang="de"),
+            SuggestEntry("wsp:w/en/Phoenix", "Phoenix", prior=0.5, lang="en"),
+            SuggestEntry("wsp:rfc/1", "Photon notes", prior=0.1, lang=""),
+            SuggestEntry("wsp:w/en/Alans", "Alans", prior=0.9, lang="en"),
+            SuggestEntry("wsp:w/en/Alan_Turing", "Alan Turing", prior=0.8, lang="en"),
+        ]
+        self.inner = Suggester(TitleTrie.build(entries, tmp_path))
+
+    def suggest(self, prefix: str, *, limit: int = 10) -> Sequence[str]:
+        return self.inner.suggest(prefix, limit=limit)
+
+    def suggest_docs(self, prefix: str, *, limit: int = 10, lang: str | None = None) -> Sequence[Suggestion]:
+        return self.inner.suggest_docs(prefix, limit=limit, lang=lang)
+
+
+def _suggested(c: httpx.Client, **params: object) -> list[str]:
+    r = c.get("/v1/suggest", params=cast(Any, params))
+    assert r.status_code == 200, r.text
+    return Suggestions.model_validate(r.json()).suggestions
+
+
+def test_suggest_without_lang_prefers_the_default_language(tmp_path: Path) -> None:
+    # With no lang nothing was foreign: a direct caller got the German and Chinese pages first.
+    services = replace(sample_services(), index=cast(Any, _Titles(tmp_path)))
+    with local_client(create_app(services)) as c:
+        assert _suggested(c, q="pho") == ["Phoenix", "Photon notes", "Photosynthese", "Phosphor"]
+        assert _suggested(c, q="pho") == _suggested(c, q="pho", lang="en")
+        assert _suggested(c, q="pho", lang="de")[0] == "Photosynthese"
+    german = ApiSettings(default_lang="de")
+    with local_client(create_app(services, german)) as c:
+        assert _suggested(c, q="pho")[0] == "Photosynthese"
+
+
+def test_suggest_lang_mul_mixes(tmp_path: Path) -> None:
+    services = replace(sample_services(), index=cast(Any, _Titles(tmp_path)))
+    with local_client(create_app(services)) as c:
+        # no language preferred: by how well known (an untagged page not first for being untagged),
+        # a title before a label only begun
+        assert _suggested(c, q="pho", lang="mul") == ["Photosynthese", "Phoenix", "Photon notes", "Phosphor"]
+
+
+def test_suggest_keeps_a_trailing_space(tmp_path: Path) -> None:
+    services = replace(sample_services(), index=cast(Any, _Titles(tmp_path)))
+    with local_client(create_app(services)) as c:
+        assert _suggested(c, q="alan") == ["Alans", "Alan Turing"]
+        assert _suggested(c, q="alan ") == ["Alan Turing"]

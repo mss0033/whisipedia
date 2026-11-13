@@ -239,3 +239,161 @@ def test_a_heavy_prefix_is_ranked_from_its_precomputed_list(tmp_path: Path) -> N
     sug = Suggester(trie)
     assert sug.suggest("alpha", limit=10, lang="en") == suggest_entries_bruteforce(entries, "alpha", 10, "en")
     assert scanned == ["alpha\x1f"]  # the exact lookup only, no scan past the top list
+
+
+# --- how well known, not how short; the next word (2026-11-10 trawl, search-index-13) ---------------
+
+
+def _known() -> list[SuggestEntry]:
+    return [
+        SuggestEntry("wsp:w/en/Kathak", "Kathak", prior=0.990, lang="en"),
+        SuggestEntry("wsp:w/en/Kathmandu", "Kathmandu", prior=0.999, lang="en"),
+        SuggestEntry("wsp:w/en/Kath", "Kath", prior=0.5, lang="en"),
+        SuggestEntry("wsp:w/en/Kathmandu_Valley", "Kathmandu Valley", prior=0.9905, lang="en"),
+        SuggestEntry("wsp:w/en/Nepal", "Nepal", ("Kathmandu kingdom",), prior=0.9995, lang="en"),
+    ]
+
+
+@pytest.mark.parametrize("heavy_threshold", [2, 512])
+def test_a_well_known_title_comes_before_a_shorter_lesser_one(tmp_path: Path, heavy_threshold: int) -> None:
+    """The stored score is prior + 1/(1+len): Kathak 0.990 + 1/7 = 1.133 beat Kathmandu 0.999 + 1/10 =
+    1.099, and any 6-letter title beat a 9-letter one unless its prior was 0.04 higher."""
+    entries = _known()
+    sug = Suggester(TitleTrie.build(entries, tmp_path, heavy_threshold=heavy_threshold, top_k=8))
+    assert sug.suggest("kathm", lang="en") == ["Kathmandu", "Kathmandu Valley", "Kathmandu kingdom"]
+    # "Kath" typed in full is a title and leads; then by how well known. Kathak (0.990) stays ahead
+    # of Kathmandu Valley (0.9905): 0.0005 apart is a tie the length still breaks.
+    assert sug.suggest("kath", lang="en") == [
+        "Kath",
+        "Kathmandu",
+        "Kathak",
+        "Kathmandu Valley",
+        "Kathmandu kingdom",
+    ]
+    assert sug.suggest("kat", lang="en")[:2] == ["Kathmandu", "Kathak"]  # the finding: not Kathak first
+    for prefix in ("k", "kath", "kathm", "kathmandu "):
+        assert sug.suggest(prefix, lang="en") == suggest_entries_bruteforce(entries, prefix, 10, "en"), prefix
+    overlay = Suggester(TitleTrie.build([], tmp_path / "empty"))
+    overlay.upsert(entries)
+    assert overlay.suggest("kath", lang="en") == sug.suggest("kath", lang="en")
+
+
+def test_length_still_breaks_ties(tmp_path: Path) -> None:
+    entries = [
+        SuggestEntry("wsp:w/en/Paris_Commune", "Paris Commune", prior=0.9, lang="en"),
+        SuggestEntry("wsp:w/en/Paris", "Paris", prior=0.9, lang="en"),
+        SuggestEntry("wsp:w/en/Parish", "Parish", prior=0.9, lang="en"),
+    ]
+    sug = Suggester(TitleTrie.build(entries, tmp_path))
+    assert sug.suggest("par", lang="en") == ["Paris", "Parish", "Paris Commune"]
+    # ... and only near-ties: 0.005 of the prior outweighs these lengths (the whole term is under 0.01)
+    entries[0] = SuggestEntry("wsp:w/en/Paris_Commune", "Paris Commune", prior=0.905, lang="en")
+    sug = Suggester(TitleTrie.build(entries, tmp_path / "b"))
+    assert sug.suggest("par", lang="en")[0] == "Paris Commune"
+
+
+def test_the_rank_score_is_the_prior_and_a_small_length_term() -> None:
+    from wsp_index.suggest import ALIAS_PENALTY, LENGTH_WEIGHT, Candidate, _rank_score, key_score  # pyright: ignore[reportPrivateUsage]
+
+    title = Candidate(key_score(0.7, "Kathmandu"), "kathmandu", "Kathmandu", "", "en", "wsp:a/1")
+    assert _rank_score(title) == pytest.approx(0.7 + LENGTH_WEIGHT / 10)
+    alias = Candidate(
+        key_score(0.7, "Nepal", "Kathmandu kingdom"),
+        "kathmandu kingdom",
+        "Nepal",
+        "Kathmandu kingdom",
+        "en",
+        "wsp:a/2",
+    )
+    assert alias.score < 0  # stored ALIAS_PENALTY lower
+    assert ALIAS_PENALTY == 2.0
+    assert _rank_score(alias) == pytest.approx(0.7 + LENGTH_WEIGHT / 18)  # by the alias shown, no penalty
+
+
+@pytest.mark.parametrize("heavy_threshold", [2, 512])
+def test_a_trailing_space_asks_for_the_next_word(tmp_path: Path, heavy_threshold: int) -> None:
+    """ "alan " was normalized to "alan" and offered Alans and Alanya."""
+    entries = [
+        SuggestEntry("wsp:w/en/Alans", "Alans", prior=0.99, lang="en"),
+        SuggestEntry("wsp:w/en/Alanya", "Alanya", prior=0.98, lang="en"),
+        SuggestEntry("wsp:w/en/Alan", "Alan", prior=0.5, lang="en"),
+        SuggestEntry("wsp:w/en/Alan_Turing", "Alan Turing", prior=0.97, lang="en"),
+        SuggestEntry("wsp:w/en/Alan_Kay", "Alan Kay", prior=0.9, lang="en"),
+        SuggestEntry("wsp:w/en/Given_name", "Given name", ("Alan",), prior=0.2, lang="en"),
+        SuggestEntry("wsp:w/en/Fog", "Fog", ("Alan fog",), prior=0.95, lang="en"),
+    ]
+    sug = Suggester(TitleTrie.build(entries, tmp_path, heavy_threshold=heavy_threshold, top_k=3))
+    # the page titled just so, then the word's next words by how well known; never "Alans". The page
+    # only named "Alan" shows the same text and is dropped; a label only begun comes last.
+    assert sug.suggest("alan ", lang="en") == ["Alan", "Alan Turing", "Alan Kay", "Alan fog"]
+    assert sug.suggest("Alan\t", lang="en") == sug.suggest("alan ", lang="en")  # any trailing whitespace
+    assert sug.suggest(" alan", lang="en")[1] == "Alans"  # only a trailing one: this is "alan"
+    assert sug.suggest("alan", lang="en")[:3] == ["Alan", "Alans", "Alanya"]  # without it: every completion
+    assert sug.suggest("alan t ", lang="en") == []  # "alan t" is no word of a title
+    assert sug.suggest("alan turing ", lang="en") == ["Alan Turing"]  # typed in full
+    assert sug.suggest(" ", lang="en") == []
+    for prefix in ("alan ", "alan", "al ", "alan turing ", "alan  "):
+        assert sug.suggest(prefix, lang="en") == suggest_entries_bruteforce(entries, prefix, 10, "en"), prefix
+    overlay = Suggester(TitleTrie.build([], tmp_path / "empty"))
+    overlay.upsert(entries)
+    assert overlay.suggest("alan ", lang="en") == sug.suggest("alan ", lang="en")
+
+
+def test_what_was_typed_in_full_leads_however_many_better_known_titles_begin_with_it(tmp_path: Path) -> None:
+    """Under the stored score the shortest completion led. Ranked by the prior alone, "Mercury" fell
+    off the list behind nine better-known "Mercury ..." titles, and the pipeline asks this list
+    whether a phrase is a title (suggest(phrase, limit=5))."""
+    entries = [SuggestEntry("wsp:w/en/Mercury", "Mercury", prior=0.97, lang="en")]
+    entries += [
+        SuggestEntry(f"wsp:w/en/Mercury_{i}", f"Mercury {i}", prior=0.98, lang="en") for i in range(9)
+    ]
+    entries += [SuggestEntry("wsp:w/en/Hg", "Quicksilver", ("Mercury",), prior=0.1, lang="en")]
+    for heavy in (2, 512):
+        sug = Suggester(TitleTrie.build(entries, tmp_path / str(heavy), heavy_threshold=heavy, top_k=4))
+        got = sug.suggest_docs("mercury", limit=5, lang="en")
+        assert (got[0].text, got[0].doc_id) == ("Mercury", "wsp:w/en/Mercury")
+        assert [s.text for s in got] == suggest_entries_bruteforce(entries, "mercury", 5, "en")
+        assert sug.suggest("mercury", limit=5)[0] == "Mercury"  # as the pipeline asks, without a language
+
+
+def test_a_finished_word_is_followed_by_more_than_a_space(tmp_path: Path) -> None:
+    """A space typed after a word finishes the word; the title may go on with a comma or a hyphen."""
+    entries = [
+        SuggestEntry("wsp:w/en/Washington,_D.C.", "Washington, D.C.", prior=0.99, lang="en"),
+        SuggestEntry("wsp:w/en/Washingtonia", "Washingtonia", prior=0.9, lang="en"),
+        SuggestEntry("wsp:w/en/Jean-Paul_Sartre", "Jean-Paul Sartre", prior=0.9, lang="en"),
+        SuggestEntry("wsp:w/en/Jeans", "Jeans", prior=0.95, lang="en"),
+        SuggestEntry(
+            "wsp:w/en/Alan's_Psychedelic_Breakfast", "Alan's Psychedelic Breakfast", prior=0.5, lang="en"
+        ),
+        SuggestEntry("wsp:w/en/USA", "U.S.A. of America", prior=0.5, lang="en"),
+        SuggestEntry("wsp:w/ja/東京都", "東京都", prior=0.9, lang="ja"),
+        SuggestEntry("wsp:w/ja/東京", "東京", prior=0.8, lang="ja"),
+    ]
+    for heavy in (2, 512):
+        sug = Suggester(TitleTrie.build(entries, tmp_path / str(heavy), heavy_threshold=heavy, top_k=3))
+        assert sug.suggest("washington ") == ["Washington, D.C."]
+        assert sug.suggest("jean ") == ["Jean-Paul Sartre"]
+        assert sug.suggest("alan ") == ["Alan's Psychedelic Breakfast"]
+        assert sug.suggest("u.s.a ") == ["U.S.A. of America"]
+        # a script written without spaces: the space an input method leaves finishes no word
+        assert sug.suggest("東京 ") == ["東京", "東京都"]
+        assert sug.suggest("東京\u3000") == ["東京", "東京都"]
+        for prefix in ("washington ", "jean ", "alan ", "u.s.a ", "東京 "):
+            assert sug.suggest(prefix) == suggest_entries_bruteforce(entries, prefix, 10), prefix
+
+
+def test_a_language_that_is_none_prefers_none(tmp_path: Path) -> None:
+    """``mul`` made every tagged page foreign and put the untagged ones first, whatever their prior."""
+    entries = [
+        SuggestEntry("wsp:a/Photon", "Photon", prior=0.1, lang=""),
+        SuggestEntry("wsp:a/Phobos", "Phobos", prior=0.05, lang="und"),
+        SuggestEntry("wsp:w/de/Photosynthese", "Photosynthese", prior=0.98, lang="de"),
+        SuggestEntry("wsp:w/en/Phoenix", "Phoenix", prior=0.5, lang="en"),
+    ]
+    sug = Suggester(TitleTrie.build(entries, tmp_path))
+    mixed = ["Photosynthese", "Phoenix", "Photon", "Phobos"]
+    assert sug.suggest("pho") == mixed
+    for none in ("mul", "MUL", "und", "zxx", " "):
+        assert sug.suggest("pho", lang=none) == mixed, none
+    assert sug.suggest("pho", lang="en") == ["Phoenix", "Photon", "Phobos", "Photosynthese"]

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { WspClient } from '../src/api/client.ts';
 import type { SourceInfo, Suggestions } from '../src/api/types.ts';
 import { App } from '../src/app.ts';
-import { remoteSuggestions } from '../src/chrome/suggest.ts';
+import { remoteSuggestions, typedQuery } from '../src/chrome/suggest.ts';
 import { localIsoDay } from '../src/core/format.ts';
 import { MemoryStore, SafeStorage } from '../src/core/storage.ts';
 import { pickRandomSites, RANDOM_BUTTONS, shortSiteName } from '../src/pages/home.ts';
@@ -101,6 +101,46 @@ describe('suggestions', () => {
   it('from an older API are titles to search for', () => {
     const old = { query: 'al', suggestions: ['Alan Turing'] } as Suggestions; // no `items`
     expect(remoteSuggestions(old)).toEqual([{ text: 'Alan Turing' }]);
+  });
+
+  it('keep one space typed after a word and no other', () => {
+    expect(typedQuery('alan')).toBe('alan');
+    expect(typedQuery('  alan')).toBe('alan');
+    expect(typedQuery('alan ')).toBe('alan ');
+    expect(typedQuery(' alan \t ')).toBe('alan ');
+    expect(typedQuery('alan  turing  ')).toBe('alan  turing ');
+    expect(typedQuery('   ')).toBe('');
+    expect(typedQuery('')).toBe('');
+  });
+
+  it('send the space after a finished word, so the next word is offered', async () => {
+    // The box's text was trimmed before it was asked: "alan " arrived as "alan" and the API's
+    // word-boundary rule never reached a reader.
+    const log: string[] = [];
+    document.body.innerHTML = '<div id="app"></div>';
+    history.replaceState(null, '', '/');
+    const root = document.getElementById('app')!;
+    new App(root, {
+      api: new WspClient({ fetch: mockFetch(log) }),
+      storage: new SafeStorage(new MemoryStore()),
+    }).start();
+    await until(() => !!root.querySelector('.page-home') && !root.classList.contains('is-loading'));
+    const box = root.querySelector<HTMLInputElement>('main [role="combobox"]')!;
+    box.focus();
+    box.value = 'alan   ';
+    box.dispatchEvent(new Event('input'));
+    await until(() => !!root.querySelector('main .suggest-item'));
+    const asked = log.filter((l) => l.startsWith('GET /v1/suggest'));
+    expect(asked).toHaveLength(1);
+    expect(new URL(asked[0]!.slice(4), 'http://x').searchParams.get('q')).toBe('alan ');
+    // the answer for "alan " is shown although the box holds three spaces: the same question
+    const shown = Array.from(root.querySelectorAll('main .suggest-text'), (e) => e.textContent);
+    expect(shown).toContain('Alan Turing');
+    // a lone letter and a space is still too short to ask
+    box.value = 'a ';
+    box.dispatchEvent(new Event('input'));
+    expect(root.querySelector<HTMLElement>('main .suggest-list')?.hidden).toBe(true);
+    expect(log.filter((l) => l.startsWith('GET /v1/suggest'))).toHaveLength(1);
   });
 
   it("are asked for in the Navigator's language and picking one opens it", async () => {

@@ -317,7 +317,14 @@ function mockScope(lq: string): SearchResults['scope'] {
 }
 
 export function suggest(params: URLSearchParams): Response<'GET /v1/suggest'> {
-  const q = (params.get('q') ?? '').toLowerCase().trim();
+  const raw = (params.get('q') ?? '').toLowerCase();
+  const q = raw.trim();
+  // Like the API: a trailing space asks for the next word ("alan " is not "alans"; "washington "
+  // is still "Washington, D.C.").
+  const boundary = /\s$/.test(raw);
+  const begins = (text: string, at = 0) =>
+    text.startsWith(q, at) &&
+    (!boundary || text.length === at + q.length || /[ ,\-:'’(./]/.test(text[at + q.length] ?? ''));
   const limit = Number(params.get('limit') ?? 8) || 8;
   if (!q) return { query: q, suggestions: [], items: [] };
   const item = (d: FixtureDoc, text: string) => ({
@@ -329,11 +336,14 @@ export function suggest(params: URLSearchParams): Response<'GET /v1/suggest'> {
   const titles = DOCS.filter(
     (d) =>
       d.native_id !== 'Main_Page' &&
-      (d.title.toLowerCase().startsWith(q) || d.title.toLowerCase().includes(` ${q}`)),
+      (begins(d.title.toLowerCase()) ||
+        [...d.title.toLowerCase().matchAll(/ /g)].some((m) =>
+          begins(d.title.toLowerCase(), m.index + 1),
+        )),
   ).map((d) => item(d, d.title));
   // An alias that matched is shown as itself and opens its document, like the API's.
   const phrases = DOCS.flatMap((d) =>
-    (d.aliases ?? []).filter((a) => a.startsWith(q) && a !== q).map((a) => item(d, a)),
+    (d.aliases ?? []).filter((a) => begins(a) && a !== q).map((a) => item(d, a)),
   );
   const byText = new Map<string, ReturnType<typeof item>>();
   for (const i of [...titles, ...phrases]) if (!byText.has(i.text)) byText.set(i.text, i);
