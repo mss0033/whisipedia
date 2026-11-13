@@ -485,13 +485,18 @@ def test_the_callers_git_and_python_settings_do_not_reach_the_gate(gate: Gate, t
     subprocess.run(
         ["git", "commit", "-q", "--allow-empty", "-m", "another"], cwd=other, env=gate.env, check=True
     )
-    gate.hook('printf "%s|%s\\n" "${PYTHONPATH-unset}" "${GIT_DIR-unset}" >> "$FAKE/seen"\n')
+    gate.hook(
+        'printf "%s|%s|%s\\n" "${PYTHONPATH-unset}" "${GIT_DIR-unset}" "${PYTEST_ADDOPTS-unset}"'
+        ' >> "$FAKE/seen"\n'
+    )
 
-    code, line = gate.run(GIT_DIR=str(other / ".git"), GIT_WORK_TREE=str(other), PYTHONPATH=str(other))
+    code, line = gate.run(
+        GIT_DIR=str(other / ".git"), GIT_WORK_TREE=str(other), PYTHONPATH=str(other), PYTEST_ADDOPTS="-k one"
+    )
 
     assert code == 0, line
     assert gate.stamps() == [f"{head}.ok"]
-    assert set((gate.fake / "seen").read_text().split()) == {"unset|unset"}
+    assert set((gate.fake / "seen").read_text().split()) == {"unset|unset|unset"}
 
 
 def test_a_scope_that_cannot_be_started_fails_the_step(gate: Gate) -> None:

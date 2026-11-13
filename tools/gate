@@ -65,8 +65,8 @@ set -u
 
 # Nothing from the caller's shell may point the tools at another tree: with PYTHONPATH the tests
 # import another checkout's packages, with GIT_DIR and GIT_WORK_TREE the stamp names another
-# repository's commit (verification of 7a).
-unset CDPATH VIRTUAL_ENV PYTHONPATH PYTHONHOME GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR
+# repository's commit, with PYTEST_ADDOPTS (`-k one`) a handful of tests pass for all (verification of 7a).
+unset CDPATH VIRTUAL_ENV PYTHONPATH PYTHONHOME PYTEST_ADDOPTS GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR
 repo=$(cd -- "$(dirname -- "$0")/.." && pwd -P) || exit 2
 cd -- "$repo" || exit 2
 

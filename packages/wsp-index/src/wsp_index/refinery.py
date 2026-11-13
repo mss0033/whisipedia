@@ -243,8 +243,9 @@ def configured_root(index_root: Path, value: object) -> Path:
 
 def sealed_generations(root: Path, source_id: str) -> list[str]:
     """Sealed generation ids of a source, oldest first: in the order of
-    :func:`wsp_core.versions.version_key` (digit runs as numbers), the one order the vault, the
-    orchestrator and the API use. As text a same-day cycle ``2026-10-21r10`` came before ``r9``."""
+    :func:`wsp_core.versions.version_key` (digit runs as numbers), by which the vault promotes and
+    the API picks the generation it serves. As text a same-day cycle ``2026-10-21r10`` came before
+    ``r9``."""
     src = root / source_id
     if not src.is_dir():
         return []
