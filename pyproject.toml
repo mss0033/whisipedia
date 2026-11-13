@@ -53,6 +53,9 @@ reportMissingTypeStubs = false
 
 [tool.pytest.ini_options]
 addopts = "-q --strict-markers"
+# A test that runs longer than this gets every thread's stack dumped into the log (pytest's built-in
+# faulthandler; nothing is killed), so the log of a directory that tools/gate timed out names the test.
+faulthandler_timeout = 300
 markers = [
   "network: test touches the network (excluded from offline CI)",
   "slow: long-running test",

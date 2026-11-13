@@ -1,0 +1,349 @@
+#!/bin/sh
+# The merge gate as one command: ruff, pyright, then pytest one test directory at a time, each heavy
+# step in its own memory-capped systemd scope, with the pre-checks the hand-typed gate kept forgetting.
+#
+#   tools/gate [--navigator] [--only PATH]...
+#
+# Why a script (trawl 2026-11-10, ops-tests-docs-13): the gate was typed from a memory note. Five
+# times a pipe or a `;` hid a failed step and a merge followed; three times pytest ran beside the
+# nightly index build and the whole VM ran out of memory; once pytest left with exit 0 at 74%.
+#
+# It works on the checkout it lives in and uses that checkout's .venv/bin directly (never `uv run`,
+# which may re-sync the venv). It never merges, commits, pushes or restarts anything.
+#
+# Steps:
+#   1. ruff format --check, ruff check
+#   2. pyright --pythonpath .venv/bin/python (without it pyright reads another checkout's packages)
+#   3. pytest -m "not network" for each of packages/*/tests and tests (or each --only PATH)
+#   4. `npm run check` in navigator/, with --navigator or when navigator/ differs from GATE_BASE
+#      (default main). CI also runs the Playwright journeys (`npm run e2e`); the gate does not.
+# Every step runs even after a failure, so one run names every failing step. No step's output goes
+# through a pipe: each writes its own log and its exit code is read on the next line.
+#
+# Before every capped step (2, 3, 4) the pre-checks run again, because the 04:30 index build can
+# start in the middle of a gate: whisipedia-index.service must not be active, activating or
+# deactivating, and MemAvailable must be over GATE_MIN_AVAIL_MB (default 5120). A refused pre-check
+# ends the gate with exit 75 and `gate: NOT RUN (<reason>)`.
+#
+# A capped step runs as `systemd-run --user --scope` with MemoryMax=GATE_MEMORY_MAX (4G) and
+# MemorySwapMax=0 (a swapping pytest filled the VM on 2026-11-02), under `timeout` with
+# GATE_PKG_TIMEOUT seconds (1800). `timeout` ends only the process it started, so the scope is
+# stopped afterwards: children that outlive a timed-out pytest would keep the memory.
+#
+# A pytest directory passes with exit 0 and `[100%]` as the last progress mark of its log. Exit 5
+# (nothing collected) passes only for the paths in GATE_EMPTY_OK (default: tests, which holds only
+# network-marked end-to-end tests): anywhere else it means the collection fell to zero.
+#
+# Navigator: `npm run check` includes `vite build`, which rewrites navigator/dist. In the checkout
+# the API serves from (the WorkingDirectory of whisipedia-api.service) that changes what readers
+# get, so the gate refuses the Navigator step there (exit 2).
+#
+# Stamp: a full run (no --only) that passes on a clean tree writes
+#   ${WSP_STATE:-${XDG_STATE_HOME:-$HOME/.local/state}/whisipedia}/gate/<full sha>.ok
+# The sha and the cleanliness (plain `git status --porcelain`: an untracked module is not part of the
+# commit, so it counts as dirty) are read before the first step and checked again before the stamp.
+# A tree that was dirty at the start passes without a stamp; a checkout that changed during the run
+# (a commit, an edit) fails, because nobody can say what was tested. The newest GATE_KEEP_STAMPS (50)
+# stamps are kept.
+#
+# Logs: ${TMPDIR:-/tmp}/wsp-gate.XXXXXX/, removed on PASS, kept otherwise; kept ones older than
+# GATE_KEEP_LOG_DAYS (7) are removed at the next run.
+#
+# Only one gate runs at a time (a lock in the stamp directory); a second one is "not run".
+# GATE_DIRS and GATE_EMPTY_OK change what is tested: a run with either set never writes a stamp. The
+# stamp names the directories tested, whether the Navigator step ran ("not-checked" on the base branch
+# itself, where there is nothing to compare: a deploy of a Navigator change wants --navigator), and
+# any program seam that was set.
+#
+# Exit: 0 pass, 1 fail, 2 usage or a refusal that waiting does not cure (the Navigator step in the
+# live checkout, not a git checkout), 75 not run for now (a pre-check, another gate), 130/143 interrupted.
+# The last line on stdout is always the one that starts with `gate:`.
+#
+# For tests: GATE_BIN (used instead of .venv/bin), GATE_SYSTEMD_RUN, GATE_SYSTEMCTL, GATE_NPM,
+# GATE_MEMINFO, GATE_DIRS (replaces the directory list), WSP_STATE.
+set -u
+
+unset CDPATH VIRTUAL_ENV
+repo=$(cd -- "$(dirname -- "$0")/.." && pwd -P) || exit 2
+cd -- "$repo" || exit 2
+
+bin="${GATE_BIN:-$repo/.venv/bin}"
+systemd_run="${GATE_SYSTEMD_RUN:-systemd-run}"
+systemctl="${GATE_SYSTEMCTL:-systemctl}"
+npm="${GATE_NPM:-npm}"
+meminfo="${GATE_MEMINFO:-/proc/meminfo}"
+min_avail_mb="${GATE_MIN_AVAIL_MB:-5120}"
+memory_max="${GATE_MEMORY_MAX:-4G}"
+pkg_timeout="${GATE_PKG_TIMEOUT:-1800}"
+empty_ok="${GATE_EMPTY_OK:-tests}"
+base="${GATE_BASE:-main}"
+keep_stamps="${GATE_KEEP_STAMPS:-50}"
+keep_log_days="${GATE_KEEP_LOG_DAYS:-7}"
+state="${WSP_STATE:-${XDG_STATE_HOME:-$HOME/.local/state}/whisipedia}"
+tmp="${TMPDIR:-/tmp}"
+case $keep_stamps in '' | 0 | *[!0-9]*) echo "gate: GATE_KEEP_STAMPS must be a number, 1 or more" >&2; exit 2 ;; esac
+case $keep_log_days in '' | *[!0-9]*) echo "gate: GATE_KEEP_LOG_DAYS must be a number" >&2; exit 2 ;; esac
+# Settings that change what is tested. A run with one of them can pass, but it is not the gate: no stamp.
+overrides=""
+[ -z "${GATE_DIRS:-}" ] || overrides="$overrides GATE_DIRS"
+[ -z "${GATE_EMPTY_OK:-}" ] || overrides="$overrides GATE_EMPTY_OK"
+# Seams that replace a program. Tests need the stamp with them, so they are written into it.
+seams=""
+for seam in GATE_BIN GATE_SYSTEMD_RUN GATE_SYSTEMCTL GATE_NPM GATE_MEMINFO; do
+  eval "[ -z \"\${$seam:-}\" ]" || seams="$seams $seam"
+done
+
+navigator=no # no | asked | changed
+only=""
+while [ $# -gt 0 ]; do
+  case $1 in
+    --navigator) navigator=asked ;;
+    --only)
+      [ $# -ge 2 ] || { echo "gate: --only needs a path" >&2; exit 2; }
+      only="$only $2"
+      shift
+      ;;
+    -h | --help)
+      sed -n '2,/^set -u$/p' "$0" | sed -e '$d' -e 's/^# \{0,1\}//'
+      exit 0
+      ;;
+    *) echo "gate: unknown argument: $1 (usage: tools/gate [--navigator] [--only PATH]...)" >&2; exit 2 ;;
+  esac
+  shift
+done
+
+started=$(date +%s)
+sha=$(git rev-parse HEAD) || { echo "gate: NOT RUN (not a git checkout: $repo)"; exit 2; }
+sha12=$(printf %.12s "$sha")
+dirty_at_start=$(git status --porcelain) || { echo "gate: NOT RUN (git status failed in $repo)"; exit 2; }
+echo "gate: checking $repo at $sha12"
+
+# Whether the Navigator step is due. A failed `git diff` (no such base) is not "no change"; files in
+# navigator/ that are not committed count as a change; and on the base branch itself (after a merge)
+# the comparison has nothing to say, which the summary and the stamp state ("navigator: not-checked").
+fails=""
+ran=""
+nav_note="not-needed"
+if [ "$navigator" = no ]; then
+  changed=$(git diff --name-only "$base...HEAD" -- navigator)
+  rc=$?
+  loose=$(git status --porcelain -- navigator) || rc=$?
+  if [ $rc -ne 0 ]; then
+    fails="navigator-diff (rc $rc: cannot compare navigator/ with $base; pass --navigator or set GATE_BASE)"
+  elif [ -n "$changed$loose" ]; then
+    navigator=changed
+  elif [ "$(git rev-parse "$base")" = "$sha" ] || git merge-base --is-ancestor HEAD "$base"; then
+    nav_note="not-checked (HEAD is on $base: nothing to compare; --navigator checks it)"
+  fi
+fi
+if [ "$navigator" != no ]; then
+  nav_note="ran ($navigator)"
+  # Fails closed: if the API's checkout cannot be read, the step that rewrites navigator/dist does not run.
+  live=$("$systemctl" --user show -p WorkingDirectory --value whisipedia-api.service 2>/dev/null) || live="?"
+  live=${live#!}
+  live=${live#-}
+  case $live in
+    '') ;; # no such unit on this machine: nothing is served from anywhere
+    /*) live=$(cd -- "$live" 2>/dev/null && pwd -P) || live="" ;;
+    *)
+      echo "gate: NOT RUN (cannot tell which checkout the API serves from, and the Navigator step" \
+        "rewrites navigator/dist)"
+      exit 2
+      ;;
+  esac
+  if [ "$live" = "$repo" ]; then
+    echo "gate: NOT RUN (the Navigator step builds navigator/dist, which the API serves from this" \
+      "checkout; run the gate in a development checkout)"
+    exit 2
+  fi
+fi
+
+# One gate at a time: two would each pass the memory pre-check and then run side by side.
+mkdir -p "$state/gate" || { echo "gate: NOT RUN (cannot make $state/gate)"; exit 2; }
+exec 9> "$state/gate/.lock" || { echo "gate: NOT RUN (cannot open $state/gate/.lock)"; exit 2; }
+if ! flock -n 9; then
+  echo "gate: NOT RUN (another gate is running)"
+  exit 75
+fi
+
+# Old logs of failed runs.
+find "$tmp" -maxdepth 1 -type d -name 'wsp-gate.*' -mtime +"$keep_log_days" -exec rm -rf {} + 2>/dev/null
+logdir=$(mktemp -d "$tmp/wsp-gate.XXXXXX") || { echo "gate: NOT RUN (cannot make a log directory in $tmp)"; exit 2; }
+
+unit=""
+stop_scope() {
+  [ -n "$unit" ] && "$systemctl" --user stop "$unit.scope" > /dev/null 2>&1 9>&-
+  unit=""
+}
+# A capped step runs in the background and is waited for, so the trap runs at once and takes the
+# scope with it (a foreground step would hold the signal back until its time limit).
+trap 'stop_scope; echo "gate: NOT RUN (interrupted; logs $logdir)"; exit 130' INT
+trap 'stop_scope; echo "gate: NOT RUN (interrupted; logs $logdir)"; exit 143' TERM HUP
+
+not_run() {
+  if [ -n "$ran" ]; then
+    echo "gate: NOT RUN ($1; stopped after:$ran; logs $logdir)"
+  else
+    rm -rf "$logdir"
+    echo "gate: NOT RUN ($1)"
+  fi
+  exit 75
+}
+
+precheck() {
+  build=$("$systemctl" --user show whisipedia-index.service -p ActiveState --value 2>/dev/null) ||
+    not_run "cannot read the state of whisipedia-index.service"
+  case $build in
+    inactive | failed) ;; # the only states in which the build is known not to be running
+    '') not_run "cannot read the state of whisipedia-index.service" ;;
+    *) not_run "the index build is $build" ;;
+  esac
+  avail=$(awk '/^MemAvailable:/ { print int($2 / 1024); found = 1 } END { if (!found) print -1 }' "$meminfo" 2>/dev/null)
+  case $avail in
+    '' | -1 | *[!0-9]*) not_run "cannot read MemAvailable from $meminfo" ;;
+  esac
+  [ "$avail" -gt "$min_avail_mb" ] || not_run "MemAvailable is $avail MB, the gate needs over $min_avail_mb MB"
+}
+
+fail() { fails="${fails:+$fails; }$1"; }
+
+# plain NAME COMMAND...: a light step, uncapped. Sets rc.
+plain() {
+  step=$1
+  shift
+  "$@" > "$logdir/$step.log" 2>&1 9>&-
+  rc=$?
+  ran="$ran $step"
+  [ $rc -eq 0 ] || fail "$step (rc $rc, log $logdir/$step.log)"
+}
+
+# capped NAME COMMAND...: pre-checks, then the command in a memory-capped scope with a time limit.
+# Sets rc and log; the caller judges them.
+n=0
+capped() {
+  step=$1
+  shift
+  precheck
+  n=$((n + 1))
+  unit="wsp-gate-$$-$n"
+  log="$logdir/$step.log"
+  "$systemd_run" --user --scope -q --unit="$unit" -p MemoryMax="$memory_max" -p MemorySwapMax=0 -- \
+    nice -n 10 timeout -k 30 "$pkg_timeout" "$@" > "$log" 2>&1 9>&- &
+  wait $!
+  rc=$?
+  stop_scope
+  ran="$ran $step"
+}
+
+why() { # the words for an exit code of a capped step
+  case $1 in
+    124) echo "timed out after $pkg_timeout s" ;;
+    137) echo "killed (memory, or a hang that ignored the timeout)" ;;
+    *) echo "rc $1" ;;
+  esac
+}
+
+plain ruff-format "$bin/ruff" format --check .
+plain ruff-check "$bin/ruff" check .
+
+capped pyright "$bin/pyright" --pythonpath "$bin/python"
+[ $rc -eq 0 ] || fail "pyright ($(why $rc), log $log)"
+
+if [ -n "$only" ]; then
+  dirs=$only
+elif [ -n "${GATE_DIRS:-}" ]; then
+  dirs=$GATE_DIRS
+else
+  dirs="$(echo packages/*/tests) tests"
+fi
+total=0
+passed=0
+for d in $dirs; do
+  total=$((total + 1))
+  d=${d%/}
+  name=$(printf %s "$d" | tr -c 'A-Za-z0-9._-' '_')
+  if [ ! -e "$d" ]; then
+    fail "pytest $d (no such path)"
+    continue
+  fi
+  capped "pytest-$name" "$bin/python" -m pytest -m "not network" -p no:cacheprovider "$d"
+  case $rc in
+    0)
+      # exit 0 is not enough: on 2026-10-20 a test called os._exit(0) at 74%.
+      # And 100% is not enough either: the last line must be pytest's own count, with nothing failed
+      # (an exit forced after the last test would hide an F).
+      last=$(grep -o '\[ *[0-9]*%\]' "$log" | tail -n 1 | tr -d ' ')
+      end=$(grep -v '^[[:space:]]*$' "$log" | tail -n 1)
+      if [ "$last" != "[100%]" ]; then
+        fail "pytest $d (exit 0 but the log ends at ${last:-no progress mark}, log $log)"
+      else
+        case $end in
+          *failed* | *error*) fail "pytest $d (exit 0 but the log ends with: $end, log $log)" ;;
+          *[0-9]\ passed*) passed=$((passed + 1)) ;;
+          *) fail "pytest $d (exit 0 but the log does not end with pytest's count, log $log)" ;;
+        esac
+      fi
+      ;;
+    5)
+      case " $empty_ok " in
+        *" $d "*) passed=$((passed + 1)) ;;
+        *) fail "pytest $d (no test collected, log $log)" ;;
+      esac
+      ;;
+    *) fail "pytest $d ($(why $rc), log $log)" ;;
+  esac
+done
+[ $total -gt 0 ] || fail "pytest (no test directory)"
+
+if [ "$navigator" != no ]; then
+  if [ ! -d navigator/node_modules ]; then
+    fail "navigator (no navigator/node_modules: run npm ci in navigator)"
+  else
+    capped navigator "$npm" --prefix navigator run check
+    [ $rc -eq 0 ] || fail "navigator ($(why $rc), log $log)"
+  fi
+fi
+
+took=$(($(date +%s) - started))
+if [ -n "$fails" ]; then
+  echo "gate: FAIL $sha12: $fails"
+  exit 1
+fi
+
+# What was tested must still be what is there.
+sha_now=$(git rev-parse HEAD) || sha_now="unreadable"
+dirty_now=$(git status --porcelain) || dirty_now="unreadable"
+if [ "$sha_now" != "$sha" ] || [ "$dirty_now" != "$dirty_at_start" ]; then
+  echo "gate: FAIL $sha12: the checkout changed during the run (HEAD is $(printf %.12s "$sha_now")); run it again (logs $logdir)"
+  exit 1
+fi
+
+summary="gate: PASS $sha12 ruff pyright pytest $passed/$total"
+[ "$navigator" = no ] || summary="$summary navigator"
+summary="$summary in $took s"
+case $nav_note in not-checked*) summary="$summary (navigator not checked: on $base)" ;; esac
+rm -rf "$logdir"
+
+if [ -n "$only" ]; then
+  echo "$summary (--only: no stamp)"
+elif [ -n "$overrides" ]; then
+  echo "$summary (set:$overrides: no stamp)"
+elif [ -n "$dirty_at_start" ]; then
+  echo "$summary (uncommitted or untracked files: no stamp)"
+else
+  stamps="$state/gate"
+  rm -f "$stamps"/*.ok.tmp.* 2>/dev/null # a killed gate's; this one holds the lock
+  if printf '%s\n%s\nnavigator: %s\ndirectories: %s\nseams:%s\nrepo: %s\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$summary" "$nav_note" "$(echo $dirs)" "${seams:- none}" "$repo" \
+    > "$stamps/$sha.ok.tmp.$$" &&
+    mv "$stamps/$sha.ok.tmp.$$" "$stamps/$sha.ok"; then
+    # Keep the newest stamps only (names are shas: no spaces).
+    for old in $(ls -t "$stamps"/*.ok 2>/dev/null | tail -n +$((keep_stamps + 1))); do rm -f "$old"; done
+    echo "$summary"
+  else
+    rm -f "$stamps/$sha.ok.tmp.$$"
+    echo "gate: FAIL $sha12: every step passed but the stamp could not be written in $stamps"
+    exit 1
+  fi
+fi
+exit 0
