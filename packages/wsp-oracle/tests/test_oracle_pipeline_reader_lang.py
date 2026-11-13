@@ -488,3 +488,32 @@ def test_a_script_several_languages_write_does_not_name_the_foreign_dictionaries
     searcher.run("서울")  # Hangul writes Korean alone
     assert [lang for lang, _ in calls] == [None, "ar", "ko"]
     idx.close()
+
+
+def test_a_reader_language_with_no_edition_leaves_the_default_language_page_first(tmp_path: Path) -> None:
+    # ``lang=fi`` and no Finnish page: every edition was "foreign" alike and the first of the pool led
+    # (the Cebuano page here, same source and weight). The default language's page is the answer.
+    docs = [
+        _doc("wiki", "ceb/Paris", "Paris", "Ang Paris usa ka lungsod.", "ceb"),
+        _doc("wiki", "en/Paris", "Paris", "Paris is the capital of France.", "en"),
+        _doc("wiki", "de/Paris", "Paris", "Paris ist die Hauptstadt Frankreichs.", "de"),
+    ]
+    idx = _index(tmp_path, docs)
+    searcher = _searcher(idx, "wiki")
+    held = [
+        SearchHit(make_doc_id("wiki", "ceb/Paris"), 1.0, "Paris", "", "wiki", "ceb"),
+        SearchHit(make_doc_id("wiki", "de/Paris"), 0.95, "Paris", "", "wiki", "de"),
+        SearchHit(make_doc_id("wiki", "en/Paris"), 0.9, "Paris", "", "wiki", "en"),
+    ]
+
+    def best(lang: str | None) -> DocId:
+        route = replace(searcher.router.route("Paris"), reader_lang=_reader(lang))
+        hit = searcher._best_titled(route, "Paris", held, None)  # pyright: ignore[reportPrivateUsage]
+        assert hit is not None
+        return hit.doc_id
+
+    assert best("fi") == make_doc_id("wiki", "en/Paris")
+    assert best("xx") == make_doc_id("wiki", "en/Paris")
+    assert best("de") == make_doc_id("wiki", "de/Paris")  # a reader language that has the page
+    assert best(None) == make_doc_id("wiki", "en/Paris")
+    idx.close()

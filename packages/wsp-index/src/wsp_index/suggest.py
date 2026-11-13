@@ -482,7 +482,9 @@ def _doc_score(c: Candidate) -> float:
     return c.score + ALIAS_PENALTY - 1.0 / (1.0 + len(c.alias)) + 1.0 / (1.0 + len(c.title))
 
 
-_WORD_ENDS = " ,-:'\u2019(./"  # what may follow a finished word in a title: "Washington, D.C.", "Spider-Man"
+# What may follow a finished word in a title: "Washington, D.C.", "Spider-Man", "Iran\u2013Iraq War",
+# "Yahoo! Inc." (the dashes and the "!" were missing at first: "iran " lost the war; verification).
+_WORD_ENDS = " ,-:'\u2019(./\u2013\u2014!"
 _UNSPACED = ("CJK", "IDEOGRAPHIC", "HIRAGANA", "KATAKANA", "THAI", "LAO", "KHMER", "MYANMAR", "TIBETAN")
 
 

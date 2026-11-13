@@ -248,12 +248,20 @@ class Searcher:
         speller = self.lib.s.speller
         if speller is None:
             return None, False
+        # A result titled as the query is the answer: nothing is offered in its place. Since a
+        # correction that makes a title is offered without a count, a page whose title holds a word
+        # the vocabulary lacks would be "corrected" to the title one letter away (verification of the
+        # 2026-11-10 trawl). Only for a query of two words or more: one word titled so ("teh") may
+        # still be a slip, and no title is put in its place (``rivals`` answers nothing for it).
+        key = _title_key(q)
+        titled = any(_title_key(t) == key for t in titles)
+        if titled and len(q.split()) > 1:
+            return None, False
         only: list[str] | None = None
         if found >= SPARSE:
             only = list(speller.unknown(q))
             rare = getattr(speller, "rare", None)  # optional: a corrector may know no frequencies
-            key = _title_key(q)
-            if callable(rare) and not any(_title_key(t) == key for t in titles):
+            if callable(rare) and not titled:
                 only += [w for w in cast(Sequence[str], rare(q)) if w not in only]
             if not only:
                 return None, False

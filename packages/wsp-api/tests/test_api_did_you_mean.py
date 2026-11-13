@@ -138,6 +138,33 @@ def test_a_correction_that_is_already_a_title_is_kept() -> None:
     assert index.counts == []
 
 
+@dataclass
+class _Answered(_Index):
+    """As :class:`_Index`, and the first result is titled ``first``."""
+
+    first: str = ""
+
+    def _hits(self) -> tuple[SearchHit, ...]:
+        hits = super()._hits()
+        return (replace(hits[0], title=self.first), *hits[1:])
+
+
+def test_a_query_that_is_a_results_title_is_offered_nothing() -> None:
+    # "Alan Turring" is a page and it is among the results: no title one letter away in its place,
+    # however few results there are; the title list and the index are not asked.
+    for found in (8, 2):
+        index = _Answered(found=found, titles=frozenset({"alan turing"}), first="Alan Turring")
+        assert _ask(index, "alan  turring").did_you_mean is None
+        assert index.named_asked == []
+        assert index.counts == []
+    # one word that is a title may still be a slip: the speller's own choice, counted or titled
+    one = _Answered(titles=frozenset({"turing"}), first="Turring")
+    assert _ask(one, "turring").did_you_mean == "turning"
+    # and without such a result the title is offered as before
+    other = _Answered(titles=frozenset({"alan turing"}), first="Alan Turing (film)")
+    assert _ask(other, "alan turring").did_you_mean == "alan turing"
+
+
 def test_one_word_is_never_swapped_for_a_title() -> None:
     # Every word is some page's title: only a phrase of two words or more says which word was meant.
     index = _Index(titles=frozenset({"turing"}))

@@ -369,9 +369,15 @@ def test_a_finished_word_is_followed_by_more_than_a_space(tmp_path: Path) -> Non
         SuggestEntry("wsp:w/en/USA", "U.S.A. of America", prior=0.5, lang="en"),
         SuggestEntry("wsp:w/ja/東京都", "東京都", prior=0.9, lang="ja"),
         SuggestEntry("wsp:w/ja/東京", "東京", prior=0.8, lang="ja"),
+        SuggestEntry("wsp:w/en/Iran\u2013Iraq_War", "Iran\u2013Iraq War", prior=0.9, lang="en"),
+        SuggestEntry("wsp:w/en/Iranian_rial", "Iranian rial", prior=0.95, lang="en"),
+        SuggestEntry("wsp:w/en/Yahoo!_Mail", "Yahoo! Mail", prior=0.9, lang="en"),
     ]
     for heavy in (2, 512):
         sug = Suggester(TitleTrie.build(entries, tmp_path / str(heavy), heavy_threshold=heavy, top_k=3))
+        # a dash or an exclamation mark ends a word too ("iran " lost the war; verification)
+        assert sug.suggest("iran ") == ["Iran\u2013Iraq War"]
+        assert sug.suggest("yahoo ") == ["Yahoo! Mail"]
         assert sug.suggest("washington ") == ["Washington, D.C."]
         assert sug.suggest("jean ") == ["Jean-Paul Sartre"]
         assert sug.suggest("alan ") == ["Alan's Psychedelic Breakfast"]
@@ -379,7 +385,7 @@ def test_a_finished_word_is_followed_by_more_than_a_space(tmp_path: Path) -> Non
         # a script written without spaces: the space an input method leaves finishes no word
         assert sug.suggest("東京 ") == ["東京", "東京都"]
         assert sug.suggest("東京\u3000") == ["東京", "東京都"]
-        for prefix in ("washington ", "jean ", "alan ", "u.s.a ", "東京 "):
+        for prefix in ("washington ", "jean ", "alan ", "u.s.a ", "東京 ", "iran ", "yahoo "):
             assert sug.suggest(prefix) == suggest_entries_bruteforce(entries, prefix, 10), prefix
 
 

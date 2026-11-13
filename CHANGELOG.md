@@ -3,6 +3,18 @@
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Changed: search language, low confidence, suggestions, "did you mean" (2026-11-13)
+* `/v1/suggest` without `lang` now prefers English pages (it mixed the editions); send `lang=mul` for
+  the mixed order. Well-known titles come before merely short ones, what is typed in full leads, and
+  a trailing space asks for the next word ("alan " offers "Alan Turing", not "Alans").
+* `/v1/search` takes an optional `lang` (the reader's language, BCP-47), used when the query does not
+  show its own. An exact title in a language the query does not announce is found ("Berliner Mauer").
+* A query no document matches in a word is `low_confidence` (its hits are nearest neighbours); a page
+  the API itself puts first (a doc id, a citation, a corrected title) is never low confidence.
+  `timings_ms` gains `oracle.kind.*` (the kind retrieval's stages), `did_you_mean.spell`,
+  `did_you_mean.count` and the marker `oracle.cached`.
+* "Did you mean" prefers the correction that is a page's title ("alan turring": "alan turing"), is
+  counted by one every-word query, and offers nothing when a result is titled as the query.
 ### Added: the Crystallography Open Database, one page per structure (2026-11-05)
 * `reader: cod-cif` streams COD's 26.6 GB archive once and makes each of its ~520,000 CIFs a document:
   "<name or formula> (COD <id>)", a summary (formula, space group, cell, authors, journal, year, DOI)

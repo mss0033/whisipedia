@@ -398,10 +398,22 @@ class OracleSearcher:
         if not pool:
             return None
 
-        def rank(item: tuple[int, SearchHit]) -> tuple[bool, float, int]:
+        # A language the query's words do not announce is a preference: when no page is in it, the
+        # reader's, then the default language's page comes before the other editions (as in
+        # ``_aliased``). "Paris" asked with ``lang=fi`` and no Finnish page held fell to the pool's
+        # order among the editions of one source, and could open the Cebuano page (verification).
+        order = (
+            (lang,)
+            if known
+            else tuple(dict.fromkeys(x for x in (lang, route.reader_lang, DEFAULT_LANG) if x))
+        )
+
+        def rank(item: tuple[int, SearchHit]) -> tuple[int, float, int]:
             i, h = item
             src = h.source_id or source_of(h.doc_id)
-            return (bool(h.lang) and primary_lang(h.lang) != lang, -self.source_weights.get(src, 1.0), i)
+            own = primary_lang(h.lang) if h.lang else lang
+            tier = order.index(own) if own in order else len(order)
+            return (tier, -self.source_weights.get(src, 1.0), i)
 
         return min(enumerate(pool), key=rank)[1]
 
