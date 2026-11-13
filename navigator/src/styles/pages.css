@@ -594,6 +594,11 @@
 .page-document .doc-body {
   max-width: 46rem;
 }
+/* A word longer than the line (an address written out, a chemical name) breaks rather than push the
+   page sideways. `break-word`, not `anywhere`: table columns keep their widths. */
+.doc-body {
+  overflow-wrap: break-word;
+}
 .doc-text {
   font-size: 0.875rem;
   line-height: 1.3;

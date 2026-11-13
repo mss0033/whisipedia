@@ -143,11 +143,11 @@ test.describe('at phone width', () => {
 
   const WIDE = `<h1>Wide things</h1><p>Lead paragraph.</p>
 <table><caption>Longest rivers</caption><tr>${'<th>Column heading</th>'.repeat(14)}</tr><tr>${'<td>1234567890</td>'.repeat(14)}</tr></table>
-<p>Between.</p><table><tr><td>small</td></tr></table>
+<p>Between: ${'methionylthreonyl'.repeat(10)}.</p><table><tr><td>small</td></tr></table>
 <pre>${'a_long_line_of_code_with_no_break_in_it;'.repeat(6)}</pre>
 <p>End.</p>`;
 
-  test('a wide table, a long line of code and a long address do not push the page sideways', async ({
+  test('a wide table, a long line of code, a long word and a long address do not push the page sideways', async ({
     page,
     nav,
   }) => {
