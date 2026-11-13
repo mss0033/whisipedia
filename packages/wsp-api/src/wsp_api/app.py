@@ -410,9 +410,18 @@ def _v1(lib: Library, settings: ApiSettings) -> APIRouter:
         offset: Annotated[
             int, Query(ge=0, le=WINDOW, description=f"Results are ranked {WINDOW} deep; pages end there.")
         ] = 0,
+        lang: Annotated[
+            str | None,
+            Query(
+                max_length=35,
+                pattern=r"^[A-Za-z]{2,8}([-_][A-Za-z0-9]{1,8})*$",
+                description="The reader's language (BCP-47): when the query does not show its own "
+                "language, pages in this one are preferred.",
+            ),
+        ] = None,
     ) -> SearchResults:
         wanted = [x for raw in sources or [] for x in raw.split(",") if x] or None
-        return await lib.searches.run(lambda: searcher.run(q, wanted, kind, limit, offset))
+        return await lib.searches.run(lambda: searcher.run(q, wanted, kind, limit, offset, lang))
 
     @r.get("/suggest", tags=["search"], responses=errors(422))
     def suggest(

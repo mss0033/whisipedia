@@ -647,6 +647,26 @@
               "title": "Offset"
             },
             "description": "Results are ranked 200 deep; pages end there."
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 35,
+                  "pattern": "^[A-Za-z]{2,8}([-_][A-Za-z0-9]{1,8})*$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The reader's language (BCP-47): when the query does not show its own language, pages in this one are preferred.",
+              "title": "Lang"
+            },
+            "description": "The reader's language (BCP-47): when the query does not show its own language, pages in this one are preferred."
           }
         ],
         "responses": {

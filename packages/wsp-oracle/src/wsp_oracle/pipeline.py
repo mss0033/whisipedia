@@ -25,6 +25,7 @@ from wsp_core.listing import is_default_listing
 from wsp_core.model import DocRecord, SearchHit, Suggestion
 from wsp_core.ports import DocSuggester, Embedder, LexicalIndex, Reranker
 from wsp_index import FusionConfig, HybridSearcher
+from wsp_index.spelling import script_of
 from wsp_index.text import STOPWORDS_EN, normalize_key, primary_lang, query_language
 from wsp_oracle.embedder import encode_queries
 from wsp_oracle.reranker import plain
@@ -51,6 +52,79 @@ TITLED_DEPTH = 30  # title matches read to choose among same-titled pages (ten W
 NAMED_TARGETS = 16  # documents a name (a redirect) is looked up as, from the suggest trie
 NAMED_LOOKUPS = 4  # of them resolved (a stored-document read each) to find one in the query's language
 FOREIGN_WINDOW = 10  # first hits read to tell a query whose results hold nothing in its language
+DEFAULT_LANG = "en"
+"""The language preferred when neither the query nor the reader names one (the interface language)."""
+# Scripts that all but name a language, by ``wsp_index.spelling.script_of``'s keys (the first eight
+# letters of the script's Unicode name). Not Latin, not Cyrillic (``query_language`` answers "ru") and
+# not Han alone (Chinese or Japanese).
+_SCRIPT_LANG = {
+    "ARABIC": "ar",
+    "HEBREW": "he",
+    "GREEK": "el",
+    "HANGUL": "ko",
+    "KANA": "ja",
+    "THAI": "th",
+    "DEVANAGA": "hi",
+}
+
+
+_SHARED_SCRIPT_LANGS = frozenset({"ar", "hi", "he"})
+"""Languages of :data:`_SCRIPT_LANG` whose script other languages of the library are written in too."""
+
+
+def _script_language(text: str) -> str | None:
+    """The language the script of ``text`` all but names, when every letter of it is in that script
+    (Japanese: kana, with or without Han); ``None`` otherwise.
+
+    The whole query, not a letter of it: "β-carotene", "μ decay", "Δ9-THC" and "π calculus" are English
+    queries, and a lone Greek letter beside Latin ones names nothing; nor do Greek letters on their
+    own ("π", "ΔΣ"), which are symbols until three of them make a word. The answer is a preference
+    between editions, never a filter: Arabic script also writes Persian and Urdu, Devanagari also
+    Marathi and Nepali, so callers treat it as a language the query did not announce (see
+    :func:`_language`, which returns it with ``known`` false)."""
+    # "ー" is KATAKANA-HIRAGANA PROLONGED SOUND MARK and "々" IDEOGRAPHIC ITERATION MARK: kana and Han
+    # under names ``script_of`` does not fold
+    scripts = {
+        "KANA" if s.startswith(("KATAKANA", "HIRAGANA")) else "CJK" if s == "IDEOGRAP" else s
+        for s in map(script_of, filter(str.isalpha, text))
+    }
+    if not scripts:
+        return None
+    if "KANA" in scripts and scripts <= {"KANA", "CJK"}:
+        return "ja"
+    if len(scripts) != 1:
+        return None
+    script = next(iter(scripts))
+    if script == "GREEK" and not any(sum(c.isalpha() for c in w) > 2 for w in text.split()):
+        return None  # "π", "β δ", "ΔΣ": Greek letters as symbols, not Greek words
+    return _SCRIPT_LANG.get(script)
+
+
+def _reader(lang: str | None) -> str:
+    """The reader's language as the pipeline keeps it: the primary subtag, and nothing for
+    :data:`DEFAULT_LANG` (a reader who sends "en" and one who sends nothing are served alike, from one
+    cache entry, and neither is taken to have said which edition "東京" wants)."""
+    code = primary_lang(lang) if lang and lang.strip() else ""
+    return "" if code in (DEFAULT_LANG, "mul", "und", "zxx") else code  # "mul": no one language
+
+
+def _stated_language(text: str, reader: str = "") -> tuple[str | None, bool]:
+    """``(language, known)``: the language the query's function words announce (``known``), else the
+    one its script names, else the reader's (``reader`` as :func:`_reader` gives it); ``None`` when
+    nothing says."""
+    found = query_language(text.split())
+    if found:
+        return found, True
+    return _script_language(text) or reader or None, False
+
+
+def _language(text: str, reader: str = "") -> tuple[str, bool]:
+    """``(the language to prefer, whether the query's own words announce it)``: the one place that
+    decides it. Announced by two function words (:func:`wsp_index.text.query_language`), then named by
+    the script, then the reader's, then :data:`DEFAULT_LANG`. Only an announced language may filter
+    (drop other editions); the others order."""
+    lang, known = _stated_language(text, reader)
+    return lang or DEFAULT_LANG, known
 
 
 def source_of(doc_id: str) -> str:
@@ -284,7 +358,7 @@ class OracleSearcher:
         result, as thirty Wikipedia pages with the words in their titles (schools, prizes, streets)
         came before it in the heavy title search (2026-11-05 review)."""
         key = _title_key(title)
-        lang = query_language((route.title or route.query).split()) or "en"
+        lang, known = _language(route.title or route.query, route.reader_lang)
         seen: set[str] = set()
         pool: list[SearchHit] = []
         heavy = [s for s, w in self.source_weights.items() if w > 1.0 and (sources is None or s in sources)]
@@ -302,7 +376,11 @@ class OracleSearcher:
             # the reference copy may be past the first matches (every Wikipedia language has the title)
             found += self._titled(title, heavy)
         if missed([*held, *found]):
-            found += self._named_titled(title, lang, heavy)
+            # A language the query does not announce is a preference, not a filter: "Berliner Mauer"
+            # has no function word, was taken for English, and the German article (buried in the
+            # title search like "Albert Einstein" above) was dropped here; Wikiquote's page led
+            # (2026-11-10 trawl, search-index-09). ``rank`` below still puts the preferred language first.
+            found += self._named_titled(title, lang, heavy, strict=known)
         for h in [*held, *found]:
             if h.doc_id in seen or _title_key(h.title) != key or not self._pinnable(route.query, h):
                 continue
@@ -320,10 +398,12 @@ class OracleSearcher:
 
         return min(enumerate(pool), key=rank)[1]
 
-    def _named_titled(self, title: str, lang: str, heavy: Sequence[str]) -> list[SearchHit]:
+    def _named_titled(self, title: str, lang: str, heavy: Sequence[str], *, strict: bool) -> list[SearchHit]:
         """The pages of the ``heavy`` sources the suggest trie holds as titled exactly ``title``, the
-        query's language's edition looked up first (``"en/"``), at most :data:`NAMED_LOOKUPS` reads;
-        only those in the query's language. The trie knows a title the word search buries."""
+        edition in ``lang`` looked up first (``"en/"``), then the trie's order (its prior), at most
+        :data:`NAMED_LOOKUPS` reads. ``strict`` (the query's words announce ``lang``): only those in
+        ``lang``; otherwise every page that states a language, ``lang`` being a guess. The trie knows a
+        title the word search buries."""
         named = getattr(self.lexical, "named", None)
         resolve = getattr(self.lexical, "lookup", None) or self.resolve
         if not callable(named) or not callable(resolve):
@@ -341,7 +421,7 @@ class OracleSearcher:
         out: list[SearchHit] = []
         for _, doc_id in wanted[:NAMED_LOOKUPS]:
             hit = cast(SearchHit | None, resolve(doc_id))
-            if hit is not None and hit.lang and primary_lang(hit.lang) == lang:
+            if hit is not None and hit.lang and (not strict or primary_lang(hit.lang) == lang):
                 out.append(hit)
         return out
 
@@ -393,13 +473,21 @@ class OracleSearcher:
             or not route.title
         ):
             return []
-        lang = query_language(route.title.split()) or "en"
+        lang, known = _language(route.title, route.reader_lang)
+        # A language the query's words do not announce (its script's, the reader's) is a preference:
+        # the reader's, then the default language's page is the answer when it holds none. "서울" with
+        # only the English article "Seoul" redirected from it must still find Seoul.
+        langs = (
+            (lang,)
+            if known
+            else tuple(dict.fromkeys(x for x in (lang, route.reader_lang, DEFAULT_LANG) if x))
+        )
         # Only a heavy pin in the query's language: the Cebuano "Einstein" stub the title search falls
         # back to is no answer to "Einstein", and it kept Albert Einstein out (2026-11-05 review).
         if any(
             self.source_weights.get(p.source_id or source_of(p.doc_id), 1.0) > 1.0
             and p.lang
-            and primary_lang(p.lang) == lang
+            and primary_lang(p.lang) in langs
             for p in pins
         ):
             return []
@@ -419,25 +507,29 @@ class OracleSearcher:
             and (allowed is None or source_of(doc_id) in allowed)
         ]
 
-        def order(t: tuple[int, str]) -> tuple[float, bool, int]:
+        def order(t: tuple[int, str]) -> tuple[float, int, int]:
             i, doc_id = t
             src = source_of(doc_id)
             native = doc_id.removeprefix(f"wsp:{src}/")
             # the heaviest source (the reference article), its edition in the query's language, the
             # trie's order (the prior)
-            return (-self.source_weights.get(src, 1.0), not native.startswith(f"{lang}/"), i)
+            edition = next((n for n, x in enumerate(langs) if native.startswith(f"{x}/")), len(langs))
+            return (-self.source_weights.get(src, 1.0), edition, i)
 
         targets.sort(key=order)
+        found_in: dict[str, SearchHit] = {}
         for _, doc_id in targets[:NAMED_LOOKUPS]:
             hit = cast(SearchHit | None, resolve(doc_id))
-            if hit is None or not hit.lang or primary_lang(hit.lang) != lang:
+            if hit is None or not hit.lang or primary_lang(hit.lang) not in langs:
                 continue  # gone from the index since the trie was built, or another language's page
             if not self._pinnable(route.query, hit):
                 continue
             if route.intent is not Intent.DEFINE and _is_dictionary(hit):
                 continue
-            return [replace(hit, snippet="")]
-        return []
+            if primary_lang(hit.lang) == lang:
+                return [replace(hit, snippet="")]
+            found_in.setdefault(primary_lang(hit.lang), hit)
+        return [replace(found_in[x], snippet="") for x in langs if x in found_in][:1]
 
     def _title_pins(self, route: Route, candidates: Iterable[SearchHit], pinned: set[str]) -> list[SearchHit]:
         """For a page-name query, each source's best near-exact title: one holding every word of the
@@ -460,7 +552,7 @@ class OracleSearcher:
         words = set(_words_of(route.title))
         if not words:
             return []
-        lang = query_language(route.title.split()) or "en"
+        lang = _language(route.title, route.reader_lang)[0]
         best: dict[str, tuple[tuple[bool, bool, int, int, float, int], SearchHit]] = {}
         for i, h in enumerate(candidates):
             title = _words_of(h.title)
@@ -649,8 +741,16 @@ class OracleSearcher:
     # --- the pipeline --------------------------------------------------------------------------
 
     def run(
-        self, query: str, *, sources: Sequence[str] | None = None, depth: int | None = None
+        self,
+        query: str,
+        *,
+        sources: Sequence[str] | None = None,
+        depth: int | None = None,
+        lang: str | None = None,
     ) -> OracleResult:
+        """One query end to end. ``lang`` is the reader's language (BCP-47): it is preferred when the
+        query neither announces a language nor is written in a script that names one. Absent, or
+        :data:`DEFAULT_LANG`, is the default (:func:`_reader`)."""
         t0 = time.perf_counter()
         timings: dict[str, float] = {}
 
@@ -660,6 +760,7 @@ class OracleSearcher:
             return now
 
         route, scope = self.scoped(query, sources)
+        route = replace(route, reader_lang=_reader(lang))
         if scope is not None:
             searched = scope.searched()
             sources = None if searched is None else list(searched)
@@ -694,13 +795,14 @@ class OracleSearcher:
             self._boost(route, self._weigh(route.query, list(found.hits))), self.content_hashes
         )
         t = lap("lexical+fusion", t)
-        pins = self._pins(route, fused, sources)
-        pins += self._aliased(route, pins, sources)
+        exact = self._pins(route, fused, sources)
+        exact += self._aliased(route, exact, sources)
         # Candidates from the lexical window too: a book's long text ranks it below the fusion's cut.
-        named = self._title_pins(route, [*fused, *found.lexical], {p.doc_id for p in pins})
-        pins += named
-        titled = {p.doc_id for p in pins}  # the pages the query names: their snippets are their leads
-        pins += self._embedded_title(route, [*fused, *found.lexical], {p.doc_id for p in pins}, sources)
+        named = self._title_pins(route, [*fused, *found.lexical], {p.doc_id for p in exact})
+        titled = {p.doc_id for p in [*exact, *named]}  # the pages the query names: their leads are shown
+        embedded = self._embedded_title(route, [*fused, *found.lexical], set(titled), sources)
+        # In this order to the end: the exact titles and the alias, the near titles, the embedded one.
+        pins = [*exact, *named, *embedded]
         pinned = {p.doc_id for p in pins}
         rest = [h for h in fused if h.doc_id not in pinned]
         t = lap("titles", t)
@@ -728,16 +830,32 @@ class OracleSearcher:
             pins = [replace(p, score=scores.get(p.doc_id, p.score)) for p in pins]
             head = [replace(h, snippet=display[h.doc_id]) for h in ranked if h.doc_id in display]
             t = lap("rerank", t)
+        fixed = len(exact)  # the pins no later rule moves: the exact titles and the alias
         if named:  # near-exact titles: the query's language first, then by the reranker's score
-            lang = query_language(route.title.split()) or "en"
-            exact, near = pins[: len(pins) - len(named)], pins[len(pins) - len(named) :]
-            if confidence is not None:
-                near.sort(key=lambda h: (not h.lang or primary_lang(h.lang) != lang, -h.score))
-            pins, head = [*exact, *near[:TITLE_PINS]], [*near[TITLE_PINS:], *head]
-        head, tail = _prefer_language(route.query or query, head, tail, reranked=confidence is not None)
-        pins, head = _spread_foreign_dictionaries(
-            route.query or query, pins, head, fixed=len(pins) - min(len(named), TITLE_PINS)
+            first, near, last = pins[:fixed], pins[fixed : fixed + len(named)], pins[fixed + len(named) :]
+            near, demoted = _near_pins(
+                near,
+                first,
+                *_language(route.title, route.reader_lang),
+                reranked=confidence is not None,
+            )
+            pins, head = [*first, *near[:TITLE_PINS], *last], [*near[TITLE_PINS:], *demoted, *head]
+        # One preferred language for the rest: what the query announces, its script names or the
+        # reader sent, else the default. An exact title in another language does not change it.
+        stated, known = _stated_language(route.query or query, route.reader_lang)
+        prefer = stated or DEFAULT_LANG
+        if not known and not any(h.lang and primary_lang(h.lang) == prefer for h in (*head, *tail)):
+            prefer = DEFAULT_LANG  # a guess no result is in: the default's pages keep their bonus
+        head, tail = _prefer_language(
+            route.query or query, head, tail, reranked=confidence is not None, lang=prefer
         )
+        # For the dictionaries only a language something states outright: with nothing said the
+        # function keeps its own rule (Latin letters only), and a script several languages write
+        # (Arabic: Persian, Urdu; Devanagari: Marathi, Nepali; Hebrew: Yiddish) does not say which
+        # edition is the foreign one.
+        if not known and stated != route.reader_lang and stated in _SHARED_SCRIPT_LANGS:
+            stated = None
+        pins, head = _spread_foreign_dictionaries(route.query or query, pins, head, fixed=fixed, lang=stated)
         hits = tuple([*pins, *head, *tail])
         total = (time.perf_counter() - t0) * 1000
         timings["total"] = round(total, 3)
@@ -775,19 +893,22 @@ class OracleSearcher:
         hits: Sequence[SearchHit],
         corrected: Callable[[], str | None],
         sources: Sequence[str] | None = None,
+        lang: str | None = None,
     ) -> SearchHit | None:
         """The page titled like the corrected query, in the query's language, when the first
         :data:`FOREIGN_WINDOW` of ``hits`` hold nothing in that language (``corrected`` is asked only
         then). "Isaac Newtonn" matched French pages alone (the French stemmer undoes the double n): all
-        ten hits were French while "did you mean" offered "Isaac Newton" (2026-11-05 deep dive)."""
-        lang = query_language(query.split()) or "en"
+        ten hits were French while "did you mean" offered "Isaac Newton" (2026-11-05 deep dive).
+        ``lang`` is the reader's language, as in :meth:`run`."""
+        reader = _reader(lang)
+        lang = _language(query, reader)[0]
         first = hits[:FOREIGN_WINDOW]
         if not first or any(not h.lang or primary_lang(h.lang) == lang for h in first):
             return None
         fixed = corrected()
         if not fixed or fixed.casefold() == query.casefold():
             return None
-        route = self.router.route(fixed)
+        route = replace(self.router.route(fixed), reader_lang=reader)
         hit = self._best_titled(route, route.title or fixed, [], sources)
         if hit is None or not hit.lang or primary_lang(hit.lang) != lang:
             return None
@@ -836,7 +957,7 @@ class OracleIndex:
         self.searcher = searcher
         self.lexical = searcher.lexical
         # (result, the depth it was computed for, when)
-        self._cache: OrderedDict[tuple[str, tuple[str, ...] | None], tuple[OracleResult, int, float]] = (
+        self._cache: OrderedDict[tuple[str, tuple[str, ...] | None, str], tuple[OracleResult, int, float]] = (
             OrderedDict()
         )
         self._cache_size = cache_size
@@ -874,11 +995,15 @@ class OracleIndex:
             log.info("oracle: vector store changed on disk; reopened, result cache cleared")
             self._invalidate()
 
-    def result(self, query: str, *, sources: Sequence[str] | None = None, depth: int = 0) -> OracleResult:
+    def result(
+        self, query: str, *, sources: Sequence[str] | None = None, depth: int = 0, lang: str | None = None
+    ) -> OracleResult:
         """The pipeline's result for a query, cached. A deeper request than the cached one re-runs
-        the pipeline but keeps the hits already shown in their order (pages never disagree)."""
+        the pipeline but keeps the hits already shown in their order (pages never disagree).
+        ``lang`` is the reader's language (:meth:`OracleSearcher.run`); it is part of the cache key as
+        :func:`reader_key` gives it, so no ``lang`` and the default language share an entry."""
         self._maybe_refresh()
-        key = (" ".join(query.split()), None if sources is None else tuple(sorted(sources)))
+        key = (" ".join(query.split()), None if sources is None else tuple(sorted(sources)), reader_key(lang))
         searched = self.searcher.depth_for(depth)
         now = self._clock()
         shown: OracleResult | None = None
@@ -892,7 +1017,7 @@ class OracleIndex:
                     return hit
                 shown = hit if fresh else None
             began = self._generation
-        res = self.searcher.run(query, sources=sources, depth=depth or None)
+        res = self.searcher.run(query, sources=sources, depth=depth or None, lang=lang)
         if shown is not None:
             kept = {h.doc_id for h in shown.hits}
             res = replace(res, hits=(*shown.hits, *(h for h in res.hits if h.doc_id not in kept)))
@@ -906,13 +1031,19 @@ class OracleIndex:
         return res
 
     def search(
-        self, query: str, *, limit: int = 10, offset: int = 0, sources: Sequence[str] | None = None
+        self,
+        query: str,
+        *,
+        limit: int = 10,
+        offset: int = 0,
+        sources: Sequence[str] | None = None,
+        lang: str | None = None,
     ) -> Sequence[SearchHit]:
         if limit <= 0 or offset < 0 or not query.strip():
             return []
         if sources is not None and not sources:
             return []
-        res = self.result(query, sources=sources, depth=offset + limit)
+        res = self.result(query, sources=sources, depth=offset + limit, lang=lang)
         return self.searcher.with_snippets(res.route.lexical or query, res.hits[offset : offset + limit])
 
     def with_snippets(self, query: str, hits: Sequence[SearchHit]) -> list[SearchHit]:
@@ -926,9 +1057,16 @@ class OracleIndex:
         hits: Sequence[SearchHit],
         corrected: Callable[[], str | None],
         sources: Sequence[str] | None = None,
+        lang: str | None = None,
     ) -> SearchHit | None:
         """:meth:`OracleSearcher.correction_pin` for ``hits`` of :meth:`result` (the API's list)."""
-        return self.searcher.correction_pin(query, hits, corrected, sources)
+        return self.searcher.correction_pin(query, hits, corrected, sources, lang)
+
+    @staticmethod
+    def reader_key(lang: str | None) -> str:
+        """:func:`reader_key`, for a caller that shares runs in flight (the API's ``Searcher.retrieval``):
+        its key and this cache's must take the same tags for the same reader."""
+        return reader_key(lang)
 
     def suggest(self, prefix: str, *, limit: int = 10) -> Sequence[str]:
         return self.lexical.suggest(prefix, limit=limit)
@@ -941,9 +1079,11 @@ class OracleIndex:
             return self.lexical.suggest_docs(prefix, limit=limit, lang=lang)
         raise NotImplementedError("the lexical index suggests titles only")
 
-    def scope(self, query: str, sources: Sequence[str] | None = None) -> Scope | None:
+    def scope(
+        self, query: str, sources: Sequence[str] | None = None, lang: str | None = None
+    ) -> Scope | None:
         """Where :meth:`search` looks for this query (a named site, or the whole library)."""
-        return self.result(query, sources=sources).scope
+        return self.result(query, sources=sources, lang=lang).scope
 
     def search_hits(
         self, query: str, *, limit: int = 10, offset: int = 0, sources: Sequence[str] | None = None
@@ -1004,11 +1144,65 @@ def cosine_top(query: np.ndarray, matrix: np.ndarray, k: int) -> list[int]:
     return [int(i) for i in top[np.argsort(-sims[top], kind="stable")]]
 
 
-def _prefer_language(
-    query: str, head: Sequence[SearchHit], tail: Sequence[SearchHit], *, reranked: bool
+def reader_key(lang: str | None) -> str:
+    """The reader's language as a cache or in-flight key: every tag the pipeline serves alike gives
+    the same key (``None``, ``"en"`` and ``"en-GB"`` are all :data:`DEFAULT_LANG`)."""
+    return _reader(lang) or DEFAULT_LANG
+
+
+def _near_pins(
+    near: Sequence[SearchHit], exact: Sequence[SearchHit], lang: str, known: bool, *, reranked: bool
 ) -> tuple[list[SearchHit], list[SearchHit]]:
-    """Favour hits in the query's language (:data:`LANG_BONUS`, :data:`LANG_BOOST`), each list kept sorted."""
-    lang = query_language(query.split()) or "en"
+    """``(the near-exact titles to pin, those to rank with the head)``, the first sorted: the
+    preferred language, then the other "own" languages, each by the reranker's score.
+
+    "Own" is the preferred language ``lang`` and the language of every exact pin: "Berliner Mauer"
+    (exact pin: the German article) keeps its German near titles pinned beside the English ones. An
+    exact pin only widens it; it never replaces ``lang``: the Cebuano and Swedish editions hold
+    millions of bot-written stubs titled with place and species names the English one lacks, and such
+    a stub as the only exact title must not turn the English near titles out.
+
+    A near title in a language outside "own" is not pinned once something says what "own" is (the
+    query's words announce the language, ``known``, or an exact pin states one): every source gives its
+    best near title, so a source holding only Japanese or Portuguese pages gave one of those, and
+    "united states" listed foreign pages at ranks 2-5 before every reranked hit (2026-11-10 trawl,
+    search-index-16). They join the head, where the reranker's score and the language bonus place
+    them; nothing is dropped. Without reranker scores there is nothing to place them by, and with
+    neither an exact pin nor an announced language nothing to tell them from the reader's pages: the
+    order stands."""
+    own = {lang} | {primary_lang(p.lang) for p in exact if p.lang}
+
+    def foreign(h: SearchHit) -> bool:
+        return bool(h.lang) and primary_lang(h.lang) not in own
+
+    kept = list(near)
+    if not reranked:
+        return kept, []
+    # the preferred language still first, as before: eight Cebuano near titles the reranker scores
+    # a hair higher must not push the English one past ``TITLE_PINS``
+    kept.sort(
+        key=lambda h: (
+            not h.lang or primary_lang(h.lang) != lang,
+            not h.lang or primary_lang(h.lang) not in own,
+            -h.score,
+        )
+    )
+    if not known and not any(p.lang for p in exact):
+        return kept, []
+    return [h for h in kept if not foreign(h)], [h for h in kept if foreign(h)]
+
+
+def _prefer_language(
+    query: str,
+    head: Sequence[SearchHit],
+    tail: Sequence[SearchHit],
+    *,
+    reranked: bool,
+    lang: str | None = None,
+) -> tuple[list[SearchHit], list[SearchHit]]:
+    """Favour hits in the query's language (:data:`LANG_BONUS`, :data:`LANG_BOOST`), each list kept
+    sorted. ``lang``, when given, is that language (the pipeline's choice, :func:`_language`)."""
+    lang = lang or _language(query)[0]
 
     def bonus(h: SearchHit, *, head_part: bool) -> SearchHit:
         if not h.lang or primary_lang(h.lang) != lang:  # stored tags are full BCP-47 ("en-GB")
@@ -1052,7 +1246,7 @@ def _latin(text: str) -> bool:
 
 
 def _spread_foreign_dictionaries(
-    query: str, pins: Sequence[SearchHit], head: Sequence[SearchHit], *, fixed: int
+    query: str, pins: Sequence[SearchHit], head: Sequence[SearchHit], *, fixed: int, lang: str | None = None
 ) -> tuple[list[SearchHit], list[SearchHit]]:
     """Of the dictionary entries in another language than the query's, the first keeps its place and
     the others go to the end of the reranked head, below the hits in the query's language.
@@ -1061,12 +1255,17 @@ def _spread_foreign_dictionaries(
     slot of the first ten, five Wiktionary entries in all (2026-11-05 deep dive). The first ``fixed``
     pins (the exact title, the alias) stay. The query's language must be known, or the query written
     in Latin letters (English, the interface language, then): "東京" (seven Wiktionary entries) says
-    nothing about which edition it wants, and keeps its order. Nothing is dropped."""
-    lang = query_language(query.split())
+    nothing about which edition it wants, and keeps its order. Nothing is dropped.
+
+    ``lang``, when given, is a language something stated (the query's words, its script, a reader's
+    language other than the default: :func:`_stated_language`); never the default as a guess, which
+    would undo the "東京" rule."""
+    if lang is None:
+        lang = query_language(query.split())
     if lang is None:
         if not _latin(query):
             return list(pins), list(head)
-        lang = "en"
+        lang = DEFAULT_LANG
 
     def foreign(h: SearchHit) -> bool:
         return bool(h.lang) and primary_lang(h.lang) != lang and _is_dictionary(h)

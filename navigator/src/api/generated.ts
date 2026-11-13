@@ -1176,6 +1176,8 @@ export interface Routes {
       limit?: number | undefined;
       /** Results are ranked 200 deep; pages end there. */
       offset?: number | undefined;
+      /** The reader's language (BCP-47): when the query does not show its own language, pages in this one are preferred. */
+      lang?: string | null | undefined;
     };
     body: null;
     response: SearchResults;

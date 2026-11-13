@@ -88,6 +88,9 @@ class Route:
     bundle's book named after one (``osm-planet``, ``wikibooks_en_all``), matched by its first word."""
     prefer_sources: tuple[str, ...] = ()
     """Exact source ids to boost: the sources of a site named as a soft prior (``wikipedia ...``)."""
+    reader_lang: str = ""
+    """The reader's language (a primary subtag), when one was sent that is not the default: set by
+    the pipeline for its own stages; the router never sets it."""
 
 
 # --- site words -------------------------------------------------------------------------------------

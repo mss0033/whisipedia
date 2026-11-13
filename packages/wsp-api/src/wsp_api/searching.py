@@ -79,13 +79,24 @@ class Retrieval:
     timings_ms: Mapping[str, float] = field(default_factory=dict[str, float])  # the Oracle's stages
 
 
-def retrieve(index: object, q: str, wanted: Sequence[str] | None) -> Retrieval:
-    """One ranked retrieval of up to :data:`WINDOW` hits."""
+def reader_key(index: object, lang: str | None) -> str:
+    """The reader's language as a key for runs shared in flight: the index's own (the Oracle's cache
+    key, so ``lang=en`` and no ``lang`` are one run when it serves them alike), else the primary subtag."""
+    own = getattr(index, "reader_key", None)
+    if callable(own):
+        return cast(str, own(lang))
+    return lang.strip().lower().replace("_", "-").split("-", 1)[0] if lang else ""
+
+
+def retrieve(index: object, q: str, wanted: Sequence[str] | None, lang: str | None = None) -> Retrieval:
+    """One ranked retrieval of up to :data:`WINDOW` hits. ``lang`` (the reader's language) is passed
+    only when one was sent: an index that takes none is called as before."""
     if wanted is not None and not wanted:  # a filter that matches no source: nothing, not everything
         return Retrieval((), True, True)
     oracle = getattr(index, "result", None)
     if callable(oracle):  # the Oracle: hits, confidence and scope from one (cached) run
-        res = cast(Any, oracle(q, sources=wanted, depth=WINDOW))
+        said = {} if lang is None else {"lang": lang}
+        res = cast(Any, oracle(q, sources=wanted, depth=WINDOW, **said))
         hits = tuple(cast(Sequence[SearchHit], res.hits))
         # The Oracle says whether its list holds every match: collapsed duplicates and filtered hits make
         # a list shorter than the window without making it complete (audit 2026-10-12 F10). An index that
@@ -120,7 +131,7 @@ def _access(spec: SourceSpec) -> Mapping[str, object]:
 class Searcher:
     def __init__(self, lib: Library) -> None:
         self.lib = lib
-        self._flight: SingleFlight[tuple[str, tuple[str, ...] | None], Retrieval] = SingleFlight()
+        self._flight: SingleFlight[tuple[str, tuple[str, ...] | None, str], Retrieval] = SingleFlight()
         self._listing: dict[str, re.Pattern[str] | None] = {}  # source id -> listing-path regex
         self._copies: dict[str, tuple[tuple[str, str], ...]] = {}  # source id -> (twin source, prefix)
 
@@ -200,9 +211,14 @@ class Searcher:
         ids = [x.id for x in self.lib.s.sources if sites.kind_of(x) is kind]
         return [x for x in ids if wanted is None or x in wanted]
 
-    def retrieval(self, q: str, wanted: Sequence[str] | None) -> Retrieval:
-        key = (" ".join(q.split()), None if wanted is None else tuple(sorted(wanted)))
-        return self._flight.do(key, lambda: retrieve(self.lib.s.index, q, wanted))
+    def retrieval(self, q: str, wanted: Sequence[str] | None, lang: str | None = None) -> Retrieval:
+        index = self.lib.s.index
+        key = (
+            " ".join(q.split()),
+            None if wanted is None else tuple(sorted(wanted)),
+            reader_key(index, lang),
+        )
+        return self._flight.do(key, lambda: retrieve(index, q, wanted, lang))
 
     def correction(self, q: str, found: int, titles: Sequence[str] = ()) -> str | None:
         """The speller's correction of ``q`` (None: none), before any count. With ``found`` results or
@@ -237,7 +253,7 @@ class Searcher:
         return fixed if _count(self.lib.s.index, fixed, wanted, max(found, 1)) >= max(found, 1) else None
 
     def correction_pin(
-        self, q: str, hits: Sequence[SearchHit], wanted: Sequence[str] | None
+        self, q: str, hits: Sequence[SearchHit], wanted: Sequence[str] | None, lang: str | None = None
     ) -> SearchHit | None:
         """The page titled like the corrected query when ``hits`` hold nothing in the query's language
         at their head (the Oracle's ``correction_pin``): "Isaac Newtonn" listed ten French pages, the
@@ -247,7 +263,10 @@ class Searcher:
         if not callable(pin) or self.lib.s.speller is None:
             return None
         titles = [h.title for h in hits]
-        found = cast(SearchHit | None, pin(q, hits, lambda: self.correction(q, len(hits), titles), wanted))
+        said = {} if lang is None else {"lang": lang}  # an index that takes none is called as before
+        found = cast(
+            SearchHit | None, pin(q, hits, lambda: self.correction(q, len(hits), titles), wanted, **said)
+        )
         return None if found is None or self.is_listing(found) else found
 
     def searched_instead(
@@ -300,8 +319,15 @@ class Searcher:
             return list(pool.map(self.lib.hit_fields, [h.doc_id for h in page]))
 
     def run(
-        self, q: str, wanted: Sequence[str] | None, kind: DocKind | None, limit: int, offset: int
+        self,
+        q: str,
+        wanted: Sequence[str] | None,
+        kind: DocKind | None,
+        limit: int,
+        offset: int,
+        lang: str | None = None,
     ) -> SearchResults:
+        """``lang`` is the reader's language (BCP-47), preferred when the query does not show its own."""
         t0 = time.perf_counter()
         lib, s = self.lib, self.lib.s
         wanted, replaced = self.searched_instead(wanted)
@@ -318,7 +344,7 @@ class Searcher:
             stages[name] = round((now - since) * 1000, 1)
             return now
 
-        found = self.retrieval(q, wanted)
+        found = self.retrieval(q, wanted, lang)
         t = lap("retrieval", t0)
         content = self.one_copy([h for h in found.hits if not self.is_listing(h)])
         kinds = [self.kind_of(h) for h in content]
@@ -329,14 +355,14 @@ class Searcher:
             # (2026-10-17 field exam). The facets still count the mixed list.
             scope = self.scope_of(kind, wanted)
             if scope:
-                found = self.retrieval(q, scope)
+                found = self.retrieval(q, scope, lang)
                 t = lap("kind_retrieval", t)
                 shown = self.one_copy(
                     [h for h in found.hits if not self.is_listing(h) and self.kind_of(h) is kind]
                 )
             else:
                 shown = []
-        fixed = self.correction_pin(q, content, wanted)
+        fixed = self.correction_pin(q, content, wanted, lang)
         if fixed is not None and (kind is None or self.kind_of(fixed) is kind):
             shown = [fixed, *(h for h in shown if h.doc_id != fixed.doc_id)]
         # The pin is placed the same way on every page, so pages slice one list; only page 1 also
