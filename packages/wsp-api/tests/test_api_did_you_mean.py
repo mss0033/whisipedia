@@ -4,12 +4,14 @@ stage timings (2026-11-10 trawl, search-index-11, with the changes its review re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 
 import httpx
 
 from wsp_api import create_app
 from wsp_api.schemas import SearchResults
+from wsp_api.searching import ANSWERED_DEPTH, Searcher
 from wsp_api.testing import local_client
 from wsp_api.testing.browse import browse_services
 from wsp_core.model import SearchHit
@@ -143,13 +145,10 @@ class _Answered(_Index):
     """As :class:`_Index`, and the first result is titled ``first``."""
 
     first: str = ""
-    at: int = 0
 
     def _hits(self) -> tuple[SearchHit, ...]:
-        hits = list(super()._hits())
-        hits = (hits * (self.at + 1))[: max(len(hits), self.at + 1)]  # long enough to hold ``at``
-        hits[self.at] = replace(hits[self.at], title=self.first)
-        return tuple(hits)
+        hits = super()._hits()
+        return (replace(hits[0], title=self.first), *hits[1:])
 
 
 def test_a_query_that_is_a_results_title_is_offered_nothing() -> None:
@@ -160,15 +159,26 @@ def test_a_query_that_is_a_results_title_is_offered_nothing() -> None:
         assert _ask(index, "alan  turring").did_you_mean is None
         assert index.named_asked == []
         assert index.counts == []
-    # far down the list it is no answer (a forum question titled with the slip): corrected as ever
-    deep = _Answered(titles=frozenset({"alan turing"}), first="Alan Turring", at=10)
-    assert _ask(deep, "alan turring").did_you_mean == "alan turing"
     # one word that is a title may still be a slip: the speller's own choice, counted or titled
     one = _Answered(titles=frozenset({"turing"}), first="Turring")
     assert _ask(one, "turring").did_you_mean == "turning"
     # and without such a result the title is offered as before
     other = _Answered(titles=frozenset({"alan turing"}), first="Alan Turing (film)")
     assert _ask(other, "alan turring").did_you_mean == "alan turing"
+
+
+def test_only_a_result_near_the_top_answers_the_query() -> None:
+    # The tenth result titled as the query is its answer; the eleventh (a forum question titled with
+    # the slip, far down the list) is not, and the correction is made as ever.
+    services = SimpleNamespace(speller=_Speller(), index=_Index(titles=frozenset({"alan turing"})))
+    searcher = Searcher(cast(Any, SimpleNamespace(s=services)))
+    other = [f"Page {i}" for i in range(ANSWERED_DEPTH + 5)]
+    last = [*other[: ANSWERED_DEPTH - 1], "Alan_Turring", *other[ANSWERED_DEPTH:]]
+    past = [*other[:ANSWERED_DEPTH], "Alan Turring", *other[ANSWERED_DEPTH + 1 :]]
+    assert last.index("Alan_Turring") == ANSWERED_DEPTH - 1
+    assert past.index("Alan Turring") == ANSWERED_DEPTH
+    assert searcher.correction("alan turring", len(last), last) is None
+    assert searcher.correction("alan turring", len(past), past) == "alan turing"
 
 
 def test_one_word_is_never_swapped_for_a_title() -> None:
