@@ -77,6 +77,9 @@ class Retrieval:
     low_confidence: bool
     scope: Any = None  # the index's scope object (site, sources, fallback), if it routes queries
     timings_ms: Mapping[str, float] = field(default_factory=dict[str, float])  # the Oracle's stages
+    # ``low_confidence`` only because no document matches a word of the query (the hits are nearest
+    # neighbours); false when the retrieval doubts for an older reason too
+    unmatched_only: bool = False
 
 
 def reader_key(index: object, lang: str | None) -> str:
@@ -105,7 +108,12 @@ def retrieve(index: object, q: str, wanted: Sequence[str] | None, lang: str | No
         complete = len(hits) < WINDOW if exhaustive is None else bool(exhaustive) and len(hits) <= WINDOW
         stages = cast(Mapping[str, float], getattr(res, "timings_ms", None) or {})
         return Retrieval(
-            hits[:WINDOW], complete, bool(res.low_confidence) or not hits, res.scope, dict(stages)
+            hits[:WINDOW],
+            complete,
+            bool(res.low_confidence) or not hits,
+            res.scope,
+            dict(stages),
+            bool(getattr(res, "unmatched", False)) and not getattr(res, "doubted", False),
         )
     lexical = cast(Any, index)
     hits = tuple(cast(Sequence[SearchHit], lexical.search(q, limit=WINDOW + 1, offset=0, sources=wanted)))
@@ -344,9 +352,11 @@ class Searcher:
             stages[name] = round((now - since) * 1000, 1)
             return now
 
-        found = self.retrieval(q, wanted, lang)
+        # ``mixed`` is the whole-library list (the facets); ``found`` the list shown, a kind's own
+        # retrieval when one is asked.
+        mixed = found = self.retrieval(q, wanted, lang)
         t = lap("retrieval", t0)
-        content = self.one_copy([h for h in found.hits if not self.is_listing(h)])
+        content = self.one_copy([h for h in mixed.hits if not self.is_listing(h)])
         kinds = [self.kind_of(h) for h in content]
         shown = [h for h, k in zip(content, kinds, strict=True) if kind is None or k is kind]
         if kind is not None:
@@ -363,8 +373,10 @@ class Searcher:
             else:
                 shown = []
         fixed = self.correction_pin(q, content, wanted, lang)
+        answered = False  # a page the API itself puts first: the corrected title, a doc id, a citation
         if fixed is not None and (kind is None or self.kind_of(fixed) is kind):
             shown = [fixed, *(h for h in shown if h.doc_id != fixed.doc_id)]
+            answered = True
         # The pin is placed the same way on every page, so pages slice one list; only page 1 also
         # says "go straight there" (a hit was skipped or shown twice past page 1: review #112).
         target = search.navigate_to(s, q, exists=lib.exists)
@@ -374,6 +386,7 @@ class Searcher:
             held = next((h for h in shown if h.doc_id == pin), None)
             first = held or SearchHit(pin, 0.0, lib.title(pin) or pin, source_id=pin[4:].partition("/")[0])
             shown = [first, *(h for h in shown if h.doc_id != pin)]
+            answered = True
         t = lap("navigate", t)
         page = shown[offset : offset + limit]
         fill = getattr(s.index, "with_snippets", None)
@@ -401,14 +414,36 @@ class Searcher:
             else None
         )
         t = lap("did_you_mean", t)
-        low = found.low_confidence or not shown
+        # The retrieval's doubt does not stand over a page the API pinned first: "wsp:rfc/9110" or a
+        # citation matches no word of any document, and the Navigator would say "the library may not
+        # hold a good answer to this" above the very page asked for (review of the 2026-11-10 trawl).
+        # This lifts the reranker's doubt over such a page too: a doc id, a citation or a corrected
+        # title that the API answered is logged ``low: false`` now, and is no gap for the miner.
+        low = (found.low_confidence and not answered) or not shown
+        # A query no document matches in a word (nonsense, a typo, a term the library lacks) is low
+        # confidence since the same trawl. The gap miner proposes a source for every repeated ``low``
+        # query. Where that rule is the ONLY reason (the reranker was sure of the neighbours), the
+        # query was not ``low`` before: the line is marked and the miner leaves it out, so its input
+        # is what it was (a decision, not an accident: the new rule alone cannot tell a typo from a
+        # gap). One the reranker doubts too, or with no result at all, is a gap as ever.
+        unmatched = found.unmatched_only and low
         if s.queries is not None and offset == 0:
-            s.queries.record(s.clock(), q, len(shown), low)
+            if unmatched:
+                s.queries.record(s.clock(), q, len(shown), low, unmatched=True)
+            else:  # as before the mark existed: a log that takes no ``unmatched`` is called as ever
+                s.queries.record(s.clock(), q, len(shown), low)
         routed = found.scope
         took = round((time.perf_counter() - t0) * 1000, 2)
         # The Oracle's own stages (route, lexical+fusion, dense, titles, snippets, rerank) beside the
         # API's: a slow search says where its time went (it said only its total before 2026-10-14).
-        timings = {**{f"oracle.{k}": float(v) for k, v in found.timings_ms.items()}, **stages}
+        # Both retrievals' stages: with a ``kind`` the second assignment replaced the first, and a
+        # search whose mixed retrieval took 15.8 s logged the kind retrieval's stages alone
+        # (2026-11-10 trawl, api-perf-security-06). ``oracle.*`` is the mixed list's, ``oracle.kind.*``
+        # the kind's; ``cached`` among them says the stages are those of the run that was cached.
+        timings = {f"oracle.{k}": float(v) for k, v in mixed.timings_ms.items()}
+        if found is not mixed:
+            timings |= {f"oracle.kind.{k}": float(v) for k, v in found.timings_ms.items()}
+        timings |= stages
         if took >= SLOW_SEARCH_MS:
             log.warning("slow search %.0f ms %r: %s", took, q[:80], timings)
         return SearchResults(

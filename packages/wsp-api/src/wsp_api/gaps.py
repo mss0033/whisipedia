@@ -45,9 +45,21 @@ class JsonlQueryLog:
     def path(self) -> Path:
         return self._path
 
-    def record(self, at: datetime, query: str, total: int, low_confidence: bool) -> None:
+    def record(
+        self, at: datetime, query: str, total: int, low_confidence: bool, *, unmatched: bool = False
+    ) -> None:
+        """One line per search. ``unmatched`` (written only when true) marks a query that is ``low``
+        only because no document holds any of its words: the gap miner does not count it as a gap."""
+        entry: dict[str, object] = {
+            "at": at.isoformat(),
+            "q": query[:500],
+            "total": total,
+            "low": low_confidence,
+        }
+        if unmatched:
+            entry["unmatched"] = True
         line = json.dumps(
-            {"at": at.isoformat(), "q": query[:500], "total": total, "low": low_confidence},
+            entry,
             ensure_ascii=False,
             separators=(",", ":"),
         )

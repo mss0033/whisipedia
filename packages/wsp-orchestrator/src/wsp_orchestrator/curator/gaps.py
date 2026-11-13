@@ -127,6 +127,12 @@ class GapMiner:
             total = obj.get("total")
             if not (obj.get("low") is True or total == 0):
                 continue
+            if obj.get("unmatched") is True and total != 0:
+                # Low ONLY because no document holds a word of it, the reranker being sure of what
+                # it was shown: the API marks these since the 2026-11-10 trawl, when they became
+                # ``low``. They were not counted before and are not now (that rule alone cannot tell
+                # a typo from a gap). One the reranker doubts is not marked; with no result, as ever.
+                continue
             n_low += 1
             q = str(obj.get("q", ""))
             if normalize_query(q):

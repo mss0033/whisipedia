@@ -384,6 +384,29 @@ def test_gap_miner_groups_broken_links_and_empty_searches(tmp_path: Path) -> Non
     assert not any("src" in k for k in keys), "a page missing from a held source is not a new source"
 
 
+def test_gap_miner_leaves_out_searches_no_document_matched_in_a_word(tmp_path: Path) -> None:
+    # Since the 2026-11-10 trawl a query no document holds a word of (nonsense, a typo) is low
+    # confidence, and the API marks it: it was not a gap before and is not one now. With no result
+    # at all it counts as ever.
+    gaps, queries = tmp_path / "gaps.jsonl", tmp_path / "queries.jsonl"
+    at = T0.isoformat()
+
+    def line(q: str, total: int, **more: object) -> str:
+        return json.dumps({"at": at, "q": q, "total": total, "low": True, **more}) + "\n"
+
+    queries.write_text(
+        line("qwertyuiop asdfgh", 200, unmatched=True) * 5
+        + line("zxcvbnm lkjhgf", 0, unmatched=True) * 5
+        + line("obscure treaty", 12) * 5
+    )
+    result = GapMiner(gaps_path=gaps, queries_path=queries).run(_ctx(tmp_path, [make_spec("src")], {}))
+    keys = [c.key for c in result.candidates]
+    assert "gap:query:obscure treaty" in keys  # low for the reranker's doubt: a gap, as before
+    assert "gap:query:zxcvbnm lkjhgf" in keys  # nothing found at all: a gap, as before
+    assert not any("qwertyuiop" in k or "asdfgh" in k for k in keys)
+    assert result.notes["low_result_queries"] == 10
+
+
 def test_registry_text_edit_and_overlay(tmp_path: Path) -> None:
     text = "schema_version: 1\nsources:\n  - id: a\n    name: A\n\n  - id: b\n    name: B\n"
     replaced = apply_to_registry_text(text, {"id": "a", "name": "A2", "domain": ["x"]})

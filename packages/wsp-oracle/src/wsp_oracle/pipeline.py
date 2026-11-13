@@ -165,6 +165,13 @@ class OracleResult:
     """``hits`` are every match for the query: the retrievers ran out before the depth asked for, so a
     deeper run finds nothing more and a count of ``hits`` is exact. Not the same as ``len(hits)`` being
     under that depth: collapsed duplicates and filtered hits make a list shorter, not complete."""
+    unmatched: bool = False
+    """No document in the sources searched matches the query's words and no page is titled or named
+    like it: ``hits`` are the dense stage's nearest neighbours alone (it always has some). Such a
+    result is ``low_confidence``."""
+    doubted: bool = False
+    """``low_confidence`` by the older rules alone (no hits, or the reranker's best score under the
+    bar): false when ``unmatched`` is the only reason. The search log tells the two apart."""
 
 
 class _StaticDense:
@@ -861,8 +868,29 @@ class OracleSearcher:
         timings["total"] = round(total, 3)
         if total > self.budget_ms:
             log.info("oracle query over budget: %.1f ms (%s)", total, timings)
-        low = not hits or (confidence is not None and confidence < self.low_confidence)
-        return OracleResult(query, route, hits, passages, confidence, low, timings, scope, found.exhaustive)
+        # Nonsense is low confidence: the dense stage returns its nearest neighbours for any text, so
+        # "qwertyuiopasdf" had some 200 hits, the reranker's best score cleared the bar and the page
+        # looked like an answer (2026-11-10 trawl, search-index-15). The lexical window is empty only
+        # when no document searched matches a word of the query (or the words of a quoted phrase side
+        # by side): with ``partial=False`` the any-word query still runs when fewer than
+        # ``MIN_TIER_HITS`` documents hold every word. Not when the query names a page: a redirect's
+        # name is in the suggest trie and in no text ("acetaminophen" -> Paracetamol), and the exact
+        # title or the alias pinned first is the answer.
+        unmatched = bool(route.lexical) and not found.lexical and not exact
+        doubted = not hits or (confidence is not None and confidence < self.low_confidence)
+        return OracleResult(
+            query,
+            route,
+            hits,
+            passages,
+            confidence,
+            doubted or unmatched,
+            timings,
+            scope,
+            found.exhaustive,
+            unmatched,
+            doubted,
+        )
 
     @property
     def _cut(self) -> Callable[[str, Sequence[str]], Mapping[str, str]] | None:
@@ -999,7 +1027,13 @@ class OracleIndex:
         self, query: str, *, sources: Sequence[str] | None = None, depth: int = 0, lang: str | None = None
     ) -> OracleResult:
         """The pipeline's result for a query, cached. A deeper request than the cached one re-runs
-        the pipeline but keeps the hits already shown in their order (pages never disagree).
+        the pipeline but keeps the hits already shown in their order (pages never disagree). A result
+        from the cache carries the stage timings of the run that made it and ``cached: 1.0`` beside
+        them, so a log line shows they are not this request's.
+
+        Calls for the same query at the same time each run the pipeline: sharing a run in flight is the
+        caller's (``wsp_api.searching.Searcher.retrieval``, the only concurrent caller), and the run a
+        timed-out request left behind fills this cache for the retry.
         ``lang`` is the reader's language (:meth:`OracleSearcher.run`); it is part of the cache key as
         :func:`reader_key` gives it, so no ``lang`` and the default language share an entry."""
         self._maybe_refresh()
@@ -1014,7 +1048,7 @@ class OracleIndex:
                 fresh = now - at < self._cache_seconds
                 if fresh and (depth <= deep or hit.exhaustive):  # deep enough, or nothing more to find
                     self._cache.move_to_end(key)
-                    return hit
+                    return replace(hit, timings_ms={**hit.timings_ms, "cached": 1.0})
                 shown = hit if fresh else None
             began = self._generation
         res = self.searcher.run(query, sources=sources, depth=depth or None, lang=lang)

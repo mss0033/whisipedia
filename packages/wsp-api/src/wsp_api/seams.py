@@ -89,9 +89,13 @@ class DocumentFields(Protocol):
 
 @runtime_checkable
 class QueryLog(Protocol):
-    """Local-only search log for the gap miner (PLAN §5.3): query text and result count."""
+    """Local-only search log for the gap miner (PLAN §5.3): query text and result count.
+    ``unmatched``: ``low_confidence`` only because no document holds a word of the query (it is
+    passed only when true)."""
 
-    def record(self, at: datetime, query: str, total: int, low_confidence: bool) -> None: ...
+    def record(
+        self, at: datetime, query: str, total: int, low_confidence: bool, *, unmatched: bool = False
+    ) -> None: ...
 
 
 __all__ = [
