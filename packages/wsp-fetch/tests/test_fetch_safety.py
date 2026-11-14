@@ -631,3 +631,151 @@ def test_a_download_checked_piece_by_piece_is_verified_not_unverifiable() -> Non
     pieces = FetchResult(Path("x"), 1, "a" * 64, "b" * 64, pieces_verified="pieces:sha-1")
     assert pieces.verdict.status is VerdictStatus.OK
     assert pieces.verdict.detail == "pieces:sha-1"
+
+
+# --- secret headers (trawl 2026-11-10, core-correctness-04) ------------------------------------------
+
+KEY = "SECRETSECRETSECRETSECRET"
+
+
+def _seen(log: list[tuple[str, str | None]]) -> Callable[[httpx.Request], None]:
+    def note(request: httpx.Request) -> None:
+        log.append(
+            (f"{request.url.scheme}://{request.url.host}{request.url.path}", request.headers.get("X-Api-Key"))
+        )
+
+    return note
+
+
+def test_host_header_is_sent_only_to_its_host() -> None:
+    seen: list[tuple[str, str | None]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        _seen(seen)(request)
+        return httpx.Response(200, stream=httpx.ByteStream(b"{}"))
+
+    with HttpFetcher(CFG, transport=httpx.MockTransport(handler)) as f:
+        assert f.set_host_header("API.example", "X-Api-Key", KEY) is True
+        f.get_bytes("https://api.example/v1?x=1")
+        f.get_bytes("https://www.example/page")
+        f.get_bytes("https://api.example.evil.test/v1")
+        f.get_bytes("http://api.example/v1")  # not https: the key never travels in clear
+        f.get_bytes("https://api.example:8443/v1")  # another service on the same name
+        f.set_host_header("api.example", "X-Api-Key", None)
+        f.get_bytes("https://api.example/v2")
+    assert seen == [
+        ("https://api.example/v1", KEY),
+        ("https://www.example/page", None),
+        ("https://api.example.evil.test/v1", None),
+        ("http://api.example/v1", None),
+        ("https://api.example/v1", None),
+        ("https://api.example/v2", None),
+    ]
+
+
+def test_host_header_is_not_forwarded_on_a_redirect_to_another_host() -> None:
+    """httpx copies a request's headers to the redirect target and strips only Authorization."""
+    seen: list[tuple[str, str | None]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        _seen(seen)(request)
+        if request.url.host == "api.example" and request.url.path == "/v1":
+            return httpx.Response(302, headers={"Location": "https://cdn.elsewhere.test/v1"})
+        if request.url.host == "api.example" and request.url.path == "/moved":
+            return httpx.Response(302, headers={"Location": "https://api.example/v3"})
+        return httpx.Response(200, stream=httpx.ByteStream(b"{}"))
+
+    with HttpFetcher(CFG, transport=httpx.MockTransport(handler)) as f:
+        f.set_host_header("api.example", "X-Api-Key", KEY)
+        f.get_bytes("https://api.example/v1")
+        f.get_bytes("https://api.example/moved")
+    assert seen == [
+        ("https://api.example/v1", KEY),
+        ("https://cdn.elsewhere.test/v1", None),
+        ("https://api.example/moved", KEY),
+        ("https://api.example/v3", KEY),  # the same host again: it is the service the key is for
+    ]
+
+
+def test_a_header_taken_back_between_two_redirect_hops_does_not_reach_the_next_host() -> None:
+    """httpx copied it to the next hop's request already; the hook strips every name ever configured
+    (2026-11-13 review). Names are compared without case, as HTTP does."""
+    seen: list[tuple[str, str | None]] = []
+    fetcher: list[HttpFetcher] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        _seen(seen)(request)
+        if request.url.host == "api.example":
+            fetcher[0].set_host_header("api.example", "x-api-key", None)  # e.g. the query fallback
+            return httpx.Response(302, headers={"Location": "https://other.test/z"})
+        return httpx.Response(200, stream=httpx.ByteStream(b"{}"))
+
+    with HttpFetcher(CFG, transport=httpx.MockTransport(handler)) as f:
+        fetcher.append(f)
+        f.set_host_header("api.example", "X-Api-Key", KEY)
+        f.get_bytes("https://api.example/v1")
+        f.get_bytes("https://api.example/v2")
+    assert seen == [
+        ("https://api.example/v1", KEY),
+        ("https://other.test/z", None),
+        ("https://api.example/v2", None),  # taken back under another letter case: not sent again
+        ("https://other.test/z", None),
+    ]
+
+
+def test_host_header_is_not_sent_with_robots_txt() -> None:
+    """Neither with the fetcher's own robots.txt request nor with a caller's (the collections'
+    Throttle reads ``/robots.txt`` through get_bytes)."""
+    seen: list[tuple[str, str | None]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        _seen(seen)(request)
+        if request.url.path.lower().rstrip("/") == "/robots.txt":
+            return httpx.Response(200, stream=httpx.ByteStream(b"User-agent: *\nAllow: /\n"))
+        return httpx.Response(200, stream=httpx.ByteStream(b"{}"))
+
+    with HttpFetcher(replace(CFG, robots=True), transport=httpx.MockTransport(handler)) as f:
+        f.set_host_header("api.example", "X-Api-Key", KEY)
+        f.get_bytes("https://api.example/v1")
+        f.get_bytes("https://api.example/robots.txt")
+        f.get_bytes("https://api.example/Robots.txt")
+    assert seen == [
+        ("https://api.example/robots.txt", None),  # the fetcher's own read
+        ("https://api.example/v1", KEY),
+        ("https://api.example/robots.txt", None),  # a caller's read
+        ("https://api.example/Robots.txt", None),
+    ]
+
+
+def test_retry_label_is_redacted_in_the_error_and_the_log(caplog: pytest.LogCaptureFixture) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503)
+
+    url = f"https://api.example/v1?pageSize=5&api_key={KEY}"
+    cfg = replace(CFG, max_attempts=2, backoff_base=0.001, backoff_max=0.002)
+    with (
+        caplog.at_level("INFO", logger="wsp_fetch"),
+        HttpFetcher(cfg, transport=httpx.MockTransport(handler)) as f,
+        pytest.raises(FetchError) as caught,
+    ):
+        f.get_bytes(url)
+    assert "api_key=***" in str(caught.value)
+    assert "retrying in" in caplog.text  # the retry line was written, and is the one checked below
+    assert "api_key=***" in caplog.text
+    for text in (str(caught.value), repr(caught.value), str(caught.value.__cause__), caplog.text):
+        assert KEY not in text
+
+
+def test_a_refused_robots_check_never_prints_the_key() -> None:
+    """The 21 lane logs: api.govinfo.gov's robots.txt answers 500, and the refusal named the URL."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500)
+
+    with (
+        HttpFetcher(replace(CFG, robots=True), transport=httpx.MockTransport(handler)) as f,
+        pytest.raises(FetchError, match=r"disallowed by api\.example/robots\.txt") as caught,
+    ):
+        f.get_bytes(f"https://api.example/v1?pageSize=5&api_key={KEY}")
+    assert KEY not in str(caught.value)
+    assert "pageSize=5&api_key=***" in str(caught.value)

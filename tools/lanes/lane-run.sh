@@ -100,8 +100,14 @@ note_given_up() {
     --message "$src${part:+ $item} (lane $NAME): done; $1 (the same failure on every try; tried again by a later fetch)" >> "$LOG" 2>&1 || true
 }
 clear_given_up() { "$ALERT_CMD" alerts resolve --key "$(given_up_key)" >> "$LOG" 2>&1 || true; }
-# The last error line of the item's own log since this step began (for the alert's message).
-last_error() { tail -c +"$((${1:-0} + 1))" "$out" 2>/dev/null | grep -E 'Error|error:' | tail -n 1 | cut -c1-300; }
+# The last error line of the item's own log since this step began (for the alert's message). The value
+# of a secret-named query parameter is masked (the same names as wsp_core.redact): log lines written
+# before 2026-11-13 hold the api.data.gov key in clear, and an alert message is stored and shown.
+last_error() {
+  tail -c +"$((${1:-0} + 1))" "$out" 2>/dev/null | grep -E 'Error|error:' | tail -n 1 |
+    sed -E 's/([?&]([Aa][Pp][Ii][_-]?[Kk][Ee][Yy]|[Aa][Cc][Cc][Ee][Ss][Ss]_[Tt][Oo][Kk][Ee][Nn]|[Tt][Oo][Kk][Ee][Nn]|[Ss][Ii][Gg][Nn][Aa][Tt][Uu][Rr][Ee]|[Ss][Ii][Gg])=)[^&#[:space:]"'"'"'<>]+/\1***/g' |
+    cut -c1-300
+}
 
 # --- signals: pass SIGTERM/SIGINT on to the running command, then stop ---------------------------------
 child=""

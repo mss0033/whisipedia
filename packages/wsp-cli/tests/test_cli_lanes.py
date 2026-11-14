@@ -451,6 +451,19 @@ def test_a_failed_ingest_raises_a_critical_alert_and_success_resolves_it(tmp_pat
     assert lane.alerts()[-1] == "alerts resolve --key lane:lane-t:osti"
 
 
+def test_last_error_masks_api_keys(tmp_path: Path) -> None:
+    """Trawl 2026-11-10 (core-correctness-04): an alert's message quotes the item log's last error
+    line, and lines written before the fix hold the api.data.gov key in the URL."""
+    lane = Lane(tmp_path)
+    key = "ABCDEFGHIJKLMNOPQRSTUVWX"
+    url = f"https://api.govinfo.gov/collections/BILLS/2020?pageSize=1000&api_key={key}&offsetMark=a"
+    lane.script(fetch=[0], ingest=[f"1:api: RobotsDisallowedError: {url}: disallowed by robots.txt"])
+    assert lane.run("govinfo") == 1
+    (raised,) = [a for a in lane.alerts() if a.startswith("alerts raise")]
+    assert "pageSize=1000&api_key=***&offsetMark=a: disallowed by robots.txt" in raised
+    assert key not in raised
+
+
 def test_downloads_that_keep_failing_raise_a_warning(tmp_path: Path) -> None:
     lane = Lane(tmp_path)
     lane.script(fetch=[6, 6, 6], ingest=[0, 0, 0])

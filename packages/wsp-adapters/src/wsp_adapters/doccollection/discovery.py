@@ -56,7 +56,7 @@ from datetime import UTC, date, datetime
 from html import unescape as html_unescape
 from pathlib import Path
 from typing import Any, cast
-from urllib.parse import quote, urlencode, urljoin, urlsplit
+from urllib.parse import quote, urlencode, urljoin, urlsplit, urlunsplit
 from xml.etree import ElementTree as ET
 
 from selectolax.lexbor import LexborHTMLParser, LexborNode
@@ -81,6 +81,7 @@ from wsp_core.errors import (
 )
 from wsp_core.model import FetchResult, RemoteFile, RemoteHead
 from wsp_core.ports import Fetcher, SupportsHead
+from wsp_core.redact import redact_url_secrets
 from wsp_core.redirects import redirect_guard, unguarded
 from wsp_core.robots import Robots, unreachable_long
 from wsp_core.robots import parse as parse_robots
@@ -272,6 +273,15 @@ class Throttle:
         with self._guarded():
             return self.inner.head(url)
 
+    def set_host_header(self, host: str, name: str, value: str | None) -> bool:
+        """Pass a secret header for ``host`` on to the wrapped fetcher (``HttpFetcher.set_host_header``).
+        False when it cannot send one (a test fake, aria2): the caller then puts the key in the query.
+        Without this method the wrapper hid the fetcher's, and the key stayed in every URL (2026-11-10
+        review of batch 5b). This wrapper's own robots.txt request (:meth:`_robots`) goes through the
+        same fetcher, which never sends the header with a robots.txt request."""
+        setter = getattr(self.inner, "set_host_header", None)
+        return callable(setter) and setter(host, name, value) is True
+
 
 _ATTEMPTS_RE = re.compile(r"after (\d+) attempt")
 
@@ -305,7 +315,8 @@ class DiscoverEnv:
     issuer: str
     prefix: str  # document key prefix, e.g. "army"
     origins: tuple[str, ...] = ()
-    keys: Mapping[str, str] = field(default_factory=dict[str, str])  # API keys by name (never logged)
+    # API keys by name (never logged, and not in the repr)
+    keys: Mapping[str, str] = field(default_factory=dict[str, str], repr=False)
     rules: Rules = field(default_factory=Rules)
     max_pages: int | None = None  # per discoverer: listing pages to read (sampling for dry runs)
     partition: str | None = None  # only this partition (state, batch) of a very large collection
@@ -321,6 +332,9 @@ class DiscoverEnv:
     # but nothing may be inferred from what the sample lacks.
     sampled: list[str] = field(default_factory=list[str])
     cache_dir: Path | None = None  # local disk for listings worth keeping between runs (archive.org)
+    # Hosts that get the API key in the query this run (:meth:`keyed_json`'s fallback).
+    key_in_query: set[str] = field(default_factory=set[str])
+    key_in_header: set[str] = field(default_factory=set[str])  # hosts that accepted the header
     # Registry ``access.decode_url_keys``: decode every %XX of a URL before a key is made from it. Off
     # by default because it changes the key (and doc id) of a document already stored; see
     # model.key_stem_from_url.
@@ -341,6 +355,47 @@ class DiscoverEnv:
     def get_json(self, url: str) -> Any:
         return json.loads(self.fetcher.get_bytes(url, max_bytes=256 * 1024 * 1024))
 
+    def keyed_json(self, url: str, key_name: str) -> Any:
+        """:meth:`get_json` from an api.data.gov service, with the API key ``key_name``.
+
+        The key travels as the ``X-Api-Key`` request header, which api.data.gov documents as the first
+        way to pass a key (https://api.data.gov/docs/developer-manual/, read 2026-11-13; GovInfo's and
+        Congress.gov's own READMEs point there), so no URL holds it: as ``?api_key=`` it was printed
+        by every error that named the URL (trawl 2026-11-10, core-correctness-04). ``url`` must not
+        carry an ``api_key`` (one echoed in a ``nextPage`` link is dropped).
+
+        Fallback: when the service answers 401 or 403 to the first request that carries the header
+        (api.data.gov's answer to a missing key is 403), or the fetcher cannot send a header (a test
+        fake), the key goes into the query for the rest of the run, with one note. Error text then
+        shows ``api_key=***``. Once the header has been accepted, a later 401 or 403 is a failure
+        like any other: the header was not what the service refused.
+
+        The key is given only to the hosts in :data:`KEYED_HOSTS`, over https: a ``nextPage`` link to
+        anywhere else is refused, not followed with the key."""
+        parts = urlsplit(url)
+        host = (parts.hostname or "").lower()
+        if parts.scheme != "https" or host not in KEYED_HOSTS or parts.port not in (None, 443):
+            raise DiscoveryError(f"{redact_url_secrets(url)}: not a host the API key {key_name!r} is sent to")
+        url = _without_query(url, "api_key")
+        key = self.key(key_name)
+        setter = getattr(self.fetcher, "set_host_header", None)
+        if host not in self.key_in_query:
+            if callable(setter) and setter(host, "X-Api-Key", key) is True:
+                try:
+                    data = self.get_json(url)
+                    self.key_in_header.add(host)
+                    return data
+                except FetchError as exc:
+                    status = getattr(exc.__cause__, "status", None)
+                    if status not in (401, 403) or host in self.key_in_header:
+                        raise
+                    self.notes.append(
+                        f"{host}: X-Api-Key refused (HTTP {status}); key sent as a query parameter"
+                    )
+                setter(host, "X-Api-Key", None)
+            self.key_in_query.add(host)
+        return self.get_json(_with_query(url, api_key=key))
+
     def get_text(self, url: str) -> str:
         return self.fetcher.get_bytes(url, max_bytes=64 * 1024 * 1024).decode("utf-8", "replace")
 
@@ -354,6 +409,30 @@ class DiscoverEnv:
 
     def pages(self) -> int:
         return self.max_pages if self.max_pages is not None else 1_000_000
+
+
+# The api.data.gov services an API key may be sent to (:meth:`DiscoverEnv.keyed_json`).
+KEYED_HOSTS = frozenset({"api.govinfo.gov", "api.congress.gov"})
+
+
+def _without_query(url: str, name: str) -> str:
+    """``url`` without the query parameter ``name`` (any letter case). The other parameters keep
+    their exact bytes (a page mark such as ``offsetMark`` must go back as it was given)."""
+    parts = urlsplit(url)
+    pairs = parts.query.split("&") if parts.query else []
+    kept = [pair for pair in pairs if pair.split("=", 1)[0].lower() != name.lower()]
+    if len(kept) == len(pairs):
+        return url
+    return urlunsplit(parts._replace(query="&".join(kept)))
+
+
+def _with_query(url: str, **extra: str) -> str:
+    """``url`` with the query parameters ``extra`` added (replacing any of the same name)."""
+    for name in extra:
+        url = _without_query(url, name)
+    parts = urlsplit(url)
+    query = "&".join(q for q in (parts.query, urlencode(extra)) if q)
+    return urlunsplit(parts._replace(query=query))
 
 
 Discoverer = Callable[[Mapping[str, Any], DiscoverEnv], Iterator[Candidate]]
@@ -1352,13 +1431,14 @@ def govinfo(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
     if fmt not in ("pdf", "htm"):
         raise DiscoveryError(f"govinfo: unknown format {fmt!r}")
     folder = "html" if fmt == "htm" else "pdf"
-    key = env.key(_s(cfg.get("api_key")) or "govinfo")
+    key_name = _s(cfg.get("api_key")) or "govinfo"
+    env.key(key_name)  # a missing key is said before anything is requested
     url: str | None = f"https://api.govinfo.gov/collections/{collection}/{since}?" + urlencode(
-        {"pageSize": 1000, "offsetMark": "*", "api_key": key}
+        {"pageSize": 1000, "offsetMark": "*"}
     )
     pages = seen = 0
     while url and pages < env.pages():
-        data = cast(Json, env.get_json(url))
+        data = cast(Json, env.keyed_json(url, key_name))
         pages += 1
         env.totals[f"govinfo:{collection}"] = int(data.get("count") or 0)
         packages = cast(list[Json], data.get("packages") or [])
@@ -1386,7 +1466,8 @@ def govinfo(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
                 partition=part,
             )
         nxt = _s(data.get("nextPage"))
-        url = f"{nxt}&api_key={key}" if nxt and "api_key=" not in nxt else (nxt or None)
+        # The key is never part of the URL kept here: keyed_json adds it (a header, or the query).
+        url = _without_query(nxt, "api_key") if nxt else None
     env.listing_end(
         f"govinfo:{collection}",
         stopped=url is not None,
@@ -1397,14 +1478,16 @@ def govinfo(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
 
 def congress_crs(cfg: Mapping[str, Any], env: DiscoverEnv) -> Iterator[Candidate]:
     """CRS reports listed by the official Congress.gov API (metadata; PDFs live on congress.gov)."""
-    key = env.key(_s(cfg.get("api_key")) or "congress")
+    key_name = _s(cfg.get("api_key")) or "congress"
+    env.key(key_name)  # a missing key is said before anything is requested
     offset, pages, more = 0, 0, True
     while pages < env.pages():
         data = cast(
             Json,
-            env.get_json(
+            env.keyed_json(
                 "https://api.congress.gov/v3/crsreport?"
-                + urlencode({"format": "json", "limit": 250, "offset": offset, "api_key": key})
+                + urlencode({"format": "json", "limit": 250, "offset": offset}),
+                key_name,
             ),
         )
         pages += 1
@@ -2807,9 +2890,12 @@ def discover_all(configs: Sequence[Mapping[str, Any]], env: DiscoverEnv) -> Iter
                 seen.add(cand.key)
                 yield cand
         except (FetchError, ValueError, ET.ParseError, DiscoveryError) as exc:
-            env.notes.append(f"{kind}: {type(exc).__name__}: {exc}")
-            env.incomplete.append(f"{kind}: {type(exc).__name__}: {exc}")
-            log.warning("discovery %s failed: %s", kind, exc)
+            # Masked here too: an error that is not a FetchError (a DiscoveryError or ValueError
+            # naming a URL) does not mask its own text.
+            said = redact_url_secrets(f"{kind}: {type(exc).__name__}: {exc}")
+            env.notes.append(said)
+            env.incomplete.append(said)
+            log.warning("discovery %s failed: %s", kind, redact_url_secrets(str(exc)))
 
 
 def resolve(cand: Candidate, env: DiscoverEnv) -> list[Candidate]:

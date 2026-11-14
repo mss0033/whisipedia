@@ -6,9 +6,19 @@ replacement implementation never changes error handling upstream.
 
 from __future__ import annotations
 
+from wsp_core.redact import redact_url_secrets
+
 
 class FetchError(Exception):
-    """A download or metadata request failed and left no verified file behind (``Fetcher`` port)."""
+    """A download or metadata request failed and left no verified file behind (``Fetcher`` port).
+
+    Its text never holds a secret: the value of a secret-named query parameter (``api_key=``, a
+    token, a signature) in any string argument is masked here, once, for every subclass and every
+    raise site (:func:`wsp_core.redact.redact_url_secrets`; the api.data.gov key was printed by 2,884
+    log lines, trawl 2026-11-10). Attributes such as ``url`` keep the real value."""
+
+    def __init__(self, *args: object) -> None:
+        super().__init__(*(redact_url_secrets(a) if isinstance(a, str) else a for a in args))
 
 
 class RobotsDisallowedError(FetchError):

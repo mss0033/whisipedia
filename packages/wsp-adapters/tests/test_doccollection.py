@@ -1707,6 +1707,58 @@ def test_a_zipped_csv_catalogue_is_filtered_listed_once_per_key_and_titled() -> 
     assert (c.title, c.language, c.edition_date) == ("芥川竜之介歌集 (芥川竜之介)", "ja", "1999-07-18")
 
 
+def test_a_fetcher_without_header_support_uses_the_query() -> None:
+    """Guard (passes before 2026-11-13 too): a fetcher that cannot send a header (a fake, aria2) still
+    gets the key, in the query, and says nothing about a refusal."""
+    page = {"count": 1, "packages": [{"packageId": "BILLS-1", "title": "t", "dateIssued": "2020-01-01"}]}
+    asked: list[str] = []
+
+    class Recording(FakeFetcher):
+        def get_bytes(self, url: str, *, max_bytes: int = 0) -> bytes:
+            asked.append(url)
+            return json.dumps(page).encode()
+
+    env = DiscoverEnv(fetcher=Recording({}), issuer="T", prefix="t", keys={"govinfo": "k3y"})
+    (cand,) = discover_all([{"kind": "api", "flavor": "govinfo", "collection": "BILLS"}], env)
+    assert cand.pub_number == "BILLS-1"
+    assert asked == [
+        "https://api.govinfo.gov/collections/BILLS/1990-01-01T00:00:00Z?pageSize=1000&offsetMark=%2A&api_key=k3y"
+    ]
+    assert env.notes == []
+
+
+def test_the_throttle_passes_a_host_header_on_to_a_fetcher_that_can_send_one() -> None:
+    """2026-11-10 review of batch 5b: the env's fetcher is the Throttle, which hid the method."""
+    calls: list[tuple[str, str, str | None]] = []
+
+    class Capable(FakeFetcher):
+        def set_host_header(self, host: str, name: str, value: str | None) -> bool:
+            calls.append((host, name, value))
+            return True
+
+    assert Throttle(Capable({})).set_host_header("api.govinfo.gov", "X-Api-Key", "k") is True
+    assert calls == [("api.govinfo.gov", "X-Api-Key", "k")]
+    assert Throttle(FakeFetcher({})).set_host_header("api.govinfo.gov", "X-Api-Key", "k") is False
+
+
+def test_discovery_notes_and_the_warning_are_redacted(caplog: pytest.LogCaptureFixture) -> None:
+    """An error that is not a FetchError (it masks its own text) may name a URL too."""
+    secret = "SECRETSECRETSECRETSECRET"
+
+    class Broken(FakeFetcher):
+        def get_bytes(self, url: str, *, max_bytes: int = 0) -> bytes:
+            raise ValueError(f"bad answer from {url}")
+
+    env = DiscoverEnv(fetcher=Broken({}), issuer="T", prefix="t", keys={"govinfo": secret})
+    with caplog.at_level("WARNING"):
+        assert list(discover_all([{"kind": "api", "flavor": "govinfo"}], env)) == []
+    said = "\n".join([*env.notes, *env.incomplete, caplog.text])
+    assert "api: ValueError: bad answer from https://api.govinfo.gov/" in said
+    assert "discovery api failed" in caplog.text
+    assert secret not in said
+    assert said.count("api_key=***") == 3  # the note, the incomplete line, the warning
+
+
 def test_govinfo_collections_are_partitions_and_serial_set_volumes_are_taken_once() -> None:
     def listing(*pids: str) -> bytes:
         return json.dumps({"count": len(pids), "packages": [{"packageId": p} for p in pids]}).encode()

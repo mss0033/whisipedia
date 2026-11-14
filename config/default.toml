@@ -72,6 +72,7 @@ budget_tb_per_language = 0.3
 # Official APIs that need a free api.data.gov key (GovInfo, Congress.gov; PLAN D11). Never commit a
 # key: set it in config/local.toml as `govinfo_key = "..."` / `congress_key = "..."` (or the
 # WSP_API_KEY_GOVINFO / WSP_API_KEY_CONGRESS environment variables). `wsp config show` redacts them.
+# Keep config/local.toml at mode 600 (chmod 600 config/local.toml): it holds the key in clear.
 
 [api]
 query_log = true                 # local-only search log (query + result count) for the gap miner; rotated

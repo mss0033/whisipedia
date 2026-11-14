@@ -71,6 +71,7 @@ import httpx
 from wsp_core.errors import RedirectRefusedError, RobotsDisallowedError, RobotsUnreachableError
 from wsp_core.model import RemoteFile, RemoteHead
 from wsp_core.nasretry import is_blip, retrying
+from wsp_core.redact import redact_url_secrets
 from wsp_core.redirects import current_guard, unguarded
 from wsp_core.robots import Robots, reachable, unreachable_long
 from wsp_core.robots import parse as parse_robots
@@ -277,8 +278,18 @@ class HttpFetcher:
             follow_redirects=True,
             limits=httpx.Limits(max_connections=None, max_keepalive_connections=64),
             transport=transport,
-            event_hooks={"response": [_refuse_downgrade, _guard_redirect, self._robots_hop]},
+            event_hooks={
+                "request": [self._secret_headers],
+                "response": [_refuse_downgrade, _guard_redirect, self._robots_hop],
+            },
         )
+        # host -> {header name: secret value} (:meth:`set_host_header`). Kept here, never in
+        # ``FetchConfig`` (a dataclass whose repr may be printed) and never in a URL.
+        self._host_headers: dict[str, dict[str, str]] = {}
+        # Every header name ever configured (lower case); never shrinks, so a header taken back while
+        # a request is between two redirect hops is still stripped from the next hop.
+        self._secret_names: set[str] = set()
+        self._host_headers_lock = threading.Lock()
         # "scheme://host" -> (rules, expiry, whether they stand in for an unreachable robots.txt)
         self._robots: dict[str, tuple[Robots | None, float, bool]] = {}
         self._robots_lock = threading.Lock()
@@ -382,6 +393,54 @@ class HttpFetcher:
                 self._pace(nbytes)
 
     # --- small documents ---------------------------------------------------------------------
+
+    # --- secret headers -------------------------------------------------------------------------
+
+    def set_host_header(self, host: str, name: str, value: str | None) -> bool:
+        """Send the header ``name: value`` with every request to exactly ``host`` (an API key that
+        would otherwise sit in the URL, where every error and log line that names the URL prints it;
+        trawl 2026-11-10, core-correctness-04). ``None`` stops sending it. True: this fetcher sends
+        such headers (a wrapper asks, :class:`wsp_adapters.doccollection.discovery.Throttle`).
+
+        The header goes out over https to the host's default port only, never with a robots.txt
+        request (ours or a caller's), and never to another host a redirect leads to
+        (:meth:`_secret_headers`)."""
+        host, name = host.lower(), name.lower()
+        with self._host_headers_lock:
+            self._secret_names.add(name)
+            if value is None:
+                headers = self._host_headers.get(host, {})
+                headers.pop(name, None)
+                if not headers:
+                    self._host_headers.pop(host, None)
+            else:
+                self._host_headers.setdefault(host, {})[name] = value
+        return True
+
+    def _secret_headers(self, request: httpx.Request) -> None:
+        """Request hook, run by httpx before every request it sends, each redirect hop included.
+
+        First every configured secret header is taken off the request: httpx copies a request's
+        headers to the redirect target and strips only ``Authorization`` on a change of host, so
+        without this a key would follow a redirect to another host. Then the headers of exactly this
+        host are set, unless the request is for robots.txt (a public file: :meth:`_read_robots`, or a
+        caller reading ``/robots.txt`` through :meth:`get_bytes`) or is not https on the default port."""
+        with self._host_headers_lock:
+            names = tuple(self._secret_names)
+            mine = dict(self._host_headers.get(request.url.host.lower(), {}))
+        for name in names:
+            if name in request.headers:
+                del request.headers[name]
+        if (
+            not mine
+            or request.url.scheme != "https"
+            or request.url.port not in (None, 443)
+            or _IN_ROBOTS.get()
+            or request.url.path.rstrip("/").lower() == "/robots.txt"
+        ):
+            return
+        for name, value in mine.items():
+            request.headers[name] = value
 
     # --- robots.txt ------------------------------------------------------------------------------
 
@@ -512,7 +571,10 @@ class HttpFetcher:
                 raise _RetryableError(f"{type(exc).__name__}: {exc}") from exc
 
     def _retrying[T](self, label: str, fn: Callable[[], T], attempts: int) -> T:
-        """Retry transient failures with jittered backoff, honouring ``Retry-After``."""
+        """Retry transient failures with jittered backoff, honouring ``Retry-After``. ``label`` (a
+        verb and the URL) is printed, so a secret in the URL's query is masked first."""
+        target = label.split(" ", 1)[-1]  # the real URL, for NotFoundError.url (an attribute, not text)
+        label = redact_url_secrets(label)
         attempt = 0
         while True:
             attempt += 1
@@ -521,7 +583,7 @@ class HttpFetcher:
                 return fn()
             except _RetryableError as exc:
                 if exc.status in _NOT_FOUND:
-                    raise NotFoundError(label.split(" ", 1)[-1], f"HTTP {exc.status}") from exc
+                    raise NotFoundError(target, f"HTTP {exc.status}") from exc
                 if isinstance(exc, _DowngradeRefusedError):
                     raise RedirectRefusedError(f"{label}: {exc}") from exc
                 if attempt >= attempts or exc.fatal_for_mirror:
