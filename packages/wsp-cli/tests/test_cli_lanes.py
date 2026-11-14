@@ -580,6 +580,7 @@ def test_items_left_for_later_are_tried_again_in_a_later_round(lane: Lane) -> No
 
 
 REFRESH = ROOT / "tools" / "lanes" / "refresh.sh"
+DEFAULT_REFRESH = "crs-reports nist-csrc usmc-mcpel itu-recommendations etsi-deliverables"
 
 
 def test_the_weekly_refresh_reopens_a_done_source_and_seals_nothing_when_nothing_is_new(lane: Lane) -> None:
@@ -634,6 +635,37 @@ def test_the_refresh_fetches_usmc_mcpel_by_its_source_id(lane: Lane) -> None:
     assert (lane.state / "refresh.done").read_text().split() == ["usmc-mcpel"]
 
 
+def test_the_refresh_fetches_the_itu_and_etsi_sets_in_the_order_given(lane: Lane) -> None:
+    """ITU and ETSI publish every month and their lanes are done for good (2026-11-13). The refresh is
+    one lane: each source by its id, whole, on today's cycle, one after the other.
+
+    A guard (it holds before 2026-11-13 too: the script takes any source it is given); the default
+    list is what changed, and the two tests below fail on the old list."""
+    env = {**lane.env, "LANE_ROUNDS": "1", "LANE_PARTIAL_TRIES": "1"}
+    lane.script(fetch=[0, 0], ingest=[0, 0])
+    argv = [str(REFRESH), "--run", "itu-recommendations", "etsi-deliverables"]
+    assert subprocess.run(argv, env=env, capture_output=True, text=True, timeout=60).returncode == 0
+    today = time.strftime("%Y-%m-%d", time.gmtime())
+    assert [c for c in lane.calls() if c.startswith("collections fetch")] == [
+        f"collections fetch --source itu-recommendations --version {today}",
+        f"collections fetch --source etsi-deliverables --version {today}",
+    ]
+    assert (lane.state / "refresh.done").read_text().split() == ["itu-recommendations", "etsi-deliverables"]
+
+
+def test_the_registry_knows_every_source_of_the_default_refresh_list() -> None:
+    """A source id mistyped in the list would be fetched for nothing every week."""
+    service = (ROOT / "deploy" / "systemd" / "whisipedia-refresh.service").read_text()
+    (line,) = [ln for ln in service.splitlines() if ln.startswith('Environment="WSP_REFRESH_SOURCES=')]
+    listed = line.split("=", 2)[2].rstrip('"').split()
+    assert listed[-2:] == ["itu-recommendations", "etsi-deliverables"]
+    registry = (ROOT / "registry" / "sources.yaml").read_text()
+    for source in listed:
+        assert f"\n  - id: {source}\n" in registry, source
+    fallback = (ROOT / "tools" / "lanes" / "refresh.sh").read_text()
+    assert "${WSP_REFRESH_SOURCES:-" + " ".join(listed) + "}" in fallback
+
+
 def test_the_refresh_timer_starts_one_capped_background_job(tmp_path: Path) -> None:
     fakebin = tmp_path / "bin"
     fakebin.mkdir()
@@ -658,14 +690,14 @@ def test_the_refresh_timer_starts_one_capped_background_job(tmp_path: Path) -> N
     units = ROOT / "deploy" / "systemd"
     service = (units / "whisipedia-refresh.service").read_text()
     assert "ExecStart=@REPO@/tools/lanes/refresh.sh" in service
-    assert 'Environment="WSP_REFRESH_SOURCES=crs-reports nist-csrc usmc-mcpel"' in service
+    assert (f'Environment="WSP_REFRESH_SOURCES={DEFAULT_REFRESH}"') in service
     # Without the service's list (run by hand): the same sources.
     (tmp_path / "started").unlink()
     state.unlink()
     del env["WSP_REFRESH_SOURCES"]
     subprocess.run([str(REFRESH)], env=env, check=True, timeout=30)
     assert (tmp_path / "started").read_text().splitlines() == [
-        f"--fetch collections-refresh 1G -- {REFRESH} --run crs-reports nist-csrc usmc-mcpel"
+        f"--fetch collections-refresh 1G -- {REFRESH} --run " + DEFAULT_REFRESH
     ]
     assert "OnCalendar=Sun" in (units / "whisipedia-refresh.timer").read_text()
 

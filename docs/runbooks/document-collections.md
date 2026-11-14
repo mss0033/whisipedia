@@ -146,7 +146,8 @@ tools/wsp-bg --no-heavy-lock fetch-cia-csi 2G -- .venv/bin/wsp collections fetch
 A lane marks an item done for good, so a source that keeps publishing took nothing new once its lane
 was done. `whisipedia-refresh.timer` (Sundays 13:00, installed by `wsp service install`) starts
 `tools/lanes/refresh.sh`, which runs the lane `refresh` over `WSP_REFRESH_SOURCES` (the service's
-default `crs-reports nist-csrc usmc-mcpel`; `~/.config/whisipedia/refresh.env` may set another list) as the
+default `crs-reports nist-csrc usmc-mcpel itu-recommendations etsi-deliverables`;
+`~/.config/whisipedia/refresh.env` may set another list) as the
 background job `whisipedia-job-collections-refresh` (`tools/wsp-bg --fetch`, 1G, two rounds). Each
 run reopens the items the last refresh finished, on today's cycle; one it left undone resumes on its
 cycle. A refresh still running when the timer fires is left alone. It also takes the sources (by partition, one lane `refresh-<source>`
@@ -161,9 +162,14 @@ log to `refresh-<source>.log`, apart from the lanes' own logs.
 * A source another lane is fetching: the per-source lock (`<lane state>/locks/<source>.lock`) leaves
   it for the refresh's next round, or next week.
 * Weekly: CRS publishes several reports a week, NIST CSRC drafts and finals most weeks; a listing pass
-  is cheap (CSV, 283 documents). Not on it: `usmc-mcpel` (a closed archive.org collection), the ITU
-  and ETSI sets (a few new documents a month, a 4-hour listing pass: monthly at most, the owner's call),
-  OSTI (very large), and active sources the orchestrator schedules (`rfc`).
+  is cheap (CSV, 283 documents). `usmc-mcpel` since 2026-11-10; `itu-recommendations` and
+  `etsi-deliverables` since 2026-11-13 (a few new documents a month each; a listing pass of ITU
+  takes about 4 hours at the host's polite rate even with nothing new, and the refresh job is one lane:
+  the three quick sources come first, then these two one after the other). While documents of a
+  source keep failing (exit 6), the refresh tries its fetch up to `LANE_PARTIAL_TRIES` (3) times in
+  each of its two rounds: for ITU that is up to a day of listing a week until its failing documents
+  are settled; `~/.config/whisipedia/refresh.env` can leave it out meanwhile. Not on it: OSTI (very large), and active sources the orchestrator
+  schedules (`rfc`).
 
 ## 3. Owner review
 
