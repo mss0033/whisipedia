@@ -2024,7 +2024,16 @@ def test_the_itu_crowd_of_persistent_5xx_is_given_up_when_the_host_served_on_thr
     assert dc.fetch_exit_code(given) == dc.EXIT_COMPLETE
     assert runs.run(5.5, itu, tried=284, listed=8500).failed == []  # still given up, still a crowd
 
-    # The same crowd where the listing is not known (0), or is small, is the cap's: reset every run.
+    # As the real passes are: nothing fetched after the failures, the host proven by held documents
+    # downloaded again and found the same.
+    probed = _Passes(tmp_path / "probed.json")
+    for n, day in enumerate(HALF_DAYS[:11]):
+        at = datetime(2026, 11, 9, tzinfo=UTC) + timedelta(days=day)
+        report = probed.run(
+            day, itu, tried=284, listed=8500, good=0, probe=lambda _host, at=at: (1, (at, 2000))
+        )
+        assert len(report.given_up) == (284 if n == 10 else 0), day
+
     for name, listed in (("unknown.json", 0), ("small.json", 2000)):
         small = _Passes(tmp_path / name)
         for day in HALF_DAYS:
@@ -2069,7 +2078,13 @@ def test_a_crowd_of_5xx_that_is_fresh_or_most_of_the_source_or_unproven_gives_up
     assert last.given_up == []
     assert last.permanent_over == 284
     assert {e["tries"] for e in unproven.seen().values()} == {14}
-    assert "proved" not in unproven.seen()["k0"]
+    assert unproven.seen()["k0"]["proved"] == []
+    # ... and such a crowd is not given up on one day's proof by a full pass, whose cap (2 % of 8,500
+    # downloads) it is under: its counts were kept as a crowd's, and need the three days.
+    full = unproven.run(7, itu, tried=8500, listed=8500)
+    assert full.given_up == []
+    assert full.permanent_over == 284
+    assert unproven.seen()["k0"]["proved"] == ["2026-11-16"]
 
     blocked = _Passes(tmp_path / "blocked.json")  # held documents downloaded again fail too
     for day in HALF_DAYS:

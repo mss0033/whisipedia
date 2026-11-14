@@ -777,13 +777,18 @@ def settle_permanent(
                     reset |= keys
             if ok:
                 proven |= mine
-    if wide:
-        today = now.date().isoformat()
-        for key in (errors & proven) - reset:
-            days = {str(d) for d in entries[key].get("proved", ())} | {today}
-            entries[key]["proved"] = sorted(days)[-SERVER_ERROR_PROOF_DAYS:]
-        # Proof on too few separate days yet: due, and not given up (counted in ``permanent_over``).
-        proven -= {key for key in errors if len(entries[key].get("proved", ())) < SERVER_ERROR_PROOF_DAYS}
+    # A record once counted in such a crowd carries ``proved`` (the days its host was proven) from then
+    # on, and needs the days also on a run where the crowd is under the cap again (a full pass, whose
+    # cap is larger): its count was kept only on those terms (2026-11-14 review).
+    today = now.date().isoformat()
+    crowded = {key for key in errors if wide or "proved" in entries[key]}
+    for key in crowded:
+        days = {str(d) for d in entries[key].get("proved", ())}
+        if key in proven and key not in reset:
+            days.add(today)
+        entries[key]["proved"] = sorted(days)[-SERVER_ERROR_PROOF_DAYS:]
+    # Proof on too few separate days yet: due, and not given up (counted in ``permanent_over``).
+    proven -= {key for key in crowded if len(entries[key]["proved"]) < SERVER_ERROR_PROOF_DAYS}
     still_given_up = {key for key, e in entries.items() if "given_up" in e}
     moved = ((due & proven) - reset) | still_given_up
     for key in moved:
