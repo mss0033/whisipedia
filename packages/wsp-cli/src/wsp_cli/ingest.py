@@ -49,11 +49,18 @@ in ``targets.json``; :func:`plan_arxiv` reads it directly. The incremental model
   SHA-256/BLAKE3 (``FileVault.adopt_many``: hashing on threads, batched staging record); the chunk
   manifest is kept as ``upstream/manifests/<chunk>.jsonl``; then the part is sealed. Parts are never
   promoted (``CURRENT.txt`` names the metadata generation that the indexer reads);
-* resumable at any point: sealed parts are skipped, staged files are re-hashed and recorded.
+* resumable at any point: sealed parts are skipped, staged files are re-hashed and recorded;
+* a PDF of a finished chunk whose bytes no longer match the manifest's MD5 (damaged on the share after
+  the download) is moved to ``_incoming/arxiv/<snapshot>/_damaged/`` and named in
+  ``redo-<snapshot>.jsonl`` beside the done file; the pull fetches that one file again and says so in
+  ``refetched-<snapshot>.jsonl``. Until then the chunk is "redo pending" and is not offered; after
+  :data:`ARXIV_REDO_TRIES` failures of the same file the chunk is FAILED and stays so (see
+  :func:`read_arxiv_redo`).
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -294,6 +301,7 @@ class Ingestor:
         arxiv_state_dir: Path | None = None,
         hash_workers: int = 4,
         max_seconds: float | None = None,
+        alert: Callable[[str, str], None] | None = None,
     ) -> None:
         self.vault = vault
         self.specs = {s.id: s for s in specs}
@@ -310,6 +318,10 @@ class Ingestor:
         # every lane's ingest waited (2026-10-21). With max_seconds an ingest stops after the file in
         # hand once that long has passed (adoption resumes; the seal comes when all are in).
         self.max_seconds = max_seconds
+        # alert(key, message): opens an alert for something only a person can settle (an arXiv chunk
+        # given up on); :func:`config_alert` makes one on the orchestrator's alerts. None: the progress
+        # line and the plan's reason are all there is.
+        self.alert = alert
         self._started = time.monotonic()
 
     def _say(self, text: str) -> None:
@@ -682,20 +694,30 @@ class Ingestor:
             gid = chunk.generation_id
             started = time.monotonic()
             manifest = vp.snapshot_dir / "manifests" / f"{chunk.name}.jsonl"
+            items: list[tuple[Path, str, Sequence[Checksum]]] = []
+            taken: set[str] = set()  # relpaths adopt_many reported as staged
+
+            def staged(rel: str, _adopted: bool, taken: set[str] = taken) -> None:
+                taken.add(rel)
+
             try:
                 items = list(chunk.items(vp.snapshot_dir))
                 self.vault.stage(sid, gid)
-                n = self.vault.adopt_many(sid, gid, items, workers=self.hash_workers)
+                n = self.vault.adopt_many(sid, gid, items, workers=self.hash_workers, on_file=staged)
                 self.vault.adopt(sid, gid, manifest, f"upstream/manifests/{manifest.name}")
                 self.vault.seal(sid, gid)
             except (IntegrityError, VaultError, OSError, ValueError) as exc:
+                if isinstance(exc, IntegrityError) and self._arxiv_redo(vp, chunk, items, taken):
+                    continue  # one damaged PDF: asked for again or given up on; the other chunks go on
                 chunk.state = ChunkState.FAILED
-                vp.status, vp.reason = VersionStatus.FAILED, f"{chunk.name}: {type(exc).__name__}: {exc}"
+                chunk.note = f"{chunk.name}: {type(exc).__name__}: {exc}"
+                vp.status, vp.reason = VersionStatus.FAILED, chunk.note
                 self._say(f"  {sid}/{gid}: FAILED {vp.reason} (files left in place)")
                 break
             chunk.state = ChunkState.SEALED
             sealed += 1
             self._say(f"  {sid}/{gid}: {n} files verified and sealed ({time.monotonic() - started:.1f}s)")
+            self._arxiv_redo_settled(vp, chunk)
             if self.vault.ledger is not None:
                 self.vault.ledger.append(
                     "ingest.adopted",
@@ -704,9 +726,116 @@ class Ingestor:
                 )
         failed = vp.status is VersionStatus.FAILED
         vp.refresh()
-        if not failed:
-            vp.status = VersionStatus.INGESTED
+        if failed or any(c.state is ChunkState.FAILED for c in vp.chunks):
+            # Also when chunks after the failing one are still ready, and when the failed chunk was
+            # given up on by an earlier run (the plan shows it FAILED): never "ingested", exit 0.
+            vp.status = VersionStatus.FAILED
+        elif not any(c.state is ChunkState.REDO for c in vp.chunks):
+            vp.status = VersionStatus.INGESTED  # a redo pending: not done (refresh says incomplete)
         return sealed > 0
+
+    def _arxiv_redo(
+        self,
+        vp: ArxivSnapshotPlan,
+        chunk: ArxivChunk,
+        items: Sequence[tuple[Path, str, Sequence[Checksum]]],
+        taken: set[str],
+    ) -> bool:
+        """After an IntegrityError in ``chunk``: when the cause is one incoming PDF whose bytes do not
+        match the manifest's MD5, ask the pull for that file again (or give up on the chunk at the
+        cap) and return True. False for every other cause: the caller fails the chunk as before.
+
+        Only that cause is cured by a download. The vault raises IntegrityError elsewhere too (a
+        read-back that disagrees with a fetch, an ``expected`` digest, staged bytes that no longer
+        match their record at the seal, a file already staged whose bytes went bad): there the
+        incoming file is fine or absent, and fetching it again would loop for nothing (2026-11-10
+        review). So the cause is not read from the message: the failing file is the first one
+        ``adopt_many`` did not report (it reports in order and stops at the first failure; the vault
+        has renamed it back to its place), and its MD5 is computed here, once.
+
+        The files before it stay adopted and recorded; when the chunk is offered again they are
+        skipped without a read, the fetched file and the rest are adopted, and the part is sealed.
+
+        The redo is of the one file. The chunk is never handed back to the pull: its adopted files
+        are gone from ``_incoming``, and a pull that listed the chunk again would fetch them all a
+        second time."""
+        sid, gid = vp.source_id, chunk.generation_id
+        culprit = next((it for it in items if it[1] not in taken), None)
+        if culprit is None:
+            return False
+        path, relpath, checksums = culprit
+        want = next((c.hexdigest for c in checksums if c.algorithm == "md5"), None)
+        rel = relpath.removeprefix("upstream/")  # the manifest's path: pdf/<archive>/<yymm>/<file>
+        tries, nth, why = 0, 0, ""
+        try:
+            if want is None or path.is_symlink() or not path.is_file() or _md5_of(path) == want:
+                return False
+            entries = read_arxiv_redo(self.arxiv_state_dir, vp.snapshot)
+            before = entries.get(rel)
+            if before is not None:
+                base, tries = before.base, before.tries + 1
+            else:
+                # No line (the first failure, or the owner removed a given-up line to try again): the
+                # numbering goes on after the pull's records of this path, so an old "fetched" line
+                # can never answer the new request (2026-11-13 review: it did, the plan offered a
+                # chunk whose file was moved aside, and every run failed on the missing file).
+                refetched = read_arxiv_refetched(self.arxiv_state_dir, vp.snapshot)
+                base = max((t for p, t in refetched if p == rel), default=0)
+                tries = base + 1
+            nth = tries - base
+            if nth >= ARXIV_REDO_TRIES:
+                why = (
+                    f"{rel} failed its MD5 {nth} times, fetched again in between; given up "
+                    f"(file left in place; to try again, remove its line from "
+                    f"{arxiv_redo_file(self.arxiv_state_dir, vp.snapshot)})"
+                )
+                entries[rel] = ArxivRedo(chunk.name, rel, tries, failed=True, reason=why, base=base)
+                write_arxiv_redo(self.arxiv_state_dir, vp.snapshot, entries)
+            else:
+                # Recorded first, moved second: a run killed in between leaves a damaged file in place
+                # that the pull moves aside itself; the other order would leave a file missing with
+                # nothing asking for it.
+                entries[rel] = ArxivRedo(chunk.name, rel, tries, base=base)
+                write_arxiv_redo(self.arxiv_state_dir, vp.snapshot, entries)
+        except OSError as exc:
+            self._say(f"  {sid}/{gid}: {rel} not queued for a redo ({type(exc).__name__}: {exc})")
+            return False
+        if nth >= ARXIV_REDO_TRIES:
+            chunk.state, chunk.note = ChunkState.FAILED, f"{chunk.name}: {why}"
+            vp.status, vp.reason = VersionStatus.FAILED, chunk.note
+            self._say(f"  {sid}/{gid}: FAILED {chunk.note}")
+            if self.alert is not None:
+                try:
+                    self.alert(
+                        f"ingest:{sid}:{vp.snapshot}:{chunk.name}", f"arXiv {vp.snapshot}, chunk {chunk.note}"
+                    )
+                except (
+                    Exception
+                ) as exc:  # the cap is recorded; an alert store in trouble must not end the run
+                    self._say(f"  {sid}/{gid}: alert not raised ({type(exc).__name__}: {exc})")
+            return True
+        where = "left in place (the pull moves it aside)"
+        try:
+            where = f"moved to {_move_damaged(vp.snapshot_dir, rel, tries).relative_to(vp.snapshot_dir)}"
+        except OSError as exc:
+            where += f": {type(exc).__name__}: {exc}"
+        chunk.state, chunk.redo_files = ChunkState.REDO, 1
+        chunk.note = f"{chunk.name}: redo pending (1 file, try {nth} of {ARXIV_REDO_TRIES})"
+        self._say(
+            f"  {sid}/{gid}: {rel} does not match its MD5 (try {nth} of {ARXIV_REDO_TRIES}); {where}; "
+            "redo pending: the pull fetches this one file again"
+        )
+        return True
+
+    def _arxiv_redo_settled(self, vp: ArxivSnapshotPlan, chunk: ArxivChunk) -> None:
+        """A sealed chunk needs its redo lines no longer (never worth failing a sealed chunk for)."""
+        try:
+            entries = read_arxiv_redo(self.arxiv_state_dir, vp.snapshot)
+            kept = {k: e for k, e in entries.items() if e.chunk != chunk.name}
+            if len(kept) != len(entries):
+                write_arxiv_redo(self.arxiv_state_dir, vp.snapshot, kept)
+        except OSError as exc:
+            self._say(f"  {vp.source_id}/{chunk.generation_id}: redo lines not cleared ({exc})")
 
     def _maybe_promote(self, gen: Generation) -> bool:
         """Promote unless a newer generation is current (for a partitioned source, ADR-0010: a newer
@@ -775,7 +904,147 @@ class ChunkState(StrEnum):
     READY = "ready"
     SEALED = "sealed"
     IN_PROGRESS = "in-progress"
+    REDO = "redo-pending"  # a damaged PDF was asked for again; not offered until the pull has fetched it
     FAILED = "failed"
+
+
+# --- arXiv redo: one damaged PDF of a finished chunk, fetched again by the pull ---------------------
+#
+# Two files beside ``done-<snapshot>.txt``, each with ONE writer. The pull runs for days and keeps
+# what it read; a single file that both sides rewrote would lose an ingest's entry to the pull's
+# rewrite from its older view (2026-11-10 review). So neither side ever writes the other's file:
+#
+# * ``redo-<snapshot>.jsonl``: only ``wsp ingest`` writes it (the whole file, tmp + rename, and only
+#   one ingest runs at a time: the ingest lock). One line per file:
+#   ``{"chunk", "path", "tries", "failed", "reason"}``. ``tries`` counts the times the file failed its
+#   MD5 at adoption; ``failed`` is set at :data:`ARXIV_REDO_TRIES` and nothing is fetched after it.
+# * ``refetched-<snapshot>.jsonl``: only ``tools/arxiv_pull.py`` writes it, by appending
+#   ``{"path", "tries"}`` once the file is back in ``pdf/`` and matches the manifest's MD5.
+#
+# An entry is open (the chunk "redo pending") while no refetched line has its path AND its tries, so
+# a second failure of the same file (tries 2) is open again without anyone editing the other file.
+
+ARXIV_REDO_TRIES = 3  # the same file failing its MD5 this many times fails the chunk for good
+ARXIV_DAMAGED_DIR = "_damaged"  # under the snapshot folder, outside pdf/: no manifest path reaches it
+
+
+@dataclass(frozen=True, slots=True)
+class ArxivRedo:
+    chunk: str
+    path: str  # the manifest's path, pdf/<archive>/<yymm>/<file>
+    tries: int  # the request's number; the pull answers (path, tries)
+    failed: bool = False
+    reason: str = ""
+    base: int = 0  # tries before this count began (a line the owner removed to try again)
+
+
+def arxiv_redo_file(state_dir: Path, snapshot: str) -> Path:
+    return state_dir / f"redo-{snapshot}.jsonl"
+
+
+def arxiv_refetched_file(state_dir: Path, snapshot: str) -> Path:
+    return state_dir / f"refetched-{snapshot}.jsonl"
+
+
+def _state_lines(path: Path) -> Iterator[Mapping[str, Any]]:
+    """The JSON objects of a state file. A missing file is empty; a line that does not parse (an append
+    cut short, an edit by hand) is skipped: the plan of every source must not fail on it."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return
+    for line in text.splitlines():
+        try:
+            item = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(item, dict):
+            yield cast(Mapping[str, Any], item)
+
+
+def read_arxiv_redo(state_dir: Path, snapshot: str) -> dict[str, ArxivRedo]:
+    """Ingest's redo entries of a snapshot, by manifest path."""
+    out: dict[str, ArxivRedo] = {}
+    for item in _state_lines(arxiv_redo_file(state_dir, snapshot)):
+        chunk, path, tries = item.get("chunk"), item.get("path"), item.get("tries")
+        if isinstance(chunk, str) and isinstance(path, str) and isinstance(tries, int):
+            base = item.get("base")
+            out[path] = ArxivRedo(
+                chunk,
+                path,
+                tries,
+                bool(item.get("failed")),
+                str(item.get("reason") or ""),
+                base if isinstance(base, int) else 0,
+            )
+    return out
+
+
+def write_arxiv_redo(state_dir: Path, snapshot: str, entries: Mapping[str, ArxivRedo]) -> None:
+    """Replace the redo file as a whole (tmp, fsync, rename): the pull reads the old or the new one."""
+    state_dir.mkdir(parents=True, exist_ok=True)
+    target = arxiv_redo_file(state_dir, snapshot)
+    tmp = target.with_name(target.name + ".tmp")
+    with tmp.open("w", encoding="utf-8") as fh:
+        for e in entries.values():
+            row = {"chunk": e.chunk, "path": e.path, "tries": e.tries, "failed": e.failed, "reason": e.reason}
+            if e.base:
+                row["base"] = e.base
+            fh.write(json.dumps(row) + "\n")
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp, target)
+
+
+def read_arxiv_refetched(state_dir: Path, snapshot: str) -> set[tuple[str, int]]:
+    """``(path, tries)`` of every redo the pull has fetched again and checked."""
+    out: set[tuple[str, int]] = set()
+    for item in _state_lines(arxiv_refetched_file(state_dir, snapshot)):
+        path, tries = item.get("path"), item.get("tries")
+        if isinstance(path, str) and isinstance(tries, int):
+            out.add((path, tries))
+    return out
+
+
+def _md5_of(path: Path) -> str:
+    digest = hashlib.md5(usedforsecurity=False)
+    with path.open("rb") as fh:
+        while block := fh.read(8 << 20):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _move_damaged(snapshot_dir: Path, rel: str, tries: int) -> Path:
+    """Move a damaged PDF to ``_damaged/<archive>/<yymm>/<file>.try<N>`` (never deleted: the bytes show
+    what the share did to it). Not under ``pdf/`` and not named ``*.pdf``."""
+    first = aside = snapshot_dir / ARXIV_DAMAGED_DIR / f"{rel.removeprefix('pdf/')}.try{tries}"
+    n = 1
+    while aside.exists():  # a rename would replace it: every damaged copy keeps a name of its own
+        n += 1
+        aside = first.with_name(f"{first.name}.{n}")
+    aside.parent.mkdir(parents=True, exist_ok=True)
+    os.rename(snapshot_dir / rel, aside)
+    return aside
+
+
+def config_alert(cfg: Mapping[str, Any]) -> Callable[[str, str], None]:
+    """``alert(key, message)`` for :class:`Ingestor` on the orchestrator's alerts (the store and sinks
+    ``wsp alerts raise`` uses; a warning; nothing when there is no state DB)."""
+
+    def alert(key: str, message: str) -> None:
+        from wsp_cli.notify import _alerter  # pyright: ignore[reportPrivateUsage]
+        from wsp_orchestrator.alerts import Alert, Severity
+
+        pair = _alerter(cfg)
+        if pair is None:
+            return
+        alerter, store = pair
+        try:
+            alerter.raise_(Alert(key, Severity.WARNING, message))
+        finally:
+            store.close()
+
+    return alert
 
 
 @dataclass
@@ -786,6 +1055,8 @@ class ArxivChunk:
     files: int = 0
     bytes: int = 0
     manifest: Path | None = None  # in _incoming, or already staged after an interrupted run
+    redo_files: int = 0  # PDFs asked for again that the pull has not fetched yet
+    note: str = ""  # why it failed or waits; shown in the plan's reason
 
     def items(self, snapshot_dir: Path) -> Iterator[tuple[Path, str, Sequence[Checksum]]]:
         """``(incoming path, relpath, [md5])`` for every manifest entry."""
@@ -813,6 +1084,7 @@ _CHUNK_FILE_STATE = {
     ChunkState.SEALED: FileState.STAGED,
     ChunkState.READY: FileState.COMPLETE,
     ChunkState.IN_PROGRESS: FileState.DOWNLOADING,
+    ChunkState.REDO: FileState.DOWNLOADING,
     ChunkState.FAILED: FileState.COMPLETE,
 }
 
@@ -842,11 +1114,19 @@ class ArxivSnapshotPlan(VersionPlan):
             f"({sum(c.files for c in ready):,} PDFs, {sum(c.bytes for c in ready) / 1e9:.1f} GB), "
             f"{count[ChunkState.IN_PROGRESS]} in progress, {count[ChunkState.FAILED]} failed"
         )
+        redo = [c for c in self.chunks if c.state is ChunkState.REDO]
+        if redo:
+            self.reason += f", {len(redo)} redo pending ({sum(c.redo_files for c in redo)} file(s))"
+        # Why a chunk failed or waits (the counts alone hid it); a few, the line is one table cell
+        notes = [c.note for c in self.chunks if c.note and c.state in (ChunkState.FAILED, ChunkState.REDO)]
+        if notes:
+            more = f" (+{len(notes) - 3} more)" if len(notes) > 3 else ""
+            self.reason += "; " + "; ".join(notes[:3]) + more
         if ready:
             self.status = VersionStatus.READY
         elif count[ChunkState.FAILED]:
             self.status = VersionStatus.FAILED
-        elif self.chunks and not count[ChunkState.IN_PROGRESS]:
+        elif self.chunks and not count[ChunkState.IN_PROGRESS] and not redo:
             self.status = VersionStatus.SEALED
         else:
             self.status = VersionStatus.INCOMPLETE
@@ -874,6 +1154,10 @@ def plan_arxiv(vault: FileVault, root: Path, state_dir: Path) -> list[ArxivSnaps
         manifests = snap / "manifests"
         done_file = state_dir / f"done-{snap.name}.txt"
         done = set(done_file.read_text(encoding="utf-8").split()) if done_file.is_file() else None
+        redo: dict[str, list[ArxivRedo]] = {}
+        for entry in read_arxiv_redo(state_dir, snap.name).values():
+            redo.setdefault(entry.chunk, []).append(entry)
+        refetched = read_arxiv_refetched(state_dir, snap.name) if redo else set[tuple[str, int]]()
         prefix = f"{snap.name}.pdf."
         names = {p.stem for p in manifests.glob("*.jsonl")} if manifests.is_dir() else set[str]()
         names |= {g.removeprefix(prefix) for g in parts if g.startswith(prefix)}
@@ -890,6 +1174,14 @@ def plan_arxiv(vault: FileVault, root: Path, state_dir: Path) -> list[ArxivSnaps
                 vp.chunks.append(ArxivChunk(name, gid, ChunkState.READY, len(entries), size, staged))
             elif not manifest.is_file():
                 vp.chunks.append(ArxivChunk(name, gid, ChunkState.IN_PROGRESS))
+            elif given_up := [e for e in redo.get(name, []) if e.failed]:
+                # Given up on (ARXIV_REDO_TRIES): shown as failed, never offered again by itself
+                note = f"{name}: {given_up[0].reason or 'given up on ' + given_up[0].path}"
+                vp.chunks.append(ArxivChunk(name, gid, ChunkState.FAILED, note=note))
+            elif waiting := [e for e in redo.get(name, []) if (e.path, e.tries) not in refetched]:
+                # Not offered until the pull has the file back: adopting now would fail on the gap
+                note = f"{name}: redo pending ({len(waiting)} file(s), the pull fetches them again)"
+                vp.chunks.append(ArxivChunk(name, gid, ChunkState.REDO, redo_files=len(waiting), note=note))
             elif (name in done) if done is not None else _chunk_complete_on_disk(snap, manifest):
                 entries = read_chunk_manifest(manifest)
                 size = sum(e[1] for e in entries)

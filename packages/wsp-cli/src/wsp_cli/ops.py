@@ -21,7 +21,7 @@ from wsp_cli.doctor import Doctor, Level
 from wsp_cli.doctor import exit_code as doctor_exit
 from wsp_cli.doctor import render as render_doctor
 from wsp_cli.indexer import Indexer, SourceReport
-from wsp_cli.ingest import Ingestor, VersionStatus, render
+from wsp_cli.ingest import Ingestor, VersionStatus, config_alert, render
 from wsp_cli.locks import (
     DRILL,
     EXIT_BUSY,
@@ -133,6 +133,9 @@ def _ingest(
         user_agent=bootstrap.user_agent(cfg),
         settle_seconds=float(args.settle_seconds),
         max_seconds=getattr(args, "max_seconds", None),
+        # An arXiv chunk given up on after its PDF was fetched again three times: an alert, not
+        # only a FAILED line in a job's log. A dry run changes nothing, so it raises nothing.
+        alert=None if dry else config_alert(cfg),
     )
     try:
         if args.allow_mirror:

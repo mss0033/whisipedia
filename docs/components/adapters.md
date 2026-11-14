@@ -130,6 +130,12 @@ or a dense file on local NVMe); a later step can add it.
   threads and renames it into staging (staging record flushed per 1,000 files, not per file, which
   would be quadratic); the manifest is adopted; the part is sealed and never promoted. A crash at any
   point resumes: sealed parts are skipped, staged files are re-hashed and recorded.
+* A PDF of a finished chunk that no longer matches its MD5 (damaged on the share after the download)
+  is moved to `_incoming/arxiv/<snapshot>/_damaged/` and named in `redo-<snapshot>.jsonl` in the state
+  dir (written only by `wsp ingest`); the pull fetches that one file again, between chunks or with
+  `--redo-only`, and appends it to `refetched-<snapshot>.jsonl` (written only by the pull). Until then
+  the chunk is "redo pending" and not offered. The same file failing 3 times fails the chunk for good
+  (an alert; to try again, remove its line from the redo file: the count starts anew). Other integrity failures are not queued.
 
 ## `doc-collection` (curated document sets, PLAN D11/D13/D14)
 
