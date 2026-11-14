@@ -6,11 +6,13 @@ from __future__ import annotations
 import asyncio
 import gzip
 import hashlib
+import io
 import json
+import logging
 import os
 import shutil
 import time
-from collections.abc import Callable, MutableMapping
+from collections.abc import Callable, Iterator, MutableMapping
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -33,6 +35,7 @@ from wsp_cli.monitor import LibraryMonitor
 from wsp_core.activity import ActivityMiddleware, client_path, recently_active, seconds_since
 from wsp_core.model import Artifact, Generation, GenerationStatus
 from wsp_orchestrator.integrity import ContentProfile, ProfileBuilder, compare_profiles
+from wsp_orchestrator.jsonlog import configure_logging
 from wsp_orchestrator.store import StateStore
 from wsp_orchestrator.testing import make_spec
 
@@ -446,6 +449,57 @@ def test_a_profile_interrupted_in_a_zim_resumes_at_its_entry(tmp_path: Path, oft
     assert second.read["a.zim"] == list(range(96, part["total"])), "only what was not saved is read"
     assert resumed.to_json() == plain.to_json(), "entries 96..99 were read twice and counted once"
     assert not (ckpt / "unit-001.part.json.gz").exists(), "a finished unit keeps only its done file"
+
+
+@pytest.fixture
+def journal() -> Iterator[io.StringIO]:
+    """What the profile child writes to the journal: the JSON handler on the ``wsp`` logger tree, as
+    ``wsp_orchestrator.child`` sets it up (nothing else of a child's logging reaches the journal)."""
+    logger = logging.getLogger("wsp")
+    handlers, level, propagate = list(logger.handlers), logger.level, logger.propagate
+    out = io.StringIO()
+    configure_logging("INFO", stream=out)
+    yield out
+    logger.handlers[:] = handlers
+    logger.setLevel(level)
+    logger.propagate = propagate
+
+
+def _messages(journal: io.StringIO) -> list[str]:
+    return [str(json.loads(line).get("msg", "")) for line in journal.getvalue().splitlines()]
+
+
+def test_the_journal_says_where_a_profile_starts_or_resumes(
+    tmp_path: Path, often: float, journal: io.StringIO
+) -> None:
+    # The module logged as ``wsp_cli.integrity``, outside the ``wsp`` tree: a resumed profile wrote
+    # nothing the journal kept, and the resume had to be proved from the files (2026-11-13).
+    gen_dir = _two_zims(tmp_path)
+    _refinery(tmp_path / "refinery")
+    ckpt = tmp_path / "work" / f"{GID}.ckpt"
+
+    def run(reader: _Reader) -> None:
+        Profiler(tmp_path / "refinery", sample_rate=1.0, zim_reader=reader)(
+            make_spec("w"), _generation(), gen_dir, checkpoint_dir=ckpt, checkpoint_seconds=often
+        )
+
+    with pytest.raises(_CutError):
+        run(_Reader(a_zim=100))
+    first = _messages(journal)
+    assert [m for m in first if m.startswith("profile: ")] == [
+        f"profile: starting fresh: w, 3 units ({ckpt})"
+    ]
+    journal.seek(0)
+    journal.truncate()
+    total = _part(ckpt, 1)["total"]
+    run(_Reader())
+    second = [m for m in _messages(journal) if m.startswith("profile: ")]
+    assert second == [f"profile: resuming w from unit 1 of 0..2 (cursor 96 of {total})"]
+    journal.seek(0)
+    journal.truncate()
+    run(_Reader())  # everything was saved as done
+    third = [m for m in _messages(journal) if m.startswith("profile: ")]
+    assert third == ["profile: resuming w: all 3 units were done, nothing is read again"]
 
 
 def test_a_profile_interrupted_between_files_skips_the_finished_ones(

@@ -53,7 +53,10 @@ from wsp_vault.attest import PROVENANCE_NAME, attestation_state, write_attestati
 from wsp_vault.scrub import Scrubber
 from wsp_vault.vault import FileVault, SignatureError
 
-log = logging.getLogger(__name__)
+# Under ``wsp``: the profile child's JSON handler is on that logger tree (``wsp_orchestrator.jsonlog``),
+# and ``wsp_cli.integrity`` (``__name__``) is outside it, so no line of a resumed profile reached the
+# journal (2026-11-13: the resume had to be proved from the checkpoint's files).
+log = logging.getLogger("wsp.cli.integrity")
 
 DEFAULT_SAMPLE_RATE = 1 / 32
 PROFILE_MIN_RATE = 0.25e6
@@ -416,11 +419,13 @@ class UnitCheckpoint:
         self.total = total
         found = self.checkpoint.partial(self.unit, total)
         if found is None:
+            self.checkpoint.announce(self.unit, 0, total)
             return 0
         cursor, restored = found
         for f in fields(ProfileBuilder):
             setattr(self.builder, f.name, getattr(restored, f.name))
         log.info("profile checkpoint: unit %d continues at %d of %d", self.unit, cursor, total)
+        self.checkpoint.announce(self.unit, cursor, total)
         return cursor
 
     def saved(self, cursor: int) -> None:
@@ -452,6 +457,10 @@ class ProfileCheckpoint:
     every: float = CHECKPOINT_SECONDS
     clock: Callable[[], float] = time.monotonic
     _next: float = field(default=0.0, repr=False)
+    source: str = ""
+    """Whose profile this is, for the one line that says where the run began (:meth:`announce`)."""
+    units: int = 0
+    resumed: bool = field(default=False, repr=False)  # kept from an earlier run, and not yet announced
 
     @classmethod
     def open(
@@ -461,6 +470,8 @@ class ProfileCheckpoint:
         *,
         every: float = CHECKPOINT_SECONDS,
         clock: Callable[[], float] = time.monotonic,
+        source: str = "",
+        units: int = 0,
     ) -> ProfileCheckpoint:
         """The checkpoint at ``root``, emptied first unless it was made from the same input by the
         same code (``fingerprint``). Never raises: a directory that cannot be read or written
@@ -471,10 +482,37 @@ class ProfileCheckpoint:
             log.warning("profile checkpoint: off for this run, %s cannot be used: %r", root, exc)
             return cls(None, every, clock)
         if done is None:
-            log.info("profile checkpoint: starting (%s)", root)
+            log.info("profile: starting fresh: %s, %d units (%s)", source or "?", units, root)
         else:
             log.info("profile checkpoint: resuming, %d units done (%s)", done, root)
-        return cls(root, every, clock, clock() + every)
+        return cls(root, every, clock, clock() + every, source, units, done is not None)
+
+    def announce(self, unit: int, cursor: int, total: int) -> None:
+        """Say once, for a checkpoint kept from an earlier run, where this run begins: the first unit
+        a reader is started for (``unit`` of 0..``units`` - 1, numbered as its file is) and the step
+        of it (``cursor`` of ``total``; 0 when its saved part was absent or of no use)."""
+        if not self.resumed:
+            return
+        self.resumed = False
+        log.info(
+            "profile: resuming %s from unit %d of 0..%d (cursor %d of %d)",
+            self.source or "?",
+            unit,
+            max(self.units - 1, unit),
+            cursor,
+            total,
+        )
+
+    def announce_done(self) -> None:
+        """The same line for a kept checkpoint in which no unit was left to read."""
+        if not self.resumed:
+            return
+        self.resumed = False
+        log.info(
+            "profile: resuming %s: all %d units were done, nothing is read again",
+            self.source or "?",
+            self.units,
+        )
 
     @staticmethod
     def _prepare(root: Path, fingerprint: str) -> int | None:
@@ -695,7 +733,13 @@ class Profiler:
                 log.warning("profile checkpoint: off for this run, the input cannot be described: %r", exc)
                 ckpt = ProfileCheckpoint(None)
             else:
-                ckpt = ProfileCheckpoint.open(checkpoint_dir, fingerprint, every=checkpoint_seconds)
+                ckpt = ProfileCheckpoint.open(
+                    checkpoint_dir,
+                    fingerprint,
+                    every=checkpoint_seconds,
+                    source=spec.id,
+                    units=1 + len(zims),  # unit 0 is the Refinery pass
+                )
             return self._in_units(ckpt, gen_dir, zims, pacer)
         builder = ProfileBuilder(sample_rate=self.sample_rate)
         refined = 0
@@ -713,6 +757,7 @@ class Profiler:
         then each ZIM) and merged in that order: every count is a sum, and of a key sampled twice
         the later unit's entry wins in both. A unit saved as done is not read again."""
         first = ckpt.done(0)
+        read = first is None and gen_dir is not None  # a reader was started for some unit
         if first is None:
             builder = ProfileBuilder(sample_rate=self.sample_rate)
             if gen_dir is not None:
@@ -724,6 +769,7 @@ class Profiler:
         for n, z in enumerate(zims, start=1):
             profile = ckpt.done(n)
             if profile is None:
+                read = True
                 builder = ProfileBuilder(sample_rate=self.sample_rate)
                 unit = ckpt.unit(n, builder)
                 prefix = f"{z.stem}/" if len(zims) > 1 else ""
@@ -738,6 +784,8 @@ class Profiler:
                 )
                 profile = ckpt.finish(n, builder)
             units.append(profile)
+        if not read:
+            ckpt.announce_done()
         return merge_profiles(units)
 
 

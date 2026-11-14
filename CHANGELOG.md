@@ -19,6 +19,8 @@ All notable changes are documented here. The format follows [Keep a Changelog](h
 * When the query names a page in the reader's language ("united states"), pages in other languages
   no longer stand before the reader's results the ranker scores 0.15 or more: a German, a Japanese and two
   Portuguese pages titled so held ranks 2-5. They follow, by their score; none is removed.
+* A content profile says in the journal where it begins: "profile: starting fresh: <source>, N units"
+  or "profile: resuming <source> from unit N of 0..M (cursor X of Y)" (its lines never reached the journal).
 ### Added: the Crystallography Open Database, one page per structure (2026-11-05)
 * `reader: cod-cif` streams COD's 26.6 GB archive once and makes each of its ~520,000 CIFs a document:
   "<name or formula> (COD <id>)", a summary (formula, space group, cell, authors, journal, year, DOI)
