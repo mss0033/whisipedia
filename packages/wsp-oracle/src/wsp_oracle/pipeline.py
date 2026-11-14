@@ -42,6 +42,13 @@ PREFER_BOOST = 1.5
 # their order there is noise ("python list comprehension" led with a Spanish Stack Overflow question).
 LANG_BONUS = 0.01  # added to reranker scores (0-1): reorders near-ties only
 LANG_BOOST = 1.15  # multiplies fused scores below the reranked head
+OWN_LEAD = 0.15
+"""The reranker score (weighted) from which a page in the reader's language comes before the other
+languages' pages for a query that names a page of theirs (:func:`_own_language_first`). Not the
+low-confidence bar (0.05): the German article "Hamburg" (0.98) would follow English pages the
+reranker gives 0.07. Live, "united states" has English results at 0.72, 0.35, 0.204 and 0.201, then
+0.138, 0.099 and 0.078 (2026-11-13): the bar stands in the gap, clear of the 0.20 pair. A judgement,
+to be tuned on more queries."""
 SOURCE_SHARE = 8
 """One source takes at most 1/8 of the lexical window while other sources have matches (``per_source``)."""
 TITLE_PINS = 8
@@ -813,6 +820,7 @@ class OracleSearcher:
         )
         t = lap("lexical+fusion", t)
         exact = self._pins(route, fused, sources)
+        titles = len(exact)  # the pages titled as the query; the alias, if any, follows them
         exact += self._aliased(route, exact, sources)
         # Candidates from the lexical window too: a book's long text ranks it below the fusion's cut.
         named = self._title_pins(route, [*fused, *found.lexical], {p.doc_id for p in exact})
@@ -872,6 +880,14 @@ class OracleSearcher:
         # edition is the foreign one.
         if not known and stated != route.reader_lang and stated in _SHARED_SCRIPT_LANGS:
             stated = None
+        # The same statement decides whose pages lead the reranked head (:func:`_own_language_first`).
+        # A reader's language says nothing of a query in a script that names none ("東京" from a German
+        # reader: Chinese or Japanese, and the Chinese page is not the foreign one).
+        text = route.query or query
+        clear = known or _latin(text) or _script_language(text) is not None
+        own = (stated or (DEFAULT_LANG if _latin(text) else None)) if clear else None
+        if confidence is not None and own is not None:
+            head = _own_language_first(head, pins[:titles], pins[:fixed], own, known)
         pins, head = _spread_foreign_dictionaries(route.query or query, pins, head, fixed=fixed, lang=stated)
         hits = tuple([*pins, *head, *tail])
         total = (time.perf_counter() - t0) * 1000
@@ -1234,9 +1250,10 @@ def _near_pins(
     query's words announce the language, ``known``, or an exact pin states one): every source gives its
     best near title, so a source holding only Japanese or Portuguese pages gave one of those, and
     "united states" listed foreign pages at ranks 2-5 before every reranked hit (2026-11-10 trawl,
-    search-index-16). They join the head, where the reranker's score and the language bonus place
-    them; nothing is dropped. Without reranker scores there is nothing to place them by, and with
-    neither an exact pin nor an announced language nothing to tell them from the reader's pages: the
+    search-index-16). They join the head, after the reader's pages there
+    (:func:`_own_language_first`; the reranker's score alone kept them at its top); nothing is
+    dropped. Without reranker scores there is nothing to place them by, and with neither an exact
+    pin nor an announced language nothing to tell them from the reader's pages: the
     order stands."""
     own = {lang} | {primary_lang(p.lang) for p in exact if p.lang}
 
@@ -1281,6 +1298,50 @@ def _prefer_language(
     new_head = sorted((bonus(h, head_part=True) for h in head), key=lambda h: -h.score)
     new_tail = sorted((bonus(h, head_part=False) for h in tail), key=lambda h: -h.score)
     return new_head, new_tail
+
+
+def _own_language_first(
+    head: Sequence[SearchHit], titled: Sequence[SearchHit], exact: Sequence[SearchHit], lang: str, known: bool
+) -> list[SearchHit]:
+    """The reranked ``head`` (best first) with the reader's pages before the other languages': no
+    page in another language stands before a page in an "own" language the reranker scores
+    :data:`OWN_LEAD` or more. Each group keeps its order; below the last such page the order is the
+    scores', as it was. Nothing is dropped.
+
+    The cross-encoder scores a page titled as the query near 1.0 in whatever language it is written:
+    live, "united states" gave the German page "United States" 0.98, the Japanese dictionary entry
+    1.00 and two Portuguese "Classe United States" 0.96, the best English result after the article
+    0.63 (0.72 weighted). :func:`_near_pins` had sent those four to the head "where the reranker's
+    score and the language bonus place them": at its top, ranks 2-5, :data:`LANG_BONUS` being 0.01
+    (2026-11-13, live after 4a-1; its test gave every page one score, so the bonus decided).
+
+    Only when a page titled as the query (``titled``: the exact pins without the alias) is in the
+    reader's language, ``lang`` or the default: the query names a page the reader has in their
+    language, so the other editions are copies of it or other things of that name. Without one
+    nothing moves: a foreign title the query really names is the exact pin itself ("Estados Unidos":
+    the Spanish article, with the English alias "United States" second, and the Portuguese article
+    of that title keeps its place), and a query with no page of its name keeps the scores' order.
+    Nor when the query's words announce a language other than the default (``known``): every
+    Cyrillic query is taken for Russian, and "Казахстан" must not send the Kazakh and the English
+    article below every Russian page. ``lang`` is a language something states, or the default for a
+    query in Latin letters (the caller's rule: "東京" alone says nothing).
+
+    "Own" is ``lang``, the default language (a script or the reader's setting is a preference: the
+    English article is not sent below every German page for a reader who set German) and the
+    language of every exact pin, the alias too."""
+    if known and lang != DEFAULT_LANG:
+        return list(head)
+    readers = {lang, DEFAULT_LANG}
+    if not any(p.lang and primary_lang(p.lang) in readers for p in titled):
+        return list(head)
+    own = readers | {primary_lang(p.lang) for p in exact if p.lang}
+
+    def foreign(h: SearchHit) -> bool:
+        return bool(h.lang) and primary_lang(h.lang) not in own
+
+    last = max((i for i, h in enumerate(head) if not foreign(h) and h.score >= OWN_LEAD), default=-1)
+    lead = head[: last + 1]
+    return [*(h for h in lead if not foreign(h)), *(h for h in lead if foreign(h)), *head[last + 1 :]]
 
 
 _TITLE_WORDS = re.compile(r"[^\w]+", re.UNICODE)

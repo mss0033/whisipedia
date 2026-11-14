@@ -20,6 +20,7 @@ from wsp_oracle.pipeline import (
     OracleSearcher,
     _language,  # pyright: ignore[reportPrivateUsage]
     _near_pins,  # pyright: ignore[reportPrivateUsage]
+    _own_language_first,  # pyright: ignore[reportPrivateUsage]
     _reader,  # pyright: ignore[reportPrivateUsage]
     _script_language,  # pyright: ignore[reportPrivateUsage]
     _stated_language,  # pyright: ignore[reportPrivateUsage]
@@ -320,6 +321,225 @@ def test_foreign_near_titles_follow_the_reader_language_results(tmp_path: Path) 
     assert ids[:2] == [article, near]  # the English near title is still pinned
     assert set(foreign) <= set(ids)  # nothing is dropped
     assert max(ids.index(x) for x in english) < min(ids.index(x) for x in foreign)
+    idx.close()
+
+
+class _Scored:
+    """The cross-encoder as it scored the live library: by title, ``default`` for any other page."""
+
+    def __init__(self, scores: dict[tuple[str, str], float], default: float = 0.02) -> None:
+        self.scores = scores
+        self.default = default
+
+    def rerank(self, query: str, hits: Sequence[SearchHit]) -> Sequence[SearchHit]:
+        return [replace(h, score=self.scores.get((h.title, h.lang), self.default)) for h in hits]
+
+
+# What GET /v1/search?q=united+states gave on the live library at 6b5d7cc (2026-11-13), top 20: the
+# doc ids, languages and reranker scores (the response's score divided by the source weight, 1.15 for
+# wikipedia-top10). A page titled as the query scores near 1.0 in any language; the best English
+# result after the article 0.72.
+_LIVE_STATES = {
+    ("United States", "en"): 0.991,
+    ("United States", "de"): 0.981,
+    ("United States", "ja"): 0.995,
+    ("Classe United States", "pt"): 0.962,
+    ("COVID-19 pandemic in the United States", "en"): 0.721,
+    ("United States Range", "ceb"): 0.533,
+    ("United States of Mind", "pt"): 0.581,
+    ("U.S. federal government response to the COVID-19 pandemic", "en"): 0.347,
+    ("COVID-19 pandemic in North America", "en"): 0.194,  # 0.204 with the language bonus
+    ("Healthcare in the United States", "en"): 0.099,
+    ("United States Mine", "ceb"): 0.111,
+    ("Sanctions of the United States", "en"): 0.03,  # below the low-confidence bar (0.05)
+}
+
+
+def _live_states(tmp_path: Path) -> tuple[TantivyIndex, OracleSearcher]:
+    top10, md = "wikipedia-top10", "mdwiki"
+    ja, pt, extra = "kiwix-multilingual-ja", "kiwix-multilingual-pt", "wikipedia-text-extra"
+    docs = [
+        _doc(top10, "en/United_States", "United States", "The United States is a country."),
+        # the same source's German page of that title: a disambiguation of ships and films
+        _doc(top10, "de/United_States", "United States", "United States steht für: ein Schiff.", "de"),
+        _doc(
+            top10, "ceb/United_States_Range", "United States Range", "Bukid ang United States Range.", "ceb"
+        ),
+        _doc(top10, "ceb/United_States_Mine", "United States Mine", "Minahan ang United States Mine.", "ceb"),
+        _doc(ja, "wiktionary_ja_all/United_States", "United States", "United States: アメリカ合衆国。", "ja"),
+        _doc(
+            pt,
+            "wikipedia_pt_all/Classe_United_States",
+            "Classe United States",
+            "A classe United States.",
+            "pt",
+        ),
+        _doc(
+            pt,
+            "wikipedia_pt_all/United_States_of_Mind",
+            "United States of Mind",
+            "United States of Mind.",
+            "pt",
+        ),
+        _doc(
+            extra,
+            "pt/Classe_United_States",
+            "Classe United States",
+            "A classe United States de navios.",
+            "pt",
+        ),
+        _doc(
+            md,
+            "COVID-19_pandemic_in_the_United_States",
+            "COVID-19 pandemic in the United States",
+            "The COVID-19 pandemic in the United States.",
+        ),
+        _doc(
+            md,
+            "U.S._federal_government_response_to_the_COVID-19_pandemic",
+            "U.S. federal government response to the COVID-19 pandemic",
+            "The federal government of the United States responded.",
+        ),
+        _doc(
+            md,
+            "COVID-19_pandemic_in_North_America",
+            "COVID-19 pandemic in North America",
+            "The pandemic in North America: the United States, Canada and Mexico.",
+        ),
+        _doc(
+            md,
+            "Healthcare_in_the_United_States",
+            "Healthcare in the United States",
+            "Healthcare in the United States is provided by many organizations.",
+        ),
+        _doc(
+            md,
+            "Sanctions_of_the_United_States",
+            "Sanctions of the United States",
+            "Sanctions of the United States, a list.",
+        ),
+    ]
+    idx = _index(tmp_path, docs)
+    searcher = _searcher(idx, top10, md, ja, pt, extra, reranker=_Scored(_LIVE_STATES))
+    searcher.source_weights = {top10: 1.15}
+    return idx, searcher
+
+
+def test_foreign_pages_titled_as_the_query_follow_the_readers_pages_whatever_the_reranker_scores(
+    tmp_path: Path,
+) -> None:
+    # Live after 4a-1: "united states" still listed de, ja, pt, pt at ranks 2-5. The near titles were
+    # no longer pinned, but the reranker scores a page titled as the query 0.96-1.0 in any language
+    # (the English results 0.72 and less), so the head they joined opened with them; the language
+    # bonus is 0.01. The test above gives every page one score and so never met this.
+    idx, searcher = _live_states(tmp_path)
+    hits = searcher.run("united states").hits
+    ids = [h.doc_id for h in hits]
+    langs = [h.lang for h in hits]
+    assert ids[0] == make_doc_id("wikipedia-top10", "en/United_States")
+    confident = [
+        make_doc_id("mdwiki", native)
+        for native in (
+            "COVID-19_pandemic_in_the_United_States",
+            "U.S._federal_government_response_to_the_COVID-19_pandemic",
+            "COVID-19_pandemic_in_North_America",
+        )
+    ]
+    assert ids[1:4] == confident  # the reader's pages (0.72, 0.35, 0.20), by the reranker's score
+    # then the other languages' pages, by their score: nothing is dropped
+    assert ids[4] == make_doc_id("wikipedia-top10", "de/United_States")
+    assert ids[5] == make_doc_id("kiwix-multilingual-ja", "wiktionary_ja_all/United_States")
+    assert len(ids) == 13
+    assert sorted(langs[4:11]) == ["ceb", "ceb", "de", "ja", "pt", "pt", "pt"]
+    # English pages the reranker gives less than OWN_LEAD (0.10, 0.03) do not come before them
+    assert ids[-2:] == [
+        make_doc_id("mdwiki", "Healthcare_in_the_United_States"),
+        make_doc_id("mdwiki", "Sanctions_of_the_United_States"),
+    ]
+    idx.close()
+
+
+def test_a_foreign_title_the_query_names_is_the_exact_pin_and_nothing_moves(tmp_path: Path) -> None:
+    # "Classe United States" has no English page of its name: the Portuguese page is the exact title,
+    # the other Portuguese one follows by its score, before the English results.
+    idx, searcher = _live_states(tmp_path)
+    ids = [h.doc_id for h in searcher.run("Classe United States").hits]
+    assert set(ids[:2]) == {
+        make_doc_id("kiwix-multilingual-pt", "wikipedia_pt_all/Classe_United_States"),
+        make_doc_id("wikipedia-text-extra", "pt/Classe_United_States"),
+    }
+    idx.close()
+
+
+def test_the_readers_pages_lead_the_head_only_when_the_query_names_a_page_of_theirs() -> None:
+    en, low = _hit("a", "en", "en", 0.72), _hit("a", "en2", "en", 0.1)
+    de, ja, pt = _hit("b", "de", "de", 0.98), _hit("c", "ja", "ja", 0.99), _hit("d", "pt", "pt", 0.5)
+    untagged = _hit("e", "none", "", 0.4)
+    head = [ja, de, en, pt, untagged, low]
+    first = [en, untagged, ja, de, pt, low]
+    article = _hit("wiki", "en/United_States", "en")
+    # an English exact title: English (and pages that state no language) at OWN_LEAD or more first,
+    # then the rest by score; the English page below it (0.1) stays where its score put it
+    assert _own_language_first(head, [article], [article], "en", False) == first
+    assert _own_language_first(head, [article], [article], "en", True) == first  # "the united states"
+    # no exact title, or one in another language or in none: the scores' order stands
+    assert _own_language_first(head, [], [], "en", False) == head
+    classe = _hit("wiki", "pt/Classe", "pt")
+    assert _own_language_first(head, [classe], [classe], "en", False) == head
+    assert _own_language_first(head, [_hit("x", "x", "")], [_hit("x", "x", "")], "en", False) == head
+    # "Berliner Mauer", "Estados Unidos": the foreign exact title and its English alias. The alias is
+    # no page titled as the query: nothing moves (the Portuguese "Estados Unidos" keeps its place)
+    mauer, wall = _hit("wiki", "de/Berliner_Mauer", "de"), _hit("wiki", "en/Berlin_Wall", "en")
+    assert _own_language_first(head, [mauer], [mauer, wall], "en", False) == head
+    # a reader who set German (a preference): German and the default language are own
+    assert _own_language_first(head, [mauer], [mauer], "de", False) == [de, en, untagged, ja, pt, low]
+    # ... and the default language's exact title is a page of theirs too (no Finnish one held)
+    assert _own_language_first(head, [article], [article], "fi", False) == first
+    # an exact title beside the reader's widens "own": Japanese with English
+    both = [article, _hit("wiki", "ja/United_States", "ja")]
+    assert _own_language_first(head, [article], both, "en", False) == [ja, en, untagged, de, pt, low]
+    # a query whose words announce another language (every Cyrillic query is "Russian"): untouched
+    assert _own_language_first(head, [mauer], [mauer], "de", True) == head
+    assert _own_language_first(head, [article], [article], "ru", True) == head
+    # no page of the reader's at OWN_LEAD: nothing to put first
+    assert _own_language_first([ja, de, low], [article], [article], "en", False) == [ja, de, low]
+
+
+def test_a_foreign_title_with_an_english_alias_keeps_the_other_editions_of_that_title(tmp_path: Path) -> None:
+    # Review of this change: "Estados Unidos" pins the Spanish article and its English alias "United
+    # States". The alias alone made English the reader's pages, and the Portuguese article of the
+    # very title fell behind every English result.
+    docs = [
+        _doc("wiki", "es/Estados_Unidos", "Estados Unidos", "Estados Unidos es un país.", "es"),
+        _doc("wiki", "en/United_States", "United States", "A country.", "en", "Estados Unidos"),
+        _doc("ptwiki", "Estados_Unidos", "Estados Unidos", "Estados Unidos é um país.", "pt"),
+        _doc("guide", "Mexico", "Mexico", "Mexico borders the Estados Unidos to the north."),
+    ]
+    idx = _index(tmp_path, docs)
+    scores = {("Estados Unidos", "es"): 0.99, ("Estados Unidos", "pt"): 0.99, ("Mexico", "en"): 0.4}
+    searcher = _searcher(idx, "wiki", "ptwiki", "guide", reranker=_Scored(scores, default=0.9))
+    ids = [h.doc_id for h in searcher.run("Estados Unidos").hits]
+    assert ids[:2] == [make_doc_id("wiki", "es/Estados_Unidos"), make_doc_id("wiki", "en/United_States")]
+    assert ids.index(make_doc_id("ptwiki", "Estados_Unidos")) < ids.index(make_doc_id("guide", "Mexico"))
+    idx.close()
+
+
+def test_a_query_in_han_characters_does_not_send_the_chinese_pages_below_the_english(tmp_path: Path) -> None:
+    # "東京" alone is Chinese or Japanese: with the Japanese exact title and the English alias pinned,
+    # the default language is still a guess, and the Chinese page keeps the place its score gives it.
+    docs = [
+        _doc("wiki", "ja/東京", "東京", "東京は日本の首都。", "ja"),
+        _doc("wiki", "en/Tokyo", "Tokyo", "Tokyo (東京) is the capital of Japan.", "en", "東京"),
+        _doc("zhwiki", "東京都", "東京都", "東京 都是日本首都。", "zh"),
+        _doc("guide", "Kanto", "Kanto", "Kanto holds 東京 and its neighbours."),
+    ]
+    idx = _index(tmp_path, docs)
+    scores = {("東京", "ja"): 0.99, ("Tokyo", "en"): 0.9, ("東京都", "zh"): 0.8, ("Kanto", "en"): 0.3}
+    searcher = _searcher(idx, "wiki", "zhwiki", "guide", reranker=_Scored(scores))
+    for lang in (None, "de"):  # nor does a German reader's setting say which of the two it is
+        ids = [h.doc_id for h in searcher.run("東京", lang=lang).hits]
+        assert ids[0] == make_doc_id("wiki", "ja/東京")
+        assert ids.index(make_doc_id("zhwiki", "東京都")) < ids.index(make_doc_id("guide", "Kanto"))
     idx.close()
 
 

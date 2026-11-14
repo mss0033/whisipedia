@@ -16,6 +16,9 @@ All notable changes are documented here. The format follows [Keep a Changelog](h
 * "Did you mean" prefers the correction that is a page's title ("alan turring": "alan turing"), is
   counted by one every-word query, and offers nothing when a query of two words or more is the
   title of one of the first ten results.
+* When the query names a page in the reader's language ("united states"), pages in other languages
+  no longer stand before the reader's results the ranker scores 0.15 or more: a German, a Japanese and two
+  Portuguese pages titled so held ranks 2-5. They follow, by their score; none is removed.
 ### Added: the Crystallography Open Database, one page per structure (2026-11-05)
 * `reader: cod-cif` streams COD's 26.6 GB archive once and makes each of its ~520,000 CIFs a document:
   "<name or formula> (COD <id>)", a summary (formula, space group, cell, authors, journal, year, DOI)
