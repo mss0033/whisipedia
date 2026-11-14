@@ -1889,6 +1889,7 @@ class _Passes:
         failures: Mapping[str, BaseException],
         *,
         tried: int = 10,
+        listed: int = 0,
         good: int = 1,
         probe: Callable[[str], tuple[int, tuple[datetime, int] | None]] | None = None,
     ) -> dc.FetchReport:
@@ -1903,6 +1904,7 @@ class _Passes:
             self.ledger,
             at,
             tried=tried,
+            listed=listed,
             host_of=dict.fromkeys(failures, "h"),
             fail_at={key: (at, i) for i, key in enumerate(failures)},
             clean_at={"h": [(at, 1000)] * good},
@@ -1995,6 +1997,107 @@ def test_a_host_whose_every_document_answers_5xx_gives_up_none_however_long(tmp_
     assert {(e["tries"], e["first"]) for e in probed.seen().values()} == {(2, "2026-11-14T12:00:00+00:00")}
     assert capped.seen() == {}
     assert capped.run(6.5, many, tried=11).permanent_over == 11
+
+
+def test_the_itu_crowd_of_persistent_5xx_is_given_up_when_the_host_served_on_three_days(
+    tmp_path: Path,
+) -> None:
+    """2026-11-13: the 284 ITU documents are 284 of some 320 downloads tried on a later pass (cap 10),
+    so their counts started over on every run and the rule above never released them. Counted against
+    the 8,500 documents the run listed (3.3 %, within SERVER_ERROR_SHARE) they keep their counts, and
+    are given up after five days and ten runs when the host proved itself after their failures on
+    every run, on three separate days at least.
+
+    Fails on the code before: ``listed`` was not looked at, the crowd was reset on every run."""
+    itu = {f"k{i}": _http(500) for i in range(284)}
+    runs = _Passes(tmp_path / "itu.json")
+    for day in HALF_DAYS[:10]:
+        report = runs.run(day, itu, tried=320, listed=8500)
+        assert report.given_up == [], day
+        assert len(report.failed) == 284
+    assert {e["tries"] for e in runs.seen().values()} == {10}
+    assert runs.seen()["k0"]["proved"] == ["2026-11-11", "2026-11-12", "2026-11-13"]
+    given = runs.run(5, itu, tried=320, listed=8500)
+    assert len(given.given_up) == 284
+    assert given.failed == []
+    assert given.permanent_over == 0
+    assert dc.fetch_exit_code(given) == dc.EXIT_COMPLETE
+    assert runs.run(5.5, itu, tried=284, listed=8500).failed == []  # still given up, still a crowd
+
+    # The same crowd where the listing is not known (0), or is small, is the cap's: reset every run.
+    for name, listed in (("unknown.json", 0), ("small.json", 2000)):
+        small = _Passes(tmp_path / name)
+        for day in HALF_DAYS:
+            assert small.run(day, itu, tried=320, listed=listed).given_up == [], (name, day)
+        assert small.seen() == {}
+
+
+def test_a_crowd_of_5xx_that_is_fresh_or_most_of_the_source_or_unproven_gives_up_none(
+    tmp_path: Path,
+) -> None:
+    """The wider bound gives up nothing in an outage: failures younger than five days or ten runs;
+    most of the source failing (6,000 of 8,500: the host, not documents; counts start over); no proof
+    that the host serves (nothing good after the failures, nothing held to download again: counts kept,
+    nothing given up); held documents that fail too (a block: counts start over); proof on fewer than
+    three separate days.
+
+    Fails on the code before for the kept counts (it reset them all); the "nothing given up" lines are
+    guards of the wider bound."""
+    itu = {f"k{i}": _http(500) for i in range(284)}
+    fresh = _Passes(tmp_path / "fresh.json")
+    assert fresh.run(0, itu, tried=320, listed=8500).given_up == []
+    for day in [d / 6 for d in range(1, 15)]:  # 15 runs in under three days
+        assert fresh.run(day, itu, tried=320, listed=8500).given_up == [], day
+    assert {e["tries"] for e in fresh.seen().values()} == {15}
+
+    most = _Passes(tmp_path / "most.json")
+    outage = {f"k{i}": _http(500) for i in range(6000)}
+    for day in HALF_DAYS:
+        report = most.run(day, outage, tried=6100, listed=8500)
+        assert report.given_up == [], day
+        assert report.permanent_over == 6000
+    assert most.seen() == {}
+    over = _Passes(tmp_path / "over.json")  # just above the share (850 of 8,500)
+    for day in HALF_DAYS:
+        assert over.run(day, {f"k{i}": _http(500) for i in range(851)}, tried=900, listed=8500).given_up == []
+    assert over.seen() == {}
+
+    unproven = _Passes(tmp_path / "unproven.json")
+    for day in HALF_DAYS:
+        assert unproven.run(day, itu, tried=284, listed=8500, good=0).given_up == [], day
+    last = unproven.run(6.5, itu, tried=284, listed=8500, good=0)
+    assert last.given_up == []
+    assert last.permanent_over == 284
+    assert {e["tries"] for e in unproven.seen().values()} == {14}
+    assert "proved" not in unproven.seen()["k0"]
+
+    blocked = _Passes(tmp_path / "blocked.json")  # held documents downloaded again fail too
+    for day in HALF_DAYS:
+        report = blocked.run(day, itu, tried=284, listed=8500, good=0, probe=lambda _host: (2, None))
+        assert report.given_up == [], day
+    assert blocked.seen() == {}
+    # ... also on the day the documents were due, after ten proven runs: the block starts them over.
+    late = _Passes(tmp_path / "late.json")
+    for day in HALF_DAYS[:10]:
+        late.run(day, itu, tried=284, listed=8500)
+    assert late.run(5, itu, tried=284, listed=8500, good=0, probe=lambda _host: (2, None)).given_up == []
+    assert late.seen() == {}
+
+    two = _Passes(tmp_path / "two.json")  # the host shown to serve on two days only
+    for day in HALF_DAYS[:11]:
+        report = two.run(day, itu, tried=284, listed=8500, good=1 if day in (0, 5) else 0)
+        assert report.given_up == [], day
+    assert two.seen()["k0"]["proved"] == ["2026-11-09", "2026-11-14"]
+    assert two.run(5.5, itu, tried=284, listed=8500, good=0).permanent_over == 284
+    assert len(two.run(6, itu, tried=284, listed=8500).given_up) == 284  # a third day
+
+    # Documents that were single ones (under the cap, no days recorded) joined by a crowd on the day
+    # they are due: not given up that day.
+    joined = _Passes(tmp_path / "joined.json")
+    few = {f"k{i}": _http(500) for i in range(5)}
+    for day in HALF_DAYS[:10]:
+        joined.run(day, few, tried=320, listed=8500)
+    assert joined.run(5, itu, tried=320, listed=8500).given_up == []
 
 
 def test_single_documents_answering_5xx_for_five_days_and_ten_tries_are_given_up(tmp_path: Path) -> None:

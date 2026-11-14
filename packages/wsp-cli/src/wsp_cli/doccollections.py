@@ -534,6 +534,16 @@ PERMANENT_SHARE = 0.02
 SERVER_ERROR = "server error, persistent"
 SERVER_ERROR_TRIES = 10
 SERVER_ERROR_DAYS = 5
+# The cap above is counted against the downloads tried, and a later pass tries little but the failing
+# documents: ITU's 284 were 284 of some 320 tried (cap 10), their counts started over on every run and
+# none could ever be given up, though they were 3.3 % of the source's 8,500 documents. So a crowd of
+# server errors above that cap, and no more than this share of the documents the run listed, keeps its
+# counts, on these terms: on every such run the host must show that it serves good files after the
+# crowd's latest failure (a clean take, or held documents downloaded again: one that finds none
+# starts the host's counts over), and a document is given up only when that was shown on this many
+# separate days since its first failure. Above this share it is the host that fails: counts start over.
+SERVER_ERROR_SHARE = 0.10
+SERVER_ERROR_PROOF_DAYS = 3
 _TRANSIENT = re.compile(
     r"\bHTTP (?:408|425|429)\b|timed? ?out|Timeout|Connect(?:Error|Timeout)|RemoteProtocolError|"
     r"ReadError|WriteError|NetworkError|ProxyError|Temporary failure|Name or service not known|"
@@ -658,6 +668,7 @@ def settle_permanent(
     now: datetime,
     *,
     tried: int,
+    listed: int = 0,
     host_of: Mapping[str, str],
     fail_at: Mapping[str, Event],
     clean_at: Mapping[str, Sequence[Event]],
@@ -681,7 +692,11 @@ def settle_permanent(
     block: the host's counts start over. No probe possible (nothing held): unproven, the count kept.
     More such documents in one run than PERMANENT_MAX (or PERMANENT_SHARE of the ``tried``
     downloads) also start over; server errors are counted against that cap apart from the other
-    classes, so neither crowd hides the other's single documents. A document given up before stays
+    classes, so neither crowd hides the other's single documents. A crowd of server errors above
+    that cap and within SERVER_ERROR_SHARE of the ``listed`` documents (all the run saw, held ones
+    too) keeps its counts while the host proves itself on every run, and gives a document up only
+    with such proof on SERVER_ERROR_PROOF_DAYS separate days (``proved`` in its record); ``listed``
+    unknown (0): the cap alone. A document given up before stays
     given up while it fails (a monthly retry that fails again): its record is never dropped, only
     ``retried`` stamped."""
     failing = {key for key, _ in report.failed}
@@ -721,19 +736,25 @@ def settle_permanent(
     }
     cap = max(PERMANENT_MAX, int(tried * PERMANENT_SHARE))
     errors = {key for key, sig in seen_now.items() if permanent_class(sig) == SERVER_ERROR}
+    others = set(seen_now) - errors
+    # A crowd of server errors over the cap, within the share of the listed documents (see
+    # SERVER_ERROR_SHARE): counted on, every one of them asks for the host's proof on every run.
+    wide = cap < len(errors) <= int(listed * SERVER_ERROR_SHARE)
     reset: set[str] = set()
-    for crowd in (errors, set(seen_now) - errors):
-        if len(crowd) > cap:
-            reset |= crowd
+    if len(errors) > cap and not wide:
+        reset |= errors
+    if len(others) > cap:
+        reset |= others
     proven: set[str] = set()
     probed: dict[str, tuple[int, Event | None]] = {}  # a host is probed once, whichever crowd asks
     # Proof is looked for per crowd: a server error that failed after the host's last clean take must
     # not take the proof away from a refusal that failed before it (2026-11-13 review: it did, and
     # a document the code before gave up was kept failing).
-    for crowd in (set(seen_now) - errors, errors):
-        for host in sorted({host_of.get(key, "") for key in (due & crowd) - reset}):
+    for crowd in (others, errors):
+        asking = crowd if wide and crowd is errors else due & crowd
+        for host in sorted({host_of.get(key, "") for key in asking - reset}):
             keys = {key for key in seen_now if host_of.get(key, "") == host}
-            mine = (keys & due & crowd) - reset
+            mine = (keys & asking) - reset
             if not mine:
                 continue  # an earlier probe of this host found a block
             latest = max(fail_at.get(key, (now, 1 << 62)) for key in mine)
@@ -756,6 +777,13 @@ def settle_permanent(
                     reset |= keys
             if ok:
                 proven |= mine
+    if wide:
+        today = now.date().isoformat()
+        for key in (errors & proven) - reset:
+            days = {str(d) for d in entries[key].get("proved", ())} | {today}
+            entries[key]["proved"] = sorted(days)[-SERVER_ERROR_PROOF_DAYS:]
+        # Proof on too few separate days yet: due, and not given up (counted in ``permanent_over``).
+        proven -= {key for key in errors if len(entries[key].get("proved", ())) < SERVER_ERROR_PROOF_DAYS}
     still_given_up = {key for key, e in entries.items() if "given_up" in e}
     moved = ((due & proven) - reset) | still_given_up
     for key in moved:
@@ -1277,6 +1305,7 @@ class CollectionFetcher:
                 self.workdir / spec.id / f"failed-for-good{part}.json",
                 self.clock(),
                 tried=report.tried,
+                listed=len(docs),
                 host_of=report.permanent_hosts,
                 fail_at=fail_at,
                 clean_at=clean_at,

@@ -69,7 +69,11 @@ timeout, a 429 (408, 425), a refused connection, a short read or a share that di
 counts. A 5xx counts only as a "server error, persistent": the document's every download answered a
 real HTTP 500-599 and nothing else (no `Retry-After`) on ten runs in a row, the first at least five days before, under
 the same host proof as the rest and the same cap (below), counted apart from the other classes; a
-host whose every document answers 5xx gives up none, however long. Each run lists them (`failed for good ...: KEY: WHY`, and one line
+host whose every document answers 5xx gives up none, however long. More such documents than the cap
+(ITU: 284, of some 320 downloads tried on a later pass) keep their counts only while they are at most
+10 % of the documents the run listed and the host shows on every run that it serves good files after
+their latest failure; they are given up when that was shown on three separate days (`proved` in the
+ledger). Above 10 %, or once held documents downloaded again fail too, the counts start over. Each run lists them (`failed for good ...: KEY: WHY`, and one line
 `failed for good: N document(s), listed in <ledger>`; the ledger is
 `<workdir>/collections/<source>/failed-for-good[-<partition>].json`, with each document's count and
 first failure and when it was given up); the lane raises the info alert
