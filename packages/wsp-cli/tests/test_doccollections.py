@@ -20,7 +20,7 @@ import pytest
 import yaml
 
 from wsp_adapters.doccollection import DocCollectionAdapter
-from wsp_adapters.doccollection.adapter import CATALOG, Screen, screen_text
+from wsp_adapters.doccollection.adapter import CATALOG, Screen, WrongBodyError, screen_text
 from wsp_adapters.doccollection.catalog import read_catalog_file
 from wsp_adapters.doccollection.model import Candidate
 from wsp_adapters.doccollection.policy import Decision, Marking, Rules, Verdict, load_rules
@@ -2343,17 +2343,108 @@ def test_a_zipped_pdf_download_keeps_the_pdf_it_holds(tmp_path: Path) -> None:
     with zipfile.ZipFile(path, "w") as z:
         z.writestr("a.pdf", b"%PDF-1")
         z.writestr("b.pdf", b"%PDF-2")
-    with pytest.raises(FetchError, match="2 PDF files"):
+    with pytest.raises(WrongBodyError, match="2 PDF files"):
         unzip_pdf(path)
     with zipfile.ZipFile(path, "w") as z:  # BO.1724's zip: the Recommendation and the ETSI standard it cites
         z.writestr("En301790.V1.3.1.pdf", b"%PDF-etsi")
         z.writestr("BO1724-1E.pdf", b"%PDF-rec")
-    unzip_pdf(path, match="BO1724")
+    assert unzip_pdf(path, match="BO1724") == ("BO1724-1E.pdf", 2)
     assert path.read_bytes() == b"%PDF-rec"
     path.write_bytes(b"<html>error</html>")
     with pytest.raises(FetchError, match="not a zip"):
         unzip_pdf(path)
     assert not list(tmp_path.glob("*.unzip"))
+
+
+def _zip_of(path: Path, members: Mapping[str, bytes]) -> Path:
+    with zipfile.ZipFile(path, "w") as z:
+        for name, data in members.items():
+            z.writestr(name, data)
+    return path
+
+
+def test_a_zip_of_two_pdfs_gives_the_one_named_after_the_document_without_the_resolvers_hint(
+    tmp_path: Path,
+) -> None:
+    """The two ITU-R zips that failed on 29 passes (2026-11-13), with their real member names.
+
+    BO.1724 was resolved before the resolver gave ``unzip_match`` and sat in the 45-day resolve
+    cache without it: the key says as much. BT.1700's files are named by the number alone. Size is
+    never the rule: the cited ETSI standard is the larger file."""
+    from wsp_cli.doccollections import unzip_pdf
+
+    bo = _zip_of(
+        tmp_path / "itu__R-REC-BO.1724-1-200701-I-846d5a56.pdf",
+        {"En301790.V1.3.1.pdf": b"%PDF-etsi, the larger one " * 40, "BO1724-1E.pdf": b"%PDF-rec"},
+    )
+    assert unzip_pdf(bo, key="itu:R-REC-BO.1724-1-200701-I") == ("BO1724-1E.pdf", 2)
+    assert bo.read_bytes() == b"%PDF-rec"
+    bt = _zip_of(
+        tmp_path / "itu__R-REC-BT.1700-0-200502-I-dded1abb.pdf",
+        {"S170m-2004.pdf": b"%PDF-smpte", "1700-e.pdf": b"%PDF-rec"},
+    )
+    assert unzip_pdf(bt, match="BT1700", key="itu:R-REC-BT.1700-0-200502-I") == ("1700-e.pdf", 2)
+    assert bt.read_bytes() == b"%PDF-rec"
+    one = _zip_of(tmp_path / "one.pdf", {"anything.pdf": b"%PDF-1", "notes.txt": b"x"})
+    assert unzip_pdf(one, key="itu:R-REC-BT.1700-0-200502-I") is None  # no choice was made
+    assert one.read_bytes() == b"%PDF-1"
+
+
+@pytest.mark.parametrize(
+    ("key", "members", "want"),
+    [
+        # 2026-11-13 review: a substring without bounds took the cited standard in each of these
+        ("itu:R-REC-S.1011-1-199710-I", ["1011-e.pdf", "ts_101154v010901p.pdf"], "1011-e.pdf"),
+        ("itu:R-REC-M.2004-0-201202-I", ["2004-e.pdf", "S170m-2004.pdf"], "2004-e.pdf"),
+        ("itu:T-REC-G.711-198811-I", ["711-e.pdf", "G7110.pdf"], "711-e.pdf"),
+        ("itu:R-REC-BT.601-7-201103-I", ["Rec-E.pdf", "IEC-601.pdf"], None),
+        ("itu:R-REC-BT.2004-0-201202-I", ["rec.pdf", "S170m-2004.pdf"], None),
+        ("itu:T-REC-X.1-198811-I", ["main.pdf", "annex-1.pdf"], None),  # a short number names nothing
+        ("itu:T-REC-X.1-198811-I", ["1-e.pdf", "other.pdf"], None),
+        ("itu:T-REC-X.25-199610-I", ["T-REC-X.25-E.pdf", "other.pdf"], "T-REC-X.25-E.pdf"),
+        ("itu:R-REC-BO.1724-1-200701-I", ["dir/bo_1724.PDF", "dir/En301790.pdf"], "dir/bo_1724.PDF"),
+        ("no-series-in-this-key", ["a.pdf", "b.pdf"], None),
+    ],
+)
+def test_the_pdf_named_after_the_document_is_never_a_cited_standard(
+    key: str, members: list[str], want: str | None
+) -> None:
+    assert dc._named_after(members, "", key) == want  # pyright: ignore[reportPrivateUsage]
+    assert dc._named_after(members[::-1], "", key) == want  # pyright: ignore[reportPrivateUsage]
+
+
+@pytest.mark.parametrize(
+    "members",
+    [
+        ["a.pdf", "b.pdf"],  # nothing names the document
+        ["1700-e.pdf", "1700-f.pdf"],  # the number names two
+        ["BT1700-e.pdf", "BT1700-annex.pdf"],  # the series and number name two
+        ["17001-e.pdf", "S21700.pdf"],  # 1700 only inside longer numbers
+        ["sub/1700/a.pdf", "sub/1700/b.pdf"],  # in a folder's name, not the file's
+        ["1700\\a.pdf", "x\\b.pdf"],  # a folder named by a Windows zip
+        ["Rec-E.pdf", "IEC-1700.pdf"],  # the number only further in: the cited standard's
+        ["rec.pdf", "S170m-1700.pdf"],
+    ],
+)
+def test_a_zip_of_several_pdfs_none_alone_named_after_the_document_fails_for_good(
+    tmp_path: Path, members: list[str]
+) -> None:
+    """No safe rule: nothing is taken (never the largest), the zip stays as it is, and the failure
+    is of the ledger's "not the file" class, so the lane stops fetching it on every pass."""
+    from wsp_cli.doccollections import unzip_pdf
+    from wsp_core.errors import FetchError
+
+    path = _zip_of(tmp_path / "x.pdf", {name: b"%PDF-" + name.encode() for name in members})
+    before = path.read_bytes()
+    with pytest.raises(WrongBodyError, match="2 PDF files in the zip, not one") as caught:
+        unzip_pdf(path, match="BT1700", key="itu:R-REC-BT.1700-0-200502-I")
+    assert path.read_bytes() == before
+    assert not list(tmp_path.glob("*.unzip"))
+    assert dc.permanent_class(dc.permanent_kind(caught.value) or "") == "not the file"
+    empty = _zip_of(tmp_path / "none.pdf", {"readme.txt": b"x"})
+    with pytest.raises(FetchError, match="0 PDF files") as none:  # as before: a failed download
+        unzip_pdf(empty)
+    assert dc.permanent_kind(none.value) is None
 
 
 # --- 2026-11-05 deep dive: a fetch of a cycle screens the copies earlier runs left ------------------------

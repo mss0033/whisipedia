@@ -1526,7 +1526,9 @@ class CollectionFetcher:
         self._served[cand.key] = served_host(result, remote.url)
         path = Path(result.path)
         if cand.extra.get("unzip") == "pdf":
-            unzip_pdf(path, match=cand.extra.get("unzip_match") or "")
+            chosen = unzip_pdf(path, match=cand.extra.get("unzip_match") or "", key=cand.key)
+            if chosen is not None:
+                self._say(f"  {cand.key}: the zip holds {chosen[1]} PDF files; took {chosen[0]}")
         return path
 
     def _take_manual(self, cand: Candidate, done: Path, folder: Path) -> Path:
@@ -2499,22 +2501,71 @@ def register(sub: Any, add: Any) -> None:
 UNZIP_MAX_BYTES = 2 * 1024**3  # the one PDF of a zipped-PDF download; larger is not a document
 
 
-def unzip_pdf(path: Path, *, match: str = "") -> None:
+_KEY_SERIES_NUMBER = re.compile(r"([A-Za-z]+)\.([0-9]+)")  # "BO.1724" in itu:R-REC-BO.1724-1-200701-I
+_HINT = re.compile(r"([A-Za-z]+)([0-9]+)")  # the resolver's "BO1724"
+
+
+def _named_after(names: Sequence[str], match: str, key: str) -> str | None:
+    """Which of a zip's PDF ``names`` is the document ``key`` (several PDFs: the Recommendation and a
+    standard it cites), or None when no rule names exactly one. In order, on the file's own name
+    (no folder), lower case:
+
+    1. the series and number of ``match`` (the resolver's ``BO1724``), then of the key (``BO.1724``;
+       a candidate resolved before 2026-11-03 sits in the resolve cache for 45 days without
+       ``match``, which is why ``BO1724-1E.pdf`` was not taken for ten days after the rule existed):
+       the series as a word of its own, then the number, not inside a longer number. ``S.1011`` is
+       not in ``ts_101154v010901p.pdf``, nor ``M.2004`` in ``S170m-2004.pdf``, nor ``G.711`` in
+       ``G7110.pdf`` (2026-11-13 review: a plain substring took each of them);
+    2. a name that begins with the number (three digits or more), not inside a longer one: BT.1700's
+       zip holds ``1700-e.pdf`` beside ``S170m-2004.pdf`` (SMPTE 170M). Only at the start: a cited
+       standard often carries the same number or a year further in (``IEC-601.pdf``, ``...-2004.pdf``).
+
+    Never by size: in BO.1724's zip the cited ETSI standard is the larger file."""
+
+    def base(name: str) -> str:
+        return re.split(r"[/\\]", name)[-1].lower()
+
+    m = _KEY_SERIES_NUMBER.search(key.partition(":")[2])
+    hints = [h.groups() for h in (_HINT.fullmatch(match), m) if h is not None]
+    for series, number in hints:
+        named = re.compile(rf"(?<![0-9a-z]){re.escape(series.lower())}[^0-9a-z]*{number}(?![0-9])")
+        if len(hits := [n for n in names if named.search(base(n))]) == 1:
+            return hits[0]
+    for number in dict.fromkeys(number for _, number in hints):
+        if len(number) < 3:
+            continue
+        starts = re.compile(rf"{number}(?![0-9])")
+        if len(hits := [n for n in names if starts.match(base(n))]) == 1:
+            return hits[0]
+    return None
+
+
+def unzip_pdf(path: Path, *, match: str = "", key: str = "") -> tuple[str, int] | None:
     """Put the PDF a downloaded zip holds in the zip's place (ITU-R publishes ~1,290 Recommendations in
-    English only as a zipped PDF, ``!!ZPF-E.zip``; 2026-11-02). With several PDFs, the one whose name
-    holds ``match`` (``BO1724`` in ``BO1724-1E.pdf``, beside the ETSI standard it cites), when exactly
-    one does. A file that is already a PDF (an earlier run unpacked it) is left as it is; a zip with no
-    PDF, or with several and no single match, is not the document."""
+    English only as a zipped PDF, ``!!ZPF-E.zip``; 2026-11-02). With several PDFs, the one named
+    after the document (:func:`_named_after`: ``BO1724-1E.pdf`` beside the ETSI standard it cites);
+    returns ``(the member taken, how many PDFs)`` then, for the run's log, else None. A file that is
+    already a PDF (an earlier run unpacked it) is left as it is. A zip with no PDF is a failed
+    download; one with several of which none alone is named after the document is not the file
+    (:class:`WrongBodyError`): another download brings the same zip, so the ledger gives it up
+    instead of fetching it on every pass (two ITU-R zips, 29 passes each, 2026-11-13)."""
     with path.open("rb") as fh:
         if fh.read(5) == b"%PDF-":
-            return
+            return None
     tmp = path.with_name(path.name + ".unzip")
+    chosen: tuple[str, int] | None = None
     try:
         with zipfile.ZipFile(path) as zf:
             pdfs = [i for i in zf.infolist() if not i.is_dir() and i.filename.lower().endswith(".pdf")]
-            key = re.sub(r"[^0-9a-z]", "", match.lower())
-            if len(pdfs) > 1 and key:
-                pdfs = [i for i in pdfs if key in re.sub(r"[^0-9a-z]", "", i.filename.lower())] or pdfs
+            if len(pdfs) > 1:
+                name = _named_after([i.filename for i in pdfs], match, key)
+                if name is None:
+                    raise WrongBodyError(
+                        f"{path.name}: {len(pdfs)} PDF files in the zip, not one, and none alone is "
+                        f"named after the document ({', '.join(sorted(i.filename for i in pdfs))[:200]})"
+                    )
+                chosen = (name, len(pdfs))
+                pdfs = [i for i in pdfs if i.filename == name][:1]
             if len(pdfs) != 1:
                 raise FetchError(f"{path.name}: {len(pdfs)} PDF files in the zip, not one")
             if pdfs[0].file_size > UNZIP_MAX_BYTES:
@@ -2528,6 +2579,7 @@ def unzip_pdf(path: Path, *, match: str = "") -> None:
         tmp.unlink(missing_ok=True)
         raise
     os.replace(tmp, path)
+    return chosen
 
 
 def windows_path(path: Path, mounts: Path = Path("/proc/mounts")) -> str | None:
