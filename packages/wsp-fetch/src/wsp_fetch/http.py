@@ -587,7 +587,11 @@ class HttpFetcher:
                 if isinstance(exc, _DowngradeRefusedError):
                     raise RedirectRefusedError(f"{label}: {exc}") from exc
                 if attempt >= attempts or exc.fatal_for_mirror:
-                    raise FetchError(f"{label} failed after {attempt} attempt(s): {exc}") from exc
+                    # A server that names a time to come back is throttling or in maintenance, not
+                    # broken: said in the text, which is all a caller of a multi-mirror download gets
+                    # (the collections' "server error, persistent" rule leaves such a failure out).
+                    asked = "" if exc.retry_after is None else " (Retry-After sent)"
+                    raise FetchError(f"{label} failed after {attempt} attempt(s): {exc}{asked}") from exc
                 delay = backoff_delay(attempt, self.config.backoff_base, self.config.backoff_max)
                 if exc.retry_after is not None:
                     if exc.retry_after > self.config.max_retry_after:

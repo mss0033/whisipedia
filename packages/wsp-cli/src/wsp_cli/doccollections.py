@@ -511,8 +511,9 @@ def settle_stale_checksums(report: FetchReport, ledger: Path, now: datetime) -> 
 # that failed the same way on enough runs in a row, over PERMANENT_MIN_AGE, no longer keeps the run
 # from being complete; it is listed as failed for good, in the run's report and its ledger. Any later
 # fetch of the source tries it again (a lane's item is done, though: only a new lane or a scheduled
-# refresh fetches it again). A timeout, a 5xx, a 429, a refused connection, a short read, a share that
-# did not answer is never permanent: it keeps the run partial, retried as before.
+# refresh fetches it again). A timeout, a 429, a refused connection, a short read, a share that did
+# not answer is never permanent: it keeps the run partial, retried as before. So does a 5xx, until it
+# has lasted SERVER_ERROR_DAYS (below).
 PERMANENT_TRIES = 2  # a refusal (HTTP 401/403/451)
 # A wrong body or an unverifiable file: a challenge, maintenance or rate-limit page served with 200
 # looks like a wrong body too, so it takes more tries (review of 2026-11-09).
@@ -524,12 +525,22 @@ PERMANENT_MIN_AGE = timedelta(hours=2)
 # refusal (a WAF, a login wall in front of every file), not single documents: they stay failures.
 PERMANENT_MAX = 10
 PERMANENT_SHARE = 0.02
+# A server error, persistent: the document's every download answered a real HTTP 500-599, and nothing
+# else, on this many runs in a row, the first at least this many days before, while its host served
+# good files after each (the same proof and the same cap as the classes above, counted on its own).
+# Some 284 ITU recommendations answered HTTP 500 on every pass from 2026-11-09 on while 8,220 from the
+# same host were held, and their lane never finished (2026-11-13). A 429, 408 or 425, a timeout, a
+# connection or name error, a 5xx beside any of those, a Retry-After too long to wait is never counted.
+SERVER_ERROR = "server error, persistent"
+SERVER_ERROR_TRIES = 10
+SERVER_ERROR_DAYS = 5
 _TRANSIENT = re.compile(
-    r"\bHTTP (?:408|425|429|5\d\d)\b|timed? ?out|Timeout|Connect(?:Error|Timeout)|RemoteProtocolError|"
+    r"\bHTTP (?:408|425|429)\b|timed? ?out|Timeout|Connect(?:Error|Timeout)|RemoteProtocolError|"
     r"ReadError|WriteError|NetworkError|ProxyError|Temporary failure|Name or service not known|"
     r"\[Errno|reset by peer|\bEOF\b|disconnected|did not answer|took no connection|Too Many Requests",
     re.IGNORECASE,
 )
+_HTTP_STATUS = re.compile(r"\bHTTP (\d{3})\b", re.IGNORECASE)
 _REFUSED = re.compile(r"\bHTTP (401|403|451)\b")
 # An unverifiable file is permanent only when the second download got other bytes (a file generated
 # on each request) or the policy refuses it; a short read, a Range ignored, a redirect are transient.
@@ -550,6 +561,9 @@ def permanent_kind(exc: BaseException) -> str | None:
     text = str(exc)
     if _TRANSIENT.search(text) is not None:
         return None
+    codes = cast(list[str], _HTTP_STATUS.findall(text))
+    if any(code.startswith("5") for code in codes):
+        return _server_error(exc, text, codes)
     if isinstance(exc, UnverifiableError):
         if _UNVERIFIABLE_TRANSIENT.search(text) or not _UNVERIFIABLE_FOR_GOOD.search(text):
             return None
@@ -559,17 +573,45 @@ def permanent_kind(exc: BaseException) -> str | None:
     return None
 
 
+def _server_error(exc: BaseException, text: str, codes: Sequence[str]) -> str | None:
+    """The kind of a download failure whose message names an HTTP 5xx (and no other transient fault:
+    the caller looked), when every status in it is 500-599: a mirror that answered 403 or 429 beside
+    one that answered 500 is not counted. wsp_fetch joins its sources' errors into the message
+    (MirrorsExhaustedError), so the message is the record, as for a refusal; where an error underneath
+    still carries the status it was raised with (``__cause__``), that must be 500-599 too. A failed
+    second download (UnverifiableError) is not one: the first download answered."""
+    if not isinstance(exc, FetchError) or isinstance(exc, UnverifiableError):
+        return None
+    if any(not code.startswith("5") for code in codes) or "Retry-After" in text:
+        return None
+    cause = exc.__cause__
+    while cause is not None:
+        status = getattr(cause, "status", None)
+        if isinstance(status, int) and not 500 <= status <= 599:
+            return None
+        cause = cause.__cause__
+    return f"{SERVER_ERROR}: HTTP {codes[-1]}"
+
+
 def permanent_class(kind: str) -> str:
     """The failure class a ledger counts a permanent failure by: ``refused`` (HTTP 401, 403 and 451
-    alike), ``not the file`` (any wrong body: a login page, a challenge page, an error message) or
-    ``unverifiable``. The exact kind is kept in the record to show; a count starts over only when the
+    alike), ``not the file`` (any wrong body: a login page, a challenge page, an error message),
+    ``unverifiable`` or ``server error, persistent`` (HTTP 500-599 alike, SERVER_ERROR_TRIES). The
+    exact kind is kept in the record to show; a count starts over only when the
     class changes. archive.org answers ``usmc:mcrp0002unse`` 401 on most tries and 403 on some: counted
     by the exact code it never reached given up, and the MCPEL lane stopped each time (2026-11-10)."""
     return kind.split(":", 1)[0].strip()
 
 
 def _permanent_tries(kind: str) -> int:
+    if permanent_class(kind) == SERVER_ERROR:
+        return SERVER_ERROR_TRIES
     return PERMANENT_TRIES if kind.startswith("refused:") else PERMANENT_TRIES_CONTENT
+
+
+def _permanent_age(kind: str) -> timedelta:
+    """How long before now a document's first failure of this kind must be for it to be given up."""
+    return timedelta(days=SERVER_ERROR_DAYS) if permanent_class(kind) == SERVER_ERROR else PERMANENT_MIN_AGE
 
 
 # Held documents downloaded again, at most, to show that a host still serves good files when no clean
@@ -626,7 +668,8 @@ def settle_permanent(
     ``ledger`` and move one from ``report.failed`` to ``report.given_up`` only when
 
     * it failed so on enough runs in a row (:func:`_permanent_tries`), the first at least
-      PERMANENT_MIN_AGE ago;
+      PERMANENT_MIN_AGE ago (a server error: SERVER_ERROR_TRIES runs, SERVER_ERROR_DAYS days; a run
+      counts once, however many requests it made);
     * its host (``host_of``: the host that sent its bytes, else the listed one) made a clean take
       strictly after the document's latest failure (``fail_at``) and within PROOF_WITHIN: a document
       fetched, or held bytes downloaded again and found the same (``clean_at``, events by host). A
@@ -637,17 +680,32 @@ def settle_permanent(
     (``(tried, the event of the first found the same)``). A probe that tried and got nothing good is a
     block: the host's counts start over. No probe possible (nothing held): unproven, the count kept.
     More such documents in one run than PERMANENT_MAX (or PERMANENT_SHARE of the ``tried``
-    downloads) also start over. A document given up before stays given up while it fails (a monthly
-    retry that fails again): its record is never dropped, only ``retried`` stamped."""
+    downloads) also start over; server errors are counted against that cap apart from the other
+    classes, so neither crowd hides the other's single documents. A document given up before stays
+    given up while it fails (a monthly retry that fails again): its record is never dropped, only
+    ``retried`` stamped."""
     failing = {key for key, _ in report.failed}
-    seen_now = {key: kind for key, kind in report.permanent.items() if key in failing}
     seen = _read_json(ledger)
+
+    def counted(key: str, kind: str) -> bool:
+        # A document given up for another reason that answers a 5xx now is as it always was: a
+        # failure this run, its record kept as it is (below).
+        old = seen.get(key, {})
+        return not (
+            permanent_class(kind) == SERVER_ERROR
+            and "given_up" in old
+            and permanent_class(str(old.get("sig", ""))) != SERVER_ERROR
+        )
+
+    seen_now = {key: kind for key, kind in report.permanent.items() if key in failing and counted(key, kind)}
     stamp = now.isoformat(timespec="seconds")
     entries: dict[str, dict[str, Any]] = {}
     for key, sig in sorted(seen_now.items()):
         old = seen.get(key)
         if old is not None and permanent_class(str(old.get("sig", ""))) == permanent_class(sig):
             entry = dict(old)
+            entry.setdefault("first", stamp)  # a record without its start: its days count from now
+            entry.setdefault("tries", 0)
         else:
             entry = {"first": stamp, "tries": 0}
             if old is not None and "given_up" in old:
@@ -659,15 +717,25 @@ def settle_permanent(
         key
         for key, e in entries.items()
         if e["tries"] >= _permanent_tries(str(e["sig"]))
-        and now - datetime.fromisoformat(e["first"]) >= PERMANENT_MIN_AGE
+        and now - datetime.fromisoformat(e["first"]) >= _permanent_age(str(e["sig"]))
     }
-    over = len(seen_now) > max(PERMANENT_MAX, int(tried * PERMANENT_SHARE))
-    reset: set[str] = set(seen_now) if over else set()
+    cap = max(PERMANENT_MAX, int(tried * PERMANENT_SHARE))
+    errors = {key for key, sig in seen_now.items() if permanent_class(sig) == SERVER_ERROR}
+    reset: set[str] = set()
+    for crowd in (errors, set(seen_now) - errors):
+        if len(crowd) > cap:
+            reset |= crowd
     proven: set[str] = set()
-    if not over:
-        for host in sorted({host_of.get(key, "") for key in due}):
+    probed: dict[str, tuple[int, Event | None]] = {}  # a host is probed once, whichever crowd asks
+    # Proof is looked for per crowd: a server error that failed after the host's last clean take must
+    # not take the proof away from a refusal that failed before it (2026-11-13 review: it did, and
+    # a document the code before gave up was kept failing).
+    for crowd in (set(seen_now) - errors, errors):
+        for host in sorted({host_of.get(key, "") for key in (due & crowd) - reset}):
             keys = {key for key in seen_now if host_of.get(key, "") == host}
-            mine = keys & due
+            mine = (keys & due & crowd) - reset
+            if not mine:
+                continue  # an earlier probe of this host found a block
             latest = max(fail_at.get(key, (now, 1 << 62)) for key in mine)
             takes = list(clean_at.get(host, ()))
 
@@ -676,11 +744,16 @@ def settle_permanent(
 
             ok = any(after(take) for take in takes)
             if not ok and probe is not None:
-                attempted, when = probe(host)
+                fresh = host not in probed
+                if fresh:
+                    probed[host] = probe(host)
+                attempted, when = probed[host]
                 if when is not None and after(when):
                     ok = True
-                elif attempted:
-                    reset |= keys  # held documents of the host fail too: a block
+                elif attempted and (fresh or when is None):
+                    # Held documents of the host fail too: a block. (A probe made for the other
+                    # crowd that found one good, before this crowd's latest failure: unproven only.)
+                    reset |= keys
             if ok:
                 proven |= mine
     still_given_up = {key for key, e in entries.items() if "given_up" in e}

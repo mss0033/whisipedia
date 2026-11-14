@@ -65,8 +65,11 @@ Failed for good: a document whose download failed the same permanent way on runs
 HTTP 401, 403 or 451 for that file alone; three for a web page or error body in place of the file, or
 no checksum published and a second download of other bytes), the first at least 2 hours before, no
 longer makes the fetch partial: 0, 7 and 8 also cover it, and the lane marks the item done. A
-timeout, a 5xx, a 429, a refused connection, a short read or a share that did not answer never
-counts. Each run lists them (`failed for good ...: KEY: WHY`, and one line
+timeout, a 429 (408, 425), a refused connection, a short read or a share that did not answer never
+counts. A 5xx counts only as a "server error, persistent": the document's every download answered a
+real HTTP 500-599 and nothing else (no `Retry-After`) on ten runs in a row, the first at least five days before, under
+the same host proof as the rest and the same cap (below), counted apart from the other classes; a
+host whose every document answers 5xx gives up none, however long. Each run lists them (`failed for good ...: KEY: WHY`, and one line
 `failed for good: N document(s), listed in <ledger>`; the ledger is
 `<workdir>/collections/<source>/failed-for-good[-<partition>].json`, with each document's count and
 first failure and when it was given up); the lane raises the info alert

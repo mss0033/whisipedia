@@ -779,3 +779,22 @@ def test_a_refused_robots_check_never_prints_the_key() -> None:
         f.get_bytes(f"https://api.example/v1?pageSize=5&api_key={KEY}")
     assert KEY not in str(caught.value)
     assert "pageSize=5&api_key=***" in str(caught.value)
+
+
+def test_a_failure_whose_server_sent_retry_after_says_so() -> None:
+    """A 503 with Retry-After is a server asking for patience, not a broken document: the collections'
+    "server error, persistent" rule reads the text (a multi-mirror error carries nothing else)."""
+    after: list[str | None] = ["0"]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, headers={"Retry-After": after[0]} if after[0] else {})
+
+    cfg = replace(CFG, max_attempts=2, backoff_base=0.001, backoff_max=0.002)
+    with HttpFetcher(cfg, transport=httpx.MockTransport(handler)) as f:
+        with pytest.raises(FetchError) as caught:
+            f.get_bytes("https://api.example/v1")
+        assert str(caught.value).endswith("failed after 2 attempt(s): HTTP 503 (Retry-After sent)")
+        after[0] = None
+        with pytest.raises(FetchError) as plain:
+            f.get_bytes("https://api.example/v1")
+        assert str(plain.value).endswith("failed after 2 attempt(s): HTTP 503")

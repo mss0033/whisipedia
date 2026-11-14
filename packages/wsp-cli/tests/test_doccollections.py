@@ -9,8 +9,9 @@ import io
 import json
 import subprocess
 import zipfile
-from collections.abc import Generator
+from collections.abc import Callable, Generator, Mapping
 from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 from unittest.mock import patch
@@ -24,6 +25,7 @@ from wsp_adapters.doccollection.catalog import read_catalog_file
 from wsp_adapters.doccollection.model import Candidate
 from wsp_adapters.doccollection.policy import Decision, Marking, Rules, Verdict, load_rules
 from wsp_adapters.doccollection.testing import PUBLIC_A, RESTRICTED_C, make_pdf, s3_listing
+from wsp_cli import doccollections as dc
 from wsp_cli.doccollections import (
     CollectionFetcher,
     FetchReport,
@@ -1537,9 +1539,30 @@ def test_failures_another_download_answers_the_same_way_are_permanent_the_rest_t
     assert (
         permanent_kind(WrongBodyError("expected a PDF, got html")) == "not the file: expected a PDF, got html"
     )
+    # A real HTTP 500-599 and nothing else is a server error: counted, over many more tries and days.
+    assert permanent_kind(exhausted("6 attempt(s): HTTP 500")) == "server error, persistent: HTTP 500"
+    assert permanent_kind(exhausted("6 attempt(s): HTTP 503")) == "server error, persistent: HTTP 503"
+    assert {
+        permanent_class(permanent_kind(exhausted(f"6 attempt(s): HTTP {c}")) or "") for c in (500, 599)
+    } == {"server error, persistent"}
+    direct = FetchError(f"GET {url} failed after 6 attempt(s): HTTP 502")
+    direct.__cause__ = FetchError("HTTP 502")
+    direct.__cause__.status = 502  # type: ignore[attr-defined]  # as wsp_fetch's retry loop raises it
+    assert permanent_kind(direct) == "server error, persistent: HTTP 502"
+    throttled = FetchError(f"GET {url} failed after 6 attempt(s): HTTP 502")
+    throttled.__cause__ = FetchError("HTTP 429")
+    throttled.__cause__.status = 429  # type: ignore[attr-defined]  # the status it carries decides
     for transient in (
-        exhausted("6 attempt(s): HTTP 500"),
-        exhausted("6 attempt(s): HTTP 503"),
+        throttled,
+        exhausted("6 attempt(s): HTTP 408"),
+        exhausted("6 attempt(s): HTTP 425"),
+        exhausted("6 attempt(s): HTTP 600"),
+        exhausted("6 attempt(s): HTTP 500; https://mirror/x: failed after 6 attempt(s): ConnectError"),
+        exhausted("6 attempt(s): HTTP 500; https://mirror/x: failed after 1 attempt(s): HTTP 403"),
+        exhausted("6 attempt(s): HTTP 503; https://mirror/x: failed after 2 attempt(s): HTTP 429"),
+        FetchError(f"GET {url}: Retry-After 86400s too long"),
+        FetchError(f"GET {url}: HTTP 503, Retry-After 86400s too long"),
+        OSError("HTTP 500"),  # not a download's answer
         exhausted("6 attempt(s): HTTP 429"),
         exhausted("6 attempt(s): ConnectTimeout: timed out"),
         exhausted("6 attempt(s): ReadTimeout: The read operation timed out"),
@@ -1564,7 +1587,6 @@ def test_a_failure_seen_the_same_way_on_runs_in_a_row_no_longer_makes_the_run_pa
     (three 403s) sealed cycle after cycle and their lanes never finished. A refusal on two runs in a
     row, a wrong body on three, the first at least 2 hours before, from a host that serves good files,
     no longer keeps the run partial; anything else does."""
-    from collections.abc import Mapping
     from datetime import UTC, datetime, timedelta
 
     from wsp_cli import doccollections as dc
@@ -1658,6 +1680,8 @@ class _Timeline:
         self.docs = docs
         self.blocked = False
         self.block_after: int | None = None
+        self.status: dict[str, int] = {}  # file name -> the HTTP status its every download answers
+        self.outage: int | None = None  # every request (probes too) answers this HTTP status
         self.t0 = datetime(2026, 11, 9, 6, tzinfo=UTC)
 
     def spec(self) -> SourceSpec:
@@ -1672,6 +1696,8 @@ class _Timeline:
     def fetch(self, hour: float) -> Any:
         from datetime import timedelta
 
+        from wsp_fetch.errors import MirrorsExhaustedError
+
         timeline = self
         served = [0]
         body = {f"{BUCKET}/{PREFIX}{n}": b for n, b in self.docs}
@@ -1681,8 +1707,16 @@ class _Timeline:
                 timeline.block_after is not None and served[0] >= timeline.block_after
             )
 
+        def answer(url: str) -> None:
+            code = timeline.outage or timeline.status.get(url.rsplit("/", 1)[-1])
+            if code is not None:
+                raise MirrorsExhaustedError(
+                    f"no usable source for {url}: {url}: probe {url} failed after 6 attempt(s): HTTP {code}"
+                )
+
         class Site(FakeFetcher):
             def download(self, remote: RemoteFile, dest: Path) -> FetchResult:
+                answer(remote.url)
                 good = body.get(remote.url)
                 if page() or good is None:
                     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -1692,6 +1726,7 @@ class _Timeline:
                 return super().download(remote, dest)
 
             def get_bytes(self, url: str, *, max_bytes: int = 64 * 1024 * 1024) -> bytes:
+                answer(url)
                 return PAGE if page() else super().get_bytes(url, max_bytes=max_bytes)
 
         fetcher = CollectionFetcher(
@@ -1827,6 +1862,332 @@ def test_given_up_documents_are_due_for_another_try_once_a_month(tmp_path: Path)
         ("nist-csrc", ""),
         ("usmc-mcpel", ""),
     ]
+
+
+def _http(code: int | str) -> Exception:
+    """A download's failure as wsp_fetch words it (itu-recommendations, 2026-11-13)."""
+    from wsp_fetch.errors import MirrorsExhaustedError
+
+    url = "https://www.itu.int/rec/dologin_pub.asp?lang=e&id=T-REC-G.718-200806-I!!PDF-E&type=items"
+    why = f"HTTP {code}" if isinstance(code, int) else code
+    return MirrorsExhaustedError(
+        f"no usable source for {url}: {url}: probe {url} failed after 6 attempt(s): {why}"
+    )
+
+
+class _Passes:
+    """Fetch runs of one source settled one after another (``settle_permanent``), each at a day since
+    2026-11-09: what failed as the download raised it (classified by ``permanent_kind``, as a run
+    does), all from host ``h``, which made ``good`` clean takes after every failure of the run."""
+
+    def __init__(self, ledger: Path) -> None:
+        self.ledger = ledger
+
+    def run(
+        self,
+        day: float,
+        failures: Mapping[str, BaseException],
+        *,
+        tried: int = 10,
+        good: int = 1,
+        probe: Callable[[str], tuple[int, tuple[datetime, int] | None]] | None = None,
+    ) -> dc.FetchReport:
+        at = datetime(2026, 11, 9, tzinfo=UTC) + timedelta(days=day)
+        report = dc.FetchReport("itu-recommendations", "v", planned=True)
+        for key, exc in failures.items():
+            report.failed.append((key, f"why {key}"))
+            if (kind := dc.permanent_kind(exc)) is not None:
+                report.permanent[key] = kind
+        dc.settle_permanent(
+            report,
+            self.ledger,
+            at,
+            tried=tried,
+            host_of=dict.fromkeys(failures, "h"),
+            fail_at={key: (at, i) for i, key in enumerate(failures)},
+            clean_at={"h": [(at, 1000)] * good},
+            probe=probe,
+        )
+        return report
+
+    def seen(self) -> dict[str, dict[str, Any]]:
+        return json.loads(self.ledger.read_text()) if self.ledger.exists() else {}
+
+
+HALF_DAYS = [d / 2 for d in range(13)]  # 13 runs over 6 days: the 10th at 4.5 days, the 11th at 5
+
+
+def test_a_server_error_after_the_hosts_clean_take_does_not_unprove_a_refusal_before_it(
+    tmp_path: Path,
+) -> None:
+    """2026-11-13 review: proof was looked for once per host, after the latest failure of all its due
+    documents, so a 500 that came after the host's last clean take kept a refused document, which the
+    code before gave up, failing. Each crowd is proven by its own latest failure.
+
+    Fails on the code before this rule: it gave ``s`` no record at all (asserted below)."""
+    at = datetime(2026, 11, 20, tzinfo=UTC)
+    long_ago = (at - timedelta(days=9)).isoformat(timespec="seconds")
+    ledger = tmp_path / "failed-for-good.json"
+    ledger.write_text(
+        json.dumps(
+            {
+                "r": {"first": long_ago, "tries": 9, "sig": "refused: HTTP 403"},
+                "s": {"first": long_ago, "tries": 12, "sig": f"{dc.SERVER_ERROR}: HTTP 500"},
+            }
+        )
+    )
+    report = dc.FetchReport("itu-recommendations", "v", planned=True)
+    report.failed = [("r", "why r"), ("s", "why s")]
+    report.permanent = {"r": "refused: HTTP 403", "s": f"{dc.SERVER_ERROR}: HTTP 500"}
+    dc.settle_permanent(
+        report,
+        ledger,
+        at,
+        tried=10,
+        host_of={"r": "h", "s": "h"},
+        fail_at={"r": (at, 0), "s": (at, 2)},
+        clean_at={"h": [(at, 1)]},  # after the refusal, before the server error
+    )
+    assert [key for key, _ in report.given_up] == ["r"]
+    assert [key for key, _ in report.failed] == ["s"]  # unproven: its count is kept
+    assert json.loads(ledger.read_text())["s"]["tries"] == 13
+
+
+def test_a_503_whose_server_sent_retry_after_is_not_a_persistent_server_error() -> None:
+    """wsp_fetch says so in the text (``test_a_failure_whose_server_sent_retry_after_says_so``); the
+    same failure without it is one. The first half is a guard: it holds on the code before too."""
+    assert dc.permanent_kind(_http("HTTP 503 (Retry-After sent)")) is None
+    assert dc.permanent_kind(_http(503)) == f"{dc.SERVER_ERROR}: HTTP 503"
+
+
+def test_a_host_whose_every_document_answers_5xx_gives_up_none_however_long(tmp_path: Path) -> None:
+    """A site-wide outage is never single documents: with nothing good from the host after the
+    failures (no clean take; held documents downloaded again fail too, or none is held), or with more
+    such documents than the cap, HTTP 500 on 13 runs over 6 days gives up nothing.
+
+    Fails on the code before: it counted no 5xx at all, so ``permanent_over`` was 0 and the ledger
+    held no count."""
+    down = {f"k{i}": _http(500) for i in range(5)}
+    probed = _Passes(tmp_path / "probed.json")  # held documents of the host are probed: they fail too
+    alone = _Passes(tmp_path / "alone.json")  # nothing held to probe: unproven
+    capped = _Passes(tmp_path / "capped.json")  # the host serves, but too many documents answer 5xx
+    many = {f"k{i}": _http(503) for i in range(11)}
+    itu = {f"k{i}": _http(500) for i in range(284)}  # the real run: 284 failing of some 320 tried
+    itu_reports: list[dc.FetchReport] = []
+    for day in HALF_DAYS:
+        itu_reports.append(_Passes(tmp_path / "itu.json").run(day, itu, tried=320))
+        for report in (
+            probed.run(day, down, good=0, probe=lambda _host: (2, None)),
+            alone.run(day, down, good=0),
+            capped.run(day, many, tried=11),
+            itu_reports[-1],
+        ):
+            assert report.given_up == [], day
+            assert dc.fetch_exit_code(report) == dc.EXIT_PARTIAL
+    report = itu_reports[-1]
+    assert len(report.failed) == 284
+    assert report.permanent_over == 284
+    last = alone.run(6.5, down, good=0)
+    assert last.given_up == []
+    assert last.permanent_over == 5  # due, and said so: only unproven
+    assert {(e["tries"], e["first"]) for e in alone.seen().values()} == {(14, "2026-11-09T00:00:00+00:00")}
+    # A probe that found nothing good is a block: the counts started over the day they were due.
+    assert {(e["tries"], e["first"]) for e in probed.seen().values()} == {(2, "2026-11-14T12:00:00+00:00")}
+    assert capped.seen() == {}
+    assert capped.run(6.5, many, tried=11).permanent_over == 11
+
+
+def test_single_documents_answering_5xx_for_five_days_and_ten_tries_are_given_up(tmp_path: Path) -> None:
+    """2026-11-13: some 284 ITU recommendations answer HTTP 500 on every pass since 2026-11-09 while
+    8,220 from the same host are held, and the lane never finishes. A document whose every download
+    answers a real HTTP 500-599 on ten runs in a row, the first at least five days before, from a host
+    that made a clean take after its latest failure, is failed for good; fewer tries or days are not.
+
+    Fails on the code before: a 5xx was never counted, so nothing was given up."""
+    runs = _Passes(tmp_path / "failed-for-good.json")
+    failing = {"p": _http(500), "q": _http(502), "t": _http(429)}
+    for day in HALF_DAYS[:10]:
+        report = runs.run(day, failing)
+        assert report.given_up == [], day  # the 10th try is at 4.5 days
+        assert len(report.failed) == 3
+    given = runs.run(5, failing)
+    assert sorted(k for k, _ in given.given_up) == ["p", "q"]
+    assert "on every one of 11 tries since 2026-11-09T00:00:00+00:00" in given.given_up[0][1]
+    assert given.failed == [("t", "why t")]  # a 429 stays a failure
+    seen = runs.seen()
+    assert dc.permanent_class(seen["p"]["sig"]) == "server error, persistent"
+    assert seen["q"] == {
+        "first": "2026-11-09T00:00:00+00:00",
+        "given_up": "2026-11-14T00:00:00+00:00",
+        "retried": "2026-11-14T00:00:00+00:00",
+        "sig": "server error, persistent: HTTP 502",
+        "tries": 11,
+    }
+    done = runs.run(5.5, {"p": _http(500), "q": _http(503)})  # another 5xx: the same class
+    assert done.failed == []
+    assert dc.fetch_exit_code(done) == dc.EXIT_COMPLETE
+
+    quick = _Passes(tmp_path / "quick.json")  # ten tries (and more) in two days
+    for day in [d / 6 for d in range(13)]:
+        assert quick.run(day, {"p": _http(500)}).given_up == [], day
+    assert quick.seen()["p"]["tries"] == 13
+    few = _Passes(tmp_path / "few.json")  # six days, four tries
+    for day in (0, 2, 4, 6):
+        assert few.run(day, {"p": _http(500)}).given_up == [], day
+    assert few.seen()["p"]["tries"] == 4
+
+    # The thresholds of the other classes are as they were: a refusal beside it takes two tries.
+    both = _Passes(tmp_path / "both.json")
+    both.run(0, {"r": _http(403), "p": _http(500)})
+    assert [k for k, _ in both.run(1, {"r": _http(403), "p": _http(500)}).given_up] == ["r"]
+    # More 5xx than the cap never keep a single refusal from being given up, or the other way round.
+    crowd = _Passes(tmp_path / "crowd.json")
+    busy = {"r": _http(403), **{f"k{i}": _http(500) for i in range(40)}}
+    crowd.run(0, busy)
+    mixed = crowd.run(1, busy)
+    assert [k for k, _ in mixed.given_up] == ["r"]
+    assert len(mixed.failed) == 40
+
+
+def test_a_throttle_a_timeout_or_an_unreachable_host_is_never_a_persistent_server_error(
+    tmp_path: Path,
+) -> None:
+    """Only a real HTTP 500-599 counts: 429, 408, 425, a timeout, a refused connection, a name that
+    does not resolve, a robots.txt that could not be read, a 5xx beside another fault stay transient on
+    13 runs over 6 days with the host proven each time, and leave no record.
+
+    A guard for the transient half (it passes on the code before); the 5xx document beside them, given
+    up on the same runs, fails on the code before and shows that the runs were enough."""
+    from wsp_core.errors import FetchError, RobotsUnreachableError
+
+    transient: dict[str, BaseException] = {
+        "429": _http(429),
+        "408": _http(408),
+        "425": _http(425),
+        "read": _http("ReadTimeout: The read operation timed out"),
+        "connect": _http("ConnectError: [Errno 111] Connection refused"),
+        "dns": _http("ConnectError: [Errno -2] Name or service not known"),
+        "robots": RobotsUnreachableError("https://www.itu.int/robots.txt could not be read: HTTP 503"),
+        "mixed": _http("HTTP 500; https://mirror/x: failed after 6 attempt(s): ConnectTimeout"),
+        "later": FetchError("GET https://www.itu.int/x: HTTP 503, Retry-After 86400s too long"),
+        "down": FetchError("HostUnreachable: www.itu.int took no connection 5 times in a row"),
+    }
+    for exc in transient.values():
+        assert dc.permanent_kind(exc) is None, exc
+    runs = _Passes(tmp_path / "failed-for-good.json")
+    report = dc.FetchReport("itu-recommendations", "v")
+    for day in HALF_DAYS:
+        report = runs.run(day, {**transient, "p": _http(500)}, tried=100)
+    assert [k for k, _ in report.given_up] == ["p"]
+    assert sorted(k for k, _ in report.failed) == sorted(transient)
+    assert list(runs.seen()) == ["p"]
+    assert report.permanent_over == 0
+
+
+def test_a_5xx_streak_broken_by_another_failure_or_a_download_starts_over(tmp_path: Path) -> None:
+    """Nine tries over 4.5 days, then one run where the document is refused, times out, or is not
+    among the failures (it downloaded): the count and the five days start again from the next 5xx.
+
+    Fails on the code before: no 5xx streak was recorded, and none was ever given up at its end."""
+    breaks = (("refused", _http(403)), ("timeout", _http("ReadTimeout: timed out")), ("ok", None))
+    for name, between in breaks:
+        runs = _Passes(tmp_path / f"{name}.json")
+        for day in HALF_DAYS[:9]:
+            runs.run(day, {"p": _http(500)})
+        assert runs.seen()["p"]["tries"] == 9
+        assert runs.run(4.5, {} if between is None else {"p": between}).given_up == []
+        again = [5 + d / 2 for d in range(11)]  # from day 5: the 10th try at 9.5, five days at 10
+        for day in again[:10]:
+            assert runs.run(day, {"p": _http(500)}).given_up == [], (name, day)
+        assert (runs.seen()["p"]["tries"], runs.seen()["p"]["first"]) == (10, "2026-11-14T00:00:00+00:00")
+        assert [k for k, _ in runs.run(again[10], {"p": _http(500)}).given_up] == ["p"], name
+
+
+def test_a_ledger_record_without_its_first_failure_starts_its_five_days_when_first_seen(
+    tmp_path: Path,
+) -> None:
+    """A record written without ``first`` (or without ``tries``) by other code or by hand does not
+    stop the run, and its days count from the run that first sees it, whatever its count says.
+
+    Fails on the code before: the 5xx was not counted, the record was left as it was (no ``first``
+    written) and the document was never given up."""
+    runs = _Passes(tmp_path / "failed-for-good.json")
+    runs.ledger.write_text(
+        json.dumps({"p": {"sig": "server error, persistent: HTTP 500", "tries": 50}, "q": {"sig": "refused"}})
+    )
+    failing = {"p": _http(500), "q": _http(403)}
+    assert runs.run(0, failing).given_up == []
+    assert runs.seen()["p"] == {
+        "first": "2026-11-09T00:00:00+00:00",
+        "sig": "server error, persistent: HTTP 500",
+        "tries": 51,
+    }
+    assert runs.seen()["q"]["tries"] == 1
+    assert runs.run(4.9, {"p": _http(500)}).given_up == []
+    assert [k for k, _ in runs.run(5, {"p": _http(500)}).given_up] == ["p"]
+
+
+def test_a_persistent_server_error_given_up_is_tried_again_by_the_monthly_retry(tmp_path: Path) -> None:
+    """The weekly refresh's ``wsp collections given-up`` lists its source 30 days after it was given
+    up (or last tried); a retry that answers 5xx again keeps it given up and records the try, and one
+    that downloads it clears its record.
+
+    Fails on the code before: the document was never given up, so never listed."""
+    runs = _Passes(tmp_path / "itu-recommendations" / "failed-for-good.json")
+    report = [runs.run(day, {"p": _http(500)}) for day in HALF_DAYS[:11]][-1]
+    assert [k for k, _ in report.given_up] == ["p"]  # at day 5
+    start = datetime(2026, 11, 9, tzinfo=UTC)
+    assert dc.due_for_retry(tmp_path, start + timedelta(days=34)) == []
+    assert dc.due_for_retry(tmp_path, start + timedelta(days=35)) == [("itu-recommendations", "")]
+    # The retry, alone and unproven (no clean take, nothing to probe): still given up, the try recorded.
+    retry = runs.run(36, {"p": _http(500)}, good=0)
+    assert [k for k, _ in retry.given_up] == ["p"]
+    assert retry.failed == []
+    assert runs.seen()["p"]["given_up"] == "2026-11-14T00:00:00+00:00"
+    assert runs.seen()["p"]["retried"] == "2026-12-15T00:00:00+00:00"
+    assert dc.due_for_retry(tmp_path, start + timedelta(days=40)) == []
+    assert dc.due_for_retry(tmp_path, start + timedelta(days=66)) == [("itu-recommendations", "")]
+    runs.run(67, {})  # it downloaded: no record left
+    assert runs.seen() == {}
+    assert dc.due_for_retry(tmp_path, start + timedelta(days=200)) == []
+
+
+def test_a_document_answering_500_beside_held_siblings_is_given_up_through_a_probe(
+    vault: FileVault, tmp_path: Path
+) -> None:
+    """The ITU shape through a whole fetch: the siblings are held, each pass downloads only the
+    document that answers HTTP 500, and a held sibling downloaded again after it proves the host. An
+    outage (every request 500, probes too) on a pass counts nothing and starts the streak over.
+
+    Fails on the code before: the 500 was never counted, and every pass stayed partial."""
+    from wsp_cli.doccollections import EXIT_PARTIAL, fetch_exit_code
+
+    site = _Timeline(vault, tmp_path, [*SIBLINGS, ("down-1989.pdf", None)])
+    site.status = {"down-1989.pdf": 500}
+    first = site.fetch(0)
+    assert len(first.fetched) == 3
+    [(bad, why)] = first.failed
+    assert "HTTP 500" in why
+    for half in range(1, 10):  # ten tries by day 4.5
+        report = site.fetch(half * 12)
+        assert [k for k, _ in report.failed] == [bad], half
+        assert report.given_up == []
+        assert fetch_exit_code(report) == EXIT_PARTIAL
+    site.outage = 500  # day 5: the whole host answers 500, the held siblings too
+    assert site.fetch(120).given_up == []
+    ledger = tmp_path / "work" / "test-pubs" / "failed-for-good.json"
+    assert json.loads(ledger.read_text()) == {}
+    site.outage = None
+    for half in range(11, 21):  # from day 5.5: ten tries by day 10
+        report = site.fetch(half * 12)
+        assert report.given_up == [], half
+    given = site.fetch(21 * 12)  # five days after day 5.5
+    assert [k for k, _ in given.given_up] == [bad]
+    assert given.failed == []
+    assert fetch_exit_code(given) != EXIT_PARTIAL
+    seen = json.loads(ledger.read_text())
+    assert seen[bad]["sig"] == "server error, persistent: HTTP 500"
+    assert (seen[bad]["tries"], seen[bad]["first"]) == (11, "2026-11-14T18:00:00+00:00")
 
 
 EXTRA = ("FM-6-0_2022.pdf", make_pdf([PUBLIC_A, ["Chapter 2"]]))

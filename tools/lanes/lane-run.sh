@@ -18,7 +18,8 @@
 # docs/runbooks/document-collections.md, "Exit codes". Per fetch outcome:
 #   0, 7, 8   complete: ingest this cycle; done when it is in. Complete also when documents failed
 #             for good (the same permanent failure on two fetches in a row: HTTP 401/403 for that
-#             file, a web page in its place, never verifiable; wsp_cli.doccollections.settle_permanent):
+#             file, a web page in its place, never verifiable; or HTTP 5xx for that file on ten
+#             fetches over five days; wsp_cli.doccollections.settle_permanent):
 #             once the item is done, the info alert failed-for-good:SOURCE[:PARTITION] names their
 #             ledger; a later done item of that source with none resolves it (any lane: a refresh)
 #   4         a listing failed, nothing fetched: retry the same cycle after LANE_LISTING_WAIT seconds
